@@ -266,7 +266,7 @@ void Trace_Call(const STraceSite &Site, const char *szFormat, ...)
   if (Site.m_nCalls == 1)
     Trace_Write("[%d] %s(%s)    // %s", Site.m_nCalls, szName, szArgs, Site.m_szSignature);
   else
-    Trace_Write("[%d] %s(%s)%s", Site.m_nCalls, szName, szArgs, Site.m_nCalls == CV_xrt_TraceCalls && !s_bCapture ? "  -- further calls are only counted" : "");
+    Trace_Write("[%d] %s(%s)%s", Site.m_nCalls, szName, szArgs, Site.m_nCalls == CV_xrt_TraceCalls && !s_bCapture && !Site.m_bAlways ? "  -- further calls are only counted" : "");
 }
 
 void Trace_FrameEnd(int nFrameID)
