@@ -231,6 +231,33 @@ static const int nHeapAlignment = 4;
 // 1024 x 768). Set2DMode is called with (true, 1024, 768), (true, 800, 600), (false, 0, 0) and
 // (false, 800, 600).
 //
+// How the D3D9 renderer draws the 2D calls (River, 1024 x 768, HUD and console):
+//   Draw2dImage(x, y, w, h, nTexId, s0, t0, s1, t1, fAngle, r, g, b, a, z): one quad (a triangle
+//     fan) in back buffer pixels whatever Set2DMode says: the corners are x * W / 800 and
+//     y * H / 600 (W x H the viewport), minus half a pixel when fAngle is 0. Texture coordinates:
+//     top left (s0, 1 - t0), top right (s1, 1 - t0), bottom right (s1, 1 - t1), bottom left
+//     (s0, 1 - t1), so the engine's usual (0, 1, 1, 0) shows the image upright; values outside
+//     0..1 repeat the texture (the console passes (4, 2, 1, 1)). fAngle is in degrees and turns the
+//     quad about its centre: -90 turns it a quarter turn counter-clockwise on the screen (the top
+//     left corner goes to the bottom left). The vertex colour is (r, g, b, a); SetMaterialColor
+//     does not change it. Orthographic projection of the viewport with the origin top left; depth,
+//     blending and colour writes follow SetState.
+//   DrawLineColor(v0, c0, v1, c1) and DrawDynVB(pVerts, pInds, nVerts, nInds, R_PRIMV_TRIANGLES)
+//     come inside Set2DMode(true, 800, 600): an orthographic projection of 800 x 600 with the
+//     origin top left, positions as passed (no half pixel). A line is one line list primitive with
+//     the colours as vertex colours; DrawDynVB draws an indexed triangle list of the vertices as
+//     passed with the texture of SetTexture.
+//   Text (DrawDynVB(nOffs, 0, nVerts) after the font calls below) keeps its positions too.
+//   TransformTextureMatrix(x, y, fAngle, fScale) ... ResetTextureMatrix around a Draw2dImage moves
+//     its texture coordinates (seen with fAngle 0): fScale 1 gives (u + x, v + y), fScale -1 gives
+//     (1 + x - u, 1 + y - v). The console background is two such images of 800 x 300 at the top of
+//     the screen, the second with fScale -1 and blended, with x growing each frame.
+//   SetState: the GS_BLSRC_* / GS_BLDST_* pairs seen in 2D are (ONE, ZERO), (SRCALPHA,
+//     ONEMINUSSRCALPHA) and (ONEMINUSDSTALPHA, DSTALPHA), drawn with the same blend factors, and no
+//     blending without them. GS_COLMASKONLYALPHA writes only alpha: the HUD writes two images into
+//     the back buffer's alpha (GS_COLMASKONLYALPHA with ONE, ZERO) and then draws two more over
+//     the same place with (ONEMINUSDSTALPHA, DSTALPHA), so the back buffer needs an alpha channel.
+//
 // Text (CryFont) uses only the texture ID functions; the CFBitmap overloads are never called.
 //   FontCreateTexture(512, 512, pData, eTF_8888) creates a font texture (4 at start-up) and
 //   FontUpdateTexture(nTexId, 0, 0, 512, 512, pData) uploads the whole bitmap again, with the same
