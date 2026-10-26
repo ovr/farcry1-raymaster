@@ -129,6 +129,15 @@ static const int nHeapAlignment = 4;
 //   a leaf buffer with the source name "Unknown"; during EF_EndEf3D the renderer calls CheckUpdate
 //   on it with nFlags 0x10, after which the engine uploads the skinned vertices (P3F_N_TEX2F) with
 //   IRenderer::UpdateBuffer.
+//   The D3D9 renderer lights them with fixed function lighting (Steam): the world matrix stays
+//   identity and the object's matrix is folded into the view matrix, so the lights are given in the
+//   object's space. Global ambient white; material ambient = the object's m_AmbColor, halved for
+//   the draws that modulate the texture by 2 (the draws with specular lighting modulate by 1 and
+//   keep it); material diffuse 1 or the material's diffuse colour. Light 0 is the sun, a
+//   directional light with the CDLight colour as diffuse. A dynamic point light becomes a D3D point
+//   light with diffuse = m_Color (m_fDirectFactor not applied), specular = m_SpecColor in the draws
+//   with specular lighting, range 50.416 * m_fRadius and attenuation (0.01, 5.07756 / m_fRadius, 0),
+//   which reaches 1/256 at the range (radius 1, 2.06 and 4 seen).
 //
 // Terrain ("TerrainSector")
 //   One leaf buffer per 64 m x 64 m sector, created with
