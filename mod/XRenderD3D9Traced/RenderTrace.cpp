@@ -8,6 +8,7 @@
 #include "StdAfx.h"
 #include "RenderTrace.h"
 #include "FieldWatch.h"
+#include "VCallHooks.h"
 #include <map>
 #include <string>
 
@@ -268,6 +269,7 @@ void Trace_FrameEnd(int nFrameID)
     Trace_Write("==== end of captured frame %d ====", nFrameID);
     s_bCapture = false;
     Watch_WriteSummary("after the captured frame");
+    VCallHooks_WriteSummary("after the captured frame");
   }
 }
 
@@ -287,7 +289,7 @@ bool Trace_IsCode(const void *pAddr)
   return Trace_IsCodeAddress((UINT_PTR)pAddr);
 }
 
-static bool Trace_IsReadable(const void *p, size_t nSize)
+bool Trace_IsReadable(const void *p, size_t nSize)
 {
   MEMORY_BASIC_INFORMATION mbi;
   if (!p || !VirtualQuery(p, &mbi, sizeof(mbi)) || mbi.State != MEM_COMMIT || (mbi.Protect & (PAGE_NOACCESS | PAGE_GUARD)))

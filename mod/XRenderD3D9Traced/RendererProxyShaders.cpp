@@ -10,6 +10,7 @@
 #include "RenderTrace.h"
 #include "FieldWatch.h"
 #include "RendererProxy.h"
+#include "VCallHooks.h"
 #include <CREPolyMesh.h>
 
 static const char *ShaderName(IShader *pSH)
@@ -163,6 +164,7 @@ IShader *CRendererProxy::EF_LoadShader(const char *name, EShClass Class, int fla
   TRACE_CALL("'%s' class %d flags 0x%x maskGen 0x%llx", name, Class, flags, (unsigned long long)nMaskGen);
   IShader *pRes = m_pReal->EF_LoadShader(name, Class, flags, nMaskGen);
   TRACE_RESULT("%p", pRes);
+  VCallHooks_Install("IShader", pRes);
   if (TRACE_DUMP)
     Dump_Shader(pRes);
   return pRes;
@@ -178,6 +180,8 @@ SShaderItem CRendererProxy::EF_LoadShaderItem(const char *name, EShClass Class, 
   SShaderItem Item = m_pReal->EF_LoadShaderItem(name, Class, bShare, templName, flags, Res, nMaskGen);
   TRACE_RESULT("shader %p res %p", Item.m_pShader, Item.m_pShaderResources);
   Watch_RendererObject(WT_SRenderShaderResources, Item.m_pShaderResources);
+  VCallHooks_Install("IShader", Item.m_pShader);
+  VCallHooks_Install("SRenderShaderResources", Item.m_pShaderResources);
   if (TRACE_DUMP)
   {
     Dump_Shader(Item.m_pShader);
@@ -211,6 +215,7 @@ IShader *CRendererProxy::EF_CopyShader(IShader *ef)
   TRACE_CALL("%p '%s'", ef, ShaderName(ef));
   IShader *pRes = m_pReal->EF_CopyShader(ef);
   TRACE_RESULT("%p", pRes);
+  VCallHooks_Install("IShader", pRes);
   if (TRACE_DUMP)
     Dump_Shader(pRes);
   return pRes;
@@ -224,6 +229,7 @@ ITexPic *CRendererProxy::EF_GetTextureByID(int Id)
   TRACE_CALL("%d", Id);
   ITexPic *pRes = m_pReal->EF_GetTextureByID(Id);
   TRACE_RESULT("%p", pRes);
+  VCallHooks_Install("ITexPic", pRes);
   if (TRACE_DUMP)
     Dump_TexPic(pRes);
   return pRes;
@@ -234,6 +240,7 @@ ITexPic *CRendererProxy::EF_LoadTexture(const char *nameTex, uint flags, uint fl
   TRACE_CALL("'%s' flags 0x%x flags2 0x%x type %d amount %g %g id %d bind %d", nameTex, flags, flags2, eTT, fAmount1, fAmount2, Id, BindId);
   ITexPic *pRes = m_pReal->EF_LoadTexture(nameTex, flags, flags2, eTT, fAmount1, fAmount2, Id, BindId);
   TRACE_RESULT("%p", pRes);
+  VCallHooks_Install("ITexPic", pRes);
   if (TRACE_DUMP)
     Dump_TexPic(pRes);
   return pRes;
@@ -377,6 +384,7 @@ CRendElement *CRendererProxy::EF_CreateRE(EDataType edt)
   if (pRes && edt == eDATA_ScreenProcess)
     TRACE_RESULT("screen vars %p, heap prefix %s", ((CREScreenProcess *)pRes)->GetVars(), Trace_HeapPrefix(((CREScreenProcess *)pRes)->GetVars()));
   Watch_RenderElement(pRes);
+  VCallHooks_InstallRE(pRes);
   return pRes;
 }
 

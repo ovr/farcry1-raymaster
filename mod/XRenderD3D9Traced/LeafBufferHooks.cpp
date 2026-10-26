@@ -9,6 +9,7 @@
 #include "RenderTrace.h"
 #include "FieldWatch.h"
 #include "LeafBufferHooks.h"
+#include "VCallHooks.h"
 
 using namespace RetailRenderer;
 
@@ -296,6 +297,15 @@ void CLeafBufferHooks::ReleaseShaders()
 //////////////////////////////////////////////////////////////////////////
 // Drawing
 
+//! The render elements of the materials are created by the renderer itself.
+static void HookRenderElements(CLeafBuffer *pLB)
+{
+  if (!pLB->m_pMats)
+    return;
+  for (int i = 0; i < pLB->m_pMats->Count(); i++)
+    VCallHooks_InstallRE((*pLB->m_pMats)[i].pRE);
+}
+
 void CLeafBufferHooks::AddRenderElements(CCObject *pObj, int DLightMask, int nTemplate, int nFogVolumeID, int nSortId, IMatInfo *pIMatInfo)
 {
   TRACE_CALL("lb %p '%s' obj %p lights 0x%x templ %d fog %d sort %d material %p", LB(), Source(), pObj, DLightMask, nTemplate,
@@ -307,6 +317,7 @@ void CLeafBufferHooks::AddRenderElements(CCObject *pObj, int DLightMask, int nTe
   }
   LB_ORIG(LBS_AddRenderElements, void, (CCObject *, int, int, int, int, IMatInfo *))(pObj, DLightMask, nTemplate, nFogVolumeID, nSortId,
     pIMatInfo);
+  HookRenderElements(LB());
 }
 
 void CLeafBufferHooks::Render(const SRendParams &rParams, CCObject *pObj, TArray<int> &ShaderTemplates, int e_overlay_geometry, bool bNotCurArea, IMatInfo *pMaterial, bool bSupportDefaultShaderTemplates)
@@ -327,6 +338,7 @@ void CLeafBufferHooks::Render(const SRendParams &rParams, CCObject *pObj, TArray
   CWatchArg WatchParams(WT_SRendParams, &rParams);
   LB_ORIG(LBS_Render, void, (const SRendParams &, CCObject *, TArray<int> &, int, bool, IMatInfo *, bool))(rParams, pObj, ShaderTemplates,
     e_overlay_geometry, bNotCurArea, pMaterial, bSupportDefaultShaderTemplates);
+  HookRenderElements(LB());
 }
 
 void CLeafBufferHooks::AddRE(CCObject *pObj, IShader *pEf, int nNumSort, IShader *pStateEff)

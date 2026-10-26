@@ -85,6 +85,8 @@ const char *Trace_Addr(const void *pAddr);
 const char *Trace_VTable(const void *pObject);
 //! Whether the address is inside executable code of a loaded module.
 bool Trace_IsCode(const void *pAddr);
+//! Whether nSize bytes at p are committed, readable memory.
+bool Trace_IsReadable(const void *p, size_t nSize);
 //! The 16 bytes in front of a heap block as four hex dwords (the heap's block header).
 const char *Trace_HeapPrefix(const void *pBlock);
 //! Size of a CrySystem heap block (the dword in front of it), or -1.

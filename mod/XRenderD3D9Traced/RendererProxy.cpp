@@ -11,6 +11,7 @@
 #include "FieldWatch.h"
 #include "RendererProxy.h"
 #include "LeafBufferHooks.h"
+#include "VCallHooks.h"
 #include <I3DEngine.h>
 #include <IStatObj.h>
 
@@ -154,7 +155,9 @@ void CRendererProxy::Release()
 {
   TRACE_CALL("");
   Watch_WriteSummary("renderer released");
+  VCallHooks_WriteSummary("renderer released");
   LeafBufferHooks_Uninstall();
+  VCallHooks_Uninstall();
   m_pReal->Release();
   m_pReal = NULL;
   Trace_Write("Renderer released after %d frames", m_nFrames);
@@ -227,7 +230,7 @@ void CRendererProxy::ExecuteCommands(const char *szCommands)
 {
   if (!iConsole)
     return;
-  char szCopy[512];
+  char szCopy[2048];
   strcpy_s(szCopy, szCommands);
   char *szContext = NULL;
   for (char *szCmd = strtok_s(szCopy, ";", &szContext); szCmd; szCmd = strtok_s(NULL, ";", &szContext))
@@ -235,8 +238,46 @@ void CRendererProxy::ExecuteCommands(const char *szCommands)
     while (*szCmd == ' ')
       szCmd++;
     Trace_Write("Executing '%s'", szCmd);
-    iConsole->ExecuteString(szCmd, false, true);
+    if (!strncmp(szCmd, "screenfx ", 9))
+      ScreenFxCommand(szCmd + 9);
+    else
+      iConsole->ExecuteString(szCmd, false, true);
   }
+}
+
+void CRendererProxy::ScreenFxCommand(const char *szArgs)
+{
+  I3DEngine *p3DEngine = iSystem ? iSystem->GetI3DEngine() : NULL;
+  if (!p3DEngine)
+    return;
+  char szEffect[64] = "", szValue[32] = "";
+  if (sscanf_s(szArgs, "%63s %31s", szEffect, (unsigned)sizeof(szEffect), szValue, (unsigned)sizeof(szValue)) < 1)
+    return;
+  const bool bGet = szEffect[0] == '?';
+  char *szName = szEffect + (bGet ? 1 : 0);
+  char *szParam = strchr(szName, '.');
+  if (szParam)
+    *szParam++ = 0;
+  if (bGet && szParam)
+  {
+    void *pValue = NULL;
+    int nRes = p3DEngine->GetScreenFxParam(szName, szParam, pValue);
+    Trace_Write("  GetScreenFxParam('%s', '%s') -> %d, value %p", szName, szParam, nRes, pValue);
+  }
+  else if (bGet)
+    Trace_Write("  GetScreenFx('%s') -> %d", szName, p3DEngine->GetScreenFx(szName));
+  else if (szParam)
+  {
+    // "i5" passes an integer, anything else a float.
+    union { int n; float f; } Value;
+    if (szValue[0] == 'i')
+      Value.n = atoi(szValue + 1);
+    else
+      Value.f = (float)atof(szValue);
+    p3DEngine->SetScreenFxParam(szName, szParam, &Value);
+  }
+  else
+    p3DEngine->SetScreenFx(szName, atoi(szValue));
 }
 
 void CRendererProxy::ShareResources(IRenderer *renderer)

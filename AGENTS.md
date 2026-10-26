@@ -40,5 +40,10 @@ it as well: it holds local, machine-specific instructions and is not committed (
   `XRENDERTRACED_EXEC_LEVEL_FRAME` frames (default 100) after each level load. Settings that are
   off in `system.cfg` (e.g. `e_shadow_maps 1; e_stencil_shadows 1`) go in front of the `map`
   command in `XRENDERTRACED_EXEC`; the game is stopped by killing it, so `system.cfg` stays as it is.
+- The x64 build also hooks the vtables of the shaders, textures and render elements of the
+  original renderer (`VCallHooks.h`): the summary after the captured frame lists which virtual
+  functions the engine calls. A command `screenfx Effect 1`, `screenfx Effect.Param 0.5` or
+  `screenfx ?Effect` in `XRENDERTRACED_EXEC`/`XRENDERTRACED_EXEC_LEVEL` calls the screen effect
+  functions of `I3DEngine`.
 - The log is `farcry1_testing1/XRenderD3D9Traced.log`; the engine log is
   `farcry1_testing1/log.txt`.

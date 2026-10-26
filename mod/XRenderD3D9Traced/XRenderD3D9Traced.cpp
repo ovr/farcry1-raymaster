@@ -13,6 +13,7 @@
 #include "StdAfx.h"
 #include "RenderTrace.h"
 #include "RendererProxy.h"
+#include "VCallHooks.h"
 #include <RendererAbiChecks.h>
 #include <intrin.h>
 
@@ -109,6 +110,7 @@ extern "C" __declspec(dllexport) IRenderer *PackageRenderConstructor(int argc, c
     return NULL;
   }
   Trace_Write("Original renderer '%s' loaded at %p", szPath, hReal);
+  VCallHooks_SetRenderer(hReal);
 
   IRenderer *pReal = pfnCreate(argc, argv, sp);
   Trace_Write("  -> real IRenderer %p (vtbl %s)", pReal, Trace_VTable(pReal));

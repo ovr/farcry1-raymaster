@@ -45,7 +45,14 @@ set(XRENDERD3D9TRACED_SOURCES
     LeafBufferHooks.h
     FieldWatch.cpp
     FieldWatch.h
+    VCallHooks.cpp
+    VCallHooks.h
 )
+if(FARCRY_X64)
+    # The common part of the virtual call hooks (x64 has no inline assembler).
+    enable_language(ASM_MASM)
+    list(APPEND XRENDERD3D9TRACED_SOURCES VCallThunk_x64.asm)
+endif()
 source_group("Source Files" FILES ${XRENDERD3D9TRACED_SOURCES})
 
 add_library(XRenderD3D9Traced SHARED ${XRENDERD3D9TRACED_SOURCES})
@@ -72,13 +79,14 @@ target_compile_definitions(XRenderD3D9Traced PRIVATE
 )
 
 target_precompile_headers(XRenderD3D9Traced PRIVATE StdAfx.h)
+set_source_files_properties(VCallThunk_x64.asm PROPERTIES SKIP_PRECOMPILE_HEADERS ON)
 
 target_compile_options(XRenderD3D9Traced PRIVATE
-    /W3
+    $<$<COMPILE_LANGUAGE:CXX>:/W3>
     # Global operator new/delete are replaced inline by CryMemoryManager.h.
-    /wd4595
+    $<$<COMPILE_LANGUAGE:CXX>:/wd4595>
     # Keep VC7.1 semantics: every delete goes through the replaced unsized operator delete.
-    /Zc:sizedDealloc-
+    $<$<COMPILE_LANGUAGE:CXX>:/Zc:sizedDealloc->
 )
 
 target_link_options(XRenderD3D9Traced PRIVATE /MAP)

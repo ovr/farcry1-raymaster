@@ -252,15 +252,18 @@ public:
 private:
   //! Runs console commands separated by ';' (outside any traced call).
   void ExecuteCommands(const char *szCommands);
+  //! "screenfx Effect 1", "screenfx Effect.Param 0.5" (or i5 for an integer), "screenfx ?Effect",
+  //! "screenfx ?Effect.Param": I3DEngine::SetScreenFx, SetScreenFxParam, GetScreenFx, GetScreenFxParam.
+  void ScreenFxCommand(const char *szArgs);
 
   IRenderer *m_pReal;
   int m_nRealType;
   //! Console commands executed once after frame m_nExecFrame (XRENDERTRACED_EXEC, separated by ';').
-  char m_szExec[512];
+  char m_szExec[2048];
   int m_nExecFrame;
   //! Console commands executed m_nExecLevelAfterLoad frames after each level load
   //! (XRENDERTRACED_EXEC_LEVEL and XRENDERTRACED_EXEC_LEVEL_FRAME), e.g. to move the player.
-  char m_szExecLevel[512];
+  char m_szExecLevel[2048];
   int m_nExecLevelAfterLoad;
   int m_nExecLevelFrame;
   //! Every call of the m_nCaptureAfterLoad-th frame after a level load is written out
