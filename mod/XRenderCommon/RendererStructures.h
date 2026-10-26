@@ -117,8 +117,11 @@ namespace RendererStructures
 //   buffer (a CREOcLeaf per material). Released with CRendElement::Release.
 //   Renderer writes: m_NextGlobal / m_PrevGlobal (list of all render elements, on creation and
 //   release); m_LastVP while drawing (EF_EndEf3D).
-//   CREOcLeaf: m_pChunk is its CMatInfo entry, m_pBuffer its leaf buffer. The engine also moves
-//   m_pChunk now and then (around DeleteLeafBuffer); why is not known yet.
+//   CREOcLeaf: m_pChunk is its CMatInfo entry, m_pBuffer its leaf buffer. m_pChunk changes only
+//   when the engine releases the elements of a buffer before DeleteLeafBuffer: CRendElement::Release
+//   (renderer code the engine calls through the vtable) destroys the element, and the destructor
+//   in RendElement.h unlinks it from the global list, which also changes the neighbours'
+//   m_NextGlobal / m_PrevGlobal. The engine does not write m_pChunk itself.
 //   CREOcclusionQuery: the engine writes m_vBoxMin, m_vBoxMax before EF_AddEf; the renderer
 //   writes m_nOcclusionID, m_nCheckFrame, m_nDrawFrame and the result m_nVisSamples in EF_EndEf3D.
 //   CRESky: the engine writes m_fTerrainWaterLevel; the renderer allocates m_parrFogLayer and
