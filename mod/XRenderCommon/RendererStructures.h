@@ -181,10 +181,13 @@ static const int nBin64ScreenParam_FlashBangFlashSizeX = 22;
 static const int nBin64ScreenParam_FlashBangFlashSizeY = 23;
 static const int nBin64ScreenParam_FlashBangCurrent = 24;       // written by the renderer, see below
 static const int nBin64ScreenParam_FlashBangForce = 25;
+//   No other process codes were used; the SDK names only these four effects.
 //   The engine reads NightVision's Active every frame. While FlashBang is active it reads its
-//   parameters back, among them 24, which only the renderer writes (a float; 0.99 shortly after
-//   the flash started). FlashBang switches itself off: once the flash is over, its Active reads
-//   false without the engine having set it.
+//   parameters back (Active, 19, 24, 20 to 23), among them 24, which only the renderer writes: a
+//   float that falls from 1 towards 0 as the flash fades (0.99 shortly after the flash started,
+//   0.03 in a later read). FlashBang switches itself off: once the flash is over, its Active reads
+//   false without the engine having set it. The defaults read back after FlashBang 1 alone:
+//   TimeScale 1, FlashPosX 200, FlashPosY 100, FlashSizeX 400, FlashSizeY 400.
 //   At the start of a level the engine sets ScreenFade Active 1, ScreenFadeTime -2.5 and
 //   ScreenPreFadeTime 5 (CryGame's XClient.cpp; a negative time fades in), then ScreenBlur Active 0
 //   and ScreenBlurAmount 0.
