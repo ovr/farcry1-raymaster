@@ -105,6 +105,19 @@ static const int nHeapAlignment = 4;
 //   nFlags when the shader also needs the tangent stream. The first call creates the video buffer
 //   (CreateVidVertices, UpdateVidIndices).
 //
+//   Lightmapped objects (River, every lightmapped draw of the frame, the same for all their
+//   materials): the D3D9 renderer takes the lightmap UVs from the m_pLMTCBufferO buffer as a
+//   second texture coordinate set and combines in two fixed function stages:
+//     stage 0: lightmap texture (m_nLMId) + texture factor, alpha lightmap alpha * factor alpha;
+//     stage 1: diffuse texture * result * 4.
+//   The texture factor is the object's ambient colour divided by 4 (ambient (0.380, 0.410, 0.375)
+//   gives the bytes 24, 26, 23; its alpha is 255 for most objects, lower for a few). So a texel is
+//   diffuse * (4 * lightmap + ambient), clamped after each stage (lightmap + ambient / 4 to 1, the
+//   product to 1): the lightmaps hold a quarter of the light.
+//   Vegetation (River): texture * vertex colour * 2 * m_Color * the colour of EF_SetWorldColor
+//   (m_Color 0.75 and the world colour (0.843, 0.780, 0.659) give the factor bytes 161, 149, 126).
+//   For grass, the alpha of m_Color fades it out (alpha blended, no depth writes).
+//
 // Characters (CryAnimation)
 //   The model goes into CreateLeafBuffer(true, "ModelState", NULL) with
 //   CreateBuffer(VertexBufferSource *); that buffer keeps no system vertex buffer (m_pSecVertBuffer
@@ -166,7 +179,9 @@ static const int nHeapAlignment = 4;
 //   R_PRIMV_TRIANGLES, "MergedLB", eBT_Static, nMats, 0, NULL, NULL, false, true) with as many
 //   indices as vertices, then UpdateTangBuffer, SetChunk(pShader, 0, n, nFirstIndex, nIndices, i,
 //   true) for every material (the shaders of the objects' materials), and an "LMapTexCoords"
-//   buffer with one lightmap UV per vertex. None of them was drawn from the start position.
+//   buffer with one lightmap UV per vertex. None of them was drawn from the start position on
+//   Carrier; on River they are drawn like the other lightmapped objects, one draw per material,
+//   from a video buffer in the format they were created with (the vertex colours stay unused).
 
 //////////////////////////////////////////////////////////////////////////
 // Shaders (Training: 636 shaders and what their getters return)
