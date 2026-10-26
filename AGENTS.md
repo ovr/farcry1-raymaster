@@ -45,7 +45,8 @@ it as well: it holds local, machine-specific instructions and is not committed (
   functions the engine calls. A command `screenfx Effect 1`, `screenfx Effect.Param 0.5` or
   `screenfx ?Effect` in `XRENDERTRACED_EXEC`/`XRENDERTRACED_EXEC_LEVEL` calls the screen effect
   functions of `I3DEngine`; `particles [count] [blend type] [size]` spawns particles around the
-  camera (`I3DEngine::SpawnParticles`).
+  camera (`I3DEngine::SpawnParticles`); `cvars [prefix]` writes the console variables whose names
+  start with the prefix, with their values and flags (`IConsole::DumpCVars`).
 - `XRENDERTRACED_TRACE_METHODS` (names as in the log, separated by `,`, e.g.
   `DownLoadToVideoMemory,CLeafBuffer::CreateBufferFromSource`) writes every call of those methods,
   not only the first `xrt_TraceCalls`.

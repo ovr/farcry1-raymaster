@@ -256,6 +256,8 @@ private:
   //! "screenfx ?Effect.Param": I3DEngine::SetScreenFx, SetScreenFxParam, GetScreenFx, GetScreenFxParam.
   void ScreenFxCommand(const char *szArgs);
   void ParticlesCommand(const char *szArgs);
+  //! "cvars prefix": the console variables whose names start with prefix (all without one).
+  void CVarsCommand(const char *szArgs);
 
   IRenderer *m_pReal;
   int m_nRealType;

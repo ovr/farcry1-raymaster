@@ -247,9 +247,39 @@ void CRendererProxy::ExecuteCommands(const char *szCommands)
       ScreenFxCommand(szCmd + 9);
     else if (!strncmp(szCmd, "particles", 9))
       ParticlesCommand(szCmd + 9);
+    else if (!strncmp(szCmd, "cvars", 5) && (!szCmd[5] || szCmd[5] == ' '))
+      CVarsCommand(szCmd + 5);
     else
       iConsole->ExecuteString(szCmd, false, true);
   }
+}
+
+//! Writes the console variables whose names start with a prefix (IConsole::DumpCVars).
+struct SCVarTraceSink : public ICVarDumpSink
+{
+  const char *m_szPrefix;
+  int m_nFound;
+
+  virtual void OnElementFound(ICVar *pCVar)
+  {
+    const char *szName = pCVar ? pCVar->GetName() : NULL;
+    if (!szName || _strnicmp(szName, m_szPrefix, strlen(m_szPrefix)))
+      return;
+    m_nFound++;
+    const char *szValue = pCVar->GetString();
+    Trace_Write("    cvar %s = '%s' flags 0x%x", szName, szValue ? szValue : "", pCVar->GetFlags());
+  }
+};
+
+void CRendererProxy::CVarsCommand(const char *szArgs)
+{
+  while (*szArgs == ' ')
+    szArgs++;
+  SCVarTraceSink Sink;
+  Sink.m_szPrefix = szArgs;
+  Sink.m_nFound = 0;
+  iConsole->DumpCVars(&Sink);
+  Trace_Write("    %d console variables starting with '%s'", Sink.m_nFound, szArgs);
 }
 
 void CRendererProxy::ScreenFxCommand(const char *szArgs)
