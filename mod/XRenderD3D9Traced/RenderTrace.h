@@ -48,10 +48,16 @@ struct STraceSite
   int m_nOtherThreadCalls;
   //! Every call is written out (XRENDERTRACED_TRACE_METHODS).
   bool m_bAlways;
+  //! The written out calls are followed by the Direct3D state after them (XRENDERTRACED_D3D_STATE).
+  bool m_bD3DState;
   STraceSite *m_pNext;
 };
 
 void Trace_Call(const STraceSite &Site, const char *szFormat, ...);
+
+//! Whether szName is one of the names in the environment variable szVar, separated by ',' (e.g.
+//! XRENDERTRACED_TRACE_METHODS="DownLoadToVideoMemory,CLeafBuffer::CreateBufferFromSource").
+bool Trace_IsListed(const char *szVar, const char *szName);
 
 //! Marks the time spent in a traced method; the outermost one is a call of the engine into the
 //! renderer (see FieldWatch.h).

@@ -10,6 +10,7 @@
 #include "FieldWatch.h"
 #include "RendererProxy.h"
 #include "LeafBufferHooks.h"
+#include "D3DState.h"
 
 //////////////////////////////////////////////////////////////////////////
 // Vertex buffers
@@ -20,20 +21,30 @@ void CRendererProxy::DrawTriStrip(CVertexBuffer *src, int vert_num)
   if (TRACE_DUMP)
     Dump_VertexBuffer("buffer", src, vert_num);
   m_pReal->DrawTriStrip(src, vert_num);
+  TRACE_D3D_STATE(m_pReal);
 }
+
+//! The last pointer GetDynVBPtr returned for pool 0.
+static void *s_pDynVB0 = NULL;
 
 void *CRendererProxy::GetDynVBPtr(int nVerts, int &nOffs, int Pool)
 {
   TRACE_CALL("verts %d pool %d", nVerts, Pool);
   void *pRes = m_pReal->GetDynVBPtr(nVerts, nOffs, Pool);
   TRACE_RESULT("%p offset %d", pRes, nOffs);
+  if (Pool == 0)
+    s_pDynVB0 = pRes;
   return pRes;
 }
 
 void CRendererProxy::DrawDynVB(int nOffs, int Pool, int nVerts)
 {
   TRACE_CALL("offset %d pool %d verts %d", nOffs, Pool, nVerts);
+  // Pool 0 holds P3F_COL4UB_TEX2F vertices; GetDynVBPtr returned the place of the first one.
+  if (TRACE_DUMP && Pool == 0 && s_pDynVB0)
+    Dump_Vertices("verts", s_pDynVB0, VERTEX_FORMAT_P3F_COL4UB_TEX2F, nVerts, 6);
   m_pReal->DrawDynVB(nOffs, Pool, nVerts);
+  TRACE_D3D_STATE(m_pReal);
 }
 
 void CRendererProxy::DrawDynVB(struct_VERTEX_FORMAT_P3F_COL4UB_TEX2F *pBuf, ushort *pInds, int nVerts, int nInds, int nPrimType)
@@ -45,6 +56,7 @@ void CRendererProxy::DrawDynVB(struct_VERTEX_FORMAT_P3F_COL4UB_TEX2F *pBuf, usho
     Dump_Indices("inds", pInds, nInds);
   }
   m_pReal->DrawDynVB(pBuf, pInds, nVerts, nInds, nPrimType);
+  TRACE_D3D_STATE(m_pReal);
 }
 
 void CRendererProxy::SetFenceCompleted(CVertexBuffer *buffer)
@@ -85,6 +97,7 @@ void CRendererProxy::DrawBuffer(CVertexBuffer *src, SVertexStream *indicies, int
       Dump_MatInfo(mi, -1);
   }
   m_pReal->DrawBuffer(src, indicies, numindices, offsindex, prmode, vert_start, vert_stop, mi);
+  TRACE_D3D_STATE(m_pReal);
 }
 
 void CRendererProxy::UpdateBuffer(CVertexBuffer *dest, const void *src, int vertexcount, bool bUnLock, int nOffs, int Type)

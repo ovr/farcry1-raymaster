@@ -21,6 +21,28 @@ static const char *ShaderName(IShader *pSH)
   return szName ? szName : "(null)";
 }
 
+//! Names of the shaders by their IDs (IShader::GetID), for the methods that take a shader ID.
+static char s_szShaderNames[4096][48];
+
+static void RememberShader(IShader *pSH)
+{
+  if (!pSH)
+    return;
+  int nID = pSH->GetID();
+  if (nID >= 0 && nID < (int)(sizeof(s_szShaderNames) / sizeof(s_szShaderNames[0])))
+  {
+    _snprintf(s_szShaderNames[nID], sizeof(s_szShaderNames[nID]) - 1, "%s", ShaderName(pSH));
+    s_szShaderNames[nID][sizeof(s_szShaderNames[nID]) - 1] = 0;
+  }
+}
+
+static const char *ShaderNameByID(int nID)
+{
+  if (nID >= 0 && nID < (int)(sizeof(s_szShaderNames) / sizeof(s_szShaderNames[0])) && s_szShaderNames[nID][0])
+    return s_szShaderNames[nID];
+  return "?";
+}
+
 static const char *QueryName(int nQuery)
 {
   switch (nQuery)
@@ -115,7 +137,7 @@ void CRendererProxy::EF_PolygonOffset(bool bEnable, float fFactor, float fUnits)
 
 void CRendererProxy::EF_AddPolyToScene3D(int Ef, int numPts, SColorVert *verts, CCObject *obj, int nFogID)
 {
-  TRACE_CALL("shader %d points %d verts %p obj %p fog %d", Ef, numPts, verts, obj, nFogID);
+  TRACE_CALL("shader %d '%s' points %d verts %p obj %p fog %d", Ef, ShaderNameByID(Ef), numPts, verts, obj, nFogID);
   if (TRACE_DUMP)
   {
     Dump_ColorVerts(verts, numPts);
@@ -127,7 +149,7 @@ void CRendererProxy::EF_AddPolyToScene3D(int Ef, int numPts, SColorVert *verts, 
 
 CCObject *CRendererProxy::EF_AddSpriteToScene(int Ef, int numPts, SColorVert *verts, CCObject *obj, byte *inds, int ninds, int nFogID)
 {
-  TRACE_CALL("shader %d points %d verts %p obj %p inds %p (%d) fog %d", Ef, numPts, verts, obj, inds, ninds, nFogID);
+  TRACE_CALL("shader %d '%s' points %d verts %p obj %p inds %p (%d) fog %d", Ef, ShaderNameByID(Ef), numPts, verts, obj, inds, ninds, nFogID);
   if (TRACE_DUMP)
   {
     Dump_ColorVerts(verts, numPts);
@@ -141,7 +163,7 @@ CCObject *CRendererProxy::EF_AddSpriteToScene(int Ef, int numPts, SColorVert *ve
 
 void CRendererProxy::EF_AddPolyToScene2D(int Ef, int numPts, SColorVert2D *verts)
 {
-  TRACE_CALL("shader %d points %d verts %p", Ef, numPts, verts);
+  TRACE_CALL("shader %d '%s' points %d verts %p", Ef, ShaderNameByID(Ef), numPts, verts);
   if (TRACE_DUMP)
     Dump_ColorVerts2D(verts, numPts);
   m_pReal->EF_AddPolyToScene2D(Ef, numPts, verts);
@@ -165,6 +187,7 @@ IShader *CRendererProxy::EF_LoadShader(const char *name, EShClass Class, int fla
   IShader *pRes = m_pReal->EF_LoadShader(name, Class, flags, nMaskGen);
   TRACE_RESULT("%p", pRes);
   VCallHooks_Install("IShader", pRes);
+  RememberShader(pRes);
   if (TRACE_DUMP)
     Dump_Shader(pRes);
   return pRes;
@@ -182,6 +205,7 @@ SShaderItem CRendererProxy::EF_LoadShaderItem(const char *name, EShClass Class, 
   Watch_RendererObject(WT_SRenderShaderResources, Item.m_pShaderResources);
   VCallHooks_Install("IShader", Item.m_pShader);
   VCallHooks_Install("SRenderShaderResources", Item.m_pShaderResources);
+  RememberShader(Item.m_pShader);
   if (TRACE_DUMP)
   {
     Dump_Shader(Item.m_pShader);

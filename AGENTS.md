@@ -44,9 +44,14 @@ it as well: it holds local, machine-specific instructions and is not committed (
   original renderer (`VCallHooks.h`): the summary after the captured frame lists which virtual
   functions the engine calls. A command `screenfx Effect 1`, `screenfx Effect.Param 0.5` or
   `screenfx ?Effect` in `XRENDERTRACED_EXEC`/`XRENDERTRACED_EXEC_LEVEL` calls the screen effect
-  functions of `I3DEngine`.
+  functions of `I3DEngine`; `particles [count] [blend type] [size]` spawns particles around the
+  camera (`I3DEngine::SpawnParticles`).
 - `XRENDERTRACED_TRACE_METHODS` (names as in the log, separated by `,`, e.g.
   `DownLoadToVideoMemory,CLeafBuffer::CreateBufferFromSource`) writes every call of those methods,
   not only the first `xrt_TraceCalls`.
+- `XRENDERTRACED_D3D_STATE` (names as in the log, e.g. `DrawDynVB,Draw2dImage`) writes the
+  Direct3D 9 state of the original renderer after those calls (`D3DState.h`; read only, through
+  `EF_Query(EFQ_D3DDevice)`). `XRENDERTRACED_PROBE=FontSetBlending` passes (i, 12 - i) in the first
+  13 calls of `FontSetBlending` instead of the engine's arguments.
 - The log is `farcry1_testing1/XRenderD3D9Traced.log`; the engine log is
   `farcry1_testing1/log.txt`.

@@ -159,27 +159,38 @@ void Trace_Write(const char *szFormat, ...)
 }
 
 //////////////////////////////////////////////////////////////////////////
-//! Whether every call of the method is written out (XRENDERTRACED_TRACE_METHODS, names as in the
-//! log separated by ',', e.g. "DownLoadToVideoMemory,CLeafBuffer::CreateBufferFromSource").
-static bool IsAlwaysTraced(const char *szDisplay)
+bool Trace_IsListed(const char *szVar, const char *szName)
 {
-  static char s_szMethods[1024];
-  static bool s_bRead = false;
-  if (!s_bRead)
+  struct SList
   {
-    s_bRead = true;
-    DWORD nLen = GetEnvironmentVariableA("XRENDERTRACED_TRACE_METHODS", s_szMethods + 1, sizeof(s_szMethods) - 2);
-    if (!nLen || nLen >= sizeof(s_szMethods) - 2)
-      nLen = 0;
-    // ",Name1,Name2," so that a name is found as ",Name,".
-    s_szMethods[0] = ',';
-    s_szMethods[nLen + 1] = ',';
-    s_szMethods[nLen + 2] = 0;
+    const char *m_szVar;
+    char m_szNames[1024];
+  };
+  static SList s_Lists[4];
+  SList *pList = NULL;
+  for (int i = 0; i < (int)(sizeof(s_Lists) / sizeof(s_Lists[0])) && !pList; i++)
+  {
+    if (s_Lists[i].m_szVar == szVar || s_Lists[i].m_szVar && !strcmp(s_Lists[i].m_szVar, szVar))
+      pList = &s_Lists[i];
+    else if (!s_Lists[i].m_szVar)
+    {
+      pList = &s_Lists[i];
+      pList->m_szVar = szVar;
+      DWORD nLen = GetEnvironmentVariableA(szVar, pList->m_szNames + 1, sizeof(pList->m_szNames) - 2);
+      if (!nLen || nLen >= sizeof(pList->m_szNames) - 2)
+        nLen = 0;
+      // ",Name1,Name2," so that a name is found as ",Name,".
+      pList->m_szNames[0] = ',';
+      pList->m_szNames[nLen + 1] = ',';
+      pList->m_szNames[nLen + 2] = 0;
+    }
   }
+  if (!pList)
+    return false;
   char szKey[80];
-  _snprintf(szKey, sizeof(szKey) - 1, ",%s,", szDisplay);
+  _snprintf(szKey, sizeof(szKey) - 1, ",%s,", szName);
   szKey[sizeof(szKey) - 1] = 0;
-  return strstr(s_szMethods, szKey) != NULL;
+  return strstr(pList->m_szNames, szKey) != NULL;
 }
 
 STraceSite::STraceSite(const char *szName, const char *szSignature)
@@ -225,7 +236,8 @@ STraceSite::STraceSite(const char *szName, const char *szSignature)
   m_nCalls = 0;
   m_nFrameCalls = 0;
   m_nOtherThreadCalls = 0;
-  m_bAlways = IsAlwaysTraced(m_szDisplay);
+  m_bAlways = Trace_IsListed("XRENDERTRACED_TRACE_METHODS", m_szDisplay);
+  m_bD3DState = Trace_IsListed("XRENDERTRACED_D3D_STATE", m_szDisplay);
   m_pNext = s_pSites;
   s_pSites = this;
 }

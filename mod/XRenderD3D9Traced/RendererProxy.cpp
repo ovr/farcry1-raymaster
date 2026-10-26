@@ -11,6 +11,7 @@
 #include "FieldWatch.h"
 #include "RendererProxy.h"
 #include "LeafBufferHooks.h"
+#include "D3DState.h"
 #include "VCallHooks.h"
 #include <I3DEngine.h>
 #include <IStatObj.h>
@@ -240,6 +241,8 @@ void CRendererProxy::ExecuteCommands(const char *szCommands)
     Trace_Write("Executing '%s'", szCmd);
     if (!strncmp(szCmd, "screenfx ", 9))
       ScreenFxCommand(szCmd + 9);
+    else if (!strncmp(szCmd, "particles", 9))
+      ParticlesCommand(szCmd + 9);
     else
       iConsole->ExecuteString(szCmd, false, true);
   }
@@ -278,6 +281,32 @@ void CRendererProxy::ScreenFxCommand(const char *szArgs)
   }
   else
     p3DEngine->SetScreenFx(szName, atoi(szValue));
+}
+
+//! "particles [count] [blend type] [size]": spawns particles around the camera with
+//! I3DEngine::SpawnParticles (default texture, 10 s of life), to see how the engine draws them.
+void CRendererProxy::ParticlesCommand(const char *szArgs)
+{
+  I3DEngine *p3DEngine = iSystem ? iSystem->GetI3DEngine() : NULL;
+  if (!p3DEngine)
+    return;
+  int nCount = 50, nBlend = ParticleBlendType_Additive;
+  float fSize = 0.3f;
+  sscanf_s(szArgs, "%d %d %f", &nCount, &nBlend, &fSize);
+  ParticleParams Params;
+  Params.vPosition = m_pReal->GetCamera().GetPos();
+  Params.vDirection = Vec3(0, 0, 1);
+  Params.fFocus = 0;
+  Params.vColorStart = Vec3(1, 0.5f, 0.2f);
+  Params.vColorEnd = Vec3(0.2f, 0.5f, 1);
+  Params.fSpeed = 1.0f;
+  Params.nCount = nCount;
+  Params.fSize = fSize;
+  Params.fLifeTime = 10.0f;
+  Params.eBlendType = (ParticleBlendType)nBlend;
+  Params.fScale = 1.0f;
+  Trace_Write("  SpawnParticles(pos " TRACE_V3 " count %d blend %d size %g)", TRACE_V3_ARGS(Params.vPosition), nCount, nBlend, fSize);
+  p3DEngine->SpawnParticles(Params);
 }
 
 void CRendererProxy::ShareResources(IRenderer *renderer)
@@ -416,6 +445,7 @@ void CRendererProxy::Draw2dImage(float xpos, float ypos, float w, float h, int t
   TRACE_CALL("%g %g %gx%g tex %d st (%g %g)-(%g %g) angle %g color (%g %g %g %g) z %g", xpos, ypos, w, h, texture_id,
     s0, t0, s1, t1, angle, r, g, b, a, z);
   m_pReal->Draw2dImage(xpos, ypos, w, h, texture_id, s0, t0, s1, t1, angle, r, g, b, a, z);
+  TRACE_D3D_STATE(m_pReal);
 }
 
 void CRendererProxy::DrawImage(float xpos, float ypos, float w, float h, int texture_id, float s0, float t0, float s1, float t1, float r, float g, float b, float a)
@@ -599,9 +629,28 @@ bool CRendererProxy::FontUploadTexture(class CFBitmap *pBmp, ETEX_Format eTF)
   return bRes;
 }
 
+//! The bytes of a font bitmap (4 per pixel) by their place in the pixel: how many are not 0 and
+//! their sum, to compare with the texture the renderer makes of it.
+static void DumpFontBitmap(const byte *pData, int nWidth, int nHeight)
+{
+  if (!pData || nWidth <= 0 || nHeight <= 0 || !Trace_IsReadable(pData, (size_t)nWidth * nHeight * 4))
+    return;
+  int nNonZero[4] = {};
+  unsigned __int64 nSum[4] = {};
+  for (int i = 0; i < nWidth * nHeight * 4; i++)
+  {
+    nNonZero[i & 3] += pData[i] != 0;
+    nSum[i & 3] += pData[i];
+  }
+  Trace_Write("    bytes 0..3 of the pixels: not 0 %d %d %d %d, sum %llu %llu %llu %llu", nNonZero[0], nNonZero[1], nNonZero[2],
+    nNonZero[3], nSum[0], nSum[1], nSum[2], nSum[3]);
+}
+
 int CRendererProxy::FontCreateTexture(int Width, int Height, byte *pData, ETEX_Format eTF)
 {
   TRACE_CALL("%dx%d data %p format %d", Width, Height, pData, eTF);
+  if (TRACE_DUMP && eTF == eTF_8888)
+    DumpFontBitmap(pData, Width, Height);
   int nRes = m_pReal->FontCreateTexture(Width, Height, pData, eTF);
   TRACE_RESULT("tex %d", nRes);
   return nRes;
@@ -610,6 +659,8 @@ int CRendererProxy::FontCreateTexture(int Width, int Height, byte *pData, ETEX_F
 bool CRendererProxy::FontUpdateTexture(int nTexId, int X, int Y, int USize, int VSize, byte *pData)
 {
   TRACE_CALL("tex %d %d %d %dx%d data %p", nTexId, X, Y, USize, VSize, pData);
+  if (TRACE_DUMP)
+    DumpFontBitmap(pData, USize, VSize);
   bool bRes = m_pReal->FontUpdateTexture(nTexId, X, Y, USize, VSize, pData);
   TRACE_RESULT("%d", bRes);
   return bRes;
@@ -637,12 +688,25 @@ void CRendererProxy::FontSetRenderingState(unsigned long nVirtualScreenWidth, un
 {
   TRACE_CALL("virtual screen %lux%lu", nVirtualScreenWidth, nVirtualScreenHeight);
   m_pReal->FontSetRenderingState(nVirtualScreenWidth, nVirtualScreenHeight);
+  TRACE_D3D_STATE(m_pReal);
 }
 
 void CRendererProxy::FontSetBlending(int src, int dst)
 {
   TRACE_CALL("src 0x%x dst 0x%x", src, dst);
+  // XRENDERTRACED_PROBE=FontSetBlending: the first 13 calls pass (i, 12 - i) instead, so that the
+  // Direct3D state after the text is drawn (XRENDERTRACED_D3D_STATE=DrawDynVB) shows what each
+  // value stands for.
+  static int s_nProbe = 0;
+  if (s_nProbe <= 12 && Trace_IsListed("XRENDERTRACED_PROBE", "FontSetBlending"))
+  {
+    Trace_Write("    probe: FontSetBlending(%d, %d) instead of (%d, %d)", s_nProbe, 12 - s_nProbe, src, dst);
+    src = s_nProbe;
+    dst = 12 - s_nProbe;
+    s_nProbe++;
+  }
   m_pReal->FontSetBlending(src, dst);
+  TRACE_D3D_STATE(m_pReal);
 }
 
 void CRendererProxy::FontRestoreRenderingState()
@@ -745,6 +809,7 @@ void CRendererProxy::SetState(int State)
 {
   TRACE_CALL("0x%08x", State);
   m_pReal->SetState(State);
+  TRACE_D3D_STATE(m_pReal);
 }
 
 void CRendererProxy::SetCullMode(int mode)

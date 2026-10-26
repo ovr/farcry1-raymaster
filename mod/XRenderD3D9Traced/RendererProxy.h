@@ -255,6 +255,7 @@ private:
   //! "screenfx Effect 1", "screenfx Effect.Param 0.5" (or i5 for an integer), "screenfx ?Effect",
   //! "screenfx ?Effect.Param": I3DEngine::SetScreenFx, SetScreenFxParam, GetScreenFx, GetScreenFxParam.
   void ScreenFxCommand(const char *szArgs);
+  void ParticlesCommand(const char *szArgs);
 
   IRenderer *m_pReal;
   int m_nRealType;
