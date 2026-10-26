@@ -138,7 +138,19 @@ static const int nHeapAlignment = 4;
 //   "LowResTerrain", eBT_Dynamic, 1, nTexId, NULL, NULL, false, true): a 129 x 129 grid with 16 m
 //   spacing, then one chunk over all vertices with the shader "terrainlowlod" and no indices
 //   (UpdateSysIndices(NULL, 0)); how the grid is triangulated is not known yet. Every frame:
-//   SetRECustomData(pData, 1, 1) and AddRenderElements(pObj, 0, -1, 0, 0, NULL).
+//   SetRECustomData(pData, 1, 1) and AddRenderElements(pObj, 0, -1, 0, 0, NULL). pData holds
+//   (1, 1, 1/2048, 0) in every frame (Steam; the floats after these four are other engine data).
+//
+// Terrain under a dynamic light ("Dynamic", Steam)
+//   When a dynamic point light reaches the terrain (here a light of radius 2 next to the player),
+//   the engine creates CreateLeafBufferInitialized(pVerts, 1, VERTEX_FORMAT_P3F_N_COL4UB_COL4UB,
+//   NULL, 0, R_PRIMV_TRIANGLES, "Dynamic", eBT_Static, 1, nTexId, NULL, NULL, false, false) with one
+//   zeroed vertex and the texture ID of the terrain sector the light is in, and every frame calls
+//   SetRECustomData(pData, 0, 1) and AddRE(pObj, NULL, 0x30000000, NULL). pData holds
+//   (-y0 / 64, -x0 / 64, 1 / 64, 0) for the sector's corner (x0, y0): (-14, -17, 0.015625, 0) for
+//   the sector at (1088, 896). pObj has an identity matrix and the light's bit in m_DynLMMask. The
+//   buffer has no geometry of its own; how the original renderer draws it is not known. In the
+//   first frames the engine deleted it once and created it again for the same sector.
 //
 // Fog volume caps ("VolFogTopCircle", Carrier)
 //   Like the water rings: P3F, R_PRIMV_MULTI_STRIPS, eBT_Dynamic, 16 chunks of 26 vertices (one
