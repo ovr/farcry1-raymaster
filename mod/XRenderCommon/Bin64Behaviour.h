@@ -157,10 +157,14 @@ static const int nHeapAlignment = 4;
 // Low detail terrain ("LowResTerrain")
 //   CreateLeafBufferInitialized(pVerts, 16641, VERTEX_FORMAT_P3F, NULL, 0, R_PRIMV_TRIANGLES,
 //   "LowResTerrain", eBT_Dynamic, 1, nTexId, NULL, NULL, false, true): a 129 x 129 grid with 16 m
-//   spacing, then one chunk over all vertices with the shader "terrainlowlod" and no indices
-//   (UpdateSysIndices(NULL, 0)); how the grid is triangulated is not known yet. Every frame:
+//   spacing. Every frame: UpdateSysIndices(NULL, 0), InvalidateVideoBuffer,
+//   SetChunk(pShader, 0, 16641, 0, 0, 0, false) with the shader "terrainlowlod" and no indices,
 //   SetRECustomData(pData, 1, 1) and AddRenderElements(pObj, 0, -1, 0, 0, NULL). pData holds
-//   (1, 1, 1/2048, 0) in every frame (Steam; the floats after these four are other engine data).
+//   (1, 1, 1/2048, 0), (0, 0, 0, 0), four floats that are not set, and the camera position
+//   (x, y, z, 0).
+//   The buffer never gets a material: m_pMats is empty right after the creation and stays empty
+//   (a SetChunk without indices adds none), so AddRenderElements adds no render element and the
+//   D3D9 renderer never draws it (Training, Steam, River).
 //
 // Terrain under a dynamic light ("Dynamic", Steam)
 //   When a dynamic point light reaches the terrain (here a light of radius 2 next to the player),
