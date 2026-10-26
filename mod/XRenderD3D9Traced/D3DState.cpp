@@ -157,6 +157,37 @@ void D3DState_WriteDevice(IDirect3DDevice9 *pDev)
       Trace_Write("    d3d %s [%g %g %g %g] [%g %g %g %g] [%g %g %g %g] [%g %g %g %g]", s_Transforms[i].m_szName,
         M._11, M._12, M._13, M._14, M._21, M._22, M._23, M._24, M._31, M._32, M._33, M._34, M._41, M._42, M._43, M._44);
   }
+
+  // Fixed function lighting: the material, the global ambient and the enabled lights.
+  DWORD nLighting = 0;
+  if (SUCCEEDED(pDev->GetRenderState(D3DRS_LIGHTING, &nLighting)) && nLighting)
+  {
+    DWORD nAmbient = 0, nColorVertex = 0, nDiffuseSrc = 0, nAmbientSrc = 0, nSpecular = 0, nNormalize = 0;
+    pDev->GetRenderState(D3DRS_AMBIENT, &nAmbient);
+    pDev->GetRenderState(D3DRS_COLORVERTEX, &nColorVertex);
+    pDev->GetRenderState(D3DRS_DIFFUSEMATERIALSOURCE, &nDiffuseSrc);
+    pDev->GetRenderState(D3DRS_AMBIENTMATERIALSOURCE, &nAmbientSrc);
+    pDev->GetRenderState(D3DRS_SPECULARENABLE, &nSpecular);
+    pDev->GetRenderState(D3DRS_NORMALIZENORMALS, &nNormalize);
+    D3DMATERIAL9 Mtl = {};
+    pDev->GetMaterial(&Mtl);
+    Trace_Write("    d3d lighting: ambient 0x%08x colorvertex %u diffuse from %u ambient from %u specular %u normalize %u"
+      " material diffuse (%g %g %g %g) ambient (%g %g %g %g) specular (%g %g %g %g) power %g emissive (%g %g %g %g)",
+      nAmbient, nColorVertex, nDiffuseSrc, nAmbientSrc, nSpecular, nNormalize,
+      Mtl.Diffuse.r, Mtl.Diffuse.g, Mtl.Diffuse.b, Mtl.Diffuse.a, Mtl.Ambient.r, Mtl.Ambient.g, Mtl.Ambient.b, Mtl.Ambient.a,
+      Mtl.Specular.r, Mtl.Specular.g, Mtl.Specular.b, Mtl.Specular.a, Mtl.Power, Mtl.Emissive.r, Mtl.Emissive.g, Mtl.Emissive.b, Mtl.Emissive.a);
+    for (DWORD nLight = 0; nLight < 8; nLight++)
+    {
+      BOOL bEnabled = FALSE;
+      D3DLIGHT9 L = {};
+      if (FAILED(pDev->GetLightEnable(nLight, &bEnabled)) || !bEnabled || FAILED(pDev->GetLight(nLight, &L)))
+        continue;
+      Trace_Write("    d3d light %u: type %d diffuse (%g %g %g) specular (%g %g %g) ambient (%g %g %g) pos (%g %g %g) dir (%g %g %g)"
+        " range %g att (%g %g %g)", nLight, L.Type, L.Diffuse.r, L.Diffuse.g, L.Diffuse.b, L.Specular.r, L.Specular.g, L.Specular.b,
+        L.Ambient.r, L.Ambient.g, L.Ambient.b, L.Position.x, L.Position.y, L.Position.z, L.Direction.x, L.Direction.y, L.Direction.z,
+        L.Range, L.Attenuation0, L.Attenuation1, L.Attenuation2);
+    }
+  }
   if (pVS)
     pVS->Release();
   if (pPS)
