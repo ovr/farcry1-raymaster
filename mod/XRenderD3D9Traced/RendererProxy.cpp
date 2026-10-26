@@ -257,6 +257,34 @@ void CRendererProxy::ExecuteCommands(const char *szCommands)
       sscanf_s(szCmd + 12, "%f %f %f", &m_fLightRadius, &m_fLightDirect, &m_fLightColor);
       Trace_Write("  point lights get radius %g direct factor %g colour scale %g", m_fLightRadius, m_fLightDirect, m_fLightColor);
     }
+    else if (!strncmp(szCmd, "view ", 5))
+    {
+      // "view maxdist|- fogstart|- fogend|-": I3DEngine::SetMaxViewDistance, SetFogStart, SetFogEnd.
+      I3DEngine *p3DEngine = iSystem ? iSystem->GetI3DEngine() : NULL;
+      char szArg[3][32] = { "-", "-", "-" };
+      sscanf_s(szCmd + 5, "%31s %31s %31s", szArg[0], (unsigned)sizeof(szArg[0]), szArg[1], (unsigned)sizeof(szArg[1]), szArg[2], (unsigned)sizeof(szArg[2]));
+      if (p3DEngine && strcmp(szArg[0], "-"))
+        p3DEngine->SetMaxViewDistance((float)atof(szArg[0]));
+      if (p3DEngine && strcmp(szArg[1], "-"))
+        p3DEngine->SetFogStart((float)atof(szArg[1]));
+      if (p3DEngine && strcmp(szArg[2], "-"))
+        p3DEngine->SetFogEnd((float)atof(szArg[2]));
+      if (p3DEngine)
+        Trace_Write("  view distance %g fog %g to %g", p3DEngine->GetMaxViewDistance(), p3DEngine->GetFogStart(), p3DEngine->GetFogEnd());
+    }
+    else if (!strncmp(szCmd, "sky ", 4))
+    {
+      char szWater[32] = "-", szStretching[32] = "-", szAlpha[32] = "-";
+      sscanf_s(szCmd + 4, "%31s %31s %31s", szWater, (unsigned)sizeof(szWater), szStretching, (unsigned)sizeof(szStretching),
+        szAlpha, (unsigned)sizeof(szAlpha));
+      m_bSkyWater = strcmp(szWater, "-") != 0;
+      m_bSkyStretching = strcmp(szStretching, "-") != 0;
+      m_bSkyAlpha = strcmp(szAlpha, "-") != 0;
+      m_fSkyWater = (float)atof(szWater);
+      m_fSkyStretching = (float)atof(szStretching);
+      m_fSkyAlpha = (float)atof(szAlpha);
+      Trace_Write("  sky gets water level %s stretching %s alpha %s", szWater, szStretching, szAlpha);
+    }
     else
       iConsole->ExecuteString(szCmd, false, true);
   }

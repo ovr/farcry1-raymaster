@@ -433,6 +433,15 @@ void CRendererProxy::EF_AddEf(int NumFog, CRendElement *re, IShader *ef, SRender
 {
   TRACE_CALL("fog %d RE %p %s shader %p '%s' res %p obj %p templ %d state %p '%s' sort %d", NumFog, re, re ? Trace_RETypeName(re->m_Type) : "",
     ef, ShaderName(ef), sr, obj, nTempl, efState, efState ? ShaderName(efState) : "", nSort);
+  if (re && re->m_Type == eDATA_Sky)
+  {
+    if (m_bSkyWater)
+      ((CRESky *)re)->m_fTerrainWaterLevel = m_fSkyWater;
+    if (m_bSkyStretching)
+      ((CRESky *)re)->m_fSkyBoxStretching = m_fSkyStretching;
+    if (m_bSkyAlpha)
+      ((CRESky *)re)->m_fAlpha = m_fSkyAlpha;
+  }
   if (TRACE_DUMP)
   {
     Dump_RE(re);

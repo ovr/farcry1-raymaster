@@ -49,7 +49,10 @@ it as well: it holds local, machine-specific instructions and is not committed (
   start with the prefix, with their values and flags (`IConsole::DumpCVars`); `veggroup id|* field
   value` changes a vegetation group (`I3DEngine::SetStatInstGroup`; fields `fadeSize`, `useSprites`,
   `maxViewDistRatio`, `spriteDistRatio`, `brightness`); `lightradius r [direct] [colour scale]` gives the point lights
-  that reach `EF_ADDDlight` the radius r, the direct factor and a scaled colour (0: their own).
+  that reach `EF_ADDDlight` the radius r, the direct factor and a scaled colour (0: their own);
+  `sky water stretching [alpha]` writes those members into the sky element at `EF_AddEf` (`-`:
+  the engine's value); `view maxdist fogstart fogend` calls `I3DEngine::SetMaxViewDistance`,
+  `SetFogStart`, `SetFogEnd` (`-`: unchanged).
 - `XRENDERTRACED_TRACE_METHODS` (names as in the log, separated by `,`, e.g.
   `DownLoadToVideoMemory,CLeafBuffer::CreateBufferFromSource`) writes every call of those methods,
   not only the first `xrt_TraceCalls`.
