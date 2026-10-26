@@ -249,6 +249,8 @@ void CRendererProxy::ExecuteCommands(const char *szCommands)
       ParticlesCommand(szCmd + 9);
     else if (!strncmp(szCmd, "cvars", 5) && (!szCmd[5] || szCmd[5] == ' '))
       CVarsCommand(szCmd + 5);
+    else if (!strncmp(szCmd, "veggroup ", 9))
+      VegGroupCommand(szCmd + 9);
     else
       iConsole->ExecuteString(szCmd, false, true);
   }
@@ -280,6 +282,45 @@ void CRendererProxy::CVarsCommand(const char *szArgs)
   Sink.m_nFound = 0;
   iConsole->DumpCVars(&Sink);
   Trace_Write("    %d console variables starting with '%s'", Sink.m_nFound, szArgs);
+}
+
+void CRendererProxy::VegGroupCommand(const char *szArgs)
+{
+  I3DEngine *p3DEngine = iSystem ? iSystem->GetI3DEngine() : NULL;
+  if (!p3DEngine)
+    return;
+  char szGroup[16] = "", szField[32] = "";
+  float fValue = 0;
+  if (sscanf_s(szArgs, "%15s %31s %f", szGroup, (unsigned)sizeof(szGroup), szField, (unsigned)sizeof(szField), &fValue) < 3)
+    return;
+  const bool bAll = !strcmp(szGroup, "*");
+  int nChanged = 0;
+  for (int g = bAll ? 0 : atoi(szGroup); g < (bAll ? 256 : atoi(szGroup) + 1); g++)
+  {
+    IStatInstGroup Group;
+    if (!p3DEngine->GetStatInstGroup(g, Group) || !Group.pStatObj)
+      continue;
+    if (!strcmp(szField, "fadeSize"))
+      Group.bFadeSize = fValue != 0;
+    else if (!strcmp(szField, "useSprites"))
+      Group.bUseSprites = fValue != 0;
+    else if (!strcmp(szField, "maxViewDistRatio"))
+      Group.fMaxViewDistRatio = fValue;
+    else if (!strcmp(szField, "spriteDistRatio"))
+      Group.fSpriteDistRatio = fValue;
+    else if (!strcmp(szField, "brightness"))
+      Group.fBrightness = fValue;
+    else
+      return;
+    if (!p3DEngine->SetStatInstGroup(g, Group))
+      continue;
+    nChanged++;
+    IStatInstGroup Check;
+    if (p3DEngine->GetStatInstGroup(g, Check))
+      Trace_Write("    group %d now: fadeSize %d useSprites %d maxViewDistRatio %g spriteDistRatio %g brightness %g", g,
+        Check.bFadeSize, Check.bUseSprites, Check.fMaxViewDistRatio, Check.fSpriteDistRatio, Check.fBrightness);
+  }
+  Trace_Write("  SetStatInstGroup(%s %s %g): %d groups", szGroup, szField, fValue, nChanged);
 }
 
 void CRendererProxy::ScreenFxCommand(const char *szArgs)
@@ -1148,6 +1189,57 @@ void CRendererProxy::FlushTextMessages()
   m_pReal->FlushTextMessages();
 }
 
+//! The sprites made so far (MakeSprite), with the object's box and the Direct3D texture each one
+//! got, written by DrawObjSprites.
+struct SSpriteRecord
+{
+  IStatObj *m_pStatObj;
+  float m_fScale;
+  int m_nTexSize;
+  float m_fRadius;
+  Vec3 m_vBoxMin, m_vBoxMax;
+  float m_fAngle;
+  unsigned int m_nID;
+  void *m_pD3DTexture;
+  int m_nOffset;
+};
+static SSpriteRecord s_Sprites[8192];
+static int s_nSprites = 0;
+
+//! The Direct3D texture behind a texture of the original renderer: the first pointer in the
+//! first 0x200 bytes of its ITexPic to an object whose vtable is in d3d9.dll.
+static void *FindD3DTextureUnsafe(ITexPic *pPic, int *pOffset)
+{
+  HMODULE hD3D9 = GetModuleHandleA("d3d9.dll");
+  for (int nOff = 8; pPic && hD3D9 && nOff < 0x200; nOff += 8)
+  {
+    if (!Trace_IsReadable((char *)pPic + nOff, sizeof(void *)))
+      break;
+    void *p = *(void **)((char *)pPic + nOff);
+    HMODULE hModule = NULL;
+    if (p && Trace_IsReadable(p, sizeof(void *)) && Trace_IsReadable(*(void **)p, sizeof(void *))
+      && GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT, (LPCSTR)**(void ***)p, &hModule)
+      && hModule == hD3D9)
+    {
+      *pOffset = nOff;
+      return p;
+    }
+  }
+  return NULL;
+}
+
+static void *FindD3DTexture(IRenderer *pRenderer, unsigned int nID, int *pOffset)
+{
+  __try
+  {
+    return FindD3DTextureUnsafe(pRenderer->EF_GetTextureByID(nID), pOffset);
+  }
+  __except (EXCEPTION_EXECUTE_HANDLER)
+  {
+    return NULL;
+  }
+}
+
 void CRendererProxy::DrawObjSprites(list2<CStatObjInst *> *pList, float fMaxViewDist, CObjManager *pObjMan)
 {
   TRACE_CALL("list %p (%d) maxViewDist %g objManager %p", pList, pList ? pList->Count() : -1, fMaxViewDist, pObjMan);
@@ -1158,6 +1250,19 @@ void CRendererProxy::DrawObjSprites(list2<CStatObjInst *> *pList, float fMaxView
     Trace_Write("    objManager heap prefix %s", Trace_HeapPrefix(pObjMan));
     for (int i = 0; pList && i < pList->Count() && i < 2; i++)
       Trace_Write("    instance %d %p heap prefix %s", i, (*pList)[i], Trace_HeapPrefix((*pList)[i]));
+  }
+  if (TRACE_DUMP && s_nSprites)
+  {
+    // The sprites made since the last traced call with their Direct3D textures, to tell which one a
+    // draw of the far sprites uses.
+    for (int i = 0; i < s_nSprites; i++)
+    {
+      const SSpriteRecord &S = s_Sprites[i];
+      Trace_Write("    sprite statObj %p angle %g id %u -> d3d %p (+0x%x) scale %g size %d radius %g box (%g %g %g)-(%g %g %g)", S.m_pStatObj,
+        S.m_fAngle, S.m_nID, S.m_pD3DTexture, S.m_nOffset, S.m_fScale, S.m_nTexSize, S.m_fRadius, S.m_vBoxMin.x, S.m_vBoxMin.y,
+        S.m_vBoxMin.z, S.m_vBoxMax.x, S.m_vBoxMax.y, S.m_vBoxMax.z);
+    }
+    s_nSprites = 0;
   }
   if (TRACE_DUMP)
   {
@@ -1173,9 +1278,18 @@ void CRendererProxy::DrawObjSprites(list2<CStatObjInst *> *pList, float fMaxView
         IStatInstGroup Group;
         if (!p3DEngine->GetStatInstGroup(g, Group) || !Group.pStatObj)
           continue;
+        Vec3 vMin = Group.pStatObj->GetBoxMin(), vMax = Group.pStatObj->GetBoxMax();
         Trace_Write("    group %d: statObj %p '%s' radius %g brightness %g spriteDistRatio %g maxViewDistRatio %g useSprites %d "
-          "spriteTexRes %d bending %g", g, Group.pStatObj, Group.pStatObj->GetFileName(), Group.pStatObj->GetRadius(),
-          Group.fBrightness, Group.fSpriteDistRatio, Group.fMaxViewDistRatio, Group.bUseSprites, Group.nSpriteTexRes, Group.fBending);
+          "spriteTexRes %d bending %g fadeSize %d alphaBlend %d backSide %g calcLighting %d rndFlags 0x%x material %p "
+          "box (%g %g %g)-(%g %g %g) lods %p %p %p", g, Group.pStatObj, Group.pStatObj->GetFileName(), Group.pStatObj->GetRadius(),
+          Group.fBrightness, Group.fSpriteDistRatio, Group.fMaxViewDistRatio, Group.bUseSprites, Group.nSpriteTexRes, Group.fBending,
+          Group.bFadeSize, Group.bUseAlphaBlending, Group.fBackSideLevel, Group.bCalcLighting, Group.m_dwRndFlags, Group.pMaterial,
+          vMin.x, vMin.y, vMin.z, vMax.x, vMax.y, vMax.z, Group.pStatObj->GetLodObject(1), Group.pStatObj->GetLodObject(2),
+          Group.pStatObj->GetLodObject(3));
+        // The object manager starts with a pointer to an array of groups (0x48 bytes each in Bin64).
+        const unsigned char *pGroups = Trace_IsReadable(pObjMan, sizeof(void *)) ? *(const unsigned char **)pObjMan : NULL;
+        if (pGroups && Trace_IsReadable(pGroups + g * 0x48, 0x48))
+          Dump_HexLine("grpmem", pGroups + g * 0x48, 0x48);
       }
     }
     for (int i = 0; pList && i < pList->Count(); i++)
@@ -1281,6 +1395,21 @@ unsigned int CRendererProxy::MakeSprite(float object_scale, int tex_size, float 
   TRACE_CALL("scale %g size %d angle %g statObj %p buffer %p default %u", object_scale, tex_size, angle, pStatObj, pTmpBuffer, def_tid);
   unsigned int nRes = m_pReal->MakeSprite(object_scale, tex_size, angle, pStatObj, pTmpBuffer, def_tid);
   TRACE_RESULT("tex %u", nRes);
+  if (s_nSprites < (int)(sizeof(s_Sprites) / sizeof(s_Sprites[0])))
+  {
+    s_Sprites[s_nSprites].m_pStatObj = pStatObj;
+    s_Sprites[s_nSprites].m_fAngle = angle;
+    s_Sprites[s_nSprites].m_fScale = object_scale;
+    s_Sprites[s_nSprites].m_nTexSize = tex_size;
+    // The object may be gone by the time the list is written.
+    s_Sprites[s_nSprites].m_fRadius = pStatObj ? pStatObj->GetRadius() : 0;
+    s_Sprites[s_nSprites].m_vBoxMin = pStatObj ? pStatObj->GetBoxMin() : Vec3(0, 0, 0);
+    s_Sprites[s_nSprites].m_vBoxMax = pStatObj ? pStatObj->GetBoxMax() : Vec3(0, 0, 0);
+    s_Sprites[s_nSprites].m_nID = nRes;
+    s_Sprites[s_nSprites].m_nOffset = 0;
+    s_Sprites[s_nSprites].m_pD3DTexture = FindD3DTexture(m_pReal, nRes, &s_Sprites[s_nSprites].m_nOffset);
+    s_nSprites++;
+  }
   return nRes;
 }
 

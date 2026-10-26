@@ -258,6 +258,9 @@ private:
   void ParticlesCommand(const char *szArgs);
   //! "cvars prefix": the console variables whose names start with prefix (all without one).
   void CVarsCommand(const char *szArgs);
+  //! "veggroup id|* field value": changes a member of vegetation groups (I3DEngine::GetStatInstGroup,
+  //! SetStatInstGroup); fields fadeSize, useSprites, maxViewDistRatio, spriteDistRatio, brightness.
+  void VegGroupCommand(const char *szArgs);
 
   IRenderer *m_pReal;
   int m_nRealType;

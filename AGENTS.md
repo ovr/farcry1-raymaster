@@ -46,7 +46,9 @@ it as well: it holds local, machine-specific instructions and is not committed (
   `screenfx ?Effect` in `XRENDERTRACED_EXEC`/`XRENDERTRACED_EXEC_LEVEL` calls the screen effect
   functions of `I3DEngine`; `particles [count] [blend type] [size]` spawns particles around the
   camera (`I3DEngine::SpawnParticles`); `cvars [prefix]` writes the console variables whose names
-  start with the prefix, with their values and flags (`IConsole::DumpCVars`).
+  start with the prefix, with their values and flags (`IConsole::DumpCVars`); `veggroup id|* field
+  value` changes a vegetation group (`I3DEngine::SetStatInstGroup`; fields `fadeSize`, `useSprites`,
+  `maxViewDistRatio`, `spriteDistRatio`, `brightness`).
 - `XRENDERTRACED_TRACE_METHODS` (names as in the log, separated by `,`, e.g.
   `DownLoadToVideoMemory,CLeafBuffer::CreateBufferFromSource`) writes every call of those methods,
   not only the first `xrt_TraceCalls`.
