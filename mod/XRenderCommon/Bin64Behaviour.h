@@ -231,6 +231,28 @@ static const int nHeapAlignment = 4;
 //     texel in u and minus half a texel in v (1/128 for the 64 x 64 sprites), with wrap addressing.
 //   - Vertex colour: the colour of EF_SetWorldColor times min(1, g's fBrightness * the instance's
 //     brightness byte / 100), alpha 255.
+//
+// Sky box (CRESky; River, Steam, Research, Pier)
+//   The engine adds the sky element with EF_AddEf every frame, after writing m_fTerrainWaterLevel,
+//   m_fSkyBoxStretching (from the level: 1 on River and Steam, 0.5 on Pier, 0 on Research) and
+//   m_fAlpha (I3DEngine::SetSkyBoxAlpha). The D3D9 renderer draws a box around the camera: the view
+//   matrix without its translation, no depth test or writes, no fog, clamped textures, texture *
+//   texture factor; the factor is white with alpha m_fAlpha, and below alpha 1 the box is blended
+//   (SRCALPHA, INVSRCALPHA). Five strips, in this order:
+//   - the top, z = 32, x and y from -32 to 32, u = (x + 32) / 64, v = (y + 32) / 64;
+//   - the sides y = -32, x = -32, y = 32, x = 32, each from z = 32 down to z1 (v from the top
+//     value to 0.5) and on to z2 (v stays 0.5), u 1 to 0 along the side (y = -32: x from -32 to 32;
+//     x = -32: y from 32 to -32; y = 32: x from 32 to -32; x = 32: y from -32 to 32). The sides
+//     y = -32 and y = 32 run from v 0 at the top, x = -32 and x = 32 from v 1 at the top: two sides
+//     share a texture, one in its upper half, the other upside down in its lower half.
+//   - Three textures: the top, the sides y = -32 and x = -32, the sides y = 32 and x = 32.
+//   With h = camera z - m_fTerrainWaterLevel, s = m_fSkyBoxStretching and F the view distance (the
+//   camera's far plane):
+//     z1 = -s * h * (30.72 / F + 1 / 128)
+//     z2 = -8 + h * (30.72 / F - 0.018)
+//   and z1 = z2 = 0 when the camera is below the water level. Both are not clamped: z1 can lie
+//   below z2. Checked for F from 350 to 1500, h from 1.6 to 114 and s 0, 0.5, 1 and 2: within 0.001
+//   of the heights drawn.
 
 //////////////////////////////////////////////////////////////////////////
 // Shaders (Training: 636 shaders and what their getters return)
