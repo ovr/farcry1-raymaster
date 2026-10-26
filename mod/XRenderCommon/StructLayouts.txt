@@ -658,6 +658,87 @@ SAAFormat    x86 0x4C    x64 0x4C
    0x48    4    0x48    4   nAPIType
 
 ====================================================================================================
+Vertex formats (VertexFormats.h; VERTEX_FORMAT_T3F_B3F_N3F is SPipTangents)
+====================================================================================================
+
+struct_VERTEX_FORMAT_P3F    x86 0xC    x64 0xC
+    0x0   12     0x0   12   xyz
+
+struct_VERTEX_FORMAT_P3F_COL4UB    x86 0x10    x64 0x10
+    0x0   12     0x0   12   xyz
+    0xC    4     0xC    4   color
+
+struct_VERTEX_FORMAT_P3F_TEX2F    x86 0x14    x64 0x14
+    0x0   12     0x0   12   xyz
+    0xC    8     0xC    8   st
+
+struct_VERTEX_FORMAT_P3F_COL4UB_TEX2F    x86 0x18    x64 0x18
+    0x0   12     0x0   12   xyz
+    0xC    4     0xC    4   color
+   0x10    8    0x10    8   st
+
+struct_VERTEX_FORMAT_TRP3F_COL4UB_TEX2F    x86 0x1C    x64 0x1C
+    0x0    4     0x0    4   x
+    0x4    4     0x4    4   y
+    0x8    4     0x8    4   z
+    0xC    4     0xC    4   rhw
+   0x10    4    0x10    4   color
+   0x14    8    0x14    8   st
+
+struct_VERTEX_FORMAT_P3F_COL4UB_COL4UB    x86 0x14    x64 0x14
+    0x0   12     0x0   12   xyz
+    0xC    4     0xC    4   color
+   0x10    4    0x10    4   seccolor
+
+struct_VERTEX_FORMAT_P3F_N    x86 0x18    x64 0x18
+    0x0   12     0x0   12   xyz
+    0xC   12     0xC   12   normal
+
+struct_VERTEX_FORMAT_P3F_N_COL4UB    x86 0x1C    x64 0x1C
+    0x0   12     0x0   12   xyz
+    0xC   12     0xC   12   normal
+   0x18    4    0x18    4   color
+
+struct_VERTEX_FORMAT_P3F_N_TEX2F    x86 0x20    x64 0x20
+    0x0   12     0x0   12   xyz
+    0xC   12     0xC   12   normal
+   0x18    8    0x18    8   st
+
+struct_VERTEX_FORMAT_P3F_N_COL4UB_TEX2F    x86 0x24    x64 0x24
+    0x0   12     0x0   12   xyz
+    0xC   12     0xC   12   normal
+   0x18    4    0x18    4   color
+   0x1C    8    0x1C    8   st
+
+struct_VERTEX_FORMAT_P3F_N_COL4UB_COL4UB    x86 0x20    x64 0x20
+    0x0   12     0x0   12   xyz
+    0xC   12     0xC   12   normal
+   0x18    4    0x18    4   color
+   0x1C    4    0x1C    4   seccolor
+
+struct_VERTEX_FORMAT_P3F_COL4UB_COL4UB_TEX2F    x86 0x1C    x64 0x1C
+    0x0   12     0x0   12   xyz
+    0xC    4     0xC    4   color
+   0x10    4    0x10    4   seccolor
+   0x14    8    0x14    8   st
+
+struct_VERTEX_FORMAT_P3F_N_COL4UB_COL4UB_TEX2F    x86 0x28    x64 0x28
+    0x0   12     0x0   12   xyz
+    0xC   12     0xC   12   normal
+   0x18    4    0x18    4   color
+   0x1C    4    0x1C    4   seccolor
+   0x20    8    0x20    8   st
+
+struct_VERTEX_FORMAT_TEX2F    x86 0x8    x64 0x8
+    0x0    8     0x0    8   st
+
+struct_VERTEX_FORMAT_P3F_COL4UB_TEX2F_TEX2F    x86 0x20    x64 0x20
+    0x0   12     0x0   12   xyz
+    0xC    4     0xC    4   color
+   0x10    8    0x10    8   st0
+   0x18    8    0x18    8   st1
+
+====================================================================================================
 Small value types and containers
 ====================================================================================================
 
