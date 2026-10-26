@@ -22,7 +22,7 @@
 
 
 # ifndef setjmp
-#  include _STLP_NATIVE_C_HEADER(setjmp.h)
+#  include _STLP_NATIVE_COMPILER_C_HEADER(setjmp.h)
 # endif
 
 # if (_STLP_OUTERMOST_HEADER_ID == 0x256)

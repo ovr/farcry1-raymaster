@@ -215,9 +215,7 @@ struct IScriptSystem
 	virtual void EndCall(int &nRet)=0;
 	virtual void EndCall(float &fRet)=0;
 	virtual void EndCall(const char *&sRet)=0;
-#if defined(WIN64) || defined(LINUX)
 	inline void EndCall(char *&sRet) {EndCall ((const char*&)sRet);}
-#endif
 	virtual void EndCall(bool &bRet)=0;
 	virtual void EndCall(IScriptObject *pScriptObject)=0;
 	//##@}
@@ -522,11 +520,9 @@ struct IScriptObject
 	virtual bool GetCurrentFuncData(unsigned int * &pCode, int &iSize) = 0;
 	virtual bool GetCurrentKey(const char* &sVal) = 0;
 
-#if defined(WIN64) || defined(LINUX)
 	inline bool GetCurrentKey(char* &sVal) {return GetCurrentKey((const char*&)sVal);}
 	inline bool GetCurrent(char* &sVal) {return GetCurrent ((const char*&)sVal);}
 	inline bool GetAt(int nIdx,char* &sVal) {return GetAt(nIdx, (const char*&)sVal);}
-#endif
 
 	virtual bool GetCurrentKey(int &nKey) = 0;
 	virtual ScriptVarType GetCurrentType() = 0;
@@ -613,9 +609,7 @@ struct IFunctionHandler
 	virtual bool GetParam(int nIdx, int &n) = 0;
 	virtual bool GetParam(int nIdx, float &f) = 0;
 	virtual bool GetParam(int nIdx, const char * &s) = 0;
-#if defined(WIN64) || defined(LINUX)
 	inline bool GetParam(int nIdx, char * &s) {return GetParam(nIdx, (const char*&)s);}
-#endif
 #if defined(WIN64) || defined(LINUX64)
 	virtual bool GetParam(int nIdx, INT_PTR &n) = 0;	//## AMD Port
 #endif

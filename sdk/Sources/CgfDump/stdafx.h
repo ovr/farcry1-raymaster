@@ -27,6 +27,7 @@
 #include <map>
 #include <string>
 #include <algorithm>
+#include <functional>
 #include <assert.h>
 #include <math.h>
 #ifndef max

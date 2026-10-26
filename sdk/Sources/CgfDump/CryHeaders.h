@@ -620,12 +620,12 @@ struct MTL_CHUNK_DESC_0744
 			float		Dyn_Bounce;
 			float		Dyn_StaticFriction;
 			float		Dyn_SlidingFriction;
-		};
+		} std;
 
 		struct
 		{
 			int		nChildren;
-		};
+		} multi;
 	};
 };
 
@@ -665,12 +665,12 @@ struct MTL_CHUNK_DESC_0745
 			float		Dyn_Bounce;
 			float		Dyn_StaticFriction;
 			float		Dyn_SlidingFriction;
-		};
+		} std;
 
 		struct
 		{
 			int		nChildren;
-		};
+		} multi;
 	};
 };
 
@@ -711,12 +711,12 @@ struct MTL_CHUNK_DESC_0746
 			float		Dyn_Bounce;
 			float		Dyn_StaticFriction;
 			float		Dyn_SlidingFriction;
-		};
+		} std;
 
 		struct
 		{
 			int		nChildren;
-		};
+		} multi;
 	};
 };
 

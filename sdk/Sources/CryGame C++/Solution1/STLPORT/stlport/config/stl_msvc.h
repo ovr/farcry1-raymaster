@@ -11,6 +11,16 @@
 #  define _STLP_NATIVE_OLD_STREAMS_HEADER(x) <../crt/##x>
 #  define _STLP_NATIVE_CPP_RUNTIME_HEADER(header) <../crt/##header>
 #  define _STLP_GLOBAL_NEW_HANDLER
+# elif (_MSC_VER >= 1900)
+// FC-SDK CMake port: since Visual Studio 2015 the C library is the Universal CRT, whose headers
+// live in "Windows Kits/10/Include/<ver>/ucrt" next to "um" and "shared". Only a few compiler
+// specific C headers (limits.h, setjmp.h, stdarg.h) remain in VC/include.
+#  define _STLP_NATIVE_HEADER(x) <../include/##x>
+#  define _STLP_NATIVE_C_HEADER(x) <../ucrt/##x>
+#  define _STLP_NATIVE_COMPILER_C_HEADER(x) <../include/##x>
+#  define _STLP_NATIVE_CPP_C_HEADER(x) <../include/##x>
+#  define _STLP_NATIVE_OLD_STREAMS_HEADER(x) <../include/##x>
+#  define _STLP_NATIVE_CPP_RUNTIME_HEADER(header) <../include/##header>
 # else
 #  define _STLP_NATIVE_HEADER(x) <../include/##x>
 #  define _STLP_NATIVE_C_HEADER(x) <../include/##x>

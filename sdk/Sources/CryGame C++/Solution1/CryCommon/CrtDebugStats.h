@@ -32,8 +32,14 @@ typedef struct _CrtMemBlockHeader
         struct _CrtMemBlockHeader * pBlockHeaderPrev;
         char *                      szFileName;
         int                         nLine;
+#if _MSC_VER >= 1900
+        // The Universal CRT stores the block use before the size.
+        int                         nBlockUse;
+        size_t                      nDataSize;
+#else
         size_t                      nDataSize;
         int                         nBlockUse;
+#endif
         long                        lRequest;
         unsigned char               gap[nNoMansLandSize];
         /* followed by:
@@ -149,7 +155,8 @@ extern "C" void __declspec(dllexport) UsageSummary(ILog *log, char *modulename, 
 
 #endif
 
-#if !defined(_RELEASE) && !defined(_DLL)
+// _crtheap only exists in the pre-UCRT static CRT.
+#if !defined(_RELEASE) && !defined(_DLL) && _MSC_VER < 1900
 extern "C" HANDLE _crtheap;
 extern "C" HANDLE __declspec(dllexport) GetDLLHeap() { return _crtheap; };
 #endif

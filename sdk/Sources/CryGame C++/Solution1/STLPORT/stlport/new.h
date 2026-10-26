@@ -24,6 +24,9 @@
 # ifndef _STLP_WINCE
 # if defined (__BORLANDC__)
 #  include <new.>
+# elif defined (_MSC_VER) && (_MSC_VER >= 1900)
+// FC-SDK CMake port: new.h is part of the Universal CRT.
+#  include _STLP_NATIVE_C_HEADER(new.h)
 # elif (__INTEL_COMPILER >= 800)
 #   include _STLP_NATIVE_OLD_STREAMS_HEADER(new.h)
 # else

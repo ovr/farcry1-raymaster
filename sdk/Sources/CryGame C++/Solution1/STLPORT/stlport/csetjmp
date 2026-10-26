@@ -26,7 +26,7 @@
 # if defined (_STLP_USE_NEW_C_HEADERS)
 #  include _STLP_NATIVE_CPP_C_HEADER(csetjmp)
 # else
-#  include _STLP_NATIVE_C_HEADER(setjmp.h)
+#  include _STLP_NATIVE_COMPILER_C_HEADER(setjmp.h)
 # endif
 # endif
 

@@ -20,7 +20,7 @@
 #  define _STLP_DONT_POP_0x261
 # endif
 
-# include _STLP_NATIVE_C_HEADER(stdarg.h)
+# include _STLP_NATIVE_COMPILER_C_HEADER(stdarg.h)
 
 # if (_STLP_OUTERMOST_HEADER_ID == 0x261)
 #  if ! defined (_STLP_DONT_POP_0x261)

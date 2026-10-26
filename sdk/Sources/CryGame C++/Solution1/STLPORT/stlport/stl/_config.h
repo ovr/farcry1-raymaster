@@ -198,6 +198,12 @@
 # define _STLP_NATIVE_C_HEADER(header)  _STLP_MAKE_HEADER(_STLP_NATIVE_C_INCLUDE_PATH,header)
 #endif
 
+/* FC-SDK CMake port: C headers that belong to the compiler rather than to its C library
+   (limits.h, setjmp.h, stdarg.h). Only differs from the above for MSVC 2015+. */
+#if !defined (_STLP_NATIVE_COMPILER_C_HEADER)
+# define _STLP_NATIVE_COMPILER_C_HEADER(header)  _STLP_NATIVE_C_HEADER(header)
+#endif
+
 /* For some compilers, C-library headers like <cstdio> are located in separate directory */
 #if !defined (_STLP_NATIVE_CPP_C_HEADER)
 # if !defined (_STLP_NATIVE_CPP_C_INCLUDE_PATH)

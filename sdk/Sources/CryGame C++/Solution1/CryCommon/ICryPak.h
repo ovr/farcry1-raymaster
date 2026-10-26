@@ -20,6 +20,10 @@
 #ifdef LINUX
 	#include <winbase.h>
 	#include <stdint.h>
+#else
+	// Declares _finddata_t, which the CRT may #define to the explicitly sized variant
+	// (e.g. _finddata32_t with _USE_32BIT_TIME_T); FindFirst/FindNext must see that macro.
+	#include <io.h>
 #endif
 
 ////////////////////////////////////////////////////////////////////////////

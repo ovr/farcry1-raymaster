@@ -24,7 +24,7 @@
 # endif
 
 #ifdef __Lynx__
-#  include _STLP_NATIVE_C_HEADER(stdarg.h)
+#  include _STLP_NATIVE_COMPILER_C_HEADER(stdarg.h)
 #endif
 
 # if defined (_STLP_USE_NEW_C_HEADERS)
@@ -42,7 +42,9 @@
 #  define stderr	(&_STLP_VENDOR_CSTD::__files[2])
 # endif
 
-#  if defined (_STLP_MSVC) || defined (__ICL)
+// FC-SDK CMake port: the Universal CRT (MSVC 2015+) has a conforming vsnprintf, and a namespace
+// alias such as _STLP_VENDOR_CSTD can no longer be reopened.
+#  if (defined (_STLP_MSVC) || defined (__ICL)) && !(defined (_MSC_VER) && (_MSC_VER >= 1900))
 namespace _STLP_VENDOR_CSTD {
 inline
 int vsnprintf(char *s1, size_t n, const char *s2, va_list v)
@@ -94,7 +96,10 @@ using _STLP_VENDOR_CSTD::fwrite;
  using _STLP_VENDOR_CSTD::putchar;
 #   endif
 
+// FC-SDK CMake port: gets() was removed from the Universal CRT.
+#  if !(defined (_MSC_VER) && (_MSC_VER >= 1900))
 using _STLP_VENDOR_CSTD::gets;
+#  endif
 using _STLP_VENDOR_CSTD::perror;
 using _STLP_VENDOR_CSTD::printf;
 using _STLP_VENDOR_CSTD::puts;

@@ -17,6 +17,7 @@
 #define _STL_UTILS_HEADER_
 
 #include <algorithm>
+#include <functional>
 
 //////////////////////////////////////////////////////////////////////
 // searches the given entry in the map by key, and if there is none, returns the default value

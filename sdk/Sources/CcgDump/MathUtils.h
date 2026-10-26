@@ -16,7 +16,8 @@
 #define _CRY_ANIMATION_MATH_UTILS_HDR_
 
 #include "IBindable.h"
-#include "Cry_Intersection.h"
+// Cry_Intersection.h is not part of the SDK; only AddToBounds() from Cry_Geo.h is needed.
+#include "Cry_Geo.h"
 
 // aligned on 16-byte boundary vector
 class Vec3dA16

@@ -20,6 +20,7 @@
 #include "ChunkFileReader.h"
 #include "CgfUtils.h"
 #include "StringUtils.h"
+#include "Cry_Geo.h"
 
 // OPTIONS
 // dumps animation keys as they are in the file (in the controller chunks)
