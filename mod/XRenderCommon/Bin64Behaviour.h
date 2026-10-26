@@ -93,6 +93,12 @@ static const int nHeapAlignment = 4;
 //   one entry per material (-1: no template override); pMaterial is the instance's material or
 //   NULL. Render makes no IRenderer calls: its render elements go straight to the renderer's own
 //   lists.
+//   Vegetation instances also get m_fBending (0 to 1.4 in Training) and one call per frame of
+//   CCObject::AddWaves (the first virtual function of CCObject), after which m_NumWFX and m_NumWFY
+//   hold the indices of two new waves (1/2, 3/4, ... from the start of every frame). The argument
+//   is not two SWaveForm2 pointers: it points to a block on the engine's stack that starts with the
+//   object's address, an int 1, a float that differs per instance and later 5.0. What the waves are
+//   made from is still open; the bending can be driven from m_fBending alone.
 //
 //   In EF_EndEf3D the renderer calls CheckUpdate(nVertexFormat, nFlags, false) on every leaf buffer
 //   it draws, with the vertex format the shader needs (P3F_N_TEX2F) and VSM_TANGENTS (0x2) in

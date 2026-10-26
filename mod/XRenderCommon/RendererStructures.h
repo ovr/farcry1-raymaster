@@ -98,6 +98,18 @@ namespace RendererStructures
 //   - EF_EndEf3D: m_VPMatrixId, m_InvMatrixId, m_VPMatrixFrame (matrices the renderer derives
 //     from the object; the IDs are 0xFFFF before).
 //   - MakeSprite: m_Counter, m_AmbColor, m_fHeatFactor.
+//   CCObject has a vtable (AddWaves, SetShaderFloat, RemovePermanent; the SDK declares no virtual
+//   destructor). The engine calls AddWaves once per vegetation instance and frame;
+//   afterwards m_NumWFX and m_NumWFY (unions with m_nLod and m_nTemplId) hold two new indices into
+//   the renderer's table of waves (CCObject::m_Waves, a static member only the renderer can see),
+//   counted from 1 every frame (1/2, 3/4, ...). The argument is not two SWaveForm2 pointers as
+//   declared (see Bin64Behaviour.h, "Static objects"). RemovePermanent is called on permanent
+//   objects (EF_GetObject(false, n)).
+//   Shader inputs taken from the object (SDK "Shaders Specification"): ObjColor m_Color, ObjVal
+//   m_TempVars, Bending m_fBending (a union with m_pLightImage), ObjWaveX/ObjWaveY the waves
+//   m_NumWFX/m_NumWFY, ObjRefrFactor m_fRefract, BumpAmount m_fBump. In Training only the
+//   vegetation sets them: m_fBending between 0 and 1.4 and the wave indices; m_TempVars, m_fRefract
+//   and m_fBump stay 0.
 
 // CRendElement and the CRE* classes
 //   Created by EF_CreateRE (seen: Sky, Dummy, 2DQuad, ScreenProcess, OcclusionQuery, ShadowMapGen,
@@ -135,6 +147,8 @@ namespace RendererStructures
 //   - SRenderShaderResources: Release, its only virtual function.
 //   - CRendElement: Release (of the CREOcLeaf of the leaf buffer materials).
 //   - CREScreenProcess: mfSetParameter, mfGetParameter (see "Screen effects" below).
+//   - CCObject: AddWaves, RemovePermanent (see CCObject above); SetShaderFloat is not called.
+//   CMatInfo's virtual functions are inline in IShader.h, so every module has its own copy.
 //   All other virtual functions of these classes (mfPrepare, mfDraw, mfPreDraw, mfCheckUpdate,
 //   mfGetMatInfo, mfReset, ...) were only called by the renderer itself, from inside EF_EndEf3D.
 //   A renderer still has to fill every slot in the SDK order.
