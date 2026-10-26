@@ -9,6 +9,7 @@
 #include "RenderTrace.h"
 #include "FieldWatch.h"
 #include "VCallHooks.h"
+#include <LMCompStructures.h>
 #include <map>
 #include <string>
 
@@ -158,6 +159,29 @@ void Trace_Write(const char *szFormat, ...)
 }
 
 //////////////////////////////////////////////////////////////////////////
+//! Whether every call of the method is written out (XRENDERTRACED_TRACE_METHODS, names as in the
+//! log separated by ',', e.g. "DownLoadToVideoMemory,CLeafBuffer::CreateBufferFromSource").
+static bool IsAlwaysTraced(const char *szDisplay)
+{
+  static char s_szMethods[1024];
+  static bool s_bRead = false;
+  if (!s_bRead)
+  {
+    s_bRead = true;
+    DWORD nLen = GetEnvironmentVariableA("XRENDERTRACED_TRACE_METHODS", s_szMethods + 1, sizeof(s_szMethods) - 2);
+    if (!nLen || nLen >= sizeof(s_szMethods) - 2)
+      nLen = 0;
+    // ",Name1,Name2," so that a name is found as ",Name,".
+    s_szMethods[0] = ',';
+    s_szMethods[nLen + 1] = ',';
+    s_szMethods[nLen + 2] = 0;
+  }
+  char szKey[80];
+  _snprintf(szKey, sizeof(szKey) - 1, ",%s,", szDisplay);
+  szKey[sizeof(szKey) - 1] = 0;
+  return strstr(s_szMethods, szKey) != NULL;
+}
+
 STraceSite::STraceSite(const char *szName, const char *szSignature)
 {
   m_szName = szName;
@@ -201,6 +225,7 @@ STraceSite::STraceSite(const char *szName, const char *szSignature)
   m_nCalls = 0;
   m_nFrameCalls = 0;
   m_nOtherThreadCalls = 0;
+  m_bAlways = IsAlwaysTraced(m_szDisplay);
   m_pNext = s_pSites;
   s_pSites = this;
 }
@@ -209,7 +234,7 @@ bool STraceSite::Hit()
 {
   m_nCalls++;
   m_nFrameCalls++;
-  return CV_xrt_Trace > 0 && s_pTraceFile && (m_nCalls <= CV_xrt_TraceCalls || s_bCapture);
+  return CV_xrt_Trace > 0 && s_pTraceFile && (m_nCalls <= CV_xrt_TraceCalls || s_bCapture || m_bAlways);
 }
 
 STraceScope::STraceScope(STraceSite &Site) : m_Site(Site)
@@ -891,6 +916,16 @@ void Dump_RendParams(const SRendParams &rp)
     rp.pShaderParams, rp.pCCObjCustomData);
   if (rp.pMatrix)
     Dump_Matrix("matrix", (const float *)rp.pMatrix);
+  if (rp.pLightMapInfo)
+    Trace_Write("      RenderLMData @%p: refs %d colorLerp %d hdrColorLerp %d domDirection %d occl %d", rp.pLightMapInfo,
+      rp.pLightMapInfo->NumRefs(), rp.pLightMapInfo->GetColorLerpTex(), rp.pLightMapInfo->GetHDRColorLerpTex(),
+      rp.pLightMapInfo->GetDomDirectionTex(), rp.pLightMapInfo->GetOcclTex());
+  if (rp.pLMTCBuffer)
+  {
+    Dump_LeafBuffer(rp.pLMTCBuffer);
+    Dump_VertexBuffer("LMTC sysBuf", rp.pLMTCBuffer->m_pSecVertBuffer);
+    Dump_VertexBuffer("LMTC vidBuf", rp.pLMTCBuffer->m_pVertexBuffer);
+  }
   Dump_OpaqueList("SRendParams::pShadowMapCasters", rp.pShadowMapCasters);
 }
 

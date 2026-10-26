@@ -46,6 +46,8 @@ struct STraceSite
   int m_nFrameCalls;
   //! Calls from other threads than the one that loaded the renderer (logged once per method).
   int m_nOtherThreadCalls;
+  //! Every call is written out (XRENDERTRACED_TRACE_METHODS).
+  bool m_bAlways;
   STraceSite *m_pNext;
 };
 
