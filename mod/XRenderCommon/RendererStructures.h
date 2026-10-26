@@ -167,10 +167,27 @@ static const int nBin64ScreenParam_FlashBangCurrent = 24;       // written by th
 static const int nBin64ScreenParam_FlashBangForce = 25;
 //   The engine reads NightVision's Active every frame. While FlashBang is active it reads its
 //   parameters back, among them 24, which only the renderer writes (a float; 0.99 shortly after
-//   the flash started).
+//   the flash started). FlashBang switches itself off: once the flash is over, its Active reads
+//   false without the engine having set it.
 //   At the start of a level the engine sets ScreenFade Active 1, ScreenFadeTime -2.5 and
 //   ScreenPreFadeTime 5 (CryGame's XClient.cpp; a negative time fades in), then ScreenBlur Active 0
 //   and ScreenBlurAmount 0.
+
+// Lightmaps (Training: the static objects of the level with baked lighting)
+//   The 3D engine loads the lightmap textures itself during the level load, with
+//   EF_LoadTexture("Levels/<level>\xN.dds", FT_LM, FT2_NOANISO) (N from 0; 512x512 on Training),
+//   and keeps their IDs in one RenderLMData per lightmap (LMCompStructures.h; created, owned and
+//   reference counted by the engine). Only m_iColorLerpTex was set; the HDR, dominant direction
+//   and occlusion IDs were 0.
+//   For every lightmapped object instance the engine creates a buffer of lightmap texture
+//   coordinates: CreateLeafBufferInitialized(pUVs, n, VERTEX_FORMAT_TEX2F, NULL, 0,
+//   R_PRIMV_TRIANGLES, "LMapTexCoords", eBT_Static, 1) and SetChunk("default" shader, vertices and
+//   indices 0..n, material 0). n is the vertex count of the object's leaf buffer (always
+//   VERTEX_FORMAT_P3F_N_TEX2F here): one UV per vertex, in the order of the object's vertices.
+//   When it draws the object, CLeafBuffer::Render gets SRendParams::pLightMapInfo (the
+//   RenderLMData) and pLMTCBuffer (the "LMapTexCoords" buffer), and the engine has set
+//   CCObject::m_nLMId (the colour texture's ID) and m_pLMTCBufferO (the same buffer);
+//   m_nLMDirId and m_nOcclId stay 0. No object flag marks a lightmapped object.
 
 // SShaderItem, SRenderShaderResources
 //   From EF_LoadShaderItem; the shader resources are reference counted (m_nRefCounter).
