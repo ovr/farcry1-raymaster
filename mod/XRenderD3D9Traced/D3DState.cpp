@@ -126,6 +126,12 @@ void D3DState_WriteDevice(IDirect3DDevice9 *pDev)
     pDev->GetSamplerState(nStage, D3DSAMP_ADDRESSU, &nU);
     pDev->GetSamplerState(nStage, D3DSAMP_ADDRESSV, &nV);
     Append(szLine, sizeof(szLine), " filter %u/%u/%u address %u/%u", nMin, nMag, nMip, nU, nV);
+    DWORD nTexTransform = 0;
+    pDev->GetTextureStageState(nStage, D3DTSS_TEXTURETRANSFORMFLAGS, &nTexTransform);
+    D3DMATRIX T;
+    if (nTexTransform && SUCCEEDED(pDev->GetTransform((D3DTRANSFORMSTATETYPE)(D3DTS_TEXTURE0 + nStage), &T)))
+      Append(szLine, sizeof(szLine), " texture transform %u [%g %g %g %g] [%g %g %g %g] [%g %g %g %g] [%g %g %g %g]", nTexTransform,
+        T._11, T._12, T._13, T._14, T._21, T._22, T._23, T._24, T._31, T._32, T._33, T._34, T._41, T._42, T._43, T._44);
     Trace_Write("    d3d ts%u: %s", nStage, szLine);
     if (nColorOp == D3DTOP_DISABLE)
       break;
