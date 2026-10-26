@@ -126,7 +126,8 @@ namespace RendererStructures
 //   renderer gives it (slots in VTables.inl; Bin64, Training: level load and 160 frames):
 //   - IShader: AddRef, Release, GetName, GetSort, GetFlags, GetFlags2, GetLFlags, GetREs,
 //     GetTemplate, GetPublicParams. GetTemplate and GetFlags2 are hot (about 180000 calls each
-//     in that run, from Cry3DEngine and CryAnimation).
+//     in that run, from Cry3DEngine and CryAnimation). With particles on screen also GetID (for
+//     the shader ID EF_AddSpriteToScene takes).
 //   - ITexPic: AddRef, Release, GetWidth, GetHeight, GetOriginalWidth, GetOriginalHeight,
 //     GetTextureID, GetFlags, IsTextureLoaded (from Cry3DEngine, CrySystem, CryGame and
 //     CryEntitySystem).
@@ -213,6 +214,7 @@ static const int nBin64ScreenParam_FlashBangForce = 25;
 // Owned by the renderer; the engine only holds pointers, so a renderer may define them freely:
 //   CScreenVars (CREScreenProcess::m_pVars), STexPic (behind ITexPic), CVProgram
 //   (CRendElement::m_LastVP), CPShader, SParamComp, SCGBind, SVrect.
+// Never passed: CFBitmap (the CFBitmap overloads of the Font* functions are not called).
 //
 // Owned by the 3D engine and read by the renderer: the far vegetation sprites and the shadow maps.
 // What is known of them is runtime behaviour of the 64-bit engine (Bin64); the offsets are those

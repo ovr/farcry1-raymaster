@@ -126,6 +126,61 @@ static const int nHeapAlignment = 4;
 //   camera, "OutdoorWaterCircle" (P3F_COL4UB strips, new vertices every frame with
 //   UpdateSysVertices) and "OceanBottomCircle" (P3F strips, scaled by the CCObject matrix), are
 //   drawn with AddRenderElements; the water surface uses sort group 14.
+//
+// Low detail terrain ("LowResTerrain")
+//   CreateLeafBufferInitialized(pVerts, 16641, VERTEX_FORMAT_P3F, NULL, 0, R_PRIMV_TRIANGLES,
+//   "LowResTerrain", eBT_Dynamic, 1, nTexId, NULL, NULL, false, true): a 129 x 129 grid with 16 m
+//   spacing, then one chunk over all vertices with the shader "terrainlowlod" and no indices
+//   (UpdateSysIndices(NULL, 0)); how the grid is triangulated is not known yet. Every frame:
+//   SetRECustomData(pData, 1, 1) and AddRenderElements(pObj, 0, -1, 0, 0, NULL).
+//
+// Fog volume caps ("VolFogTopCircle", Carrier)
+//   Like the water rings: P3F, R_PRIMV_MULTI_STRIPS, eBT_Dynamic, 16 chunks of 26 vertices (one
+//   strip each) with the shader "foglayer", drawn with AddRenderElements and the fog volume's ID.
+//
+// Merged static objects ("MergedLB", Carrier)
+//   The engine merges static objects into buffers in world space:
+//   CreateLeafBufferInitialized(pVerts, n, VERTEX_FORMAT_P3F_N_COL4UB_TEX2F, pInds, n,
+//   R_PRIMV_TRIANGLES, "MergedLB", eBT_Static, nMats, 0, NULL, NULL, false, true) with as many
+//   indices as vertices, then UpdateTangBuffer, SetChunk(pShader, 0, n, nFirstIndex, nIndices, i,
+//   true) for every material (the shaders of the objects' materials), and an "LMapTexCoords"
+//   buffer with one lightmap UV per vertex. None of them was drawn from the start position.
+
+//////////////////////////////////////////////////////////////////////////
+// Particles
+//
+// Particles (I3DEngine::SpawnParticles with the default texture, and a light effect on Carrier)
+// are added one by one every frame with EF_AddSpriteToScene(nShaderID, 4, pVerts, pObj, NULL, 0, 0):
+// a quad facing the camera in world space, texture coordinates (1,0) (1,1) (0,1) (0,0), the
+// particle's colour in SColorVert::color (bytes R, G, B, A), the ID of the shader
+// ("particlelight_fp"), which the engine gets with IShader::GetID, and an object from EF_GetObject
+// with an identity matrix and m_SortId -1e6 or 1e6 (some with the ambient colour of the place in
+// m_AmbColor). EF_AddSpriteToScene returns pObj.
+
+//////////////////////////////////////////////////////////////////////////
+// 2D and text
+//
+// Draw2dImage takes coordinates of an 800 x 600 virtual screen: the engine clears the screen and
+// draws the loading screen with Draw2dImage(0, 0, 800, 600, ...), also outside Set2DMode.
+// ScaleCoordX(x) = x * width / 800 and ScaleCoordY(y) = y * height / 600 (12 -> 15.36 at
+// 1024 x 768). Set2DMode is called with (true, 1024, 768), (true, 800, 600), (false, 0, 0) and
+// (false, 800, 600).
+//
+// Text (CryFont) uses only the texture ID functions; the CFBitmap overloads are never called.
+//   FontCreateTexture(512, 512, pData, eTF_8888) creates a font texture (4 at start-up) and
+//   FontUpdateTexture(nTexId, 0, 0, 512, 512, pData) uploads the whole bitmap again, with the same
+//   pData, whenever glyphs are added (dozens of times in the first frames). The bitmap has 4 bytes
+//   per pixel, B, G, R, A: 255, 255, 255 inside the glyph cells and the glyph's coverage in A; the
+//   D3D9 renderer keeps only A (a D3DFMT_A8 texture).
+//   Every block of text: FontSetTexture(nTexId, 2), FontSetRenderingState(0, 0),
+//   FontSetBlending(4, 5), GetDynVBPtr(nVerts, nOffs, 0), DrawDynVB(nOffs, 0, nVerts),
+//   FontRestoreRenderingState(). Pool 0 of the dynamic vertex buffer holds P3F_COL4UB_TEX2F
+//   vertices; text is a triangle list, 6 vertices per glyph, positions in pixels of the back buffer
+//   (origin top left, z 1), texture coordinates in the font texture.
+//   The D3D9 renderer draws it with an orthographic projection of the back buffer, no depth test or
+//   depth writes, no culling, the vertex colour, alpha = texture alpha * vertex alpha, alpha test
+//   (alpha > 0), alpha blending (SRCALPHA, INVSRCALPHA) and bilinear filtering without mip maps;
+//   the arguments of FontSetBlending make no difference to it.
 
 //////////////////////////////////////////////////////////////////////////
 // Camera
