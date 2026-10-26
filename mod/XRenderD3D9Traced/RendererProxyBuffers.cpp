@@ -8,6 +8,7 @@
 #include "StdAfx.h"
 #include "RenderTrace.h"
 #include "RendererProxy.h"
+#include "LeafBufferHooks.h"
 
 //////////////////////////////////////////////////////////////////////////
 // Vertex buffers
@@ -133,6 +134,7 @@ CLeafBuffer *CRendererProxy::CreateLeafBuffer(bool bDynamic, const char *szSourc
   TRACE_RESULT("%p (vtbl %s)", pRes, Trace_VTable(pRes));
   if (TRACE_DUMP)
     Dump_LeafBuffer(pRes);
+  LeafBufferHooks_Install(pRes);
   return pRes;
 }
 
@@ -151,6 +153,7 @@ CLeafBuffer *CRendererProxy::CreateLeafBufferInitialized(void *pVertBuffer, int 
   TRACE_RESULT("%p (vtbl %s)", pRes, Trace_VTable(pRes));
   if (TRACE_DUMP)
     Dump_LeafBuffer(pRes);
+  LeafBufferHooks_Install(pRes);
   return pRes;
 }
 

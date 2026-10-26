@@ -41,6 +41,8 @@ set(XRENDERD3D9TRACED_SOURCES
     RendererProxyBuffers.cpp
     RenderTrace.cpp
     RenderTrace.h
+    LeafBufferHooks.cpp
+    LeafBufferHooks.h
 )
 source_group("Source Files" FILES ${XRENDERD3D9TRACED_SOURCES})
 

@@ -86,8 +86,45 @@ enum EVTableOffset
   VT_NumSlots             = 216,
 };
 
-//! CLeafBuffer vtable (32 slots): CreateBuffer(VertexBufferSource*) is slot 7 (+0x1C),
-//! CreateBuffer(CIndexedMesh*, ...) slot 8 (+0x20).
+//! CLeafBuffer virtual functions in vtable order (32 slots, no virtual destructor). The SDK
+//! header produces this order; by the overload rule above, CreateBuffer(VertexBufferSource*)
+//! comes before CreateBuffer(CIndexedMesh*, ...).
+enum ELeafBufferSlot
+{
+  LBS_CalcFaceNormals,
+  LBS_AddRE,
+  LBS_CheckUpdate,
+  LBS_CreateTangBuffer,
+  LBS_ReleaseShaders,
+  LBS_InvalidateVideoBuffer,
+  LBS_CopyTo,
+  LBS_CreateBufferFromSource,     //!< CreateBuffer(VertexBufferSource *)
+  LBS_CreateBufferFromMesh,       //!< CreateBuffer(CIndexedMesh *, bool, bool, bool)
+  LBS_GetAllocatedBytes,
+  LBS_Unload,
+  LBS_UpdateCustomLighting,
+  LBS_AddRenderElements,
+  LBS_GetIndices,
+  LBS_DestroyIndices,
+  LBS_UpdateVidIndices,
+  LBS_UpdateSysIndices,
+  LBS_UpdateSysVertices,
+  LBS_UpdateVidVertices,
+  LBS_CreateSysVertices,
+  LBS_CreateVidVertices,
+  LBS_SetRECustomData,
+  LBS_SetChunk,
+  LBS_SetShader,
+  LBS_GetSecVerticesPtr,
+  LBS_AllocateSystemBuffer,
+  LBS_FreeSystemBuffer,
+  LBS_Serialize,
+  LBS_DrawImmediately,
+  LBS_UpdateTangBuffer,
+  LBS_RenderDebugLightPass,
+  LBS_Render,
+  LBS_NumSlots
+};
 
 //////////////////////////////////////////////////////////////////////////
 // EF_Query

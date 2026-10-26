@@ -29,6 +29,8 @@ void Trace_FrameEnd(int nFrameID);
 //! Starts counting the calls of every method from zero again, so the next xrt_TraceCalls calls of
 //! each are written out, followed by the statistics of xrt_TraceFrames frames (e.g. on level load).
 void Trace_Restart(const char *szReason);
+//! Writes every call of the next frame (up to the next Trace_FrameEnd), regardless of xrt_TraceCalls.
+void Trace_CaptureFrame();
 
 struct STraceSite
 {
@@ -37,6 +39,8 @@ struct STraceSite
   bool Hit();
 
   const char *m_szName;
+  //! Name in the log: "Update" for IRenderer methods, "CLeafBuffer::AddRE" for the hooked classes.
+  char m_szDisplay[64];
   char m_szSignature[192];
   int m_nCalls;
   int m_nFrameCalls;
@@ -65,6 +69,8 @@ void Trace_Call(const STraceSite &Site, const char *szFormat, ...);
 const char *Trace_Addr(const void *pAddr);
 //! "Module+0xRVA" of the vtable of a C++ object (identifies its class in the module).
 const char *Trace_VTable(const void *pObject);
+//! Whether the address is inside executable code of a loaded module.
+bool Trace_IsCode(const void *pAddr);
 
 //////////////////////////////////////////////////////////////////////////
 // Structure dumps (guard them with TRACE_DUMP).
@@ -98,3 +104,4 @@ void Dump_Indices(const char *szName, const ushort *pInds, int nInds, int nMax =
 void Dump_ColorVerts(const SColorVert *pVerts, int nVerts);
 void Dump_ColorVerts2D(const SColorVert2D *pVerts, int nVerts);
 void Dump_MatInfo(const CMatInfo *pMI, int nIndex);
+void Dump_RendParams(const SRendParams &rp);

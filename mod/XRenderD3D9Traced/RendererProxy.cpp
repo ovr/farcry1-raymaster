@@ -9,6 +9,7 @@
 #include "StdAfx.h"
 #include "RenderTrace.h"
 #include "RendererProxy.h"
+#include "LeafBufferHooks.h"
 
 static const void *s_pProxyVTable = NULL;
 
@@ -31,6 +32,15 @@ CRendererProxy::CRendererProxy(IRenderer *pReal, int nRealType)
     m_nExecFrame = atoi(szFrame);
   if (m_szExec[0])
     Trace_Write("Will execute '%s' after frame %d", m_szExec, m_nExecFrame);
+
+  // A complete frame of a level in the log, e.g. XRENDERTRACED_CAPTURE=300.
+  m_nCaptureAfterLoad = 0;
+  m_nCaptureFrame = -1;
+  nLen = GetEnvironmentVariableA("XRENDERTRACED_CAPTURE", szFrame, sizeof(szFrame));
+  if (nLen && nLen < sizeof(szFrame))
+    m_nCaptureAfterLoad = atoi(szFrame);
+  if (m_nCaptureAfterLoad > 0)
+    Trace_Write("Will capture frame %d after each level load", m_nCaptureAfterLoad);
 }
 
 CRendererProxy::~CRendererProxy()
@@ -129,6 +139,7 @@ bool CRendererProxy::ChangeResolution(int nNewWidth, int nNewHeight, int nNewCol
 void CRendererProxy::Release()
 {
   TRACE_CALL("");
+  LeafBufferHooks_Uninstall();
   m_pReal->Release();
   m_pReal = NULL;
   Trace_Write("Renderer released after %d frames", m_nFrames);
@@ -161,6 +172,8 @@ void CRendererProxy::PostLoad()
   m_pReal->PostLoad();
   // The first frames of the level.
   Trace_Restart("PostLoad");
+  if (m_nCaptureAfterLoad > 0)
+    m_nCaptureFrame = m_nFrames + m_nCaptureAfterLoad;
 }
 
 //////////////////////////////////////////////////////////////////////////
@@ -177,6 +190,8 @@ void CRendererProxy::Update()
   TRACE_CALL("frame %d", m_nFrames + 1);
   m_pReal->Update();
   Trace_FrameEnd(++m_nFrames);
+  if (m_nFrames + 1 == m_nCaptureFrame)
+    Trace_CaptureFrame();
   if (m_nFrames == m_nExecFrame && m_szExec[0] && iConsole)
   {
     char *szContext = NULL;

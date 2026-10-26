@@ -11,7 +11,9 @@
 //
 //	Trace: Training level ("map training" at frame 200), r_Driver
 //	"Direct3D8" (the proxy) over farcry1_testing1/Bin64/XRenderD3D9.dll,
-//	1024x768 windowed, log farcry1_testing1/XRenderD3D9Traced.log.
+//	1024x768 windowed, log farcry1_testing1/XRenderD3D9Traced.log, with the
+//	CLeafBuffer methods traced and the 300th frame of the level captured in
+//	full (the player at the start position, inside the tunnel).
 //
 //////////////////////////////////////////////////////////////////////
 
@@ -55,12 +57,75 @@ static const int nHeapAlignment = 4;
 //   2D: Set2DMode, Draw2dImage, DrawDynVB, SetState, ...
 //   Update
 //
-// The scene geometry does not go through IRenderer::EF_AddEf. The 3D engine takes render objects
-// from EF_GetObject and hands them to CLeafBuffer methods, which run inside the renderer DLL and
-// add their render elements internally. A replacement renderer has to implement CLeafBuffer in
-// full, and tracing the geometry needs a hook on the CLeafBuffer vtable.
+// Most of the scene geometry does not go through IRenderer::EF_AddEf. The 3D engine takes render
+// objects from EF_GetObject and hands them to CLeafBuffer methods, which run inside the renderer
+// DLL and add their render elements internally (see Geometry). A replacement renderer has to
+// implement CLeafBuffer in full, and tracing the geometry needs a hook on the CLeafBuffer vtable.
 //
 // GetFrameID starts at 65535 in the first frame and counts up by one per frame.
+
+//////////////////////////////////////////////////////////////////////////
+// Geometry
+//
+// All leaf buffers, including the ones the renderer creates for itself, share one CLeafBuffer
+// vtable, and the CLeafBuffer methods call each other through it (CreateBuffer calls
+// UpdateSysIndices, CheckUpdate calls CreateVidVertices and UpdateVidIndices, ...). CheckUpdate
+// returned false in every traced call. m_sSource tells what a leaf buffer is for.
+//
+// Static objects ("StatObj", the geometry of IStatObj)
+//   Created with CreateLeafBuffer(false, "StatObj", NULL) followed by
+//   CLeafBuffer::CreateBuffer(pMesh, true, true, false). The result is an R_PRIMV_MULTI_GROUPS
+//   buffer with a system copy of the vertices (m_pSecVertBuffer, m_SecVertCount) and of the
+//   indices (m_SecIndices, 3 per face), and one m_pMats entry per mesh material with its vertex and
+//   index range and its own render element (pRE); materials without faces get empty ranges and no
+//   render element. Vertices are split by texture coordinates (a mesh with 495 positions and 540
+//   texture coordinates gives 521 vertices). The vertex format depends on the object:
+//   P3F_COL4UB_TEX2F (vegetation, colours lit by UpdateCustomLighting) or P3F_N_TEX2F.
+//   There is no video buffer until the first CheckUpdate.
+//
+//   Drawn once per visible instance and frame:
+//     CCObject *pObj = EF_GetObject(true, -1);   // filled by the 3D engine before the call below
+//     pLB->Render(rParams, pObj, ShaderTemplates, 0, false, pMaterial, false);
+//   When Render is called, the object already holds the instance matrix (= *rParams.pMatrix),
+//   m_ObjFlags (= rParams.dwFObjFlags, 0x70000800), m_SortId (= rParams.fCustomSortOffset, -1e6),
+//   the ambient colour, m_DynLMMask (= rParams.nDLightMask) and, for lightmapped objects, the
+//   lightmap texture ID in m_nLMId and m_pLMTCBufferO (= rParams.pLMTCBuffer). ShaderTemplates has
+//   one entry per material (-1: no template override); pMaterial is the instance's material or
+//   NULL. Render makes no IRenderer calls: its render elements go straight to the renderer's own
+//   lists.
+//
+//   In EF_EndEf3D the renderer calls CheckUpdate(nVertexFormat, nFlags, false) on every leaf buffer
+//   it draws, with the vertex format the shader needs (P3F_N_TEX2F) and VSM_TANGENTS (0x2) in
+//   nFlags when the shader also needs the tangent stream. The first call creates the video buffer
+//   (CreateVidVertices, UpdateVidIndices).
+//
+// Characters (CryAnimation)
+//   The model goes into CreateLeafBuffer(true, "ModelState", NULL) with
+//   CreateBuffer(VertexBufferSource *); that buffer keeps no system vertex buffer (m_pSecVertBuffer
+//   NULL, m_SecVertCount set). Instances get copies ("CryModelArray": CopyTo, CreateTangBuffer).
+//   Every frame the character's per-material CREOcLeaf render elements are submitted with
+//   IRenderer::EF_AddEf, all with one CCObject (m_pCharInstance set); in the tunnel they are
+//   submitted a second time with a fog volume ID and sort group 27. These render elements point to
+//   a leaf buffer with the source name "Unknown"; during EF_EndEf3D the renderer calls CheckUpdate
+//   on it with nFlags 0x10, after which the engine uploads the skinned vertices (P3F_N_TEX2F) with
+//   IRenderer::UpdateBuffer.
+//
+// Terrain ("TerrainSector")
+//   One leaf buffer per 64 m x 64 m sector, created with
+//   CreateLeafBufferInitialized(pVerts, 1089, VERTEX_FORMAT_P3F_N_COL4UB_COL4UB, pInds, nInds,
+//   R_PRIMV_MULTI_STRIPS, "TerrainSector", eBT_Static, 80, nTexId, NULL, NULL, false, false):
+//   a 33 x 33 vertex grid with 2 m spacing, one triangle strip per row. SetChunk is called once per
+//   strip (all vertices, the strip's index range, the same shader); only m_pMats[0] gets the shader
+//   and a render element, the other entries only describe strips. SetShader(pShader, nTexId) sets
+//   the sector texture (128x128 eTF_DXT1, created with DownLoadToVideoMemory just before). The
+//   sector is drawn with AddRenderElements(pObj, 0, -1, nFogID, 0x30000000, NULL), pObj with an
+//   identity matrix.
+//
+// Water
+//   "WaterVolume" (P3F_N_COL4UB_TEX2F triangles, shader "terrainlake") and the rings around the
+//   camera, "OutdoorWaterCircle" (P3F_COL4UB strips, new vertices every frame with
+//   UpdateSysVertices) and "OceanBottomCircle" (P3F strips, scaled by the CCObject matrix), are
+//   drawn with AddRenderElements; the water surface uses sort group 14.
 
 //////////////////////////////////////////////////////////////////////////
 // Camera

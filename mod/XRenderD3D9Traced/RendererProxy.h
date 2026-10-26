@@ -255,6 +255,10 @@ private:
   //! Console commands executed once after frame m_nExecFrame (XRENDERTRACED_EXEC, separated by ';').
   char m_szExec[512];
   int m_nExecFrame;
+  //! Every call of the m_nCaptureAfterLoad-th frame after a level load is written out
+  //! (XRENDERTRACED_CAPTURE, 0 - off); m_nCaptureFrame is that frame of the current level.
+  int m_nCaptureAfterLoad;
+  int m_nCaptureFrame;
   //! Frames finished by Update (the engine's frame ID also counts recursive scene renders).
   int m_nFrames;
 };

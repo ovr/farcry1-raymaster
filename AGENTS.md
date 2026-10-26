@@ -33,6 +33,6 @@ it as well: it holds local, machine-specific instructions and is not committed (
   (`r_Fullscreen = "0"`); the original is `farcry1_testing1/system.cfg.xrt-backup`.
 - Run `farcry1_testing1/Bin64/FarCry.exe` with `farcry1_testing1` as the working directory.
   `XRENDERTRACED_EXEC="map training"` (and `XRENDERTRACED_EXEC_FRAME`) loads a level without
-  input.
+  input; `XRENDERTRACED_CAPTURE=300` writes every call of the 300th frame after the level load.
 - The log is `farcry1_testing1/XRenderD3D9Traced.log`; the engine log is
   `farcry1_testing1/log.txt`.

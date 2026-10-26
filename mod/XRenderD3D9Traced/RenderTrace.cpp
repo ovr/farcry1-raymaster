@@ -18,6 +18,7 @@ static PVOID s_pExceptionHandler = NULL;
 static int s_nExceptionsLogged = 0;
 static int s_nLastFrame = 0;
 static int s_nRestartFrame = 0;
+static bool s_bCapture = false;
 
 //////////////////////////////////////////////////////////////////////////
 static void Trace_ModuleAddress(const void *pAddr, char *szOut, size_t nOut)
@@ -153,6 +154,23 @@ void Trace_Write(const char *szFormat, ...)
 STraceSite::STraceSite(const char *szName, const char *szSignature)
 {
   m_szName = szName;
+  // The hook classes stand for the classes of the original renderer they hook.
+  static const char *s_Classes[][2] =
+  {
+    { "CRendererProxy::", "" },
+    { "CLeafBufferHooks::", "CLeafBuffer::" },
+  };
+  _snprintf(m_szDisplay, sizeof(m_szDisplay), "%s", szName);
+  for (int i = 0; i < (int)(sizeof(s_Classes) / sizeof(s_Classes[0])); i++)
+  {
+    size_t nLen = strlen(s_Classes[i][0]);
+    if (!strncmp(szName, s_Classes[i][0], nLen))
+    {
+      _snprintf(m_szDisplay, sizeof(m_szDisplay), "%s%s", s_Classes[i][1], szName + nLen);
+      break;
+    }
+  }
+  m_szDisplay[sizeof(m_szDisplay) - 1] = 0;
   // __FUNCSIG__ without the noise: "void CRendererProxy::SetCamera(const CCamera &)".
   static const char *s_Noise[] = { "__thiscall ", "__cdecl ", "__stdcall ", "class ", "struct ", "enum " };
   size_t n = 0;
@@ -183,7 +201,7 @@ bool STraceSite::Hit()
 {
   m_nCalls++;
   m_nFrameCalls++;
-  return CV_xrt_Trace > 0 && s_pTraceFile && m_nCalls <= CV_xrt_TraceCalls;
+  return CV_xrt_Trace > 0 && s_pTraceFile && (m_nCalls <= CV_xrt_TraceCalls || s_bCapture);
 }
 
 void Trace_Call(const STraceSite &Site, const char *szFormat, ...)
@@ -194,30 +212,34 @@ void Trace_Call(const STraceSite &Site, const char *szFormat, ...)
   _vsnprintf(szArgs, sizeof(szArgs) - 1, szFormat, args);
   va_end(args);
   szArgs[sizeof(szArgs) - 1] = 0;
-  const char *szName = strstr(Site.m_szName, "::");
-  szName = szName ? szName + 2 : Site.m_szName;
+  const char *szName = Site.m_szDisplay;
   // The first call also writes the full signature, so the log documents the argument types.
   if (Site.m_nCalls == 1)
     Trace_Write("[%d] %s(%s)    // %s", Site.m_nCalls, szName, szArgs, Site.m_szSignature);
   else
-    Trace_Write("[%d] %s(%s)%s", Site.m_nCalls, szName, szArgs, Site.m_nCalls == CV_xrt_TraceCalls ? "  -- further calls are only counted" : "");
+    Trace_Write("[%d] %s(%s)%s", Site.m_nCalls, szName, szArgs, Site.m_nCalls == CV_xrt_TraceCalls && !s_bCapture ? "  -- further calls are only counted" : "");
 }
 
 void Trace_FrameEnd(int nFrameID)
 {
   s_nLastFrame = nFrameID;
-  bool bWrite = CV_xrt_Trace > 0 && (nFrameID - s_nRestartFrame <= CV_xrt_TraceFrames || (nFrameID % 500) == 0);
+  bool bWrite = CV_xrt_Trace > 0 && (nFrameID - s_nRestartFrame <= CV_xrt_TraceFrames || (nFrameID % 500) == 0 || s_bCapture);
   if (bWrite)
   {
     Trace_Write("==== frame %d: calls ====", nFrameID);
     for (STraceSite *pSite = s_pSites; pSite; pSite = pSite->m_pNext)
     {
       if (pSite->m_nFrameCalls)
-        Trace_Write("  %6d  %s", pSite->m_nFrameCalls, pSite->m_szName);
+        Trace_Write("  %6d  %s", pSite->m_nFrameCalls, pSite->m_szDisplay);
     }
   }
   for (STraceSite *pSite = s_pSites; pSite; pSite = pSite->m_pNext)
     pSite->m_nFrameCalls = 0;
+  if (s_bCapture)
+  {
+    Trace_Write("==== end of captured frame %d ====", nFrameID);
+    s_bCapture = false;
+  }
 }
 
 const char *Trace_Addr(const void *pAddr)
@@ -229,6 +251,11 @@ const char *Trace_Addr(const void *pAddr)
     return "(null)";
   Trace_ModuleAddress(pAddr, szOut, sizeof(s_szBuf[0]));
   return szOut;
+}
+
+bool Trace_IsCode(const void *pAddr)
+{
+  return Trace_IsCodeAddress((UINT_PTR)pAddr);
 }
 
 static bool Trace_IsReadable(const void *p, size_t nSize)
@@ -254,6 +281,12 @@ void Trace_Restart(const char *szReason)
   s_nRestartFrame = s_nLastFrame;
   for (STraceSite *pSite = s_pSites; pSite; pSite = pSite->m_pNext)
     pSite->m_nCalls = 0;
+}
+
+void Trace_CaptureFrame()
+{
+  Trace_Restart("capture of the next frame");
+  s_bCapture = true;
 }
 
 //////////////////////////////////////////////////////////////////////////
@@ -666,6 +699,22 @@ void Dump_VertexBuffer(const char *szName, const CVertexBuffer *pVB, int nMax)
   // Only system memory copies can be read; a locked D3D buffer pointer is valid until unlock.
   if (pVB->m_VS[VSF_GENERAL].m_VData && Trace_IsReadable(pVB->m_VS[VSF_GENERAL].m_VData, 1))
     Dump_Vertices("verts", pVB->m_VS[VSF_GENERAL].m_VData, pVB->m_vertexformat, pVB->m_NumVerts, nMax);
+}
+
+void Dump_RendParams(const SRendParams &rp)
+{
+  Trace_Write("    SRendParams: pos " TRACE_V3 " scale %g angles " TRACE_V3 " matrix %p sortOffset %g templ %d lights 0x%x strongest 0x%x fog %d bending %g",
+    TRACE_V3_ARGS(rp.vPos), rp.fScale, TRACE_V3_ARGS(rp.vAngles), rp.pMatrix, rp.fCustomSortOffset, rp.nShaderTemplate, rp.nDLightMask,
+    rp.nStrongestDLightMask, rp.nFogVolumeID, rp.fBending);
+  Trace_Write("      state %p shadowCasters %p color " TRACE_V3 " alpha %g sort %d ambient " TRACE_V3 " dist %g objFlags 0x%x sqDist %g",
+    rp.pStateShader, rp.pShadowMapCasters, TRACE_V3_ARGS(rp.vColor), rp.fAlpha, rp.nSortValue, TRACE_V3_ARGS(rp.vAmbientColor),
+    rp.fDistance, rp.dwFObjFlags, rp.fSQDistance);
+  Trace_Write("      shadowVolumeLight %p caller %p heat %g shadowExtent %g LM %p LMTC %p occlLights %d %d %d %d material %p params %p custom %p",
+    rp.pShadowVolumeLightSource, rp.pCaller, rp.fHeatAmount, rp.fShadowVolumeExtent, rp.pLightMapInfo, rp.pLMTCBuffer,
+    rp.arrOcclusionLightIds[0], rp.arrOcclusionLightIds[1], rp.arrOcclusionLightIds[2], rp.arrOcclusionLightIds[3], rp.pMaterial,
+    rp.pShaderParams, rp.pCCObjCustomData);
+  if (rp.pMatrix)
+    Dump_Matrix("matrix", (const float *)rp.pMatrix);
 }
 
 void Dump_VertexBufferSource(const VertexBufferSource *p)
