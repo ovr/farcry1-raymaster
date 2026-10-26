@@ -50,7 +50,7 @@ void D3DState_Write(IRenderer *pRenderer)
     D3DState_WriteDevice(pDev);
 }
 
-void D3DState_WriteDevice(IDirect3DDevice9 *pDev)
+void D3DState_WriteDevice(IDirect3DDevice9 *pDev, bool bShaderConstants)
 {
   static const struct { D3DRENDERSTATETYPE m_eState; const char *m_szName; } s_States[] =
   {
@@ -186,6 +186,28 @@ void D3DState_WriteDevice(IDirect3DDevice9 *pDev)
         " range %g att (%g %g %g)", nLight, L.Type, L.Diffuse.r, L.Diffuse.g, L.Diffuse.b, L.Specular.r, L.Specular.g, L.Specular.b,
         L.Ambient.r, L.Ambient.g, L.Ambient.b, L.Position.x, L.Position.y, L.Position.z, L.Direction.x, L.Direction.y, L.Direction.z,
         L.Range, L.Attenuation0, L.Attenuation1, L.Attenuation2);
+    }
+  }
+
+  // The constants of the bound shaders (vs_1_1 has 96 registers, ps_2_0 32); registers that are
+  // all zero are left out.
+  if (bShaderConstants && (pVS || pPS))
+  {
+    for (int nKind = 0; nKind < 2; nKind++)
+    {
+      if (!(nKind ? (void *)pPS : (void *)pVS))
+        continue;
+      const UINT nCount = nKind ? 32 : 96;
+      float fConsts[96 * 4] = {};
+      HRESULT hr = nKind ? pDev->GetPixelShaderConstantF(0, fConsts, nCount) : pDev->GetVertexShaderConstantF(0, fConsts, nCount);
+      if (FAILED(hr))
+        continue;
+      for (UINT i = 0; i < nCount; i++)
+      {
+        const float *c = &fConsts[i * 4];
+        if (c[0] || c[1] || c[2] || c[3])
+          Trace_Write("    d3d %s c%u (%g %g %g %g)", nKind ? "ps" : "vs", i, c[0], c[1], c[2], c[3]);
+      }
     }
   }
   if (pVS)

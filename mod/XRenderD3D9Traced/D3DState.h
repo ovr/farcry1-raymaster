@@ -23,7 +23,8 @@ struct IDirect3DDevice9;
 IDirect3DDevice9 *D3DState_GetDevice(IRenderer *pRenderer);
 //! Writes the device state after the traced call (lines starting with "    d3d").
 void D3DState_Write(IRenderer *pRenderer);
-void D3DState_WriteDevice(IDirect3DDevice9 *pDev);
+//! bShaderConstants: also the constants of the bound vertex and pixel shaders.
+void D3DState_WriteDevice(IDirect3DDevice9 *pDev, bool bShaderConstants = false);
 
 //! After the call of the original renderer, in a method that started with TRACE_CALL.
 #define TRACE_D3D_STATE(pRenderer) \

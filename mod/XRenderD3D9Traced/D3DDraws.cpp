@@ -450,7 +450,7 @@ static void WriteDraw(IDirect3DDevice9 *pDev, const char *szCall, bool bStreams,
     pIB->Release();
   }
   if (s_nLevel >= 2)
-    D3DState_WriteDevice(pDev);
+    D3DState_WriteDevice(pDev, s_nLevel >= 3);
 }
 
 static HRESULT STDMETHODCALLTYPE Hook_DrawPrimitive(IDirect3DDevice9 *pDev, D3DPRIMITIVETYPE eType, UINT nStartVertex, UINT nPrims)

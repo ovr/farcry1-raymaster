@@ -56,6 +56,7 @@ it as well: it holds local, machine-specific instructions and is not committed (
   13 calls of `FontSetBlending` instead of the engine's arguments.
 - `XRENDERTRACED_D3D_DRAWS=1` writes the Direct3D 9 draw calls of the original renderer in the
   captured frame (`D3DDraws.h`): buffers, vertex declaration, shaders, textures and the render
-  element being drawn (x64); `2` adds the device state after each.
+  element being drawn (x64), the first vertices of the non-indexed draws; `2` adds the device
+  state after each, `3` also the shader constants.
 - The log is `farcry1_testing1/XRenderD3D9Traced.log`; the engine log is
   `farcry1_testing1/log.txt`.
