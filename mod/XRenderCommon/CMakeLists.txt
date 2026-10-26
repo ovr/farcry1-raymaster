@@ -6,7 +6,10 @@ add_library(XRenderCommon INTERFACE
     XRenderCommon.h
     RetailRenderer.h
     Bin64Behaviour.h
+    RendererStructures.h
     RendererAbiChecks.h
+    StructFields.inl
+    StructLayouts.txt
 )
 set_target_properties(XRenderCommon PROPERTIES FOLDER "Renderer")
 target_include_directories(XRenderCommon INTERFACE "${CMAKE_CURRENT_SOURCE_DIR}")
