@@ -364,6 +364,13 @@ void CLeafBufferHooks::RenderDebugLightPass(const Matrix44 &mat, int nLightMask,
 void CLeafBufferHooks::SetRECustomData(float *pfCustomData, float fFogScale, float fAlpha)
 {
   TRACE_CALL("lb %p '%s' custom %p fogScale %g alpha %g", LB(), Source(), pfCustomData, fFogScale, fAlpha);
+  // The SDK does not say how many floats the render elements read; the first 16 are written.
+  if (TRACE_DUMP && pfCustomData && Trace_IsReadable(pfCustomData, 16 * sizeof(float)))
+  {
+    const float *f = pfCustomData;
+    Trace_Write("    custom: %g %g %g %g | %g %g %g %g | %g %g %g %g | %g %g %g %g", f[0], f[1], f[2], f[3], f[4], f[5], f[6], f[7], f[8],
+      f[9], f[10], f[11], f[12], f[13], f[14], f[15]);
+  }
   LB_ORIG(LBS_SetRECustomData, void, (float *, float, float))(pfCustomData, fFogScale, fAlpha);
 }
 
