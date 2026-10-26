@@ -39,8 +39,8 @@ enum
   BUF_CopiedSlots = 256,
 };
 
-//! Vertices written per draw.
-static const UINT DUMP_Vertices = 8;
+//! Vertices written per draw (XRENDERTRACED_D3D_VERTS, default 8).
+static UINT s_nDumpVertices = 8;
 
 typedef HRESULT (STDMETHODCALLTYPE *PFN_DrawPrimitive)(IDirect3DDevice9 *, D3DPRIMITIVETYPE, UINT, UINT);
 typedef HRESULT (STDMETHODCALLTYPE *PFN_DrawIndexedPrimitive)(IDirect3DDevice9 *, D3DPRIMITIVETYPE, INT, UINT, UINT, UINT, UINT);
@@ -262,7 +262,7 @@ static void DumpVertices(IDirect3DVertexDeclaration9 *pDecl, UINT nStream, const
   UINT nElements = MAXD3DDECLLENGTH + 1;
   if (!pDecl || !pData || FAILED(pDecl->GetDeclaration(Elements, &nElements)))
     return;
-  for (UINT nVert = 0; nVert < nCount && nVert < DUMP_Vertices; nVert++)
+  for (UINT nVert = 0; nVert < nCount && nVert < s_nDumpVertices; nVert++)
   {
     const BYTE *pVert = pData + nVert * nStride;
     char szLine[512] = "";
@@ -388,7 +388,7 @@ static void WriteDraw(IDirect3DDevice9 *pDev, const char *szCall, bool bStreams,
     if (FirstSeen(pDecl))
       DescribeDecl(pDecl);
     // The dynamic buffers keep what was written into them since the first draw that used them.
-    const UINT nDumped = nVerts < DUMP_Vertices ? nVerts : DUMP_Vertices;
+    const UINT nDumped = nVerts < s_nDumpVertices ? nVerts : s_nDumpVertices;
     if (!bIndexed && pUPVerts)
       DumpVertices(pDecl, 0, (const BYTE *)pUPVerts, nUPStride, nDumped);
     else if (!bIndexed && pVB0 && nStride0)
@@ -499,6 +499,9 @@ void D3DDraws_Begin(IRenderer *pRenderer)
   if (!GetEnvironmentVariableA("XRENDERTRACED_D3D_DRAWS", szEnv, sizeof(szEnv)) || szEnv[0] < '1' || szEnv[0] > '9')
     return;
   s_nLevel = szEnv[0] - '0';
+  char szVerts[16] = "";
+  if (GetEnvironmentVariableA("XRENDERTRACED_D3D_VERTS", szVerts, sizeof(szVerts)) && atoi(szVerts) > 0)
+    s_nDumpVertices = (UINT)atoi(szVerts);
   IDirect3DDevice9 *pDev = D3DState_GetDevice(pRenderer);
   if (!pDev)
     return;

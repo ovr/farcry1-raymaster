@@ -13,7 +13,8 @@
 //	vertex and index buffers, the vertex declaration or FVF, the shaders,
 //	the textures and the render element whose mfDraw is running (x64, from
 //	VCallHooks), for a leaf buffer element also its source and material.
-//	The first vertices of a non-indexed draw follow the line: from memory
+//	The first vertices of a non-indexed draw (8, or XRENDERTRACED_D3D_VERTS)
+//	follow the line: from memory
 //	for the *UP calls, and from the dynamic vertex buffers, whose Lock and
 //	Unlock are hooked the same way from the first draw that uses them (what
 //	is written into them is kept until the end of the frame).
