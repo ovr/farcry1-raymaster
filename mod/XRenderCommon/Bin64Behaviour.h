@@ -116,7 +116,8 @@ static const int nHeapAlignment = 4;
 //   product to 1): the lightmaps hold a quarter of the light.
 //   Vegetation (River): texture * vertex colour * 2 * m_Color * the colour of EF_SetWorldColor
 //   (m_Color 0.75 and the world colour (0.843, 0.780, 0.659) give the factor bytes 161, 149, 126).
-//   For grass, the alpha of m_Color fades it out (alpha blended, no depth writes).
+//   For grass the factor's alpha is the square of m_Color's alpha (0.84 gives 179, 0.12 gives 3),
+//   which fades it out (alpha blended, no depth writes).
 //
 // Characters (CryAnimation)
 //   The model goes into CreateLeafBuffer(true, "ModelState", NULL) with
