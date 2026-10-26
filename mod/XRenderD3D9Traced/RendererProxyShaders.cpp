@@ -424,6 +424,7 @@ CCObject *CRendererProxy::EF_GetObject(bool bTemp, int num)
   CCObject *pRes = m_pReal->EF_GetObject(bTemp, num);
   TRACE_RESULT("%p id %d", pRes, pRes ? pRes->m_Id : -1);
   Watch_RendererObject(WT_CCObject, pRes);
+  VCallHooks_Install("CCObject", pRes);
   return pRes;
 }
 

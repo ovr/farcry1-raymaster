@@ -246,6 +246,54 @@ static void ScreenCall_Leave(SVCallFrame *pFrame)
       (void *)pFrame->nResult, ScreenValueText((void *)pFrame->nResult), Trace_Addr(pFrame->pReturn));
 }
 
+//! The arguments of the CCObject methods (written after the [vcall] line).
+static void ObjectCall_Enter(SVCallFrame *pFrame)
+{
+  SVSlot *pSlot = pFrame->pSlot;
+  if (strcmp(pSlot->pTable->szName, "CCObject"))
+    return;
+  if (!strcmp(pSlot->szMethod, "AddWaves"))
+  {
+    // AddWaves(SWaveForm2 **wf) in the SDK; on Bin64 rdx does not point to two wave pointers, so the
+    // block is written as it is, and every pointer in it (and r8, r9) is read as an SWaveForm2.
+    const unsigned char *pBlock = (const unsigned char *)pFrame->Args[1];
+    for (int nOffs = 0; nOffs < 0xa0 && pBlock && Trace_IsReadable(pBlock + nOffs, 32); nOffs += 32)
+    {
+      char szName[32];
+      sprintf_s(szName, "[vcall]     rdx+0x%02x", nOffs);
+      Dump_HexLine(szName, pBlock + nOffs, 32);
+    }
+    const void *pCandidates[22] = { (const void *)pFrame->Args[2], (const void *)pFrame->Args[3] };
+    int nCandidates = 2;
+    for (int nOffs = 0; nOffs < 0xa0 && pBlock && Trace_IsReadable(pBlock + nOffs, sizeof(void *)); nOffs += sizeof(void *))
+      pCandidates[nCandidates++] = *(const void *const *)(pBlock + nOffs);
+    for (int i = 0; i < nCandidates; i++)
+    {
+      const SWaveForm2 *pWF = (const SWaveForm2 *)pCandidates[i];
+      if (!pWF || pWF == (const void *)pFrame->Args[0] || !Trace_IsReadable(pWF, sizeof(*pWF)) || (unsigned)pWF->m_eWFType > eWF_InvHill)
+        continue;
+      Trace_Write("[vcall]     %s %p: type %d level %g amp %g phase %g freq %g", i == 0 ? "r8" : i == 1 ? "r9" : "ptr", pWF, pWF->m_eWFType,
+        pWF->m_Level, pWF->m_Amp, pWF->m_Phase, pWF->m_Freq);
+    }
+  }
+  else if (!strcmp(pSlot->szMethod, "SetShaderFloat"))
+  {
+    // SetShaderFloat(const char *Name, float Val).
+    const char *szName = (const char *)pFrame->Args[1];
+    Trace_Write("[vcall]     '%s' = %g", szName && Trace_IsReadable(szName, 1) ? szName : "?", pFrame->Xmm[2][0]);
+  }
+}
+
+static void ObjectCall_Leave(SVCallFrame *pFrame)
+{
+  SVSlot *pSlot = pFrame->pSlot;
+  if (strcmp(pSlot->pTable->szName, "CCObject") || strcmp(pSlot->szMethod, "AddWaves"))
+    return;
+  const CCObject *pObj = (const CCObject *)pFrame->Args[0];
+  if (Trace_IsReadable(pObj, sizeof(*pObj)))
+    Trace_Write("[vcall]     -> m_NumWFX %d m_NumWFY %d", pObj->m_NumWFX, pObj->m_NumWFY);
+}
+
 #ifdef _WIN64
 //! The return address of the call of the original function in VCall_Thunk.
 extern "C" void VCall_ThunkReturn();
@@ -282,6 +330,7 @@ extern "C" void VCall_Enter(SVCallFrame *pFrame)
     pSlot->pTable->szName, pSlot->szMethod, (void *)pFrame->Args[0], (unsigned long long)pFrame->Args[1], (unsigned long long)pFrame->Args[2],
     (unsigned long long)pFrame->Args[3], pFrame->Xmm[1][0], pFrame->Xmm[2][0], pFrame->Xmm[3][0], (unsigned long long)pFrame->StackArgs[0],
     (unsigned long long)pFrame->StackArgs[1], Trace_Addr(pFrame->pReturn));
+  ObjectCall_Enter(pFrame);
 }
 
 extern "C" void VCall_Leave(SVCallFrame *pFrame)
@@ -292,8 +341,11 @@ extern "C" void VCall_Leave(SVCallFrame *pFrame)
   if (pSlot->eSpecial != SPECIAL_None)
     ScreenCall_Leave(pFrame);
   else
+  {
     Trace_Write("[vcall]   %s::%s -> rax 0x%llx (xmm0 %g)", pSlot->pTable->szName, pSlot->szMethod, (unsigned long long)pFrame->nResult,
       pFrame->XmmResult[0]);
+    ObjectCall_Leave(pFrame);
+  }
 }
 
 //////////////////////////////////////////////////////////////////////////

@@ -581,6 +581,15 @@ void Dump_Object(const CCObject *pObj)
   Trace_Write("      RE %p EF %p custom %p LM %d/%d occl %d dynLM 0x%x heat %.2f shadowCasters %p charInst %p LMTC %p",
     pObj->m_RE, pObj->m_EF, pObj->m_CustomData, pObj->m_nLMId, pObj->m_nLMDirId, pObj->m_nOcclId, pObj->m_DynLMMask,
     pObj->m_fHeatFactor, pObj->m_pShadowCasters, pObj->m_pCharInstance, pObj->m_pLMTCBufferO);
+  // The members the shader components read (SDK Shaders Specification: ObjVal, ObjWaveX/Y, Bending,
+  // ObjRefrFactor, BumpAmount); several share a union, so each is shown as the types it can be.
+  union { const void *p; float f; int n; } Light;
+  Light.p = NULL;
+  memcpy(&Light, &pObj->m_pLightImage, sizeof(pObj->m_pLightImage));
+  Trace_Write("      lod/wfx %d templ/wfy %d tempVars (%g %g %g %g %g) refract %g bump %g light %p (float %g) numCM %d lightStyle %d renderState 0x%x params %d",
+    pObj->m_nLod, pObj->m_nTemplId, pObj->m_TempVars[0], pObj->m_TempVars[1], pObj->m_TempVars[2], pObj->m_TempVars[3],
+    pObj->m_TempVars[4], pObj->m_fRefract, pObj->m_fBump, Light.p, Light.f, pObj->m_NumCM, pObj->m_LightStyle, pObj->m_RenderState,
+    pObj->m_ShaderParams && Trace_IsReadable(pObj->m_ShaderParams, sizeof(*pObj->m_ShaderParams)) ? pObj->m_ShaderParams->Num() : -1);
   Dump_Matrix("matrix", (const float *)&pObj->m_Matrix);
   Dump_OpaqueList("CCObject::m_pShadowCasters", pObj->m_pShadowCasters);
   if (pObj->m_pShadowCasters)
