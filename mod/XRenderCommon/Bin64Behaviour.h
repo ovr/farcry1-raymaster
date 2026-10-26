@@ -196,6 +196,32 @@ static const int nHeapAlignment = 4;
 //   buffer with one lightmap UV per vertex. None of them was drawn from the start position on
 //   Carrier; on River they are drawn like the other lightmapped objects, one draw per material,
 //   from a video buffer in the format they were created with (the vertex colours stay unused).
+//
+// Far vegetation sprites ("FarTreeSprites"; River, Research, Pier)
+//   DrawObjSprites (RendererStructures.h) gets the instances to draw as sprites; the D3D9 renderer
+//   draws one upright quad (two triangles) per instance, one draw per sprite texture, with
+//   texture * vertex colour * 2, alpha test (reference 128), depth writes, fog and no culling.
+//   For an instance at position P with scale s, group g and the object O that MakeSprite got:
+//   - Size: k = s * f, where the fade factor f is 1, or, when g's bFadeSize is set,
+//     min(1, (E - d) / (E / 8)) with d the instance's distance and E = min(the instance's
+//     MaxViewDist, 0.8 * fMaxViewDist): the quad shrinks to nothing over the last eighth of E
+//     (River: E = 400, the quads shrink from 350 m on).
+//   - Placement: the bottom edge at P.z + k * O's box min z, the height k * O's box height, the
+//     horizontal centre at P + k * the horizontal centre of O's box; so a fading quad shrinks
+//     towards P. The horizontal edge is perpendicular to the horizontal direction from the camera
+//     to the instance.
+//   - Width: k times a constant of O, 0.9 to 2.4 times O's box height for the objects seen. It
+//     comes from how the sprite picture is framed, so a renderer that makes its own sprites picks it
+//     together with the picture.
+//   - Texture: with a the angle of the horizontal direction from the camera to the instance
+//     (atan2(dy, dx) in degrees, 0 to 360), the sprite made with fAngle = 165 - 15 * floor(a / 15),
+//     brought into 90 to 435 by adding or subtracting 360 (a from 75 to 90 uses fAngle 90, from 90
+//     to 105 fAngle 435).
+//   - Texture coordinates: u from 0 at the left edge to 1 at the right edge and v from 0 at the
+//     bottom to 1 at the top (in the sprite texture the picture's bottom is in row 0), plus half a
+//     texel in u and minus half a texel in v (1/128 for the 64 x 64 sprites), with wrap addressing.
+//   - Vertex colour: the colour of EF_SetWorldColor times min(1, g's fBrightness * the instance's
+//     brightness byte / 100), alpha 255.
 
 //////////////////////////////////////////////////////////////////////////
 // Shaders (Training: 636 shaders and what their getters return)

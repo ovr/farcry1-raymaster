@@ -255,21 +255,33 @@ static const int nBin64Size_ShadowMapFrustum = 0x148;             // element of 
 //   The renderer makes the sprite textures: during the level load the engine calls
 //   MakeSprite(fScale, nTexSize, fAngle, pStatObj, NULL, 0) 24 times per vegetation object, with
 //   fAngle from 90 to 435 degrees in steps of 15, and keeps the returned texture IDs. A renderer can
-//   therefore look the sprites up by IStatObj and angle itself.
+//   therefore look the sprites up by IStatObj and angle itself. pStatObj is the object's LOD 1
+//   (IStatObj::GetLodObject(1)) when it has one and the object itself otherwise; fScale was 18 and
+//   nTexSize 64 in every call, also for groups with nSpriteTexRes 128.
 //   DrawObjSprites(pList, fMaxViewDist, pObjMan) is called every frame from inside EF_EndEf3D (see
-//   CRECommon above) with the instances to draw as sprites. The members of CStatObjInst that are
-//   enough to draw one (Bin64 offsets; checked on 2962 instances of 62 vegetation groups):
-static const int nBin64Offset_StatObjInst_MaxViewDist = 0x08;  // float: radius * group fMaxViewDistRatio * 55
+//   CRECommon above) with the instances to draw as sprites. fMaxViewDist equals the camera's far
+//   plane (350 to 1500 in the levels seen). The members of CStatObjInst that are enough to draw one
+//   (Bin64 offsets; checked on 2962 instances of 62 vegetation groups):
+static const int nBin64Offset_StatObjInst_MaxViewDist = 0x08;  // float: radius * group fMaxViewDistRatio * e_obj_view_dist_ratio (55)
+static const int nBin64Offset_StatObjInst_Distance = 0x18;     // float: horizontal distance from the camera to the box centre
 static const int nBin64Offset_StatObjInst_BoxMin = 0x2C;       // Vec3, world space
 static const int nBin64Offset_StatObjInst_BoxMax = 0x38;       // Vec3, world space
 static const int nBin64Offset_StatObjInst_Radius = 0x44;       // float: IStatObj::GetRadius() of the group * scale
-static const int nBin64Offset_StatObjInst_Pos = 0x68;          // Vec3, world space, bottom centre of the box
+static const int nBin64Offset_StatObjInst_Pos = 0x68;          // Vec3, world space: the object's origin
 static const int nBin64Offset_StatObjInst_Scale = 0x74;        // float
 static const int nBin64Offset_StatObjInst_Group = 0x88;        // byte: vegetation group ID
-//   The group ID gives the IStatObj and the group settings (fBrightness, fSpriteDistRatio,
-//   fMaxViewDistRatio, bUseSprites) through I3DEngine::GetStatInstGroup. The instance starts with a
-//   vtable; it also holds a frame ID (GetFrameID values) at 0x10 and pointers to other engine
-//   objects. CObjManager is not needed for that.
+static const int nBin64Offset_StatObjInst_Brightness = 0x89;   // byte: 100 when fully lit, lower in shadow
+//   The box is the object's box times the scale, moved to Pos. The group ID gives the IStatObj and
+//   the group settings (fBrightness, fSpriteDistRatio, fMaxViewDistRatio, bUseSprites) through
+//   I3DEngine::GetStatInstGroup. The instance starts with a vtable; it also holds a frame ID
+//   (GetFrameID values) at 0x10 and pointers to other engine objects.
+//   GetStatInstGroup does not fill in bFadeSize and m_dwRndFlags (they keep what the caller's
+//   structure held), but the renderer needs bFadeSize (see Bin64Behaviour.h). CObjManager starts
+//   with the engine's array of groups, which have the layout of IStatInstGroup:
+static const int nBin64Offset_ObjManager_Groups = 0x00;        // pointer to the groups, indexed by group ID
+static const int nBin64Offset_ObjManager_GroupCount = 0x08;    // int: 1024
+static const int nBin64Size_StatInstGroup = 0x48;              // sizeof(IStatInstGroup) on x64
+static const int nBin64Offset_StatInstGroup_FadeSize = 0x32;   // bool bFadeSize
 
 // Shadow maps (off in farcry1_testing1's settings; seen with e_shadow_maps 1 on Training)
 //   MakeShadowMapFrustum(pFrustum, pLightSource, vObjPos, pStatObjects, 0): the engine passes a
