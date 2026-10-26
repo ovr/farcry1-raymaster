@@ -7,7 +7,8 @@
 //	the retail Far Cry 1.4 contract (RetailRenderer.h), the runtime
 //	behaviour recorded by XRenderD3D9Traced (Bin64Behaviour.h) and the
 //	structures shared by the engine and the renderer (RendererStructures.h,
-//	StructLayouts.txt).
+//	StructLayouts.txt) and the vtable slots of the renderer classes the
+//	engine calls (VTables.inl).
 //	Include after IRenderer.h.
 //
 //////////////////////////////////////////////////////////////////////

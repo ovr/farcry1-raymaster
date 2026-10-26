@@ -9,6 +9,7 @@ add_library(XRenderCommon INTERFACE
     RendererStructures.h
     RendererAbiChecks.h
     StructFields.inl
+    VTables.inl
     StructLayouts.txt
 )
 set_target_properties(XRenderCommon PROPERTIES FOLDER "Renderer")

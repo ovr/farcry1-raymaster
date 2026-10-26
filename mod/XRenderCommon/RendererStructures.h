@@ -120,6 +120,57 @@ namespace RendererStructures
 //   (I3DEngine::DrawFarTrees, DrawTerrainDetailTextureLayers, DrawTerrainParticles), which calls
 //   IRenderer methods from inside EF_EndEf3D (DrawObjSprites for the far trees).
 
+// Virtual functions the engine calls
+//   Besides IRenderer and CLeafBuffer, the engine calls these virtual functions of the objects the
+//   renderer gives it (slots in VTables.inl; Bin64, Training: level load and 160 frames):
+//   - IShader: AddRef, Release, GetName, GetSort, GetFlags, GetFlags2, GetLFlags, GetREs,
+//     GetTemplate, GetPublicParams. GetTemplate and GetFlags2 are hot (about 180000 calls each
+//     in that run, from Cry3DEngine and CryAnimation).
+//   - ITexPic: AddRef, Release, GetWidth, GetHeight, GetOriginalWidth, GetOriginalHeight,
+//     GetTextureID, GetFlags, IsTextureLoaded (from Cry3DEngine, CrySystem, CryGame and
+//     CryEntitySystem).
+//   - SRenderShaderResources: Release, its only virtual function.
+//   - CRendElement: Release (of the CREOcLeaf of the leaf buffer materials).
+//   - CREScreenProcess: mfSetParameter, mfGetParameter (see "Screen effects" below).
+//   All other virtual functions of these classes (mfPrepare, mfDraw, mfPreDraw, mfCheckUpdate,
+//   mfGetMatInfo, mfReset, ...) were only called by the renderer itself, from inside EF_EndEf3D.
+//   A renderer still has to fill every slot in the SDK order.
+
+// Screen effects (CREScreenProcess)
+//   The 3D engine creates one CREScreenProcess with EF_CreateRE(eDATA_ScreenProcess) and turns
+//   I3DEngine::SetScreenFx, SetScreenFxParam, GetScreenFx and GetScreenFxParam (effect and
+//   parameter names in the SDK's CScriptObjectSystem reference) into calls of
+//   mfSetParameter(iProcess, iParam, pValue) and mfGetParameter(iProcess, iParam) with the codes
+//   below (Bin64, runtime). pValue points to the engine's copy of the value, valid during the call;
+//   mfGetParameter returns a pointer to the renderer's copy, which the engine reads right away.
+//   mfSetParameter returned 0 for every call; mfActivate was never called.
+//   The Active parameter is a bool (one byte; the bytes after it are not part of the value), the
+//   others are floats.
+static const int nBin64ScreenProcess_ScreenFade = 0;
+static const int nBin64ScreenProcess_ScreenBlur = 1;
+static const int nBin64ScreenProcess_NightVision = 6;
+static const int nBin64ScreenProcess_FlashBang = 8;
+static const int nBin64ScreenParam_Active = 30;                 // every process
+static const int nBin64ScreenParam_ScreenFadeTime = 28;
+static const int nBin64ScreenParam_ScreenPreFadeTime = 29;
+static const int nBin64ScreenParam_ScreenBlurAmount = 1;
+static const int nBin64ScreenParam_ScreenBlurColorRed = 2;
+static const int nBin64ScreenParam_ScreenBlurColorGreen = 3;
+static const int nBin64ScreenParam_ScreenBlurColorBlue = 4;
+static const int nBin64ScreenParam_FlashBangTimeScale = 19;
+static const int nBin64ScreenParam_FlashBangFlashPosX = 20;
+static const int nBin64ScreenParam_FlashBangFlashPosY = 21;
+static const int nBin64ScreenParam_FlashBangFlashSizeX = 22;
+static const int nBin64ScreenParam_FlashBangFlashSizeY = 23;
+static const int nBin64ScreenParam_FlashBangCurrent = 24;       // written by the renderer, see below
+static const int nBin64ScreenParam_FlashBangForce = 25;
+//   The engine reads NightVision's Active every frame. While FlashBang is active it reads its
+//   parameters back, among them 24, which only the renderer writes (a float; 0.99 shortly after
+//   the flash started).
+//   At the start of a level the engine sets ScreenFade Active 1, ScreenFadeTime -2.5 and
+//   ScreenPreFadeTime 5 (CryGame's XClient.cpp; a negative time fades in), then ScreenBlur Active 0
+//   and ScreenBlurAmount 0.
+
 // SShaderItem, SRenderShaderResources
 //   From EF_LoadShaderItem; the shader resources are reference counted (m_nRefCounter).
 //   Renderer: +1 per EF_LoadShaderItem that returns them, +1 per CLeafBuffer::CopyTo.
