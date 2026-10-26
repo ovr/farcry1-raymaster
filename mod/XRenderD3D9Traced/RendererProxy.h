@@ -272,6 +272,9 @@ private:
   char m_szExecLevel[2048];
   int m_nExecLevelAfterLoad;
   int m_nExecLevelFrame;
+  //! "lightradius r [direct] [colour scale]": what EF_ADDDlight changes in the point lights (0: the
+  //! engine's value).
+  float m_fLightRadius = 0, m_fLightDirect = 0, m_fLightColor = 0;
   //! Every call of the m_nCaptureAfterLoad-th frame after a level load is written out
   //! (XRENDERTRACED_CAPTURE, 0 - off); m_nCaptureFrame is that frame of the current level.
   int m_nCaptureAfterLoad;

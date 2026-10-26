@@ -251,6 +251,12 @@ void CRendererProxy::ExecuteCommands(const char *szCommands)
       CVarsCommand(szCmd + 5);
     else if (!strncmp(szCmd, "veggroup ", 9))
       VegGroupCommand(szCmd + 9);
+    else if (!strncmp(szCmd, "lightradius ", 12))
+    {
+      m_fLightDirect = m_fLightColor = 0;
+      sscanf_s(szCmd + 12, "%f %f %f", &m_fLightRadius, &m_fLightDirect, &m_fLightColor);
+      Trace_Write("  point lights get radius %g direct factor %g colour scale %g", m_fLightRadius, m_fLightDirect, m_fLightColor);
+    }
     else
       iConsole->ExecuteString(szCmd, false, true);
   }

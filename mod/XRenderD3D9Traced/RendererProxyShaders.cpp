@@ -7,6 +7,7 @@
 //////////////////////////////////////////////////////////////////////
 
 #include "StdAfx.h"
+#include <map>
 #include "RenderTrace.h"
 #include "FieldWatch.h"
 #include "RendererProxy.h"
@@ -475,6 +476,21 @@ bool CRendererProxy::EF_IsFakeDLight(CDLight *Source)
 void CRendererProxy::EF_ADDDlight(CDLight *Source)
 {
   TRACE_CALL("%p", Source);
+  if (m_fLightRadius > 0 && Source && (Source->m_Flags & DLF_POINT) && !(Source->m_Flags & DLF_SUN))
+  {
+    Source->m_fRadius = m_fLightRadius;
+    if (m_fLightDirect > 0)
+      Source->m_fDirectFactor = m_fLightDirect;
+    // The engine passes the same light object every frame: scale the colour it had first.
+    static std::map<CDLight *, CFColor> s_OrigColors;
+    if (m_fLightColor > 0)
+    {
+      if (!s_OrigColors.count(Source))
+        s_OrigColors[Source] = Source->m_Color;
+      const CFColor &Orig = s_OrigColors[Source];
+      Source->m_Color = CFColor(Orig.r * m_fLightColor, Orig.g * m_fLightColor, Orig.b * m_fLightColor, 1);
+    }
+  }
   if (TRACE_DUMP)
     Dump_Light(Source);
   CWatchArg WatchLight(WT_CDLight, Source);

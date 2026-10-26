@@ -48,7 +48,8 @@ it as well: it holds local, machine-specific instructions and is not committed (
   camera (`I3DEngine::SpawnParticles`); `cvars [prefix]` writes the console variables whose names
   start with the prefix, with their values and flags (`IConsole::DumpCVars`); `veggroup id|* field
   value` changes a vegetation group (`I3DEngine::SetStatInstGroup`; fields `fadeSize`, `useSprites`,
-  `maxViewDistRatio`, `spriteDistRatio`, `brightness`).
+  `maxViewDistRatio`, `spriteDistRatio`, `brightness`); `lightradius r [direct] [colour scale]` gives the point lights
+  that reach `EF_ADDDlight` the radius r, the direct factor and a scaled colour (0: their own).
 - `XRENDERTRACED_TRACE_METHODS` (names as in the log, separated by `,`, e.g.
   `DownLoadToVideoMemory,CLeafBuffer::CreateBufferFromSource`) writes every call of those methods,
   not only the first `xrt_TraceCalls`.
