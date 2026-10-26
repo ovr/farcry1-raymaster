@@ -134,12 +134,19 @@ static const int nHeapAlignment = 4;
 //   One leaf buffer per 64 m x 64 m sector, created with
 //   CreateLeafBufferInitialized(pVerts, 1089, VERTEX_FORMAT_P3F_N_COL4UB_COL4UB, pInds, nInds,
 //   R_PRIMV_MULTI_STRIPS, "TerrainSector", eBT_Static, 80, nTexId, NULL, NULL, false, false):
-//   a 33 x 33 vertex grid with 2 m spacing, one triangle strip per row. SetChunk is called once per
+//   a 33 x 33 vertex grid with 2 m spacing, one triangle strip per row. Sectors further away get
+//   coarser grids of the same size: 17 x 17 (289 vertices), 9 x 9 (81) or 5 x 5 (25) (Steam: 7,
+//   3, 3 and 15 sectors), with indices from the engine that also stitch them to their neighbours
+//   (UpdateSysIndices when they change). SetChunk is called once per
 //   strip (all vertices, the strip's index range, the same shader); only m_pMats[0] gets the shader
 //   and a render element, the other entries only describe strips. SetShader(pShader, nTexId) sets
 //   the sector texture (128x128 eTF_DXT1, created with DownLoadToVideoMemory just before). The
 //   sector is drawn with AddRenderElements(pObj, 0, -1, nFogID, 0x30000000, NULL), pObj with an
 //   identity matrix.
+//   The vertices carry no texture coordinates; the D3D9 renderer makes them from the world
+//   position: the sector texture at u = (y - y0) / 64, v = (x - x0) / 64 for the sector's corner
+//   (x0, y0) (clamped), the detail texture at u = y / 8, v = x / 8 (repeated). Its pixel shader
+//   also gets the colour of EF_SetWorldColor and the fog colour of SetFog.
 //
 // Water
 //   "WaterVolume" (P3F_N_COL4UB_TEX2F triangles, shader "terrainlake") and the rings around the
@@ -168,7 +175,9 @@ static const int nHeapAlignment = 4;
 //   0x30000000, NULL). pData holds (-y0 / 64, -x0 / 64, 1 / 64, 0) for the sector's corner
 //   (x0, y0): (-14, -17, 0.015625, 0) for the sector at (1088, 896). pObj has an identity matrix
 //   and the light's bit in m_DynLMMask. The D3D9 renderer draws it as one indexed triangle list
-//   over the container's video vertex buffer, with the sector texture in the first stage.
+//   over the container's video vertex buffer, with the sector texture in the first stage, the
+//   texture coordinates from pData as for the sector, added to the picture (ONE, ONE) without
+//   depth writes, with the light's origin, radius, 1 / radius and colour as shader constants.
 //
 // Fog volume caps ("VolFogTopCircle", Carrier)
 //   Like the water rings: P3F, R_PRIMV_MULTI_STRIPS, eBT_Dynamic, 16 chunks of 26 vertices (one
