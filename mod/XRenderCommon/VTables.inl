@@ -1,5 +1,5 @@
 // Virtual functions of the renderer classes the engine calls, in vtable slot order, generated
-// by tools/struct_layouts.py from the class layout report of the SDK headers; do not edit.
+// from the MSVC class layout report of the SDK headers; do not edit.
 // XRC_VTABLE(Class, number of slots), XRC_SLOT(Class, slot, name), XRC_VTABLE_END(Class).
 // Overloads share a name ({dtor} is the destructor).
 
