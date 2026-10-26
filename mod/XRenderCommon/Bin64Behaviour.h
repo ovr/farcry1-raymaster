@@ -147,6 +147,49 @@ static const int nHeapAlignment = 4;
 //   buffer with one lightmap UV per vertex. None of them was drawn from the start position.
 
 //////////////////////////////////////////////////////////////////////////
+// Shaders (Training: 636 shaders and what their getters return)
+//
+// The engine loads its own shaders by name with EF_LoadShader(szName, eSH_World, EF_SYSTEM, 0):
+// "Default", "<Stencil>", "StencilState", "StencilStateInv", "ClearStencil", "ShadowMapGen",
+// "OcclusionTest", "CryLight", "ParticleLight", "FogLayer", "RainMap", "OutSpace", "FarTreeSprites",
+// "BumpSunGlow", "Decal_VP", "Decal_2D_VP", "ScreenProcess", "ScreenTexMap", "ScreenDistort",
+// "BinocularDistortMask", "SniperDistortMask", "Terrain", "TerrainWithFog", "TerrainLowLOD",
+// "TerrainWithDefaultDetailTexture", "TerrainDetailLayers", "TerrainDetailTextureLayers",
+// "TerrainLayer", "TerrainLightPass", "TerrainShadowPass", "TerrainParticles", "TerrainLake",
+// "TerrainWaterBeach", "TerrainWaterBottomSimple", "TerrainWater_OnlySky". Other names come from the
+// level and its objects (the sky, flares, lights), some with eSH_Misc and flags 0. Names are not
+// case sensitive (the templates "NoDraw" and "nodraw" are the same shader); GetName returns them in
+// lower case.
+//
+// Most shaders are materials: EF_LoadShaderItem(szMaterial, eSH_World, true, szTemplate, 0, pRes,
+// 0), with the template the material names ("TemplBumpDiffuse", "TemplModelCommon",
+// "TemplBumpSpec_HP_GlossAlpha", "TemplPlants1", "TemplDecal", ..., "NoDraw" for invisible
+// surfaces). The shader returned has EF_NOTFOUND set (there is no shader of the material's name);
+// GetTemplate(-1) returns the template that is actually used, which the renderer picks (with
+// farcry1_testing1's settings mostly "templdiffuse_fp"; "nodraw" for "NoDraw").
+//
+// The values the engine reads:
+//   GetTemplate(-1)->GetFlags2() & EF2_OPAQUE: SShaderItem::IsTransparent (IShader.h), called for
+//     every drawn material. Opaque templates return flags2 EF2_OPAQUE | EF2_FOGOVERLAY1 (0x408),
+//     decals EF2_DONTSORTBYDIST, alpha-blended ones 0.
+//   GetSort: eS_Opaque for most, eS_Trees (vegetation), eS_Decal, eS_SeeThrough, eS_Banner (alpha
+//     blended), eS_Sky, eS_Terrain, eS_TerrainShadowPass, eS_TerrainDetailTextures,
+//     eS_TerrainLightPass, eS_Stencil, eS_Water, eS_WaterBeach, eS_Particles, eS_OcclusionTest,
+//     eS_MuzzleFlash, eS_Nearest (lights and flares), eS_FogShader, eS_Refractive (scopes),
+//     eS_Glare (screen effects).
+//   GetFlags: EF_COMPILEDLAYERS for nearly all, EF_NEEDNORMALS and EF_NOTFOUND for the materials,
+//     EF_SYSTEM for the engine's own shaders, EF_SKY for the sky, EF_FOGSHADER for "foglayer",
+//     EF_HASCULL, EF_HASVSHADER, EF_USELIGHTS, EF_HASDIFFUSEMAP, EF_OVERLAY, EF_NOMIPMAPS on a few.
+//   GetFlags3 (read by the renderer): EF3_NODRAW for the "NoDraw" materials, EF3_HASLM for the
+//     lightmapped ones, EF3_DEPTHWRITE for the vegetation template, EF3_HASAMBPASSES,
+//     EF3_HASRGBGEN, EF3_HASPSHADER.
+//   GetLFlags: 0 except LMF_BUMPMATERIAL (terrain, water) and LMF_DISABLE (decals, some lights).
+//   GetREs: empty except for light shaders (one Flare render element: "crylight", the flares) and
+//     light beams (one Beam).
+//   GetPublicParams: empty except for water and glass shaders (waveamplitude, bumpamountx,
+//     bumpamounty, reflectamount, refrbumpamount, opacity, ...).
+
+//////////////////////////////////////////////////////////////////////////
 // Particles
 //
 // Particles (I3DEngine::SpawnParticles with the default texture, and a light effect on Carrier)

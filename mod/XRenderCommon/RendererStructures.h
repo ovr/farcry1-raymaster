@@ -126,8 +126,9 @@ namespace RendererStructures
 //   renderer gives it (slots in VTables.inl; Bin64, Training: level load and 160 frames):
 //   - IShader: AddRef, Release, GetName, GetSort, GetFlags, GetFlags2, GetLFlags, GetREs,
 //     GetTemplate, GetPublicParams. GetTemplate and GetFlags2 are hot (about 180000 calls each
-//     in that run, from Cry3DEngine and CryAnimation). With particles on screen also GetID (for
-//     the shader ID EF_AddSpriteToScene takes).
+//     in that run, from Cry3DEngine and CryAnimation): SShaderItem::IsTransparent (IShader.h) calls
+//     both for every material drawn. With particles on screen also GetID (for the shader ID
+//     EF_AddSpriteToScene takes). The values they return: Bin64Behaviour.h, "Shaders".
 //   - ITexPic: AddRef, Release, GetWidth, GetHeight, GetOriginalWidth, GetOriginalHeight,
 //     GetTextureID, GetFlags, IsTextureLoaded (from Cry3DEngine, CrySystem, CryGame and
 //     CryEntitySystem).
