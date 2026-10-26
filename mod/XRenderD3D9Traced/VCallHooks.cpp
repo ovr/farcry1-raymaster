@@ -8,6 +8,7 @@
 #include "StdAfx.h"
 #include "RenderTrace.h"
 #include "VCallHooks.h"
+#include "D3DDraws.h"
 
 #include <map>
 
@@ -321,6 +322,7 @@ extern "C" void VCall_Enter(SVCallFrame *pFrame)
     pFrame->nPad = (UINT_PTR)s_pDrawingRE;
     s_pDrawingRE = (CRendElement *)pFrame->Args[0];
     pFrame->nFlags = FRAME_DRAW;
+    D3DDraws_OnDrawRE();
   }
   const int nModule = ModuleIndex(pFrame->pReturn);
   ECaller eCaller = nModule == s_nRenderer ? CALLER_Renderer : nModule == s_nSelf ? CALLER_Proxy : CALLER_Engine;

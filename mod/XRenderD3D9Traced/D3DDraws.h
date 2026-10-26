@@ -30,3 +30,6 @@
 void D3DDraws_Begin(IRenderer *pRenderer);
 //! At the end of the frame (after Update).
 void D3DDraws_End();
+//! When the renderer calls the mfDraw of a render element (VCallHooks): a line "[d3d] mfDraw"
+//! in the captured frame, also for elements that end up drawing nothing.
+void D3DDraws_OnDrawRE();

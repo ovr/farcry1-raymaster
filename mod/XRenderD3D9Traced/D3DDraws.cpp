@@ -523,6 +523,15 @@ void D3DDraws_Begin(IRenderer *pRenderer)
   Trace_Write("==== Direct3D draws of this frame (device %p) ====", pDev);
 }
 
+void D3DDraws_OnDrawRE()
+{
+  if (!s_pDevice)
+    return;
+  char szLine[512] = "[d3d] mfDraw";
+  AppendRE(szLine, sizeof(szLine));
+  Trace_Write("%s", szLine);
+}
+
 void D3DDraws_End()
 {
   if (!s_pDevice)
