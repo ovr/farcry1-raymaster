@@ -596,6 +596,36 @@ void Dump_Shader(IShader *pSH)
     return;
   }
   Trace_Write("    IShader @%p (vtbl %s) '%s' id %d", pSH, Trace_VTable(pSH), SafeStr(pSH->GetName()), pSH->GetID());
+  // What the engine reads from a shader (the getters it calls), and what the renderer itself uses.
+  Trace_Write("      sort %d flags 0x%x flags2 0x%x flags3 0x%x lflags 0x%x cull %d renderFlags 0x%x preprocess 0x%x vertexFormat %d texId %d textureTypes 0x%x",
+    pSH->GetSort(), pSH->GetFlags(), pSH->GetFlags2(), pSH->GetFlags3(), pSH->GetLFlags(), pSH->GetCull(), pSH->GetRenderFlags(),
+    pSH->GetPreprocessFlags(), pSH->GetVertexFormat(), pSH->GetTexId(), pSH->GetUsedTextureTypes());
+  // SShaderItem::IsTransparent (IShader.h) tests GetTemplate(-1)->GetFlags2() & EF2_OPAQUE.
+  IShader *pTempl = pSH->GetTemplate(-1);
+  if (pTempl && pTempl != pSH)
+    Trace_Write("      template(-1) %p '%s' sort %d flags 0x%x flags2 0x%x flags3 0x%x", pTempl, SafeStr(pTempl->GetName()), pTempl->GetSort(),
+      pTempl->GetFlags(), pTempl->GetFlags2(), pTempl->GetFlags3());
+  char szLine[512] = "";
+  TArray<CRendElement *> *pREs = pSH->GetREs();
+  if (pREs && Trace_IsReadable(pREs, sizeof(*pREs)))
+  {
+    for (int i = 0; i < pREs->Num() && i < 8; i++)
+    {
+      CRendElement *pRE = (*pREs)[i];
+      size_t nLen = strlen(szLine);
+      _snprintf(szLine + nLen, sizeof(szLine) - nLen - 1, " %s", pRE ? Trace_RETypeName(pRE->m_Type) : "(null)");
+    }
+    Trace_Write("      REs %d:%s", pREs->Num(), szLine);
+  }
+  TArray<SShaderParam> &Params = pSH->GetPublicParams();
+  szLine[0] = 0;
+  for (int i = 0; i < Params.Num() && i < 8; i++)
+  {
+    size_t nLen = strlen(szLine);
+    _snprintf(szLine + nLen, sizeof(szLine) - nLen - 1, " %.32s(type %d)", Params[i].m_Name, Params[i].m_Type);
+  }
+  if (Params.Num())
+    Trace_Write("      public params %d:%s", Params.Num(), szLine);
 }
 
 void Dump_ShaderItem(const SShaderItem &Item)
