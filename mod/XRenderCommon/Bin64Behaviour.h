@@ -145,12 +145,16 @@ static const int nHeapAlignment = 4;
 //   When a dynamic point light reaches the terrain (here a light of radius 2 next to the player),
 //   the engine creates CreateLeafBufferInitialized(pVerts, 1, VERTEX_FORMAT_P3F_N_COL4UB_COL4UB,
 //   NULL, 0, R_PRIMV_TRIANGLES, "Dynamic", eBT_Static, 1, nTexId, NULL, NULL, false, false) with one
-//   zeroed vertex and the texture ID of the terrain sector the light is in, and every frame calls
-//   SetRECustomData(pData, 0, 1) and AddRE(pObj, NULL, 0x30000000, NULL). pData holds
-//   (-y0 / 64, -x0 / 64, 1 / 64, 0) for the sector's corner (x0, y0): (-14, -17, 0.015625, 0) for
-//   the sector at (1088, 896). pObj has an identity matrix and the light's bit in m_DynLMMask. The
-//   buffer has no geometry of its own; how the original renderer draws it is not known. In the
-//   first frames the engine deleted it once and created it again for the same sector.
+//   zeroed vertex and the texture ID of the terrain sector the light is in, and points its
+//   m_pVertexContainer to that sector's leaf buffer (CLeafBuffer::SetVertexContainer, inline in
+//   LeafBuffer.h). Every frame it then calls UpdateSysIndices with the triangles of the sector
+//   near the light (a triangle list into the sector's 33 x 33 grid, 96 indices here),
+//   InvalidateVideoBuffer, SetChunk(pShader, 0, 1089, 0, nIndices, 0, false) and SetShader(pShader,
+//   nTexId) with the shader "terrainlightpass", SetRECustomData(pData, 0, 1) and AddRE(pObj, NULL,
+//   0x30000000, NULL). pData holds (-y0 / 64, -x0 / 64, 1 / 64, 0) for the sector's corner
+//   (x0, y0): (-14, -17, 0.015625, 0) for the sector at (1088, 896). pObj has an identity matrix
+//   and the light's bit in m_DynLMMask. The D3D9 renderer draws it as one indexed triangle list
+//   over the container's video vertex buffer, with the sector texture in the first stage.
 //
 // Fog volume caps ("VolFogTopCircle", Carrier)
 //   Like the water rings: P3F, R_PRIMV_MULTI_STRIPS, eBT_Dynamic, 16 chunks of 26 vertices (one

@@ -50,6 +50,8 @@ namespace RendererStructures
 //     renderer takes the list over (see VertexBufferSource).
 //   - m_vBoxMin, m_vBoxMax of the "WaterVolume" buffers (made with CreateLeafBufferInitialized),
 //     every frame: both hold the camera position, not the bounds.
+//   - m_pVertexContainer of the "Dynamic" buffers (SetVertexContainer, inline in LeafBuffer.h): the
+//     terrain sector whose vertices they use (Bin64Behaviour.h, "Terrain under a dynamic light").
 //   Renderer writes:
 //   - CreateBuffer(CIndexedMesh *): m_nVertexFormat, m_nPrimetiveType, m_pSecVertBuffer,
 //     m_SecVertCount, m_pVertexBuffer, m_SecIndices, m_NumIndices, m_Indices,
