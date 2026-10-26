@@ -10,9 +10,7 @@
 #include "RenderTrace.h"
 #include "D3DState.h"
 
-//! The device of the original renderer, or NULL if EF_Query does not return a Direct3D 9 device
-//! (checked by the module of its vtable).
-static IDirect3DDevice9 *GetDevice(IRenderer *pRenderer)
+IDirect3DDevice9 *D3DState_GetDevice(IRenderer *pRenderer)
 {
   static IDirect3DDevice9 *s_pDevice = NULL;
   static bool s_bQueried = false;
@@ -47,10 +45,13 @@ static void Append(char *szBuf, size_t nSize, const char *szFormat, ...)
 
 void D3DState_Write(IRenderer *pRenderer)
 {
-  IDirect3DDevice9 *pDev = GetDevice(pRenderer);
-  if (!pDev)
-    return;
+  IDirect3DDevice9 *pDev = D3DState_GetDevice(pRenderer);
+  if (pDev)
+    D3DState_WriteDevice(pDev);
+}
 
+void D3DState_WriteDevice(IDirect3DDevice9 *pDev)
+{
   static const struct { D3DRENDERSTATETYPE m_eState; const char *m_szName; } s_States[] =
   {
     { D3DRS_ZENABLE, "z" }, { D3DRS_ZWRITEENABLE, "zwrite" }, { D3DRS_ZFUNC, "zfunc" },

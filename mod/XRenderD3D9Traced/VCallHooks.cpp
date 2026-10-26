@@ -65,6 +65,8 @@ struct SVSlot
   const char *szMethod;
   void *pOrig;
   ESpecial eSpecial;
+  //! CRendElement::mfDraw: the element is the one being drawn until it returns.
+  bool bDraw;
   volatile LONG nCalls[CALLER_Num];
   //! Bit i: called from module i of s_Modules.
   volatile LONG nEngineModules;
@@ -88,7 +90,8 @@ struct SVCallFrame
   //! The function VCall_Thunk calls; set by VCall_Enter.
   void *pOrig;
   UINT_PTR nResult;       // rax
-  //! Set by VCall_Enter: VCall_Leave writes the result.
+  //! Set by VCall_Enter: FRAME_LOG, VCall_Leave writes the result; FRAME_DRAW, nPad holds the
+  //! element drawn before this mfDraw.
   UINT_PTR nFlags;
   float XmmResult[4];     // xmm0
   UINT_PTR nPad;
@@ -117,6 +120,15 @@ static int s_nRejected = 0;
 static void **volatile s_pLastVTable = NULL;
 static bool s_bInitialized = false;
 static bool s_bDisabled = false;
+
+enum
+{
+  FRAME_LOG = 1,
+  FRAME_DRAW = 2,
+};
+
+//! The render element whose mfDraw is running (the renderer draws on one thread).
+static CRendElement *s_pDrawingRE = NULL;
 
 static SModule s_Modules[nMaxModules];
 static volatile LONG s_nModules = 0;
@@ -225,12 +237,12 @@ static void ScreenCall_Enter(SVCallFrame *pFrame)
     {
       Trace_Write("[screenfx] %p mfSetParameter(process %d, param %d, value %p: %s) from %s", (void *)pFrame->Args[0], nProcess, nParam,
         (void *)pFrame->Args[3], ScreenValueText((void *)pFrame->Args[3]), Trace_Addr(pFrame->pReturn));
-      pFrame->nFlags = 1;
+      pFrame->nFlags |= FRAME_LOG;
     }
     break;
   case SPECIAL_ScreenGetParameter:
     if (CountScreenCall(pSlot->eSpecial, nProcess, nParam))
-      pFrame->nFlags = 1;
+      pFrame->nFlags |= FRAME_LOG;
     break;
   }
 }
@@ -304,6 +316,12 @@ extern "C" void VCall_Enter(SVCallFrame *pFrame)
   SVSlot *pSlot = pFrame->pSlot;
   pFrame->pOrig = pSlot->pOrig;
   pFrame->nFlags = 0;
+  if (pSlot->bDraw)
+  {
+    pFrame->nPad = (UINT_PTR)s_pDrawingRE;
+    s_pDrawingRE = (CRendElement *)pFrame->Args[0];
+    pFrame->nFlags = FRAME_DRAW;
+  }
   const int nModule = ModuleIndex(pFrame->pReturn);
   ECaller eCaller = nModule == s_nRenderer ? CALLER_Renderer : nModule == s_nSelf ? CALLER_Proxy : CALLER_Engine;
 #ifdef _WIN64
@@ -325,7 +343,7 @@ extern "C" void VCall_Enter(SVCallFrame *pFrame)
   }
   if (InterlockedIncrement(&pSlot->nLogged) > nLogPerSlot)
     return;
-  pFrame->nFlags = 1;
+  pFrame->nFlags |= FRAME_LOG;
   Trace_Write("[vcall] %s::%s(this %p, rdx 0x%llx, r8 0x%llx, r9 0x%llx; xmm1 %g, xmm2 %g, xmm3 %g; stack 0x%llx 0x%llx) from %s",
     pSlot->pTable->szName, pSlot->szMethod, (void *)pFrame->Args[0], (unsigned long long)pFrame->Args[1], (unsigned long long)pFrame->Args[2],
     (unsigned long long)pFrame->Args[3], pFrame->Xmm[1][0], pFrame->Xmm[2][0], pFrame->Xmm[3][0], (unsigned long long)pFrame->StackArgs[0],
@@ -335,7 +353,9 @@ extern "C" void VCall_Enter(SVCallFrame *pFrame)
 
 extern "C" void VCall_Leave(SVCallFrame *pFrame)
 {
-  if (!pFrame->nFlags)
+  if (pFrame->nFlags & FRAME_DRAW)
+    s_pDrawingRE = (CRendElement *)pFrame->nPad;
+  if (!(pFrame->nFlags & FRAME_LOG))
     return;
   SVSlot *pSlot = pFrame->pSlot;
   if (pSlot->eSpecial != SPECIAL_None)
@@ -507,6 +527,7 @@ static void InstallLocked(const char *szClass, void **pVTable, const char *szTag
     Slot.szMethod = pInfo->szMethods[i];
     Slot.pOrig = pVTable[i];
     Slot.eSpecial = SpecialOf(szClass, Slot.szMethod);
+    Slot.bDraw = !strcmp(Slot.szMethod, "mfDraw");
     WriteStub(pStubs + i * nStubSize, &Slot);
     pEntries[i] = pStubs + i * nStubSize;
   }
@@ -564,6 +585,13 @@ void VCallHooks_InstallRE(CRendElement *pRE)
     return;
   }
   VCallHooks_Install(szClass, pRE);
+}
+
+//////////////////////////////////////////////////////////////////////////
+
+CRendElement *VCallHooks_DrawingRE()
+{
+  return s_pDrawingRE;
 }
 
 //////////////////////////////////////////////////////////////////////////

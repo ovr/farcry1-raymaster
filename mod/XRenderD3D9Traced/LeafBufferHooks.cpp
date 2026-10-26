@@ -345,7 +345,10 @@ void CLeafBufferHooks::AddRE(CCObject *pObj, IShader *pEf, int nNumSort, IShader
 {
   TRACE_CALL("lb %p '%s' obj %p shader %p '%s' sort %d state %p", LB(), Source(), pObj, pEf, ShaderName(pEf), nNumSort, pStateEff);
   if (TRACE_DUMP)
+  {
+    Dump_LeafBuffer(LB());
     Dump_Object(pObj);
+  }
   LB_ORIG(LBS_AddRE, void, (CCObject *, IShader *, int, IShader *))(pObj, pEf, nNumSort, pStateEff);
 }
 

@@ -369,6 +369,11 @@ void Trace_CaptureFrame()
   s_bCapture = true;
 }
 
+bool Trace_IsCapturing()
+{
+  return s_bCapture;
+}
+
 //////////////////////////////////////////////////////////////////////////
 // Names
 

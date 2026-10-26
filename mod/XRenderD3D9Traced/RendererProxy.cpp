@@ -12,6 +12,7 @@
 #include "RendererProxy.h"
 #include "LeafBufferHooks.h"
 #include "D3DState.h"
+#include "D3DDraws.h"
 #include "VCallHooks.h"
 #include <I3DEngine.h>
 #include <IStatObj.h>
@@ -204,6 +205,8 @@ void CRendererProxy::BeginFrame()
 {
   TRACE_CALL("frame %d", m_nFrames + 1);
   Watch_NewFrame();
+  if (Trace_IsCapturing())
+    D3DDraws_Begin(m_pReal);
   m_pReal->BeginFrame();
 }
 
@@ -212,6 +215,7 @@ void CRendererProxy::Update()
   {
     TRACE_CALL("frame %d", m_nFrames + 1);
     m_pReal->Update();
+    D3DDraws_End();
     Trace_FrameEnd(++m_nFrames);
     if (m_nFrames + 1 == m_nCaptureFrame)
       Trace_CaptureFrame();

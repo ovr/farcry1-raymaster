@@ -16,8 +16,14 @@
 
 #pragma once
 
+struct IDirect3DDevice9;
+
+//! The device of the original renderer, or NULL if EF_Query does not return a Direct3D 9 device
+//! (checked by the module of its vtable).
+IDirect3DDevice9 *D3DState_GetDevice(IRenderer *pRenderer);
 //! Writes the device state after the traced call (lines starting with "    d3d").
 void D3DState_Write(IRenderer *pRenderer);
+void D3DState_WriteDevice(IDirect3DDevice9 *pDev);
 
 //! After the call of the original renderer, in a method that started with TRACE_CALL.
 #define TRACE_D3D_STATE(pRenderer) \

@@ -31,6 +31,8 @@ void Trace_FrameEnd(int nFrameID);
 void Trace_Restart(const char *szReason);
 //! Writes every call of the next frame (up to the next Trace_FrameEnd), regardless of xrt_TraceCalls.
 void Trace_CaptureFrame();
+//! Whether the current frame is the captured one.
+bool Trace_IsCapturing();
 
 struct STraceSite
 {

@@ -49,6 +49,8 @@ set(XRENDERD3D9TRACED_SOURCES
     VCallHooks.h
     D3DState.cpp
     D3DState.h
+    D3DDraws.cpp
+    D3DDraws.h
 )
 if(FARCRY_X64)
     # The common part of the virtual call hooks (x64 has no inline assembler).
