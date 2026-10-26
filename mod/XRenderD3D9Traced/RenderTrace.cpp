@@ -7,6 +7,9 @@
 
 #include "StdAfx.h"
 #include "RenderTrace.h"
+#include "FieldWatch.h"
+#include <map>
+#include <string>
 
 int CV_xrt_Trace = 2;
 int CV_xrt_TraceCalls = 30;
@@ -19,6 +22,8 @@ static int s_nExceptionsLogged = 0;
 static int s_nLastFrame = 0;
 static int s_nRestartFrame = 0;
 static bool s_bCapture = false;
+//! The thread that loaded the renderer (the engine's main thread).
+static DWORD s_dwMainThread = 0;
 
 //////////////////////////////////////////////////////////////////////////
 static void Trace_ModuleAddress(const void *pAddr, char *szOut, size_t nOut)
@@ -99,6 +104,7 @@ void Trace_Open(const char *szFileName)
   s_pTraceFile = fopen(szFileName, "wt");
   if (!s_pTraceFile)
     return;
+  s_dwMainThread = GetCurrentThreadId();
   SYSTEMTIME st;
   GetLocalTime(&st);
   Trace_Write("XRenderD3D9Traced trace, %04d-%02d-%02d %02d:%02d:%02d", st.wYear, st.wMonth, st.wDay, st.wHour, st.wMinute, st.wSecond);
@@ -193,6 +199,7 @@ STraceSite::STraceSite(const char *szName, const char *szSignature)
   m_szSignature[n] = 0;
   m_nCalls = 0;
   m_nFrameCalls = 0;
+  m_nOtherThreadCalls = 0;
   m_pNext = s_pSites;
   s_pSites = this;
 }
@@ -202,6 +209,22 @@ bool STraceSite::Hit()
   m_nCalls++;
   m_nFrameCalls++;
   return CV_xrt_Trace > 0 && s_pTraceFile && (m_nCalls <= CV_xrt_TraceCalls || s_bCapture);
+}
+
+STraceScope::STraceScope(STraceSite &Site) : m_Site(Site)
+{
+  m_bMainThread = GetCurrentThreadId() == s_dwMainThread;
+  if (m_bMainThread)
+    Watch_EnterRenderer(Site.m_szDisplay);
+  else if (Site.m_nOtherThreadCalls++ == 0)
+    Trace_Write("[thread] %s called from thread %u (the renderer was loaded by thread %u)", Site.m_szDisplay, GetCurrentThreadId(),
+      s_dwMainThread);
+}
+
+STraceScope::~STraceScope()
+{
+  if (m_bMainThread)
+    Watch_LeaveRenderer(m_Site.m_szDisplay);
 }
 
 void Trace_Call(const STraceSite &Site, const char *szFormat, ...)
@@ -232,6 +255,11 @@ void Trace_FrameEnd(int nFrameID)
       if (pSite->m_nFrameCalls)
         Trace_Write("  %6d  %s", pSite->m_nFrameCalls, pSite->m_szDisplay);
     }
+    for (STraceSite *pSite = s_pSites; pSite; pSite = pSite->m_pNext)
+    {
+      if (pSite->m_nOtherThreadCalls)
+        Trace_Write("  %s: %d calls from other threads so far", pSite->m_szDisplay, pSite->m_nOtherThreadCalls);
+    }
   }
   for (STraceSite *pSite = s_pSites; pSite; pSite = pSite->m_pNext)
     pSite->m_nFrameCalls = 0;
@@ -239,6 +267,7 @@ void Trace_FrameEnd(int nFrameID)
   {
     Trace_Write("==== end of captured frame %d ====", nFrameID);
     s_bCapture = false;
+    Watch_WriteSummary("after the captured frame");
   }
 }
 
@@ -264,6 +293,18 @@ static bool Trace_IsReadable(const void *p, size_t nSize)
   if (!p || !VirtualQuery(p, &mbi, sizeof(mbi)) || mbi.State != MEM_COMMIT || (mbi.Protect & (PAGE_NOACCESS | PAGE_GUARD)))
     return false;
   return (const char *)p + nSize <= (const char *)mbi.BaseAddress + mbi.RegionSize;
+}
+
+const char *Trace_HeapPrefix(const void *pBlock)
+{
+  static char s_szBuf[4][64];
+  static int s_nBuf = 0;
+  char *szOut = s_szBuf[s_nBuf++ & 3];
+  const DWORD *pPrefix = (const DWORD *)((const char *)pBlock - 16);
+  if (!pBlock || !Trace_IsReadable(pPrefix, 16))
+    return "(unreadable)";
+  sprintf_s(szOut, sizeof(s_szBuf[0]), "%08x %08x %08x %08x", pPrefix[0], pPrefix[1], pPrefix[2], pPrefix[3]);
+  return szOut;
 }
 
 const char *Trace_VTable(const void *pObject)
@@ -344,6 +385,134 @@ void Dump_Hex(const char *szName, const void *pData, int nSize)
   }
 }
 
+void Dump_HexLine(const char *szName, const void *pData, int nSize)
+{
+  char szLine[1024];
+  int n = _snprintf(szLine, sizeof(szLine), "    %s %p:", szName, pData);
+  const byte *p = (const byte *)pData;
+  for (int i = 0; i < nSize && n < (int)sizeof(szLine) - 4; i++)
+    n += _snprintf(szLine + n, sizeof(szLine) - n, i % 4 ? "%02x" : " %02x", p[i]);
+  Trace_Write("%s", szLine);
+}
+
+int Trace_HeapBlockSize(const void *pBlock)
+{
+  const DWORD *pPrefix = (const DWORD *)((const char *)pBlock - 4);
+  if (!Trace_IsReadable(pPrefix, 4))
+    return -1;
+  return (int)*pPrefix;
+}
+
+void Dump_Unknown(const char *szName, const void *pData, int nSize)
+{
+  Trace_Write("    %s @%p, %d bytes:", szName, pData, nSize);
+  if (!pData || !Trace_IsReadable(pData, nSize))
+    return;
+  const byte *p = (const byte *)pData;
+  for (int i = 0; i + 4 <= nSize; i += 4)
+  {
+    DWORD dw = *(const DWORD *)(p + i);
+    float f = *(const float *)(p + i);
+    char szLine[256];
+    int n = _snprintf(szLine, sizeof(szLine), "      +0x%03x  %08x  %11d", i, dw, (int)dw);
+    // A float with a plausible exponent (not a small integer, not a denormal).
+    int nExp = (dw >> 23) & 0xFF;
+    if (nExp > 100 && nExp < 160)
+      n += _snprintf(szLine + n, sizeof(szLine) - n, "  %g", f);
+    // A pointer to readable memory: the heap block size and the module of its first member.
+    if (i + 8 <= nSize)
+    {
+      const void *pPtr = *(const void *const *)(p + i);
+      if ((UINT_PTR)pPtr > 0x10000 && Trace_IsReadable(pPtr, sizeof(void *)))
+      {
+        const void *pFirst = *(const void *const *)pPtr;
+        n += _snprintf(szLine + n, sizeof(szLine) - n, "  ptr %p block 0x%x first %s", pPtr, Trace_HeapBlockSize(pPtr),
+          Trace_IsCode(pFirst) || Trace_IsCode(Trace_IsReadable(pFirst, sizeof(void *)) ? *(const void *const *)pFirst : NULL)
+            ? Trace_Addr(pFirst) : "data");
+      }
+    }
+    Trace_Write("%s", szLine);
+  }
+}
+
+//! Dump_Unknown, then the same for the data blocks it points to (not objects with a vtable).
+static void Dump_Tree(const std::string &sName, const void *p, int nSize, int nDepth)
+{
+  Dump_Unknown(sName.c_str(), p, nSize);
+  if (nDepth <= 0 || !Trace_IsReadable(p, nSize))
+    return;
+  const byte *b = (const byte *)p;
+  for (int i = 0; i + 8 <= nSize; i += 4)
+  {
+    const void *pPtr = *(const void *const *)(b + i);
+    if ((UINT_PTR)pPtr <= 0x10000 || pPtr == p || !Trace_IsReadable(pPtr, sizeof(void *)))
+      continue;
+    const void *pFirst = *(const void *const *)pPtr;
+    if (Trace_IsCode(pFirst) || (Trace_IsReadable(pFirst, sizeof(void *)) && Trace_IsCode(*(const void *const *)pFirst)))
+      continue;
+    int nBlock = Trace_HeapBlockSize(pPtr);
+    char szSub[32];
+    // A list2: the pointer is followed by the count and the allocated count.
+    if (i + 16 <= nSize)
+    {
+      int nCount = *(const int *)(b + i + 8), nAllocated = *(const int *)(b + i + 12);
+      if (nCount > 0 && nCount <= nAllocated && nAllocated < 0x10000 && nBlock > 0 && nBlock % nAllocated == 0)
+      {
+        int nElement = nBlock / nAllocated;
+        Trace_Write("    %s +0x%02x: list2 of %d (%d allocated), 0x%x bytes per element", sName.c_str(), i, nCount, nAllocated,
+          nElement);
+        sprintf_s(szSub, sizeof(szSub), " +0x%02x[0]", i);
+        if (nElement <= 0x400)
+          Dump_Tree(sName + szSub, pPtr, nElement, nDepth - 1);
+        continue;
+      }
+    }
+    if (nBlock <= 0 || nBlock > 0x400)
+      continue;
+    sprintf_s(szSub, sizeof(szSub), " +0x%02x->", i);
+    Dump_Tree(sName + szSub, pPtr, nBlock, nDepth - 1);
+  }
+}
+
+const void *g_pTraceLastShadowCasters = NULL;
+
+void Dump_Opaque(const char *szName, const void *p, int nMaxDumps, int nDepth)
+{
+  if (!p)
+    return;
+  // Counted separately for the captured frame.
+  static std::map<std::string, int> s_Dumps[2];
+  int &nDumps = s_Dumps[s_bCapture][szName];
+  if (nDumps >= nMaxDumps)
+    return;
+  nDumps++;
+  int nSize = Trace_HeapBlockSize(p);
+  Trace_Write("    %s @%p: heap block 0x%x", szName, p, nSize);
+  Dump_Tree(szName, p, nSize > 0 && nSize <= 0x400 ? nSize : 0x100, nDepth);
+}
+
+void Dump_OpaqueList(const char *szName, const void *pList, int nMaxDumps, int nDepth)
+{
+  if (!pList || !Trace_IsReadable(pList, sizeof(list2<char>)))
+    return;
+  // The element type is unknown; as a list of chars, GetMemoryUsage() is the allocated count.
+  list2<char> &List = *(list2<char> *)pList;
+  const void *pElements = List.Count() ? &List[0] : NULL;
+  int nAllocated = List.GetMemoryUsage();
+  int nBlock = Trace_HeapBlockSize(pElements);
+  int nElement = nAllocated > 0 && nBlock > 0 ? nBlock / nAllocated : 0;
+  // Counted separately for the captured frame.
+  static std::map<std::string, int> s_Dumps[2];
+  int &nDumps = s_Dumps[s_bCapture][szName];
+  if (nDumps >= nMaxDumps)
+    return;
+  nDumps++;
+  Trace_Write("    %s @%p: %d elements (%d allocated) @%p, heap block 0x%x -> 0x%x per element", szName, pList, List.Count(),
+    nAllocated, pElements, nBlock, nElement);
+  for (int i = 0; i < List.Count() && i < 2 && nElement > 0 && nElement <= 0x400; i++)
+    Dump_Tree(szName, (const char *)pElements + i * nElement, nElement, nDepth);
+}
+
 void Dump_Matrix(const char *szName, const float *m)
 {
   Trace_Write("    %s: [%.3f %.3f %.3f %.3f] [%.3f %.3f %.3f %.3f] [%.3f %.3f %.3f %.3f] [%.3f %.3f %.3f %.3f]", szName,
@@ -374,6 +543,10 @@ void Dump_Object(const CCObject *pObj)
     pObj->m_RE, pObj->m_EF, pObj->m_CustomData, pObj->m_nLMId, pObj->m_nLMDirId, pObj->m_nOcclId, pObj->m_DynLMMask,
     pObj->m_fHeatFactor, pObj->m_pShadowCasters, pObj->m_pCharInstance, pObj->m_pLMTCBufferO);
   Dump_Matrix("matrix", (const float *)&pObj->m_Matrix);
+  Dump_OpaqueList("CCObject::m_pShadowCasters", pObj->m_pShadowCasters);
+  if (pObj->m_pShadowCasters)
+    g_pTraceLastShadowCasters = pObj->m_pShadowCasters;
+  Dump_Opaque("CCObject::m_pShadowFrustum", pObj->m_pShadowFrustum);
 }
 
 void Dump_Shader(IShader *pSH)
@@ -568,6 +741,7 @@ void Dump_Light(const CDLight *pL)
   Trace_Write("      projAngles (%.2f %.2f %.2f) frustum %.2f shader %p image %p owner %p style %d corona %.2f lifeTime %.2f creator '%.8s'",
     pL->m_ProjAngles.x, pL->m_ProjAngles.y, pL->m_ProjAngles.z, pL->m_fLightFrustumAngle, pL->m_pShader, pL->m_pLightImage,
     pL->m_pOwner, pL->m_nLightStyle, pL->m_fCoronaScale, pL->m_fLifeTime, pL->m_sDebugName);
+  Dump_Opaque("CDLight::m_pShadowMapLightSource", pL->m_pShadowMapLightSource);
 }
 
 void Dump_Vertices(const char *szName, const void *pData, int nFormat, int nVerts, int nMax)
@@ -715,6 +889,7 @@ void Dump_RendParams(const SRendParams &rp)
     rp.pShaderParams, rp.pCCObjCustomData);
   if (rp.pMatrix)
     Dump_Matrix("matrix", (const float *)rp.pMatrix);
+  Dump_OpaqueList("SRendParams::pShadowMapCasters", rp.pShadowMapCasters);
 }
 
 void Dump_VertexBufferSource(const VertexBufferSource *p)

@@ -8,7 +8,9 @@
 
 #include "StdAfx.h"
 #include "RenderTrace.h"
+#include "FieldWatch.h"
 #include "RendererProxy.h"
+#include <CREPolyMesh.h>
 
 static const char *ShaderName(IShader *pSH)
 {
@@ -172,8 +174,10 @@ SShaderItem CRendererProxy::EF_LoadShaderItem(const char *name, EShClass Class, 
     (unsigned long long)nMaskGen);
   if (TRACE_DUMP && Res)
     Dump_InputResources(Res);
+  CWatchArg WatchRes(WT_SInputShaderResources, Res);
   SShaderItem Item = m_pReal->EF_LoadShaderItem(name, Class, bShare, templName, flags, Res, nMaskGen);
   TRACE_RESULT("shader %p res %p", Item.m_pShader, Item.m_pShaderResources);
+  Watch_RendererObject(WT_SRenderShaderResources, Item.m_pShaderResources);
   if (TRACE_DUMP)
   {
     Dump_Shader(Item.m_pShader);
@@ -342,12 +346,37 @@ int CRendererProxy::GetGlobalShaderTemplateId()
 //////////////////////////////////////////////////////////////////////////
 // Render elements, objects, the scene
 
+//! Size of the SDK class of a render element type in this build, 0 if the SDK has no class for it.
+static int SdkRESize(EDataType edt)
+{
+  switch (edt)
+  {
+  case eDATA_Dummy:             return sizeof(CREDummy);
+  case eDATA_Sky:               return sizeof(CRESky);
+  case eDATA_Poly:              return sizeof(CREPolyMesh);
+  case eDATA_TriMeshShadow:     return sizeof(CRETriMeshShadow);
+  case eDATA_OcLeaf:            return sizeof(CREOcLeaf);
+  case eDATA_TerrainSector:     return sizeof(CRECommon);
+  case eDATA_2DQuad:            return sizeof(CRE2DQuad);
+  case eDATA_Glare:             return sizeof(CREGlare);
+  case eDATA_OcclusionQuery:    return sizeof(CREOcclusionQuery);
+  case eDATA_FlashBang:         return sizeof(CREFlashBang);
+  case eDATA_ScreenProcess:     return sizeof(CREScreenProcess);
+  default:                      return 0;
+  }
+}
+
 CRendElement *CRendererProxy::EF_CreateRE(EDataType edt)
 {
   TRACE_CALL("%s(%d)", Trace_RETypeName(edt), edt);
   CRendElement *pRes = m_pReal->EF_CreateRE(edt);
   // The vtable identifies the CRE* class in the original renderer.
-  TRACE_RESULT("%p (vtbl %s), retail size 0x%x", pRes, Trace_VTable(pRes), RetailRenderer::RESize(edt));
+  TRACE_RESULT("%p (vtbl %s), retail size 0x%x, SDK size 0x%x, heap prefix %s", pRes, Trace_VTable(pRes), RetailRenderer::RESize(edt),
+    SdkRESize(edt), Trace_HeapPrefix(pRes));
+  // CScreenVars is only declared in the SDK.
+  if (pRes && edt == eDATA_ScreenProcess)
+    TRACE_RESULT("screen vars %p, heap prefix %s", ((CREScreenProcess *)pRes)->GetVars(), Trace_HeapPrefix(((CREScreenProcess *)pRes)->GetVars()));
+  Watch_RenderElement(pRes);
   return pRes;
 }
 
@@ -362,6 +391,7 @@ CCObject *CRendererProxy::EF_GetObject(bool bTemp, int num)
   TRACE_CALL("temp %d num %d", bTemp, num);
   CCObject *pRes = m_pReal->EF_GetObject(bTemp, num);
   TRACE_RESULT("%p id %d", pRes, pRes ? pRes->m_Id : -1);
+  Watch_RendererObject(WT_CCObject, pRes);
   return pRes;
 }
 
@@ -376,12 +406,20 @@ void CRendererProxy::EF_AddEf(int NumFog, CRendElement *re, IShader *ef, SRender
     Dump_Object(obj);
   }
   m_pReal->EF_AddEf(NumFog, re, ef, sr, obj, nTempl, efState, nSort);
+  Watch_RenderElement(re);
+  Watch_RendererObject(WT_CCObject, obj);
+  Watch_RendererObject(WT_SRenderShaderResources, sr);
 }
 
 void CRendererProxy::EF_EndEf3D(int nFlags)
 {
   TRACE_CALL("flags 0x%x", nFlags);
+  // What drawing the frame changes in the shadow casters (frustums, light sources).
+  const void *pCasters = TRACE_DUMP ? g_pTraceLastShadowCasters : NULL;
+  Dump_OpaqueList("shadow casters before EF_EndEf3D", pCasters);
   m_pReal->EF_EndEf3D(nFlags);
+  Dump_OpaqueList("shadow casters after EF_EndEf3D", pCasters);
+  g_pTraceLastShadowCasters = NULL;
 }
 
 void CRendererProxy::EF_EndEf2D(bool bSort)
@@ -406,6 +444,7 @@ void CRendererProxy::EF_ADDDlight(CDLight *Source)
   TRACE_CALL("%p", Source);
   if (TRACE_DUMP)
     Dump_Light(Source);
+  CWatchArg WatchLight(WT_CDLight, Source);
   m_pReal->EF_ADDDlight(Source);
   TRACE_RESULT("id %d", Source ? Source->m_Id : -1);
 }
@@ -421,6 +460,7 @@ bool CRendererProxy::EF_UpdateDLight(CDLight *pDL)
   TRACE_CALL("%p", pDL);
   if (TRACE_DUMP)
     Dump_Light(pDL);
+  CWatchArg WatchLight(WT_CDLight, pDL);
   bool bRes = m_pReal->EF_UpdateDLight(pDL);
   TRACE_RESULT("%d", bRes);
   return bRes;

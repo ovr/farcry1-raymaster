@@ -7,6 +7,7 @@
 
 #include "StdAfx.h"
 #include "RenderTrace.h"
+#include "FieldWatch.h"
 #include "LeafBufferHooks.h"
 
 using namespace RetailRenderer;
@@ -102,6 +103,7 @@ void CLeafBufferHooks::CreateBufferFromMesh(CIndexedMesh *pTriData, bool bStripi
     bRemoveNoDrawFaces, bKeepRemapTable);
   if (TRACE_DUMP)
     Dump_IndexedMesh(pTriData);
+  CWatchArg WatchMesh(WT_CIndexedMesh, pTriData);
   LB_ORIG(LBS_CreateBufferFromMesh, void, (CIndexedMesh *, bool, bool, bool))(pTriData, bStripifyAndShareVerts, bRemoveNoDrawFaces, bKeepRemapTable);
   if (TRACE_DUMP)
     Dump_LeafBufferGeometry(LB());
@@ -112,6 +114,7 @@ bool CLeafBufferHooks::CreateBufferFromSource(VertexBufferSource *pSource)
   TRACE_CALL("lb %p '%s' source %p", LB(), Source(), pSource);
   if (TRACE_DUMP)
     Dump_VertexBufferSource(pSource);
+  CWatchArg WatchSource(WT_VertexBufferSource, pSource);
   bool bRes = LB_ORIG(LBS_CreateBufferFromSource, bool, (VertexBufferSource *))(pSource);
   TRACE_RESULT("%d", bRes);
   if (TRACE_DUMP)
@@ -321,6 +324,7 @@ void CLeafBufferHooks::Render(const SRendParams &rParams, CCObject *pObj, TArray
     Dump_RendParams(rParams);
     Dump_Object(pObj);
   }
+  CWatchArg WatchParams(WT_SRendParams, &rParams);
   LB_ORIG(LBS_Render, void, (const SRendParams &, CCObject *, TArray<int> &, int, bool, IMatInfo *, bool))(rParams, pObj, ShaderTemplates,
     e_overlay_geometry, bNotCurArea, pMaterial, bSupportDefaultShaderTemplates);
 }

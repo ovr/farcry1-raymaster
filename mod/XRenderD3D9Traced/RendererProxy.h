@@ -250,11 +250,19 @@ public:
   virtual float EF_GetWaterZElevation(float fX, float fY) override;
 
 private:
+  //! Runs console commands separated by ';' (outside any traced call).
+  void ExecuteCommands(const char *szCommands);
+
   IRenderer *m_pReal;
   int m_nRealType;
   //! Console commands executed once after frame m_nExecFrame (XRENDERTRACED_EXEC, separated by ';').
   char m_szExec[512];
   int m_nExecFrame;
+  //! Console commands executed m_nExecLevelAfterLoad frames after each level load
+  //! (XRENDERTRACED_EXEC_LEVEL and XRENDERTRACED_EXEC_LEVEL_FRAME), e.g. to move the player.
+  char m_szExecLevel[512];
+  int m_nExecLevelAfterLoad;
+  int m_nExecLevelFrame;
   //! Every call of the m_nCaptureAfterLoad-th frame after a level load is written out
   //! (XRENDERTRACED_CAPTURE, 0 - off); m_nCaptureFrame is that frame of the current level.
   int m_nCaptureAfterLoad;

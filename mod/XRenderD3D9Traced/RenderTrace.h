@@ -44,15 +44,29 @@ struct STraceSite
   char m_szSignature[192];
   int m_nCalls;
   int m_nFrameCalls;
+  //! Calls from other threads than the one that loaded the renderer (logged once per method).
+  int m_nOtherThreadCalls;
   STraceSite *m_pNext;
 };
 
 void Trace_Call(const STraceSite &Site, const char *szFormat, ...);
 
+//! Marks the time spent in a traced method; the outermost one is a call of the engine into the
+//! renderer (see FieldWatch.h).
+struct STraceScope
+{
+  explicit STraceScope(STraceSite &Site);
+  ~STraceScope();
+
+  STraceSite &m_Site;
+  bool m_bMainThread;
+};
+
 //! Logs the call of the enclosing method (printf-style arguments) and defines bTraced, which tells
 //! whether the call was written out (and so its structures and result may be written too).
 #define TRACE_CALL(...) \
   static STraceSite s_TraceSite(__FUNCTION__, __FUNCSIG__); \
+  STraceScope TraceScope(s_TraceSite); \
   const bool bTraced = s_TraceSite.Hit() && (Trace_Call(s_TraceSite, __VA_ARGS__), true)
 
 #define TRACE_DUMP (bTraced && CV_xrt_Trace >= 2)
@@ -71,6 +85,10 @@ const char *Trace_Addr(const void *pAddr);
 const char *Trace_VTable(const void *pObject);
 //! Whether the address is inside executable code of a loaded module.
 bool Trace_IsCode(const void *pAddr);
+//! The 16 bytes in front of a heap block as four hex dwords (the heap's block header).
+const char *Trace_HeapPrefix(const void *pBlock);
+//! Size of a CrySystem heap block (the dword in front of it), or -1.
+int Trace_HeapBlockSize(const void *pBlock);
 
 //////////////////////////////////////////////////////////////////////////
 // Structure dumps (guard them with TRACE_DUMP).
@@ -85,6 +103,18 @@ const char *Trace_RETypeName(int nType);
 const char *Trace_VertexFormatName(int nFormat);
 
 void Dump_Hex(const char *szName, const void *pData, int nSize);
+//! The bytes on one line, grouped by dwords (for comparing many objects of one type).
+void Dump_HexLine(const char *szName, const void *pData, int nSize);
+//! A structure of unknown layout, one dword per line: as integer, as float where plausible, and
+//! where 8 bytes point to readable memory, the heap block size and the module of its first member.
+void Dump_Unknown(const char *szName, const void *pData, int nSize);
+//! A structure the SDK only declares, as large as its heap block; the first nMaxDumps per name.
+//! Data blocks it points to are dumped too, nDepth levels deep.
+void Dump_Opaque(const char *szName, const void *p, int nMaxDumps = 3, int nDepth = 2);
+//! A list2 of such structures: the element size from the heap block of the elements.
+void Dump_OpaqueList(const char *szName, const void *pList, int nMaxDumps = 3, int nDepth = 3);
+//! The last CCObject::m_pShadowCasters dumped (to see what drawing the frame changed in it).
+extern const void *g_pTraceLastShadowCasters;
 void Dump_Matrix(const char *szName, const float *pM);
 void Dump_Camera(const CCamera &Cam);
 void Dump_Object(const CCObject *pObj);

@@ -7,6 +7,7 @@
 
 #include "StdAfx.h"
 #include "RenderTrace.h"
+#include "FieldWatch.h"
 #include "RendererProxy.h"
 #include "LeafBufferHooks.h"
 
@@ -57,6 +58,7 @@ CVertexBuffer *CRendererProxy::CreateBuffer(int vertexcount, int vertexformat, c
   TRACE_CALL("verts %d format %s(%d) '%s' dynamic %d", vertexcount, Trace_VertexFormatName(vertexformat), vertexformat, szSource, bDynamic);
   CVertexBuffer *pRes = m_pReal->CreateBuffer(vertexcount, vertexformat, szSource, bDynamic);
   TRACE_RESULT("%p", pRes);
+  Watch_RendererObject(WT_CVertexBuffer, pRes);
   if (TRACE_DUMP)
     Dump_VertexBuffer("created", pRes, 0);
   return pRes;
@@ -65,6 +67,7 @@ CVertexBuffer *CRendererProxy::CreateBuffer(int vertexcount, int vertexformat, c
 void CRendererProxy::ReleaseBuffer(CVertexBuffer *bufptr)
 {
   TRACE_CALL("%p", bufptr);
+  Watch_Forget(bufptr);
   m_pReal->ReleaseBuffer(bufptr);
 }
 
@@ -130,11 +133,13 @@ CLeafBuffer *CRendererProxy::CreateLeafBuffer(bool bDynamic, const char *szSourc
   TRACE_CALL("dynamic %d '%s' mesh %p", bDynamic, szSource, pIndexedMesh);
   if (TRACE_DUMP && pIndexedMesh)
     Dump_IndexedMesh(pIndexedMesh);
+  CWatchArg WatchMesh(WT_CIndexedMesh, pIndexedMesh);
   CLeafBuffer *pRes = m_pReal->CreateLeafBuffer(bDynamic, szSource, pIndexedMesh);
-  TRACE_RESULT("%p (vtbl %s)", pRes, Trace_VTable(pRes));
+  TRACE_RESULT("%p (vtbl %s) heap prefix %s, SDK size 0x%x", pRes, Trace_VTable(pRes), Trace_HeapPrefix(pRes), (int)sizeof(CLeafBuffer));
   if (TRACE_DUMP)
     Dump_LeafBuffer(pRes);
   LeafBufferHooks_Install(pRes);
+  Watch_RendererObject(WT_CLeafBuffer, pRes);
   return pRes;
 }
 
@@ -150,15 +155,17 @@ CLeafBuffer *CRendererProxy::CreateLeafBufferInitialized(void *pVertBuffer, int 
   }
   CLeafBuffer *pRes = m_pReal->CreateLeafBufferInitialized(pVertBuffer, nVertCount, nVertFormat, pIndices, nIndices, nPrimetiveType,
     szSource, eBufType, nMatInfoCount, nClientTextureBindID, PrepareBufferCallback, CustomData, bOnlyVideoBuffer, bPrecache);
-  TRACE_RESULT("%p (vtbl %s)", pRes, Trace_VTable(pRes));
+  TRACE_RESULT("%p (vtbl %s) heap prefix %s, SDK size 0x%x", pRes, Trace_VTable(pRes), Trace_HeapPrefix(pRes), (int)sizeof(CLeafBuffer));
   if (TRACE_DUMP)
     Dump_LeafBuffer(pRes);
   LeafBufferHooks_Install(pRes);
+  Watch_RendererObject(WT_CLeafBuffer, pRes);
   return pRes;
 }
 
 void CRendererProxy::DeleteLeafBuffer(CLeafBuffer *pLBuffer)
 {
   TRACE_CALL("%p '%s'", pLBuffer, pLBuffer && pLBuffer->m_sSource ? pLBuffer->m_sSource : "");
+  Watch_Forget(pLBuffer);
   m_pReal->DeleteLeafBuffer(pLBuffer);
 }

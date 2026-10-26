@@ -8,8 +8,11 @@
 
 #include "StdAfx.h"
 #include "RenderTrace.h"
+#include "FieldWatch.h"
 #include "RendererProxy.h"
 #include "LeafBufferHooks.h"
+#include <I3DEngine.h>
+#include <IStatObj.h>
 
 static const void *s_pProxyVTable = NULL;
 
@@ -32,6 +35,17 @@ CRendererProxy::CRendererProxy(IRenderer *pReal, int nRealType)
     m_nExecFrame = atoi(szFrame);
   if (m_szExec[0])
     Trace_Write("Will execute '%s' after frame %d", m_szExec, m_nExecFrame);
+  m_nExecLevelAfterLoad = 100;
+  m_nExecLevelFrame = -1;
+  nLen = GetEnvironmentVariableA("XRENDERTRACED_EXEC_LEVEL", m_szExecLevel, sizeof(m_szExecLevel));
+  if (!nLen || nLen >= sizeof(m_szExecLevel))
+    m_szExecLevel[0] = 0;
+  nLen = GetEnvironmentVariableA("XRENDERTRACED_EXEC_LEVEL_FRAME", szFrame, sizeof(szFrame));
+  if (nLen && nLen < sizeof(szFrame))
+    m_nExecLevelAfterLoad = atoi(szFrame);
+  if (m_szExecLevel[0])
+    Trace_Write("Will execute '%s' %d frames after each level load", m_szExecLevel, m_nExecLevelAfterLoad);
+  Watch_Init();
 
   // A complete frame of a level in the log, e.g. XRENDERTRACED_CAPTURE=300.
   m_nCaptureAfterLoad = 0;
@@ -139,6 +153,7 @@ bool CRendererProxy::ChangeResolution(int nNewWidth, int nNewHeight, int nNewCol
 void CRendererProxy::Release()
 {
   TRACE_CALL("");
+  Watch_WriteSummary("renderer released");
   LeafBufferHooks_Uninstall();
   m_pReal->Release();
   m_pReal = NULL;
@@ -174,6 +189,8 @@ void CRendererProxy::PostLoad()
   Trace_Restart("PostLoad");
   if (m_nCaptureAfterLoad > 0)
     m_nCaptureFrame = m_nFrames + m_nCaptureAfterLoad;
+  if (m_szExecLevel[0])
+    m_nExecLevelFrame = m_nFrames + m_nExecLevelAfterLoad;
 }
 
 //////////////////////////////////////////////////////////////////////////
@@ -182,27 +199,43 @@ void CRendererProxy::PostLoad()
 void CRendererProxy::BeginFrame()
 {
   TRACE_CALL("frame %d", m_nFrames + 1);
+  Watch_NewFrame();
   m_pReal->BeginFrame();
 }
 
 void CRendererProxy::Update()
 {
-  TRACE_CALL("frame %d", m_nFrames + 1);
-  m_pReal->Update();
-  Trace_FrameEnd(++m_nFrames);
-  if (m_nFrames + 1 == m_nCaptureFrame)
-    Trace_CaptureFrame();
-  if (m_nFrames == m_nExecFrame && m_szExec[0] && iConsole)
   {
-    char *szContext = NULL;
-    for (char *szCmd = strtok_s(m_szExec, ";", &szContext); szCmd; szCmd = strtok_s(NULL, ";", &szContext))
-    {
-      while (*szCmd == ' ')
-        szCmd++;
-      Trace_Write("Executing '%s'", szCmd);
-      iConsole->ExecuteString(szCmd, false, true);
-    }
+    TRACE_CALL("frame %d", m_nFrames + 1);
+    m_pReal->Update();
+    Trace_FrameEnd(++m_nFrames);
+    if (m_nFrames + 1 == m_nCaptureFrame)
+      Trace_CaptureFrame();
+  }
+  // Outside the traced call: the commands run engine code (a level load) that calls the renderer,
+  // and those calls are calls of the engine, not of the renderer to itself.
+  if (m_nFrames == m_nExecFrame && m_szExec[0])
+  {
+    ExecuteCommands(m_szExec);
     m_szExec[0] = 0;
+  }
+  if (m_nFrames == m_nExecLevelFrame)
+    ExecuteCommands(m_szExecLevel);
+}
+
+void CRendererProxy::ExecuteCommands(const char *szCommands)
+{
+  if (!iConsole)
+    return;
+  char szCopy[512];
+  strcpy_s(szCopy, szCommands);
+  char *szContext = NULL;
+  for (char *szCmd = strtok_s(szCopy, ";", &szContext); szCmd; szCmd = strtok_s(NULL, ";", &szContext))
+  {
+    while (*szCmd == ' ')
+      szCmd++;
+    Trace_Write("Executing '%s'", szCmd);
+    iConsole->ExecuteString(szCmd, false, true);
   }
 }
 
@@ -266,6 +299,7 @@ void CRendererProxy::SetCamera(const CCamera &cam)
   TRACE_CALL("cam %p", &cam);
   if (TRACE_DUMP)
     Dump_Camera(cam);
+  CWatchArg WatchCamera(WT_CCamera, &cam);
   m_pReal->SetCamera(cam);
 }
 
@@ -977,6 +1011,40 @@ void CRendererProxy::FlushTextMessages()
 void CRendererProxy::DrawObjSprites(list2<CStatObjInst *> *pList, float fMaxViewDist, CObjManager *pObjMan)
 {
   TRACE_CALL("list %p (%d) maxViewDist %g objManager %p", pList, pList ? pList->Count() : -1, fMaxViewDist, pObjMan);
+  // CStatObjInst and CObjManager are 3D engine types the SDK only declares: their sizes (heap block
+  // headers) and the first instances as they are passed.
+  if (bTraced)
+  {
+    Trace_Write("    objManager heap prefix %s", Trace_HeapPrefix(pObjMan));
+    for (int i = 0; pList && i < pList->Count() && i < 2; i++)
+      Trace_Write("    instance %d %p heap prefix %s", i, (*pList)[i], Trace_HeapPrefix((*pList)[i]));
+  }
+  if (TRACE_DUMP)
+  {
+    // Once: the object manager and the vegetation groups of the level (public I3DEngine interface).
+    static bool s_bOnce = false;
+    I3DEngine *p3DEngine = iSystem ? iSystem->GetI3DEngine() : NULL;
+    if (!s_bOnce && p3DEngine)
+    {
+      s_bOnce = true;
+      Dump_Unknown("CObjManager", pObjMan, 0x328);
+      for (int g = 0; g < 256; g++)
+      {
+        IStatInstGroup Group;
+        if (!p3DEngine->GetStatInstGroup(g, Group) || !Group.pStatObj)
+          continue;
+        Trace_Write("    group %d: statObj %p '%s' radius %g brightness %g spriteDistRatio %g maxViewDistRatio %g useSprites %d "
+          "spriteTexRes %d bending %g", g, Group.pStatObj, Group.pStatObj->GetFileName(), Group.pStatObj->GetRadius(),
+          Group.fBrightness, Group.fSpriteDistRatio, Group.fMaxViewDistRatio, Group.bUseSprites, Group.nSpriteTexRes, Group.fBending);
+      }
+    }
+    for (int i = 0; pList && i < pList->Count(); i++)
+    {
+      if (i < 2)
+        Dump_Unknown("CStatObjInst", (*pList)[i], 0x90);
+      Dump_HexLine("inst", (*pList)[i], 0x90);
+    }
+  }
   m_pReal->DrawObjSprites(pList, fMaxViewDist, pObjMan);
 }
 
@@ -1088,8 +1156,16 @@ ShadowMapFrustum *CRendererProxy::MakeShadowMapFrustum(ShadowMapFrustum *lof, Sh
 {
   TRACE_CALL("frustum %p lightSource %p pos " TRACE_V3 " statObjs %p (%d) type %d", lof, pLs, TRACE_V3_ARGS(obj_pos), pStatObjects,
     pStatObjects ? pStatObjects->Count() : -1, shadow_type);
+  if (TRACE_DUMP)
+  {
+    Dump_Opaque("ShadowMapFrustum (in)", lof);
+    Dump_Opaque("ShadowMapLightSource", pLs);
+  }
   ShadowMapFrustum *pRes = m_pReal->MakeShadowMapFrustum(lof, pLs, obj_pos, pStatObjects, shadow_type);
-  TRACE_RESULT("%p", pRes);
+  // ShadowMapFrustum and ShadowMapLightSource are only declared in the SDK: their heap block headers.
+  TRACE_RESULT("%p, heap prefix: frustum %s, light source %s", pRes, Trace_HeapPrefix(pRes), Trace_HeapPrefix(pLs));
+  if (TRACE_DUMP)
+    Dump_Opaque("ShadowMapFrustum (out)", pRes);
   return pRes;
 }
 

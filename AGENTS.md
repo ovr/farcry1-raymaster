@@ -34,5 +34,11 @@ it as well: it holds local, machine-specific instructions and is not committed (
 - Run `farcry1_testing1/Bin64/FarCry.exe` with `farcry1_testing1` as the working directory.
   `XRENDERTRACED_EXEC="map training"` (and `XRENDERTRACED_EXEC_FRAME`) loads a level without
   input; `XRENDERTRACED_CAPTURE=300` writes every call of the 300th frame after the level load.
+  `XRENDERTRACED_WATCH=1` (with `XRENDERTRACED_WATCH_MAX`, default 64) records which members of
+  the shared structures the engine and the renderer write (`FieldWatch.h`); the summary is
+  written after the captured frame. `XRENDERTRACED_EXEC_LEVEL` runs commands
+  `XRENDERTRACED_EXEC_LEVEL_FRAME` frames (default 100) after each level load. Settings that are
+  off in `system.cfg` (e.g. `e_shadow_maps 1; e_stencil_shadows 1`) go in front of the `map`
+  command in `XRENDERTRACED_EXEC`; the game is stopped by killing it, so `system.cfg` stays as it is.
 - The log is `farcry1_testing1/XRenderD3D9Traced.log`; the engine log is
   `farcry1_testing1/log.txt`.
