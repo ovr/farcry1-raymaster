@@ -292,6 +292,9 @@ private:
   int m_nCaptureFrame;
   //! Frames finished by Update (the engine's frame ID also counts recursive scene renders).
   int m_nFrames;
+  //! XRENDERTRACED_FLARES: the object of the flare added this frame (written again after EF_EndEf3D).
+  CCObject *m_pFlareObj = NULL;
+  void WriteFlareObject(const char *szWhen, const char *szShader);
   //! XRENDERTRACED_SCREENFX_WATCH="8.24,8.30": after every frame the values of these screen effect
   //! parameters (process.param) are read from the ScreenProcess element the engine adds, and
   //! written when they change.

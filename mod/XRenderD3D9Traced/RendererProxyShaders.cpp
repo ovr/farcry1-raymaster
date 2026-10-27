@@ -476,6 +476,37 @@ void CRendererProxy::EF_AddEf(int NumFog, CRendElement *re, IShader *ef, SRender
     Dump_RenderResources(sr);
     Dump_Object(obj);
   }
+  // XRENDERTRACED_PROBE=FlareInView: a flare is moved onto the line of sight of the camera, at its
+  // own distance, to see how the renderer draws one in view; XRENDERTRACED_FLARE_DIR="dx dy" turns
+  // that line by dx times the right and dy times the up vector of the view.
+  if (re && re->m_Type == eDATA_Flare && obj && Trace_IsListed("XRENDERTRACED_PROBE", "FlareInView"))
+  {
+    const CCamera &Cam = m_pReal->GetCamera();
+    const Matrix44 View = Cam.GetVCMatrixD3D9();
+    const Vec3 Eye = Cam.GetPos();
+    const Vec3 Pos(obj->m_Matrix(3, 0), obj->m_Matrix(3, 1), obj->m_Matrix(3, 2));
+    float fRight = 0, fUp = 0;
+    if (const char *szDir = getenv("XRENDERTRACED_FLARE_DIR"))
+      sscanf_s(szDir, "%f %f", &fRight, &fUp);
+    // The view space looks down -z.
+    Vec3 Dir = Vec3(-View(0, 2), -View(1, 2), -View(2, 2)) + Vec3(View(0, 0), View(1, 0), View(2, 0)) * fRight
+      + Vec3(View(0, 1), View(1, 1), View(2, 1)) * fUp;
+    Dir.Normalize();
+    const Vec3 New = Eye + Dir * (Pos - Eye).Length();
+    Trace_Write("    probe: flare from (%.3f %.3f %.3f) to (%.3f %.3f %.3f)", Pos.x, Pos.y, Pos.z, New.x, New.y, New.z);
+    obj->m_Matrix(3, 0) = New.x;
+    obj->m_Matrix(3, 1) = New.y;
+    obj->m_Matrix(3, 2) = New.z;
+  }
+  // XRENDERTRACED_FLARES=1: the object of a flare as the engine passes it (with what the renderer
+  // left in it the frame before: its fade), every frame, and again after EF_EndEf3D.
+  if (re && re->m_Type == eDATA_Flare && obj && Trace_IsListed("XRENDERTRACED_FLARES", "1"))
+  {
+    m_pFlareObj = obj;
+    WriteFlareObject("", ShaderName(ef));
+  }
+  // The elements of a shader (GetREs, e.g. the flares) reach the renderer only here.
+  VCallHooks_InstallRE(re);
   m_pReal->EF_AddEf(NumFog, re, ef, sr, obj, nTempl, efState, nSort);
   Watch_RenderElement(re);
   Watch_RendererObject(WT_CCObject, obj);
@@ -491,6 +522,25 @@ void CRendererProxy::EF_EndEf3D(int nFlags)
   m_pReal->EF_EndEf3D(nFlags);
   Dump_OpaqueList("shadow casters after EF_EndEf3D", pCasters);
   g_pTraceLastShadowCasters = NULL;
+  if (m_pFlareObj)
+    WriteFlareObject(" after EF_EndEf3D", "");
+  m_pFlareObj = NULL;
+}
+
+void CRendererProxy::WriteFlareObject(const char *szWhen, const char *szShader)
+{
+  static int s_nLines = 0;
+  if (s_nLines++ >= 40000)
+    return;
+  const CCObject *obj = m_pFlareObj;
+  const Vec3 Eye = m_pReal->GetCamera().GetPos();
+  const Vec3 Pos(obj->m_Matrix(3, 0), obj->m_Matrix(3, 1), obj->m_Matrix(3, 2));
+  Trace_Write("[flare%s] frame %d time %.4f '%s' obj %d flags 0x%x color (%g %g %g %g) amb (%g %g %g) fadeTime %g startTime %g "
+    "tempVars (%g %g %g %g %g) trans2 (%g %g %g) angs2 (%g %g %g) RE %p dist %.2f", szWhen, m_nFrames + 1,
+    iTimer ? iTimer->GetCurrTime() : 0.0f, szShader, obj->m_Id, obj->m_ObjFlags, obj->m_Color.r, obj->m_Color.g, obj->m_Color.b,
+    obj->m_Color.a, obj->m_AmbColor.x, obj->m_AmbColor.y, obj->m_AmbColor.z, obj->m_fBump, obj->m_fRefract, obj->m_TempVars[0],
+    obj->m_TempVars[1], obj->m_TempVars[2], obj->m_TempVars[3], obj->m_TempVars[4], obj->m_Trans2[0], obj->m_Trans2[1],
+    obj->m_Trans2[2], obj->m_Angs2[0], obj->m_Angs2[1], obj->m_Angs2[2], obj->m_RE, (Pos - Eye).Length());
 }
 
 void CRendererProxy::EF_EndEf2D(bool bSort)

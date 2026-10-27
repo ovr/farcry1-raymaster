@@ -102,13 +102,29 @@ it as well: it holds local, machine-specific instructions and is not committed (
   view.
   `XRENDERTRACED_SKIP_SPRITES=particlelight_fp,...` holds back the `EF_AddSpriteToScene` calls
   of these shaders, to tell which Direct3D draw belongs to which sprite.
+  `XRENDERTRACED_PROBE=FlareInView` moves the object of every flare (`EF_AddEf` with a Flare
+  element) onto the camera's line of sight at its own distance, so that the renderer tests and
+  draws it; `XRENDERTRACED_FLARE_DIR="dx dy"` turns that line by dx times the view's right and dy
+  times its up vector (e.g. `0.6 0` towards the right edge of the screen).
+  `XRENDERTRACED_FLARES=1` writes the object of the flare as the engine passes it and again after
+  `EF_EndEf3D` as `[flare]` lines (colour, `m_AmbColor`, `m_TempVars`, `m_Trans2`, `m_Angs2`,
+  `m_RE` and the distance to the camera; up to 40000 lines), for the state the renderer keeps
+  in it. The flares are off in farcry1_testing1's settings: put `r_Flares 1` (and `r_Coronas 1`)
+  in front of `map` in `XRENDERTRACED_EXEC`.
+  The render elements a shader holds (`GetREs`, e.g. the flares) are hooked when they reach
+  `EF_AddEf`, so their draws carry the element in the Direct3D draw log.
 - `XRENDERTRACED_D3D_DRAWS=1` writes the Direct3D 9 draw calls of the original renderer in the
   captured frame (`D3DDraws.h`; the header line gives `ITimer::GetCurrTime()`, for animated
   values): buffers, vertex declaration, shaders, textures and the render
   element being drawn (x64), the first vertices of the non-indexed draws (8, or
   `XRENDERTRACED_D3D_VERTS`), the `Clear` calls, the render target and depth buffer changes
   (`SetRenderTarget`, `SetDepthStencilSurface`), the surface copies and fills (`StretchRect`,
-  `UpdateSurface`, `ColorFill`) and `Present`; `2` adds the device state after each (with
+  `UpdateSurface`, `ColorFill`), the read backs (`GetRenderTargetData`, `GetFrontBufferData`,
+  `LockRect` of the depth buffer or the back buffer), `GetDepthStencilSurface`, `CreateQuery`
+  and `Present`. The dynamic vertex buffers seen in a captured frame are watched from the start
+  of the next captured frame, so the vertices of its first draws are known too (capture two
+  frames in a row, e.g. `after 1000 frame; after 1001 frame`). `2` adds the device state after
+  each (with
   the stencil state when stencil is on) and the box of the positions an indexed draw uses (when
   its vertex buffer can be read back), `3` also the shader constants.
   `XRENDERTRACED_D3D_CUBESAVE=<path prefix>` saves level 0 of the six faces of every cube texture

@@ -22,15 +22,19 @@ enum
 {
   DEV_Present = 17,
   DEV_UpdateSurface = 30,
+  DEV_GetRenderTargetData = 32,
+  DEV_GetFrontBufferData = 33,
   DEV_StretchRect = 34,
   DEV_ColorFill = 35,
   DEV_SetRenderTarget = 37,
   DEV_SetDepthStencilSurface = 39,
+  DEV_GetDepthStencilSurface = 40,
   DEV_Clear = 43,
   DEV_DrawPrimitive = 81,
   DEV_DrawIndexedPrimitive = 82,
   DEV_DrawPrimitiveUP = 83,
   DEV_DrawIndexedPrimitiveUP = 84,
+  DEV_CreateQuery = 118,
   DEV_Slots = 119,
   //! The class behind the device has more virtual functions than IDirect3DDevice9, and d3d9.dll
   //! calls them through the same vtable, so the copy goes on as far as the table can be read.
@@ -44,6 +48,14 @@ enum
   BUF_Unlock = 12,
   BUF_Slots = 14,
   BUF_CopiedSlots = 256,
+};
+
+//! Slots of IDirect3DSurface9.
+enum
+{
+  SURF_LockRect = 13,
+  SURF_Slots = 17,
+  SURF_CopiedSlots = 256,
 };
 
 //! Vertices written per draw (XRENDERTRACED_D3D_VERTS, default 8).
@@ -62,6 +74,11 @@ typedef HRESULT (STDMETHODCALLTYPE *PFN_UpdateSurface)(IDirect3DDevice9 *, IDire
 typedef HRESULT (STDMETHODCALLTYPE *PFN_StretchRect)(IDirect3DDevice9 *, IDirect3DSurface9 *, const RECT *, IDirect3DSurface9 *,
   const RECT *, D3DTEXTUREFILTERTYPE);
 typedef HRESULT (STDMETHODCALLTYPE *PFN_ColorFill)(IDirect3DDevice9 *, IDirect3DSurface9 *, const RECT *, D3DCOLOR);
+typedef HRESULT (STDMETHODCALLTYPE *PFN_GetRenderTargetData)(IDirect3DDevice9 *, IDirect3DSurface9 *, IDirect3DSurface9 *);
+typedef HRESULT (STDMETHODCALLTYPE *PFN_GetFrontBufferData)(IDirect3DDevice9 *, UINT, IDirect3DSurface9 *);
+typedef HRESULT (STDMETHODCALLTYPE *PFN_GetDepthStencilSurface)(IDirect3DDevice9 *, IDirect3DSurface9 **);
+typedef HRESULT (STDMETHODCALLTYPE *PFN_CreateQuery)(IDirect3DDevice9 *, D3DQUERYTYPE, IDirect3DQuery9 **);
+typedef HRESULT (STDMETHODCALLTYPE *PFN_LockRect)(IDirect3DSurface9 *, D3DLOCKED_RECT *, const RECT *, DWORD);
 typedef HRESULT (STDMETHODCALLTYPE *PFN_Present)(IDirect3DDevice9 *, const RECT *, const RECT *, HWND, const RGNDATA *);
 typedef HRESULT (STDMETHODCALLTYPE *PFN_Lock)(IUnknown *, UINT, UINT, void **, DWORD);
 typedef HRESULT (STDMETHODCALLTYPE *PFN_Unlock)(IUnknown *);
@@ -328,6 +345,12 @@ static HRESULT STDMETHODCALLTYPE Hook_Unlock(IUnknown *pBuf)
   return ((PFN_Unlock)Shadow.m_pOrigVTable[BUF_Unlock])(pBuf);
 }
 
+//! The dynamic vertex buffers of earlier captured frames: a later captured frame hooks them from
+//! its start, so that what is written into them before its first draw is known (the flares'
+//! visibility quads are drawn first). The references are never released, so a device Reset after
+//! a capture would fail.
+static std::vector<std::pair<IUnknown *, UINT> > s_KnownDynamicVBs;
+
 //! Starts keeping what is written into a dynamic buffer (holds a reference until the end of the
 //! frame).
 static void HookBuffer(IUnknown *pBuf, UINT nSize)
@@ -521,7 +544,17 @@ static void WriteDraw(IDirect3DDevice9 *pDev, const char *szCall, bool bStreams,
       Append(szLine, sizeof(szLine), " s%u %p+%u/%u (%u bytes%s)", nStream, pVB, nOffset, nStride, Desc.Size,
         (Desc.Usage & D3DUSAGE_DYNAMIC) ? " dynamic" : "");
       if (Desc.Usage & D3DUSAGE_DYNAMIC)
+      {
         HookBuffer(pVB, Desc.Size);
+        bool bKnown = false;
+        for (size_t i = 0; i < s_KnownDynamicVBs.size() && !bKnown; i++)
+          bKnown = s_KnownDynamicVBs[i].first == pVB;
+        if (!bKnown)
+        {
+          pVB->AddRef();
+          s_KnownDynamicVBs.push_back(std::make_pair((IUnknown *)pVB, Desc.Size));
+        }
+      }
       if (!nStream)
       {
         pVB0 = pVB;
@@ -753,6 +786,102 @@ static HRESULT STDMETHODCALLTYPE Hook_ColorFill(IDirect3DDevice9 *pDev, IDirect3
   return ((PFN_ColorFill)s_pOrigVTable[DEV_ColorFill])(pDev, pSurf, pRect, nColor);
 }
 
+//! Read backs and queries (how the renderer learns what was drawn, e.g. whether a flare is hidden).
+static HRESULT STDMETHODCALLTYPE Hook_GetRenderTargetData(IDirect3DDevice9 *pDev, IDirect3DSurface9 *pSrc, IDirect3DSurface9 *pDst)
+{
+  char szSrc[160], szDst[160], szLine[512];
+  _snprintf_s(szLine, _TRUNCATE, "[d3d] GetRenderTargetData(%s -> %s)", SurfaceName(pDev, pSrc, szSrc, sizeof(szSrc)),
+    SurfaceName(pDev, pDst, szDst, sizeof(szDst)));
+  AppendRE(szLine, sizeof(szLine));
+  Trace_Write("%s", szLine);
+  return ((PFN_GetRenderTargetData)s_pOrigVTable[DEV_GetRenderTargetData])(pDev, pSrc, pDst);
+}
+
+static HRESULT STDMETHODCALLTYPE Hook_GetFrontBufferData(IDirect3DDevice9 *pDev, UINT nSwapChain, IDirect3DSurface9 *pDst)
+{
+  char szDst[160], szLine[512];
+  _snprintf_s(szLine, _TRUNCATE, "[d3d] GetFrontBufferData(%u -> %s)", nSwapChain, SurfaceName(pDev, pDst, szDst, sizeof(szDst)));
+  AppendRE(szLine, sizeof(szLine));
+  Trace_Write("%s", szLine);
+  return ((PFN_GetFrontBufferData)s_pOrigVTable[DEV_GetFrontBufferData])(pDev, nSwapChain, pDst);
+}
+
+static HRESULT STDMETHODCALLTYPE Hook_GetDepthStencilSurface(IDirect3DDevice9 *pDev, IDirect3DSurface9 **ppSurf)
+{
+  const HRESULT hr = ((PFN_GetDepthStencilSurface)s_pOrigVTable[DEV_GetDepthStencilSurface])(pDev, ppSurf);
+  char szSurf[160] = "-", szLine[512];
+  if (SUCCEEDED(hr) && ppSurf && *ppSurf)
+    SurfaceName(pDev, *ppSurf, szSurf, sizeof(szSurf));
+  _snprintf_s(szLine, _TRUNCATE, "[d3d] GetDepthStencilSurface() -> %s", szSurf);
+  AppendRE(szLine, sizeof(szLine));
+  Trace_Write("%s", szLine);
+  return hr;
+}
+
+static HRESULT STDMETHODCALLTYPE Hook_CreateQuery(IDirect3DDevice9 *pDev, D3DQUERYTYPE eType, IDirect3DQuery9 **ppQuery)
+{
+  const HRESULT hr = ((PFN_CreateQuery)s_pOrigVTable[DEV_CreateQuery])(pDev, eType, ppQuery);
+  char szLine[512];
+  _snprintf_s(szLine, _TRUNCATE, "[d3d] CreateQuery(type %d) -> %p", eType, ppQuery ? *ppQuery : NULL);
+  AppendRE(szLine, sizeof(szLine));
+  Trace_Write("%s", szLine);
+  return hr;
+}
+
+//! The depth buffer and the back buffer of the frame, each with LockRect hooked in a vtable copy of
+//! its own (a read back of depths or pixels on the CPU).
+struct SSurfaceHook
+{
+  IDirect3DSurface9 *m_pSurf;
+  void **m_pOrigVTable;
+  void *m_Slots[SURF_CopiedSlots];
+  const char *m_szName;
+};
+static SSurfaceHook s_SurfaceHooks[2];
+static int s_nSurfaceHooks = 0;
+
+static HRESULT STDMETHODCALLTYPE Hook_SurfaceLockRect(IDirect3DSurface9 *pSurf, D3DLOCKED_RECT *pLocked, const RECT *pRect, DWORD nFlags)
+{
+  const SSurfaceHook *pHook = &s_SurfaceHooks[0];
+  for (int i = 0; i < s_nSurfaceHooks; i++)
+    if (s_SurfaceHooks[i].m_pSurf == pSurf)
+      pHook = &s_SurfaceHooks[i];
+  char szRect[64], szLine[512];
+  _snprintf_s(szLine, _TRUNCATE, "[d3d] LockRect(%s rect %s flags 0x%x)", pHook->m_szName, RectName(pRect, szRect, sizeof(szRect)), nFlags);
+  AppendRE(szLine, sizeof(szLine));
+  Trace_Write("%s | from %s", szLine, Trace_Addr(_ReturnAddress()));
+  return ((PFN_LockRect)pHook->m_pOrigVTable[SURF_LockRect])(pSurf, pLocked, pRect, nFlags);
+}
+
+static void HookSurface(IDirect3DDevice9 *pDev, IDirect3DSurface9 *pSurf, const char *szName)
+{
+  if (!pSurf || s_nSurfaceHooks == sizeof(s_SurfaceHooks) / sizeof(s_SurfaceHooks[0]))
+  {
+    if (pSurf)
+      pSurf->Release();
+    return;
+  }
+  char szSurf[160];
+  Trace_Write("[d3d] %s: %s", szName, SurfaceName(pDev, pSurf, szSurf, sizeof(szSurf)));
+  void **pVTable = *(void ***)pSurf;
+  int nSlots = SURF_CopiedSlots;
+  while (nSlots > SURF_Slots && !Trace_IsReadable(pVTable, nSlots * sizeof(void *)))
+    nSlots--;
+  if (!Trace_IsReadable(pVTable, nSlots * sizeof(void *)))
+  {
+    pSurf->Release();
+    return;
+  }
+  SSurfaceHook &Hook = s_SurfaceHooks[s_nSurfaceHooks++];
+  memset(Hook.m_Slots, 0, sizeof(Hook.m_Slots));
+  memcpy(Hook.m_Slots, pVTable, nSlots * sizeof(void *));
+  Hook.m_Slots[SURF_LockRect] = (void *)&Hook_SurfaceLockRect;
+  Hook.m_pOrigVTable = pVTable;
+  Hook.m_pSurf = pSurf;
+  Hook.m_szName = szName;
+  *(void ***)pSurf = Hook.m_Slots;
+}
+
 static HRESULT STDMETHODCALLTYPE Hook_Present(IDirect3DDevice9 *pDev, const RECT *pSrcRect, const RECT *pDstRect, HWND hWnd,
   const RGNDATA *pDirty)
 {
@@ -793,6 +922,10 @@ void D3DDraws_Begin(IRenderer *pRenderer)
   s_HookedVTable[DEV_UpdateSurface] = (void *)&Hook_UpdateSurface;
   s_HookedVTable[DEV_StretchRect] = (void *)&Hook_StretchRect;
   s_HookedVTable[DEV_ColorFill] = (void *)&Hook_ColorFill;
+  s_HookedVTable[DEV_GetRenderTargetData] = (void *)&Hook_GetRenderTargetData;
+  s_HookedVTable[DEV_GetFrontBufferData] = (void *)&Hook_GetFrontBufferData;
+  s_HookedVTable[DEV_GetDepthStencilSurface] = (void *)&Hook_GetDepthStencilSurface;
+  s_HookedVTable[DEV_CreateQuery] = (void *)&Hook_CreateQuery;
   s_HookedVTable[DEV_Present] = (void *)&Hook_Present;
   s_HookedVTable[DEV_DrawPrimitive] = (void *)&Hook_DrawPrimitive;
   s_HookedVTable[DEV_DrawIndexedPrimitive] = (void *)&Hook_DrawIndexedPrimitive;
@@ -804,6 +937,14 @@ void D3DDraws_Begin(IRenderer *pRenderer)
   *(void ***)pDev = s_HookedVTable;
   // The timer time, for the animated texture transforms of the frame.
   Trace_Write("==== Direct3D draws of this frame (device %p, time %.4f) ====", pDev, iTimer ? iTimer->GetCurrTime() : 0.0f);
+  for (size_t i = 0; i < s_KnownDynamicVBs.size(); i++)
+    HookBuffer(s_KnownDynamicVBs[i].first, s_KnownDynamicVBs[i].second);
+  IDirect3DSurface9 *pSurf = NULL;
+  if (SUCCEEDED(((PFN_GetDepthStencilSurface)s_pOrigVTable[DEV_GetDepthStencilSurface])(pDev, &pSurf)))
+    HookSurface(pDev, pSurf, "depth buffer");
+  pSurf = NULL;
+  if (SUCCEEDED(pDev->GetBackBuffer(0, 0, D3DBACKBUFFER_TYPE_MONO, &pSurf)))
+    HookSurface(pDev, pSurf, "back buffer");
 }
 
 //! XRENDERTRACED_D3D_RT: the device keeps a vtable copy with SetRenderTarget hooked in every frame.
@@ -975,6 +1116,12 @@ void D3DDraws_End()
     return;
   *(void ***)s_pDevice = s_pOrigVTable;
   s_pDevice = NULL;
+  for (int i = 0; i < s_nSurfaceHooks; i++)
+  {
+    *(void ***)s_SurfaceHooks[i].m_pSurf = s_SurfaceHooks[i].m_pOrigVTable;
+    s_SurfaceHooks[i].m_pSurf->Release();
+  }
+  s_nSurfaceHooks = 0;
   for (std::map<IUnknown *, SBufferShadow>::iterator it = s_Shadows.begin(); it != s_Shadows.end(); ++it)
   {
     *(void ***)it->first = it->second.m_pOrigVTable;
