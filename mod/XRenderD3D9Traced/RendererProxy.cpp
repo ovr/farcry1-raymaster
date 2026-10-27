@@ -323,6 +323,37 @@ void CRendererProxy::ExecuteCommands(const char *szCommands)
       DecalCommand(szCmd + 6);
     else if (!strncmp(szCmd, "goto ", 5))
       GotoCommand(szCmd + 5);
+    else if (!strncmp(szCmd, "entities", 8) && (!szCmd[8] || szCmd[8] == ' '))
+    {
+      // "entities [part of a class name]": the entities with their class, name and position, to find
+      // a place for goto (at most 1000).
+      const char *szPart = szCmd[8] ? szCmd + 9 : "";
+      IEntitySystem *pEntitySystem = iSystem ? iSystem->GetIEntitySystem() : NULL;
+      IEntityIt *pIt = pEntitySystem ? pEntitySystem->GetEntityIterator() : NULL;
+      int nListed = 0;
+      while (pIt && !pIt->IsEnd() && nListed < 1000)
+      {
+        IEntity *pEntity = pIt->Next();
+        const char *szClass = pEntity ? pEntity->GetEntityClassName() : NULL;
+        if (!szClass)
+          continue;
+        char szLower[128], szPartLower[128];
+        strncpy_s(szLower, szClass, _TRUNCATE);
+        strncpy_s(szPartLower, szPart, _TRUNCATE);
+        _strlwr_s(szLower);
+        _strlwr_s(szPartLower);
+        if (!strstr(szLower, szPartLower))
+          continue;
+        const Vec3 Pos = pEntity->GetPos();
+        const char *szName = pEntity->GetName();
+        Trace_Write("  entity %d class '%s' name '%s' pos (%.2f %.2f %.2f)", pEntity->GetId(), szClass, szName ? szName : "",
+          Pos.x, Pos.y, Pos.z);
+        nListed++;
+      }
+      if (pIt)
+        pIt->Release();
+      Trace_Write("  %d entities", nListed);
+    }
     else if (!strcmp(szCmd, "mouse down") || !strcmp(szCmd, "mouse up") || !strncmp(szCmd, "mouse move ", 11))
     {
       // The left mouse button or a relative move, only while the game window is in front (the input

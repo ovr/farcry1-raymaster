@@ -65,7 +65,9 @@ it as well: it holds local, machine-specific instructions and is not committed (
   world (x, y) (decals need `e_decals 1` before the level loads); `mouse down`, `mouse up` and
   `mouse move dx dy` send the left button or a relative move with `SendInput`, only while the game
   window is in front; `goto x y z [ax ay az]` puts the player (the first entity of class `Player`)
-  and the view camera at that point; `capture` writes every call from then on until the renderer
+  and the view camera at that point (a scripted camera, as at the start of Archive, overrides
+  it); `entities [part of a class name]` lists the entities with class, name and position, to
+  find a place for `goto`; `capture` writes every call from then on until the renderer
   is released
   (e.g. `capture; quit` in `XRENDERTRACED_EXEC_LEVEL` for the shutdown; in the menu it never ends
   and the log grows by gigabytes), `frame` only the next frame, as `XRENDERTRACED_CAPTURE` does
