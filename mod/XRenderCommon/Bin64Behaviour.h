@@ -743,23 +743,31 @@ static const int nHeapAlignment = 4;
 //     the back buffer's alpha (GS_COLMASKONLYALPHA with ONE, ZERO) and then draws two more over
 //     the same place with (ONEMINUSDSTALPHA, DSTALPHA), so the back buffer needs an alpha channel.
 //
-// Start-up videos (the frames before the menu):
-//   Once: DownLoadToVideoMemory(pData, 640, 480, eTF_0888, eTF_0888, 0, false, 0, 0, "$VideoPanel",
-//   FT_DYNAMIC) makes the video texture (the D3D9 renderer makes a 640 x 480 X8R8G8B8 texture with
-//   one level in D3DPOOL_MANAGED, without usage flags).
+// Start-up videos and the main menu (the frames before a level):
+//   The first video: DownLoadToVideoMemory(pData, 640, 480, eTF_0888, eTF_0888, 0, false, 0, 0,
+//   "$VideoPanel", FT_DYNAMIC) makes the video texture (the D3D9 renderer makes a 640 x 480
+//   X8R8G8B8 texture with one level in D3DPOOL_MANAGED, without usage flags). Each following
+//   video: RemoveTexture(nTexId) and DownLoadToVideoMemory(pData, w, h, eTF_0888, eTF_0888, 0,
+//   false, 0, 0, NULL, FT_DYNAMIC) with pData all zeros, which gets the same ID back: 800 x 600,
+//   1024 x 768 (the D3D9 renderer makes it at that size, not a power of two), then the main menu's
+//   background, 800 x 600 (the menu was up at frame 15000 here).
 //   Whenever the video has a new picture (not every frame): UpdateTextureInVideoMemory(nTexId,
-//   pData, 0, 0, 640, 480, eTF_8888) with the whole picture, always in the same pData: 4 bytes per
+//   pData, 0, 0, w, h, eTF_8888) with the whole picture, always in the same pData: 4 bytes per
 //   pixel in the order B, G, R, A (A always 255), rows from the top. The D3D9 renderer shows these
 //   bytes as they are (X8R8G8B8).
-//   Every frame, without Clear: GetHWND, Set2DMode(true, 1024, 768), twice SetState(GS_NODEPTHTEST
-//   | GS_BLSRC_SRCALPHA | GS_BLDST_ONEMINUSSRCALPHA), Draw2dImage(0, 0, 800, 600, -1, 0, 0, 0, 0, 0,
-//   0, 0, 0, 1, 0) (an opaque black quad over the whole screen), Draw2dImage(0, 0, 800, 600,
-//   nTexId, 0, 1, 1, 0, 0, 1, 1, 1, 1, 0), SetState(GS_DEPTHWRITE), Set2DMode(false, 0, 0),
-//   SetState(GS_DEPTHWRITE). The D3D9 renderer samples the video clamped, with linear filtering
-//   and no mip maps.
-//   At "map" the engine calls RemoveTexture(nTexId) and DownLoadToVideoMemory(pData, 800, 600,
-//   eTF_0888, eTF_0888, 0, false, 0, 0, NULL, FT_DYNAMIC) with pData all zeros, which gets the same
-//   ID back; the last loading screen frames still draw the black quad and this texture first.
+//   Every frame, without Clear: GetHWND, Set2DMode(true, 1024, 768), SetState(GS_NODEPTHTEST |
+//   GS_BLSRC_SRCALPHA | GS_BLDST_ONEMINUSSRCALPHA), the UpdateTextureInVideoMemory if any, the same
+//   SetState again, Draw2dImage(0, 0, 800, 600, -1, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0) (an opaque black
+//   quad over the whole screen), Draw2dImage(0, 0, 800, 600, nTexId, 0, 1, 1, 0, 0, 1, 1, 1, 1, 0),
+//   SetState(GS_DEPTHWRITE), Set2DMode(false, 0, 0), SetState(GS_DEPTHWRITE). The D3D9 renderer
+//   samples the video clamped, with linear filtering and no mip maps.
+//   The main menu draws over its video only with Draw2dImage (its frame images, DXT3 textures in
+//   the D3D9 renderer, the mouse pointer, and quads with nTexId -1 and colour (0, 0, 0, 0)) and
+//   text (each string twice: a black shadow one pixel lower right, then the string); its frames
+//   call nothing else of IRenderer.
+//   At "map" the engine calls RemoveTexture(nTexId) and makes an 800 x 600 texture of zeros the
+//   same way, which is never updated; the last loading screen frames still draw the black quad and
+//   this texture first.
 // Loading screen: every frame of a level load draws, twice, SetState(GS_NODEPTHTEST |
 //   GS_BLSRC_SRCALPHA | GS_BLDST_ONEMINUSSRCALPHA), Draw2dImage(0, 0, 800, 600, nPicture, 0, 1, 1,
 //   0, 0, 1, 1, 1, 1, 1) with the level's picture (EF_LoadTexture) and the progress bar
