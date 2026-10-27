@@ -617,6 +617,10 @@ void Dump_Camera(const CCamera &Cam)
     p.x, p.y, p.z, a.x, a.y, a.z, Cam.GetFov(), Cam.GetProjRatio(), Cam.GetZMin(), Cam.GetZMax(), Cam.GetViewSurfaceX(), Cam.GetViewSurfaceZ());
   Matrix44 m = Cam.GetVCMatrixD3D9();
   Dump_Matrix("VCMatrixD3D9", (const float *)&m);
+  if (Cam.m_pPortal || Cam.m_ScissorInfo.x2 || Cam.m_ScissorInfoParent.x2)
+    Trace_Write("    CCamera: portal %p scissor (%u %u)-(%u %u) parent (%u %u)-(%u %u)", Cam.m_pPortal, Cam.m_ScissorInfo.x1,
+      Cam.m_ScissorInfo.y1, Cam.m_ScissorInfo.x2, Cam.m_ScissorInfo.y2, Cam.m_ScissorInfoParent.x1, Cam.m_ScissorInfoParent.y1,
+      Cam.m_ScissorInfoParent.x2, Cam.m_ScissorInfoParent.y2);
 }
 
 static void Dump_ShaderParams(const TArray<SShaderParam> &Params);
@@ -639,10 +643,11 @@ void Dump_Object(const CCObject *pObj)
   union { const void *p; float f; int n; } Light;
   Light.p = NULL;
   memcpy(&Light, &pObj->m_pLightImage, sizeof(pObj->m_pLightImage));
-  Trace_Write("      lod/wfx %d templ/wfy %d tempVars (%g %g %g %g %g) refract %g bump %g light %p (float %g) numCM %d lightStyle %d renderState 0x%x params %d",
+  Trace_Write("      lod/wfx %d templ/wfy %d tempVars (%g %g %g %g %g) refract %g bump %g light %p (float %g) numCM %d lightStyle %d renderState 0x%x params %d scissor (%d %d)-(%d %d)",
     pObj->m_nLod, pObj->m_nTemplId, pObj->m_TempVars[0], pObj->m_TempVars[1], pObj->m_TempVars[2], pObj->m_TempVars[3],
     pObj->m_TempVars[4], pObj->m_fRefract, pObj->m_fBump, Light.p, Light.f, pObj->m_NumCM, pObj->m_LightStyle, pObj->m_RenderState,
-    pObj->m_ShaderParams && Trace_IsReadable(pObj->m_ShaderParams, sizeof(*pObj->m_ShaderParams)) ? pObj->m_ShaderParams->Num() : -1);
+    pObj->m_ShaderParams && Trace_IsReadable(pObj->m_ShaderParams, sizeof(*pObj->m_ShaderParams)) ? pObj->m_ShaderParams->Num() : -1,
+    pObj->m_nScissorX1, pObj->m_nScissorY1, pObj->m_nScissorX2, pObj->m_nScissorY2);
   if (pObj->m_ShaderParams && Trace_IsReadable(pObj->m_ShaderParams, sizeof(*pObj->m_ShaderParams)) &&
     Trace_IsReadable(pObj->m_ShaderParams->Data(), pObj->m_ShaderParams->Num() * sizeof(SShaderParam)))
     Dump_ShaderParams(*pObj->m_ShaderParams);
@@ -695,8 +700,9 @@ void Dump_Shader(IShader *pSH)
 
 void Dump_ShaderItem(const SShaderItem &Item)
 {
-  Trace_Write("    SShaderItem: shader %p '%s' resources %p", Item.m_pShader, Item.m_pShader ? SafeStr(Item.m_pShader->GetName()) : "",
-    Item.m_pShaderResources);
+  IShader *pTempl = Item.m_pShader ? Item.m_pShader->GetTemplate(-1) : NULL;
+  Trace_Write("    SShaderItem: shader %p '%s' templ '%s' resources %p", Item.m_pShader, Item.m_pShader ? SafeStr(Item.m_pShader->GetName()) : "",
+    pTempl && pTempl != Item.m_pShader ? SafeStr(pTempl->GetName()) : "", Item.m_pShaderResources);
   if (Item.m_pShaderResources)
     Dump_RenderResources(Item.m_pShaderResources);
 }
@@ -722,20 +728,50 @@ void Dump_MatInfo(const CMatInfo *pMI, int nIndex)
     pMI->shaderItem.m_pShaderResources, pMI->pRE, pMI->fAlpha);
 }
 
+bool Trace_IsMatInfo(IMatInfo *pMtl)
+{
+  // Its vtable must lie in an engine module or point to code (its slots are hooked once the
+  // renderer has been handed it), or it is not an IMatInfo.
+  void **pVTable = pMtl && Trace_IsReadable(pMtl, sizeof(void *)) ? *(void ***)pMtl : NULL;
+  return pVTable && Trace_IsReadable(pVTable, sizeof(void *)) && (VCallHooks_ModuleIndex(pVTable) >= 0 || Trace_IsCode(pVTable[0]));
+}
+
 void Dump_IMatInfo(IMatInfo *pMtl)
 {
   if (!pMtl)
     return;
-  // Its vtable must be code of a loaded module, or it is not an IMatInfo.
-  void **pVTable = Trace_IsReadable(pMtl, sizeof(void *)) ? *(void ***)pMtl : NULL;
-  if (!pVTable || !Trace_IsReadable(pVTable, sizeof(void *)) || !Trace_IsCode(pVTable[0]))
+  if (!Trace_IsMatInfo(pMtl))
   {
-    Trace_Write("    IMatInfo @%p: not readable", pMtl);
+    Trace_Write("    IMatInfo @%p: vtable %p, not readable", pMtl, Trace_IsReadable(pMtl, sizeof(void *)) ? *(void **)pMtl : NULL);
+    // The raw bytes, to see what the engine handed over.
+    if (Trace_IsReadable(pMtl, sizeof(CMatInfo)))
+    {
+      const DWORD *pDW = (const DWORD *)pMtl;
+      for (int i = 0; i < (int)(sizeof(CMatInfo) / 4); i += 16)
+      {
+        char szLine[256];
+        int nLen = 0;
+        for (int j = i; j < i + 16 && j < (int)(sizeof(CMatInfo) / 4); j++)
+          nLen += sprintf_s(szLine + nLen, sizeof(szLine) - nLen, " %08x", pDW[j]);
+        Trace_Write("      +%03x:%s", i * 4, szLine);
+      }
+    }
     return;
   }
   Trace_Write("    IMatInfo @%p (vtbl %s) '%s' flags 0x%x refs %d sub materials %d", pMtl, Trace_VTable(pMtl), SafeStr(pMtl->GetName()),
     pMtl->GetFlags(), pMtl->GetNumRefs(), pMtl->GetSubMtlCount());
   Dump_ShaderItem(pMtl->GetShaderItem());
+  for (int i = 0; i < pMtl->GetSubMtlCount(); i++)
+  {
+    IMatInfo *pSub = pMtl->GetSubMtl(i);
+    if (!pSub)
+      continue;
+    const SShaderItem &Item = pSub->GetShaderItem();
+    IShader *pTempl = Item.m_pShader ? Item.m_pShader->GetTemplate(-1) : NULL;
+    Trace_Write("      sub[%d] @%p '%s' shader '%s' templ '%s' resources %p opacity %.2f", i, pSub, SafeStr(pSub->GetName()),
+      Item.m_pShader ? SafeStr(Item.m_pShader->GetName()) : "", pTempl && pTempl != Item.m_pShader ? SafeStr(pTempl->GetName()) : "",
+      Item.m_pShaderResources, Item.m_pShaderResources ? Item.m_pShaderResources->m_Opacity : -1.0f);
+  }
 }
 
 void Dump_RE(CRendElement *pRE)

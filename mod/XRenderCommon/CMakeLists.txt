@@ -1,11 +1,9 @@
-# XRenderCommon - renderer interface facts beyond the SDK headers that a compatible renderer needs,
-# and what XRenderD3D9Traced records about how the engine calls its renderer.
+# XRenderCommon - renderer interface facts beyond the SDK headers that a compatible renderer needs.
 # Header-only; shared by the renderers in mod/.
 
 add_library(XRenderCommon INTERFACE
     XRenderCommon.h
     RetailRenderer.h
-    Bin64Behaviour.h
     RendererStructures.h
     RendererAbiChecks.h
     StructFields.inl

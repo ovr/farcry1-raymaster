@@ -162,4 +162,6 @@ void Dump_ColorVerts2D(const SColorVert2D *pVerts, int nVerts);
 void Dump_MatInfo(const CMatInfo *pMI, int nIndex);
 //! An engine material (IMatInfo, e.g. the one passed to CLeafBuffer::AddRenderElements).
 void Dump_IMatInfo(IMatInfo *pMtl);
+//! Whether the methods of an engine material can be called (its vtable is valid).
+bool Trace_IsMatInfo(IMatInfo *pMtl);
 void Dump_RendParams(const SRendParams &rp);

@@ -51,10 +51,10 @@ namespace RendererStructures
 //   - m_vBoxMin, m_vBoxMax of the "WaterVolume" and "Grass" buffers (made with
 //     CreateLeafBufferInitialized), every frame: both hold the camera position, not the bounds.
 //   - The vertices of the "Grass" buffer, from its PrepareBufferCallback, straight into
-//     m_pVertexBuffer->m_VS[VSF_GENERAL].m_VData between two UpdateBuffer calls (see CVertexBuffer
-//     and Bin64Behaviour.h, "Detail grass").
+//     m_pVertexBuffer->m_VS[VSF_GENERAL].m_VData between two UpdateBuffer calls (see
+//     CVertexBuffer).
 //   - m_pVertexContainer of the "Dynamic" buffers (SetVertexContainer, inline in LeafBuffer.h): the
-//     terrain sector whose vertices they use (Bin64Behaviour.h, "Terrain under a dynamic light").
+//     terrain sector whose vertices they use.
 //   Renderer writes:
 //   - CreateBuffer(CIndexedMesh *): m_nVertexFormat, m_nPrimetiveType, m_pSecVertBuffer,
 //     m_SecVertCount, m_pVertexBuffer, m_SecIndices, m_NumIndices, m_Indices,
@@ -96,18 +96,19 @@ namespace RendererStructures
 //   m_DynLMMask, m_fHeatFactor, m_Color, m_nLMId and m_pLMTCBufferO (lightmapped objects), the
 //   union members m_nLod, m_nTemplId and m_pLightImage, m_ShaderParams.
 //   Engine writes before CLeafBuffer::AddRenderElements: m_Matrix, m_ObjFlags, m_Color,
-//   m_ShaderParams, the scissor rectangle m_nScissorX1..m_nScissorY2.
+//   m_ShaderParams, the scissor rectangle m_nScissorX1..m_nScissorY2 (back buffer pixels; all 0
+//   for none, else the doorway through which the camera sees outdoors; the
+//   sky's object of EF_AddEf gets it too).
 //   With shadow maps on, the engine also sets m_pShadowCasters (the casters whose shadow maps fall
 //   on the object) before Render, AddRE and EF_AddEf; see "Shadow maps" below.
 //   Engine writes for characters before EF_AddEf (most of it already before the EF_GetHeatVision
 //   call in between): m_Matrix, m_ObjFlags, m_SortId, m_AmbColor, m_Color, m_DynLMMask,
 //   m_fHeatFactor, m_ShaderParams, m_pCharInstance, m_nTemplId, the scissor rectangle.
 //   m_ShaderParams points to an array the engine owns and changes from frame to frame (a cloaked
-//   character's "refraction"); the renderer reads the values by name when it draws the object
-//   (Bin64Behaviour.h, "Characters").
+//   character's "refraction"); the renderer reads the values by name when it draws the object.
 //   Engine writes for particles before EF_AddSpriteToScene: m_Matrix (identity), m_SortId,
 //   m_AmbColor, m_DynLMMask, m_NumCM (the particle texture's ID) and m_RenderState (GS_* blend and
-//   alpha test bits from the particle's blend type); see Bin64Behaviour.h, "Particles".
+//   alpha test bits from the particle's blend type).
 //   Renderer writes:
 //   - CLeafBuffer::Render and AddRenderElements: m_ObjFlags (can set FOB_HASALPHA); EF_AddEf:
 //     m_ObjFlags (can clear FOB_ENVLIGHTING).
@@ -120,10 +121,10 @@ namespace RendererStructures
 //   afterwards m_NumWFX and m_NumWFY (unions with m_nLod and m_nTemplId) hold two new indices into
 //   the renderer's table of waves (CCObject::m_Waves, a static member only the renderer can see),
 //   counted from 1 every frame (1/2, 3/4, ...). wf is an output: the renderer stores the two waves'
-//   addresses in wf[0] and wf[1], and the engine fills the waves after the call (see
-//   Bin64Behaviour.h, "Static objects"). RemovePermanent is called on the objects the renderer
+//   addresses in wf[0] and wf[1], and the engine fills the waves after the call.
+//   RemovePermanent is called on the objects the renderer
 //   keeps in CDLight::m_pObject (the light coronas), when the engine gives the light's place in its
-//   list to another light (CDLight below, Bin64Behaviour.h "Flares and light coronas").
+//   list to another light (CDLight below).
 //   Shader inputs taken from the object (SDK "Shaders Specification"): ObjColor m_Color, ObjVal
 //   m_TempVars, Bending m_fBending (a union with m_pLightImage), ObjWaveX/ObjWaveY the waves
 //   m_NumWFX/m_NumWFY, ObjRefrFactor m_fRefract, BumpAmount m_fBump. In Training only the
@@ -164,15 +165,15 @@ namespace RendererStructures
 //     GetTemplate, GetPublicParams. GetTemplate and GetFlags2 are hot (about 180000 calls each
 //     in that run, from Cry3DEngine and CryAnimation): SShaderItem::IsTransparent (IShader.h) calls
 //     both for every material drawn. With particles on screen also GetID (for the shader ID
-//     EF_AddSpriteToScene takes). The values they return: Bin64Behaviour.h, "Shaders". With
+//     EF_AddSpriteToScene takes). With
 //     cloaked characters in the level (Archive) also AddTemplate, from CryAnimation and every
-//     frame from Cry3DEngine (Bin64Behaviour.h, "Characters").
+//     frame from Cry3DEngine.
 //   - ITexPic: AddRef, Release, GetWidth, GetHeight, GetOriginalWidth, GetOriginalHeight,
 //     GetTextureID, GetFlags, IsTextureLoaded (from Cry3DEngine, CrySystem, CryGame and
-//     CryEntitySystem); with decals on also SetFilter and SetClamp (Bin64Behaviour.h, "Decals").
+//     CryEntitySystem); with decals on also SetFilter and SetClamp.
 //   - SRenderShaderResources: Release, its only virtual function.
 //   - CRendElement: Release (of the CREOcLeaf of the leaf buffer materials; at a level change also
-//     of CRETerrainDetailTextureLayers and CREOcclusionQuery, Bin64Behaviour.h "Level change").
+//     of CRETerrainDetailTextureLayers and CREOcclusionQuery).
 //   - CREScreenProcess: mfSetParameter, mfGetParameter (see "Screen effects" below).
 //   - CCObject: AddWaves, RemovePermanent (see CCObject above); SetShaderFloat is not called.
 //   CMatInfo's virtual functions are inline in IShader.h, so every module has its own copy.
@@ -191,16 +192,15 @@ namespace RendererStructures
 //     on Training and Pier.
 //   - For the water reflection (r_WaterReflections 1): GetDistanceToSectorWithWater,
 //     GetWaterLevel(), GetMaxViewDistance, SetCamera(cam, false) and DrawLowDetail(DLD_TERRAIN |
-//     DLD_TERRAIN_FULLRES), inside which the engine renders a frame of its own through IRenderer
-//     (Bin64Behaviour.h, "Water reflections and refractions").
+//     DLD_TERRAIN_FULLRES), inside which the engine renders a frame of its own through IRenderer.
 //   DrawTerrainDetailTextureLayers was never called: with e_detail_texture_quality 1 the engine
-//   draws the detail layers as leaf buffers (Bin64Behaviour.h, "Terrain detail layers"). Nothing
+//   draws the detail layers as leaf buffers. Nothing
 //   else of I3DEngine was called by the renderer.
 
 // The console (IConsole, SCryRenderInterface::ipConsole; slots in VTables.inl; Bin64, runtime:
 // Training): the renderer calls Register and CreateVariable while PackageRenderConstructor runs,
-// GetCVar, and GetFont once per frame in Update (it returns NULL); nothing else (Bin64Behaviour.h,
-// "Console variables"). MSVC puts the overloads of one name next to each other in reverse order of
+// GetCVar, and GetFont once per frame in Update (it returns NULL); nothing else.
+// MSVC puts the overloads of one name next to each other in reverse order of
 // declaration, as the arguments show: CreateVariable with a string value is slot 3 (float 1, int
 // 2), Register with an int pointer slot 9 and with a float pointer slot 10 (void pointer 11).
 
@@ -208,11 +208,10 @@ namespace RendererStructures
 //   For its particles the engine calls GetAnimTexInfoFromId right after LoadAnimatedTexture (the
 //   SDK's ParticleParams has the field pAnimTex for the pointer) and passes the same pointer to
 //   RemoveAnimatedTexture, so the AnimTexInfo stays at its address with the SDK layout
-//   (StructLayouts.txt: sName, pBindIds, nFramesCount, nRefCounter) until then. How the D3D9 renderer fills it: Bin64Behaviour.h, "Textures".
+//   (StructLayouts.txt: sName, pBindIds, nFramesCount, nRefCounter) until then.
 
-// The engine's services (ISystem, ILog, ITimer, ICryPak; slots in VTables.inl): which of them the
-//   D3D9 renderer calls is in Bin64Behaviour.h, "Textures". A renderer reads its files through
-//   ICryPak, as the game's data is in the paks.
+// The engine's services (ISystem, ILog, ITimer, ICryPak; slots in VTables.inl): a renderer reads
+//   its files through ICryPak, as the game's data is in the paks.
 
 // Screen effects (CREScreenProcess)
 //   The 3D engine creates one CREScreenProcess with EF_CreateRE(eDATA_ScreenProcess) and turns
@@ -243,8 +242,6 @@ static const int nBin64ScreenParam_FlashBangFlashSizeY = 23;
 static const int nBin64ScreenParam_FlashBangCurrent = 24;       // written by the renderer, see below
 static const int nBin64ScreenParam_FlashBangForce = 25;
 //   No other process codes were used; the SDK names only these four effects.
-//   How the effects are drawn: Bin64Behaviour.h, "Screen effects" and "Heat vision and night
-//   vision".
 //   The engine reads NightVision's Active every frame. When a level starts it reads FlashBang's
 //   Active once and, if it is set, parameters 19, 24 and 20 to 23.
 //   FlashBang: parameter 24 is written only by the renderer. It is the part of the flash still to
@@ -296,7 +293,7 @@ static const int nBin64ScreenParam_FlashBangForce = 25;
 //   on the entry's object, then copies the other light, with that light's m_pObject, over it.
 //   EF_UpdateDLight fills
 //   m_Orientation and m_TextureMatrix of a DLF_PROJECT light from m_ProjAngles, m_Origin and
-//   m_fLightFrustumAngle (Bin64Behaviour.h, "Lights").
+//   m_fLightFrustumAngle.
 // SInputShaderResources: EF_LoadShaderItem sets m_LMaterial when it is NULL (to a light material
 //   owned by the renderer).
 // VertexBufferSource: CreateBuffer(VertexBufferSource *) moves pMats into the leaf buffer and
@@ -347,7 +344,7 @@ static const int nBin64Offset_StatObjInst_Brightness = 0x89;   // byte: 100 when
 //   I3DEngine::GetStatInstGroup. The instance starts with a vtable; it also holds a frame ID
 //   (GetFrameID values) at 0x10 and pointers to other engine objects.
 //   GetStatInstGroup does not fill in bFadeSize and m_dwRndFlags (they keep what the caller's
-//   structure held), but the renderer needs bFadeSize (see Bin64Behaviour.h). CObjManager starts
+//   structure held), but the renderer needs bFadeSize. CObjManager starts
 //   with the engine's array of groups, which have the layout of IStatInstGroup:
 static const int nBin64Offset_ObjManager_Groups = 0x00;        // pointer to the groups, indexed by group ID
 static const int nBin64Offset_ObjManager_GroupCount = 0x08;    // int: 1024

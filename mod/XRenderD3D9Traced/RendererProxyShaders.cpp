@@ -223,8 +223,10 @@ SShaderItem CRendererProxy::EF_LoadShaderItem(const char *name, EShClass Class, 
   CWatchArg WatchRes(WT_SInputShaderResources, Res);
   // XRENDERTRACED_TEMPLATE=TemplDecalModulate: every material that names a template ("Templ...")
   // gets this one instead, to see how the renderer draws it; with XRENDERTRACED_TEMPLATE_ONLY
-  // ("name,name,...") only the materials of those names, and XRENDERTRACED_TEMPLATE_OPACITY
-  // replaces their opacity as well.
+  // ("name,name,...") only the materials of those names or with those templates, whatever template
+  // they name (the level's material library loads every material as "MaterialContainer", so e.g.
+  // "WaterVolume" picks its water materials), and XRENDERTRACED_TEMPLATE_OPACITY replaces their
+  // opacity as well.
   static char s_szTemplate[64] = "?";
   static bool s_bOnlyListed = false;
   static float s_fOpacity = -1;
@@ -237,8 +239,10 @@ SShaderItem CRendererProxy::EF_LoadShaderItem(const char *name, EShClass Class, 
     if (GetEnvironmentVariableA("XRENDERTRACED_TEMPLATE_OPACITY", szOpacity, sizeof(szOpacity)))
       s_fOpacity = (float)atof(szOpacity);
   }
-  if (s_szTemplate[0] && templName && !_strnicmp(templName, "Templ", 5) &&
-      (!s_bOnlyListed || name && Trace_IsListed("XRENDERTRACED_TEMPLATE_ONLY", name)))
+  if (s_szTemplate[0] && templName && templName[0] &&
+      (s_bOnlyListed ? name && Trace_IsListed("XRENDERTRACED_TEMPLATE_ONLY", name) ||
+                       Trace_IsListed("XRENDERTRACED_TEMPLATE_ONLY", templName)
+                     : !_strnicmp(templName, "Templ", 5)))
   {
     templName = s_szTemplate;
     if (s_bOnlyListed && s_fOpacity >= 0 && Res)

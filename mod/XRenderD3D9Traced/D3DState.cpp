@@ -90,6 +90,10 @@ void D3DState_WriteDevice(IDirect3DDevice9 *pDev, bool bShaderConstants)
     }
     Trace_Write("    d3d stencil:%s", szLine);
   }
+  DWORD nScissor = 0;
+  RECT Scissor = {};
+  if (SUCCEEDED(pDev->GetRenderState(D3DRS_SCISSORTESTENABLE, &nScissor)) && nScissor && SUCCEEDED(pDev->GetScissorRect(&Scissor)))
+    Trace_Write("    d3d scissor: (%ld %ld)-(%ld %ld)", Scissor.left, Scissor.top, Scissor.right, Scissor.bottom);
 
   // Texture stages up to the first disabled one.
   for (DWORD nStage = 0; nStage < 4; nStage++)

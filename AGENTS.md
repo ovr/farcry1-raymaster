@@ -13,14 +13,16 @@ it as well: it holds local, machine-specific instructions and is not committed (
   and run the game only there; never in any other Far Cry installation on the machine.
 - `farcry1_testing1/Bin64` is the 64-bit build of the Cumulative Patch. It may only be **run**
   with XRenderD3D9Traced and observed through the trace log. What the trace shows about it is
-  runtime behaviour of that build and is marked as such in `mod/XRenderCommon`.
+  runtime behaviour of that build and is marked as such in `mod/XRenderCommon`, which keeps only
+  the facts about the shared structures; the detailed notes on how that build drives its renderer
+  are local research notes, not committed.
 
 ## Layout
 
 - `sdk/` - the Crytek Far Cry 1.4 SDK (CryCommon headers, CryGame sources, tools).
-- `mod/` - our own modules (e.g. `mod/XRenderD3D9Traced`, the tracing renderer proxy, and
-  `mod/XRenderCommon`, renderer interface knowledge beyond the SDK headers). New libraries go
-  here, not into `sdk/`.
+- `mod/` - our own modules (e.g. `mod/XRenderD3D9Traced`, the tracing renderer proxy,
+  `mod/XRenderCommon`, renderer interface knowledge beyond the SDK headers, and `mod/Demos`, the
+  demo scenes). New libraries go here, not into `sdk/`.
 - `farcry1_testing1/` - the game install for tracing (git-ignored):
   - `Bin32` - retail 1.4 (x86; stops at its CD check, which is not to be bypassed),
   - `Bin64` - the Cumulative Patch x64 build described above.
@@ -62,12 +64,21 @@ it as well: it holds local, machine-specific instructions and is not committed (
   later (counted from when it is read; 32 may wait at once); `decal size texture [x y]` calls `I3DEngine::CreateDecal` where the ray through that point
   of the screen (fractions, the centre by default) meets terrain or a static object, with the owner
   taken as the SDK game code does, and `decal size texture terrain x y` puts one on the terrain at
-  world (x, y) (decals need `e_decals 1` before the level loads); `mouse down`, `mouse up` and
-  `mouse move dx dy` send the left button or a relative move with `SendInput`, only while the game
-  window is in front; `goto x y z [ax ay az]` puts the player (the first entity of class `Player`)
+  world (x, y) (decals need `e_decals 1` before the level loads); `mouse down [right]`, `mouse up
+  [right]`, `mouse move dx dy` and `key down|up <letter or digit>` send the left (right) button, a
+  relative move or a key (as a scan code) with `SendInput`, only while the game window is in front
+  (the run's log says whether it was); `screenshader <shader>|-` calls
+  `I3DEngine::SetScreenShader` (`-`: ""), `screenmask <texture>|-` and `blurmask <texture>|-`
+  `SetScreenMask` / `SetBlurMask` with that texture (`LoadTexture`) or NULL; `inframe n command`
+  runs a console command at the end of each of the next n frames, inside the frame (e.g.
+  `inframe 300 #System:DrawRectShader("ScreenDistort", 0, 0, 800, 600, 1, 1, 1, 1)`; the other
+  commands run between two frames); `goto x y z [ax ay az]` puts the player (the first entity of class `Player`)
   and the view camera at that point (a scripted camera, as at the start of Archive, overrides
   it); `entities [part of a class name]` lists the entities with class, name and position, to
-  find a place for `goto`; `capture` writes every call from then on until the renderer
+  find a place for `goto`; `playerevent item n` and `playerevent zoom n` send the player the
+  script event the SDK's client sends for an item key (`ScriptEvent_ItemActivated`, e.g. 0 for the
+  binoculars) and for the zoom key (`ScriptEvent_ZoomToggle`: 1 pressed, 0 released), without
+  input; `capture` writes every call from then on until the renderer
   is released
   (e.g. `capture; quit` in `XRENDERTRACED_EXEC_LEVEL` for the shutdown; in the menu it never ends
   and the log grows by gigabytes), `frame` only the next frame, as `XRENDERTRACED_CAPTURE` does
@@ -100,7 +111,12 @@ it as well: it holds local, machine-specific instructions and is not committed (
   one) and counted in the summary; e.g. `XRENDERTRACED_TRACE_METHODS=ICryPak::FOpen` with
   `XRENDERTRACED_TRACE_METHODS_MAX=30000` writes every file the renderer opens. A traced
   `GetAnimTexInfoFromId` or `RemoveAnimatedTexture` writes the `AnimTexInfo` (name, frames,
-  references, texture IDs).
+  references, texture IDs). The engine's materials (`IMatInfo`) handed to `CLeafBuffer::Render`
+  and `AddRenderElements` are hooked too (`IMatInfo::GetSubMtl` lines, e.g. with
+  `XRENDERTRACED_TRACE_METHODS=IMatInfo::GetSubMtl`; the counter starts again at the `vcalls`
+  command), and the dump under a `Render` call with a material lists its sub materials and the
+  buffer's chunks with their `cgfId`. A material pointer without a valid vtable is not called but
+  written as raw bytes.
 - `XRENDERTRACED_FEATURES_CLEAR` and `XRENDERTRACED_FEATURES_SET` (hexadecimal `RFT_*` masks)
   change the value of `GetFeatures` before the engine gets it, to see what the engine does with
   each feature; the traced call writes the caller and both values.
@@ -121,8 +137,10 @@ it as well: it holds local, machine-specific instructions and is not committed (
   `XRENDERTRACED_TEMPLATE=TemplDecalModulate` gives every material that names a template
   (`Templ...`) that template instead, to see how the renderer draws templates that are not in
   view; `XRENDERTRACED_TEMPLATE_ONLY=name,name` limits it to the materials of those names (as
-  passed to `EF_LoadShaderItem`), and `XRENDERTRACED_TEMPLATE_OPACITY=0.5` then gives them that
-  opacity too.
+  passed to `EF_LoadShaderItem`) or with those templates, and then also replaces templates that
+  are not `Templ...` (the level's material library loads every material as `MaterialContainer`,
+  so e.g. `XRENDERTRACED_TEMPLATE_ONLY=WaterVolume` picks its water materials);
+  `XRENDERTRACED_TEMPLATE_OPACITY=0.5` then gives them that opacity too.
   `XRENDERTRACED_TEXTURE=<name>` gives every material with a diffuse texture this texture instead
   (`XRENDERTRACED_TEXTURE_ONLY=name,name` only the materials of those names), e.g. an animated
   one made of test pictures, to see in view how the renderer uses it. The original renderer cuts
@@ -164,7 +182,10 @@ it as well: it holds local, machine-specific instructions and is not committed (
 - `XRENDERTRACED_D3D_DRAWS=1` writes the Direct3D 9 draw calls of the original renderer in the
   captured frame (`D3DDraws.h`; the header line gives `ITimer::GetCurrTime()`, for animated
   values): buffers, vertex declaration, shaders, textures and the render
-  element being drawn (x64), the first vertices of the non-indexed draws (8, or
+  element being drawn (x64; for a leaf buffer the shader and template of its chunk, while an
+  object rendered with `SRendParams::pMaterial` is drawn with that material, whose shader,
+  template and resources the `IMatInfo` dump under its `CLeafBuffer::Render` line gives), the
+  first vertices of the non-indexed draws (8, or
   `XRENDERTRACED_D3D_VERTS`), the `Clear` calls, the render target and depth buffer changes
   (`SetRenderTarget`, `SetDepthStencilSurface`), the surface copies and fills (`StretchRect`,
   `UpdateSurface`, `ColorFill`), the read backs (`GetRenderTargetData`, `GetFrontBufferData`,
@@ -173,8 +194,11 @@ it as well: it holds local, machine-specific instructions and is not committed (
   of the next captured frame, so the vertices of its first draws are known too (capture two
   frames in a row, e.g. `after 1000 frame; after 1001 frame`). `2` adds the device state after
   each (with
-  the stencil state when stencil is on) and the box of the positions an indexed draw uses (when
-  its vertex buffer can be read back), `3` also the shader constants.
+  the stencil state when stencil is on and the scissor rectangle when the scissor test is on) and
+  the box of the positions an indexed draw uses (when
+  its vertex buffer can be read back), `3` also the shader constants. The `CCObject` dumps give
+  its scissor rectangle, and the camera dump of `SetCamera` the camera's portal and scissor
+  rectangles when they are set.
   `XRENDERTRACED_D3D_CUBESAVE=<path prefix>` saves level 0 of the six faces of every cube texture
   a draw uses as TGA files (DXT decoded; keep them in the scratchpad, never commit them).
   `XRENDERTRACED_D3D_TEXSAVE=<path prefix>` does the same for level 0 of every managed 2D texture
@@ -198,3 +222,49 @@ it as well: it holds local, machine-specific instructions and is not committed (
   references to the dynamic vertex buffers), so do not capture between resolution changes.
 - The log is `farcry1_testing1/XRenderD3D9Traced.log`; the engine log is
   `farcry1_testing1/log.txt`.
+
+## Demos
+
+- A demo (`mod/Demos`, x64 only) is a DLL that runs inside the game's own `FarCry.exe`, never in
+  an exe of ours: the engine is not started outside the game, so that none of the game's checks
+  is bypassed. XRenderD3D9Traced loads the DLL named by `XRENDERTRACED_DEMO` (a bare name from
+  `Bin64`) and calls it at every frame (`DemoPlugin.h`: in `BeginFrame`, before `Update` presents
+  the frame, and between frames); `XRENDERTRACED_DEMO_ARGS` is its command line (`DemoHost.h`).
+- `mod/Demos/RunDemo.ps1 <demo>[,<demo>...]|all [-Renderer old|<dll>] [-DemoArgs '...']` starts
+  `farcry1_testing1/Bin64/FarCry.exe` with these variables and `XRENDERTRACED_DLL`, waits until the
+  demo ends the game (it kills it, as a trace run is ended) and prints `<demo>.host.log`; the exit
+  code is 0 when every frame to save was saved. The frames go to
+  `farcry1_testing1/DemoShots/<label>` (`old` for the original renderer), the scene files are
+  `farcry1_testing1/Demos/<demo>.ini`; neither is ever committed. `-Resolution 3840x2160` sets
+  `XRENDERTRACED_RESOLUTION`: XRenderD3D9Traced starts the renderer with that size (r_Width and
+  r_Height set before `Init`), also when it is larger than the screen; the back buffer and the
+  frames have it, `system.cfg` is not changed. The demo's `--video <file.mp4>` writes every frame
+  of the run into a video through ffmpeg (on PATH), `--until <frame>` makes the run longer than
+  its frames to save.
+- The demos in the main menu: DemoTextures (a texture of the game and the demo's own test
+  texture, drawn in 2D in several ways), DemoFonts (the game's fonts), DemoCamera (lines and
+  textured cubes in 3D under an orbiting camera), DemoObject (a static object turning), DemoLight
+  (a point light going round an object), DemoAnimation (a character playing an animation),
+  DemoStates (a table of blend, alpha test, depth, cull and fill states and the helper
+  primitives), DemoAspect (the 2D and 3D layout of the frame at any size), DemoShaders (one object
+  with a material per shader template), DemoTextureFormats (textures by format, mip levels and
+  anisotropic filtering on a floor), DemoMultiLight (coloured point, directional and projected
+  lights), DemoCharacters (characters in a row, one holding a weapon), DemoWeapons (the weapon
+  models), DemoReset (the resolution changed between frames) and DemoStress (many objects and
+  lights, with frame times).
+- The demos in a level: DemoLevel (a level drawn by the engine from a fixed camera, the game's,
+  a camera path of keyframes, or one of its cut scenes), DemoShadows (shadows under a moving
+  light; also in the main menu), DemoParticles (fire, smoke and sparks), DemoScreenFx (the screen
+  effects one after the other), DemoDecals (bullet holes, blood and scorch marks), DemoSkyFog
+  (fog and sky changed), DemoQuality (the quality presets of the video options) and DemoReplay
+  (the game's time demos played back).
+- The keys of each scene file are in the head comment of the demo's source (a line starting with
+  `#` or `;` is a comment; `exec` keys take console commands separated by `;` or `|`); `--scene`
+  picks another scene file, e.g. a second one for DemoLevel.
+- `Bin64/DemoCompare.exe <folder A> <folder B> [--tolerance <n>] [--diff <folder>]` compares the
+  frames of two runs (exit code 0 when they are equal). Repeated runs of one renderer give the
+  same frames, except a few pixels of the characters (DemoAnimation, DemoCharacters:
+  `--tolerance 1`) and of overlapping decals (DemoDecals: `--tolerance 6`); the fire and smoke of
+  DemoParticles, the water of DemoQuality from its medium preset on and the walking figures in
+  the background of the beach demos differ more and are compared by eye. So a larger difference
+  between `DemoShots/old` and the frames of our renderer is the renderer's.
