@@ -121,8 +121,9 @@ namespace RendererStructures
 //   the renderer's table of waves (CCObject::m_Waves, a static member only the renderer can see),
 //   counted from 1 every frame (1/2, 3/4, ...). wf is an output: the renderer stores the two waves'
 //   addresses in wf[0] and wf[1], and the engine fills the waves after the call (see
-//   Bin64Behaviour.h, "Static objects"). RemovePermanent is called on permanent objects
-//   (EF_GetObject(false, n)).
+//   Bin64Behaviour.h, "Static objects"). RemovePermanent is called on the objects the renderer
+//   keeps in CDLight::m_pObject (the light coronas), when the engine gives the light's place in its
+//   list to another light (CDLight below, Bin64Behaviour.h "Flares and light coronas").
 //   Shader inputs taken from the object (SDK "Shaders Specification"): ObjColor m_Color, ObjVal
 //   m_TempVars, Bending m_fBending (a union with m_pLightImage), ObjWaveX/ObjWaveY the waves
 //   m_NumWFX/m_NumWFY, ObjRefrFactor m_fRefract, BumpAmount m_fBump. In Training only the
@@ -270,7 +271,13 @@ static const int nBin64ScreenParam_FlashBangForce = 25;
 // Read only (no writes by the renderer seen): SRendParams, CCamera, CIndexedMesh.
 //
 // CDLight: EF_ADDDlight assigns m_Id (the light's index in the frame, from 0; a DLF_FAKE light
-//   keeps -1); the renderer stores its corona / flare objects in m_pObject. EF_UpdateDLight fills
+//   keeps -1); the renderer stores its corona / flare objects in m_pObject (only [1][0] was ever
+//   set). The lights the engine passes are copies (DLF_COPY) in a list of its own, kept from frame
+//   to frame. The engine never releases m_pObject, and CDLight's operator= copies the pointers (a
+//   copy shares the objects); when the engine overwrites an entry of its list with another light
+//   (a light dropped and the ones behind it moved up) it first calls CCObject::RemovePermanent()
+//   on the entry's object, then copies the other light, with that light's m_pObject, over it.
+//   EF_UpdateDLight fills
 //   m_Orientation and m_TextureMatrix of a DLF_PROJECT light from m_ProjAngles, m_Origin and
 //   m_fLightFrustumAngle (Bin64Behaviour.h, "Lights").
 // SInputShaderResources: EF_LoadShaderItem sets m_LMaterial when it is NULL (to a light material

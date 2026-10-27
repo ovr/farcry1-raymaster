@@ -1106,6 +1106,14 @@ static const int nHeapAlignment = 4;
 // Light coronas: the first time a light with m_fCoronaScale > 0 and m_pShader "flare_from_light"
 // reaches EF_ADDDlight, the renderer makes an object for its corona and stores it in
 // m_pObject[1][0]; the engine passes the same CDLight every frame, so the object stays.
+// When the light drops out of the engine's list (or the list is rebuilt after a level load), the
+// engine calls RemovePermanent() on that object before it copies another light into the entry
+// (RendererStructures.h, CDLight). A removed object can come back in the same entry's
+// m_pObject[1][0] (Bunker, after the load: another lamp with another colour), with m_RE NULL and
+// the fade time 0: the renderer starts its test and fade anew. A light added without a corona
+// keeps all m_pObject entries NULL. The engine adds lights with coronas only in the main view
+// (EF_Query(EFQ_RecurseLevel) is 0 before EF_StartEf and 1 after it); the water reflection's
+// frame adds only the sun.
 // Its m_ObjFlags are 0x70a00000 (FOB_TRANS_ROTATE | FOB_TRANS_SCALE | FOB_TRANS_TRANSLATE |
 // FOB_HASALPHA | FOB_BENDED); the corona is tested and drawn at m_Origin in every frame in which
 // the light is added.
