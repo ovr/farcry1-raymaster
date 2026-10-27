@@ -813,6 +813,52 @@ static const int nHeapAlignment = 4;
 // DLF_LIGHTSOURCE | DLF_SUN | DLF_COPY | DLF_LM | DLF_THIS_AREA_ONLY (0x6d0012), m_Origin far
 // away (447, 8530, 10200 in Training), m_fRadius 1e8, debug name "Sun". EF_ADDDlight assigns
 // m_Id (0 for the first light of the frame).
+//
+// Order in a frame (Steam): while the entities update, EF_UpdateDLight on the engine's own lights;
+// at the start of the scene EF_StartEf, EF_ClearLightsList, EF_UpdateDLight on a copy of each
+// light (DLF_COPY added), then for each copy EF_IsFakeDLight and EF_ADDDlight. EF_ADDDlight numbers
+// the lights from 0, but a light with DLF_FAKE keeps m_Id -1, and EF_IsFakeDLight is true only for
+// it (sun 0, a point light 1, a projector 2, a fake point light -1).
+//
+// Projected lights (Steam, a lamp hanging in a hut)
+//   The light: DLF_PROJECT | DLF_HEATSOURCE | DLF_LIGHTSOURCE | DLF_THIS_AREA_ONLY |
+//   DLF_IGNORE_TERRAIN | DLF_SPECULAR_ONLY_FOR_HIGHSPEC | DLF_LMDOT3 (0x1a418040), m_fRadius 7,
+//   m_fLightFrustumAngle 60, m_ProjAngles (0, 90, 288) in degrees, changing a little every frame
+//   (the lamp swings: x up to about 2, y up to 90.3), m_pShader and m_pLightImage set.
+//   The image comes from EF_LoadTexture(name, 0, FT2_FORCECUBEMAP, eTT_Cubemap) (called several
+//   times, the same ITexPic each time): a 256 x 256 picture becomes a 64 x 64 texture
+//   (GetOriginalWidth 256) with the flags FT_HASMIPS | FT_DXT1 and the flags2 FT2_FORCECUBEMAP |
+//   FT2_WASLOADED | FT2_CUBEASSINGLETEXTURE | FT2_WASFOUND. In Direct3D it is a DXT1 cube texture
+//   of 64 texels with 7 levels (managed pool). The picture is on the +X face; the other five faces
+//   are transparent black.
+//   EF_UpdateDLight fills m_Orientation and m_TextureMatrix of a DLF_PROJECT light (of no other
+//   light). The engine's light has the default basis of the CDLight constructor again at every
+//   call, so a renderer computes both in every call:
+//     R = Rz(m_ProjAngles.z) * Ry(m_ProjAngles.y) * Rx(m_ProjAngles.x) (degrees, right-handed
+//     rotations about the world axes, column vectors);
+//     m_vForward F = R (1,0,0), m_vUp U = R (0,1,0), m_vRight V = R (0,0,1) = F x U; the angles
+//     (0, 90, 288) point it straight down;
+//     m_TextureMatrix (Direct3D style, p * M) takes a world point p to the cube lookup vector
+//     (F.d, s U.d, s V.d) with d = p - m_Origin and s = 1 / tan(m_fLightFrustumAngle): its
+//     columns are F, s U, s V and (0, 0, 0, 1), its last row is -(F.o, s U.o, s V.o) for
+//     o = m_Origin (frustum 15 gives s = 3.73, 45 gives 1, 60 gives 0.577, 90 gives 0).
+//   So the picture covers a square pyramid around F whose sides are m_fLightFrustumAngle off the
+//   axis. For F.d > 0 inside it, the +X face gives u = (1 - s V.d / F.d) / 2 and
+//   v = (1 - s U.d / F.d) / 2. Which way up the picture lies on the face was not checked, because
+//   the spot picture is round.
+//   How the D3D9 renderer draws it: after the normal draws of each object the light reaches
+//   (static objects and characters; 27 draws here), it draws the object's geometry once more:
+//     depth test EQUAL, no depth writes, the same culling, fog on; blending ONE, ONE (SRCALPHA,
+//     INVSRCALPHA for the alpha-blended materials);
+//     stage 0: diffuse texture * lit vertex colour, alpha = texture alpha;
+//     stage 1: cube texture * result * 2 (alpha texture * current); the texture coordinates are
+//     the camera-space position (D3DTSS_TCI_CAMERASPACEPOSITION) with the texture transform
+//     inverse(camera view) * m_TextureMatrix (COUNT3), the same for every object (the
+//     camera's view matrix, not the view of the draw, which holds the object's matrix);
+//     fixed function lighting with light 0 only: a point light at m_Origin with diffuse m_Color,
+//     material diffuse 1, no ambient, attenuation (0.01, 256 / range, 0). The range is
+//     50.416 * m_fRadius for characters and some static objects, and up to 121 * m_fRadius for
+//     other static objects; how that range is chosen was not found.
 
 //////////////////////////////////////////////////////////////////////////
 // Textures

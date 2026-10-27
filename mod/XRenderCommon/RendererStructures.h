@@ -256,8 +256,10 @@ static const int nBin64ScreenParam_FlashBangForce = 25;
 
 // Read only (no writes by the renderer seen): SRendParams, CCamera, CIndexedMesh.
 //
-// CDLight: EF_ADDDlight assigns m_Id (the light's index in the frame, from 0); the renderer
-//   stores its corona / flare objects in m_pObject.
+// CDLight: EF_ADDDlight assigns m_Id (the light's index in the frame, from 0; a DLF_FAKE light
+//   keeps -1); the renderer stores its corona / flare objects in m_pObject. EF_UpdateDLight fills
+//   m_Orientation and m_TextureMatrix of a DLF_PROJECT light from m_ProjAngles, m_Origin and
+//   m_fLightFrustumAngle (Bin64Behaviour.h, "Lights").
 // SInputShaderResources: EF_LoadShaderItem sets m_LMaterial when it is NULL (to a light material
 //   owned by the renderer).
 // VertexBufferSource: CreateBuffer(VertexBufferSource *) moves pMats into the leaf buffer and
