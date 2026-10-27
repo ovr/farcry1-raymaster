@@ -361,7 +361,21 @@ static const int nHeapAlignment = 4;
 //     to world space by a texture transform) * vertex lighting, plus the texture; opaque.
 //   "templtexturev22rotate": the texture, alpha from the texture, blended (SRCALPHA, INVSRCALPHA)
 //     with an alpha test (>= 2), no depth writes, no culling, a texture transform.
-//   The other templates were not drawn in these frames.
+//   The other templates were not in view. With every material of River given one of them (the
+//   frame at the start position; XRENDERTRACED_TEMPLATE):
+//   "templdecal": texture * texture factor (the object's ambient colour), or texture * vertex
+//     lighting for objects that are lit; no lightmap stage; opaque, depth writes.
+//   "templdecalalphatest": the same with an alpha test (>= 128).
+//   "templalphablend": the same blended (SRCALPHA, INVSRCALPHA) without depth writes.
+//   "templdecaladd", "templmuzzleflash", "templmuzzleflash_auto_fp": the texture alone, added
+//     (ONE, ONE), no depth writes; the vertices carry only positions and texture coordinates.
+//   "templdecalalphaadd": texture * vertex colour, blended (SRCALPHA, ONE), no depth writes.
+//   "templglasscm_fp": texture * texture factor (grey 25) plus a cube map looked up with the
+//     camera space reflection vector (texture transform as for "templreflcmdecal"); opaque,
+//     depth writes.
+//   "templdecalmodulate_fp", "templdecalalphablend" (eS_Decal) and "aw50scoperefraction"
+//     (eS_Refractive): nothing is drawn. The engine renders the objects as usual (the same
+//     CLeafBuffer::Render calls), but the renderer makes no draw for their elements on their own.
 
 //////////////////////////////////////////////////////////////////////////
 // Particles
