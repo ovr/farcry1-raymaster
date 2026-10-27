@@ -217,9 +217,18 @@ it as well: it holds local, machine-specific instructions and is not committed (
   over (`EF_AddEf`, `CLeafBuffer::Render` / `AddRenderElements`), `XRENDERTRACED_CAPTURE_SHADER_MAX`
   times (default 1). Templates are shared: `templmuzzleflash` is also the flares' template.
   `XRENDERTRACED_DISPLAY=1` writes a line `[display] frame N: ...` (device, back buffer, window
-  client area, `GetWidth` / `GetHeight`) whenever one of them changes, e.g. after `r_Width 1280`.
+  client area and DPI, `GetWidth` / `GetHeight`) whenever one of them changes, e.g. after
+  `r_Width 1280`.
   A device reset after a frame captured with `XRENDERTRACED_D3D_DRAWS` fails (the tracer keeps
   references to the dynamic vertex buffers), so do not capture between resolution changes.
+- DPI: `FarCry.exe` does not declare DPI awareness, so at a Windows display scale above 100 % the
+  system stretches the game's window as a bitmap (blurry, 1.5 times larger at 150 %). The renderer
+  makes its window in `Init`; XRenderD3D9Traced declares the process per monitor DPI aware before
+  it creates the original renderer, so the window and its client area are in physical pixels and
+  the window is not stretched. The renderer sizes the whole window, frame included, to the
+  resolution, so the client area is smaller than the back buffer by the frame (thicker at a
+  larger scale). The log writes what was done and the window's DPI and client area after `Init`.
+  `XRENDERTRACED_DPI=0` leaves the process as the game starts it.
 - The log is `farcry1_testing1/XRenderD3D9Traced.log`; the engine log is
   `farcry1_testing1/log.txt`.
 

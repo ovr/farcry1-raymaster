@@ -14,6 +14,7 @@
 #include "D3DState.h"
 #include "D3DDraws.h"
 #include "VCallHooks.h"
+#include "Dpi.h"
 #include <I3DEngine.h>
 #include <IStatObj.h>
 #include <IPhysics.h>
@@ -125,6 +126,14 @@ WIN_HWND CRendererProxy::Init(int x, int y, int width, int height, unsigned int 
   WIN_HWND hWnd = m_pReal->Init(x, y, width, height, cbpp, zbpp, sbits, fullscreen, hinst, Glhwnd, Glhdc, hGLrc, bReInit);
   TRACE_RESULT("hwnd %p, %dx%d, color %d depth %d stencil %d bits, features 0x%x", hWnd, m_pReal->GetWidth(), m_pReal->GetHeight(),
     m_pReal->GetColorBpp(), m_pReal->GetDepthBpp(), m_pReal->GetStencilBpp(), m_pReal->GetFeatures());
+  if (!bReInit && hWnd)
+  {
+    char szDpi[64];
+    Dpi_Describe((HWND)hWnd, szDpi, sizeof(szDpi));
+    RECT Client = { 0, 0, 0, 0 };
+    GetClientRect((HWND)hWnd, &Client);
+    Trace_Write("The window: %s, client %dx%d", szDpi, Client.right - Client.left, Client.bottom - Client.top);
+  }
   // The console exists by now.
   Trace_RegisterCVars();
   return hWnd;
