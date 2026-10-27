@@ -973,8 +973,10 @@ static const int nHeapAlignment = 4;
 //     o = m_Origin (frustum 15 gives s = 3.73, 45 gives 1, 60 gives 0.577, 90 gives 0).
 //   So the picture covers a square pyramid around F whose sides are m_fLightFrustumAngle off the
 //   axis. For F.d > 0 inside it, the +X face gives u = (1 - s V.d / F.d) / 2 and
-//   v = (1 - s U.d / F.d) / 2. Which way up the picture lies on the face was not checked, because
-//   the spot picture is round.
+//   v = (1 - s U.d / F.d) / 2, where u = 0 is the left column and v = 0 the top row of the picture
+//   file. So the picture is cast transposed: seen along F with
+//   V up (U to the left), its top row lies along the left edge and its left column along the top
+//   edge; its columns run towards -V and its rows towards -U.
 //   How the D3D9 renderer draws it: after the normal draws of each object the light reaches
 //   (static objects and characters; 27 draws here), it draws the object's geometry once more:
 //     depth test EQUAL, no depth writes, the same culling, fog on; blending ONE, ONE (SRCALPHA,
