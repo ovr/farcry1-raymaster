@@ -1479,7 +1479,7 @@ static void TraceAnimTexInfo(const AnimTexInfo *pInfo)
       nLen += _snprintf(szIds + nLen, sizeof(szIds) - nLen - 1, " %d", pInfo->pBindIds[i]);
     }
   }
-  Trace_Write("    AnimTexInfo @%p '%.80s' frames %d refs %d ids%s", pInfo, pInfo->sName, nFrames, pInfo->nRefCounter, szIds);
+  Trace_Write("    AnimTexInfo @%p '%s' frames %d refs %d ids%s", pInfo, pInfo->sName, nFrames, pInfo->nRefCounter, szIds);
 }
 
 int CRendererProxy::LoadAnimatedTexture(const char *format, const int nCount)

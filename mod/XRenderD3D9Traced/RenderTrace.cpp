@@ -148,7 +148,7 @@ void Trace_Write(const char *szFormat, ...)
 {
   if (!s_pTraceFile)
     return;
-  char szBuf[2048];
+  char szBuf[16384];
   va_list args;
   va_start(args, szFormat);
   _vsnprintf(szBuf, sizeof(szBuf) - 1, szFormat, args);
@@ -283,7 +283,7 @@ STraceScope::~STraceScope()
 
 void Trace_Call(const STraceSite &Site, const char *szFormat, ...)
 {
-  char szArgs[1536];
+  char szArgs[8192];
   va_list args;
   va_start(args, szFormat);
   _vsnprintf(szArgs, sizeof(szArgs) - 1, szFormat, args);

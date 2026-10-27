@@ -317,14 +317,14 @@ static void SaveCubeFaces(IDirect3DCubeTexture9 *pCube, const D3DSURFACE_DESC &D
 }
 
 //! XRENDERTRACED_D3D_TEXSAVE=prefix: the first time a draw of the captured frame uses a 2D
-//! texture no wider or higher than XRENDERTRACED_D3D_TEXSAVE_MAX (default 64), level 0 is saved
+//! texture no wider or higher than XRENDERTRACED_D3D_TEXSAVE_MAX (default 256), level 0 is saved
 //! as an uncompressed 32-bit TGA file "<prefix><texture>.tga".
 static void SaveTexture(IDirect3DTexture9 *pTex, const D3DSURFACE_DESC &Desc)
 {
   char szPrefix[MAX_PATH] = "", szMax[16] = "";
   if (!GetEnvironmentVariableA("XRENDERTRACED_D3D_TEXSAVE", szPrefix, sizeof(szPrefix)) || !szPrefix[0])
     return;
-  const UINT nMax = GetEnvironmentVariableA("XRENDERTRACED_D3D_TEXSAVE_MAX", szMax, sizeof(szMax)) ? (UINT)atoi(szMax) : 64;
+  const UINT nMax = GetEnvironmentVariableA("XRENDERTRACED_D3D_TEXSAVE_MAX", szMax, sizeof(szMax)) ? (UINT)atoi(szMax) : 256;
   if (Desc.Width > nMax || Desc.Height > nMax || !CanSaveFormat(Desc.Format) || Desc.Pool == D3DPOOL_DEFAULT)
     return;
   D3DLOCKED_RECT Rect = {};
@@ -575,7 +575,7 @@ static void WriteDraw(IDirect3DDevice9 *pDev, const char *szCall, bool bStreams,
   IUnknown *pVB0 = NULL;
   UINT nOffset0 = 0, nStride0 = 0;
   ++s_nDraws;
-  char szLine[2048];
+  char szLine[8192];
   _snprintf_s(szLine, _TRUNCATE, "[d3d] %d %s", s_nDraws, szCall);
 
   if (bStreams)

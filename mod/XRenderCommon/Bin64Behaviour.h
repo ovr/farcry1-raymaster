@@ -1349,7 +1349,11 @@ static const int nHeapAlignment = 4;
 // - Animated material textures: "<a>##<first>_<last>(<t>)<b>.<ext>" (as many '#' as digits) is
 //   the frames <a><n><b> for n from <first> to <last> (e.g. "w##01_04(.9).dds" is w01 to w04,
 //   "c###001_011(1.00).dds" c001 to c011); the material's texture becomes the first frame. <t> is
-//   0.02 to 1 in the levels seen; how it times the frames was not measured.
+//   the time of one frame in seconds ("0.25" or ".25"; 0.02 to 1 in the levels): the renderer
+//   draws frame <first> + ((int)(ITimer::GetCurrTime() / <t>) mod the number of frames), so the
+//   frames change on the multiples of <t> of the timer's time, the same for every object (seen with
+//   test pictures over several cycles, <t> 0.1 with 4 frames and 0.25 with 3). The D3D9 renderer
+//   cuts the part in front of the '#' at 64 characters, so longer names are not found.
 // The renderer fills EFTT_ATTENUATION2D (and EFTT_ATTENUATION1D) of every SRenderShaderResources
 // with its own default attenuation textures.
 //

@@ -286,7 +286,8 @@ static void ScreenCall_Leave(SVCallFrame *pFrame)
 //! An argument as a quoted string if it points to a printable one, else as a number.
 static const char *ArgText(UINT_PTR nArg)
 {
-  static char s_szBuf[8][96];
+  // Whole strings up to 1023 characters (file paths, log lines).
+  static char s_szBuf[8][1040];
   static volatile LONG s_nBuf = 0;
   char *szOut = s_szBuf[InterlockedIncrement(&s_nBuf) & 7];
   const char *sz = (const char *)nArg;
@@ -302,21 +303,21 @@ static const char *ArgText(UINT_PTR nArg)
     }
   }
   if (nArg >= 0x10000 && n < 1024 && Trace_IsReadable(sz + n, 1) && sz[n] == 0)
-    _snprintf(szOut, 95, n > 80 ? "'%.77s...'" : "'%s'", sz);
+    _snprintf(szOut, sizeof(s_szBuf[0]) - 1, "'%s'", sz);
   else
-    _snprintf(szOut, 95, "0x%llx", (unsigned long long)nArg);
-  szOut[95] = 0;
+    _snprintf(szOut, sizeof(s_szBuf[0]) - 1, "0x%llx", (unsigned long long)nArg);
+  szOut[sizeof(s_szBuf[0]) - 1] = 0;
   return szOut;
 }
 
 //! The type, flags and value of a console variable.
 static const char *CVarText(ICVar *pVar)
 {
-  static char s_szBuf[160];
+  static char s_szBuf[2048];
   if (!pVar || !Trace_IsReadable(pVar, sizeof(void *)))
     return "";
   const char *szValue = pVar->GetString();
-  _snprintf(s_szBuf, sizeof(s_szBuf) - 1, " '%s' type %d flags 0x%x value '%.60s'", pVar->GetName(), pVar->GetType(), pVar->GetFlags(),
+  _snprintf(s_szBuf, sizeof(s_szBuf) - 1, " '%s' type %d flags 0x%x value '%s'", pVar->GetName(), pVar->GetType(), pVar->GetFlags(),
     szValue ? szValue : "(null)");
   s_szBuf[sizeof(s_szBuf) - 1] = 0;
   return s_szBuf;

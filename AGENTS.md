@@ -123,6 +123,11 @@ it as well: it holds local, machine-specific instructions and is not committed (
   view; `XRENDERTRACED_TEMPLATE_ONLY=name,name` limits it to the materials of those names (as
   passed to `EF_LoadShaderItem`), and `XRENDERTRACED_TEMPLATE_OPACITY=0.5` then gives them that
   opacity too.
+  `XRENDERTRACED_TEXTURE=<name>` gives every material with a diffuse texture this texture instead
+  (`XRENDERTRACED_TEXTURE_ONLY=name,name` only the materials of those names), e.g. an animated
+  one made of test pictures, to see in view how the renderer uses it. The original renderer cuts
+  the folder part of an animated texture name at 64 characters, so keep such test pictures in a
+  short folder under `farcry1_testing1` (and delete them after the run).
   `XRENDERTRACED_SKIP_SPRITES=particlelight_fp,...` holds back the `EF_AddSpriteToScene` calls
   of these shaders, to tell which Direct3D draw belongs to which sprite.
   `XRENDERTRACED_PROBE=FlareInView` moves the object of every flare (`EF_AddEf` with a Flare
@@ -173,7 +178,7 @@ it as well: it holds local, machine-specific instructions and is not committed (
   `XRENDERTRACED_D3D_CUBESAVE=<path prefix>` saves level 0 of the six faces of every cube texture
   a draw uses as TGA files (DXT decoded; keep them in the scratchpad, never commit them).
   `XRENDERTRACED_D3D_TEXSAVE=<path prefix>` does the same for level 0 of every managed 2D texture
-  a draw uses that is at most `XRENDERTRACED_D3D_TEXSAVE_MAX` (default 64) texels wide and high.
+  a draw uses that is at most `XRENDERTRACED_D3D_TEXSAVE_MAX` (default 256) texels wide and high.
   `XRENDERTRACED_D3D_RT=1` writes the first `SetRenderTarget` of every frame to a surface other
   than the back buffer (to find the frames that render shadow maps; 64 lines, counted again after
   each level load); `XRENDERTRACED_CAPTURE_RT=100` captures the rest of the first frame that sets

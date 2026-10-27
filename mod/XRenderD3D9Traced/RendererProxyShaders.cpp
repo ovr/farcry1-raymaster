@@ -24,7 +24,7 @@ static const char *ShaderName(IShader *pSH)
 }
 
 //! Names of the shaders by their IDs (IShader::GetID), for the methods that take a shader ID.
-static char s_szShaderNames[4096][48];
+static char s_szShaderNames[4096][256];
 
 static void RememberShader(IShader *pSH)
 {
@@ -244,6 +244,15 @@ SShaderItem CRendererProxy::EF_LoadShaderItem(const char *name, EShClass Class, 
     if (s_bOnlyListed && s_fOpacity >= 0 && Res)
       Res->m_Opacity = s_fOpacity;
   }
+  // XRENDERTRACED_TEXTURE=<texture name>: the diffuse texture of every material that has one (with
+  // XRENDERTRACED_TEXTURE_ONLY="name,name,..." only of the materials of those names) is this one,
+  // e.g. an animated texture, to see how the renderer draws it in view.
+  static char s_szTexture[256] = "?";
+  if (s_szTexture[0] == '?' && !GetEnvironmentVariableA("XRENDERTRACED_TEXTURE", s_szTexture, sizeof(s_szTexture)))
+    s_szTexture[0] = 0;
+  if (s_szTexture[0] && Res && !Res->m_Textures[EFTT_DIFFUSE].m_Name.empty() &&
+      (!GetEnvironmentVariableA("XRENDERTRACED_TEXTURE_ONLY", NULL, 0) || name && Trace_IsListed("XRENDERTRACED_TEXTURE_ONLY", name)))
+    Res->m_Textures[EFTT_DIFFUSE].m_Name = s_szTexture;
   SShaderItem Item = m_pReal->EF_LoadShaderItem(name, Class, bShare, templName, flags, Res, nMaskGen);
   TRACE_RESULT("shader %p res %p", Item.m_pShader, Item.m_pShaderResources);
   Watch_RendererObject(WT_SRenderShaderResources, Item.m_pShaderResources);
