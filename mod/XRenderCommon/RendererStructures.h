@@ -108,9 +108,10 @@ namespace RendererStructures
 //   with bending;
 //   afterwards m_NumWFX and m_NumWFY (unions with m_nLod and m_nTemplId) hold two new indices into
 //   the renderer's table of waves (CCObject::m_Waves, a static member only the renderer can see),
-//   counted from 1 every frame (1/2, 3/4, ...). The argument is not two SWaveForm2 pointers as
-//   declared (see Bin64Behaviour.h, "Static objects"). RemovePermanent is called on permanent
-//   objects (EF_GetObject(false, n)).
+//   counted from 1 every frame (1/2, 3/4, ...). wf is an output: the renderer stores the two waves'
+//   addresses in wf[0] and wf[1], and the engine fills the waves after the call (see
+//   Bin64Behaviour.h, "Static objects"). RemovePermanent is called on permanent objects
+//   (EF_GetObject(false, n)).
 //   Shader inputs taken from the object (SDK "Shaders Specification"): ObjColor m_Color, ObjVal
 //   m_TempVars, Bending m_fBending (a union with m_pLightImage), ObjWaveX/ObjWaveY the waves
 //   m_NumWFX/m_NumWFY, ObjRefrFactor m_fRefract, BumpAmount m_fBump. In Training only the

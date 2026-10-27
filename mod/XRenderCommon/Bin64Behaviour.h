@@ -93,21 +93,26 @@ static const int nHeapAlignment = 4;
 //   one entry per material (-1: no template override); pMaterial is the instance's material or
 //   NULL. Render makes no IRenderer calls: its render elements go straight to the renderer's own
 //   lists.
-//   Vegetation instances also get m_fBending (0 to 1.4 in Training) and one call per frame of
-//   CCObject::AddWaves (the first virtual function of CCObject), after which m_NumWFX and m_NumWFY
-//   hold the indices of two new waves (1/2, 3/4, ... from the start of every frame). The argument
-//   is not two SWaveForm2 pointers. The values the call carries (x64 registers; the declared
-//   parameter types do not fit them):
-//   - rdx points to a block of the engine's: +0x00 the object's address, +0x08 int 1, +0x10 a
-//     float that stays the same while the game time stands still and changes when it runs (0.1 to
-//     3.3, per instance), +0x20 5.0, +0x80 the instance's scale three times, +0xA0 the instance's
-//     position (both as in SRendParams); r9 points to the scale (rdx + 0x80), r8 to rdx + 0x90;
-//   - xmm2 holds the instance's SRendParams::fBending, xmm1 a float from 0.35 to 1 (1 for many
-//     instances, the same for an instance in every frame);
-//   - the 5th and 6th arguments on the stack are the object's address and 1 again.
-//   How the renderer turns these into waves is its own business; a replacement renderer can drive
-//   the bending from m_fBending and the position alone. On Training the engine made these calls only
-//   while vegetation with bending was drawn (3695 calls in the first 150 frames after the load).
+//   Vegetation instances also get m_fBending (SRendParams::fBending, 0 to 1.4 in Training), and
+//   after that one call per frame of CCObject::AddWaves (the first virtual function of CCObject)
+//   with the SDK's parameter, AddWaves(SWaveForm2 **wf). wf points to two pointers of the engine's
+//   that the call has to set (they hold stale values when it starts):
+//   - the renderer adds two waves to its table (CCObject::m_Waves, 20-byte SWaveForm2 entries),
+//     stores their indices in m_NumWFX and m_NumWFY (1/2, 3/4, ... from the start of every frame;
+//     index 0 is never handed out) and their addresses in wf[0] and wf[1];
+//   - right after the call the engine fills both waves through these pointers (if wf is left as
+//     it was, the engine writes through a stale pointer and crashes). Seen on Training and River:
+//     type eWF_Sin, level 0, amplitude 0.002, frequency 0.21 to 0.51, phase 29 to 94 for X and 54
+//     to 134 for Y (different per instance, constant while the instance stays in view).
+//   The other registers of the call are left over from the engine (xmm2 equals m_fBending).
+//   With r_Quality_BumpMapping 2 the D3D9 renderer draws vegetation with vertex shaders and gives
+//   them (ObjWaveX, ObjWaveY, m_fBending, 1) in constant c7 at every draw of the instance, each
+//   wave evaluated as level + amp * sin(2 * pi * (t * freq + phase)) with t = ITimer::GetCurrTime()
+//   of the frame (to within 1.3e-5 at amplitude 0.002: 1163 draws on Training with the time
+//   standing still, 3239 on River over 178 frames with the time running, five vertex shaders).
+//   With r_Quality_BumpMapping 0 vegetation is drawn by the fixed function pipeline from its static
+//   buffers and does not bend. On Training the engine made these calls only while vegetation with
+//   bending was drawn (3695 calls in the first 150 frames after the load).
 //
 //   In EF_EndEf3D the renderer calls CheckUpdate(nVertexFormat, nFlags, false) on every leaf buffer
 //   it draws, with the vertex format the shader needs (P3F_N_TEX2F) and VSM_TANGENTS (0x2) in
