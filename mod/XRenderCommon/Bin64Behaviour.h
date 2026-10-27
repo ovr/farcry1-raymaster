@@ -44,6 +44,20 @@ namespace Bin64Renderer
 static const int nHeapAlignment = 4;
 
 //////////////////////////////////////////////////////////////////////////
+// Shutdown (Training, the console command "quit" 100 frames after the load)
+//
+// The engine draws 62 more frames after "quit". After the last one it calls EF_ClearLightsList,
+// EnableSwapBuffers(true), RemoveTexture for textures of the game (the same ID up to 28 times in
+// a row), GetFrameID(true), GetHWND, DownLoadToVideoMemory of an 800 x 600 eTF_0888 picture
+// without mip maps (it gets the ID of a texture removed just before) and ScaleCoordX /
+// ScaleCoordY. Then it frees the level: OnEntityDeleted 577 times with DeleteLeafBuffer in
+// between (491 calls: "StatObj", the characters' "Unknown", "CryModelArray" and "ModelState", and
+// 35 times NULL), RemoveTexture(0xFFFFFFFF), RemoveTexture of the 800 x 600 picture, and last
+// IRenderer::Release(). ShutDown and FreeResources are not called, and the terrain buffers
+// ("TerrainSector", "LowResTerrain") are not deleted: Release has to free what is left, and
+// RemoveTexture and DeleteLeafBuffer have to accept the same ID several times, -1 and NULL.
+
+//////////////////////////////////////////////////////////////////////////
 // Frame
 //
 // IRenderer calls of one game frame in the level (frame 5000):
