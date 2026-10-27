@@ -44,6 +44,16 @@ namespace Bin64Renderer
 static const int nHeapAlignment = 4;
 
 //////////////////////////////////////////////////////////////////////////
+// Threads
+//
+// Every call of the engine into the renderer came from the thread that called
+// PackageRenderConstructor: the IRenderer and CLeafBuffer methods in all traces (the 20 levels,
+// the start-up videos and the menu, level changes, the shutdown), and the virtual functions of the
+// renderer's objects (IShader, ITexPic, render elements, CCObject) and the renderer's calls into
+// the engine's interfaces on Training and River, a level change included. A renderer needs no
+// locks for the engine's sake.
+
+//////////////////////////////////////////////////////////////////////////
 // Shutdown (Training, the console command "quit" 100 frames after the load)
 //
 // The engine draws 62 more frames after "quit". After the last one it calls EF_ClearLightsList,

@@ -101,6 +101,9 @@ it as well: it holds local, machine-specific instructions and is not committed (
   `XRENDERTRACED_TRACE_METHODS_MAX=30000` writes every file the renderer opens. A traced
   `GetAnimTexInfoFromId` or `RemoveAnimatedTexture` writes the `AnimTexInfo` (name, frames,
   references, texture IDs).
+- A call into the renderer from another thread than the one that loaded it (an IRenderer or
+  CLeafBuffer method, a hooked virtual function, or a call of the renderer into the engine) writes
+  a `[thread]` line, once per method.
 - `XRENDERTRACED_D3D_STATE` (names as in the log, e.g. `DrawDynVB,Draw2dImage`) writes the
   Direct3D 9 state of the original renderer after those calls (`D3DState.h`; read only, through
   `EF_Query(EFQ_D3DDevice)`). `XRENDERTRACED_PROBE=FontSetBlending` passes (i, 12 - i) in the first

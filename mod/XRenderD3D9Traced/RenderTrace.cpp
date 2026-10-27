@@ -383,6 +383,11 @@ bool Trace_IsCapturing()
   return s_bCapture;
 }
 
+DWORD Trace_MainThread()
+{
+  return s_dwMainThread;
+}
+
 //////////////////////////////////////////////////////////////////////////
 // Names
 

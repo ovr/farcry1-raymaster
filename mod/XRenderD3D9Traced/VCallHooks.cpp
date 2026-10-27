@@ -79,6 +79,9 @@ struct SVSlot
   //! Bit i: called from module i of s_Modules.
   volatile LONG nEngineModules;
   volatile LONG nLogged;
+  //! Calls (of the engine into the renderer, or of the renderer into the engine) from another
+  //! thread than the one that loaded the renderer.
+  volatile LONG nOtherThread;
 };
 
 struct SHookedVTable
@@ -529,6 +532,9 @@ extern "C" void VCall_Enter(SVCallFrame *pFrame)
   // The engine's interfaces: the calls of the renderer into the engine are the ones to write.
   if (eCaller != (pSlot->pTable->bEngine ? CALLER_Renderer : CALLER_Engine))
     return;
+  if (GetCurrentThreadId() != Trace_MainThread() && InterlockedIncrement(&pSlot->nOtherThread) == 1)
+    Trace_Write("[thread] %s::%s called from thread %u (the renderer was loaded by thread %u), from %s", pSlot->pTable->szName,
+      pSlot->szMethod, GetCurrentThreadId(), Trace_MainThread(), Trace_Addr(pFrame->pReturn));
   if (CV_xrt_Trace <= 0)
     return;
   if (pSlot->eSpecial != SPECIAL_None)

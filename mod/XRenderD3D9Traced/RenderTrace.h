@@ -37,6 +37,8 @@ void Trace_CaptureFrame(const char *szReason = "capture of the next frame");
 void Trace_CaptureRest(const char *szReason);
 //! Whether the current frame is the captured one.
 bool Trace_IsCapturing();
+//! The thread that loaded the renderer (PackageRenderConstructor).
+DWORD Trace_MainThread();
 
 struct STraceSite
 {
