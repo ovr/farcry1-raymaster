@@ -304,6 +304,49 @@ static void EngineCall_Enter(SVCallFrame *pFrame)
   }
 }
 
+//! The name of a shader of the original renderer (the proxy's own calls are not written).
+static const char *ShaderName(UINT_PTR pShader)
+{
+  if (!pShader || !Trace_IsReadable((const void *)pShader, sizeof(void *)))
+    return "?";
+  const char *szName = ((IShader *)pShader)->GetName();
+  return szName && Trace_IsReadable(szName, 1) ? szName : "?";
+}
+
+//! The arguments and results of the IShader template methods (written after the [vcall] lines).
+static void ShaderCall_Enter(SVCallFrame *pFrame)
+{
+  SVSlot *pSlot = pFrame->pSlot;
+  if (strcmp(pSlot->pTable->szName, "IShader"))
+    return;
+  if (!strcmp(pSlot->szMethod, "AddTemplate"))
+  {
+    // AddTemplate(SRenderShaderResources *Res, int &TemplId, const char *Name, bool bSetPreferred, uint64 nMaskGen).
+    const int *pId = (const int *)pFrame->Args[2];
+    const char *szName = (const char *)pFrame->Args[3];
+    Trace_Write("[vcall]     shader '%s' res %p TemplId %d name '%s' preferred %d maskGen 0x%llx", ShaderName(pFrame->Args[0]),
+      (void *)pFrame->Args[1], Trace_IsReadable(pId, sizeof(*pId)) ? *pId : -999, szName && Trace_IsReadable(szName, 1) ? szName : "(null)",
+      (int)(BYTE)pFrame->StackArgs[0], (unsigned long long)pFrame->StackArgs[1]);
+  }
+  else if (!strcmp(pSlot->szMethod, "RemoveTemplate") || !strcmp(pSlot->szMethod, "GetTemplate"))
+    Trace_Write("[vcall]     shader '%s' id %d", ShaderName(pFrame->Args[0]), (int)pFrame->Args[1]);
+}
+
+static void ShaderCall_Leave(SVCallFrame *pFrame)
+{
+  SVSlot *pSlot = pFrame->pSlot;
+  if (strcmp(pSlot->pTable->szName, "IShader"))
+    return;
+  if (!strcmp(pSlot->szMethod, "AddTemplate"))
+  {
+    const int *pId = (const int *)pFrame->Args[2];
+    if (Trace_IsReadable(pId, sizeof(*pId)))
+      Trace_Write("[vcall]     -> TemplId %d", *pId);
+  }
+  else if (!strcmp(pSlot->szMethod, "GetTemplate"))
+    Trace_Write("[vcall]     -> template '%s'", ShaderName(pFrame->nResult));
+}
+
 //! The arguments of the CCObject methods (written after the [vcall] line).
 static void ObjectCall_Enter(SVCallFrame *pFrame)
 {
@@ -389,6 +432,7 @@ extern "C" void VCall_Enter(SVCallFrame *pFrame)
     (unsigned long long)pFrame->Args[3], pFrame->Xmm[1][0], pFrame->Xmm[2][0], pFrame->Xmm[3][0], (unsigned long long)pFrame->StackArgs[0],
     (unsigned long long)pFrame->StackArgs[1], Trace_Addr(pFrame->pReturn));
   ObjectCall_Enter(pFrame);
+  ShaderCall_Enter(pFrame);
   EngineCall_Enter(pFrame);
 }
 
@@ -406,6 +450,7 @@ extern "C" void VCall_Leave(SVCallFrame *pFrame)
     Trace_Write("[vcall]   %s::%s -> rax 0x%llx (xmm0 %g)", pSlot->pTable->szName, pSlot->szMethod, (unsigned long long)pFrame->nResult,
       pFrame->XmmResult[0]);
     ObjectCall_Leave(pFrame);
+    ShaderCall_Leave(pFrame);
   }
 }
 

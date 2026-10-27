@@ -23,7 +23,8 @@
 //	every line, XRENDERTRACED_D3D_DRAWS=3 also the constants of the bound
 //	vertex and pixel shaders. XRENDERTRACED_D3D_CUBESAVE=prefix saves the
 //	faces of every cube texture a draw uses as TGA files (D3DDraws.cpp,
-//	SaveCubeFaces). The vtable of d3d9.dll itself is not changed,
+//	SaveCubeFaces), XRENDERTRACED_D3D_TEXSAVE=prefix the small 2D textures
+//	(SaveTexture). The vtable of d3d9.dll itself is not changed,
 //	and the device gets its own vtable back at the end of the frame.
 //
 //////////////////////////////////////////////////////////////////////

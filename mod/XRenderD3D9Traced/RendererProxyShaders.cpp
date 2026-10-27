@@ -552,6 +552,28 @@ void CRendererProxy::EF_AddEf(int NumFog, CRendElement *re, IShader *ef, SRender
     obj->m_Matrix(3, 1) = New.y;
     obj->m_Matrix(3, 2) = New.z;
   }
+  // XRENDERTRACED_PROBE=UserTemplParams: an object added with a user template (nTempl >=
+  // EFT_USER_FIRST) gets shader params of the proxy instead of the engine's: one float
+  // XRENDERTRACED_PARAM_NAME = XRENDERTRACED_PARAM_VALUE (ProbeValue), none for a negative value.
+  if (obj && nTempl >= EFT_USER_FIRST && Trace_IsListed("XRENDERTRACED_PROBE", "UserTemplParams"))
+  {
+    static TArray<SShaderParam> s_Params;
+    const char *szName = getenv("XRENDERTRACED_PARAM_NAME");
+    const float fValue = ProbeValue("XRENDERTRACED_PARAM_VALUE", -1, m_nFrames);
+    if (fValue < 0)
+      obj->m_ShaderParams = NULL;
+    else
+    {
+      if (!s_Params.Num())
+        s_Params.AddIndex(1);
+      strncpy_s(s_Params[0].m_Name, szName ? szName : "refraction", _TRUNCATE);
+      s_Params[0].m_Type = eType_FLOAT;
+      s_Params[0].m_nMaterial = -1;
+      s_Params[0].m_Value.m_Float = fValue;
+      obj->m_ShaderParams = &s_Params;
+    }
+    Trace_Write("    probe: object params %s %g", fValue < 0 ? "none" : s_Params[0].m_Name, fValue);
+  }
   // XRENDERTRACED_FLARES=1: the object of a flare as the engine passes it (with what the renderer
   // left in it the frame before: its fade), every frame, and again after EF_EndEf3D.
   if (re && re->m_Type == eDATA_Flare && obj && Trace_IsListed("XRENDERTRACED_FLARES", "1"))

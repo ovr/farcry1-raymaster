@@ -112,6 +112,10 @@ it as well: it holds local, machine-specific instructions and is not committed (
   (`m_fCoronaScale > 0`) in `EF_ADDDlight` onto that line, `XRENDERTRACED_CORONA_DIST` (5) in front
   of the camera, and `XRENDERTRACED_CORONA_SCALE` replaces its `m_fCoronaScale`. These three take
   one number or several (`"0.75 1.5 3"`), used in turn, one per frame.
+  `XRENDERTRACED_PROBE=UserTemplParams` gives every object added with a user template
+  (`EF_AddEf` with `nTempl` >= 30) the proxy's own `m_ShaderParams`: one float
+  `XRENDERTRACED_PARAM_NAME` (default `refraction`) = `XRENDERTRACED_PARAM_VALUE` (one number per
+  frame in turn), or none for a negative value.
   `XRENDERTRACED_PROBE=LightAt` puts every point light (not the sun) at a world position of
   `XRENDERTRACED_LIGHT_POS` (`"x y z x y z ..."`, one position per frame in turn), to see how the
   renderer lights an object from known places (the console command `lightradius` sets the radius).
@@ -144,6 +148,8 @@ it as well: it holds local, machine-specific instructions and is not committed (
   its vertex buffer can be read back), `3` also the shader constants.
   `XRENDERTRACED_D3D_CUBESAVE=<path prefix>` saves level 0 of the six faces of every cube texture
   a draw uses as TGA files (DXT decoded; keep them in the scratchpad, never commit them).
+  `XRENDERTRACED_D3D_TEXSAVE=<path prefix>` does the same for level 0 of every managed 2D texture
+  a draw uses that is at most `XRENDERTRACED_D3D_TEXSAVE_MAX` (default 64) texels wide and high.
   `XRENDERTRACED_D3D_RT=1` writes the first `SetRenderTarget` of every frame to a surface other
   than the back buffer (to find the frames that render shadow maps; 64 lines, counted again after
   each level load); `XRENDERTRACED_CAPTURE_RT=100` captures the rest of the first frame that sets

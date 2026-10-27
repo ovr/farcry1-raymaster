@@ -582,6 +582,8 @@ void Dump_Camera(const CCamera &Cam)
   Dump_Matrix("VCMatrixD3D9", (const float *)&m);
 }
 
+static void Dump_ShaderParams(const TArray<SShaderParam> &Params);
+
 void Dump_Object(const CCObject *pObj)
 {
   if (!pObj)
@@ -604,6 +606,9 @@ void Dump_Object(const CCObject *pObj)
     pObj->m_nLod, pObj->m_nTemplId, pObj->m_TempVars[0], pObj->m_TempVars[1], pObj->m_TempVars[2], pObj->m_TempVars[3],
     pObj->m_TempVars[4], pObj->m_fRefract, pObj->m_fBump, Light.p, Light.f, pObj->m_NumCM, pObj->m_LightStyle, pObj->m_RenderState,
     pObj->m_ShaderParams && Trace_IsReadable(pObj->m_ShaderParams, sizeof(*pObj->m_ShaderParams)) ? pObj->m_ShaderParams->Num() : -1);
+  if (pObj->m_ShaderParams && Trace_IsReadable(pObj->m_ShaderParams, sizeof(*pObj->m_ShaderParams)) &&
+    Trace_IsReadable(pObj->m_ShaderParams->Data(), pObj->m_ShaderParams->Num() * sizeof(SShaderParam)))
+    Dump_ShaderParams(*pObj->m_ShaderParams);
   Dump_Matrix("matrix", (const float *)&pObj->m_Matrix);
   Dump_OpaqueList("CCObject::m_pShadowCasters", pObj->m_pShadowCasters);
   if (pObj->m_pShadowCasters)
@@ -756,7 +761,7 @@ static void Dump_ShaderParams(const TArray<SShaderParam> &Params)
     switch (p.m_Type)
     {
     case eType_FLOAT:
-      Trace_Write("      param '%s' float %.3f mat %d", p.m_Name, p.m_Value.m_Float, p.m_nMaterial);
+      Trace_Write("      param '%s' float %g mat %d", p.m_Name, p.m_Value.m_Float, p.m_nMaterial);
       break;
     case eType_FCOLOR:
       Trace_Write("      param '%s' color (%.3f %.3f %.3f %.3f) mat %d", p.m_Name, p.m_Value.m_Color[0], p.m_Value.m_Color[1],
