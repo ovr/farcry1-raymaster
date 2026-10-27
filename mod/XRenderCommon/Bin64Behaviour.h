@@ -307,6 +307,20 @@ static const int nHeapAlignment = 4;
 // ("particlelight_fp"), which the engine gets with IShader::GetID, and an object from EF_GetObject
 // with an identity matrix and m_SortId -1e6 or 1e6 (some with the ambient colour of the place in
 // m_AmbColor). EF_AddSpriteToScene returns pObj.
+// The object also carries the texture and the blending:
+// - m_NumCM is the texture ID. The default particle texture is the one the engine made at start-up
+//   with GenerateAlphaGlowTexture(1): 256 x 256 D3DFMT_A8 with all 9 mip levels, alpha =
+//   clamp(256 * (1 - r / 128), 0, 255) for r the distance of the texel (x, y) from (128, 128).
+// - m_RenderState comes from ParticleParams::eBlendType: AlphaBased 0x10000065 (GS_BLSRC_SRCALPHA |
+//   GS_BLDST_ONEMINUSSRCALPHA | GS_ALPHATEST_GREATER0), ColorBased 0x42 (GS_BLSRC_ONE |
+//   GS_BLDST_ONEMINUSSRCCOL), Additive 0x22 (GS_BLSRC_ONE | GS_BLDST_ONE), None 0.
+// How the D3D9 renderer draws them (Training): world space (identity world matrix), indexed
+// triangle lists from a dynamic P3F_COL4UB_TEX2F buffer, two triangles per quad (0 1 2, 0 2 3),
+// sprites that share a CCObject in one draw; depth test without depth writes, fog, no culling,
+// linear filtering with mip maps, wrap addressing. Blending and alpha test as m_RenderState says;
+// 0 is drawn like AlphaBased. Texture stages: colour = (vertex colour + m_AmbColor, as the texture
+// factor) * texture colour, alpha = vertex alpha * texture alpha. The sprites are drawn within the
+// scene, not after it, and not in the order of the calls.
 
 //////////////////////////////////////////////////////////////////////////
 // 2D and text

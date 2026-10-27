@@ -94,6 +94,9 @@ namespace RendererStructures
 //   Engine writes for characters before EF_AddEf (most of it already before the EF_GetHeatVision
 //   call in between): m_Matrix, m_ObjFlags, m_SortId, m_AmbColor, m_Color, m_DynLMMask,
 //   m_fHeatFactor, m_ShaderParams, m_pCharInstance, m_nTemplId, the scissor rectangle.
+//   Engine writes for particles before EF_AddSpriteToScene: m_Matrix (identity), m_SortId,
+//   m_AmbColor, m_DynLMMask, m_NumCM (the particle texture's ID) and m_RenderState (GS_* blend and
+//   alpha test bits from the particle's blend type); see Bin64Behaviour.h, "Particles".
 //   Renderer writes:
 //   - CLeafBuffer::Render and AddRenderElements: m_ObjFlags (can set FOB_HASALPHA); EF_AddEf:
 //     m_ObjFlags (can clear FOB_ENVLIGHTING).
