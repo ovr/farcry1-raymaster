@@ -357,6 +357,26 @@ static const int nHeapAlignment = 4;
 // the volumes changed nothing on the screen.
 
 //////////////////////////////////////////////////////////////////////////
+// Fog volumes (Carrier)
+//
+// EF_RegisterFogVolume(fMaxFogDist, fFogLayerZ, color, -1, bCaustics) returns 1, 2, 3, ... in
+// the order of the calls. On an outdoor level the first is the ocean (layer z = the water level,
+// bCaustics true); the volumes inside buildings have bCaustics false. The ID of the volume an
+// object is in reaches the renderer as SRendParams::nFogVolumeID (CLeafBuffer::Render), the
+// nFogID of AddRenderElements and the NumFog of EF_AddEf (see also Characters, Geometry).
+// The D3D9 renderer draws volume fog only with r_VolumetricFog 1 (0 in farcry1_testing1's
+// settings; then nothing on the screen depends on the IDs and the caps are not drawn). With it on:
+// - after the opaque geometry, every element drawn with a volume ID is drawn again: the same
+//   geometry with depth test EQUAL, no depth writes, no fog, blended (SRCALPHA, INVSRCALPHA);
+// - fixed function, both stages with the camera space position as texture coordinates (through a
+//   texture matrix): stage 0 a 16 x 16 DXT5 texture whose v grows by 0.1 per unit of height,
+//   stage 1 a 128 x 128 A8R8G8B8 texture whose u grows by 1 / (4 * fMaxFogDist) per unit of
+//   distance from the camera; colour and alpha = texture 0 * texture factor * texture 1, the
+//   texture factor being the volume's colour (alpha 255);
+// - then the caps ("VolFogTopCircle", see Geometry) with the same stages, depth test LESSEQUAL
+//   without depth writes, no culling, blended the same way.
+
+//////////////////////////////////////////////////////////////////////////
 // 2D and text
 //
 // Draw2dImage takes coordinates of an 800 x 600 virtual screen: the engine clears the screen and
