@@ -104,7 +104,8 @@ namespace RendererStructures
 //     from the object; the IDs are 0xFFFF before).
 //   - MakeSprite: m_Counter, m_AmbColor, m_fHeatFactor.
 //   CCObject has a vtable (AddWaves, SetShaderFloat, RemovePermanent; the SDK declares no virtual
-//   destructor). The engine calls AddWaves once per vegetation instance and frame;
+//   destructor). The engine calls AddWaves once per frame for every vegetation instance it draws
+//   with bending;
 //   afterwards m_NumWFX and m_NumWFY (unions with m_nLod and m_nTemplId) hold two new indices into
 //   the renderer's table of waves (CCObject::m_Waves, a static member only the renderer can see),
 //   counted from 1 every frame (1/2, 3/4, ...). The argument is not two SWaveForm2 pointers as

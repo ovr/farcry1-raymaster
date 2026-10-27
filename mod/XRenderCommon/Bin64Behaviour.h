@@ -96,9 +96,18 @@ static const int nHeapAlignment = 4;
 //   Vegetation instances also get m_fBending (0 to 1.4 in Training) and one call per frame of
 //   CCObject::AddWaves (the first virtual function of CCObject), after which m_NumWFX and m_NumWFY
 //   hold the indices of two new waves (1/2, 3/4, ... from the start of every frame). The argument
-//   is not two SWaveForm2 pointers: it points to a block on the engine's stack that starts with the
-//   object's address, an int 1, a float that differs per instance and later 5.0. What the waves are
-//   made from is still open; the bending can be driven from m_fBending alone.
+//   is not two SWaveForm2 pointers. The values the call carries (x64 registers; the declared
+//   parameter types do not fit them):
+//   - rdx points to a block of the engine's: +0x00 the object's address, +0x08 int 1, +0x10 a
+//     float that stays the same while the game time stands still and changes when it runs (0.1 to
+//     3.3, per instance), +0x20 5.0, +0x80 the instance's scale three times, +0xA0 the instance's
+//     position (both as in SRendParams); r9 points to the scale (rdx + 0x80), r8 to rdx + 0x90;
+//   - xmm2 holds the instance's SRendParams::fBending, xmm1 a float from 0.35 to 1 (1 for many
+//     instances, the same for an instance in every frame);
+//   - the 5th and 6th arguments on the stack are the object's address and 1 again.
+//   How the renderer turns these into waves is its own business; a replacement renderer can drive
+//   the bending from m_fBending and the position alone. On Training the engine made these calls only
+//   while vegetation with bending was drawn (3695 calls in the first 150 frames after the load).
 //
 //   In EF_EndEf3D the renderer calls CheckUpdate(nVertexFormat, nFlags, false) on every leaf buffer
 //   it draws, with the vertex format the shader needs (P3F_N_TEX2F) and VSM_TANGENTS (0x2) in
