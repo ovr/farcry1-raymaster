@@ -102,6 +102,9 @@ namespace RendererStructures
 //   Engine writes for characters before EF_AddEf (most of it already before the EF_GetHeatVision
 //   call in between): m_Matrix, m_ObjFlags, m_SortId, m_AmbColor, m_Color, m_DynLMMask,
 //   m_fHeatFactor, m_ShaderParams, m_pCharInstance, m_nTemplId, the scissor rectangle.
+//   m_ShaderParams points to an array the engine owns and changes from frame to frame (a cloaked
+//   character's "refraction"); the renderer reads the values by name when it draws the object
+//   (Bin64Behaviour.h, "Characters").
 //   Engine writes for particles before EF_AddSpriteToScene: m_Matrix (identity), m_SortId,
 //   m_AmbColor, m_DynLMMask, m_NumCM (the particle texture's ID) and m_RenderState (GS_* blend and
 //   alpha test bits from the particle's blend type); see Bin64Behaviour.h, "Particles".
@@ -160,7 +163,9 @@ namespace RendererStructures
 //     GetTemplate, GetPublicParams. GetTemplate and GetFlags2 are hot (about 180000 calls each
 //     in that run, from Cry3DEngine and CryAnimation): SShaderItem::IsTransparent (IShader.h) calls
 //     both for every material drawn. With particles on screen also GetID (for the shader ID
-//     EF_AddSpriteToScene takes). The values they return: Bin64Behaviour.h, "Shaders".
+//     EF_AddSpriteToScene takes). The values they return: Bin64Behaviour.h, "Shaders". With
+//     cloaked characters in the level (Archive) also AddTemplate, from CryAnimation and every
+//     frame from Cry3DEngine (Bin64Behaviour.h, "Characters").
 //   - ITexPic: AddRef, Release, GetWidth, GetHeight, GetOriginalWidth, GetOriginalHeight,
 //     GetTextureID, GetFlags, IsTextureLoaded (from Cry3DEngine, CrySystem, CryGame and
 //     CryEntitySystem); with decals on also SetFilter and SetClamp (Bin64Behaviour.h, "Decals").

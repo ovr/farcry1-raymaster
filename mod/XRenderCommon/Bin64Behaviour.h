@@ -236,6 +236,19 @@ static const int nHeapAlignment = 4;
 //   which reaches 1/256 at the range (radius 1, 2.06 and 4 seen). These are the static objects'
 //   values for a light inside the object ("Static objects": the falloff 2 (1 - 3 v^2 + 2 v^3) met
 //   at 0.1 m_fRadius), whatever the distance.
+//   Cloaked characters (the stealth mutants, Archive): CryAnimation adds the template
+//   "MutantStealth" to the shaders of the character's materials, for each LOD of the model, with
+//   IShader::AddTemplate(pRes, nId, "MutantStealth") (bSetPreferred false, nMaskGen 0): the first
+//   material with nId -1 and the others with the id that call gave back. A call with -1 gets a new
+//   id from EFT_USER_FIRST (30) up, a new one every time (30, 31, 32, 33 for two mutants of two
+//   LODs each, all on the same shader); a call with an id keeps it. Both return true. Every frame
+//   the 3D engine adds the same template, with the id the character uses, to the shader of the
+//   object the character carries (its weapon, a static object). While the character is cloaked its
+//   render elements go into EF_AddEf with that id as nTempl and m_nTemplId, and the weapon into
+//   CLeafBuffer::Render with the id in SRendParams::nShaderTemplate and in the template list; the
+//   renderer draws both with that template only, none of the material's own passes. The
+//   character's CCObject::m_ShaderParams holds one float, "refraction" (0.049 and 0.01 seen; the
+//   weapon has none), read when the template is drawn ("mutantstealth_fp" under "Shaders").
 //
 // Terrain ("TerrainSector")
 //   One leaf buffer per 64 m x 64 m sector, created with
@@ -602,8 +615,17 @@ static const int nHeapAlignment = 4;
 //     writes.
 //   "lavavolume": vs_1_1 and ps_2_0, sampler 0 the texture, sampler 1 a 512 x 512
 //     D3DFMT_X8L8V8U8 bump map, sampler 2 a 32 x 32 DXT1 texture; opaque, depth writes.
-//   "mutantstealth_fp": a 32 x 32 DXT1 texture of its own * factor * 2 with the factor black
-//     (0xff000000), added (ONE, ONE), no depth writes: nothing visible.
+//   "mutantstealth_fp": one fixed function pass, colour = texture * texture factor * 2
+//     (D3DTOP_MODULATE2X), alpha = texture * factor; the texture is a 32 x 32 DXT1 grey noise
+//     texture of its own (mean about 0.54, 6 levels, repeated, the mesh's own texture coordinates,
+//     no texture transform); added (ONE, ONE), depth test LESSEQUAL without depth writes, back
+//     faces culled, fog on, no lighting. The factor is grey: (int)(refraction * 255) in R, G and B,
+//     alpha 255, from the float "refraction" in the object's m_ShaderParams (0.01 gives 2, 0.5 gives
+//     127); without it the template's own value, which gives 12 (Archive's weapons and cloaked
+//     mutants with the params taken away). Drawn among the blended objects, after the opaque ones.
+//     With a value of 0.01 the character is all but invisible; 0.5 shows a light, noisy ghost of
+//     it. Named as a material's own template (forced on meshes with no params) the factor was
+//     black (0xff000000): nothing visible.
 //   "templbeamproc": a vertex shader (vs_1_1) with fixed function stages, texture * diffuse,
 //     blended (SRCALPHA, INVSRCALPHA), no depth writes, no culling. The same for a light beam
 //     object of its own at Treehouse's start (369 vertices, P3F_N_COL4UB_TEX2F, a 16 x 16
