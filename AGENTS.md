@@ -63,7 +63,8 @@ it as well: it holds local, machine-specific instructions and is not committed (
   `DownLoadToVideoMemory,CLeafBuffer::CreateBufferFromSource`) writes every call of those methods,
   not only the first `xrt_TraceCalls`; for the hooked virtual functions (e.g. `CCObject::AddWaves`)
   the first 4000 instead of 3, counted again after the command `vcalls` (e.g. in
-  `XRENDERTRACED_EXEC_LEVEL`).
+  `XRENDERTRACED_EXEC_LEVEL`). A written `CCObject::AddWaves` call also writes the two waves the
+  engine filled after the call before it.
 - `XRENDERTRACED_D3D_STATE` (names as in the log, e.g. `DrawDynVB,Draw2dImage`) writes the
   Direct3D 9 state of the original renderer after those calls (`D3DState.h`; read only, through
   `EF_Query(EFQ_D3DDevice)`). `XRENDERTRACED_PROBE=FontSetBlending` passes (i, 12 - i) in the first
@@ -75,6 +76,8 @@ it as well: it holds local, machine-specific instructions and is not committed (
   the stencil state when stencil is on), `3` also the shader constants.
   `XRENDERTRACED_D3D_RT=1` writes the first `SetRenderTarget` of every frame to a surface other
   than the back buffer (to find the frames that render shadow maps; 64 lines, counted again after
+  each level load); `XRENDERTRACED_D3D_VSREG=7` writes vertex shader constant c7 at every
+  indexed draw where it changed, with the frame and the time (60000 lines, counted again after
   each level load); `XRENDERTRACED_CAPTURE=1`
   captures the first frame after the load.
 - The log is `farcry1_testing1/XRenderD3D9Traced.log`; the engine log is

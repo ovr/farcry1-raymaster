@@ -566,15 +566,43 @@ static HRESULT STDMETHODCALLTYPE Hook_SetRenderTarget(IDirect3DDevice9 *pDev, DW
   return ((PFN_SetRenderTarget)s_pRTOrigVTable[DEV_SetRenderTarget])(pDev, nIndex, pSurf);
 }
 
+//! XRENDERTRACED_D3D_VSREG=N: the vertex shader constant register N at the indexed draws.
+static int s_nVSReg = -1;
+static int s_nVSRegLines = 0;
+static float s_LastVSReg[4];
+static const int nMaxVSRegLines = 60000;
+
+static HRESULT STDMETHODCALLTYPE Hook_VSRegDrawIndexedPrimitive(IDirect3DDevice9 *pDev, D3DPRIMITIVETYPE eType, INT nBaseVertex,
+  UINT nMinIndex, UINT nVerts, UINT nStartIndex, UINT nPrims)
+{
+  IDirect3DVertexShader9 *pVS = NULL;
+  if (s_nVSRegLines < nMaxVSRegLines && SUCCEEDED(pDev->GetVertexShader(&pVS)) && pVS)
+  {
+    float fReg[4];
+    if (SUCCEEDED(pDev->GetVertexShaderConstantF(s_nVSReg, fReg, 1)) && memcmp(fReg, s_LastVSReg, sizeof(fReg)))
+    {
+      memcpy(s_LastVSReg, fReg, sizeof(fReg));
+      Trace_Write("[d3d vsreg] frame %d time %.4f: c%d (%g %g %g %g) vs %p prims %u", s_nRTFrame, iTimer ? iTimer->GetCurrTime() : 0.0f,
+        s_nVSReg, fReg[0], fReg[1], fReg[2], fReg[3], pVS, nPrims);
+      s_nVSRegLines++;
+    }
+    pVS->Release();
+  }
+  return ((PFN_DrawIndexedPrimitive)s_pRTOrigVTable[DEV_DrawIndexedPrimitive])(pDev, eType, nBaseVertex, nMinIndex, nVerts, nStartIndex,
+    nPrims);
+}
+
 void D3DDraws_WatchRenderTargets(IRenderer *pRenderer, int nFrame)
 {
   s_nRTFrame = nFrame;
   if (s_pRTOrigVTable || s_nRTLines < 0)
     return;
   char szEnv[8] = "";
+  const bool bRT = GetEnvironmentVariableA("XRENDERTRACED_D3D_RT", szEnv, sizeof(szEnv)) && szEnv[0] == '1';
+  if (GetEnvironmentVariableA("XRENDERTRACED_D3D_VSREG", szEnv, sizeof(szEnv)) && szEnv[0] >= '0' && szEnv[0] <= '9')
+    s_nVSReg = atoi(szEnv);
   IDirect3DDevice9 *pDev = NULL;
-  if (!GetEnvironmentVariableA("XRENDERTRACED_D3D_RT", szEnv, sizeof(szEnv)) || szEnv[0] != '1'
-    || !(pDev = D3DState_GetDevice(pRenderer)))
+  if ((!bRT && s_nVSReg < 0) || !(pDev = D3DState_GetDevice(pRenderer)))
   {
     s_nRTLines = -1;
     return;
@@ -584,16 +612,23 @@ void D3DDraws_WatchRenderTargets(IRenderer *pRenderer, int nFrame)
   while (nSlots > DEV_Slots && !Trace_IsReadable(pVTable, nSlots * sizeof(void *)))
     nSlots--;
   memcpy(s_RTVTable, pVTable, nSlots * sizeof(void *));
-  s_RTVTable[DEV_SetRenderTarget] = (void *)&Hook_SetRenderTarget;
+  if (bRT)
+    s_RTVTable[DEV_SetRenderTarget] = (void *)&Hook_SetRenderTarget;
+  if (s_nVSReg >= 0)
+    s_RTVTable[DEV_DrawIndexedPrimitive] = (void *)&Hook_VSRegDrawIndexedPrimitive;
   s_pRTOrigVTable = pVTable;
   *(void ***)pDev = s_RTVTable;
-  Trace_Write("d3d render targets: watching SetRenderTarget of device %p", pDev);
+  if (bRT)
+    Trace_Write("d3d render targets: watching SetRenderTarget of device %p", pDev);
+  if (s_nVSReg >= 0)
+    Trace_Write("d3d vs register: c%d at the indexed draws of device %p", s_nVSReg, pDev);
 }
 
 void D3DDraws_RestartRenderTargets()
 {
   if (s_nRTLines > 0)
     s_nRTLines = 0;
+  s_nVSRegLines = 0;
 }
 
 void D3DDraws_OnDrawRE()

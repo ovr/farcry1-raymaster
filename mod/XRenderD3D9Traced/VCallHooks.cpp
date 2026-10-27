@@ -271,6 +271,10 @@ static void ScreenCall_Leave(SVCallFrame *pFrame)
       iTimer ? iTimer->GetCurrTime() : 0.0f);
 }
 
+//! AddWaves(SWaveForm2 **wf): the renderer points wf[0] and wf[1] to the object's two new waves and
+//! the engine fills them after the call, so the waves of a written call are written at the next one.
+static const SWaveForm2 *s_pFilledWaves[2];
+
 //! The arguments of the CCObject methods (written after the [vcall] line).
 static void ObjectCall_Enter(SVCallFrame *pFrame)
 {
@@ -279,26 +283,13 @@ static void ObjectCall_Enter(SVCallFrame *pFrame)
     return;
   if (!strcmp(pSlot->szMethod, "AddWaves"))
   {
-    // AddWaves(SWaveForm2 **wf) in the SDK; on Bin64 rdx does not point to two wave pointers, so the
-    // block is written as it is, and every pointer in it (and r8, r9) is read as an SWaveForm2.
-    const unsigned char *pBlock = (const unsigned char *)pFrame->Args[1];
-    for (int nOffs = 0; nOffs < 0x100 && pBlock && Trace_IsReadable(pBlock + nOffs, 32); nOffs += 32)
+    for (int i = 0; i < 2; i++)
     {
-      char szName[32];
-      sprintf_s(szName, "[vcall]     rdx+0x%02x", nOffs);
-      Dump_HexLine(szName, pBlock + nOffs, 32);
-    }
-    const void *pCandidates[2 + 0x100 / sizeof(void *)] = { (const void *)pFrame->Args[2], (const void *)pFrame->Args[3] };
-    int nCandidates = 2;
-    for (int nOffs = 0; nOffs < 0x100 && pBlock && Trace_IsReadable(pBlock + nOffs, sizeof(void *)); nOffs += sizeof(void *))
-      pCandidates[nCandidates++] = *(const void *const *)(pBlock + nOffs);
-    for (int i = 0; i < nCandidates; i++)
-    {
-      const SWaveForm2 *pWF = (const SWaveForm2 *)pCandidates[i];
-      if (!pWF || pWF == (const void *)pFrame->Args[0] || !Trace_IsReadable(pWF, sizeof(*pWF)) || (unsigned)pWF->m_eWFType > eWF_InvHill)
-        continue;
-      Trace_Write("[vcall]     %s %p: type %d level %g amp %g phase %g freq %g", i == 0 ? "r8" : i == 1 ? "r9" : "ptr", pWF, pWF->m_eWFType,
-        pWF->m_Level, pWF->m_Amp, pWF->m_Phase, pWF->m_Freq);
+      const SWaveForm2 *pWF = s_pFilledWaves[i];
+      if (pWF && Trace_IsReadable(pWF, sizeof(*pWF)))
+        Trace_Write("[vcall]     wave %c of the call before: type %d level %g amp %g phase %g freq %g", 'X' + i, pWF->m_eWFType,
+          pWF->m_Level, pWF->m_Amp, pWF->m_Phase, pWF->m_Freq);
+      s_pFilledWaves[i] = NULL;
     }
   }
   else if (!strcmp(pSlot->szMethod, "SetShaderFloat"))
@@ -315,8 +306,13 @@ static void ObjectCall_Leave(SVCallFrame *pFrame)
   if (strcmp(pSlot->pTable->szName, "CCObject") || strcmp(pSlot->szMethod, "AddWaves"))
     return;
   const CCObject *pObj = (const CCObject *)pFrame->Args[0];
-  if (Trace_IsReadable(pObj, sizeof(*pObj)))
-    Trace_Write("[vcall]     -> m_NumWFX %d m_NumWFY %d", pObj->m_NumWFX, pObj->m_NumWFY);
+  const SWaveForm2 *const *pWaves = (const SWaveForm2 *const *)pFrame->Args[1];
+  if (!Trace_IsReadable(pObj, sizeof(*pObj)) || !Trace_IsReadable(pWaves, 2 * sizeof(*pWaves)))
+    return;
+  Trace_Write("[vcall]     -> m_NumWFX %d m_NumWFY %d m_fBending %g wf %p %p time %.4f", pObj->m_NumWFX, pObj->m_NumWFY, pObj->m_fBending,
+    pWaves[0], pWaves[1], iTimer ? iTimer->GetCurrTime() : 0.0f);
+  s_pFilledWaves[0] = pWaves[0];
+  s_pFilledWaves[1] = pWaves[1];
 }
 
 #ifdef _WIN64

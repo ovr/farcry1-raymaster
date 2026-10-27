@@ -33,9 +33,13 @@ void D3DDraws_Begin(IRenderer *pRenderer);
 //! XRENDERTRACED_D3D_RT=1: from the first call on, the first SetRenderTarget of every frame to a
 //! surface other than the back buffer writes a line "[d3d rt] frame N: ..." (64 at most, counted
 //! again after each level load), to find the frames that render into textures (shadow maps).
+//! XRENDERTRACED_D3D_VSREG=N: every indexed draw with a vertex shader whose constant register N
+//! differs from the one of the draw before writes it ("[d3d vsreg] frame F time T: cN (...)", 60000
+//! lines at most, counted again after each level load), e.g. the per-object values of a shader over
+//! many frames.
 //! Called at every BeginFrame.
 void D3DDraws_WatchRenderTargets(IRenderer *pRenderer, int nFrame);
-//! After a level load: the 64 lines of D3DDraws_WatchRenderTargets start again.
+//! After a level load: the lines of D3DDraws_WatchRenderTargets start again.
 void D3DDraws_RestartRenderTargets();
 //! At the end of the frame (after Update).
 void D3DDraws_End();
