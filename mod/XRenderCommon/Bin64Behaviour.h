@@ -181,6 +181,12 @@ static const int nHeapAlignment = 4;
 //   product to 1): the lightmaps hold a quarter of the light. When a dynamic light reaches the
 //   object (Training, Carrier: 73 draws, each with a point light set), Direct3D lighting is on and
 //   stage 0 adds the vertex lighting instead of the texture factor.
+//   The D3D point light of a static object has the attenuation (a0, a1, 0) and the range
+//   (256 - a0) / max(a1, 0.01), 0 when a0 > 256 (the distance where the attenuation reaches 1/256).
+//   Unlike for characters (below) a0 and a1 change from object to object for the same light: a0
+//   from 0.01 to 464, a1 from 0 to 2.2 (Carrier, Bunker, Steam, River; a1 = 0 for distant grass;
+//   on Carrier one light of radius 4 gives a1 0.42 to 2.22 on objects of scale 1, against 1.269
+//   for characters). How they follow from the light and the object was not found.
 //   Vegetation (River): texture * vertex colour * 2 * m_Color * the colour of EF_SetWorldColor
 //   (m_Color 0.75 and the world colour (0.843, 0.780, 0.659) give the factor bytes 161, 149, 126).
 //   For grass the factor's alpha is the square of m_Color's alpha (0.84 gives 179, 0.12 gives 3),
@@ -559,7 +565,9 @@ static const int nHeapAlignment = 4;
 //   "mutantstealth_fp": a 32 x 32 DXT1 texture of its own * factor * 2 with the factor black
 //     (0xff000000), added (ONE, ONE), no depth writes: nothing visible.
 //   "templbeamproc": a vertex shader (vs_1_1) with fixed function stages, texture * diffuse,
-//     blended (SRCALPHA, INVSRCALPHA), no depth writes, no culling.
+//     blended (SRCALPHA, INVSRCALPHA), no depth writes, no culling. The same for a light beam
+//     object of its own at Treehouse's start (369 vertices, P3F_N_COL4UB_TEX2F, a 16 x 16
+//     D3DFMT_X8R8G8B8 texture).
 //   "flareproc", "particlemedheathaze": no draw at all for the objects.
 
 //////////////////////////////////////////////////////////////////////////
