@@ -147,4 +147,6 @@ void Dump_Indices(const char *szName, const ushort *pInds, int nInds, int nMax =
 void Dump_ColorVerts(const SColorVert *pVerts, int nVerts);
 void Dump_ColorVerts2D(const SColorVert2D *pVerts, int nVerts);
 void Dump_MatInfo(const CMatInfo *pMI, int nIndex);
+//! An engine material (IMatInfo, e.g. the one passed to CLeafBuffer::AddRenderElements).
+void Dump_IMatInfo(IMatInfo *pMtl);
 void Dump_RendParams(const SRendParams &rp);

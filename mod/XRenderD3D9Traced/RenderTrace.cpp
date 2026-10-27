@@ -671,6 +671,22 @@ void Dump_MatInfo(const CMatInfo *pMI, int nIndex)
     pMI->shaderItem.m_pShaderResources, pMI->pRE, pMI->fAlpha);
 }
 
+void Dump_IMatInfo(IMatInfo *pMtl)
+{
+  if (!pMtl)
+    return;
+  // Its vtable must be code of a loaded module, or it is not an IMatInfo.
+  void **pVTable = Trace_IsReadable(pMtl, sizeof(void *)) ? *(void ***)pMtl : NULL;
+  if (!pVTable || !Trace_IsReadable(pVTable, sizeof(void *)) || !Trace_IsCode(pVTable[0]))
+  {
+    Trace_Write("    IMatInfo @%p: not readable", pMtl);
+    return;
+  }
+  Trace_Write("    IMatInfo @%p (vtbl %s) '%s' flags 0x%x refs %d sub materials %d", pMtl, Trace_VTable(pMtl), SafeStr(pMtl->GetName()),
+    pMtl->GetFlags(), pMtl->GetNumRefs(), pMtl->GetSubMtlCount());
+  Dump_ShaderItem(pMtl->GetShaderItem());
+}
+
 void Dump_RE(CRendElement *pRE)
 {
   if (!pRE)

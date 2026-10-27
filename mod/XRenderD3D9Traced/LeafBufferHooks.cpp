@@ -316,6 +316,7 @@ void CLeafBufferHooks::AddRenderElements(CCObject *pObj, int DLightMask, int nTe
   {
     Dump_LeafBuffer(LB());
     Dump_Object(pObj);
+    Dump_IMatInfo(pIMatInfo);
   }
   LB_ORIG(LBS_AddRenderElements, void, (CCObject *, int, int, int, int, IMatInfo *))(pObj, DLightMask, nTemplate, nFogVolumeID, nSortId,
     pIMatInfo);
