@@ -22,7 +22,7 @@ it as well: it holds local, machine-specific instructions and is not committed (
   `mod/XRenderCommon`, renderer interface knowledge beyond the SDK headers). New libraries go
   here, not into `sdk/`.
 - `farcry1_testing1/` - the game install for tracing (git-ignored):
-  - `Bin32` - retail 1.4 (x86; does not start on this machine),
+  - `Bin32` - retail 1.4 (x86; stops at its CD check, which is not to be bypassed),
   - `Bin64` - the Cumulative Patch x64 build described above.
 
 ## Tracing
