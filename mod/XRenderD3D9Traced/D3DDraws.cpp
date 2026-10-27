@@ -20,6 +20,8 @@
 //! Slots of IDirect3DDevice9 (declaration order in d3d9.h).
 enum
 {
+  DEV_SetRenderTarget = 37,
+  DEV_Clear = 43,
   DEV_DrawPrimitive = 81,
   DEV_DrawIndexedPrimitive = 82,
   DEV_DrawPrimitiveUP = 83,
@@ -47,6 +49,8 @@ typedef HRESULT (STDMETHODCALLTYPE *PFN_DrawIndexedPrimitive)(IDirect3DDevice9 *
 typedef HRESULT (STDMETHODCALLTYPE *PFN_DrawPrimitiveUP)(IDirect3DDevice9 *, D3DPRIMITIVETYPE, UINT, const void *, UINT);
 typedef HRESULT (STDMETHODCALLTYPE *PFN_DrawIndexedPrimitiveUP)(IDirect3DDevice9 *, D3DPRIMITIVETYPE, UINT, UINT, UINT, const void *, D3DFORMAT,
   const void *, UINT);
+typedef HRESULT (STDMETHODCALLTYPE *PFN_Clear)(IDirect3DDevice9 *, DWORD, const D3DRECT *, DWORD, D3DCOLOR, float, DWORD);
+typedef HRESULT (STDMETHODCALLTYPE *PFN_SetRenderTarget)(IDirect3DDevice9 *, DWORD, IDirect3DSurface9 *);
 typedef HRESULT (STDMETHODCALLTYPE *PFN_Lock)(IUnknown *, UINT, UINT, void **, DWORD);
 typedef HRESULT (STDMETHODCALLTYPE *PFN_Unlock)(IUnknown *);
 
@@ -491,6 +495,16 @@ static HRESULT STDMETHODCALLTYPE Hook_DrawIndexedPrimitiveUP(IDirect3DDevice9 *p
     eIndexFormat, pVerts, nStride);
 }
 
+static HRESULT STDMETHODCALLTYPE Hook_Clear(IDirect3DDevice9 *pDev, DWORD nRects, const D3DRECT *pRects, DWORD nFlags, D3DCOLOR nColor,
+  float fZ, DWORD nStencil)
+{
+  char szLine[512] = "";
+  _snprintf_s(szLine, _TRUNCATE, "[d3d] Clear(rects %u flags 0x%x colour 0x%08x z %g stencil %u)", nRects, nFlags, nColor, fZ, nStencil);
+  AppendRE(szLine, sizeof(szLine));
+  Trace_Write("%s", szLine);
+  return ((PFN_Clear)s_pOrigVTable[DEV_Clear])(pDev, nRects, pRects, nFlags, nColor, fZ, nStencil);
+}
+
 void D3DDraws_Begin(IRenderer *pRenderer)
 {
   if (s_pDevice)
@@ -515,6 +529,7 @@ void D3DDraws_Begin(IRenderer *pRenderer)
     return;
   }
   memcpy(s_HookedVTable, pVTable, nSlots * sizeof(void *));
+  s_HookedVTable[DEV_Clear] = (void *)&Hook_Clear;
   s_HookedVTable[DEV_DrawPrimitive] = (void *)&Hook_DrawPrimitive;
   s_HookedVTable[DEV_DrawIndexedPrimitive] = (void *)&Hook_DrawIndexedPrimitive;
   s_HookedVTable[DEV_DrawPrimitiveUP] = (void *)&Hook_DrawPrimitiveUP;
@@ -524,6 +539,55 @@ void D3DDraws_Begin(IRenderer *pRenderer)
   s_nDraws = 0;
   *(void ***)pDev = s_HookedVTable;
   Trace_Write("==== Direct3D draws of this frame (device %p) ====", pDev);
+}
+
+//! XRENDERTRACED_D3D_RT: the device keeps a vtable copy with SetRenderTarget hooked in every frame.
+static void **s_pRTOrigVTable = NULL;
+static void *s_RTVTable[DEV_CopiedSlots];
+static int s_nRTFrame = 0, s_nRTLastFrame = -1, s_nRTLines = 0;
+
+static HRESULT STDMETHODCALLTYPE Hook_SetRenderTarget(IDirect3DDevice9 *pDev, DWORD nIndex, IDirect3DSurface9 *pSurf)
+{
+  if (pSurf && s_nRTFrame != s_nRTLastFrame && s_nRTLines < 64)
+  {
+    IDirect3DSurface9 *pBack = NULL;
+    pDev->GetBackBuffer(0, 0, D3DBACKBUFFER_TYPE_MONO, &pBack);
+    D3DSURFACE_DESC Desc;
+    if (pSurf != pBack && SUCCEEDED(pSurf->GetDesc(&Desc)))
+    {
+      Trace_Write("[d3d rt] frame %d: SetRenderTarget(%u, %ux%u format %u usage 0x%x)", s_nRTFrame, nIndex, Desc.Width, Desc.Height,
+        Desc.Format, Desc.Usage);
+      s_nRTLastFrame = s_nRTFrame;
+      s_nRTLines++;
+    }
+    if (pBack)
+      pBack->Release();
+  }
+  return ((PFN_SetRenderTarget)s_pRTOrigVTable[DEV_SetRenderTarget])(pDev, nIndex, pSurf);
+}
+
+void D3DDraws_WatchRenderTargets(IRenderer *pRenderer, int nFrame)
+{
+  s_nRTFrame = nFrame;
+  if (s_pRTOrigVTable || s_nRTLines < 0)
+    return;
+  char szEnv[8] = "";
+  IDirect3DDevice9 *pDev = NULL;
+  if (!GetEnvironmentVariableA("XRENDERTRACED_D3D_RT", szEnv, sizeof(szEnv)) || szEnv[0] != '1'
+    || !(pDev = D3DState_GetDevice(pRenderer)))
+  {
+    s_nRTLines = -1;
+    return;
+  }
+  void **pVTable = *(void ***)pDev;
+  int nSlots = DEV_CopiedSlots;
+  while (nSlots > DEV_Slots && !Trace_IsReadable(pVTable, nSlots * sizeof(void *)))
+    nSlots--;
+  memcpy(s_RTVTable, pVTable, nSlots * sizeof(void *));
+  s_RTVTable[DEV_SetRenderTarget] = (void *)&Hook_SetRenderTarget;
+  s_pRTOrigVTable = pVTable;
+  *(void ***)pDev = s_RTVTable;
+  Trace_Write("d3d render targets: watching SetRenderTarget of device %p", pDev);
 }
 
 void D3DDraws_OnDrawRE()

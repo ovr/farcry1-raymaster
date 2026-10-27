@@ -8,8 +8,9 @@
 //	2D calls), out of sight of the IRenderer calls. With
 //	XRENDERTRACED_D3D_DRAWS=1 the device of the original renderer
 //	(EF_Query(EFQ_D3DDevice)) gets a copy of its vtable for the captured
-//	frame in which DrawPrimitive, DrawIndexedPrimitive and their UP
-//	variants write a line ("[d3d] ...") before they draw: the primitives, the
+//	frame in which Clear writes its arguments and DrawPrimitive,
+//	DrawIndexedPrimitive and their UP variants write a line ("[d3d] ...")
+//	before they draw: the primitives, the
 //	vertex and index buffers, the vertex declaration or FVF, the shaders,
 //	the textures and the render element whose mfDraw is running (x64, from
 //	VCallHooks), for a leaf buffer element also its source and material.
@@ -29,6 +30,10 @@
 
 //! At the start of the captured frame.
 void D3DDraws_Begin(IRenderer *pRenderer);
+//! XRENDERTRACED_D3D_RT=1: from the first call on, the first SetRenderTarget of every frame to a
+//! surface other than the back buffer writes a line "[d3d rt] frame N: ..." (64 at most), to find
+//! the frames that render into textures (shadow maps). Called at every BeginFrame.
+void D3DDraws_WatchRenderTargets(IRenderer *pRenderer, int nFrame);
 //! At the end of the frame (after Update).
 void D3DDraws_End();
 //! When the renderer calls the mfDraw of a render element (VCallHooks): a line "[d3d] mfDraw"

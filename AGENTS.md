@@ -63,7 +63,10 @@ it as well: it holds local, machine-specific instructions and is not committed (
 - `XRENDERTRACED_D3D_DRAWS=1` writes the Direct3D 9 draw calls of the original renderer in the
   captured frame (`D3DDraws.h`): buffers, vertex declaration, shaders, textures and the render
   element being drawn (x64), the first vertices of the non-indexed draws (8, or
-  `XRENDERTRACED_D3D_VERTS`); `2` adds the device state after each, `3` also the shader
-  constants.
+  `XRENDERTRACED_D3D_VERTS`), and the `Clear` calls; `2` adds the device state after each (with
+  the stencil state when stencil is on), `3` also the shader constants.
+  `XRENDERTRACED_D3D_RT=1` writes the first `SetRenderTarget` of every frame to a surface other
+  than the back buffer (to find the frames that render shadow maps); `XRENDERTRACED_CAPTURE=1`
+  captures the first frame after the load.
 - The log is `farcry1_testing1/XRenderD3D9Traced.log`; the engine log is
   `farcry1_testing1/log.txt`.

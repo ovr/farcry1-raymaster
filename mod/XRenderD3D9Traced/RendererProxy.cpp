@@ -194,6 +194,9 @@ void CRendererProxy::PostLoad()
   Trace_Restart("PostLoad");
   if (m_nCaptureAfterLoad > 0)
     m_nCaptureFrame = m_nFrames + m_nCaptureAfterLoad;
+  // The first frame after the load starts before the next Update.
+  if (m_nFrames + 1 == m_nCaptureFrame)
+    Trace_CaptureFrame();
   if (m_szExecLevel[0])
     m_nExecLevelFrame = m_nFrames + m_nExecLevelAfterLoad;
 }
@@ -205,6 +208,7 @@ void CRendererProxy::BeginFrame()
 {
   TRACE_CALL("frame %d", m_nFrames + 1);
   Watch_NewFrame();
+  D3DDraws_WatchRenderTargets(m_pReal, m_nFrames + 1);
   if (Trace_IsCapturing())
     D3DDraws_Begin(m_pReal);
   m_pReal->BeginFrame();

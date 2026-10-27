@@ -71,6 +71,25 @@ void D3DState_WriteDevice(IDirect3DDevice9 *pDev, bool bShaderConstants)
       Append(szLine, sizeof(szLine), " %s ?", s_States[i].m_szName);
   }
   Trace_Write("    d3d rs:%s", szLine);
+  DWORD nStencil = 0;
+  if (SUCCEEDED(pDev->GetRenderState(D3DRS_STENCILENABLE, &nStencil)) && nStencil)
+  {
+    static const struct { D3DRENDERSTATETYPE m_eState; const char *m_szName; } s_StencilStates[] =
+    {
+      { D3DRS_STENCILFUNC, "func" }, { D3DRS_STENCILREF, "ref" }, { D3DRS_STENCILMASK, "mask" },
+      { D3DRS_STENCILWRITEMASK, "writemask" }, { D3DRS_STENCILFAIL, "fail" }, { D3DRS_STENCILZFAIL, "zfail" },
+      { D3DRS_STENCILPASS, "pass" }, { D3DRS_TWOSIDEDSTENCILMODE, "twosided" }, { D3DRS_CCW_STENCILFUNC, "ccwfunc" },
+      { D3DRS_CCW_STENCILFAIL, "ccwfail" }, { D3DRS_CCW_STENCILZFAIL, "ccwzfail" }, { D3DRS_CCW_STENCILPASS, "ccwpass" },
+    };
+    szLine[0] = 0;
+    for (int i = 0; i < (int)(sizeof(s_StencilStates) / sizeof(s_StencilStates[0])); i++)
+    {
+      DWORD nValue = 0;
+      pDev->GetRenderState(s_StencilStates[i].m_eState, &nValue);
+      Append(szLine, sizeof(szLine), " %s %u", s_StencilStates[i].m_szName, nValue);
+    }
+    Trace_Write("    d3d stencil:%s", szLine);
+  }
 
   // Texture stages up to the first disabled one.
   for (DWORD nStage = 0; nStage < 4; nStage++)
