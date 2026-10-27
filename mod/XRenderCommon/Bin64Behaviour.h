@@ -323,6 +323,39 @@ static const int nHeapAlignment = 4;
 // scene, not after it, and not in the order of the calls.
 
 //////////////////////////////////////////////////////////////////////////
+// Shadows (Training with e_shadow_maps 1 and e_stencil_shadows 1)
+//
+// Shadow maps (frustum layout in RendererStructures.h, "Shadow maps"). The D3D9 renderer renders
+// a frustum's map inside EF_EndEf3D of a frame that draws a receiver of it (frames 7, 38, 67, ...
+// after the load); later frames draw the receivers without rendering the static casters' maps
+// again:
+// - into a 512 x 512 D3DFMT_A8R8G8B8 render target, viewport 512 x 512, no culling, no fog;
+// - from the light: for the sun the eye is 10000 units from the caster along the sun direction,
+//   with a perspective projection whose near and far plane lie around that distance (9989.6 and
+//   10005.9 for the caster seen) and a field of view of about 0.08 degrees, so practically
+//   orthographic;
+// - each opaque chunk of the caster in two passes: alpha only without a depth test, then colour
+//   only with depth test and writes, a vs_1_1, a second stream of 36-byte vertices (three FLOAT3
+//   declared TEXCOORD2, TEXCOORD3, BLENDWEIGHT) and a 2048 x 1 D3DFMT_A8R8G8B8 texture in stage 0
+//   (clamped); an alpha-tested chunk in one pass with its own texture (alpha test >= 128) in
+//   stage 0 and the 2048 x 1 texture in stage 1.
+// Receivers: the terrain under a caster gets "EntityShadowOnTerrain" leaf buffers (shader
+// "terrainshadowpass", indices into the sector's 33 x 33 grid as for "Dynamic"), drawn with
+// vs_2_0 / ps_2_0: the sector texture in stage 0 and the shadow map in stage 1 (clamped,
+// bilinear), blended (SRCALPHA, INVSRCALPHA) with alpha test > 0, depth test without depth
+// writes, fog; vertex constants c0-c3 the camera's view projection, c10 and c11 the sector
+// texture coordinates (as c4 and c5 of the terrain).
+//
+// Stencil shadows: characters get a "Character ShadowVolume" leaf buffer (VERTEX_FORMAT_P3F, new
+// indices every frame with UpdateVidIndices) drawn through a TriMeshShadow element with the shader
+// "<stencil>" (EF_AddEf, sort value 0x30000000), between two ClearStencil elements with the same
+// sort value. ClearStencil is Clear(D3DCLEAR_STENCIL, stencil 0). The volume: an indexed triangle
+// list with a vs_1_1, depth test without depth writes, no colour writes, no culling, two-sided
+// stencil with func ALWAYS, zfail DECR for the front (clockwise) faces and INCR for the back
+// faces, fail and pass KEEP (depth fail). In the frames seen no later draw tested the stencil, so
+// the volumes changed nothing on the screen.
+
+//////////////////////////////////////////////////////////////////////////
 // 2D and text
 //
 // Draw2dImage takes coordinates of an 800 x 600 virtual screen: the engine clears the screen and
