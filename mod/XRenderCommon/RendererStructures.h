@@ -204,6 +204,16 @@ namespace RendererStructures
 // declaration, as the arguments show: CreateVariable with a string value is slot 3 (float 1, int
 // 2), Register with an int pointer slot 9 and with a float pointer slot 10 (void pointer 11).
 
+// AnimTexInfo (LoadAnimatedTexture, GetAnimTexInfoFromId)
+//   For its particles the engine calls GetAnimTexInfoFromId right after LoadAnimatedTexture (the
+//   SDK's ParticleParams has the field pAnimTex for the pointer) and passes the same pointer to
+//   RemoveAnimatedTexture, so the AnimTexInfo stays at its address with the SDK layout
+//   (StructLayouts.txt: sName, pBindIds, nFramesCount, nRefCounter) until then. How the D3D9 renderer fills it: Bin64Behaviour.h, "Textures".
+
+// The engine's services (ISystem, ILog, ITimer, ICryPak; slots in VTables.inl): which of them the
+//   D3D9 renderer calls is in Bin64Behaviour.h, "Textures". A renderer reads its files through
+//   ICryPak, as the game's data is in the paks.
+
 // Screen effects (CREScreenProcess)
 //   The 3D engine creates one CREScreenProcess with EF_CreateRE(eDATA_ScreenProcess) and turns
 //   I3DEngine::SetScreenFx, SetScreenFxParam, GetScreenFx and GetScreenFxParam (effect and

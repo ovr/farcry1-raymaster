@@ -953,6 +953,9 @@ static const int nHeapAlignment = 4;
 // (the clear colour, black, inside buildings). Terrain, water, sky and the far tree sprites keep
 // the camera and stay in place; in the back buffer water comes out dark blue (about (30, 44, 66)),
 // the far tree sprites dark green, and the sky is dimmed.
+// At start-up this renderer reports (ILog::LogWarning and ISystem::Warning) that it cannot compile
+// two of its own programs: the vertex program of the characters in heat vision and a pixel shader
+// for the screen. The missing transform of the characters at least may come from that.
 //
 // Night vision is the screen effect "NightVision" (Active 1, see RendererStructures.h, "Screen
 // effects"); r_Cryvision 1 has the same effect. The ScreenProcess element then draws two quads
@@ -1228,5 +1231,57 @@ static const int nHeapAlignment = 4;
 // as a placeholder ITexPic with ID 4096, IsTextureLoaded() == false and flags2 0x10000000.
 // Loading an already loaded texture again returns the same ITexPic with FT2_WASFOUND set in its
 // flags2.
+//
+// Files (Training). The renderer reads every file through ICryPak (ISystem::GetIPak): FOpen ("rb",
+// "r" for its own text files), FRead, FSeek, FTell, FEof, FGets, FClose, and FindFirst, FindNext
+// and GetModificationTime for its own shader folders. A texture is read inside the call that names
+// it (EF_LoadTexture, LoadTexture, EF_LoadShaderItem, EF_LoadShader, LoadAnimatedTexture), not
+// later and not on another thread.
+// How a texture name becomes a file:
+// - Back slashes become slashes, the name becomes lower case and its extension (from the last dot
+//   of the file name on, so "a/00.dds, 24" gives "a/00") is replaced by ".dds", ".tga" and ".jpg",
+//   in this order; the first file that opens is loaded, whatever extension the name had
+//   ("x.tga" loads x.dds when it exists).
+// - EF_LoadTexture and LoadTexture: a name without a folder is tried as "textures/<name>", then as
+//   "<name>"; a name in another folder as "<name>", then as "textures/<name>"; a name in
+//   "textures/" only as it is.
+// - The textures of a material (EF_LoadShaderItem, SInputShaderResources::m_Textures): almost all
+//   are found as they are named. The others (names with the folders of the machine the material
+//   was made on) are found as m_TexturePath (the folder of the object) + the file name; on the way
+//   the renderer also tries "textures/<name>" and m_TexturePath + the whole name.
+// - A cube map, EF_LoadTexture with eTT_Cubemap or a material's EFTT_CUBEMAP texture named
+//   "<base>_posx.<ext>", is six files <base>_posx, _negx, _posy, _negy, _posz and _negz. When
+//   <base>_posx is not found (the light images), the file <base> itself is loaded as one picture
+//   (FT2_CUBEASSINGLETEXTURE, see "Projected lights").
+// - Animated material textures: "<a>##<first>_<last>(<t>)<b>.<ext>" (as many '#' as digits) is
+//   the frames <a><n><b> for n from <first> to <last> (e.g. "w##01_04(.9).dds" is w01 to w04,
+//   "c###001_011(1.00).dds" c001 to c011); the material's texture becomes the first frame. <t> is
+//   0.02 to 1 in the levels seen; how it times the frames was not measured.
+// The renderer fills EFTT_ATTENUATION2D (and EFTT_ATTENUATION1D) of every SRenderShaderResources
+// with its own default attenuation textures.
+//
+// Animated textures of particles (LoadAnimatedTexture, Training)
+//   LoadAnimatedTexture(format, nCount) returns the ID of an AnimTexInfo, 1, 2, ... in the order
+//   they are made; for its particles the engine calls GetAnimTexInfoFromId(ID) right after. An
+//   AnimTexInfo with the same sName and nFramesCount == nCount is returned again, with nRefCounter
+//   one higher. Otherwise a new one is made: sName = format, nRefCounter 1, frame i (0, 1, ...) is the texture sprintf(format, i)
+//   loaded as by EF_LoadTexture (frames already loaded, by other AnimTexInfos too, are shared), and
+//   the loading stops at the first frame that is not found. nFramesCount is the number of frames
+//   loaded and pBindIds holds their texture IDs. So nCount 103 for 24 files gives 24 frames, and
+//   each further call with nCount 103 makes another AnimTexInfo. A format without '%' ("a/00.dds")
+//   counts up the digits in front of the extension (00, 01, ...).
+//   At a level change (Training, then "map River") the engine calls RemoveAnimatedTexture(pInfo)
+//   once for every LoadAnimatedTexture whose AnimTexInfo it asked for (16 calls), each time with
+//   the pointer GetAnimTexInfoFromId returned and with nRefCounter one lower than the time before
+//   (down to 1 at the last call). The animated texture it never asked for (ID 1, loaded twice per
+//   level) is not removed and stays; the next level's ones get the IDs from 2 again.
+//
+// The engine's services the renderer calls (Training; the renderer column of the call summary)
+//   ISystem: GetIPak (about 28000 times), GetI3DEngine, GetITimer, GetIProfileSystem,
+//   CheckLogVerbosity, GetCPUFlags, GetSecondsPerCycle, Warning, StartProfilerSection and
+//   EndProfilerSection. ILog: Log, LogPlus, LogToFile, LogToFilePlus, LogWarning. ITimer:
+//   GetCurrTime and GetFrameTime. ICryPak: as above. IStreamEngine, IPhysicalWorld and ICryFont are
+//   not called, and neither is ISystem::GetViewCamera: the renderer gets everything about the
+//   frame through IRenderer.
 
 } // namespace Bin64Renderer

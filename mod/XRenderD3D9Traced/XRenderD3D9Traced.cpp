@@ -114,6 +114,13 @@ extern "C" __declspec(dllexport) IRenderer *PackageRenderConstructor(int argc, c
   // The console variables and commands the original renderer registers (it does so from here on),
   // and the variables each module looks up.
   VCallHooks_InstallEngine("IConsole", sp->ipConsole);
+  // The engine's services the original renderer uses.
+  VCallHooks_InstallEngine("ISystem", sp->ipSystem);
+  VCallHooks_InstallEngine("ILog", sp->ipLog);
+  VCallHooks_InstallEngine("ITimer", sp->ipTimer);
+  VCallHooks_InstallEngine("ICryPak", sp->ipSystem ? sp->ipSystem->GetIPak() : NULL);
+  VCallHooks_InstallEngine("IStreamEngine", sp->ipSystem ? sp->ipSystem->GetStreamEngine() : NULL);
+  VCallHooks_InstallEngine("IPhysicalWorld", sp->pIPhysicalWorld);
 
   IRenderer *pReal = pfnCreate(argc, argv, sp);
   Trace_Write("  -> real IRenderer %p (vtbl %s)", pReal, Trace_VTable(pReal));

@@ -37,8 +37,9 @@ static const int nMaxTables = 64;
 static const int nMaxModules = 31;
 //! Calls of each function from the engine that are written out.
 static const int nLogPerSlot = 3;
-//! Calls written out of a method listed in XRENDERTRACED_TRACE_METHODS ("CCObject::AddWaves").
-static const int nLogListed = 4000;
+//! Calls written out of a method listed in XRENDERTRACED_TRACE_METHODS ("CCObject::AddWaves");
+//! XRENDERTRACED_TRACE_METHODS_MAX changes it.
+static int s_nLogListed = 4000;
 //! Calls of each screen effect parameter that are written out (and then every nLogScreenEvery-th).
 static const int nLogPerScreenParam = 8;
 static const int nLogScreenEvery = 50;
@@ -338,21 +339,41 @@ static void ConsoleGetCVar_Leave(SVCallFrame *pFrame)
     Trace_Addr(pFrame->pReturn), (void *)pFrame->nResult, CVarText((ICVar *)pFrame->nResult));
 }
 
-//! The other IConsole methods the renderer calls: every register argument and the first three
-//! stack arguments (the overloads share a name; the slot tells them apart).
-static void ConsoleCall_Enter(SVCallFrame *pFrame)
+//! The engine's interfaces whose calls from the renderer are written with their arguments as text
+//! (all but I3DEngine).
+static bool IsTextCall(const SVSlot *pSlot)
+{
+  return pSlot->pTable->bEngine && strcmp(pSlot->pTable->szName, "I3DEngine");
+}
+
+//! "[console] Register" or "[engine] ILog::Log".
+static const char *TextCallName(const SVSlot *pSlot)
+{
+  static char s_szBuf[96];
+  if (pSlot->pTable->pInfo == s_pConsoleInfo)
+    _snprintf(s_szBuf, sizeof(s_szBuf) - 1, "[console] %s", pSlot->szMethod);
+  else
+    _snprintf(s_szBuf, sizeof(s_szBuf) - 1, "[engine] %s::%s", pSlot->pTable->szName, pSlot->szMethod);
+  s_szBuf[sizeof(s_szBuf) - 1] = 0;
+  return s_szBuf;
+}
+
+//! The other IConsole methods and the other engine services the renderer calls: every register
+//! argument and the first three stack arguments (the overloads share a name; the slot tells them
+//! apart).
+static void TextCall_Enter(SVCallFrame *pFrame)
 {
   SVSlot *pSlot = pFrame->pSlot;
   const UINT_PTR *pStack = pFrame->StackArgs;
-  Trace_Write("[console] %s (slot %d) from %s: rdx %s, r8 %s, r9 %s; xmm2 %g, xmm3 %g; stack %s %s %s", pSlot->szMethod, pSlot->nSlot,
-    Trace_Addr(pFrame->pReturn), ArgText(pFrame->Args[1]), ArgText(pFrame->Args[2]), ArgText(pFrame->Args[3]), pFrame->Xmm[2][0],
-    pFrame->Xmm[3][0], ArgText(pStack[0]), ArgText(pStack[1]), ArgText(pStack[2]));
+  Trace_Write("%s (slot %d) from %s: rdx %s, r8 %s, r9 %s; xmm1 %g, xmm2 %g, xmm3 %g; stack %s %s %s", TextCallName(pSlot), pSlot->nSlot,
+    Trace_Addr(pFrame->pReturn), ArgText(pFrame->Args[1]), ArgText(pFrame->Args[2]), ArgText(pFrame->Args[3]), pFrame->Xmm[1][0],
+    pFrame->Xmm[2][0], pFrame->Xmm[3][0], ArgText(pStack[0]), ArgText(pStack[1]), ArgText(pStack[2]));
 }
 
-static void ConsoleCall_Leave(SVCallFrame *pFrame)
+static void TextCall_Leave(SVCallFrame *pFrame)
 {
   SVSlot *pSlot = pFrame->pSlot;
-  Trace_Write("[console]   %s -> 0x%llx (xmm0 %g)%s", pSlot->szMethod, (unsigned long long)pFrame->nResult, pFrame->XmmResult[0],
+  Trace_Write("%s -> 0x%llx (xmm0 %g)%s", TextCallName(pSlot), (unsigned long long)pFrame->nResult, pFrame->XmmResult[0],
     !strcmp(pSlot->szMethod, "CreateVariable") ? CVarText((ICVar *)pFrame->nResult) : "");
 }
 
@@ -515,12 +536,12 @@ extern "C" void VCall_Enter(SVCallFrame *pFrame)
     ScreenCall_Enter(pFrame);
     return;
   }
-  if (InterlockedIncrement(&pSlot->nLogged) > (pSlot->bListed ? nLogListed : nLogPerSlot))
+  if (InterlockedIncrement(&pSlot->nLogged) > (pSlot->bListed ? s_nLogListed : nLogPerSlot))
     return;
   pFrame->nFlags |= FRAME_LOG;
-  if (pSlot->pTable->pInfo == s_pConsoleInfo)
+  if (IsTextCall(pSlot))
   {
-    ConsoleCall_Enter(pFrame);
+    TextCall_Enter(pFrame);
     return;
   }
   Trace_Write("[vcall] %s::%s(this %p, rdx 0x%llx, r8 0x%llx, r9 0x%llx; xmm1 %g, xmm2 %g, xmm3 %g; stack 0x%llx 0x%llx) from %s",
@@ -543,8 +564,8 @@ extern "C" void VCall_Leave(SVCallFrame *pFrame)
     ConsoleGetCVar_Leave(pFrame);
   else if (pSlot->eSpecial != SPECIAL_None)
     ScreenCall_Leave(pFrame);
-  else if (pSlot->pTable->pInfo == s_pConsoleInfo)
-    ConsoleCall_Leave(pFrame);
+  else if (IsTextCall(pSlot))
+    TextCall_Leave(pFrame);
   else
   {
     Trace_Write("[vcall]   %s::%s -> rax 0x%llx (xmm0 %g)", pSlot->pTable->szName, pSlot->szMethod, (unsigned long long)pFrame->nResult,
@@ -624,7 +645,9 @@ static void InstallLocked(const char *szClass, void **pVTable, const char *szTag
   if (!s_bInitialized)
   {
     s_bInitialized = true;
-    char szEnv[8];
+    char szEnv[16];
+    if (GetEnvironmentVariableA("XRENDERTRACED_TRACE_METHODS_MAX", szEnv, sizeof(szEnv)) && atoi(szEnv) > 0)
+      s_nLogListed = atoi(szEnv);
     if (GetEnvironmentVariableA("XRENDERTRACED_NO_VCALL_HOOKS", szEnv, sizeof(szEnv)) && szEnv[0] == '1')
     {
       Trace_Write("vcall hooks: off (XRENDERTRACED_NO_VCALL_HOOKS)");

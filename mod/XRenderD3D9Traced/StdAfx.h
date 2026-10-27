@@ -38,6 +38,8 @@
 #include <IConsole.h>
 #include <ILog.h>
 #include <ITimer.h>
+#include <ICryPak.h>
+#include <IStreamEngine.h>
 #include <IRenderer.h>
 #include <I3DEngine.h>
 #include <MeshIdx.h>

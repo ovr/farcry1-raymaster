@@ -236,6 +236,9 @@ void CRendererProxy::BeginFrame()
   {
     s_bEngineHooked = true;
     VCallHooks_InstallEngine("I3DEngine", iSystem->GetI3DEngine());
+    // The ones that may not exist yet when the renderer is created.
+    VCallHooks_InstallEngine("IPhysicalWorld", iSystem->GetIPhysicalWorld());
+    VCallHooks_InstallEngine("ICryFont", iSystem->GetICryFont());
   }
   D3DDraws_WatchRenderTargets(m_pReal, m_nFrames + 1);
   if (Trace_IsCapturing())
@@ -1435,6 +1438,29 @@ void CRendererProxy::SetMaterialColor(float r, float g, float b, float a)
   m_pReal->SetMaterialColor(r, g, b, a);
 }
 
+//! The animated texture as the renderer keeps it: name, frame count, references, frame texture IDs.
+static void TraceAnimTexInfo(const AnimTexInfo *pInfo)
+{
+  if (!pInfo || !Trace_IsReadable(pInfo, sizeof(*pInfo)))
+    return;
+  char szIds[160] = "";
+  int nLen = 0;
+  const int nFrames = pInfo->nFramesCount;
+  if (pInfo->pBindIds && nFrames > 0 && Trace_IsReadable(pInfo->pBindIds, nFrames * sizeof(int)))
+  {
+    for (int i = 0; i < nFrames && nLen < (int)sizeof(szIds) - 24; i++)
+    {
+      if (i == 8 && nFrames > 10)
+      {
+        nLen += _snprintf(szIds + nLen, sizeof(szIds) - nLen - 1, " ... %d", pInfo->pBindIds[nFrames - 1]);
+        break;
+      }
+      nLen += _snprintf(szIds + nLen, sizeof(szIds) - nLen - 1, " %d", pInfo->pBindIds[i]);
+    }
+  }
+  Trace_Write("    AnimTexInfo @%p '%.80s' frames %d refs %d ids%s", pInfo, pInfo->sName, nFrames, pInfo->nRefCounter, szIds);
+}
+
 int CRendererProxy::LoadAnimatedTexture(const char *format, const int nCount)
 {
   TRACE_CALL("'%s' count %d", format, nCount);
@@ -1446,6 +1472,8 @@ int CRendererProxy::LoadAnimatedTexture(const char *format, const int nCount)
 void CRendererProxy::RemoveAnimatedTexture(AnimTexInfo *pInfo)
 {
   TRACE_CALL("%p", pInfo);
+  if (bTraced)
+    TraceAnimTexInfo(pInfo);
   m_pReal->RemoveAnimatedTexture(pInfo);
 }
 
@@ -1454,6 +1482,8 @@ AnimTexInfo *CRendererProxy::GetAnimTexInfoFromId(int nId)
   TRACE_CALL("%d", nId);
   AnimTexInfo *pRes = m_pReal->GetAnimTexInfoFromId(nId);
   TRACE_RESULT("%p", pRes);
+  if (bTraced)
+    TraceAnimTexInfo(pRes);
   return pRes;
 }
 

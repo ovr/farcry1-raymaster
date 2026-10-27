@@ -80,9 +80,9 @@ it as well: it holds local, machine-specific instructions and is not committed (
 - `XRENDERTRACED_TRACE_METHODS` (names as in the log, separated by `,`, e.g.
   `DownLoadToVideoMemory,CLeafBuffer::CreateBufferFromSource`) writes every call of those methods,
   not only the first `xrt_TraceCalls`; for the hooked virtual functions (e.g. `CCObject::AddWaves`)
-  the first 4000 instead of 3, counted again after the command `vcalls` (e.g. in
-  `XRENDERTRACED_EXEC_LEVEL`). A written `CCObject::AddWaves` call also writes the two waves the
-  engine filled after the call before it.
+  the first 4000 (or `XRENDERTRACED_TRACE_METHODS_MAX`) instead of 3, counted again after the
+  command `vcalls` (e.g. in `XRENDERTRACED_EXEC_LEVEL`). A written `CCObject::AddWaves` call also
+  writes the two waves the engine filled after the call before it.
 - The engine's `PrepareBufferCallback` of a leaf buffer (the detail grass) reaches the original
   renderer wrapped: the calls appear as `PrepareBufferCallback(...)` with the engine's calls inside
   them and the leaf buffer, its video buffer and index stream dumped before and after.
@@ -94,6 +94,13 @@ it as well: it holds local, machine-specific instructions and is not committed (
   renderer makes into it (the variables it registers) is a `[console]` line with its arguments,
   and the first `GetCVar` of each name by each module (the engine's modules too) a
   `[console] GetCVar(...)` line with the variable found; the summary counts the lookups.
+- The engine's services are hooked the same way (`ISystem`, `ILog`, `ITimer`, `ICryPak`,
+  `IStreamEngine`, `IPhysicalWorld`, `ICryFont`): the calls the renderer makes into them are
+  `[engine] ICryPak::FOpen (slot 13) ...` lines with their arguments (as text where they point to
+  one) and counted in the summary; e.g. `XRENDERTRACED_TRACE_METHODS=ICryPak::FOpen` with
+  `XRENDERTRACED_TRACE_METHODS_MAX=30000` writes every file the renderer opens. A traced
+  `GetAnimTexInfoFromId` or `RemoveAnimatedTexture` writes the `AnimTexInfo` (name, frames,
+  references, texture IDs).
 - `XRENDERTRACED_D3D_STATE` (names as in the log, e.g. `DrawDynVB,Draw2dImage`) writes the
   Direct3D 9 state of the original renderer after those calls (`D3DState.h`; read only, through
   `EF_Query(EFQ_D3DDevice)`). `XRENDERTRACED_PROBE=FontSetBlending` passes (i, 12 - i) in the first
