@@ -88,7 +88,11 @@ static const int nHeapAlignment = 4;
 // (942 here) draws only the loading screen ("2D and text"). After PostLoad it calls
 // EnableSwapBuffers(false) and renders 162 frames of the level (in two runs) that are not meant
 // to be seen: complete 3D frames with Clear, EF_EndEf3D and their draws, but the D3D9 renderer
-// calls no Present in them, so the last loading screen stays on the screen. Then
+// calls no Present in them, so the last loading screen stays on the screen. In these frames the
+// camera (SetCamera once per frame, fov 1.7) stands at a series of points of the level (47 on
+// Archive: 282 frames) and turns in six directions, one frame each, angles (90, -90, 0),
+// (90, 90, 0), (180, 180, 0), (0, 180, 0), (90, 180, 0), (90, 0, 0); what is seen from there is
+// rendered once (the leaf buffers get their video buffers) before the game starts. Then
 // EnableSwapBuffers(true), RemoveTexture for a few textures (one ID 28 times), 5 frames of the
 // loading screen with the full progress bar, and the game. Update has to skip Present while
 // swapping is off, and the frame count (GetFrameID) goes on in these frames.
