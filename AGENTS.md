@@ -97,6 +97,14 @@ it as well: it holds local, machine-specific instructions and is not committed (
 - The engine's `PrepareBufferCallback` of a leaf buffer (the detail grass) reaches the original
   renderer wrapped: the calls appear as `PrepareBufferCallback(...)` with the engine's calls inside
   them and the leaf buffer, its video buffer and index stream dumped before and after.
+- Whole leaf buffers: `XRENDERTRACED_MESH_FULL=n` writes a mesh of at most n faces whole before
+  `CLeafBuffer::CreateBufferFromMesh` (faces, positions, texture coordinates, colours, normals) and
+  the buffer after it (vertices, tangents, indices, the strip map).
+  `XRENDERTRACED_UCL_FULL=n` makes `CLeafBuffer::UpdateCustomLighting` of a buffer of at most n
+  vertices (with colours in its vertex format) write every vertex (position, temp normal, loaded
+  colour, the colour before and after the call), the buffer with its chunks, its indices and the
+  sun colour. `XRENDERTRACED_LB_RAW=1` adds the raw words of the leaf buffer, of its first chunk
+  and of that chunk's render element to every leaf buffer dump.
 - The engine's `I3DEngine` is hooked as well (from the first `BeginFrame`): the calls the original
   renderer makes into it are written as `[vcall] I3DEngine::...` lines (with the camera of
   `SetCamera` and the flags of `DrawLowDetail`) and counted in the renderer column of the virtual
