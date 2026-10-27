@@ -83,7 +83,9 @@ it as well: it holds local, machine-specific instructions and is not committed (
 - `XRENDERTRACED_D3D_DRAWS=1` writes the Direct3D 9 draw calls of the original renderer in the
   captured frame (`D3DDraws.h`): buffers, vertex declaration, shaders, textures and the render
   element being drawn (x64), the first vertices of the non-indexed draws (8, or
-  `XRENDERTRACED_D3D_VERTS`), and the `Clear` calls; `2` adds the device state after each (with
+  `XRENDERTRACED_D3D_VERTS`), the `Clear` calls, the render target and depth buffer changes
+  (`SetRenderTarget`, `SetDepthStencilSurface`) and the surface copies and fills (`StretchRect`,
+  `UpdateSurface`, `ColorFill`); `2` adds the device state after each (with
   the stencil state when stencil is on), `3` also the shader constants.
   `XRENDERTRACED_D3D_RT=1` writes the first `SetRenderTarget` of every frame to a surface other
   than the back buffer (to find the frames that render shadow maps; 64 lines, counted again after

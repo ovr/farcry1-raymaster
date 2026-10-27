@@ -20,7 +20,11 @@
 //! Slots of IDirect3DDevice9 (declaration order in d3d9.h).
 enum
 {
+  DEV_UpdateSurface = 30,
+  DEV_StretchRect = 34,
+  DEV_ColorFill = 35,
   DEV_SetRenderTarget = 37,
+  DEV_SetDepthStencilSurface = 39,
   DEV_Clear = 43,
   DEV_DrawPrimitive = 81,
   DEV_DrawIndexedPrimitive = 82,
@@ -51,6 +55,12 @@ typedef HRESULT (STDMETHODCALLTYPE *PFN_DrawIndexedPrimitiveUP)(IDirect3DDevice9
   const void *, UINT);
 typedef HRESULT (STDMETHODCALLTYPE *PFN_Clear)(IDirect3DDevice9 *, DWORD, const D3DRECT *, DWORD, D3DCOLOR, float, DWORD);
 typedef HRESULT (STDMETHODCALLTYPE *PFN_SetRenderTarget)(IDirect3DDevice9 *, DWORD, IDirect3DSurface9 *);
+typedef HRESULT (STDMETHODCALLTYPE *PFN_SetDepthStencilSurface)(IDirect3DDevice9 *, IDirect3DSurface9 *);
+typedef HRESULT (STDMETHODCALLTYPE *PFN_UpdateSurface)(IDirect3DDevice9 *, IDirect3DSurface9 *, const RECT *, IDirect3DSurface9 *,
+  const POINT *);
+typedef HRESULT (STDMETHODCALLTYPE *PFN_StretchRect)(IDirect3DDevice9 *, IDirect3DSurface9 *, const RECT *, IDirect3DSurface9 *,
+  const RECT *, D3DTEXTUREFILTERTYPE);
+typedef HRESULT (STDMETHODCALLTYPE *PFN_ColorFill)(IDirect3DDevice9 *, IDirect3DSurface9 *, const RECT *, D3DCOLOR);
 typedef HRESULT (STDMETHODCALLTYPE *PFN_Lock)(IUnknown *, UINT, UINT, void **, DWORD);
 typedef HRESULT (STDMETHODCALLTYPE *PFN_Unlock)(IUnknown *);
 
@@ -510,6 +520,76 @@ static HRESULT STDMETHODCALLTYPE Hook_Clear(IDirect3DDevice9 *pDev, DWORD nRects
   return ((PFN_Clear)s_pOrigVTable[DEV_Clear])(pDev, nRects, pRects, nFlags, nColor, fZ, nStencil);
 }
 
+//! "back buffer", or the surface's size and format with the texture it belongs to (as the draws write it).
+static const char *SurfaceName(IDirect3DDevice9 *pDev, IDirect3DSurface9 *pSurf, char *szBuf, size_t nBuf)
+{
+  if (!pSurf)
+    return "null";
+  IDirect3DSurface9 *pBack = NULL;
+  pDev->GetBackBuffer(0, 0, D3DBACKBUFFER_TYPE_MONO, &pBack);
+  if (pBack)
+    pBack->Release();
+  D3DSURFACE_DESC Desc = {};
+  pSurf->GetDesc(&Desc);
+  IDirect3DTexture9 *pTex = NULL;
+  pSurf->GetContainer(__uuidof(IDirect3DTexture9), (void **)&pTex);
+  if (pTex)
+    pTex->Release();
+  _snprintf_s(szBuf, nBuf, _TRUNCATE, "%s%p %ux%u format %u usage 0x%x tex %p", pSurf == pBack ? "back buffer " : "", pSurf, Desc.Width,
+    Desc.Height, Desc.Format, Desc.Usage, pTex);
+  return szBuf;
+}
+
+static const char *RectName(const RECT *pRect, char *szBuf, size_t nBuf)
+{
+  if (!pRect)
+    return "all";
+  _snprintf_s(szBuf, nBuf, _TRUNCATE, "(%ld %ld)-(%ld %ld)", pRect->left, pRect->top, pRect->right, pRect->bottom);
+  return szBuf;
+}
+
+static HRESULT STDMETHODCALLTYPE Hook_DrawsSetRenderTarget(IDirect3DDevice9 *pDev, DWORD nIndex, IDirect3DSurface9 *pSurf)
+{
+  char szSurf[160];
+  Trace_Write("[d3d] SetRenderTarget(%u, %s)", nIndex, SurfaceName(pDev, pSurf, szSurf, sizeof(szSurf)));
+  return ((PFN_SetRenderTarget)s_pOrigVTable[DEV_SetRenderTarget])(pDev, nIndex, pSurf);
+}
+
+static HRESULT STDMETHODCALLTYPE Hook_SetDepthStencilSurface(IDirect3DDevice9 *pDev, IDirect3DSurface9 *pSurf)
+{
+  char szSurf[160];
+  Trace_Write("[d3d] SetDepthStencilSurface(%s)", SurfaceName(pDev, pSurf, szSurf, sizeof(szSurf)));
+  return ((PFN_SetDepthStencilSurface)s_pOrigVTable[DEV_SetDepthStencilSurface])(pDev, pSurf);
+}
+
+static HRESULT STDMETHODCALLTYPE Hook_UpdateSurface(IDirect3DDevice9 *pDev, IDirect3DSurface9 *pSrc, const RECT *pSrcRect,
+  IDirect3DSurface9 *pDst, const POINT *pDstPoint)
+{
+  char szSrc[160], szDst[160], szRect[64];
+  Trace_Write("[d3d] UpdateSurface(%s rect %s -> %s at (%ld %ld))", SurfaceName(pDev, pSrc, szSrc, sizeof(szSrc)),
+    RectName(pSrcRect, szRect, sizeof(szRect)), SurfaceName(pDev, pDst, szDst, sizeof(szDst)), pDstPoint ? pDstPoint->x : 0,
+    pDstPoint ? pDstPoint->y : 0);
+  return ((PFN_UpdateSurface)s_pOrigVTable[DEV_UpdateSurface])(pDev, pSrc, pSrcRect, pDst, pDstPoint);
+}
+
+static HRESULT STDMETHODCALLTYPE Hook_StretchRect(IDirect3DDevice9 *pDev, IDirect3DSurface9 *pSrc, const RECT *pSrcRect,
+  IDirect3DSurface9 *pDst, const RECT *pDstRect, D3DTEXTUREFILTERTYPE eFilter)
+{
+  char szSrc[160], szDst[160], szRect1[64], szRect2[64];
+  Trace_Write("[d3d] StretchRect(%s rect %s -> %s rect %s, filter %d)", SurfaceName(pDev, pSrc, szSrc, sizeof(szSrc)),
+    RectName(pSrcRect, szRect1, sizeof(szRect1)), SurfaceName(pDev, pDst, szDst, sizeof(szDst)), RectName(pDstRect, szRect2, sizeof(szRect2)),
+    eFilter);
+  return ((PFN_StretchRect)s_pOrigVTable[DEV_StretchRect])(pDev, pSrc, pSrcRect, pDst, pDstRect, eFilter);
+}
+
+static HRESULT STDMETHODCALLTYPE Hook_ColorFill(IDirect3DDevice9 *pDev, IDirect3DSurface9 *pSurf, const RECT *pRect, D3DCOLOR nColor)
+{
+  char szSurf[160], szRect[64];
+  Trace_Write("[d3d] ColorFill(%s rect %s colour 0x%08x)", SurfaceName(pDev, pSurf, szSurf, sizeof(szSurf)),
+    RectName(pRect, szRect, sizeof(szRect)), nColor);
+  return ((PFN_ColorFill)s_pOrigVTable[DEV_ColorFill])(pDev, pSurf, pRect, nColor);
+}
+
 void D3DDraws_Begin(IRenderer *pRenderer)
 {
   if (s_pDevice)
@@ -535,6 +615,11 @@ void D3DDraws_Begin(IRenderer *pRenderer)
   }
   memcpy(s_HookedVTable, pVTable, nSlots * sizeof(void *));
   s_HookedVTable[DEV_Clear] = (void *)&Hook_Clear;
+  s_HookedVTable[DEV_SetRenderTarget] = (void *)&Hook_DrawsSetRenderTarget;
+  s_HookedVTable[DEV_SetDepthStencilSurface] = (void *)&Hook_SetDepthStencilSurface;
+  s_HookedVTable[DEV_UpdateSurface] = (void *)&Hook_UpdateSurface;
+  s_HookedVTable[DEV_StretchRect] = (void *)&Hook_StretchRect;
+  s_HookedVTable[DEV_ColorFill] = (void *)&Hook_ColorFill;
   s_HookedVTable[DEV_DrawPrimitive] = (void *)&Hook_DrawPrimitive;
   s_HookedVTable[DEV_DrawIndexedPrimitive] = (void *)&Hook_DrawIndexedPrimitive;
   s_HookedVTable[DEV_DrawPrimitiveUP] = (void *)&Hook_DrawPrimitiveUP;
