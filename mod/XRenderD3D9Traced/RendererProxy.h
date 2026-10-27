@@ -297,6 +297,7 @@ private:
   CCObject *m_pFlareObj = NULL;
   CCObject *m_pCoronaObj = NULL;
   void WriteFlareObject(const CCObject *obj, const char *szWhen, const char *szShader);
+  void ProbeProjector(CDLight *pDL);
   //! XRENDERTRACED_SCREENFX_WATCH="8.24,8.30": after every frame the values of these screen effect
   //! parameters (process.param) are read from the ScreenProcess element the engine adds, and
   //! written when they change.

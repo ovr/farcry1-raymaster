@@ -113,6 +113,11 @@ it as well: it holds local, machine-specific instructions and is not committed (
   `XRENDERTRACED_PROBE=LightAt` puts every point light (not the sun) at a world position of
   `XRENDERTRACED_LIGHT_POS` (`"x y z x y z ..."`, one position per frame in turn), to see how the
   renderer lights an object from known places (the console command `lightradius` sets the radius).
+  For the projected lights (`DLF_PROJECT`), `XRENDERTRACED_PROJ_ANGLES` (`"x y z"`, one group per
+  frame in turn) and `XRENDERTRACED_PROJ_POS` replace `m_ProjAngles` and `m_Origin` at
+  `EF_UpdateDLight`, and `XRENDERTRACED_PROJ_IMAGE` (a picture file, an absolute path works)
+  replaces `m_pLightImage` with that picture loaded as the engine loads light images, to see which
+  way up the picture is cast (no `XRENDERTRACED_PROBE` needed).
   `XRENDERTRACED_FLARES=1` writes the object of the flare as the engine passes it and again after
   `EF_EndEf3D` as `[flare]` lines (colour, `m_AmbColor`, `m_TempVars`, `m_Trans2`, `m_Angs2`,
   `m_RE` and the distance to the camera; up to 40000 lines), for the state the renderer keeps

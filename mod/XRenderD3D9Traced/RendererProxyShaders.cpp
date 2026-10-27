@@ -670,9 +670,35 @@ void CRendererProxy::EF_ClearLightsList()
   m_pReal->EF_ClearLightsList();
 }
 
+//! XRENDERTRACED_PROJ_IMAGE (a picture file, loaded as the engine loads light images),
+//! XRENDERTRACED_PROJ_ANGLES ("x y z", m_ProjAngles) and XRENDERTRACED_PROJ_POS ("x y z", m_Origin)
+//! replace those of the projected lights (DLF_PROJECT), to see which way up the picture is cast.
+void CRendererProxy::ProbeProjector(CDLight *pDL)
+{
+  if (!pDL || !(pDL->m_Flags & DLF_PROJECT))
+    return;
+  float Values[3];
+  if (ProbeValues("XRENDERTRACED_PROJ_ANGLES", Values, 3, m_nFrames))
+    pDL->m_ProjAngles = Vec3(Values[0], Values[1], Values[2]);
+  if (ProbeValues("XRENDERTRACED_PROJ_POS", Values, 3, m_nFrames))
+    pDL->m_Origin = Vec3(Values[0], Values[1], Values[2]);
+  if (const char *szImage = getenv("XRENDERTRACED_PROJ_IMAGE"))
+  {
+    static ITexPic *s_pImage = NULL;
+    if (!s_pImage)
+    {
+      s_pImage = m_pReal->EF_LoadTexture(szImage, 0, FT2_FORCECUBEMAP, eTT_Cubemap);
+      Trace_Write("    probe: projector image '%s' -> %p (id %d, loaded %d)", szImage, s_pImage, s_pImage ? s_pImage->GetTextureID() : -1,
+        s_pImage ? s_pImage->IsTextureLoaded() : 0);
+    }
+    pDL->m_pLightImage = s_pImage;
+  }
+}
+
 bool CRendererProxy::EF_UpdateDLight(CDLight *pDL)
 {
   TRACE_CALL("%p", pDL);
+  ProbeProjector(pDL);
   if (TRACE_DUMP)
     Dump_Light(pDL);
   CWatchArg WatchLight(WT_CDLight, pDL);
