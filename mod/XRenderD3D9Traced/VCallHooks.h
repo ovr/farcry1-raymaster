@@ -28,6 +28,8 @@ void VCallHooks_Install(const char *szClass, void *pObject, const char *szTag = 
 void VCallHooks_InstallRE(CRendElement *pRE);
 //! The render element whose CRendElement::mfDraw is running, NULL outside of one (x64).
 CRendElement *VCallHooks_DrawingRE();
+//! The methods listed in XRENDERTRACED_TRACE_METHODS write their calls again from now on.
+void VCallHooks_RestartListed();
 //! Writes which virtual functions were called, and from which modules.
 void VCallHooks_WriteSummary(const char *szReason);
 //! Restores the original vtable entries.

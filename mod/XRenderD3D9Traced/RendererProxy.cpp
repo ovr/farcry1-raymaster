@@ -313,6 +313,8 @@ void CRendererProxy::ExecuteCommands(const char *szCommands)
       if (p3DEngine)
         Trace_Write("  view distance %g fog %g to %g", p3DEngine->GetMaxViewDistance(), p3DEngine->GetFogStart(), p3DEngine->GetFogEnd());
     }
+    else if (!strcmp(szCmd, "vcalls"))
+      VCallHooks_RestartListed();
     else if (!strncmp(szCmd, "heatvision ", 11))
     {
       // "heatvision 0|1": I3DEngine::EnableHeatVision.

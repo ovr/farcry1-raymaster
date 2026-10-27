@@ -36,6 +36,8 @@ static const int nMaxTables = 64;
 static const int nMaxModules = 31;
 //! Calls of each function from the engine that are written out.
 static const int nLogPerSlot = 3;
+//! Calls written out of a method listed in XRENDERTRACED_TRACE_METHODS ("CCObject::AddWaves").
+static const int nLogListed = 4000;
 //! Calls of each screen effect parameter that are written out (and then every nLogScreenEvery-th).
 static const int nLogPerScreenParam = 8;
 static const int nLogScreenEvery = 50;
@@ -68,6 +70,8 @@ struct SVSlot
   ESpecial eSpecial;
   //! CRendElement::mfDraw: the element is the one being drawn until it returns.
   bool bDraw;
+  //! Listed in XRENDERTRACED_TRACE_METHODS: nLogListed calls are written out.
+  bool bListed;
   volatile LONG nCalls[CALLER_Num];
   //! Bit i: called from module i of s_Modules.
   volatile LONG nEngineModules;
@@ -278,15 +282,15 @@ static void ObjectCall_Enter(SVCallFrame *pFrame)
     // AddWaves(SWaveForm2 **wf) in the SDK; on Bin64 rdx does not point to two wave pointers, so the
     // block is written as it is, and every pointer in it (and r8, r9) is read as an SWaveForm2.
     const unsigned char *pBlock = (const unsigned char *)pFrame->Args[1];
-    for (int nOffs = 0; nOffs < 0xa0 && pBlock && Trace_IsReadable(pBlock + nOffs, 32); nOffs += 32)
+    for (int nOffs = 0; nOffs < 0x100 && pBlock && Trace_IsReadable(pBlock + nOffs, 32); nOffs += 32)
     {
       char szName[32];
       sprintf_s(szName, "[vcall]     rdx+0x%02x", nOffs);
       Dump_HexLine(szName, pBlock + nOffs, 32);
     }
-    const void *pCandidates[22] = { (const void *)pFrame->Args[2], (const void *)pFrame->Args[3] };
+    const void *pCandidates[2 + 0x100 / sizeof(void *)] = { (const void *)pFrame->Args[2], (const void *)pFrame->Args[3] };
     int nCandidates = 2;
-    for (int nOffs = 0; nOffs < 0xa0 && pBlock && Trace_IsReadable(pBlock + nOffs, sizeof(void *)); nOffs += sizeof(void *))
+    for (int nOffs = 0; nOffs < 0x100 && pBlock && Trace_IsReadable(pBlock + nOffs, sizeof(void *)); nOffs += sizeof(void *))
       pCandidates[nCandidates++] = *(const void *const *)(pBlock + nOffs);
     for (int i = 0; i < nCandidates; i++)
     {
@@ -351,7 +355,7 @@ extern "C" void VCall_Enter(SVCallFrame *pFrame)
     ScreenCall_Enter(pFrame);
     return;
   }
-  if (InterlockedIncrement(&pSlot->nLogged) > nLogPerSlot)
+  if (InterlockedIncrement(&pSlot->nLogged) > (pSlot->bListed ? nLogListed : nLogPerSlot))
     return;
   pFrame->nFlags |= FRAME_LOG;
   Trace_Write("[vcall] %s::%s(this %p, rdx 0x%llx, r8 0x%llx, r9 0x%llx; xmm1 %g, xmm2 %g, xmm3 %g; stack 0x%llx 0x%llx) from %s",
@@ -538,6 +542,10 @@ static void InstallLocked(const char *szClass, void **pVTable, const char *szTag
     Slot.pOrig = pVTable[i];
     Slot.eSpecial = SpecialOf(szClass, Slot.szMethod);
     Slot.bDraw = !strcmp(Slot.szMethod, "mfDraw");
+    char szName[128];
+    _snprintf(szName, sizeof(szName) - 1, "%s::%s", Table.szName, Slot.szMethod);
+    szName[sizeof(szName) - 1] = 0;
+    Slot.bListed = Trace_IsListed("XRENDERTRACED_TRACE_METHODS", szName);
     WriteStub(pStubs + i * nStubSize, &Slot);
     pEntries[i] = pStubs + i * nStubSize;
   }
@@ -605,6 +613,16 @@ CRendElement *VCallHooks_DrawingRE()
 }
 
 //////////////////////////////////////////////////////////////////////////
+
+void VCallHooks_RestartListed()
+{
+  AcquireSRWLockExclusive(&s_Lock);
+  for (int i = 0; i < s_nTables; i++)
+    for (int j = 0; j < s_Tables[i].pInfo->nSlots; j++)
+      if (s_Tables[i].Slots[j].bListed)
+        s_Tables[i].Slots[j].nLogged = 0;
+  ReleaseSRWLockExclusive(&s_Lock);
+}
 
 void VCallHooks_WriteSummary(const char *szReason)
 {
