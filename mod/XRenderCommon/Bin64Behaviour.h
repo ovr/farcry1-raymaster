@@ -977,55 +977,72 @@ static const int nHeapAlignment = 4;
 //     other static objects; how that range is chosen was not found.
 
 //////////////////////////////////////////////////////////////////////////
-// Flares (the sun's flare: Factory, Boat, Bunker, Training, Pier)
+// Flares and light coronas (the sun: Factory, Boat, Bunker, Training, Pier; a lamp in Bunker)
 //
 // Shaders whose GetREs hold one Flare render element (eDATA_Flare, no SDK class): the sun flares
 // ("sun_evening" in Factory, Boat and Bunker with the colour (1, 0.70, 0.46); "flare_training" in
 // Training and Pier with (0.5, 0.4, 0.3)), "crylight", and "flare_from_light", which is m_pShader of
-// lights with a corona (light entities, CDLight::m_fCoronaScale 1). No corona of these lights was
-// ever added or drawn (Bunker, r_Coronas 1).
+// the lights with a corona (light entities, CDLight::m_fCoronaScale 1).
 //
 // The engine adds the sun's flare every frame in which the sun is near the view (not when it is
-// behind the camera): EF_AddEf(0, the Flare element, the shader, NULL, obj, -1, NULL,
-// EFSLIST_DISTSORT). obj comes from EF_GetObject(false, ...) and is the same object every frame:
+// behind the camera), whatever the settings: EF_AddEf(0, the Flare element, the shader, NULL, obj,
+// -1, NULL, EFSLIST_DISTSORT). obj comes from EF_GetObject(false, ...) and is the same object every
+// frame:
 //   m_ObjFlags FOB_DRSUN | FOB_TRANS_TRANSLATE, an identity matrix with the translation
 //   camera + sun direction * 0.9 * far plane (180 for a far plane of 200, 540 for 600);
-//   m_SortId -1e6; m_TempVars[2] = 1 at every add (the renderer sets it back to 0).
+//   m_SortId -1e6; m_TempVars[2] = 1 at every add (the renderer sets it back to 0 when it tests).
 // A new object has m_Color (1, 1, 1, 1) and m_AmbColor (1, 1, 1).
+// A light's corona is not added by the engine: the renderer handles it in EF_ADDDlight (below).
 //
-// The D3D9 renderer draws nothing for it (no test either) with r_Flares 0 (the value in
-// farcry1_testing1's settings). With r_Flares 1:
+// The D3D9 renderer tests and draws flares and coronas only with r_Coronas 1 (0 in
+// farcry1_testing1's settings); r_Flares, r_ProcFlares and r_checkSunVis change nothing here.
+// The same steps for both, with h the half side of the drawn square:
+//   the sun: h = 0.2 * distance (20 at 100, 36 at 180, 60 at 300);
+//   a corona: h = 0.3 * m_fCoronaScale * r_CoronaSizeScale * distance^0.7 (0.245 at 0.75, 0.398
+//   at 1.5, 1.05 at 6, 1.71 at 12, for 1 and 1), whatever the light's radius;
+//   distance = from the camera to the flare's position (the sun's object, the light's m_Origin).
 //   Visibility test. At the start of EF_EndEf3D, before the Clear of the frame (so against the
 //   depth buffer of the frame before), it draws a white square around the flare's position,
-//   facing the camera, with the side 0.04 * distance (7.2 at 180): a D3DPT_TRIANGLEFAN of 2
+//   facing the camera, with the side 0.2 * h (7.2 for the sun at 180): a D3DPT_TRIANGLEFAN of 2
 //   triangles, P3F_COL4UB_TEX2F with the texture coordinates (0,0), (0,1), (1,1), (1,0), world
 //   space (identity world matrix), the camera's view and projection, depth test LESSEQUAL, no
 //   depth writes, no colour writes, fog on, a 16 x 16 DXT1 texture bound. It does this only while
-//   the flare's centre projects into the viewport. The result arrives 2 frames later as a sample:
-//   the number of pixels that passed divided by the area of the projected square in pixels (about
-//   1 when nothing covers it, a few percent either way; 0.5 when half of it is off the screen; 0
+//   the flare's centre projects into the viewport, and only when ITimer::GetCurrTime() is at
+//   least r_CoronaFade / 8 seconds past the last test (r_CoronaFade 0, as in farcry1_testing1's
+//   settings: every frame; 1: every 0.125 s). The result arrives 2 frames later as a sample: the
+//   number of pixels that passed divided by the area of the projected square in pixels (about 1
+//   when nothing covers it, a few percent either way; 0.5 when half of it is off the screen; 0
 //   when hidden). The renderer reads back no surface for this and makes no ray tests in the 3D
 //   engine or the physics.
 //   State in the object. The renderer keeps the last 8 samples in the flare's object, oldest
 //   first: m_AmbColor.x, .y, .z, m_TempVars[3], m_Angs2[0], [1], [2], m_TempVars[4] (each test
-//   shifts them by one). m_Color is the colour of the shader's flare with alpha = the mean of the
-//   8 samples (it can exceed 1 a little). m_Trans2 is the projected position: screen x, y in
+//   shifts them by one). m_Color is the flare's colour (the sun: the shader's flare; a corona: the
+//   light's m_Color) with alpha = the mean of the 8 samples (it can exceed 1 a little); when the
+//   mean is 0 the alpha keeps its last value. m_Trans2 is the projected position: screen x, y in
 //   pixels and depth (0..1). m_fLightFadeTime is ITimer::GetCurrTime() of the last test, m_RE a
-//   value of the renderer's own from the first test on, and FOB_HASALPHA is added to m_ObjFlags.
+//   value of the renderer's own from the first test on, and FOB_HASALPHA is set in m_ObjFlags.
 //   While the centre is off the screen the samples and the alpha stay as they are.
-//   Draw. Nothing while the mean is 0. Otherwise the flare is the last draw of the 3D scene
-//   (before the screen effects): a D3DPT_TRIANGLEFAN of 8 triangles, 10 vertices
+//   Draw. Nothing while the mean is 0. Otherwise the flare is drawn after everything else of the
+//   3D scene (before the screen effects): a D3DPT_TRIANGLEFAN of 8 triangles, 10 vertices
 //   (P3F_COL4UB_TEX2F, world space): the centre (texture coordinates 0.5, 0.5), then the corners
 //   and edge midpoints of a square facing the camera, with the first of them repeated at the end.
-//   The square's half side is 0.2 * distance (36 at 180, whatever the alpha). With R and U the
-//   camera's right and up vectors and h the half side, the point with the texture coordinates
-//   (u, v) is centre + h * ((1 - 2v) R + (1 - 2u) U): (0,0) is the top right corner on the
-//   screen, (0,1) the top left, (1,1) the bottom left, (1,0) the bottom right; the order is (0,0),
-//   (0,0.5), (0,1), (0.5,1), (1,1), (1,0.5), (1,0), (0.5,0), (0,0).
-//   Vertex colour: rgb = the flare's colour * min(alpha, 1), a = alpha, each converted to a byte
-//   by truncation (alpha 0.9936 with (1, 0.70, 0.46) gives 0xfdfdb174).
-//   Texture: 128 x 128 X8R8G8B8, one level. Stage 0 colour and alpha = texture * diffuse; blending
-//   ONE, ONE; no depth test and no depth writes; no fog; no culling; fixed function.
+//   The size does not depend on the alpha. With R and U the camera's right and up vectors, the
+//   point with the texture coordinates (u, v) is centre + h * ((1 - 2v) R + (1 - 2u) U): (0,0) is
+//   the top right corner on the screen, (0,1) the top left, (1,1) the bottom left, (1,0) the
+//   bottom right; the order is (0,0), (0,0.5), (0,1), (0.5,1), (1,1), (1,0.5), (1,0), (0.5,0),
+//   (0,0).
+//   Vertex colour: rgb = the flare's colour * min(alpha, 1), a = min(alpha, 1), each converted to a
+//   byte by truncation (alpha 0.9936 with (1, 0.70, 0.46) gives 0xfdfdb174, 1.0127 gives
+//   0xffffb275; a lamp of (0.527, 0.313, 0.154) at alpha 0.9555 gives 0xf3804c25).
+//   Texture: 128 x 128 X8R8G8B8 (the sun: one level; the corona: 8 levels). Stage 0 colour and
+//   alpha = texture * diffuse; blending ONE, ONE; no depth test and no depth writes; no fog; no
+//   culling; fixed function.
+// Light coronas: the first time a light with m_fCoronaScale > 0 and m_pShader "flare_from_light"
+// reaches EF_ADDDlight, the renderer makes an object for its corona and stores it in
+// m_pObject[1][0]; the engine passes the same CDLight every frame, so the object stays.
+// Its m_ObjFlags are 0x70a00000 (FOB_TRANS_ROTATE | FOB_TRANS_SCALE | FOB_TRANS_TRANSLATE |
+// FOB_HASALPHA | FOB_BENDED); the corona is tested and drawn at m_Origin in every frame in which
+// the light is added.
 // The renderer also calls I3DEngine::GetSunPosition and GetSunColor about once a frame.
 
 //////////////////////////////////////////////////////////////////////////
