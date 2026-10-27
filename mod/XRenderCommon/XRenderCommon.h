@@ -8,7 +8,7 @@
 //	behaviour recorded by XRenderD3D9Traced (Bin64Behaviour.h) and the
 //	structures shared by the engine and the renderer (RendererStructures.h,
 //	StructLayouts.txt) and the vtable slots of the renderer classes the
-//	engine calls (VTables.inl).
+//	engine calls and of the engine interfaces the renderer calls (VTables.inl).
 //	Include after IRenderer.h.
 //
 //////////////////////////////////////////////////////////////////////

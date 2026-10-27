@@ -363,9 +363,9 @@ void Trace_Restart(const char *szReason)
     pSite->m_nCalls = 0;
 }
 
-void Trace_CaptureFrame()
+void Trace_CaptureFrame(const char *szReason)
 {
-  Trace_Restart("capture of the next frame");
+  Trace_Restart(szReason);
   s_bCapture = true;
 }
 

@@ -33,6 +33,10 @@ void D3DDraws_Begin(IRenderer *pRenderer);
 //! XRENDERTRACED_D3D_RT=1: from the first call on, the first SetRenderTarget of every frame to a
 //! surface other than the back buffer writes a line "[d3d rt] frame N: ..." (64 at most, counted
 //! again after each level load), to find the frames that render into textures (shadow maps).
+//! XRENDERTRACED_CAPTURE_RT=N: the first such SetRenderTarget at least N frames after a level load
+//! starts a capture of the rest of that frame (every call, and the Direct3D draws with
+//! XRENDERTRACED_D3D_DRAWS), for the passes the renderer makes into textures at irregular frames
+//! (water reflections).
 //! XRENDERTRACED_D3D_VSREG=N: every indexed draw with a vertex shader whose constant register N
 //! differs from the one of the draw before writes it ("[d3d vsreg] frame F time T: cN (...)", 60000
 //! lines at most, counted again after each level load), e.g. the per-object values of a shader over

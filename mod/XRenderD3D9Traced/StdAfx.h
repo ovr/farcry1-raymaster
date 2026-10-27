@@ -39,6 +39,7 @@
 #include <ILog.h>
 #include <ITimer.h>
 #include <IRenderer.h>
+#include <I3DEngine.h>
 #include <MeshIdx.h>
 #include <VertexBufferSource.h>
 

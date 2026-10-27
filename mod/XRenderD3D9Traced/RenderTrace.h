@@ -29,8 +29,9 @@ void Trace_FrameEnd(int nFrameID);
 //! Starts counting the calls of every method from zero again, so the next xrt_TraceCalls calls of
 //! each are written out, followed by the statistics of xrt_TraceFrames frames (e.g. on level load).
 void Trace_Restart(const char *szReason);
-//! Writes every call of the next frame (up to the next Trace_FrameEnd), regardless of xrt_TraceCalls.
-void Trace_CaptureFrame();
+//! Writes every call of the next frame (up to the next Trace_FrameEnd), regardless of xrt_TraceCalls;
+//! called within a frame, every call of the rest of it.
+void Trace_CaptureFrame(const char *szReason = "capture of the next frame");
 //! Whether the current frame is the captured one.
 bool Trace_IsCapturing();
 

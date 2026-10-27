@@ -635,20 +635,41 @@ void D3DDraws_Begin(IRenderer *pRenderer)
 static void **s_pRTOrigVTable = NULL;
 static void *s_RTVTable[DEV_CopiedSlots];
 static int s_nRTFrame = 0, s_nRTLastFrame = -1, s_nRTLines = 0;
+static bool s_bRTLines = false;
+//! XRENDERTRACED_CAPTURE_RT: frames after the level load (-1: off), the frame of the load (-1: none
+//! yet), and whether this level's capture has been made.
+static int s_nRTCaptureAfter = -1, s_nRTLoadFrame = -1;
+static bool s_bRTCaptured = false;
+static IRenderer *s_pRTRenderer = NULL;
 
 static HRESULT STDMETHODCALLTYPE Hook_SetRenderTarget(IDirect3DDevice9 *pDev, DWORD nIndex, IDirect3DSurface9 *pSurf)
 {
-  if (pSurf && s_nRTFrame != s_nRTLastFrame && s_nRTLines < 64)
+  const bool bLine = s_bRTLines && s_nRTFrame != s_nRTLastFrame && s_nRTLines < 64;
+  const bool bCapture = s_nRTCaptureAfter >= 0 && s_nRTLoadFrame >= 0 && !s_bRTCaptured
+    && s_nRTFrame >= s_nRTLoadFrame + s_nRTCaptureAfter && !Trace_IsCapturing();
+  if (pSurf && (bLine || bCapture))
   {
     IDirect3DSurface9 *pBack = NULL;
     pDev->GetBackBuffer(0, 0, D3DBACKBUFFER_TYPE_MONO, &pBack);
     D3DSURFACE_DESC Desc;
     if (pSurf != pBack && SUCCEEDED(pSurf->GetDesc(&Desc)))
     {
-      Trace_Write("[d3d rt] frame %d: SetRenderTarget(%u, %ux%u format %u usage 0x%x)", s_nRTFrame, nIndex, Desc.Width, Desc.Height,
-        Desc.Format, Desc.Usage);
-      s_nRTLastFrame = s_nRTFrame;
-      s_nRTLines++;
+      if (bLine)
+      {
+        Trace_Write("[d3d rt] frame %d: SetRenderTarget(%u, %ux%u format %u usage 0x%x)", s_nRTFrame, nIndex, Desc.Width,
+          Desc.Height, Desc.Format, Desc.Usage);
+        s_nRTLastFrame = s_nRTFrame;
+        s_nRTLines++;
+      }
+      if (bCapture)
+      {
+        s_bRTCaptured = true;
+        char szReason[128];
+        _snprintf_s(szReason, sizeof(szReason), _TRUNCATE, "capture of the rest of frame %d from SetRenderTarget(%u, %ux%u format %u)",
+          s_nRTFrame, nIndex, Desc.Width, Desc.Height, Desc.Format);
+        Trace_CaptureFrame(szReason);
+        D3DDraws_Begin(s_pRTRenderer);
+      }
     }
     if (pBack)
       pBack->Release();
@@ -688,7 +709,10 @@ void D3DDraws_WatchRenderTargets(IRenderer *pRenderer, int nFrame)
   if (s_pRTOrigVTable || s_nRTLines < 0)
     return;
   char szEnv[8] = "";
-  const bool bRT = GetEnvironmentVariableA("XRENDERTRACED_D3D_RT", szEnv, sizeof(szEnv)) && szEnv[0] == '1';
+  s_bRTLines = GetEnvironmentVariableA("XRENDERTRACED_D3D_RT", szEnv, sizeof(szEnv)) && szEnv[0] == '1';
+  if (GetEnvironmentVariableA("XRENDERTRACED_CAPTURE_RT", szEnv, sizeof(szEnv)) && szEnv[0] >= '0' && szEnv[0] <= '9')
+    s_nRTCaptureAfter = atoi(szEnv);
+  const bool bRT = s_bRTLines || s_nRTCaptureAfter >= 0;
   if (GetEnvironmentVariableA("XRENDERTRACED_D3D_VSREG", szEnv, sizeof(szEnv)) && szEnv[0] >= '0' && szEnv[0] <= '9')
     s_nVSReg = atoi(szEnv);
   IDirect3DDevice9 *pDev = NULL;
@@ -707,9 +731,13 @@ void D3DDraws_WatchRenderTargets(IRenderer *pRenderer, int nFrame)
   if (s_nVSReg >= 0)
     s_RTVTable[DEV_DrawIndexedPrimitive] = (void *)&Hook_VSRegDrawIndexedPrimitive;
   s_pRTOrigVTable = pVTable;
+  s_pRTRenderer = pRenderer;
   *(void ***)pDev = s_RTVTable;
   if (bRT)
     Trace_Write("d3d render targets: watching SetRenderTarget of device %p", pDev);
+  if (s_nRTCaptureAfter >= 0)
+    Trace_Write("d3d render targets: capturing the rest of the first frame that sets one, %d frames after each level load",
+      s_nRTCaptureAfter);
   if (s_nVSReg >= 0)
     Trace_Write("d3d vs register: c%d at the indexed draws of device %p", s_nVSReg, pDev);
 }
@@ -753,6 +781,8 @@ void D3DDraws_RestartRenderTargets()
   if (s_nRTLines > 0)
     s_nRTLines = 0;
   s_nVSRegLines = 0;
+  s_nRTLoadFrame = s_nRTFrame;
+  s_bRTCaptured = false;
 }
 
 void D3DDraws_OnDrawRE()

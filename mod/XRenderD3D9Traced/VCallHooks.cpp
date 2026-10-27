@@ -17,7 +17,7 @@ struct SVTableInfo
 {
   const char *szClass;
   int nSlots;
-  const char *szMethods[32];
+  const char *szMethods[192];
 };
 
 #define XRC_VTABLE(Class, nSlots) { #Class, nSlots, {
@@ -31,7 +31,7 @@ static const SVTableInfo s_VTableInfos[] =
 #undef XRC_SLOT
 #undef XRC_VTABLE_END
 
-static const int nMaxSlots = 32;
+static const int nMaxSlots = 192;
 static const int nMaxTables = 64;
 static const int nMaxModules = 31;
 //! Calls of each function from the engine that are written out.
@@ -83,6 +83,8 @@ struct SHookedVTable
   const SVTableInfo *pInfo;
   void **pVTable;
   char szName[64];
+  //! An interface of the engine: the calls from the renderer are written out.
+  bool bEngine;
   SVSlot Slots[nMaxSlots];
 };
 
@@ -275,6 +277,33 @@ static void ScreenCall_Leave(SVCallFrame *pFrame)
 //! the engine fills them after the call, so the waves of a written call are written at the next one.
 static const SWaveForm2 *s_pFilledWaves[2];
 
+//! The arguments of the I3DEngine methods the renderer calls (written after the [vcall] line).
+static void EngineCall_Enter(SVCallFrame *pFrame)
+{
+  SVSlot *pSlot = pFrame->pSlot;
+  if (strcmp(pSlot->pTable->szName, "I3DEngine"))
+    return;
+  if (!strcmp(pSlot->szMethod, "DrawLowDetail"))
+  {
+    // DrawLowDetail(const int &DrawFlags).
+    const int *pFlags = (const int *)pFrame->Args[1];
+    if (Trace_IsReadable(pFlags, sizeof(*pFlags)))
+      Trace_Write("[vcall]     DrawFlags 0x%x", *pFlags);
+  }
+  else if (!strcmp(pSlot->szMethod, "SetCamera"))
+  {
+    // SetCamera(const CCamera &cam, bool bToTheScreen).
+    const CCamera *pCam = (const CCamera *)pFrame->Args[1];
+    if (Trace_IsReadable(pCam, sizeof(*pCam)))
+    {
+      const Vec3 &vPos = pCam->GetPos();
+      const Ang3 vAng = pCam->GetAngles();
+      Trace_Write("[vcall]     cam pos (%.2f %.2f %.2f) angles (%.2f %.2f %.2f) fov %.3f zmin %.3f zmax %.1f, bToTheScreen %d",
+        vPos.x, vPos.y, vPos.z, vAng.x, vAng.y, vAng.z, pCam->GetFov(), pCam->GetZMin(), pCam->GetZMax(), (int)(BYTE)pFrame->Args[2]);
+    }
+  }
+}
+
 //! The arguments of the CCObject methods (written after the [vcall] line).
 static void ObjectCall_Enter(SVCallFrame *pFrame)
 {
@@ -340,10 +369,11 @@ extern "C" void VCall_Enter(SVCallFrame *pFrame)
     eCaller = CALLER_Renderer;
 #endif
   InterlockedIncrement(&pSlot->nCalls[eCaller]);
-  if (eCaller != CALLER_Engine)
-    return;
-  if (nModule >= 0)
+  if (eCaller == CALLER_Engine && nModule >= 0)
     InterlockedOr(&pSlot->nEngineModules, 1 << nModule);
+  // The engine's interfaces: the calls of the renderer into the engine are the ones to write.
+  if (eCaller != (pSlot->pTable->bEngine ? CALLER_Renderer : CALLER_Engine))
+    return;
   if (CV_xrt_Trace <= 0)
     return;
   if (pSlot->eSpecial != SPECIAL_None)
@@ -359,6 +389,7 @@ extern "C" void VCall_Enter(SVCallFrame *pFrame)
     (unsigned long long)pFrame->Args[3], pFrame->Xmm[1][0], pFrame->Xmm[2][0], pFrame->Xmm[3][0], (unsigned long long)pFrame->StackArgs[0],
     (unsigned long long)pFrame->StackArgs[1], Trace_Addr(pFrame->pReturn));
   ObjectCall_Enter(pFrame);
+  EngineCall_Enter(pFrame);
 }
 
 extern "C" void VCall_Leave(SVCallFrame *pFrame)
@@ -435,8 +466,8 @@ static void Reject(void **pVTable)
     s_Rejected[s_nRejected++] = pVTable;
 }
 
-//! Hooks the vtable (under s_Lock).
-static void InstallLocked(const char *szClass, void **pVTable, const char *szTag)
+//! Hooks the vtable (under s_Lock); bEngine: an interface of the engine, not of the renderer.
+static void InstallLocked(const char *szClass, void **pVTable, const char *szTag, bool bEngine = false)
 {
 #ifndef _WIN64
   if (!s_bDisabled)
@@ -492,18 +523,27 @@ static void InstallLocked(const char *szClass, void **pVTable, const char *szTag
     Reject(pVTable);
     return;
   }
-  // The vtable and all its slots must be in the original renderer, or the object is not the one
-  // the SDK header describes.
-  const SModule &Renderer = s_Modules[s_nRenderer];
-  bool bValid = (UINT_PTR)pVTable >= Renderer.nBase && (UINT_PTR)pVTable < Renderer.nEnd;
+  // The vtable and all its slots must be in the original renderer (for an engine interface: in the
+  // module of the vtable, not the renderer), or the object is not the one the SDK header describes.
+  int nOwner = s_nRenderer;
+  if (bEngine)
+  {
+    HMODULE hOwner = NULL;
+    nOwner = GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT, (LPCSTR)pVTable,
+      &hOwner) ? AddModule(hOwner) : -1;
+  }
+  bool bValid = nOwner >= 0 && (!bEngine || nOwner != s_nRenderer) && Trace_IsReadable(pVTable, pInfo->nSlots * sizeof(void *));
+  const SModule &Owner = s_Modules[nOwner >= 0 ? nOwner : s_nRenderer];
+  bValid = bValid && (UINT_PTR)pVTable >= Owner.nBase && (UINT_PTR)pVTable < Owner.nEnd;
   for (int i = 0; bValid && i < pInfo->nSlots; i++)
   {
     UINT_PTR nSlot = (UINT_PTR)pVTable[i];
-    bValid = nSlot >= Renderer.nBase && nSlot < Renderer.nEnd && Trace_IsCode(pVTable[i]);
+    bValid = nSlot >= Owner.nBase && nSlot < Owner.nEnd && Trace_IsCode(pVTable[i]);
   }
   if (!bValid)
   {
-    Trace_Write("vcall hooks: %s vtable %s is not one of the original renderer, not hooked", szClass, Trace_Addr(pVTable));
+    Trace_Write("vcall hooks: %s vtable %s is not one of the %s, not hooked", szClass, Trace_Addr(pVTable),
+      bEngine ? "engine" : "original renderer");
     Reject(pVTable);
     return;
   }
@@ -519,6 +559,7 @@ static void InstallLocked(const char *szClass, void **pVTable, const char *szTag
   memset(&Table, 0, sizeof(Table));
   Table.pInfo = pInfo;
   Table.pVTable = pVTable;
+  Table.bEngine = bEngine;
   int nSame = 0;
   for (int i = 0; i < s_nTables; i++)
     nSame += s_Tables[i].pInfo == pInfo;
@@ -567,6 +608,16 @@ void VCallHooks_Install(const char *szClass, void *pObject, const char *szTag)
     return;
   AcquireSRWLockExclusive(&s_Lock);
   InstallLocked(szClass, pVTable, szTag);
+  ReleaseSRWLockExclusive(&s_Lock);
+}
+
+void VCallHooks_InstallEngine(const char *szClass, void *pObject)
+{
+  if (!pObject || s_bDisabled)
+    return;
+  void **pVTable = *(void ***)pObject;
+  AcquireSRWLockExclusive(&s_Lock);
+  InstallLocked(szClass, pVTable, NULL, true);
   ReleaseSRWLockExclusive(&s_Lock);
 }
 
@@ -626,6 +677,8 @@ void VCallHooks_WriteSummary(const char *szReason)
     return;
   AcquireSRWLockShared(&s_Lock);
   Trace_Write("==== virtual calls (%s): engine (modules) / renderer / proxy ====", szReason);
+  // For the engine's interfaces (I3DEngine) the renderer column is the calls of the renderer into
+  // the engine.
   for (int t = 0; t < s_nTables; t++)
   {
     const SHookedVTable &Table = s_Tables[t];

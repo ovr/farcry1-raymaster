@@ -230,6 +230,13 @@ void CRendererProxy::BeginFrame()
 {
   TRACE_CALL("frame %d", m_nFrames + 1);
   Watch_NewFrame();
+  // The renderer's calls back into the engine.
+  static bool s_bEngineHooked = false;
+  if (!s_bEngineHooked && iSystem && iSystem->GetI3DEngine())
+  {
+    s_bEngineHooked = true;
+    VCallHooks_InstallEngine("I3DEngine", iSystem->GetI3DEngine());
+  }
   D3DDraws_WatchRenderTargets(m_pReal, m_nFrames + 1);
   if (Trace_IsCapturing())
     D3DDraws_Begin(m_pReal);
