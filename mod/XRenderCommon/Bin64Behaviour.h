@@ -60,7 +60,8 @@ static const int nHeapAlignment = 4;
 //////////////////////////////////////////////////////////////////////////
 // Level change (Training, then the console command "map River")
 //
-// Before PreLoad of the new level the engine frees the old one, in this order:
+// Before PreLoad of the new level the engine frees the old one, in this order (the load itself:
+// "Level load" below):
 // - EF_LoadTexture of the new level's loading screen picture; OnEntityDeleted for the game's
 //   entities with DeleteLeafBuffer of their buffers; one frame (BeginFrame, Draw2dImage of the
 //   loading screen, FlushTextMessages, Update); the game's particle textures again (EF_LoadTexture,
@@ -78,6 +79,19 @@ static const int nHeapAlignment = 4;
 // other elements of EF_CreateRE (Sky, Dummy, 2DQuad, ScreenProcess, ShadowMapGen, FarTreeSprites,
 // TerrainParticles, ClearStencil) are made once at start-up and kept. A renderer must survive any
 // number of these cycles: every object the engine got from it can be released at a level change.
+
+//////////////////////////////////////////////////////////////////////////
+// Level load (Training, the console command "map training" during the start-up videos)
+//
+// The engine removes the video texture (RemoveTexture) and makes an 800 x 600 texture of zeros in
+// its place (see "2D and text", "Start-up videos"), then calls PreLoad. Every frame of the load
+// (942 here) draws only the loading screen ("2D and text"). After PostLoad it calls
+// EnableSwapBuffers(false) and renders 162 frames of the level (in two runs) that are not meant
+// to be seen: complete 3D frames with Clear, EF_EndEf3D and their draws, but the D3D9 renderer
+// calls no Present in them, so the last loading screen stays on the screen. Then
+// EnableSwapBuffers(true), RemoveTexture for a few textures (one ID 28 times), 5 frames of the
+// loading screen with the full progress bar, and the game. Update has to skip Present while
+// swapping is off, and the frame count (GetFrameID) goes on in these frames.
 
 //////////////////////////////////////////////////////////////////////////
 // Frame
@@ -718,6 +732,7 @@ static const int nHeapAlignment = 4;
 //     the colours as vertex colours; DrawDynVB draws an indexed triangle list of the vertices as
 //     passed with the texture of SetTexture.
 //   Text (DrawDynVB(nOffs, 0, nVerts) after the font calls below) keeps its positions too.
+//   nTexId -1 draws without a texture: the vertex colour alone.
 //   TransformTextureMatrix(x, y, fAngle, fScale) ... ResetTextureMatrix around a Draw2dImage moves
 //     its texture coordinates (seen with fAngle 0): fScale 1 gives (u + x, v + y), fScale -1 gives
 //     (1 + x - u, 1 + y - v). The console background is two such images of 800 x 300 at the top of
@@ -727,6 +742,28 @@ static const int nHeapAlignment = 4;
 //     blending without them. GS_COLMASKONLYALPHA writes only alpha: the HUD writes two images into
 //     the back buffer's alpha (GS_COLMASKONLYALPHA with ONE, ZERO) and then draws two more over
 //     the same place with (ONEMINUSDSTALPHA, DSTALPHA), so the back buffer needs an alpha channel.
+//
+// Start-up videos (the frames before the menu):
+//   Once: DownLoadToVideoMemory(pData, 640, 480, eTF_0888, eTF_0888, 0, false, 0, 0, "$VideoPanel",
+//   FT_DYNAMIC) makes the video texture (the D3D9 renderer makes a 640 x 480 X8R8G8B8 texture with
+//   one level in D3DPOOL_MANAGED, without usage flags).
+//   Whenever the video has a new picture (not every frame): UpdateTextureInVideoMemory(nTexId,
+//   pData, 0, 0, 640, 480, eTF_8888) with the whole picture, always in the same pData: 4 bytes per
+//   pixel in the order B, G, R, A (A always 255), rows from the top. The D3D9 renderer shows these
+//   bytes as they are (X8R8G8B8).
+//   Every frame, without Clear: GetHWND, Set2DMode(true, 1024, 768), twice SetState(GS_NODEPTHTEST
+//   | GS_BLSRC_SRCALPHA | GS_BLDST_ONEMINUSSRCALPHA), Draw2dImage(0, 0, 800, 600, -1, 0, 0, 0, 0, 0,
+//   0, 0, 0, 1, 0) (an opaque black quad over the whole screen), Draw2dImage(0, 0, 800, 600,
+//   nTexId, 0, 1, 1, 0, 0, 1, 1, 1, 1, 0), SetState(GS_DEPTHWRITE), Set2DMode(false, 0, 0),
+//   SetState(GS_DEPTHWRITE). The D3D9 renderer samples the video clamped, with linear filtering
+//   and no mip maps.
+//   At "map" the engine calls RemoveTexture(nTexId) and DownLoadToVideoMemory(pData, 800, 600,
+//   eTF_0888, eTF_0888, 0, false, 0, 0, NULL, FT_DYNAMIC) with pData all zeros, which gets the same
+//   ID back; the last loading screen frames still draw the black quad and this texture first.
+// Loading screen: every frame of a level load draws, twice, SetState(GS_NODEPTHTEST |
+//   GS_BLSRC_SRCALPHA | GS_BLDST_ONEMINUSSRCALPHA), Draw2dImage(0, 0, 800, 600, nPicture, 0, 1, 1,
+//   0, 0, 1, 1, 1, 1, 1) with the level's picture (EF_LoadTexture) and the progress bar
+//   Draw2dImage(40, 480, w, 13, ...), w growing to 720 as the level loads.
 //
 // Text (CryFont) uses only the texture ID functions; the CFBitmap overloads are never called.
 //   FontCreateTexture(512, 512, pData, eTF_8888) creates a font texture (4 at start-up) and
