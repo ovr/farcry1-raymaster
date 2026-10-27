@@ -574,6 +574,19 @@ void CRendererProxy::EF_AddEf(int NumFog, CRendElement *re, IShader *ef, SRender
     }
     Trace_Write("    probe: object params %s %g", fValue < 0 ? "none" : s_Params[0].m_Name, fValue);
   }
+  // XRENDERTRACED_PROBE=Nearest: an element added with sort eS_Nearest or an object with
+  // FOB_NEAREST (the first person weapon) gets the sort XRENDERTRACED_NEAREST_SORT (ProbeValue), and
+  // FOB_NEAREST is cleared with XRENDERTRACED_NEAREST_FLAG=0, to see which of the two the renderer
+  // goes by.
+  if (obj && (nSort == eS_Nearest || (obj->m_ObjFlags & FOB_NEAREST)) && Trace_IsListed("XRENDERTRACED_PROBE", "Nearest"))
+  {
+    const int nOldSort = nSort;
+    const int nOldFlags = obj->m_ObjFlags;
+    nSort = (int)ProbeValue("XRENDERTRACED_NEAREST_SORT", (float)nSort, m_nFrames);
+    if (ProbeValue("XRENDERTRACED_NEAREST_FLAG", 1, m_nFrames) == 0)
+      obj->m_ObjFlags &= ~FOB_NEAREST;
+    Trace_Write("    probe: sort %d -> %d, flags 0x%x -> 0x%x", nOldSort, nSort, nOldFlags, obj->m_ObjFlags);
+  }
   // XRENDERTRACED_FLARES=1: the object of a flare as the engine passes it (with what the renderer
   // left in it the frame before: its fade), every frame, and again after EF_EndEf3D.
   if (re && re->m_Type == eDATA_Flare && obj && Trace_IsListed("XRENDERTRACED_FLARES", "1"))

@@ -116,6 +116,9 @@ it as well: it holds local, machine-specific instructions and is not committed (
   (`EF_AddEf` with `nTempl` >= 30) the proxy's own `m_ShaderParams`: one float
   `XRENDERTRACED_PARAM_NAME` (default `refraction`) = `XRENDERTRACED_PARAM_VALUE` (one number per
   frame in turn), or none for a negative value.
+  `XRENDERTRACED_PROBE=Nearest` changes the elements added with sort `eS_Nearest` or an object
+  with `FOB_NEAREST` (the first person weapon): `XRENDERTRACED_NEAREST_SORT` replaces the sort and
+  `XRENDERTRACED_NEAREST_FLAG=0` clears `FOB_NEAREST`.
   `XRENDERTRACED_PROBE=LightAt` puts every point light (not the sun) at a world position of
   `XRENDERTRACED_LIGHT_POS` (`"x y z x y z ..."`, one position per frame in turn), to see how the
   renderer lights an object from known places (the console command `lightradius` sets the radius).

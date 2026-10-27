@@ -266,6 +266,10 @@ static const int nHeapAlignment = 4;
 //     near 0.25, far 305) and depth tested against itself (LESSEQUAL with depth writes; the
 //     additional light passes EQUAL);
 //   - the lighting of the other characters.
+//   FOB_NEAREST alone selects the projection and the depth range, the sort only the place: with
+//   nSort eS_Opaque and the flag the weapon is drawn among the opaque objects with its own
+//   projection and 0..0.1; with eS_Nearest and without the flag it keeps its place after the rest
+//   of the sorted list but gets the world's projection and 0..1.
 //   The scope glass ("s_ag36scope", template RLScopeRefraction, eS_Refractive) is submitted in the
 //   same way and not drawn with r_ScopeLens_fx 0 (see "aw50scoperefraction").
 //
