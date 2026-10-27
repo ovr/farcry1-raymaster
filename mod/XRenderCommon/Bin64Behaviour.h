@@ -440,20 +440,23 @@ static const int nHeapAlignment = 4;
 // factor (the material colour), clamp addressing, linear filtering without mip maps.
 // Decals with an owner (walls and floors of buildings, crates, trees and bushes; the engine's own
 // bullet hits too; River with e_decals 1):
-// - With r_Quality_BumpMapping 0 (the owners' leaf buffers are VERTEX_FORMAT_P3F_N_TEX2F) nothing
-//   more happens at CreateDecal, and the decal is never drawn.
-// - With r_Quality_BumpMapping 1 or 2 (the owners' leaf buffers are VERTEX_FORMAT_P3F_TEX2F, the
-//   tangents in their own stream) CreateDecal goes on with CreateLeafBufferInitialized(one zeroed
-//   vertex, VERTEX_FORMAT_P3F_COL4UB, the indices of the owner's triangles the decal covers (126
+// - While the level loads (after PreLoad) the engine calls EF_LoadShader("Decal_VP") and
+//   EF_LoadShader("Decal_2D_VP"). The D3D9 renderer returns "decal_vp" and "decal_2d_vp", or, with
+//   r_Quality_BumpMapping 0 at that time, the same "decal_fp" for both (sort 15, flags2 0x100,
+//   LMF_DISABLE).
+// - CreateDecal goes on with CreateLeafBufferInitialized(one zeroed vertex,
+//   VERTEX_FORMAT_P3F_COL4UB, the indices of the owner's triangles the decal covers (114 to 135
 //   of a wall's 180, all 6 of a floor tile's), R_PRIMV_TRIANGLES, "BigDecal", eBT_Static, 1
 //   material, the decal's texture ID, no callback, no custom data, bOnlyVideoBuffer false,
-//   bPrecache true), then CLeafBuffer::SetChunk(the shader "Decal_2D_VP", first vertex 0, the
+//   bPrecache true), then CLeafBuffer::SetChunk(the "Decal_2D_VP" shader, first vertex 0, the
 //   owner's vertex count, first index 0, the index count, material 0) and
 //   CLeafBuffer::SetShader(the same shader, the decal's texture ID). The engine sets the new
 //   buffer's m_pVertexContainer to the owner's leaf buffer (the inline SetVertexContainer; nothing
 //   reaches the renderer): the indices address the owner's vertices, and the buffer's own single
 //   vertex is never used.
-// - Every frame, for each such decal in view: EF_GetObject(true, -1), with the owner's matrix,
+// - Every frame while r_Quality_BumpMapping is not 0 (its value at that moment: switching it while
+//   the level runs turns these decals on and off; with 0 they are made but never added), for each
+//   such decal in view: EF_GetObject(true, -1), with the owner's matrix,
 //   m_ObjFlags FOB_TRANS_MASK (with FOB_BENDED on a bending plant), m_SortId -1e6;
 //   CLeafBuffer::SetRECustomData(16 floats, fog scale 0, alpha 1) and
 //   CLeafBuffer::AddRenderElements(object, no lights, template -1, fog 0, sort 0, no material).
@@ -462,12 +465,17 @@ static const int nHeapAlignment = 4;
 //   then the decal's centre and its size (fSize over the owner's scale), then four zeros. The
 //   texture covers a square of side 2 * size around the centre, as on the terrain.
 // How the D3D9 renderer draws a "BigDecal": an indexed triangle list from its own index buffer
-// over the owner's vertex buffer (stream 0 at the owner's offset, positions and texture
-// coordinates, stride 20), with a vertex and a pixel shader; the first three rows of the custom
-// data are vertex shader constants c4 to c6. Stage 0 the decal's texture (clamp, linear without
-// mip maps), stage 1 a 32 x 32 D3DFMT_X8R8G8B8 texture (clamp, linear with mip maps); alpha test
-// (GREATER 0), blending (SRCALPHA, INVSRCALPHA), depth test EQUAL (the owner's own depths) without
-// depth writes, no culling, fog; each after its owner.
+// over the owner's vertex buffer, after its owner; alpha test (GREATER 0), blending (SRCALPHA,
+// INVSRCALPHA), depth test EQUAL (the owner's own depths) without depth writes, no culling, fog;
+// stage 0 the decal's texture (clamp, linear without mip maps).
+// - "decal_2d_vp" (owner buffers VERTEX_FORMAT_P3F_TEX2F, stride 20, when r_Quality_BumpMapping is
+//   not 0 at load): a vertex and a pixel shader; the first three rows of the custom data are
+//   vertex shader constants c4 to c6; stage 1 a 32 x 32 D3DFMT_X8R8G8B8 texture (clamp, linear
+//   with mip maps).
+// - "decal_fp" (owner buffers VERTEX_FORMAT_P3F_N_TEX2F, stride 32): fixed function. The texture
+//   coordinates are generated from the camera space position (D3DTSS_TCI_CAMERASPACEPOSITION,
+//   D3DTTFF_COUNT2) with a texture matrix that takes it back to the owner's object space and
+//   applies the u and v planes; colour and alpha = texture * texture factor (white).
 
 //////////////////////////////////////////////////////////////////////////
 // Shadows (Training with e_shadow_maps 1 and e_stencil_shadows 1)
