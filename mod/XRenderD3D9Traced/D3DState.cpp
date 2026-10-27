@@ -109,6 +109,25 @@ void D3DState_WriteDevice(IDirect3DDevice9 *pDev, bool bShaderConstants)
               nSum += pRow[x];
             }
           }
+          // The middle row and the diagonal, every 8th texel (once per texture): the profile of a
+          // generated texture such as the particle glow.
+          static IDirect3DBaseTexture9 *s_pProfiled[16];
+          static int s_nProfiled;
+          bool bProfiled = false;
+          for (int i = 0; i < s_nProfiled; i++)
+            bProfiled |= s_pProfiled[i] == pTex;
+          if (!bProfiled && s_nProfiled < 16 && Desc.Width == Desc.Height && Desc.Width <= 256)
+          {
+            s_pProfiled[s_nProfiled++] = pTex;
+            char szRow[1024] = "", szDiag[1024] = "";
+            for (UINT x = 0; x < Desc.Width; x += 8)
+            {
+              Append(szRow, sizeof(szRow), " %u", ((const BYTE *)Rect.pBits + (Desc.Height / 2) * Rect.Pitch)[x]);
+              Append(szDiag, sizeof(szDiag), " %u", ((const BYTE *)Rect.pBits + x * Rect.Pitch)[x]);
+            }
+            Trace_Write("    d3d tex %p row %u:%s", pTex, Desc.Height / 2, szRow);
+            Trace_Write("    d3d tex %p diagonal:%s", pTex, szDiag);
+          }
           ((IDirect3DTexture9 *)pTex)->UnlockRect(0);
           Append(szLine, sizeof(szLine), " (texels not 0 %d, sum %llu)", nNonZero, nSum);
         }
