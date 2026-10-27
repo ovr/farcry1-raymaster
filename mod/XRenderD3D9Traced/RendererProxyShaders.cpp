@@ -455,16 +455,16 @@ CCObject *CRendererProxy::EF_GetObject(bool bTemp, int num)
   return pRes;
 }
 
-//! A probe value from the environment: one number, or several ("1.5 3 6") taken in turn, one per
-//! frame.
-static float ProbeValue(const char *szVar, float fDefault, int nFrame)
+//! Probe values from the environment: groups of nCount numbers ("1.5 3 6" for one, "x y z x y z"
+//! for three), taken in turn, one group per frame. Returns false (pOut unchanged) without any.
+static bool ProbeValues(const char *szVar, float *pOut, int nCount, int nFrame)
 {
   const char *szValue = getenv(szVar);
   if (!szValue)
-    return fDefault;
-  float Values[16];
+    return false;
+  float Values[96];
   int nValues = 0;
-  for (const char *p = szValue; *p && nValues < 16;)
+  for (const char *p = szValue; *p && nValues < 96;)
   {
     char *pEnd;
     Values[nValues] = (float)strtod(p, &pEnd);
@@ -473,7 +473,18 @@ static float ProbeValue(const char *szVar, float fDefault, int nFrame)
     nValues++;
     p = pEnd;
   }
-  return nValues ? Values[nFrame % nValues] : fDefault;
+  const int nGroups = nValues / nCount;
+  if (!nGroups)
+    return false;
+  memcpy(pOut, &Values[(nFrame % nGroups) * nCount], nCount * sizeof(float));
+  return true;
+}
+
+//! A probe value from the environment (ProbeValues with one number per frame).
+static float ProbeValue(const char *szVar, float fDefault, int nFrame)
+{
+  ProbeValues(szVar, &fDefault, 1, nFrame);
+  return fDefault;
 }
 
 //! The camera's line of sight, turned by XRENDERTRACED_FLARE_DIR="dx dy" (dx times the right and dy
@@ -619,6 +630,19 @@ void CRendererProxy::EF_ADDDlight(CDLight *Source)
     Trace_Write("    probe: light from (%.3f %.3f %.3f) to (%.3f %.3f %.3f)", Source->m_Origin.x, Source->m_Origin.y,
       Source->m_Origin.z, New.x, New.y, New.z);
     Source->m_Origin = New;
+  }
+  // XRENDERTRACED_PROBE=LightAt: the point lights (not the sun) are put at the world positions of
+  // XRENDERTRACED_LIGHT_POS ("x y z x y z ...", ProbeValues), to see how the renderer lights an
+  // object from known places.
+  if (Source && (Source->m_Flags & DLF_POINT) && !(Source->m_Flags & DLF_SUN) && Trace_IsListed("XRENDERTRACED_PROBE", "LightAt"))
+  {
+    float Pos[3];
+    if (ProbeValues("XRENDERTRACED_LIGHT_POS", Pos, 3, m_nFrames))
+    {
+      Trace_Write("    probe: light from (%.3f %.3f %.3f) to (%.3f %.3f %.3f)", Source->m_Origin.x, Source->m_Origin.y,
+        Source->m_Origin.z, Pos[0], Pos[1], Pos[2]);
+      Source->m_Origin = Vec3(Pos[0], Pos[1], Pos[2]);
+    }
   }
   if (TRACE_DUMP)
     Dump_Light(Source);

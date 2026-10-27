@@ -110,6 +110,9 @@ it as well: it holds local, machine-specific instructions and is not committed (
   (`m_fCoronaScale > 0`) in `EF_ADDDlight` onto that line, `XRENDERTRACED_CORONA_DIST` (5) in front
   of the camera, and `XRENDERTRACED_CORONA_SCALE` replaces its `m_fCoronaScale`. These three take
   one number or several (`"0.75 1.5 3"`), used in turn, one per frame.
+  `XRENDERTRACED_PROBE=LightAt` puts every point light (not the sun) at a world position of
+  `XRENDERTRACED_LIGHT_POS` (`"x y z x y z ..."`, one position per frame in turn), to see how the
+  renderer lights an object from known places (the console command `lightradius` sets the radius).
   `XRENDERTRACED_FLARES=1` writes the object of the flare as the engine passes it and again after
   `EF_EndEf3D` as `[flare]` lines (colour, `m_AmbColor`, `m_TempVars`, `m_Trans2`, `m_Angs2`,
   `m_RE` and the distance to the camera; up to 40000 lines), for the state the renderer keeps
