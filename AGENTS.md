@@ -98,6 +98,8 @@ it as well: it holds local, machine-specific instructions and is not committed (
   `XRENDERTRACED_TEMPLATE=TemplDecalModulate` gives every material that names a template
   (`Templ...`) that template instead, to see how the renderer draws templates that are not in
   view.
+  `XRENDERTRACED_SKIP_SPRITES=particlelight_fp,...` holds back the `EF_AddSpriteToScene` calls
+  of these shaders, to tell which Direct3D draw belongs to which sprite.
 - `XRENDERTRACED_D3D_DRAWS=1` writes the Direct3D 9 draw calls of the original renderer in the
   captured frame (`D3DDraws.h`; the header line gives `ITimer::GetCurrTime()`, for animated
   values): buffers, vertex declaration, shaders, textures and the render

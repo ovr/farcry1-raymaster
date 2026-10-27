@@ -635,6 +635,12 @@ static const int nHeapAlignment = 4;
 // 0 is drawn like AlphaBased. Texture stages: colour = (vertex colour + m_AmbColor, as the texture
 // factor) * texture colour, alpha = vertex alpha * texture alpha. The sprites are drawn within the
 // scene, not after it, and not in the order of the calls.
+// Heat haze (Rebellion, a fire near the start): sprites in the same form with the ID of
+// "ParticleMinHeatHaze" (loaded with EF_LoadShader(name, eSH_Misc, 0); "ParticleMedHeatHaze" and
+// "ParticleMaxHeatHaze" on other levels; eS_HeatVision), vertex colour (0, 0, 0, 250),
+// m_RenderState 0x10000065 and a texture ID in m_NumCM. The D3D9 renderer makes no draw for them
+// with farcry1_testing1's settings: the frame has the same draws with and without them (checked by
+// holding the sprites back), while the "particlelight_fp" sprite next to them is drawn.
 
 //////////////////////////////////////////////////////////////////////////
 // Decals (River and Pier with e_decals 1; farcry1_testing1's settings have e_decals 0)

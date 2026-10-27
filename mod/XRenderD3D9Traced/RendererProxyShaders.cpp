@@ -157,6 +157,25 @@ CCObject *CRendererProxy::EF_AddSpriteToScene(int Ef, int numPts, SColorVert *ve
     if (obj)
       Dump_Object(obj);
   }
+  // XRENDERTRACED_SKIP_SPRITES=particlelight_fp,...: sprites of these shaders are not passed on,
+  // to tell which Direct3D draw belongs to which sprite. The renderer returns the object it was
+  // given, so the proxy does the same.
+  static char s_szSkip[256] = "?";
+  if (s_szSkip[0] == '?' && !GetEnvironmentVariableA("XRENDERTRACED_SKIP_SPRITES", s_szSkip, sizeof(s_szSkip)))
+    s_szSkip[0] = 0;
+  if (s_szSkip[0] && obj)
+  {
+    const char *szName = ShaderNameByID(Ef);
+    size_t nLen = strlen(szName);
+    for (const char *p = s_szSkip; nLen && (p = strstr(p, szName)) != NULL; p += nLen)
+    {
+      if ((p == s_szSkip || p[-1] == ',') && (p[nLen] == 0 || p[nLen] == ','))
+      {
+        TRACE_RESULT("obj %p (skipped)", obj);
+        return obj;
+      }
+    }
+  }
   CCObject *pRes = m_pReal->EF_AddSpriteToScene(Ef, numPts, verts, obj, inds, ninds, nFogID);
   TRACE_RESULT("obj %p", pRes);
   return pRes;
