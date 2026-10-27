@@ -127,7 +127,9 @@ static const int nHeapAlignment = 4;
 //   The texture factor is the object's ambient colour divided by 4 (ambient (0.380, 0.410, 0.375)
 //   gives the bytes 24, 26, 23; its alpha is 255 for most objects, lower for a few). So a texel is
 //   diffuse * (4 * lightmap + ambient), clamped after each stage (lightmap + ambient / 4 to 1, the
-//   product to 1): the lightmaps hold a quarter of the light.
+//   product to 1): the lightmaps hold a quarter of the light. When a dynamic light reaches the
+//   object (Training, Carrier: 73 draws, each with a point light set), Direct3D lighting is on and
+//   stage 0 adds the vertex lighting instead of the texture factor.
 //   Vegetation (River): texture * vertex colour * 2 * m_Color * the colour of EF_SetWorldColor
 //   (m_Color 0.75 and the world colour (0.843, 0.780, 0.659) give the factor bytes 161, 149, 126).
 //   For grass the factor's alpha is the square of m_Color's alpha (0.84 gives 179, 0.12 gives 3),
@@ -316,6 +318,50 @@ static const int nHeapAlignment = 4;
 //     light beams (one Beam).
 //   GetPublicParams: empty except for water and glass shaders (waveamplitude, bumpamountx,
 //     bumpamounty, reflectamount, refrbumpamount, opacity, ...).
+//
+// The templates the materials of seven levels name (case varies, the renderer ignores it), with
+// the template GetTemplate(-1) returns under farcry1_testing1's settings (r_Quality_BumpMapping 0),
+// its sort and its flags2:
+//   TemplBumpDiffuse, TemplBumpDiffuse_AlphaGlow, TemplBumpDiffuse_GlossAlphaSpecHigh,
+//   TemplBumpSpec, TemplBumpSpec_GlossAlpha, TemplBumpSpec_GlossAlpha_PS20, TemplBumpSpec_HP,
+//   TemplBumpSpec_HP_GlossAlpha, TemplBumpSpec_PS20, TemplModelBumpSpec_HP,
+//   TemplModelBumpSpec_HP_GlossAlpha, TemplModelCommon, TemplLightDiffuse_AlphaGlow and "TBD"
+//     -> "templdiffuse_fp", eS_Opaque, EF2_OPAQUE | EF2_FOGOVERLAY1;
+//   TemplPlants1 -> "templdecalalphatest_vcolors", eS_Trees, EF2_OPAQUE;
+//   TemplPlantsBark -> "templdecal_vcolors", eS_Trees, EF2_OPAQUE;
+//   TemplDecalModulate -> "templdecalmodulate_fp", eS_Decal, EF2_DONTSORTBYDIST;
+//   TemplGlassCM -> "templglasscm_fp", eS_Opaque, EF2_OPAQUE | EF2_FOGOVERLAY1;
+//   TemplMuzzleFlash_Auto -> "templmuzzleflash_auto_fp", eS_MuzzleFlash, 0;
+//   NoDraw (also "no_draw") -> "nodraw", eS_Opaque, EF2_OPAQUE | EF2_FOGOVERLAY1;
+//   kept as named: TemplDecal, TemplDecalAlphaTest, TemplDecalGlow, TemplDecalGlowSelfIllum,
+//     TemplReflCMDecal (eS_Opaque, EF2_OPAQUE | EF2_FOGOVERLAY1), TemplDecalAlphaBlend (eS_Decal,
+//     EF2_DONTSORTBYDIST), TemplAlphaBlend, TemplDecalAdd, TemplDecalAlphaAdd,
+//     TemplTextureV22Rotate (eS_Banner, 0), TemplMuzzleFlash (eS_MuzzleFlash, 0),
+//     AW50ScopeRefraction, RLScopeRefraction (eS_Refractive, 0), TerrainLayer
+//     (eS_TerrainDetailTextures) and WaterVolume (eS_Water, 0); also named: LavaVolume,
+//     TemplBeamProc (Volcano).
+//   With r_Quality_BumpMapping 2 the bump and model templates keep their own names (eS_Opaque,
+//   EF2_OPAQUE | EF2_FOGOVERLAY1, vertex and pixel shaders) and TemplPlants1 stays "templplants1"
+//   (eS_Trees, EF2_OPAQUE | EF2_NOCASTSHADOWS).
+// How the D3D9 renderer draws them with the default settings (the frames at the start positions
+// of the seven levels; all fixed function, with fog):
+//   "templdiffuse_fp": with lightmap coordinates the two stages of the lightmapped objects (see
+//     "Static objects"); without them lighting is on: texture * vertex lighting * 2.
+//     Opaque, depth writes, culling D3DCULL_CW. Some materials add a texture transform of the
+//     first coordinate set (scale and offset).
+//   "templdecalalphatest_vcolors": texture * vertex colour, then * texture factor * 2 (the
+//     vegetation of "Static objects"); no lighting, no culling. Most draws are blended (SRCALPHA,
+//     INVSRCALPHA; alpha = texture alpha * factor alpha) without depth writes, the others alpha
+//     tested (texture alpha >= 128) with depth writes.
+//   "templdecal_vcolors": the same colour, opaque, depth writes, culling D3DCULL_CW.
+//   "templdecalglowselfillum": two passes: texture * vertex lighting, then the texture again
+//     added (ONE, ONE) without lighting or depth writes.
+//   "templdecalglow": texture * vertex lighting plus a second texture added in stage 1.
+//   "templreflcmdecal": a cube map looked up with the camera space reflection vector (turned back
+//     to world space by a texture transform) * vertex lighting, plus the texture; opaque.
+//   "templtexturev22rotate": the texture, alpha from the texture, blended (SRCALPHA, INVSRCALPHA)
+//     with an alpha test (>= 2), no depth writes, no culling, a texture transform.
+//   The other templates were not drawn in these frames.
 
 //////////////////////////////////////////////////////////////////////////
 // Particles

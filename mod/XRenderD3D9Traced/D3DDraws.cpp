@@ -315,8 +315,13 @@ static void AppendRE(char *szBuf, size_t nSize)
   }
   Append(szBuf, nSize, " lb %p '%s' chunk %d", pLB, szSource, nChunk);
   IShader *pShader = nChunk >= 0 ? pLeaf->m_pChunk->shaderItem.m_pShader : NULL;
-  if (pShader)
-    Append(szBuf, nSize, " shader '%s'", pShader->GetName());
+  if (!pShader)
+    return;
+  Append(szBuf, nSize, " shader '%s'", pShader->GetName());
+  // The template the renderer picked for the material (with nTempl -2 the one it draws with).
+  IShader *pTempl = pShader->GetTemplate(-1);
+  if (pTempl && pTempl != pShader)
+    Append(szBuf, nSize, " templ '%s'", pTempl->GetName());
 }
 
 //! Writes the line of a draw call (before it is made), the objects it uses for the first time and
