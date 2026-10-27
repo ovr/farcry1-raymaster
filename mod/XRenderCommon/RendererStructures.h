@@ -141,7 +141,9 @@ namespace RendererStructures
 //   with CreateLeafBufferInitialized. The SDK interfaces cover all of it.
 //   CRECommon classes (CRETerrainSector.h): drawing them calls back into the 3D engine
 //   (I3DEngine::DrawFarTrees, DrawTerrainDetailTextureLayers, DrawTerrainParticles), which calls
-//   IRenderer methods from inside EF_EndEf3D (DrawObjSprites for the far trees).
+//   IRenderer methods from inside EF_EndEf3D (DrawObjSprites for the far trees). The
+//   CRETerrainDetailTextureLayers element was never added (see "Virtual functions of the engine
+//   the renderer calls" below).
 
 // Virtual functions the engine calls
 //   Besides IRenderer and CLeafBuffer, the engine calls these virtual functions of the objects the
@@ -162,6 +164,23 @@ namespace RendererStructures
 //   All other virtual functions of these classes (mfPrepare, mfDraw, mfPreDraw, mfCheckUpdate,
 //   mfGetMatInfo, mfReset, ...) were only called by the renderer itself, from inside EF_EndEf3D.
 //   A renderer still has to fill every slot in the SDK order.
+
+// Virtual functions of the engine the renderer calls (I3DEngine, the one ISystem::GetI3DEngine
+// returns; slots in VTables.inl; Bin64, runtime: Training, River and Pier)
+//   - While a level loads: GetSunColor in CLeafBuffer::UpdateCustomLighting, GetSunColor and
+//     GetSunPosition in MakeSprite (once per call each).
+//   - In EF_EndEf3D: GetMaxViewDist (in most frames on River, some on Training); DrawFarTrees for
+//     the CREFarTreeSprites element, from inside which the engine calls DrawObjSprites back, and in
+//     DrawObjSprites the renderer calls GetWorldColor once; DrawTerrainParticles(pShader) for the
+//     CRETerrainParticles element (e_decals 1); GetWaterLevel() without arguments in some frames
+//     on Training and Pier.
+//   - For the water reflection (r_WaterReflections 1): GetDistanceToSectorWithWater,
+//     GetWaterLevel(), GetMaxViewDistance, SetCamera(cam, false) and DrawLowDetail(DLD_TERRAIN |
+//     DLD_TERRAIN_FULLRES), inside which the engine renders a frame of its own through IRenderer
+//     (Bin64Behaviour.h, "Water reflections and refractions").
+//   DrawTerrainDetailTextureLayers was never called: with e_detail_texture_quality 1 the engine
+//   draws the detail layers as leaf buffers (Bin64Behaviour.h, "Terrain detail layers"). Nothing
+//   else of I3DEngine was called by the renderer.
 
 // Screen effects (CREScreenProcess)
 //   The 3D engine creates one CREScreenProcess with EF_CreateRE(eDATA_ScreenProcess) and turns

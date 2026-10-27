@@ -177,7 +177,8 @@ static const int nHeapAlignment = 4;
 //   "WaterVolume" (P3F_N_COL4UB_TEX2F triangles, shader "terrainlake") and the rings around the
 //   camera, "OutdoorWaterCircle" (P3F_COL4UB strips, new vertices every frame with
 //   UpdateSysVertices) and "OceanBottomCircle" (P3F strips, scaled by the CCObject matrix), are
-//   drawn with AddRenderElements; the water surface uses sort group 14.
+//   drawn with AddRenderElements; the water surface uses sort group 14. How the D3D9 renderer
+//   draws the ocean: "Water reflections and refractions".
 //
 // Low detail terrain ("LowResTerrain")
 //   CreateLeafBufferInitialized(pVerts, 16641, VERTEX_FORMAT_P3F, NULL, 0, R_PRIMV_TRIANGLES,
@@ -211,6 +212,28 @@ static const int nHeapAlignment = 4;
 //   over the container's video vertex buffer, with the sector texture in the first stage, the
 //   texture coordinates from pData as for the sector, added to the picture (ONE, ONE) without
 //   depth writes, with the light's origin, radius, 1 / radius and colour as shader constants.
+//
+// Terrain detail layers ("TerrainDetailTex"; River with e_detail_texture_quality 1, which is 0 in
+//   farcry1_testing1's settings)
+//   At start-up the engine loads EF_LoadShader("TerrainLayer", eSH_World, EF_SYSTEM) and creates a
+//   CRETerrainDetailTextureLayers element; the element was never added and
+//   I3DEngine::DrawTerrainDetailTextureLayers never called (also with r_DetailTextures 1,
+//   r_DetailNumLayers 2, r_DetailDistance 8). The layers are leaf buffers instead: in the first
+//   frames after the load, for the terrain layers around the camera (six on River),
+//   DeleteLeafBuffer(NULL), CreateLeafBufferInitialized(pVerts, n, VERTEX_FORMAT_P3F_N_COL4UB,
+//   pInds, m, R_PRIMV_TRIANGLES, "TerrainDetailTex", eBT_Static, 1, nTexId, NULL, NULL, false,
+//   true) (23 to 2684 vertices), SetShader(the "TerrainLayer" shader, nTexId) and SetChunk(that
+//   shader, 0, n, 0, m, 0, false). The vertices are world positions with the terrain
+//   normal and the colour (128, 128, 128) with alpha 0 or 255, the layer's weight; there are no
+//   texture coordinates. Every frame: AddRenderElements(NULL, 0, -1, 0, 0, pMaterial), with no
+//   object and pMaterial the layer's material ("Level.Terrain.Layer0", an IMatInfo of the engine
+//   whose shader item came from EF_LoadShaderItem("MaterialContainer", ...)) or NULL.
+//   The D3D9 renderer draws a layer without a material with "terrainlayer(0)": a vertex and a
+//   pixel shader, stage 0 the texture nTexId (512 x 512 DXT1 or DXT5, wrap, linear with mip
+//   maps), blending (DESTCOLOR, SRCCOLOR) = 2 * source * destination, depth test LESSEQUAL without
+//   depth writes, culling D3DCULL_CW, fog. A layer with a material is drawn with the material's
+//   shader item instead (two passes with its textures: a 128 x 128 DXT1 and a 128 x 128
+//   D3DFMT_A8R8G8B8 normal map, the second pass also a 256 x 256 cube map).
 //
 // Fog volume caps ("VolFogTopCircle", Carrier)
 //   Like the water rings: P3F, R_PRIMV_MULTI_STRIPS, eBT_Dynamic, 16 chunks of 26 vertices (one
@@ -386,6 +409,46 @@ static const int nHeapAlignment = 4;
 //     without depth writes, culling D3DCULL_CW, fog. r_ScreenRefract 1 alone makes the copy but no
 //     draws. With r_Quality_BumpMapping 1 or 2 the same copy is made once per frame before the
 //     ocean, and no draw of the frame reads it (r_WaterRefractions 0).
+
+//////////////////////////////////////////////////////////////////////////
+// Water reflections and refractions (Pier, r_Quality_BumpMapping 0)
+//
+// The ocean ring ("OutdoorWaterCircle", "terrainwater_onlysky") with r_WaterReflections and
+// r_WaterRefractions (0 in farcry1_testing1's settings; set before the level load). All passes
+// have a vertex and a pixel shader, blending (SRCALPHA, INVSRCALPHA), depth test LESSEQUAL without
+// depth writes, no culling and fog:
+// - Both 0, or only r_WaterRefractions 1: one pass, stage 0 a 64 x 64 D3DFMT_X8L8V8U8 bump map
+//   (wrap, linear with mip maps; another texture every few frames, an animation), stage 1 a
+//   128 x 128 D3DFMT_X8R8G8B8 texture (wrap, linear with mip maps).
+// - r_WaterReflections 1: the reflection (below) in a 512 x 512 D3DFMT_X8R8G8B8 render target
+//   texture, and one pass with other shaders: stage 0 the bump map, stage 1 the reflection (clamp,
+//   linear without mip maps), stage 2 a 64 x 4 and stage 3 a 64 x 64 DXT1 texture. Right before
+//   the ocean the renderer copies the whole back buffer (StretchRect) into a 1024 x 768
+//   D3DFMT_A8R8G8B8 render target texture, which no draw reads.
+// - Both 1: the same, with one more pass before it: stage 0 a 256 x 256 D3DFMT_X8L8V8U8 bump map
+//   (wrap), stage 1 the copy of the back buffer (clamp, linear without mip maps).
+//
+// The reflection. In EF_EndEf3D, before it draws anything of the frame, the renderer calls
+// I3DEngine::GetDistanceToSectorWithWater() (134.3 and 186.8 on Pier), GetWaterLevel() (no
+// arguments: W = 16) and GetMaxViewDistance() (1500). It then sets the render target texture with
+// a 1024 x 768 D24S8 depth surface of its own (not the back buffer's) and a 512 x 512 viewport,
+// clears colour, depth and stencil (the colour of SetClearColor), and calls
+//   I3DEngine::SetCamera(cam, false);
+//   I3DEngine::DrawLowDetail(DLD_TERRAIN | DLD_TERRAIN_FULLRES);   // 0x1040
+// with cam the frame's camera mirrored in the water plane: position (x, y, 2 * W - z), the pitch
+// negated, no roll, the same field of view and far plane, the near plane at (z - W) / 20 (5.799
+// for a camera 116 m above the water; 16 in the level's intro). Inside DrawLowDetail the engine
+// renders a frame of its own: GetWidth, GetHeight, IRenderer::SetCamera(cam), GetFrameID(true),
+// EF_Query(EFQ_RecurseLevel) (1 here), EF_StartEf, EF_ClearLightsList, the sun (EF_ADDDlight),
+// the sky and its flare (EF_AddEf), the terrain sectors and "LowResTerrain"
+// (AddRenderElements), SetFog, EnableFog(true), EF_EndEf3D(3), EnableFog(false); no objects,
+// characters, water, particles or sprites. The renderer draws the sky (no depth test, no fog) and
+// the terrain (depth test and writes, culling D3DCULL_CW, fog) into the texture, then sets the back
+// buffer and its depth surface again, clears them and draws the frame. The camera is an ordinary
+// one (its view matrix is a rotation, not a mirror), and the culling is the frame's.
+// The reflection is not drawn every frame, and the ocean reads the last one in between: in the
+// level's intro every one to four frames. The renderer has the cvars r_WaterUpdateDeltaAngle (5),
+// r_WaterUpdateDistance (2) and r_WaterUpdateFactor (0.02); their effect was not measured.
 
 //////////////////////////////////////////////////////////////////////////
 // Particles
