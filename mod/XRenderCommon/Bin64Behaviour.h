@@ -404,6 +404,8 @@ static const int nHeapAlignment = 4;
 //   0.92. With the defaults nothing else is drawn at the flash position.
 // - ScreenFade fading in: blended (SRCALPHA, INVSRCALPHA); the texture factor is black, with an
 //   alpha that falls linearly from 255 to 0 over the fade time (102 per second for -2.5).
+// ScreenBlur Active 1 with ScreenBlurAmount 0.5 and a colour drew nothing and rendered into no
+// texture, also with r_MotionBlur 1 and r_Glare 1 set before the level load.
 
 //////////////////////////////////////////////////////////////////////////
 // Heat vision and night vision (Training)
