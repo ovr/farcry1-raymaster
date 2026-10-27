@@ -37,5 +37,9 @@ CRendElement *VCallHooks_DrawingRE();
 void VCallHooks_RestartListed();
 //! Writes which virtual functions were called, and from which modules.
 void VCallHooks_WriteSummary(const char *szReason);
+//! Index of the module holding the address (in the list of the summary), -1 if it is in none.
+int VCallHooks_ModuleIndex(const void *pAddr);
+//! Name of the module of that index ("Cry3DEngine"), "?" for -1.
+const char *VCallHooks_ModuleName(int nModule);
 //! Restores the original vtable entries.
 void VCallHooks_Uninstall();

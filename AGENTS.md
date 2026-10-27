@@ -104,6 +104,10 @@ it as well: it holds local, machine-specific instructions and is not committed (
 - `XRENDERTRACED_FEATURES_CLEAR` and `XRENDERTRACED_FEATURES_SET` (hexadecimal `RFT_*` masks)
   change the value of `GetFeatures` before the engine gets it, to see what the engine does with
   each feature; the traced call writes the caller and both values.
+- After the captured frame and at `Release` the log lists how often each traced method was called
+  from each module (`==== callers`); the command `callers` writes the list at any time. A call
+  that an engine function makes as its last step is counted at the module that called that
+  function.
 - A call into the renderer from another thread than the one that loaded it (an IRenderer or
   CLeafBuffer method, a hooked virtual function, or a call of the renderer into the engine) writes
   a `[thread]` line, once per method.

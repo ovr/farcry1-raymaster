@@ -37,6 +37,8 @@ void Trace_CaptureFrame(const char *szReason = "capture of the next frame");
 void Trace_CaptureRest(const char *szReason);
 //! Whether the current frame is the captured one.
 bool Trace_IsCapturing();
+//! Writes how often each traced method was called from each module since the start.
+void Trace_WriteCallers(const char *szReason);
 //! The thread that loaded the renderer (PackageRenderConstructor).
 DWORD Trace_MainThread();
 
@@ -54,6 +56,11 @@ struct STraceSite
   int m_nFrameCalls;
   //! Calls from other threads than the one that loaded the renderer (logged once per method).
   int m_nOtherThreadCalls;
+  //! The modules the calls came from (VCallHooks_ModuleIndex) and the calls from each; calls from
+  //! further modules are counted in m_nOtherCallers.
+  int m_nCallerModule[6];
+  int m_nCallerCalls[6];
+  int m_nOtherCallers;
   //! Every call is written out (XRENDERTRACED_TRACE_METHODS).
   bool m_bAlways;
   //! The written out calls are followed by the Direct3D state after them (XRENDERTRACED_D3D_STATE).
@@ -71,7 +78,8 @@ bool Trace_IsListed(const char *szVar, const char *szName);
 //! renderer (see FieldWatch.h).
 struct STraceScope
 {
-  explicit STraceScope(STraceSite &Site);
+  //! pCaller: the return address of the traced method, counted by its module.
+  STraceScope(STraceSite &Site, const void *pCaller);
   ~STraceScope();
 
   STraceSite &m_Site;
@@ -82,7 +90,7 @@ struct STraceScope
 //! whether the call was written out (and so its structures and result may be written too).
 #define TRACE_CALL(...) \
   static STraceSite s_TraceSite(__FUNCTION__, __FUNCSIG__); \
-  STraceScope TraceScope(s_TraceSite); \
+  STraceScope TraceScope(s_TraceSite, _ReturnAddress()); \
   const bool bTraced = s_TraceSite.Hit() && (Trace_Call(s_TraceSite, __VA_ARGS__), true)
 
 #define TRACE_DUMP (bTraced && CV_xrt_Trace >= 2)

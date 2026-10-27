@@ -196,6 +196,7 @@ void CRendererProxy::Release()
   TRACE_CALL("");
   Watch_WriteSummary("renderer released");
   VCallHooks_WriteSummary("renderer released");
+  Trace_WriteCallers("renderer released");
   LeafBufferHooks_Uninstall();
   VCallHooks_Uninstall();
   m_pReal->Release();
@@ -417,6 +418,8 @@ void CRendererProxy::ExecuteCommands(const char *szCommands)
     }
     else if (!strcmp(szCmd, "vcalls"))
       VCallHooks_RestartListed();
+    else if (!strcmp(szCmd, "callers"))
+      Trace_WriteCallers("command 'callers'");
     else if (!strcmp(szCmd, "capture"))
       Trace_CaptureRest("capture of every call from here on (command 'capture')");
     else if (!strcmp(szCmd, "frame"))

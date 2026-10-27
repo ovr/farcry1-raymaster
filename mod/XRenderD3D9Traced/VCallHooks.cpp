@@ -849,6 +849,16 @@ void VCallHooks_RestartListed()
   ReleaseSRWLockExclusive(&s_Lock);
 }
 
+int VCallHooks_ModuleIndex(const void *pAddr)
+{
+  return ModuleIndex(pAddr);
+}
+
+const char *VCallHooks_ModuleName(int nModule)
+{
+  return nModule >= 0 && nModule < s_nModules ? s_Modules[nModule].szName : "?";
+}
+
 void VCallHooks_WriteSummary(const char *szReason)
 {
   if (!s_nTables)

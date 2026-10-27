@@ -238,6 +238,9 @@ STraceSite::STraceSite(const char *szName, const char *szSignature)
   m_nCalls = 0;
   m_nFrameCalls = 0;
   m_nOtherThreadCalls = 0;
+  memset(m_nCallerModule, 0, sizeof(m_nCallerModule));
+  memset(m_nCallerCalls, 0, sizeof(m_nCallerCalls));
+  m_nOtherCallers = 0;
   m_bAlways = Trace_IsListed("XRENDERTRACED_TRACE_METHODS", m_szDisplay);
   m_bD3DState = Trace_IsListed("XRENDERTRACED_D3D_STATE", m_szDisplay);
   m_pNext = s_pSites;
@@ -251,8 +254,19 @@ bool STraceSite::Hit()
   return CV_xrt_Trace > 0 && s_pTraceFile && (m_nCalls <= CV_xrt_TraceCalls || s_bCapture || m_bAlways);
 }
 
-STraceScope::STraceScope(STraceSite &Site) : m_Site(Site)
+STraceScope::STraceScope(STraceSite &Site, const void *pCaller) : m_Site(Site)
 {
+  const int nModule = VCallHooks_ModuleIndex(pCaller);
+  int i = 0;
+  while (i < 6 && Site.m_nCallerCalls[i] && Site.m_nCallerModule[i] != nModule)
+    i++;
+  if (i < 6)
+  {
+    Site.m_nCallerModule[i] = nModule;
+    Site.m_nCallerCalls[i]++;
+  }
+  else
+    Site.m_nOtherCallers++;
   m_bMainThread = GetCurrentThreadId() == s_dwMainThread;
   if (m_bMainThread)
     Watch_EnterRenderer(Site.m_szDisplay);
@@ -309,6 +323,24 @@ void Trace_FrameEnd(int nFrameID)
     s_bCapture = false;
     Watch_WriteSummary("after the captured frame");
     VCallHooks_WriteSummary("after the captured frame");
+    Trace_WriteCallers("after the captured frame");
+  }
+}
+
+void Trace_WriteCallers(const char *szReason)
+{
+  Trace_Write("==== callers (%s): calls of each traced method by module ====", szReason);
+  for (STraceSite *pSite = s_pSites; pSite; pSite = pSite->m_pNext)
+  {
+    char szModules[256] = "";
+    int nLen = 0;
+    for (int i = 0; i < 6 && pSite->m_nCallerCalls[i] && nLen < (int)sizeof(szModules) - 48; i++)
+      nLen += _snprintf(szModules + nLen, sizeof(szModules) - nLen - 1, "%s%s %d", nLen ? ", " : "",
+        VCallHooks_ModuleName(pSite->m_nCallerModule[i]), pSite->m_nCallerCalls[i]);
+    if (pSite->m_nOtherCallers)
+      _snprintf(szModules + nLen, sizeof(szModules) - nLen - 1, ", others %d", pSite->m_nOtherCallers);
+    if (nLen)
+      Trace_Write("  %-44s %s", pSite->m_szDisplay, szModules);
   }
 }
 

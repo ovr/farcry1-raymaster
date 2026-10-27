@@ -220,7 +220,8 @@ unsigned short *CLeafBufferHooks::GetIndices(int *pIndicesCount)
 {
   TRACE_CALL("lb %p '%s'", LB(), Source());
   unsigned short *pRes = LB_ORIG(LBS_GetIndices, unsigned short *, (int *))(pIndicesCount);
-  TRACE_RESULT("%p (%d)", pRes, pIndicesCount ? *pIndicesCount : -1);
+  TRACE_RESULT("%p (%d)%s, from %s", pRes, pIndicesCount ? *pIndicesCount : -1, pRes && pRes == LB()->m_SecIndices.Data() ? " m_SecIndices" : "",
+    Trace_Addr(_ReturnAddress()));
   if (bTraced)
     Dump_LeafBuffer(LB());
   return pRes;

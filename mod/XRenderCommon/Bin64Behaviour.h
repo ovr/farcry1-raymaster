@@ -153,6 +153,66 @@ static const int nHeapAlignment = 4;
 // every texture it loads (2931 times on Training); the console keeps the one variable.
 
 //////////////////////////////////////////////////////////////////////////
+// Callers (Training to "quit" with shadows, particles, coronas and heat vision; River; level
+// changes)
+//
+// The modules the IRenderer and CLeafBuffer calls return to. A call an engine function makes as
+// its very last step returns to the caller of that function, so a few calls are counted at the
+// module before (PreLoad, for one, was reached that way here).
+// - Cry3DEngine: the 3D frame, the level's geometry, lights, textures and shaders: every method
+//   called in the level except those only listed below.
+// - CryAnimation (characters): CreateLeafBuffer, CreateLeafBufferInitialized, DeleteLeafBuffer,
+//   UpdateBuffer (the skinned vertices), EF_GetObject, EF_AddEf, EF_CreateRE, EF_LoadShader,
+//   EF_LoadShaderItem, EF_Query, EF_GetHeatVision, GetFrameID; on the leaf buffers
+//   CreateBufferFromSource, CreateBufferFromMesh, CreateTangBuffer, CopyTo, SetChunk,
+//   UpdateSysVertices and UpdateSysIndices.
+// - CryFont (text): FontCreateTexture, FontUpdateTexture, FontSetTexture, FontSetRenderingState,
+//   FontSetBlending, FontRestoreRenderingState, GetDynVBPtr, DrawDynVB, ScaleCoordX, ScaleCoordY,
+//   GetWidth, GetFeatures, RemoveTexture.
+// - CryGame (HUD, menu, videos, level loading): Set2DMode, Draw2dImage, DrawDynVB, SetState,
+//   SetColorOp, SetCullMode, SetTexture, EF_GetTextureByID, EF_LoadTexture, LoadTexture,
+//   EF_LoadShader, DownLoadToVideoMemory, UpdateTextureInVideoMemory, RemoveTexture, GetViewport,
+//   GetWidth, GetHeight, ScaleCoordX, ScaleCoordY, GetFeatures, GetFrameID, EF_Query, PostLoad and
+//   ClearColorBuffer.
+// - CrySystem: Init, SetType, BeginFrame, Update, FlushTextMessages, GetHWND, Release, the loading
+//   screen (Set2DMode, Draw2dImage, SetState), a crosshair of DrawLineColor lines around (400, 300)
+//   in the 2D mode (River), SetPolygonMode, SetMaterialColor, particle textures (EF_LoadTexture,
+//   SetTexture, SetTexClampMode, LoadAnimatedTexture), EF_LoadShader, EF_Query, EF_UpdateDLight,
+//   RemoveTexture, GetHeight and GetFrameID.
+// - CryEntitySystem: ProjectToScreen, EF_LoadShader, EF_LoadTexture, EF_Query, GetFrameID,
+//   GetWidth, GetHeight.
+// - CryAISystem: SetState, SetColorOp and SetWhiteTexture, once each per game frame, with no draw
+//   after them (its debug drawing is off).
+// - CryScriptSystem: RemoveTexture. FarCry.exe: GetHWND (and ChangeViewport, see "Resolution
+//   change").
+// The original renderer calls CalcFaceNormals, CheckUpdate, CreateVidVertices, UpdateVidVertices,
+// UpdateVidIndices, Unload, InvalidateVideoBuffer and GetIndices of its own leaf buffers itself
+// (through the vtable, from CreateBufferFromMesh, CreateBufferFromSource, UpdateSysIndices and
+// EF_EndEf3D); the engine never calls them, apart from GetIndices.
+//
+// Small methods:
+// - SetPolygonMode returns the mode before the call (R_SOLID_MODE at start). CrySystem calls it in
+//   every frame of a level load, twice (0) and right after (1), with nothing in between: 0 is
+//   stored and handed back by the next call like any other value.
+// - GetGlobalShaderTemplateId returns -2 (SetGlobalShaderTemplateId is never called); Cry3DEngine
+//   asks for it while it renders the static objects.
+// - ResetToDefault comes before every MakeSprite and every MakeShadowMapFrustum, and at no other
+//   time.
+// - MakeCurrent: twice per level load, from Cry3DEngine; ClearColorBuffer((0, 0, 0)): once per
+//   level load, from CryGame.
+// - GetViewport returns (0, 0, the window's width and height); CryGame asks for it while it draws
+//   the HUD on River (not on Training). SetViewport gets the same rectangle before every EF_EndEf3D.
+// - ProjectToScreen(x, y, z, &sx, &sy, &sz) projects a world point with the current modelview and
+//   projection matrices (GetModelViewMatrix, GetProjectionMatrix): sx and sy are the position in
+//   percent of the viewport (0 to 100, sy from the top, not clamped), sz the depth z / w (0 at the
+//   near plane, 1 at the far plane). Cry3DEngine and CryEntitySystem call it with the corners of
+//   boxes.
+// - CLeafBuffer::GetIndices(&nCount) returns the system copy of the indices (m_SecIndices) and
+//   their number; Cry3DEngine calls it with a count for "WaterVolume" buffers and for some
+//   "StatObj" buffers in game frames, and with NULL while it makes decals (see "Decals"), so the
+//   system indices have to stay after the video buffer is made.
+
+//////////////////////////////////////////////////////////////////////////
 // Frame
 //
 // IRenderer calls of one game frame in the level (frame 5000):
@@ -1262,7 +1322,8 @@ static const int nHeapAlignment = 4;
 // Texture IDs start at 4096. A texture that is not found ('black.tga', 'Textures/fl') comes back
 // as a placeholder ITexPic with ID 4096, IsTextureLoaded() == false and flags2 0x10000000.
 // Loading an already loaded texture again returns the same ITexPic with FT2_WASFOUND set in its
-// flags2.
+// flags2. LoadTexture returns the texture's ID, or 0 when no file is found (no placeholder); a name
+// it was given before gets the same answer again, 0 included, without any file being read.
 //
 // Files (Training). The renderer reads every file through ICryPak (ISystem::GetIPak): FOpen ("rb",
 // "r" for its own text files), FRead, FSeek, FTell, FEof, FGets, FClose, and FindFirst, FindNext
