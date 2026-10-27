@@ -20,6 +20,7 @@
 //! Slots of IDirect3DDevice9 (declaration order in d3d9.h).
 enum
 {
+  DEV_Present = 17,
   DEV_UpdateSurface = 30,
   DEV_StretchRect = 34,
   DEV_ColorFill = 35,
@@ -61,6 +62,7 @@ typedef HRESULT (STDMETHODCALLTYPE *PFN_UpdateSurface)(IDirect3DDevice9 *, IDire
 typedef HRESULT (STDMETHODCALLTYPE *PFN_StretchRect)(IDirect3DDevice9 *, IDirect3DSurface9 *, const RECT *, IDirect3DSurface9 *,
   const RECT *, D3DTEXTUREFILTERTYPE);
 typedef HRESULT (STDMETHODCALLTYPE *PFN_ColorFill)(IDirect3DDevice9 *, IDirect3DSurface9 *, const RECT *, D3DCOLOR);
+typedef HRESULT (STDMETHODCALLTYPE *PFN_Present)(IDirect3DDevice9 *, const RECT *, const RECT *, HWND, const RGNDATA *);
 typedef HRESULT (STDMETHODCALLTYPE *PFN_Lock)(IUnknown *, UINT, UINT, void **, DWORD);
 typedef HRESULT (STDMETHODCALLTYPE *PFN_Unlock)(IUnknown *);
 
@@ -590,6 +592,16 @@ static HRESULT STDMETHODCALLTYPE Hook_ColorFill(IDirect3DDevice9 *pDev, IDirect3
   return ((PFN_ColorFill)s_pOrigVTable[DEV_ColorFill])(pDev, pSurf, pRect, nColor);
 }
 
+static HRESULT STDMETHODCALLTYPE Hook_Present(IDirect3DDevice9 *pDev, const RECT *pSrcRect, const RECT *pDstRect, HWND hWnd,
+  const RGNDATA *pDirty)
+{
+  char szSrc[64], szDst[64];
+  const HRESULT hr = ((PFN_Present)s_pOrigVTable[DEV_Present])(pDev, pSrcRect, pDstRect, hWnd, pDirty);
+  Trace_Write("[d3d] Present(src %s dst %s window %p) -> 0x%08x", RectName(pSrcRect, szSrc, sizeof(szSrc)),
+    RectName(pDstRect, szDst, sizeof(szDst)), hWnd, hr);
+  return hr;
+}
+
 void D3DDraws_Begin(IRenderer *pRenderer)
 {
   if (s_pDevice)
@@ -620,6 +632,7 @@ void D3DDraws_Begin(IRenderer *pRenderer)
   s_HookedVTable[DEV_UpdateSurface] = (void *)&Hook_UpdateSurface;
   s_HookedVTable[DEV_StretchRect] = (void *)&Hook_StretchRect;
   s_HookedVTable[DEV_ColorFill] = (void *)&Hook_ColorFill;
+  s_HookedVTable[DEV_Present] = (void *)&Hook_Present;
   s_HookedVTable[DEV_DrawPrimitive] = (void *)&Hook_DrawPrimitive;
   s_HookedVTable[DEV_DrawIndexedPrimitive] = (void *)&Hook_DrawIndexedPrimitive;
   s_HookedVTable[DEV_DrawPrimitiveUP] = (void *)&Hook_DrawPrimitiveUP;

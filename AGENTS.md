@@ -55,14 +55,19 @@ it as well: it holds local, machine-specific instructions and is not committed (
   `SetFogStart`, `SetFogEnd` (`-`: unchanged); `heatvision 0|1` calls
   `I3DEngine::EnableHeatVision`; `screenshot file.tga [frames]` saves the back buffer of the next
   frame (or the one that many frames later) as a TGA file in `farcry1_testing1` (move it out
-  after the run; never commit it); `after frames command` runs the command that many frames
+  after the run; never commit it); `texsave file.tga` saves the pixels of the next
+  `DownLoadToVideoMemory` or `UpdateTextureInVideoMemory` call with `eTF_0888` or `eTF_8888` (the
+  start-up videos, the loading screen) the same way, 4 bytes per pixel as passed; `after frames
+  command` runs the command that many frames
   later; `decal size texture [x y]` calls `I3DEngine::CreateDecal` where the ray through that point
   of the screen (fractions, the centre by default) meets terrain or a static object, with the owner
   taken as the SDK game code does, and `decal size texture terrain x y` puts one on the terrain at
   world (x, y) (decals need `e_decals 1` before the level loads); `mouse down`, `mouse up` and
   `mouse move dx dy` send the left button or a relative move with `SendInput`, only while the game
   window is in front; `capture` writes every call from then on until the renderer is released
-  (e.g. `capture; quit` in `XRENDERTRACED_EXEC_LEVEL` for the shutdown).
+  (e.g. `capture; quit` in `XRENDERTRACED_EXEC_LEVEL` for the shutdown; in the menu it never ends
+  and the log grows by gigabytes), `frame` only the next frame, as `XRENDERTRACED_CAPTURE` does
+  (e.g. the start-up videos with `XRENDERTRACED_EXEC_FRAME=20`).
 - The screen effect calls (`CREScreenProcess::mfSetParameter`, `mfGetParameter`) are written as
   `[screenfx]` lines (the first 8 of each parameter, then every 50th); `XRENDERTRACED_SCREENFX_ALL=1`
   writes all of them, with the timer's time. `XRENDERTRACED_SCREENFX_WATCH=8.24,8.30` reads those
@@ -89,8 +94,8 @@ it as well: it holds local, machine-specific instructions and is not committed (
   captured frame (`D3DDraws.h`): buffers, vertex declaration, shaders, textures and the render
   element being drawn (x64), the first vertices of the non-indexed draws (8, or
   `XRENDERTRACED_D3D_VERTS`), the `Clear` calls, the render target and depth buffer changes
-  (`SetRenderTarget`, `SetDepthStencilSurface`) and the surface copies and fills (`StretchRect`,
-  `UpdateSurface`, `ColorFill`); `2` adds the device state after each (with
+  (`SetRenderTarget`, `SetDepthStencilSurface`), the surface copies and fills (`StretchRect`,
+  `UpdateSurface`, `ColorFill`) and `Present`; `2` adds the device state after each (with
   the stencil state when stencil is on), `3` also the shader constants.
   `XRENDERTRACED_D3D_RT=1` writes the first `SetRenderTarget` of every frame to a surface other
   than the back buffer (to find the frames that render shadow maps; 64 lines, counted again after

@@ -302,6 +302,11 @@ private:
   //! is saved as a TGA file before it is presented (D3DDraws_SaveBackBuffer).
   char m_szShot[MAX_PATH] = "";
   int m_nShotFrame = -1;
+  //! "texsave name": the pixels of the next DownLoadToVideoMemory or UpdateTextureInVideoMemory
+  //! call with eTF_0888 or eTF_8888 are saved as a 32-bit TGA file, 4 bytes per pixel as they are
+  //! and the rows from the top.
+  char m_szTexSave[MAX_PATH] = "";
+  void SaveTexPixels(const unsigned char *pData, int nWidth, int nHeight);
   //! "after frames command": the command runs that many frames later (8 at most waiting).
   struct SDeferred
   {

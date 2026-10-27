@@ -364,6 +364,8 @@ void CRendererProxy::ExecuteCommands(const char *szCommands)
       VCallHooks_RestartListed();
     else if (!strcmp(szCmd, "capture"))
       Trace_CaptureRest("capture of every call from here on (command 'capture')");
+    else if (!strcmp(szCmd, "frame"))
+      Trace_CaptureFrame("capture of the next frame (command 'frame')");
     else if (!strncmp(szCmd, "after ", 6))
     {
       int nAfter = 0, nLen = 0;
@@ -374,6 +376,8 @@ void CRendererProxy::ExecuteCommands(const char *szCommands)
         m_nDeferred++;
       }
     }
+    else if (!strncmp(szCmd, "texsave ", 8))
+      sscanf_s(szCmd + 8, "%259s", m_szTexSave, (unsigned)sizeof(m_szTexSave));
     else if (!strncmp(szCmd, "screenshot ", 11))
     {
       int nAfter = 0;
@@ -919,9 +923,9 @@ bool CRendererProxy::FontUploadTexture(class CFBitmap *pBmp, ETEX_Format eTF)
   return bRes;
 }
 
-//! The bytes of a font bitmap (4 per pixel) by their place in the pixel: how many are not 0 and
-//! their sum, to compare with the texture the renderer makes of it.
-static void DumpFontBitmap(const byte *pData, int nWidth, int nHeight)
+//! The bytes of an image with 4 bytes per pixel (a font bitmap, a video frame) by their place in
+//! the pixel: how many are not 0 and their sum, to compare with the texture the renderer makes of it.
+static void DumpPixelBytes(const byte *pData, int nWidth, int nHeight)
 {
   if (!pData || nWidth <= 0 || nHeight <= 0 || !Trace_IsReadable(pData, (size_t)nWidth * nHeight * 4))
     return;
@@ -940,7 +944,7 @@ int CRendererProxy::FontCreateTexture(int Width, int Height, byte *pData, ETEX_F
 {
   TRACE_CALL("%dx%d data %p format %d", Width, Height, pData, eTF);
   if (TRACE_DUMP && eTF == eTF_8888)
-    DumpFontBitmap(pData, Width, Height);
+    DumpPixelBytes(pData, Width, Height);
   int nRes = m_pReal->FontCreateTexture(Width, Height, pData, eTF);
   TRACE_RESULT("tex %d", nRes);
   return nRes;
@@ -950,7 +954,7 @@ bool CRendererProxy::FontUpdateTexture(int nTexId, int X, int Y, int USize, int 
 {
   TRACE_CALL("tex %d %d %d %dx%d data %p", nTexId, X, Y, USize, VSize, pData);
   if (TRACE_DUMP)
-    DumpFontBitmap(pData, USize, VSize);
+    DumpPixelBytes(pData, USize, VSize);
   bool bRes = m_pReal->FontUpdateTexture(nTexId, X, Y, USize, VSize, pData);
   TRACE_RESULT("%d", bRes);
   return bRes;
@@ -1239,6 +1243,12 @@ unsigned int CRendererProxy::DownLoadToVideoMemory(unsigned char *data, int w, i
 {
   TRACE_CALL("data %p %dx%d format %d -> %d mips %d repeat %d filter %d id %d cache '%s' flags 0x%x", data, w, h, eTFSrc, eTFDst,
     nummipmap, repeat, filter, Id, szCacheName, flags);
+  if (eTFSrc == eTF_0888 || eTFSrc == eTF_8888)
+  {
+    if (TRACE_DUMP)
+      DumpPixelBytes(data, w, h);
+    SaveTexPixels(data, w, h);
+  }
   unsigned int nRes = m_pReal->DownLoadToVideoMemory(data, w, h, eTFSrc, eTFDst, nummipmap, repeat, filter, Id, szCacheName, flags);
   TRACE_RESULT("tex %u", nRes);
   return nRes;
@@ -1247,7 +1257,32 @@ unsigned int CRendererProxy::DownLoadToVideoMemory(unsigned char *data, int w, i
 void CRendererProxy::UpdateTextureInVideoMemory(uint tnum, unsigned char *newdata, int posx, int posy, int w, int h, ETEX_Format eTFSrc)
 {
   TRACE_CALL("tex %u data %p %d %d %dx%d format %d", tnum, newdata, posx, posy, w, h, eTFSrc);
+  if (eTFSrc == eTF_0888 || eTFSrc == eTF_8888)
+  {
+    if (TRACE_DUMP)
+      DumpPixelBytes(newdata, w, h);
+    SaveTexPixels(newdata, w, h);
+  }
   m_pReal->UpdateTextureInVideoMemory(tnum, newdata, posx, posy, w, h, eTFSrc);
+}
+
+void CRendererProxy::SaveTexPixels(const unsigned char *pData, int nWidth, int nHeight)
+{
+  if (!m_szTexSave[0] || nWidth <= 0 || nHeight <= 0 || nWidth >= 65536 || nHeight >= 65536
+    || !Trace_IsReadable(pData, (size_t)nWidth * nHeight * 4))
+    return;
+  FILE *pFile = NULL;
+  if (!fopen_s(&pFile, m_szTexSave, "wb"))
+  {
+    // Uncompressed true colour, 32 bits, rows from the top.
+    const byte Header[18] = { 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, (byte)nWidth, (byte)(nWidth >> 8), (byte)nHeight,
+      (byte)(nHeight >> 8), 32, 0x28 };
+    fwrite(Header, 1, sizeof(Header), pFile);
+    fwrite(pData, 4, (size_t)nWidth * nHeight, pFile);
+    fclose(pFile);
+    Trace_Write("    pixels saved to '%s'", m_szTexSave);
+  }
+  m_szTexSave[0] = 0;
 }
 
 unsigned int CRendererProxy::LoadTexture(const char *filename, int *tex_type, unsigned int def_tid, bool compresstodisk, bool bWarn)
