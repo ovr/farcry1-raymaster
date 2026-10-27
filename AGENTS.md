@@ -166,6 +166,10 @@ it as well: it holds local, machine-specific instructions and is not committed (
   indexed draw where it changed, with the frame and the time (60000 lines, counted again after
   each level load); `XRENDERTRACED_CAPTURE=1`
   captures the first frame after the load.
+  `XRENDERTRACED_CAPTURE_SHADER=s_m_fa,templmuzzleflash_auto_fp` (names of shaders or of their
+  templates) captures the rest of the first frame in which an object with one of them is handed
+  over (`EF_AddEf`, `CLeafBuffer::Render` / `AddRenderElements`), `XRENDERTRACED_CAPTURE_SHADER_MAX`
+  times (default 1). Templates are shared: `templmuzzleflash` is also the flares' template.
   `XRENDERTRACED_DISPLAY=1` writes a line `[display] frame N: ...` (device, back buffer, window
   client area, `GetWidth` / `GetHeight`) whenever one of them changes, e.g. after `r_Width 1280`.
   A device reset after a frame captured with `XRENDERTRACED_D3D_DRAWS` fails (the tracer keeps

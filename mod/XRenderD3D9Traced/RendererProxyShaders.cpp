@@ -12,6 +12,7 @@
 #include "FieldWatch.h"
 #include "RendererProxy.h"
 #include "VCallHooks.h"
+#include "D3DDraws.h"
 #include <CREPolyMesh.h>
 
 static const char *ShaderName(IShader *pSH)
@@ -596,6 +597,7 @@ void CRendererProxy::EF_AddEf(int NumFog, CRendElement *re, IShader *ef, SRender
   }
   // The elements of a shader (GetREs, e.g. the flares) reach the renderer only here.
   VCallHooks_InstallRE(re);
+  D3DDraws_CaptureOnShader(ef, "EF_AddEf");
   m_pReal->EF_AddEf(NumFog, re, ef, sr, obj, nTempl, efState, nSort);
   Watch_RenderElement(re);
   Watch_RendererObject(WT_CCObject, obj);

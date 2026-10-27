@@ -1004,6 +1004,8 @@ static bool s_bRTLines = false;
 static int s_nRTCaptureAfter = -1, s_nRTLoadFrame = -1;
 static bool s_bRTCaptured = false;
 static IRenderer *s_pRTRenderer = NULL;
+//! The renderer of the current frame, for the captures that start inside it.
+static IRenderer *s_pFrameRenderer = NULL;
 
 static HRESULT STDMETHODCALLTYPE Hook_SetRenderTarget(IDirect3DDevice9 *pDev, DWORD nIndex, IDirect3DSurface9 *pSurf)
 {
@@ -1069,6 +1071,7 @@ static HRESULT STDMETHODCALLTYPE Hook_VSRegDrawIndexedPrimitive(IDirect3DDevice9
 void D3DDraws_WatchRenderTargets(IRenderer *pRenderer, int nFrame)
 {
   s_nRTFrame = nFrame;
+  s_pFrameRenderer = pRenderer;
   if (s_pRTOrigVTable || s_nRTLines < 0)
     return;
   char szEnv[8] = "";
@@ -1103,6 +1106,37 @@ void D3DDraws_WatchRenderTargets(IRenderer *pRenderer, int nFrame)
       s_nRTCaptureAfter);
   if (s_nVSReg >= 0)
     Trace_Write("d3d vs register: c%d at the indexed draws of device %p", s_nVSReg, pDev);
+}
+
+void D3DDraws_CaptureOnShader(IShader *pShader, const char *szWhere)
+{
+  static int s_nMax = -1;
+  static int s_nDone = 0;
+  if (s_nMax < 0)
+  {
+    char szEnv[8] = "";
+    s_nMax = GetEnvironmentVariableA("XRENDERTRACED_CAPTURE_SHADER", szEnv, sizeof(szEnv)) ? 1 : 0;
+    if (s_nMax && GetEnvironmentVariableA("XRENDERTRACED_CAPTURE_SHADER_MAX", szEnv, sizeof(szEnv)) && szEnv[0] >= '0' && szEnv[0] <= '9')
+      s_nMax = atoi(szEnv);
+  }
+  if (s_nDone >= s_nMax || !pShader || !s_pFrameRenderer || Trace_IsCapturing())
+    return;
+  const char *szName = pShader->GetName();
+  const char *szHit = szName && Trace_IsListed("XRENDERTRACED_CAPTURE_SHADER", szName) ? szName : NULL;
+  if (!szHit)
+  {
+    IShader *pTempl = pShader->GetTemplate(-1);
+    const char *szTempl = pTempl ? pTempl->GetName() : NULL;
+    szHit = szTempl && Trace_IsListed("XRENDERTRACED_CAPTURE_SHADER", szTempl) ? szTempl : NULL;
+  }
+  if (!szHit)
+    return;
+  s_nDone++;
+  char szReason[192];
+  _snprintf_s(szReason, sizeof(szReason), _TRUNCATE, "capture of the rest of frame %d from %s with shader '%s' ('%s')", s_nRTFrame,
+    szWhere, szName ? szName : "", szHit);
+  Trace_CaptureFrame(szReason);
+  D3DDraws_Begin(s_pFrameRenderer);
 }
 
 void D3DDraws_WatchDisplay(IRenderer *pRenderer, int nFrame)

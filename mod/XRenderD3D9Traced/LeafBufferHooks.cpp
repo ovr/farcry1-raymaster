@@ -10,6 +10,7 @@
 #include "FieldWatch.h"
 #include "LeafBufferHooks.h"
 #include "VCallHooks.h"
+#include "D3DDraws.h"
 
 using namespace RetailRenderer;
 
@@ -299,6 +300,17 @@ void CLeafBufferHooks::ReleaseShaders()
 //////////////////////////////////////////////////////////////////////////
 // Drawing
 
+//! XRENDERTRACED_CAPTURE_SHADER: the shaders of the material and of the chunks.
+static void CaptureOnShaders(CLeafBuffer *pLB, IMatInfo *pMaterial, const char *szWhere)
+{
+  if (pMaterial)
+    D3DDraws_CaptureOnShader(pMaterial->GetShaderItem().m_pShader, szWhere);
+  if (!pLB->m_pMats)
+    return;
+  for (int i = 0; i < pLB->m_pMats->Count(); i++)
+    D3DDraws_CaptureOnShader((*pLB->m_pMats)[i].shaderItem.m_pShader, szWhere);
+}
+
 //! The render elements of the materials are created by the renderer itself.
 static void HookRenderElements(CLeafBuffer *pLB)
 {
@@ -318,6 +330,7 @@ void CLeafBufferHooks::AddRenderElements(CCObject *pObj, int DLightMask, int nTe
     Dump_Object(pObj);
     Dump_IMatInfo(pIMatInfo);
   }
+  CaptureOnShaders(LB(), pIMatInfo, "CLeafBuffer::AddRenderElements");
   LB_ORIG(LBS_AddRenderElements, void, (CCObject *, int, int, int, int, IMatInfo *))(pObj, DLightMask, nTemplate, nFogVolumeID, nSortId,
     pIMatInfo);
   HookRenderElements(LB());
@@ -340,6 +353,7 @@ void CLeafBufferHooks::Render(const SRendParams &rParams, CCObject *pObj, TArray
     Dump_Object(pObj);
   }
   CWatchArg WatchParams(WT_SRendParams, &rParams);
+  CaptureOnShaders(LB(), pMaterial, "CLeafBuffer::Render");
   LB_ORIG(LBS_Render, void, (const SRendParams &, CCObject *, TArray<int> &, int, bool, IMatInfo *, bool))(rParams, pObj, ShaderTemplates,
     e_overlay_geometry, bNotCurArea, pMaterial, bSupportDefaultShaderTemplates);
   HookRenderElements(LB());

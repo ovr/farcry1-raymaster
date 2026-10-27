@@ -33,6 +33,11 @@
 
 //! At the start of the captured frame.
 void D3DDraws_Begin(IRenderer *pRenderer);
+//! XRENDERTRACED_CAPTURE_SHADER (names of shaders or of their templates, e.g. "templmuzzleflash"):
+//! the first object drawn with one of them (EF_AddEf, CLeafBuffer::Render or AddRenderElements; the
+//! shader of a chunk or of the material) starts a capture of the rest of that frame, with its D3D
+//! draws, XRENDERTRACED_CAPTURE_SHADER_MAX times at most (1 by default).
+void D3DDraws_CaptureOnShader(IShader *pShader, const char *szWhere);
 //! XRENDERTRACED_D3D_RT=1: from the first call on, the first SetRenderTarget of every frame to a
 //! surface other than the back buffer writes a line "[d3d rt] frame N: ..." (64 at most, counted
 //! again after each level load), to find the frames that render into textures (shadow maps).
