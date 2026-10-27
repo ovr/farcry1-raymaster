@@ -294,4 +294,16 @@ private:
   int m_ScreenWatch[8][2];
   int m_ScreenWatchLast[8];
   int m_nScreenWatchLines = 0;
+  //! "screenshot name [frames]": the back buffer of the frame that many frames on (0: the next one)
+  //! is saved as a TGA file before it is presented (D3DDraws_SaveBackBuffer).
+  char m_szShot[MAX_PATH] = "";
+  int m_nShotFrame = -1;
+  //! "after frames command": the command runs that many frames later (8 at most waiting).
+  struct SDeferred
+  {
+    int nFrame;
+    char szCmd[256];
+  };
+  SDeferred m_Deferred[8];
+  int m_nDeferred = 0;
 };

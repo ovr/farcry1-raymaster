@@ -235,6 +235,11 @@ void CRendererProxy::BeginFrame()
 
 void CRendererProxy::Update()
 {
+  if (m_nFrames + 1 == m_nShotFrame)
+  {
+    D3DDraws_SaveBackBuffer(m_pReal, m_szShot);
+    m_nShotFrame = -1;
+  }
   {
     TRACE_CALL("frame %d", m_nFrames + 1);
     m_pReal->Update();
@@ -253,6 +258,18 @@ void CRendererProxy::Update()
   }
   if (m_nFrames == m_nExecLevelFrame)
     ExecuteCommands(m_szExecLevel);
+  for (int i = 0; i < m_nDeferred; )
+  {
+    if (m_Deferred[i].nFrame > m_nFrames)
+    {
+      i++;
+      continue;
+    }
+    char szCmd[256];
+    strcpy_s(szCmd, m_Deferred[i].szCmd);
+    m_Deferred[i] = m_Deferred[--m_nDeferred];
+    ExecuteCommands(szCmd);
+  }
 }
 
 void CRendererProxy::WatchScreenFx()
@@ -315,6 +332,22 @@ void CRendererProxy::ExecuteCommands(const char *szCommands)
     }
     else if (!strcmp(szCmd, "vcalls"))
       VCallHooks_RestartListed();
+    else if (!strncmp(szCmd, "after ", 6))
+    {
+      int nAfter = 0, nLen = 0;
+      if (sscanf_s(szCmd + 6, "%d %n", &nAfter, &nLen) == 1 && nLen && m_nDeferred < 8)
+      {
+        m_Deferred[m_nDeferred].nFrame = m_nFrames + max(nAfter, 1);
+        strcpy_s(m_Deferred[m_nDeferred].szCmd, szCmd + 6 + nLen);
+        m_nDeferred++;
+      }
+    }
+    else if (!strncmp(szCmd, "screenshot ", 11))
+    {
+      int nAfter = 0;
+      sscanf_s(szCmd + 11, "%259s %d", m_szShot, (unsigned)sizeof(m_szShot), &nAfter);
+      m_nShotFrame = m_nFrames + 1 + max(nAfter, 0);
+    }
     else if (!strncmp(szCmd, "heatvision ", 11))
     {
       // "heatvision 0|1": I3DEngine::EnableHeatVision.

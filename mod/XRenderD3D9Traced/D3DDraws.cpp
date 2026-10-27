@@ -629,6 +629,40 @@ void D3DDraws_WatchRenderTargets(IRenderer *pRenderer, int nFrame)
     Trace_Write("d3d vs register: c%d at the indexed draws of device %p", s_nVSReg, pDev);
 }
 
+void D3DDraws_SaveBackBuffer(IRenderer *pRenderer, const char *szFile)
+{
+  IDirect3DDevice9 *pDev = D3DState_GetDevice(pRenderer);
+  IDirect3DSurface9 *pBack = NULL, *pCopy = NULL;
+  D3DSURFACE_DESC Desc = {};
+  D3DLOCKED_RECT Rect = {};
+  if (!pDev || FAILED(pDev->GetBackBuffer(0, 0, D3DBACKBUFFER_TYPE_MONO, &pBack)))
+    return;
+  pBack->GetDesc(&Desc);
+  HRESULT hr = E_FAIL;
+  if ((Desc.Format == D3DFMT_X8R8G8B8 || Desc.Format == D3DFMT_A8R8G8B8) && Desc.MultiSampleType == D3DMULTISAMPLE_NONE
+    && SUCCEEDED(pDev->CreateOffscreenPlainSurface(Desc.Width, Desc.Height, Desc.Format, D3DPOOL_SYSTEMMEM, &pCopy, NULL))
+    && SUCCEEDED(pDev->GetRenderTargetData(pBack, pCopy)) && SUCCEEDED(pCopy->LockRect(&Rect, NULL, D3DLOCK_READONLY)))
+  {
+    FILE *pFile = NULL;
+    if (!fopen_s(&pFile, szFile, "wb"))
+    {
+      // Uncompressed true colour, 32 bits, rows from the top.
+      const BYTE Header[18] = { 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, (BYTE)Desc.Width, (BYTE)(Desc.Width >> 8), (BYTE)Desc.Height,
+        (BYTE)(Desc.Height >> 8), 32, 0x28 };
+      fwrite(Header, 1, sizeof(Header), pFile);
+      for (UINT y = 0; y < Desc.Height; y++)
+        fwrite((const BYTE *)Rect.pBits + y * Rect.Pitch, 4, Desc.Width, pFile);
+      fclose(pFile);
+      hr = S_OK;
+    }
+    pCopy->UnlockRect();
+  }
+  Trace_Write("back buffer %ux%u format %u saved to '%s': %s", Desc.Width, Desc.Height, Desc.Format, szFile, SUCCEEDED(hr) ? "ok" : "failed");
+  if (pCopy)
+    pCopy->Release();
+  pBack->Release();
+}
+
 void D3DDraws_RestartRenderTargets()
 {
   if (s_nRTLines > 0)

@@ -53,7 +53,10 @@ it as well: it holds local, machine-specific instructions and is not committed (
   `sky water stretching [alpha]` writes those members into the sky element at `EF_AddEf` (`-`:
   the engine's value); `view maxdist fogstart fogend` calls `I3DEngine::SetMaxViewDistance`,
   `SetFogStart`, `SetFogEnd` (`-`: unchanged); `heatvision 0|1` calls
-  `I3DEngine::EnableHeatVision`.
+  `I3DEngine::EnableHeatVision`; `screenshot file.tga [frames]` saves the back buffer of the next
+  frame (or the one that many frames later) as a TGA file in `farcry1_testing1` (move it out
+  after the run; never commit it); `after frames command` runs the command that many frames
+  later.
 - The screen effect calls (`CREScreenProcess::mfSetParameter`, `mfGetParameter`) are written as
   `[screenfx]` lines (the first 8 of each parameter, then every 50th); `XRENDERTRACED_SCREENFX_ALL=1`
   writes all of them, with the timer's time. `XRENDERTRACED_SCREENFX_WATCH=8.24,8.30` reads those

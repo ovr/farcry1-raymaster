@@ -43,6 +43,8 @@ void D3DDraws_WatchRenderTargets(IRenderer *pRenderer, int nFrame);
 void D3DDraws_RestartRenderTargets();
 //! At the end of the frame (after Update).
 void D3DDraws_End();
+//! Saves the back buffer as an uncompressed 32-bit TGA file (before Update presents it).
+void D3DDraws_SaveBackBuffer(IRenderer *pRenderer, const char *szFile);
 //! When the renderer calls the mfDraw of a render element (VCallHooks): a line "[d3d] mfDraw"
 //! in the captured frame, also for elements that end up drawing nothing.
 void D3DDraws_OnDrawRE();
