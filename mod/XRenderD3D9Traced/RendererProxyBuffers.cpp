@@ -6,6 +6,7 @@
 //////////////////////////////////////////////////////////////////////
 
 #include "StdAfx.h"
+#include <map>
 #include "RenderTrace.h"
 #include "FieldWatch.h"
 #include "RendererProxy.h"
@@ -156,6 +157,44 @@ CLeafBuffer *CRendererProxy::CreateLeafBuffer(bool bDynamic, const char *szSourc
   return pRes;
 }
 
+//! The engine's PrepareBufferCallback of each leaf buffer that has one (the detail grass): the
+//! original renderer gets PrepareBufferCallback below instead, which writes the call, runs the
+//! engine's function and dumps the leaf buffer, its video buffer and index stream around it.
+typedef bool (*PFN_PrepareBuffer)(CLeafBuffer *, bool);
+static std::map<CLeafBuffer *, PFN_PrepareBuffer> s_PrepareCallbacks;
+//! The engine's function of the leaf buffer being created (for calls before it is known).
+static PFN_PrepareBuffer s_pCreatingCallback = NULL;
+
+static void DumpPrepareBuffers(const char *szWhen, CLeafBuffer *pLB, int nVerts)
+{
+  if (!pLB)
+    return;
+  const SVertexStream &Inds = pLB->m_Indices;
+  Trace_Write("    %s: indices data %p hw %p items %d locked %d dynamic %d offs %d, m_NumIndices %d", szWhen, Inds.m_VData,
+    Inds.m_VertBuf.m_pPtr, Inds.m_nItems, Inds.m_bLocked, Inds.m_bDynamic, Inds.m_nBufOffset, pLB->m_NumIndices);
+  if (Inds.m_VData && Trace_IsReadable(Inds.m_VData, 24))
+    Dump_Indices("      indices", (const ushort *)Inds.m_VData, 12);
+  Dump_VertexBuffer(szWhen, pLB->m_pVertexBuffer, nVerts);
+}
+
+static bool PrepareBufferCallback(CLeafBuffer *pLB, bool bNeedTangents)
+{
+  std::map<CLeafBuffer *, PFN_PrepareBuffer>::const_iterator it = s_PrepareCallbacks.find(pLB);
+  const PFN_PrepareBuffer pfnEngine = it != s_PrepareCallbacks.end() ? it->second : s_pCreatingCallback;
+  TRACE_CALL("lb %p '%s' tangents %d, engine function %s", pLB, pLB && pLB->m_sSource ? pLB->m_sSource : "", bNeedTangents,
+    Trace_Addr((const void *)pfnEngine));
+  if (TRACE_DUMP)
+    DumpPrepareBuffers("before", pLB, 6);
+  const bool bRes = pfnEngine ? pfnEngine(pLB, bNeedTangents) : false;
+  TRACE_RESULT("%d", bRes);
+  if (TRACE_DUMP)
+  {
+    Dump_LeafBuffer(pLB);
+    DumpPrepareBuffers("after", pLB, 6);
+  }
+  return bRes;
+}
+
 CLeafBuffer *CRendererProxy::CreateLeafBufferInitialized(void *pVertBuffer, int nVertCount, int nVertFormat, ushort *pIndices, int nIndices, int nPrimetiveType, const char *szSource, EBufferType eBufType, int nMatInfoCount, int nClientTextureBindID, bool (*PrepareBufferCallback)(CLeafBuffer *, bool), void *CustomData, bool bOnlyVideoBuffer, bool bPrecache)
 {
   TRACE_CALL("verts %p (%d) format %s(%d) inds %p (%d) prim %d '%s' type %d mats %d tex %d callback %s custom %p videoOnly %d precache %d",
@@ -166,8 +205,12 @@ CLeafBuffer *CRendererProxy::CreateLeafBufferInitialized(void *pVertBuffer, int 
     Dump_Vertices("verts", pVertBuffer, nVertFormat, nVertCount);
     Dump_Indices("inds", pIndices, nIndices);
   }
+  s_pCreatingCallback = PrepareBufferCallback;
   CLeafBuffer *pRes = m_pReal->CreateLeafBufferInitialized(pVertBuffer, nVertCount, nVertFormat, pIndices, nIndices, nPrimetiveType,
-    szSource, eBufType, nMatInfoCount, nClientTextureBindID, PrepareBufferCallback, CustomData, bOnlyVideoBuffer, bPrecache);
+    szSource, eBufType, nMatInfoCount, nClientTextureBindID, PrepareBufferCallback ? ::PrepareBufferCallback : NULL, CustomData,
+    bOnlyVideoBuffer, bPrecache);
+  if (pRes && PrepareBufferCallback)
+    s_PrepareCallbacks[pRes] = PrepareBufferCallback;
   TRACE_RESULT("%p (vtbl %s) heap prefix %s, SDK size 0x%x", pRes, Trace_VTable(pRes), Trace_HeapPrefix(pRes), (int)sizeof(CLeafBuffer));
   if (TRACE_DUMP)
     Dump_LeafBuffer(pRes);
@@ -180,5 +223,6 @@ void CRendererProxy::DeleteLeafBuffer(CLeafBuffer *pLBuffer)
 {
   TRACE_CALL("%p '%s'", pLBuffer, pLBuffer && pLBuffer->m_sSource ? pLBuffer->m_sSource : "");
   Watch_Forget(pLBuffer);
+  s_PrepareCallbacks.erase(pLBuffer);
   m_pReal->DeleteLeafBuffer(pLBuffer);
 }

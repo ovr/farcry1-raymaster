@@ -310,12 +310,12 @@ private:
   //! and the rows from the top.
   char m_szTexSave[MAX_PATH] = "";
   void SaveTexPixels(const unsigned char *pData, int nWidth, int nHeight);
-  //! "after frames command": the command runs that many frames later (8 at most waiting).
+  //! "after frames command": the command runs that many frames later (32 at most waiting).
   struct SDeferred
   {
     int nFrame;
     char szCmd[256];
   };
-  SDeferred m_Deferred[8];
+  SDeferred m_Deferred[32];
   int m_nDeferred = 0;
 };

@@ -59,7 +59,7 @@ it as well: it holds local, machine-specific instructions and is not committed (
   `DownLoadToVideoMemory` or `UpdateTextureInVideoMemory` call with `eTF_0888` or `eTF_8888` (the
   start-up videos, the loading screen) the same way, 4 bytes per pixel as passed; `after frames
   command` runs the command that many frames
-  later; `decal size texture [x y]` calls `I3DEngine::CreateDecal` where the ray through that point
+  later (counted from when it is read; 32 may wait at once); `decal size texture [x y]` calls `I3DEngine::CreateDecal` where the ray through that point
   of the screen (fractions, the centre by default) meets terrain or a static object, with the owner
   taken as the SDK game code does, and `decal size texture terrain x y` puts one on the terrain at
   world (x, y) (decals need `e_decals 1` before the level loads); `mouse down`, `mouse up` and
@@ -81,6 +81,9 @@ it as well: it holds local, machine-specific instructions and is not committed (
   the first 4000 instead of 3, counted again after the command `vcalls` (e.g. in
   `XRENDERTRACED_EXEC_LEVEL`). A written `CCObject::AddWaves` call also writes the two waves the
   engine filled after the call before it.
+- The engine's `PrepareBufferCallback` of a leaf buffer (the detail grass) reaches the original
+  renderer wrapped: the calls appear as `PrepareBufferCallback(...)` with the engine's calls inside
+  them and the leaf buffer, its video buffer and index stream dumped before and after.
 - The engine's `I3DEngine` is hooked as well (from the first `BeginFrame`): the calls the original
   renderer makes into it are written as `[vcall] I3DEngine::...` lines (with the camera of
   `SetCamera` and the flags of `DrawLowDetail`) and counted in the renderer column of the virtual

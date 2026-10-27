@@ -371,7 +371,7 @@ void CRendererProxy::ExecuteCommands(const char *szCommands)
     else if (!strncmp(szCmd, "after ", 6))
     {
       int nAfter = 0, nLen = 0;
-      if (sscanf_s(szCmd + 6, "%d %n", &nAfter, &nLen) == 1 && nLen && m_nDeferred < 8)
+      if (sscanf_s(szCmd + 6, "%d %n", &nAfter, &nLen) == 1 && nLen && m_nDeferred < (int)ARRAYSIZE(m_Deferred))
       {
         m_Deferred[m_nDeferred].nFrame = m_nFrames + max(nAfter, 1);
         strcpy_s(m_Deferred[m_nDeferred].szCmd, szCmd + 6 + nLen);
