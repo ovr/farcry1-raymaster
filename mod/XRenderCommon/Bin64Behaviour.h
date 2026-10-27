@@ -403,6 +403,35 @@ static const int nHeapAlignment = 4;
 // scene, not after it, and not in the order of the calls.
 
 //////////////////////////////////////////////////////////////////////////
+// Decals (River and Pier with e_decals 1; farcry1_testing1's settings have e_decals 0)
+//
+// With e_decals 0 there are no decals: I3DEngine::CreateDecal does nothing and the TerrainParticles
+// element below is not added. With e_decals 1:
+// - CreateDecal looks the texture up with EF_GetTextureByID(nTid) and sets ITexPic::SetFilter
+//   (FILTER_LINEAR) and ITexPic::SetClamp(true) on it. With an owner (a static object) it also
+//   calls CLeafBuffer::GetIndices(NULL) twice on the owner's leaf buffer, with
+//   DeleteLeafBuffer(NULL) in between.
+// - Every frame the engine adds its CRETerrainParticles element (EF_AddEf, shader
+//   "terrainparticles", template 0). Drawing it calls I3DEngine::DrawTerrainParticles, and the
+//   engine draws the decals on the terrain from inside that call (inside EF_EndEf3D):
+//   SetState(GS_BLSRC_SRCALPHA | GS_BLDST_ONEMINUSSRCALPHA), SetColorOp(eCO_MODULATE, eCO_MODULATE,
+//   eCA_Texture | (eCA_Constant << 3), the same for alpha), SetCullMode(R_CULL_NONE), then for each
+//   decal SetMaterialColor(the world colour EF_SetWorldColor got) and for each strip
+//   SetTexture(nTid, eTT_Base), SetTexClampMode(true) and DrawTriStrip(pBuffer, nVerts).
+// - pBuffer is the engine's CVertexBuffer: VERTEX_FORMAT_P3F_TEX2F, m_VS[VSF_GENERAL].m_VData in
+//   system memory, no hardware buffer, m_NumVerts 0; nVerts vertices form a triangle strip.
+// - The strips are the columns of the terrain grid (2 m cells, heights from the height map) under
+//   a square of side 2 * fSize around the decal, all moved towards the camera by 1% of the
+//   distance. Texture coordinates map the square to 0..1 (u along +x, v along -y); the vertices
+//   outside it get coordinates outside 0..1, which the clamping turns into the texture's edge.
+// How the D3D9 renderer draws DrawTriStrip here: DrawPrimitiveUP(D3DPT_TRIANGLESTRIP, nVerts - 2)
+// with stride 20 and an identity world matrix; depth test (LESSEQUAL) without depth writes,
+// blending (SRCALPHA, INVSRCALPHA), no culling, fog; stage 0 colour and alpha = texture * texture
+// factor (the material colour), clamp addressing, linear filtering without mip maps.
+// Decals with an owner (walls and floors of buildings, crates, trees and bushes; the engine's own
+// bullet hits too) were not drawn in any later frame, with e_decals 1 or 2.
+
+//////////////////////////////////////////////////////////////////////////
 // Shadows (Training with e_shadow_maps 1 and e_stencil_shadows 1)
 //
 // Shadow maps (frustum layout in RendererStructures.h, "Shadow maps"). The D3D9 renderer renders

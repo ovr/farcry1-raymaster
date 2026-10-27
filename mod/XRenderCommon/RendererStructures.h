@@ -153,7 +153,7 @@ namespace RendererStructures
 //     EF_AddSpriteToScene takes). The values they return: Bin64Behaviour.h, "Shaders".
 //   - ITexPic: AddRef, Release, GetWidth, GetHeight, GetOriginalWidth, GetOriginalHeight,
 //     GetTextureID, GetFlags, IsTextureLoaded (from Cry3DEngine, CrySystem, CryGame and
-//     CryEntitySystem).
+//     CryEntitySystem); with decals on also SetFilter and SetClamp (Bin64Behaviour.h, "Decals").
 //   - SRenderShaderResources: Release, its only virtual function.
 //   - CRendElement: Release (of the CREOcLeaf of the leaf buffer materials).
 //   - CREScreenProcess: mfSetParameter, mfGetParameter (see "Screen effects" below).
