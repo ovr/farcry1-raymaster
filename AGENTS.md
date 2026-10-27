@@ -52,7 +52,8 @@ it as well: it holds local, machine-specific instructions and is not committed (
   that reach `EF_ADDDlight` the radius r, the direct factor and a scaled colour (0: their own);
   `sky water stretching [alpha]` writes those members into the sky element at `EF_AddEf` (`-`:
   the engine's value); `view maxdist fogstart fogend` calls `I3DEngine::SetMaxViewDistance`,
-  `SetFogStart`, `SetFogEnd` (`-`: unchanged).
+  `SetFogStart`, `SetFogEnd` (`-`: unchanged); `heatvision 0|1` calls
+  `I3DEngine::EnableHeatVision`.
 - `XRENDERTRACED_TRACE_METHODS` (names as in the log, separated by `,`, e.g.
   `DownLoadToVideoMemory,CLeafBuffer::CreateBufferFromSource`) writes every call of those methods,
   not only the first `xrt_TraceCalls`.
@@ -66,7 +67,8 @@ it as well: it holds local, machine-specific instructions and is not committed (
   `XRENDERTRACED_D3D_VERTS`), and the `Clear` calls; `2` adds the device state after each (with
   the stencil state when stencil is on), `3` also the shader constants.
   `XRENDERTRACED_D3D_RT=1` writes the first `SetRenderTarget` of every frame to a surface other
-  than the back buffer (to find the frames that render shadow maps); `XRENDERTRACED_CAPTURE=1`
+  than the back buffer (to find the frames that render shadow maps; 64 lines, counted again after
+  each level load); `XRENDERTRACED_CAPTURE=1`
   captures the first frame after the load.
 - The log is `farcry1_testing1/XRenderD3D9Traced.log`; the engine log is
   `farcry1_testing1/log.txt`.

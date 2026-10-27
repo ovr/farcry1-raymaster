@@ -192,6 +192,7 @@ void CRendererProxy::PostLoad()
   m_pReal->PostLoad();
   // The first frames of the level.
   Trace_Restart("PostLoad");
+  D3DDraws_RestartRenderTargets();
   if (m_nCaptureAfterLoad > 0)
     m_nCaptureFrame = m_nFrames + m_nCaptureAfterLoad;
   // The first frame after the load starts before the next Update.
@@ -275,6 +276,13 @@ void CRendererProxy::ExecuteCommands(const char *szCommands)
         p3DEngine->SetFogEnd((float)atof(szArg[2]));
       if (p3DEngine)
         Trace_Write("  view distance %g fog %g to %g", p3DEngine->GetMaxViewDistance(), p3DEngine->GetFogStart(), p3DEngine->GetFogEnd());
+    }
+    else if (!strncmp(szCmd, "heatvision ", 11))
+    {
+      // "heatvision 0|1": I3DEngine::EnableHeatVision.
+      I3DEngine *p3DEngine = iSystem ? iSystem->GetI3DEngine() : NULL;
+      if (p3DEngine)
+        p3DEngine->EnableHeatVision(atoi(szCmd + 11) != 0);
     }
     else if (!strncmp(szCmd, "sky ", 4))
     {

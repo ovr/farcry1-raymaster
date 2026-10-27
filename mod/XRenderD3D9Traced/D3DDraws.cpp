@@ -590,6 +590,12 @@ void D3DDraws_WatchRenderTargets(IRenderer *pRenderer, int nFrame)
   Trace_Write("d3d render targets: watching SetRenderTarget of device %p", pDev);
 }
 
+void D3DDraws_RestartRenderTargets()
+{
+  if (s_nRTLines > 0)
+    s_nRTLines = 0;
+}
+
 void D3DDraws_OnDrawRE()
 {
   if (!s_pDevice)
