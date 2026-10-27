@@ -16,6 +16,9 @@
 #include "VCallHooks.h"
 #include <I3DEngine.h>
 #include <IStatObj.h>
+#include <IPhysics.h>
+#include <CryEngineDecalInfo.h>
+#include <IEntitySystem.h>
 
 static const void *s_pProxyVTable = NULL;
 
@@ -309,6 +312,26 @@ void CRendererProxy::ExecuteCommands(const char *szCommands)
       CVarsCommand(szCmd + 5);
     else if (!strncmp(szCmd, "veggroup ", 9))
       VegGroupCommand(szCmd + 9);
+    else if (!strncmp(szCmd, "decal ", 6))
+      DecalCommand(szCmd + 6);
+    else if (!strcmp(szCmd, "mouse down") || !strcmp(szCmd, "mouse up") || !strncmp(szCmd, "mouse move ", 11))
+    {
+      // The left mouse button or a relative move, only while the game window is in front (the input
+      // goes to that window).
+      const HWND hWnd = (HWND)m_pReal->GetHWND();
+      const bool bFront = hWnd && GetForegroundWindow() == hWnd;
+      INPUT Input = {};
+      Input.type = INPUT_MOUSE;
+      if (!strncmp(szCmd + 6, "move ", 5))
+      {
+        sscanf_s(szCmd + 11, "%ld %ld", &Input.mi.dx, &Input.mi.dy);
+        Input.mi.dwFlags = MOUSEEVENTF_MOVE;
+      }
+      else
+        Input.mi.dwFlags = !strcmp(szCmd + 6, "down") ? MOUSEEVENTF_LEFTDOWN : MOUSEEVENTF_LEFTUP;
+      const UINT nSent = bFront ? SendInput(1, &Input, sizeof(Input)) : 0;
+      Trace_Write("  game window %sin front, %u input sent", bFront ? "" : "not ", nSent);
+    }
     else if (!strncmp(szCmd, "lightradius ", 12))
     {
       m_fLightDirect = m_fLightColor = 0;
@@ -399,6 +422,72 @@ void CRendererProxy::CVarsCommand(const char *szArgs)
   Sink.m_nFound = 0;
   iConsole->DumpCVars(&Sink);
   Trace_Write("    %d console variables starting with '%s'", Sink.m_nFound, szArgs);
+}
+
+void CRendererProxy::DecalCommand(const char *szArgs)
+{
+  I3DEngine *p3DEngine = iSystem ? iSystem->GetI3DEngine() : NULL;
+  IPhysicalWorld *pWorld = iSystem ? iSystem->GetIPhysicalWorld() : NULL;
+  char szTexture[MAX_PATH] = "";
+  float fSize = 1, fX = 0.5f, fY = 0.5f, fLifeTime = 1000;
+  if (!p3DEngine || !pWorld
+    || sscanf_s(szArgs, "%f %259s %f %f %f", &fSize, szTexture, (unsigned)sizeof(szTexture), &fX, &fY, &fLifeTime) < 2)
+    return;
+  const char *szTerrain = strstr(szArgs, " terrain ");
+  if (szTerrain && sscanf_s(szTerrain + 9, "%f %f", &fX, &fY) == 2)
+  {
+    ITexPic *pTex = m_pReal->EF_LoadTexture(szTexture, FT_NOREMOVE | FT_CLAMP, 0, eTT_Base);
+    CryEngineDecalInfo Decal;
+    Decal.vPos = Vec3(fX, fY, p3DEngine->GetTerrainElevation(fX, fY));
+    Decal.vNormal = Vec3(0, 0, 1);
+    Decal.vHitDirection = Vec3(0, 0, -1);
+    Decal.fSize = fSize;
+    Decal.fLifeTime = fLifeTime;
+    Decal.nTid = pTex ? pTex->GetTextureID() : 0;
+    Trace_Write("  decal '%s' (id %d) size %g on the terrain at (%g %g %g)", szTexture, (int)Decal.nTid, fSize, Decal.vPos.x, Decal.vPos.y,
+      Decal.vPos.z);
+    p3DEngine->CreateDecal(Decal);
+    return;
+  }
+  Vec3 Near, Far;
+  const float sx = fX * m_pReal->GetWidth(), sy = fY * m_pReal->GetHeight();
+  m_pReal->UnProjectFromScreen(sx, sy, 0, &Near.x, &Near.y, &Near.z);
+  m_pReal->UnProjectFromScreen(sx, sy, 1, &Far.x, &Far.y, &Far.z);
+  Vec3 Dir = Far - Near;
+  Dir.Normalize();
+  // As the SDK game code spawns decals: terrain and static objects, the owner from the foreign data
+  // (0: IEntity, 1: IEntityRender). The ray starts a metre ahead to pass the player.
+  ray_hit Hit;
+  memset(&Hit, 0, sizeof(Hit));
+  Near += Dir;
+  if (!pWorld->RayWorldIntersection(Near, Dir * 200.0f, ent_terrain | ent_static, rwi_stop_at_pierceable, &Hit, 1))
+  {
+    Trace_Write("  decal: the ray from (%g %g %g) along (%g %g %g) hits nothing", Near.x, Near.y, Near.z, Dir.x, Dir.y, Dir.z);
+    return;
+  }
+  // The flags the engine loads its decal textures with.
+  ITexPic *pTex = m_pReal->EF_LoadTexture(szTexture, FT_NOREMOVE | FT_CLAMP, 0, eTT_Base);
+  CryEngineDecalInfo Decal;
+  Decal.vPos = Hit.pt;
+  Decal.vNormal = Hit.n;
+  Decal.vHitDirection = Dir;
+  Decal.fSize = fSize;
+  Decal.fLifeTime = fLifeTime;
+  Decal.nTid = pTex ? pTex->GetTextureID() : 0;
+  Decal.nPartID = Hit.ipart;
+  pe_params_foreign_data Foreign;
+  if (Hit.pCollider && Hit.pCollider->GetParams(&Foreign))
+  {
+    if (Foreign.iForeignData == 0)
+      Decal.pDecalOwner = (IEntity *)Foreign.pForeignData;
+    else if (Foreign.iForeignData == 1)
+      Decal.pDecalOwner = (IEntityRender *)Foreign.pForeignData;
+  }
+  Trace_Write("  decal '%s' (id %d) size %g at (%g %g %g) normal (%g %g %g), distance %g, terrain %d, collider type %d, owner %p '%s'",
+    szTexture, (int)Decal.nTid, fSize, Hit.pt.x, Hit.pt.y, Hit.pt.z, Hit.n.x, Hit.n.y, Hit.n.z, Hit.dist, Hit.bTerrain,
+    Hit.pCollider ? Hit.pCollider->GetType() : -1, Decal.pDecalOwner,
+    Decal.pDecalOwner ? Decal.pDecalOwner->GetName() : "");
+  p3DEngine->CreateDecal(Decal);
 }
 
 void CRendererProxy::VegGroupCommand(const char *szArgs)

@@ -261,6 +261,10 @@ private:
   //! "veggroup id|* field value": changes a member of vegetation groups (I3DEngine::GetStatInstGroup,
   //! SetStatInstGroup); fields fadeSize, useSprites, maxViewDistRatio, spriteDistRatio, brightness.
   void VegGroupCommand(const char *szArgs);
+  //! "decal size texture [x y [lifetime]]": I3DEngine::CreateDecal where the ray through a point of
+  //! the screen (fractions of its size, the centre by default) meets the world. "decal size texture
+  //! terrain x y": on the terrain at world (x, y), without an owner.
+  void DecalCommand(const char *szArgs);
 
   IRenderer *m_pReal;
   int m_nRealType;

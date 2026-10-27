@@ -56,7 +56,12 @@ it as well: it holds local, machine-specific instructions and is not committed (
   `I3DEngine::EnableHeatVision`; `screenshot file.tga [frames]` saves the back buffer of the next
   frame (or the one that many frames later) as a TGA file in `farcry1_testing1` (move it out
   after the run; never commit it); `after frames command` runs the command that many frames
-  later.
+  later; `decal size texture [x y]` calls `I3DEngine::CreateDecal` where the ray through that point
+  of the screen (fractions, the centre by default) meets terrain or a static object, with the owner
+  taken as the SDK game code does, and `decal size texture terrain x y` puts one on the terrain at
+  world (x, y) (decals need `e_decals 1` before the level loads); `mouse down`, `mouse up` and
+  `mouse move dx dy` send the left button or a relative move with `SendInput`, only while the game
+  window is in front.
 - The screen effect calls (`CREScreenProcess::mfSetParameter`, `mfGetParameter`) are written as
   `[screenfx]` lines (the first 8 of each parameter, then every 50th); `XRENDERTRACED_SCREENFX_ALL=1`
   writes all of them, with the timer's time. `XRENDERTRACED_SCREENFX_WATCH=8.24,8.30` reads those

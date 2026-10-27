@@ -220,6 +220,8 @@ unsigned short *CLeafBufferHooks::GetIndices(int *pIndicesCount)
   TRACE_CALL("lb %p '%s'", LB(), Source());
   unsigned short *pRes = LB_ORIG(LBS_GetIndices, unsigned short *, (int *))(pIndicesCount);
   TRACE_RESULT("%p (%d)", pRes, pIndicesCount ? *pIndicesCount : -1);
+  if (bTraced)
+    Dump_LeafBuffer(LB());
   return pRes;
 }
 
