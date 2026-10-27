@@ -56,3 +56,6 @@ if(NOT FARCRY_X64)
     # The x64 skinning path needs Amd64Skinner from CrySkinAMD64.ASM, which is not part of the SDK.
     add_subdirectory(sdk/Sources/CcgDump)
 endif()
+
+# Our own modules (not part of the Crytek SDK).
+add_subdirectory(mod)

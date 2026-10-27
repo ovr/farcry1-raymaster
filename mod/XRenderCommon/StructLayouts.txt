@@ -1,0 +1,777 @@
+Structure layouts of the renderer interface (generated from the MSVC class layout
+report of the SDK headers; do not edit).
+x86: the retail ABI (STLport, as the retail engine). x64: the 64-bit build.
+Columns: offset and size on x86, offset and size on x64, member.
+
+====================================================================================================
+Objects the renderer creates and the engine accesses directly
+====================================================================================================
+
+CLeafBuffer    x86 0xC0    x64 0x130
+    0x0    4     0x0    8   {vfptr}
+    0x4    4     0x8    8   m_Next
+    0x8    4    0x10    8   m_Prev
+    0xC    4    0x18    8   m_sSource
+   0x10    4    0x20    8   m_NextGlobal
+   0x14    4    0x28    8   m_PrevGlobal
+   0x18    4    0x30    8   m_TempNormals
+   0x1C    4    0x38    8   m_TempTexCoords
+   0x20    4    0x40    8   m_TempColors
+   0x24    4    0x48    8   m_TempSecColors
+   0x28    4    0x50    8   m_pCustomData
+   0x2C    4    0x58    8   PrepareBufferCallback
+   0x30    4    0x60    8   m_pVertexBuffer
+   0x34    4    0x68    8   m_pVertexContainer
+   0x38    4    0x70    4   m_bMaterialsWasCreatedInRenderer (bits 0..0)
+   0x38    4    0x70    4   m_bOnlyVideoBuffer (bits 1..1)
+   0x38    4    0x70    4   m_bDynamic (bits 2..2)
+   0x3C    4    0x74    4   m_UpdateVBufferMask
+   0x40    4    0x78    4   m_UpdateFrame
+   0x44    4    0x7C    4   m_SortFrame
+   0x48    4    0x80    4   m_SecVertCount
+   0x4C    4    0x88    8   m_pSecVertBuffer
+   0x50   24    0x90   40   m_Indices
+   0x68   12    0xB8   16   m_SecIndices
+   0x74    4    0xC8    4   m_NumIndices
+   0x78    4    0xD0    8   m_pIndicesPreStrip
+   0x7C    4    0xD8    8   m_arrVertStripMap
+   0x80    4    0xE0    4   m_nVertexFormat
+   0x84    4    0xE4    4   m_nPrimetiveType
+   0x88    4    0xE8    8   m_pMats
+   0x8C    4    0xF0    8   m_arrVtxMap
+   0x90    4    0xF8    4   m_fMinU
+   0x94    4    0xFC    4   m_fMinV
+   0x98    4   0x100    4   m_fMaxU
+   0x9C    4   0x104    4   m_fMaxV
+   0xA0    4   0x108    4   m_nClientTextureBindID
+   0xA4   12   0x10C   12   m_vBoxMin
+   0xB0   12   0x118   12   m_vBoxMax
+   0xBC    4   0x128    8   m_pLoadedColors
+
+CMatInfo    x86 0xBC    x64 0xE0
+    0x0    4     0x0    8   IMatInfo::{vfptr}
+    0x4   32     0x8   32   sScriptMaterial
+   0x24   64    0x28   64   sMaterialName
+   0x64    4    0x68    4   m_nRefCount
+   0x68    4    0x6C    4   m_Id
+   0x6C    4    0x70    4   m_nCGFMaterialID
+   0x70    4    0x74    4   m_Flags
+   0x74    4    0x78    4   nGamePhysMatId
+   0x78    2    0x7C    2   m_dwNumSections
+   0x7C    4    0x80    8   m_pPrimitiveGroups
+   0x80   12    0x88   12   m_vCenter
+   0x8C    4    0x94    4   m_fRadius
+   0x90    4    0x98    4   nFirstIndexId
+   0x94    4    0x9C    4   nNumIndices
+   0x98    4    0xA0    4   nFirstVertId
+   0x9C    4    0xA4    4   nNumVerts
+   0xA0    8    0xA8   16   shaderItem
+   0xA8    4    0xB8    8   pRE
+   0xAC    4    0xC0    4   fAlpha
+   0xB0    4    0xC8    8   pMatEnt
+   0xB4    4    0xD0    8   pShaderParams
+   0xB8    4    0xD8    8   pSubMtls
+
+CVertexBuffer    x86 0x40    x64 0x60
+    0x0   48     0x0   80   m_VS
+   0x30    4    0x50    4   m_bFenceSet (bits 0..0)
+   0x30    4    0x50    4   m_bDynamic (bits 1..1)
+   0x34    4    0x54    4   m_vertexformat
+   0x38    4    0x58    4   m_fence
+   0x3C    4    0x5C    4   m_NumVerts
+
+SVertexStream    x86 0x18    x64 0x28
+    0x0    4     0x0    8   m_VData
+    0x4    4     0x8    8   m_VertBuf
+    0x8    4    0x10    4   m_nItems
+    0xC    1    0x14    1   m_bLocked
+    0xD    1    0x15    1   m_bDynamic
+   0x10    4    0x18    4   m_nBufOffset
+   0x14    4    0x20    8   m_pPool
+
+CCObject    x86 0x100    x64 0x130
+    0x0    4     0x0    8   {vfptr}
+    0x4    2     0x8    2   m_Id
+    0x6    2     0xA    2   m_Counter
+    0x8    2     0xC    2   m_VisId
+    0xA    2     0xE    2   m_VPMatrixId
+    0xC    4    0x10    4   m_ObjFlags
+   0x10   64    0x14   64   m_Matrix
+   0x50    1    0x54    1   m_bShaderParamCreatedInRenderer
+   0x54    4    0x58    8   m_ShaderParams
+   0x58    2    0x60    2   m_nLMId
+   0x5A    2    0x62    2   m_nLMDirId
+   0x5C    2    0x64    2   m_nOcclId
+   0x5E    2    0x66    2   m_nHDRLMId
+   0x60    4    0x68    4   m_Reserved1
+   0x64    4    0x6C    4   m_DynLMMask
+   0x68   12    0x70   12   m_Trans2
+   0x74   12    0x7C   12   m_Angs2
+   0x80   20    0x88   20   m_TempVars
+   0x94    4    0x9C    4   m_fDistanceToCam
+   0x98    4    0xA0    8   m_RE
+   0x9C    4    0xA8    8   m_EF
+   0xA0    4    0xB0    8   m_CustomData
+   0xA4    4    0xB8    4   m_RenderState
+   0xA8    4    0xBC    4   m_SortId
+   0xAC    2    0xC0    2   m_InvMatrixId
+   0xAE    2    0xC2    2   m_VPMatrixFrame
+   0xB0    2    0xC4    2   m_NumCM
+   0xB2    2    0xC6    2   m_nLod
+   0xB2    2    0xC6    2   m_NumWFX
+   0xB2    2    0xC6    2   m_TexId0
+   0xB4    2    0xC8    2   m_nTemplId
+   0xB4    2    0xC8    2   m_NumWFY
+   0xB4    2    0xC8    2   m_TexId1
+   0xB6    2    0xCA    2   m_FrameLight
+   0xB6    2    0xCA    2   m_bVisible
+   0xB8    2    0xCC    2   m_LightStyle
+   0xBA    2    0xCE    2   m_nScissorX1
+   0xBC    2    0xD0    2   m_nScissorY1
+   0xBE    2    0xD2    2   m_nScissorX2
+   0xC0    2    0xD4    2   m_nScissorY2
+   0xC4    4    0xD8    4   m_fRefract
+   0xC4    4    0xD8    4   m_StartTime
+   0xC8    4    0xDC    4   m_fBump
+   0xC8    4    0xDC    4   m_fLightFadeTime
+   0xCC    4    0xE0    4   m_fHeatFactor
+   0xD0    4    0xE8    8   m_pShadowCasters
+   0xD4    4    0xF0    8   m_pShadowFrustum
+   0xD8   12    0xF8   12   m_AmbColor
+   0xE4   16   0x104   16   m_Color
+   0xF4    4   0x118    8   m_pCharInstance
+   0xF8    4   0x120    8   m_pLMTCBufferO
+   0xFC    4   0x128    8   m_pLightImage
+   0xFC    4   0x128    8   m_pLight
+   0xFC    4   0x128    8   m_fBending
+   0xFC    4   0x128    8   m_fLastUpdate
+   0xFC    4   0x128    8   m_OcclLights
+
+CRendElement    x86 0x58    x64 0x70
+    0x0    4     0x0    8   {vfptr}
+    0x4    4     0x8    4   m_Type
+    0x8    4     0xC    4   m_Flags
+    0xC    4    0x10    4   m_nCountCustomData
+   0x10    4    0x18    8   m_CustomData
+   0x14    4    0x20    4   m_fFogScale
+   0x18   32    0x24   32   m_CustomTexBind
+   0x38   16    0x44   16   m_Color
+   0x48    4    0x54    4   m_SortId
+   0x4C    4    0x58    8   m_NextGlobal
+   0x50    4    0x60    8   m_PrevGlobal
+   0x54    4    0x68    8   m_LastVP
+
+CREOcLeaf    x86 0xB0    x64 0xD8
+    0x0    4     0x0    8   CRendElement::{vfptr}
+    0x4    4     0x8    4   CRendElement::m_Type
+    0x8    4     0xC    4   CRendElement::m_Flags
+    0xC    4    0x10    4   CRendElement::m_nCountCustomData
+   0x10    4    0x18    8   CRendElement::m_CustomData
+   0x14    4    0x20    4   CRendElement::m_fFogScale
+   0x18   32    0x24   32   CRendElement::m_CustomTexBind
+   0x38   16    0x44   16   CRendElement::m_Color
+   0x48    4    0x54    4   CRendElement::m_SortId
+   0x4C    4    0x58    8   CRendElement::m_NextGlobal
+   0x50    4    0x60    8   CRendElement::m_PrevGlobal
+   0x54    4    0x68    8   CRendElement::m_LastVP
+   0x58    4    0x70    4   mFrameCalcLight
+   0x5C    4    0x74    4   mFrameCalcLightNoAtt
+   0x60    4    0x78    4   mFrameCalcAtten
+   0x64    4    0x7C    4   mFrameCalcRefract
+   0x68    4    0x80    4   mFrameCalcHalfAngle
+   0x6C    4    0x84    4   mFrameCalcHalfAngleNoAtt
+   0x70    4    0x88    4   mFrameCalcProject
+   0x74    4    0x8C    4   mFrameCalcLAttenSpec0
+   0x78    4    0x90    4   mFrameCalcLAttenSpec1
+   0x7C    4    0x94    4   mMaskLight0
+   0x80    4    0x98    4   mMaskLight1
+   0x84    4    0x9C    4   mMaskLight2
+   0x88    4    0xA0    4   mMaskLight3
+   0x8C    4    0xA4    4   mMaskLight4
+   0x90    4    0xA8    4   mMaskLight5
+   0x94   12    0xAC   12   m_Center
+   0xA0    4    0xB8    8   m_pChunk
+   0xA4    4    0xC0    8   m_pBuffer
+   0xA8    4    0xC8    8   m_Faces
+   0xAC    4    0xD0    8   m_LIndicies
+
+CRE2DQuad    x86 0xA8    x64 0xC0
+    0x0    4     0x0    8   CRendElement::{vfptr}
+    0x4    4     0x8    4   CRendElement::m_Type
+    0x8    4     0xC    4   CRendElement::m_Flags
+    0xC    4    0x10    4   CRendElement::m_nCountCustomData
+   0x10    4    0x18    8   CRendElement::m_CustomData
+   0x14    4    0x20    4   CRendElement::m_fFogScale
+   0x18   32    0x24   32   CRendElement::m_CustomTexBind
+   0x38   16    0x44   16   CRendElement::m_Color
+   0x48    4    0x54    4   CRendElement::m_SortId
+   0x4C    4    0x58    8   CRendElement::m_NextGlobal
+   0x50    4    0x60    8   CRendElement::m_PrevGlobal
+   0x54    4    0x68    8   CRendElement::m_LastVP
+   0x58   80    0x70   80   m_arrVerts
+
+CRESky    x86 0x270    x64 0x290
+    0x0    4     0x0    8   CRendElement::{vfptr}
+    0x4    4     0x8    4   CRendElement::m_Type
+    0x8    4     0xC    4   CRendElement::m_Flags
+    0xC    4    0x10    4   CRendElement::m_nCountCustomData
+   0x10    4    0x18    8   CRendElement::m_CustomData
+   0x14    4    0x20    4   CRendElement::m_fFogScale
+   0x18   32    0x24   32   CRendElement::m_CustomTexBind
+   0x38   16    0x44   16   CRendElement::m_Color
+   0x48    4    0x54    4   CRendElement::m_SortId
+   0x4C    4    0x58    8   CRendElement::m_NextGlobal
+   0x50    4    0x60    8   CRendElement::m_PrevGlobal
+   0x54    4    0x68    8   CRendElement::m_LastVP
+   0x58    4    0x70    4   m_fTerrainWaterLevel
+   0x5C    4    0x74    4   m_fSkyBoxStretching
+   0x60    4    0x78    4   m_fAlpha
+   0x64    4    0x7C    4   m_nSphereListId
+   0x68    4    0x80    8   m_parrFogLayer
+   0x6C    4    0x88    8   m_parrFogLayer2
+   0x70  512    0x90  512   m_arrvPortalVerts
+
+CREScreenProcess    x86 0x5C    x64 0x78
+    0x0    4     0x0    8   CRendElement::{vfptr}
+    0x4    4     0x8    4   CRendElement::m_Type
+    0x8    4     0xC    4   CRendElement::m_Flags
+    0xC    4    0x10    4   CRendElement::m_nCountCustomData
+   0x10    4    0x18    8   CRendElement::m_CustomData
+   0x14    4    0x20    4   CRendElement::m_fFogScale
+   0x18   32    0x24   32   CRendElement::m_CustomTexBind
+   0x38   16    0x44   16   CRendElement::m_Color
+   0x48    4    0x54    4   CRendElement::m_SortId
+   0x4C    4    0x58    8   CRendElement::m_NextGlobal
+   0x50    4    0x60    8   CRendElement::m_PrevGlobal
+   0x54    4    0x68    8   CRendElement::m_LastVP
+   0x58    4    0x70    8   m_pVars
+
+CREOcclusionQuery    x86 0x80    x64 0xA0
+    0x0    4     0x0    8   CRendElement::{vfptr}
+    0x4    4     0x8    4   CRendElement::m_Type
+    0x8    4     0xC    4   CRendElement::m_Flags
+    0xC    4    0x10    4   CRendElement::m_nCountCustomData
+   0x10    4    0x18    8   CRendElement::m_CustomData
+   0x14    4    0x20    4   CRendElement::m_fFogScale
+   0x18   32    0x24   32   CRendElement::m_CustomTexBind
+   0x38   16    0x44   16   CRendElement::m_Color
+   0x48    4    0x54    4   CRendElement::m_SortId
+   0x4C    4    0x58    8   CRendElement::m_NextGlobal
+   0x50    4    0x60    8   CRendElement::m_PrevGlobal
+   0x54    4    0x68    8   CRendElement::m_LastVP
+   0x58    4    0x70    4   m_nVisSamples
+   0x5C    4    0x74    4   m_nCheckFrame
+   0x60    4    0x78    4   m_nDrawFrame
+   0x64   12    0x7C   12   m_vBoxMin
+   0x70   12    0x88   12   m_vBoxMax
+   0x7C    4    0x98    8   m_nOcclusionID
+
+CREGlare    x86 0x64    x64 0x80
+    0x0    4     0x0    8   CRendElement::{vfptr}
+    0x4    4     0x8    4   CRendElement::m_Type
+    0x8    4     0xC    4   CRendElement::m_Flags
+    0xC    4    0x10    4   CRendElement::m_nCountCustomData
+   0x10    4    0x18    8   CRendElement::m_CustomData
+   0x14    4    0x20    4   CRendElement::m_fFogScale
+   0x18   32    0x24   32   CRendElement::m_CustomTexBind
+   0x38   16    0x44   16   CRendElement::m_Color
+   0x48    4    0x54    4   CRendElement::m_SortId
+   0x4C    4    0x58    8   CRendElement::m_NextGlobal
+   0x50    4    0x60    8   CRendElement::m_PrevGlobal
+   0x54    4    0x68    8   CRendElement::m_LastVP
+   0x58    4    0x70    4   m_GlareWidth
+   0x5C    4    0x74    4   m_GlareHeight
+   0x60    4    0x78    4   m_fGlareAmount
+
+CREFlashBang    x86 0x74    x64 0x90
+    0x0    4     0x0    8   CRendElement::{vfptr}
+    0x4    4     0x8    4   CRendElement::m_Type
+    0x8    4     0xC    4   CRendElement::m_Flags
+    0xC    4    0x10    4   CRendElement::m_nCountCustomData
+   0x10    4    0x18    8   CRendElement::m_CustomData
+   0x14    4    0x20    4   CRendElement::m_fFogScale
+   0x18   32    0x24   32   CRendElement::m_CustomTexBind
+   0x38   16    0x44   16   CRendElement::m_Color
+   0x48    4    0x54    4   CRendElement::m_SortId
+   0x4C    4    0x58    8   CRendElement::m_NextGlobal
+   0x50    4    0x60    8   CRendElement::m_PrevGlobal
+   0x54    4    0x68    8   CRendElement::m_LastVP
+   0x58    1    0x70    1   m_bIsActive
+   0x5C    4    0x74    4   m_fTimeScale
+   0x60    4    0x78    4   m_fFlashTimeOut
+   0x64    4    0x7C    4   m_fPosX
+   0x68    4    0x80    4   m_fPosY
+   0x6C    4    0x84    4   m_fSizeX
+   0x70    4    0x88    4   m_fSizeY
+
+CRETriMeshShadow    x86 0x3E8    x64 0x588
+    0x0    4     0x0    8   CRendElement::{vfptr}
+    0x4    4     0x8    4   CRendElement::m_Type
+    0x8    4     0xC    4   CRendElement::m_Flags
+    0xC    4    0x10    4   CRendElement::m_nCountCustomData
+   0x10    4    0x18    8   CRendElement::m_CustomData
+   0x14    4    0x20    4   CRendElement::m_fFogScale
+   0x18   32    0x24   32   CRendElement::m_CustomTexBind
+   0x38   16    0x44   16   CRendElement::m_Color
+   0x48    4    0x54    4   CRendElement::m_SortId
+   0x4C    4    0x58    8   CRendElement::m_NextGlobal
+   0x50    4    0x60    8   CRendElement::m_PrevGlobal
+   0x54    4    0x68    8   CRendElement::m_LastVP
+   0x58  896    0x70 1280   m_arrLBuffers
+  0x3D8    4   0x570    4   m_nCurrInst
+  0x3DC    4   0x574    4   m_nRendIndices
+  0x3E0    1   0x578    1   m_bAnimatedObject
+  0x3E4    4   0x580    8   m_pSvObj
+
+CREPolyMesh    x86 0x88    x64 0xB0
+    0x0    4     0x0    8   CRendElement::{vfptr}
+    0x4    4     0x8    4   CRendElement::m_Type
+    0x8    4     0xC    4   CRendElement::m_Flags
+    0xC    4    0x10    4   CRendElement::m_nCountCustomData
+   0x10    4    0x18    8   CRendElement::m_CustomData
+   0x14    4    0x20    4   CRendElement::m_fFogScale
+   0x18   32    0x24   32   CRendElement::m_CustomTexBind
+   0x38   16    0x44   16   CRendElement::m_Color
+   0x48    4    0x54    4   CRendElement::m_SortId
+   0x4C    4    0x58    8   CRendElement::m_NextGlobal
+   0x50    4    0x60    8   CRendElement::m_PrevGlobal
+   0x54    4    0x68    8   CRendElement::m_LastVP
+   0x58   16    0x70   16   m_Plane
+   0x68    4    0x80    8   Srf
+   0x6C    4    0x88    4   NumVerts
+   0x70    4    0x8C    4   NumIndices
+   0x74    4    0x90    8   TriVerts
+   0x78    4    0x98    8   bNoDeform
+   0x7C    4    0xA0    8   Indices
+   0x80    4    0xA8    4   NumLightRE
+   0x84    4    0xAC    4   mFrameBr
+
+SShaderItem    x86 0x8    x64 0x10
+    0x0    4     0x0    8   m_pShader
+    0x4    4     0x8    8   m_pShaderResources
+
+SRenderShaderResources    x86 0x90    x64 0xF8
+    0x0    4     0x0    8   {vfptr}
+    0x4    4     0x8    4   SBaseShaderResources::m_ResFlags
+    0x8    4     0xC    4   SBaseShaderResources::m_Opacity
+    0xC    4    0x10    4   SBaseShaderResources::m_AlphaRef
+   0x10    4    0x18    8   SBaseShaderResources::m_LMaterial
+   0x14   12    0x20   16   SBaseShaderResources::m_ShaderParams
+   0x20    4    0x30    8   SBaseShaderResources::m_TexturePath
+   0x24    4    0x38    4   m_Id
+   0x28    4    0x3C    4   m_nRefCounter
+   0x2C    4    0x40    4   m_nCheckedTemplates
+   0x30    1    0x44    1   m_bNeedNormals
+   0x34   80    0x48  160   m_Textures
+   0x84    4    0xE8    4   m_nLastTexture
+   0x88    4    0xEC    4   m_nFrameLoad
+   0x8C    4    0xF0    4   m_fMinDistanceLoad
+
+SEfResTexture    x86 0x11C    x64 0x130
+    0x0    4     0x0    8   m_Name
+    0x4    1     0x8    1   m_TexFlags
+    0x5    1     0x9    1   m_Amount
+    0x6    1     0xA    1   m_bUTile
+    0x7    1     0xB    1   m_bVTile
+    0x8  248     0xC  248   m_TexModificator
+  0x100   28   0x108   40   m_TU
+
+SEfTexModificator    x86 0xF8    x64 0xF8
+    0x0    1     0x0    1   m_eTGType
+    0x1    1     0x1    1   m_eRotType
+    0x2    1     0x2    1   m_eUMoveType
+    0x3    1     0x3    1   m_eVMoveType
+    0x4    1     0x4    1   m_bTexGenProjected
+    0x8   12     0x8   12   m_Tiling
+   0x14   12    0x14   12   m_Offs
+   0x20    6    0x20    6   m_Rot
+   0x26    6    0x26    6   m_RotOscRate
+   0x2C    6    0x2C    6   m_RotOscAmplitude
+   0x32    6    0x32    6   m_RotOscPhase
+   0x38   12    0x38   12   m_RotOscCenter
+   0x44    4    0x44    4   m_UOscRate
+   0x48    4    0x48    4   m_VOscRate
+   0x4C    4    0x4C    4   m_UOscAmplitude
+   0x50    4    0x50    4   m_VOscAmplitude
+   0x54    4    0x54    4   m_UOscPhase
+   0x58    4    0x58    4   m_VOscPhase
+   0x5C    4    0x5C    4   m_nFrameUpdated
+   0x60    4    0x60    4   m_nLastRecursionLevel
+   0x64    4    0x64    4   m_UpdateFlags
+   0x68   64    0x68   64   m_TexMatrix
+   0xA8   64    0xA8   64   m_TexGenMatrix
+   0xE8    4    0xE8    4   m_LastUTime
+   0xEC    4    0xEC    4   m_LastVTime
+   0xF0    4    0xF0    4   m_CurrentUJitter
+   0xF4    4    0xF4    4   m_CurrentVJitter
+
+SLightMaterial    x86 0xD8    x64 0xD8
+    0x0    4     0x0    4   Id
+    0x4   64     0x4   64   name
+   0x44    4    0x44    4   side
+   0x48    4    0x48    4   m_nRefCounter
+   0x4C   68    0x4C   68   Front
+   0x90   68    0x90   68   Back
+   0xD4    1    0xD4    1   bNeverReplace
+
+SShaderParam    x86 0x38    x64 0x40
+    0x0   32     0x0   32   m_Name
+   0x20    4    0x20    4   m_Type
+   0x24   16    0x28   16   m_Value
+   0x34    4    0x38    4   m_nMaterial
+
+SWaveForm    x86 0x28    x64 0x28
+    0x0    4     0x0    4   m_eWFType
+    0x4    1     0x4    1   m_Flags
+    0x8    4     0x8    4   m_Level
+    0xC    4     0xC    4   m_Level1
+   0x10    4    0x10    4   m_Amp
+   0x14    4    0x14    4   m_Amp1
+   0x18    4    0x18    4   m_Phase
+   0x1C    4    0x1C    4   m_Phase1
+   0x20    4    0x20    4   m_Freq
+   0x24    4    0x24    4   m_Freq1
+
+STexAnim    x86 0x1C    x64 0x20
+    0x0   12     0x0   16   m_TexPics
+    0xC    4    0x10    4   m_Rand
+   0x10    4    0x14    4   m_NumAnimTexs
+   0x14    1    0x18    1   m_bLoop
+   0x18    4    0x1C    4   m_Time
+
+AnimTexInfo    x86 0x10C    x64 0x110
+    0x0  256     0x0  256   sName
+  0x100    4   0x100    8   pBindIds
+  0x104    4   0x108    4   nFramesCount
+  0x108    4   0x10C    4   nRefCounter
+
+====================================================================================================
+Structures the engine passes to the renderer
+====================================================================================================
+
+SRendParams    x86 0x94    x64 0xC8
+    0x0   12     0x0   12   vPos
+    0xC    4     0xC    4   fScale
+   0x10   12    0x10   12   vAngles
+   0x1C    4    0x20    8   pMatrix
+   0x20    4    0x28    4   fCustomSortOffset
+   0x24    4    0x2C    4   nShaderTemplate
+   0x28    4    0x30    4   nDLightMask
+   0x2C    4    0x34    4   nStrongestDLightMask
+   0x30    4    0x38    4   nFogVolumeID
+   0x34    4    0x3C    4   fBending
+   0x38    4    0x40    8   pStateShader
+   0x3C    4    0x48    8   pShadowMapCasters
+   0x40   12    0x50   12   vColor
+   0x4C    4    0x5C    4   fAlpha
+   0x50    4    0x60    4   nSortValue
+   0x54   12    0x64   12   vAmbientColor
+   0x60    4    0x70    4   fDistance
+   0x64    4    0x74    4   dwFObjFlags
+   0x68    4    0x78    8   pShadowVolumeLightSource
+   0x6C    4    0x80    8   pCaller
+   0x70    4    0x88    4   fHeatAmount
+   0x74    4    0x8C    4   fShadowVolumeExtent
+   0x78    4    0x90    8   pLightMapInfo
+   0x7C    4    0x98    8   pLMTCBuffer
+   0x80    4    0xA0    4   arrOcclusionLightIds
+   0x84    4    0xA8    8   pMaterial
+   0x88    4    0xB0    8   pShaderParams
+   0x8C    4    0xB8    4   fSQDistance
+   0x90    4    0xC0    8   pCCObjCustomData
+
+CDLight    x86 0x1FC    x64 0x280
+    0x0    4     0x0    4   m_Id
+    0x4   12     0x4   12   m_Origin
+   0x10   12    0x10   12   m_BaseOrigin
+   0x1C   16    0x1C   16   m_Color
+   0x2C   16    0x2C   16   m_BaseColor
+   0x3C   16    0x3C   16   m_SpecColor
+   0x4C   16    0x4C   16   m_BaseSpecColor
+   0x5C   12    0x5C   12   m_vObjectSpacePos
+   0x68    4    0x68    4   m_fRadius
+   0x6C    4    0x6C    4   m_fBaseRadius
+   0x70    4    0x70    4   m_fDirectFactor
+   0x74    4    0x74    4   m_fStartRadius
+   0x78    4    0x78    4   m_fEndRadius
+   0x7C    4    0x7C    4   m_fLastTime
+   0x80    4    0x80    4   m_NumCM
+   0x84    2    0x84    2   m_sX
+   0x86    2    0x86    2   m_sY
+   0x88    2    0x88    2   m_sWidth
+   0x8A    2    0x8A    2   m_sHeight
+   0x8C    4    0x8C    4   m_fNear
+   0x90    4    0x90    4   m_fFar
+   0x94    4    0x98    8   m_pOwner
+   0x98    4    0xA0    4   m_nReserved
+   0x9C   36    0xA4   36   m_Orientation
+   0xC0    4    0xC8    4   m_CustomTextureId
+   0xC4   64    0xCC   64   m_TextureMatrix
+  0x104   64   0x110  128   m_pObject
+  0x144    4   0x190    8   m_pLightImage
+  0x148    4   0x198    4   m_fLightFrustumAngle
+  0x14C    4   0x19C    4   m_fBaseLightFrustumAngle
+  0x150    4   0x1A0    4   m_fAnimSpeed
+  0x154    4   0x1A8    8   m_pShader
+  0x158   12   0x1B0   12   m_ProjAngles
+  0x164   12   0x1BC   12   m_BaseProjAngles
+  0x170    4   0x1C8    4   m_Flags
+  0x174   64   0x1CC   64   m_Name
+  0x1B4    4   0x20C    4   m_nLightStyle
+  0x1B8    4   0x210    4   m_fCoronaScale
+  0x1BC    4   0x214    4   m_fStartTime
+  0x1C0    4   0x218    4   m_fLifeTime
+  0x1C4    8   0x21C    8   m_sDebugName
+  0x1CC    4   0x228    8   m_pShadowMapLightSource
+  0x1D0   32   0x230   64   m_arrLightLeafBuffers
+  0x1F0    4   0x270    4   m_nEntityLightId
+  0x1F4    4   0x274    4   m_nFrameID
+  0x1F8    4   0x278    8   m_pCharInstance
+
+CCamera    x86 0x200    x64 0x208
+    0x0   12     0x0   12   m_Position
+    0xC   12     0xC   12   m_OldPosition
+   0x18   12    0x18   12   m_GameAnglesDeg
+   0x24   12    0x24   12   m_CameraAnglesRad
+   0x30    4    0x30    4   m_fov
+   0x34   12    0x34   12   m_Scale
+   0x40    4    0x40    4   m_ViewSurfaceX
+   0x44    4    0x44    4   m_ViewSurfaceZ
+   0x48    4    0x48    4   m_ProjectionRatio
+   0x4C   12    0x4C   12   m_edge_nlt
+   0x58   12    0x58   12   m_edge_plt
+   0x64   12    0x64   12   m_edge_flt
+   0x70    4    0x70    4   m_ZMax
+   0x74   96    0x74   96   m_frustum
+   0xD4   96    0xD4   96   m_fp
+  0x134   12   0x134   12   cltp
+  0x140   12   0x140   12   crtp
+  0x14C   12   0x14C   12   clbp
+  0x158   12   0x158   12   crbp
+  0x164   48   0x164   48   m_VMat
+  0x194   64   0x194   64   m_VCMatD3D9
+  0x1D4   12   0x1D4   12   m_OccPosition
+  0x1E0   12   0x1E0   12   m_vOffset
+  0x1EC    4   0x1F0    8   m_pPortal
+  0x1F0    8   0x1F8    8   m_ScissorInfo
+  0x1F8    8   0x200    8   m_ScissorInfoParent
+
+SInputShaderResources    x86 0x1650    x64 0x17F0
+    0x0    4     0x0    4   SBaseShaderResources::m_ResFlags
+    0x4    4     0x4    4   SBaseShaderResources::m_Opacity
+    0x8    4     0x8    4   SBaseShaderResources::m_AlphaRef
+    0xC    4    0x10    8   SBaseShaderResources::m_LMaterial
+   0x10   12    0x18   16   SBaseShaderResources::m_ShaderParams
+   0x1C    4    0x28    8   SBaseShaderResources::m_TexturePath
+   0x20 5680    0x30 6080   m_Textures
+
+CIndexedMesh    x86 0x9C    x64 0xD8
+    0x0    4     0x0    8   m_pFaces
+    0x4    4     0x8    8   m_pVerts
+    0x8    4    0x10    8   m_pCoors
+    0xC    4    0x18    8   m_pTangBasis
+   0x10    4    0x20    8   m_pVertMats
+   0x14    4    0x28    8   m_pNorms
+   0x18    4    0x30    8   m_pColor
+   0x1C    4    0x38    8   m_pColorSec
+   0x20    4    0x40    4   m_nFaceCount
+   0x24    4    0x44    4   m_nVertCount
+   0x28    4    0x48    4   m_nCoorCount
+   0x2C    4    0x4C    4   m_nNormCount
+   0x30   12    0x50   12   m_vBoxMin
+   0x3C   12    0x5C   12   m_vBoxMax
+   0x48   12    0x68   16   m_lstMatTable
+   0x54   12    0x78   16   m_lstGeomNames
+   0x60    8    0x88    8   m_fileTime
+   0x68    4    0x90    8   m_pSystem
+   0x6C   12    0x98   12   m_vOrigin
+   0x78   12    0xA8   16   m_lstHelpers
+   0x84   12    0xB8   16   m_tgtLSources
+   0x90   12    0xC8   16   m_lstLSources
+
+CObjFace    x86 0x58    x64 0x58
+    0x0    6     0x0    6   v
+    0x6    6     0x6    6   t
+    0xC    6     0xC    6   n
+   0x12    6    0x12    6   b
+   0x18    2    0x18    2   shader_id
+   0x1A    1    0x1A    1   m_bLit
+   0x1C   16    0x1C   16   m_Plane
+   0x2C   36    0x2C   36   m_Vecs
+   0x50    1    0x50    1   m_dwFlags
+   0x54    4    0x54    4   m_fArea
+
+TexCoord    x86 0x8    x64 0x8
+    0x0    4     0x0    4   s
+    0x4    4     0x4    4   t
+
+VertexBufferSource    x86 0x38    x64 0x70
+    0x0    4     0x0    4   numMaterials
+    0x4    4     0x8    8   pMaterials
+    0x8    4    0x10    8   pShaders
+    0xC    4    0x18    8   pMats
+   0x10    4    0x20    8   pOrFlags
+   0x14    4    0x28    8   pAndFlags
+   0x18    4    0x30    4   numPrimGroups
+   0x1C    4    0x38    8   pPrimGroups
+   0x20    4    0x40    4   numIndices
+   0x24    4    0x48    8   pIndices
+   0x28    4    0x50    4   numVertices
+   0x2C    4    0x58    8   pVertices
+   0x30    4    0x60    8   pUVs
+   0x34    4    0x68    4   nREFlags
+
+SColorVert    x86 0x18    x64 0x18
+    0x0   12     0x0   12   vert
+    0xC    8     0xC    8   dTC
+   0x14    4    0x14    4   color
+
+SColorVert2D    x86 0x14    x64 0x14
+    0x0    8     0x0    8   vert
+    0x8    8     0x8    8   dTC
+   0x10    4    0x10    4   color
+
+SMRendTexVert    x86 0x8    x64 0x8
+    0x0    8     0x0    8   vert
+
+SPipTangents    x86 0x24    x64 0x24
+    0x0   12     0x0   12   m_Tangent
+    0xC   12     0xC   12   m_Binormal
+   0x18   12    0x18   12   m_TNormal
+
+SDrawTextInfo    x86 0x20    x64 0x28
+    0x0    4     0x0    4   flags
+    0x4   16     0x4   16   color
+   0x14    4    0x14    4   xscale
+   0x18    4    0x18    4   yscale
+   0x1C    4    0x20    8   xfont
+
+SDispFormat    x86 0xC    x64 0xC
+    0x0    4     0x0    4   m_Width
+    0x4    4     0x4    4   m_Height
+    0x8    4     0x8    4   m_BPP
+
+SAAFormat    x86 0x4C    x64 0x4C
+    0x0   64     0x0   64   szDescr
+   0x40    4    0x40    4   nSamples
+   0x44    4    0x44    4   nQuality
+   0x48    4    0x48    4   nAPIType
+
+====================================================================================================
+Vertex formats (VertexFormats.h; VERTEX_FORMAT_T3F_B3F_N3F is SPipTangents)
+====================================================================================================
+
+struct_VERTEX_FORMAT_P3F    x86 0xC    x64 0xC
+    0x0   12     0x0   12   xyz
+
+struct_VERTEX_FORMAT_P3F_COL4UB    x86 0x10    x64 0x10
+    0x0   12     0x0   12   xyz
+    0xC    4     0xC    4   color
+
+struct_VERTEX_FORMAT_P3F_TEX2F    x86 0x14    x64 0x14
+    0x0   12     0x0   12   xyz
+    0xC    8     0xC    8   st
+
+struct_VERTEX_FORMAT_P3F_COL4UB_TEX2F    x86 0x18    x64 0x18
+    0x0   12     0x0   12   xyz
+    0xC    4     0xC    4   color
+   0x10    8    0x10    8   st
+
+struct_VERTEX_FORMAT_TRP3F_COL4UB_TEX2F    x86 0x1C    x64 0x1C
+    0x0    4     0x0    4   x
+    0x4    4     0x4    4   y
+    0x8    4     0x8    4   z
+    0xC    4     0xC    4   rhw
+   0x10    4    0x10    4   color
+   0x14    8    0x14    8   st
+
+struct_VERTEX_FORMAT_P3F_COL4UB_COL4UB    x86 0x14    x64 0x14
+    0x0   12     0x0   12   xyz
+    0xC    4     0xC    4   color
+   0x10    4    0x10    4   seccolor
+
+struct_VERTEX_FORMAT_P3F_N    x86 0x18    x64 0x18
+    0x0   12     0x0   12   xyz
+    0xC   12     0xC   12   normal
+
+struct_VERTEX_FORMAT_P3F_N_COL4UB    x86 0x1C    x64 0x1C
+    0x0   12     0x0   12   xyz
+    0xC   12     0xC   12   normal
+   0x18    4    0x18    4   color
+
+struct_VERTEX_FORMAT_P3F_N_TEX2F    x86 0x20    x64 0x20
+    0x0   12     0x0   12   xyz
+    0xC   12     0xC   12   normal
+   0x18    8    0x18    8   st
+
+struct_VERTEX_FORMAT_P3F_N_COL4UB_TEX2F    x86 0x24    x64 0x24
+    0x0   12     0x0   12   xyz
+    0xC   12     0xC   12   normal
+   0x18    4    0x18    4   color
+   0x1C    8    0x1C    8   st
+
+struct_VERTEX_FORMAT_P3F_N_COL4UB_COL4UB    x86 0x20    x64 0x20
+    0x0   12     0x0   12   xyz
+    0xC   12     0xC   12   normal
+   0x18    4    0x18    4   color
+   0x1C    4    0x1C    4   seccolor
+
+struct_VERTEX_FORMAT_P3F_COL4UB_COL4UB_TEX2F    x86 0x1C    x64 0x1C
+    0x0   12     0x0   12   xyz
+    0xC    4     0xC    4   color
+   0x10    4    0x10    4   seccolor
+   0x14    8    0x14    8   st
+
+struct_VERTEX_FORMAT_P3F_N_COL4UB_COL4UB_TEX2F    x86 0x28    x64 0x28
+    0x0   12     0x0   12   xyz
+    0xC   12     0xC   12   normal
+   0x18    4    0x18    4   color
+   0x1C    4    0x1C    4   seccolor
+   0x20    8    0x20    8   st
+
+struct_VERTEX_FORMAT_TEX2F    x86 0x8    x64 0x8
+    0x0    8     0x0    8   st
+
+struct_VERTEX_FORMAT_P3F_COL4UB_TEX2F_TEX2F    x86 0x20    x64 0x20
+    0x0   12     0x0   12   xyz
+    0xC    4     0xC    4   color
+   0x10    8    0x10    8   st0
+   0x18    8    0x18    8   st1
+
+====================================================================================================
+Small value types and containers
+====================================================================================================
+
+CFColor    x86 0x10    x64 0x10
+    0x0    4     0x0    4   r
+    0x4    4     0x4    4   g
+    0x8    4     0x8    4   b
+    0xC    4     0xC    4   a
+
+SWaveForm2    x86 0x14    x64 0x14
+    0x0    4     0x0    4   m_eWFType
+    0x4    4     0x4    4   m_Level
+    0x8    4     0x8    4   m_Amp
+    0xC    4     0xC    4   m_Phase
+   0x10    4    0x10    4   m_Freq
+
+SBufInfoTable    x86 0x10    x64 0x10
+    0x0    4     0x0    4   OffsTC
+    0x4    4     0x4    4   OffsColor
+    0x8    4     0x8    4   OffsSecColor
+    0xC    4     0xC    4   OffsNormal
+
+list2<struct CMatInfo>    x86 0xC    x64 0x10
+    0x0    4     0x0    8   m_pElements
+    0x4    4     0x8    4   m_nCount
+    0x8    4     0xC    4   m_nAllocatedCount
+
+TArray<unsigned short>    x86 0xC    x64 0x10
+    0x0    4     0x0    8   m_pElements
+    0x4    4     0x8    4   m_nCount
+    0x8    4     0xC    4   m_nAllocatedCount
+
+TArray<struct SShaderParam>    x86 0xC    x64 0x10
+    0x0    4     0x0    8   m_pElements
+    0x4    4     0x8    4   m_nCount
+    0x8    4     0xC    4   m_nAllocatedCount
