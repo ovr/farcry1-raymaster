@@ -58,6 +58,23 @@ CRendererProxy::CRendererProxy(IRenderer *pReal, int nRealType)
     m_nCaptureAfterLoad = atoi(szFrame);
   if (m_nCaptureAfterLoad > 0)
     Trace_Write("Will capture frame %d after each level load", m_nCaptureAfterLoad);
+
+  char szWatch[256];
+  nLen = GetEnvironmentVariableA("XRENDERTRACED_SCREENFX_WATCH", szWatch, sizeof(szWatch));
+  for (const char *p = (nLen && nLen < sizeof(szWatch)) ? szWatch : ""; *p && m_nScreenWatch < 8;)
+  {
+    int nProcess, nParam;
+    if (sscanf_s(p, "%d.%d", &nProcess, &nParam) == 2)
+    {
+      m_ScreenWatch[m_nScreenWatch][0] = nProcess;
+      m_ScreenWatch[m_nScreenWatch][1] = nParam;
+      m_ScreenWatchLast[m_nScreenWatch++] = 0x7fc0dead;
+    }
+    p = strchr(p, ',');
+    if (!p)
+      break;
+    p++;
+  }
 }
 
 CRendererProxy::~CRendererProxy()
@@ -184,6 +201,7 @@ void CRendererProxy::PreLoad()
   Trace_Restart("PreLoad");
   TRACE_CALL("");
   m_pReal->PreLoad();
+  m_pScreenRE = NULL;
 }
 
 void CRendererProxy::PostLoad()
@@ -225,6 +243,7 @@ void CRendererProxy::Update()
     if (m_nFrames + 1 == m_nCaptureFrame)
       Trace_CaptureFrame();
   }
+  WatchScreenFx();
   // Outside the traced call: the commands run engine code (a level load) that calls the renderer,
   // and those calls are calls of the engine, not of the renderer to itself.
   if (m_nFrames == m_nExecFrame && m_szExec[0])
@@ -234,6 +253,23 @@ void CRendererProxy::Update()
   }
   if (m_nFrames == m_nExecLevelFrame)
     ExecuteCommands(m_szExecLevel);
+}
+
+void CRendererProxy::WatchScreenFx()
+{
+  if (!m_pScreenRE || !m_nScreenWatch || m_nScreenWatchLines >= 2000)
+    return;
+  for (int i = 0; i < m_nScreenWatch; i++)
+  {
+    const int *pValue = (const int *)((CREScreenProcess *)m_pScreenRE)->mfGetParameter(m_ScreenWatch[i][0], m_ScreenWatch[i][1]);
+    if (!pValue || *pValue == m_ScreenWatchLast[i])
+      continue;
+    m_ScreenWatchLast[i] = *pValue;
+    Trace_Write("[screenfx watch] frame %d time %.4f frame time %.4f: process %d param %d = float %g, first byte %d", m_nFrames,
+      iTimer ? iTimer->GetCurrTime() : 0.0f, iTimer ? iTimer->GetFrameTime() : 0.0f, m_ScreenWatch[i][0], m_ScreenWatch[i][1],
+      *(const float *)pValue, *(const unsigned char *)pValue);
+    m_nScreenWatchLines++;
+  }
 }
 
 void CRendererProxy::ExecuteCommands(const char *szCommands)

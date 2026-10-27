@@ -433,6 +433,8 @@ void CRendererProxy::EF_AddEf(int NumFog, CRendElement *re, IShader *ef, SRender
 {
   TRACE_CALL("fog %d RE %p %s shader %p '%s' res %p obj %p templ %d state %p '%s' sort %d", NumFog, re, re ? Trace_RETypeName(re->m_Type) : "",
     ef, ShaderName(ef), sr, obj, nTempl, efState, efState ? ShaderName(efState) : "", nSort);
+  if (re && re->m_Type == eDATA_ScreenProcess)
+    m_pScreenRE = re;
   if (re && re->m_Type == eDATA_Sky)
   {
     if (m_bSkyWater)

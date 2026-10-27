@@ -138,6 +138,8 @@ static int s_nSelf = -1;
 
 //! The screen effect calls by method, process and parameter, and how often each was made.
 static std::map<unsigned int, int> s_ScreenCalls;
+//! XRENDERTRACED_SCREENFX_ALL=1: every screen effect call is written out, with the timer's time.
+static int s_nScreenAll = -1;
 
 //////////////////////////////////////////////////////////////////////////
 // Modules
@@ -219,7 +221,12 @@ static bool CountScreenCall(ESpecial eSpecial, int nProcess, int nParam)
   AcquireSRWLockExclusive(&s_Lock);
   int nCount = ++s_ScreenCalls[nKey];
   ReleaseSRWLockExclusive(&s_Lock);
-  return nCount <= nLogPerScreenParam || nCount % nLogScreenEvery == 0;
+  if (s_nScreenAll < 0)
+  {
+    char szEnv[8];
+    s_nScreenAll = GetEnvironmentVariableA("XRENDERTRACED_SCREENFX_ALL", szEnv, sizeof(szEnv)) && szEnv[0] == '1';
+  }
+  return s_nScreenAll || nCount <= nLogPerScreenParam || nCount % nLogScreenEvery == 0;
 }
 
 static void ScreenCall_Enter(SVCallFrame *pFrame)
@@ -255,8 +262,9 @@ static void ScreenCall_Leave(SVCallFrame *pFrame)
   if (pFrame->pSlot->eSpecial == SPECIAL_ScreenSetParameter)
     Trace_Write("[screenfx]   mfSetParameter(process %d, param %d) -> %d", nProcess, nParam, (int)pFrame->nResult);
   else if (pFrame->pSlot->eSpecial == SPECIAL_ScreenGetParameter)
-    Trace_Write("[screenfx] %p mfGetParameter(process %d, param %d) -> %p: %s, from %s", (void *)pFrame->Args[0], nProcess, nParam,
-      (void *)pFrame->nResult, ScreenValueText((void *)pFrame->nResult), Trace_Addr(pFrame->pReturn));
+    Trace_Write("[screenfx] %p mfGetParameter(process %d, param %d) -> %p: %s, from %s, time %.4f", (void *)pFrame->Args[0], nProcess,
+      nParam, (void *)pFrame->nResult, ScreenValueText((void *)pFrame->nResult), Trace_Addr(pFrame->pReturn),
+      iTimer ? iTimer->GetCurrTime() : 0.0f);
 }
 
 //! The arguments of the CCObject methods (written after the [vcall] line).

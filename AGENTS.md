@@ -54,6 +54,11 @@ it as well: it holds local, machine-specific instructions and is not committed (
   the engine's value); `view maxdist fogstart fogend` calls `I3DEngine::SetMaxViewDistance`,
   `SetFogStart`, `SetFogEnd` (`-`: unchanged); `heatvision 0|1` calls
   `I3DEngine::EnableHeatVision`.
+- The screen effect calls (`CREScreenProcess::mfSetParameter`, `mfGetParameter`) are written as
+  `[screenfx]` lines (the first 8 of each parameter, then every 50th); `XRENDERTRACED_SCREENFX_ALL=1`
+  writes all of them, with the timer's time. `XRENDERTRACED_SCREENFX_WATCH=8.24,8.30` reads those
+  parameters (process.param) from the ScreenProcess element after every frame and writes
+  `[screenfx watch]` lines with the frame, the time and the frame time when a value changes.
 - `XRENDERTRACED_TRACE_METHODS` (names as in the log, separated by `,`, e.g.
   `DownLoadToVideoMemory,CLeafBuffer::CreateBufferFromSource`) writes every call of those methods,
   not only the first `xrt_TraceCalls`.

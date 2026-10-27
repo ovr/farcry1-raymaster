@@ -11,7 +11,8 @@
 //	arguments and results, and call the original function
 //	(VCallThunk_x64.asm). The slots and their names come from
 //	mod/XRenderCommon/VTables.inl. The calls of CREScreenProcess::mfActivate,
-//	mfSetParameter and mfGetParameter (the screen effects) are all written out.
+//	mfSetParameter and mfGetParameter (the screen effects) are written out (the
+//	first ones of each parameter; all with XRENDERTRACED_SCREENFX_ALL=1).
 //	x64 only; XRENDERTRACED_NO_VCALL_HOOKS=1 turns them off.
 //
 //////////////////////////////////////////////////////////////////////

@@ -285,4 +285,13 @@ private:
   int m_nCaptureFrame;
   //! Frames finished by Update (the engine's frame ID also counts recursive scene renders).
   int m_nFrames;
+  //! XRENDERTRACED_SCREENFX_WATCH="8.24,8.30": after every frame the values of these screen effect
+  //! parameters (process.param) are read from the ScreenProcess element the engine adds, and
+  //! written when they change.
+  void WatchScreenFx();
+  CRendElement *m_pScreenRE = NULL;
+  int m_nScreenWatch = 0;
+  int m_ScreenWatch[8][2];
+  int m_ScreenWatchLast[8];
+  int m_nScreenWatchLines = 0;
 };
