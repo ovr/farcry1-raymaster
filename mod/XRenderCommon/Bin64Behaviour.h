@@ -395,6 +395,11 @@ static const int nHeapAlignment = 4;
 // surfaces). The shader returned has EF_NOTFOUND set (there is no shader of the material's name);
 // GetTemplate(-1) returns the template that is actually used, which the renderer picks (with
 // farcry1_testing1's settings mostly "templdiffuse_fp"; "nodraw" for "NoDraw").
+// GetName of a material's shader is the material name in lower case. A name loaded again with a
+// template that resolves to another GetTemplate(-1) gives a separate shader named "<name>_<n>"
+// (n counts the shaders made for that name: "materialcontainer_1" ... "materialcontainer_17" on
+// Archive); templates that resolve to the same one share a shader. Names are not unique (two
+// shaders "20 - default_1" with different ids on Archive); GetID is.
 //
 // The values the engine reads:
 //   GetTemplate(-1)->GetFlags2() & EF2_OPAQUE: SShaderItem::IsTransparent (IShader.h), called for
@@ -417,27 +422,50 @@ static const int nHeapAlignment = 4;
 //   GetPublicParams: empty except for water and glass shaders (waveamplitude, bumpamountx,
 //     bumpamounty, reflectamount, refrbumpamount, opacity, ...).
 //
-// The templates the materials of seven levels name (case varies, the renderer ignores it), with
+// The templates the materials of the 20 levels name (case varies, the renderer ignores it), with
 // the template GetTemplate(-1) returns under farcry1_testing1's settings (r_Quality_BumpMapping 0),
 // its sort and its flags2:
 //   TemplBumpDiffuse, TemplBumpDiffuse_AlphaGlow, TemplBumpDiffuse_GlossAlphaSpecHigh,
-//   TemplBumpSpec, TemplBumpSpec_GlossAlpha, TemplBumpSpec_GlossAlpha_PS20, TemplBumpSpec_HP,
-//   TemplBumpSpec_HP_GlossAlpha, TemplBumpSpec_PS20, TemplModelBumpSpec_HP,
-//   TemplModelBumpSpec_HP_GlossAlpha, TemplModelCommon, TemplLightDiffuse_AlphaGlow and "TBD"
+//   TemplBumpDiffuse_GlossSpecHigh, TemplBumpDiffuse_SpecHigh, TemplBumpSpec,
+//   TemplBumpSpec_EnvCMAmb, TemplBumpSpec_EnvCMAmb_PS20, TemplBumpSpec_GlossAlpha,
+//   TemplBumpSpec_GlossAlpha_PS20, TemplBumpSpec_HP, TemplBumpSpec_HP_GlossAlpha,
+//   TemplBumpSpec_PS20, TemplModelBumpSpec_HP, TemplModelBumpSpec_HP_GlossAlpha,
+//   TemplModelCommon, TemplModelCommon_Offset_PS20, TemplLightDiffuse_AlphaGlow and "TBD"
 //     -> "templdiffuse_fp", eS_Opaque, EF2_OPAQUE | EF2_FOGOVERLAY1;
-//   TemplPlants1 -> "templdecalalphatest_vcolors", eS_Trees, EF2_OPAQUE;
+//   TemplPlants, TemplPlants1 -> "templdecalalphatest_vcolors", eS_Trees, EF2_OPAQUE;
 //   TemplPlantsBark -> "templdecal_vcolors", eS_Trees, EF2_OPAQUE;
+//   TemplBumpReflCM, TemplBumpReflCM_Light -> "templreflcm", eS_Opaque, EF2_OPAQUE |
+//     EF2_FOGOVERLAY1;
 //   TemplDecalModulate -> "templdecalmodulate_fp", eS_Decal, EF2_DONTSORTBYDIST;
 //   TemplGlassCM -> "templglasscm_fp", eS_Opaque, EF2_OPAQUE | EF2_FOGOVERLAY1;
 //   TemplMuzzleFlash_Auto -> "templmuzzleflash_auto_fp", eS_MuzzleFlash, 0;
+//   TemplHologram -> "templhologram_fp", TemplDecalOpacityShift2 -> "templdecalopacityshift2_fp",
+//     TemplDecalOpacityShift3 -> "templdecalopacityshift3_fp", MutantStealth ->
+//     "mutantstealth_fp" (eS_Banner, 0);
 //   NoDraw (also "no_draw") -> "nodraw", eS_Opaque, EF2_OPAQUE | EF2_FOGOVERLAY1;
-//   kept as named: TemplDecal, TemplDecalAlphaTest, TemplDecalGlow, TemplDecalGlowSelfIllum,
-//     TemplReflCMDecal (eS_Opaque, EF2_OPAQUE | EF2_FOGOVERLAY1), TemplDecalAlphaBlend (eS_Decal,
-//     EF2_DONTSORTBYDIST), TemplAlphaBlend, TemplDecalAdd, TemplDecalAlphaAdd,
-//     TemplTextureV22Rotate (eS_Banner, 0), TemplMuzzleFlash (eS_MuzzleFlash, 0),
-//     AW50ScopeRefraction, RLScopeRefraction (eS_Refractive, 0), TerrainLayer
-//     (eS_TerrainDetailTextures) and WaterVolume (eS_Water, 0); also named: LavaVolume,
-//     TemplBeamProc (Volcano).
+//   TerrainLayer -> "terrainlayer(<maskGen in hex>)" ("terrainlayer(7)", "terrainlayer(27)"),
+//     eS_TerrainDetailTextures, EF2_FOGOVERLAY1 | EF2_DONTSORTBYDIST;
+//   kept as named:
+//     eS_Opaque, EF2_OPAQUE | EF2_FOGOVERLAY1: TemplDecal, TemplDecalAlphaTest,
+//       TemplDecalAlphaTestForShadows, TemplDecalGlow, TemplDecalGlowSelfIllum,
+//       TemplDecalGlowSelfIllumAnimated, TemplReflCM, TemplReflCMDecal,
+//       TemplReflCMDecal_ReflAmountOpacity, TemplReflCMDecalAddSig, TemplTextureShiftT02,
+//       TemplTextureShiftT05, LavaVolume;
+//     eS_Opaque, EF2_FOGOVERLAY1 | EF2_DONTSORTBYDIST (not opaque): TemplInvLight;
+//     eS_Decal, EF2_DONTSORTBYDIST: TemplDecalAlphaBlend;
+//     eS_Banner, 0: TemplAlphaBlend, TemplDecalAdd, TemplDecalAdd_VLight, TemplDecalAlphaAdd,
+//       TemplDecalOpacity, TemplTextureV22Rotate, S_ObjectColor, FlareProc and FlareProc with a
+//       number ("FlareProc 0.025", "FlareProc 0.25", "FlareProc 0.5", "FlareProc 0.75": a template
+//       of its own for each, named with the number);
+//     eS_Banner, EF2_IGNORERESOURCESTATES: TemplBeamProc;
+//     eS_Water, 0: WaterVolume, WaterVolumeBumpReflCM;
+//     eS_HeatVision, 0: ParticleMinHeatHaze, ParticleMedHeatHaze, ParticleMaxHeatHaze;
+//     eS_MuzzleFlash, 0: TemplMuzzleFlash;
+//     eS_Refractive, 0: AG36ScopeRefraction, AW50ScopeRefraction, OICWScopeRefraction,
+//       RLScopeRefraction.
+//   A template that does not exist ("FlareProc_warmyellow", Swamp) gives a shader with EF_NOTFOUND
+//   and EF3_NOTEMPLATE whose GetTemplate(-1) is the shader itself: eS_Opaque, EF2_OPAQUE |
+//   EF2_FOGOVERLAY1.
 //   With r_Quality_BumpMapping 2 the bump and model templates keep their own names (eS_Opaque,
 //   EF2_OPAQUE | EF2_FOGOVERLAY1, vertex and pixel shaders) and TemplPlants1 stays "templplants1"
 //   (eS_Trees, EF2_OPAQUE | EF2_NOCASTSHADOWS).
