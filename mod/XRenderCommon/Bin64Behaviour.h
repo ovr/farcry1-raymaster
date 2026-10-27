@@ -1012,7 +1012,8 @@ static const int nHeapAlignment = 4;
 // The D3D9 renderer tests and draws flares and coronas only with r_Coronas 1 (0 in
 // farcry1_testing1's settings); r_Flares, r_ProcFlares and r_checkSunVis change nothing here.
 // The same steps for both, with h the half side of the drawn square:
-//   the sun: h = 0.2 * distance (20 at 100, 36 at 180, 60 at 300);
+//   the sun: h = 0.2 * r_CoronaSizeScale * distance (20 at 100, 36 at 180, 60 at 300 for 1;
+//   18 at 180 for 0.5, 72 at 180 for 2);
 //   a corona: h = 0.3 * m_fCoronaScale * r_CoronaSizeScale * distance^0.7 (0.245 at 0.75, 0.398
 //   at 1.5, 1.05 at 6, 1.71 at 12, for 1 and 1), whatever the light's radius;
 //   distance = from the camera to the flare's position (the sun's object, the light's m_Origin).
