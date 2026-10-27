@@ -373,9 +373,19 @@ static const int nHeapAlignment = 4;
 //   "templglasscm_fp": texture * texture factor (grey 25) plus a cube map looked up with the
 //     camera space reflection vector (texture transform as for "templreflcmdecal"); opaque,
 //     depth writes.
-//   "templdecalmodulate_fp", "templdecalalphablend" (eS_Decal) and "aw50scoperefraction"
-//     (eS_Refractive): nothing is drawn. The engine renders the objects as usual (the same
+//   "templdecalmodulate_fp" and "templdecalalphablend" (eS_Decal): nothing is drawn (the first
+//     also not with r_Quality_BumpMapping 2). The engine renders the objects as usual (the same
 //     CLeafBuffer::Render calls), but the renderer makes no draw for their elements on their own.
+//   "aw50scoperefraction" (eS_Refractive): nothing is drawn with r_ScopeLens_fx 0 (the default).
+//     With r_ScopeLens_fx 1 (River) the renderer first copies the whole back buffer
+//     (IDirect3DDevice9::StretchRect, no filter) into a 1024 x 768 D3DFMT_A8R8G8B8 render target
+//     texture, once per frame, right before the first element it draws with this template. It
+//     then draws the objects with a vertex and a pixel shader: stage 0 a 64 x 64 D3DFMT_X8L8V8U8
+//     bump map (wrap, linear with mip maps), stage 1 the copy (clamp, point filtering), stage 2 a
+//     16 x 16 D3DFMT_A8R8G8B8 texture; blending (SRCALPHA, INVSRCALPHA), depth test (LESSEQUAL)
+//     without depth writes, culling D3DCULL_CW, fog. r_ScreenRefract 1 alone makes the copy but no
+//     draws. With r_Quality_BumpMapping 1 or 2 the same copy is made once per frame before the
+//     ocean, and no draw of the frame reads it (r_WaterRefractions 0).
 
 //////////////////////////////////////////////////////////////////////////
 // Particles
@@ -429,7 +439,35 @@ static const int nHeapAlignment = 4;
 // blending (SRCALPHA, INVSRCALPHA), no culling, fog; stage 0 colour and alpha = texture * texture
 // factor (the material colour), clamp addressing, linear filtering without mip maps.
 // Decals with an owner (walls and floors of buildings, crates, trees and bushes; the engine's own
-// bullet hits too) were not drawn in any later frame, with e_decals 1 or 2.
+// bullet hits too; River with e_decals 1):
+// - With r_Quality_BumpMapping 0 (the owners' leaf buffers are VERTEX_FORMAT_P3F_N_TEX2F) nothing
+//   more happens at CreateDecal, and the decal is never drawn.
+// - With r_Quality_BumpMapping 1 or 2 (the owners' leaf buffers are VERTEX_FORMAT_P3F_TEX2F, the
+//   tangents in their own stream) CreateDecal goes on with CreateLeafBufferInitialized(one zeroed
+//   vertex, VERTEX_FORMAT_P3F_COL4UB, the indices of the owner's triangles the decal covers (126
+//   of a wall's 180, all 6 of a floor tile's), R_PRIMV_TRIANGLES, "BigDecal", eBT_Static, 1
+//   material, the decal's texture ID, no callback, no custom data, bOnlyVideoBuffer false,
+//   bPrecache true), then CLeafBuffer::SetChunk(the shader "Decal_2D_VP", first vertex 0, the
+//   owner's vertex count, first index 0, the index count, material 0) and
+//   CLeafBuffer::SetShader(the same shader, the decal's texture ID). The engine sets the new
+//   buffer's m_pVertexContainer to the owner's leaf buffer (the inline SetVertexContainer; nothing
+//   reaches the renderer): the indices address the owner's vertices, and the buffer's own single
+//   vertex is never used.
+// - Every frame, for each such decal in view: EF_GetObject(true, -1), with the owner's matrix,
+//   m_ObjFlags FOB_TRANS_MASK (with FOB_BENDED on a bending plant), m_SortId -1e6;
+//   CLeafBuffer::SetRECustomData(16 floats, fog scale 0, alpha 1) and
+//   CLeafBuffer::AddRenderElements(object, no lights, template -1, fog 0, sort 0, no material).
+//   The 16 floats, in the owner's object space: the plane of the texture's u, the plane of v (each
+//   (a, b, c, d) with u = a * x + b * y + c * z + d, of length 1 / (2 * size), 0.5 at the centre),
+//   then the decal's centre and its size (fSize over the owner's scale), then four zeros. The
+//   texture covers a square of side 2 * size around the centre, as on the terrain.
+// How the D3D9 renderer draws a "BigDecal": an indexed triangle list from its own index buffer
+// over the owner's vertex buffer (stream 0 at the owner's offset, positions and texture
+// coordinates, stride 20), with a vertex and a pixel shader; the first three rows of the custom
+// data are vertex shader constants c4 to c6. Stage 0 the decal's texture (clamp, linear without
+// mip maps), stage 1 a 32 x 32 D3DFMT_X8R8G8B8 texture (clamp, linear with mip maps); alpha test
+// (GREATER 0), blending (SRCALPHA, INVSRCALPHA), depth test EQUAL (the owner's own depths) without
+// depth writes, no culling, fog; each after its owner.
 
 //////////////////////////////////////////////////////////////////////////
 // Shadows (Training with e_shadow_maps 1 and e_stencil_shadows 1)
