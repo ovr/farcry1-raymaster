@@ -849,6 +849,16 @@ void Dump_Light(const CDLight *pL)
   Trace_Write("      projAngles (%.2f %.2f %.2f) frustum %.2f shader %p image %p owner %p style %d corona %.2f lifeTime %.2f creator '%.8s'",
     pL->m_ProjAngles.x, pL->m_ProjAngles.y, pL->m_ProjAngles.z, pL->m_fLightFrustumAngle, pL->m_pShader, pL->m_pLightImage,
     pL->m_pOwner, pL->m_nLightStyle, pL->m_fCoronaScale, pL->m_fLifeTime, pL->m_sDebugName);
+  if (pL->m_Flags & DLF_PROJECT)
+  {
+    const COrthoNormalBasis &O = pL->m_Orientation;
+    const Matrix44 &M = pL->m_TextureMatrix;
+    Trace_Write("      orientation forward (%.3f %.3f %.3f) up (%.3f %.3f %.3f) right (%.3f %.3f %.3f) customTex %d",
+      O.m_vForward.x, O.m_vForward.y, O.m_vForward.z, O.m_vUp.x, O.m_vUp.y, O.m_vUp.z, O.m_vRight.x, O.m_vRight.y, O.m_vRight.z,
+      pL->m_CustomTextureId);
+    Trace_Write("      textureMatrix [%g %g %g %g] [%g %g %g %g] [%g %g %g %g] [%g %g %g %g]", M(0, 0), M(0, 1), M(0, 2), M(0, 3),
+      M(1, 0), M(1, 1), M(1, 2), M(1, 3), M(2, 0), M(2, 1), M(2, 2), M(2, 3), M(3, 0), M(3, 1), M(3, 2), M(3, 3));
+  }
   Dump_Opaque("CDLight::m_pShadowMapLightSource", pL->m_pShadowMapLightSource);
 }
 

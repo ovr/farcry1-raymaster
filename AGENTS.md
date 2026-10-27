@@ -64,7 +64,9 @@ it as well: it holds local, machine-specific instructions and is not committed (
   taken as the SDK game code does, and `decal size texture terrain x y` puts one on the terrain at
   world (x, y) (decals need `e_decals 1` before the level loads); `mouse down`, `mouse up` and
   `mouse move dx dy` send the left button or a relative move with `SendInput`, only while the game
-  window is in front; `capture` writes every call from then on until the renderer is released
+  window is in front; `goto x y z [ax ay az]` puts the player (the first entity of class `Player`)
+  and the view camera at that point; `capture` writes every call from then on until the renderer
+  is released
   (e.g. `capture; quit` in `XRENDERTRACED_EXEC_LEVEL` for the shutdown; in the menu it never ends
   and the log grows by gigabytes), `frame` only the next frame, as `XRENDERTRACED_CAPTURE` does
   (e.g. the start-up videos with `XRENDERTRACED_EXEC_FRAME=20`).
@@ -86,7 +88,10 @@ it as well: it holds local, machine-specific instructions and is not committed (
 - `XRENDERTRACED_D3D_STATE` (names as in the log, e.g. `DrawDynVB,Draw2dImage`) writes the
   Direct3D 9 state of the original renderer after those calls (`D3DState.h`; read only, through
   `EF_Query(EFQ_D3DDevice)`). `XRENDERTRACED_PROBE=FontSetBlending` passes (i, 12 - i) in the first
-  13 calls of `FontSetBlending` instead of the engine's arguments.
+  13 calls of `FontSetBlending` instead of the engine's arguments;
+  `XRENDERTRACED_PROBE=ProjectorFrustum` gives a projected light (`DLF_PROJECT`) the frustum angles
+  15, 30, ..., 90 in turn for each `EF_UpdateDLight` (restored after the call) and writes the
+  texture matrix the renderer makes from it.
   `XRENDERTRACED_TEMPLATE=TemplDecalModulate` gives every material that names a template
   (`Templ...`) that template instead, to see how the renderer draws templates that are not in
   view.
@@ -97,6 +102,8 @@ it as well: it holds local, machine-specific instructions and is not committed (
   (`SetRenderTarget`, `SetDepthStencilSurface`), the surface copies and fills (`StretchRect`,
   `UpdateSurface`, `ColorFill`) and `Present`; `2` adds the device state after each (with
   the stencil state when stencil is on), `3` also the shader constants.
+  `XRENDERTRACED_D3D_CUBESAVE=<path prefix>` saves level 0 of the six faces of every cube texture
+  a draw uses as TGA files (DXT decoded; keep them in the scratchpad, never commit them).
   `XRENDERTRACED_D3D_RT=1` writes the first `SetRenderTarget` of every frame to a surface other
   than the back buffer (to find the frames that render shadow maps; 64 lines, counted again after
   each level load); `XRENDERTRACED_CAPTURE_RT=100` captures the rest of the first frame that sets

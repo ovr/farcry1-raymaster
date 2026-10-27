@@ -321,6 +321,8 @@ void CRendererProxy::ExecuteCommands(const char *szCommands)
       VegGroupCommand(szCmd + 9);
     else if (!strncmp(szCmd, "decal ", 6))
       DecalCommand(szCmd + 6);
+    else if (!strncmp(szCmd, "goto ", 5))
+      GotoCommand(szCmd + 5);
     else if (!strcmp(szCmd, "mouse down") || !strcmp(szCmd, "mouse up") || !strncmp(szCmd, "mouse move ", 11))
     {
       // The left mouse button or a relative move, only while the game window is in front (the input
@@ -435,6 +437,49 @@ void CRendererProxy::CVarsCommand(const char *szArgs)
   Sink.m_nFound = 0;
   iConsole->DumpCVars(&Sink);
   Trace_Write("    %d console variables starting with '%s'", Sink.m_nFound, szArgs);
+}
+
+void CRendererProxy::GotoCommand(const char *szArgs)
+{
+  Vec3 Pos(0, 0, 0), Angles(0, 0, 0);
+  const int nArgs = sscanf_s(szArgs, "%f %f %f %f %f %f", &Pos.x, &Pos.y, &Pos.z, &Angles.x, &Angles.y, &Angles.z);
+  IEntitySystem *pEntitySystem = iSystem ? iSystem->GetIEntitySystem() : NULL;
+  if (nArgs < 3 || !pEntitySystem)
+    return;
+  IEntity *pPlayer = NULL;
+  IEntityIt *pIt = pEntitySystem->GetEntityIterator();
+  while (pIt && !pIt->IsEnd() && !pPlayer)
+  {
+    IEntity *pEntity = pIt->Next();
+    const char *szClass = pEntity ? pEntity->GetEntityClassName() : NULL;
+    if (szClass && !strcmp(szClass, "Player"))
+      pPlayer = pEntity;
+  }
+  if (pIt)
+    pIt->Release();
+  if (!pPlayer)
+  {
+    Trace_Write("  no entity of class 'Player'");
+    return;
+  }
+  const Vec3 OldPos = pPlayer->GetPos();
+  Trace_Write("  '%s' from (%.2f %.2f %.2f) to (%.2f %.2f %.2f)", pPlayer->GetName(), OldPos.x, OldPos.y, OldPos.z, Pos.x, Pos.y,
+    Pos.z);
+  iSystem->GetViewCamera().SetPos(Pos);
+  Vec3 EntityPos = Pos;
+  pe_player_dimensions Dim;
+  if (pPlayer->GetPhysics())
+  {
+    Dim.heightEye = 0;
+    pPlayer->GetPhysics()->GetParams(&Dim);
+    EntityPos.z -= Dim.heightEye;
+  }
+  pPlayer->SetPos(EntityPos);
+  if (nArgs >= 6)
+  {
+    iSystem->GetViewCamera().SetAngle(Angles);
+    pPlayer->SetAngles(Angles);
+  }
 }
 
 void CRendererProxy::DecalCommand(const char *szArgs)

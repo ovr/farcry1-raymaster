@@ -265,6 +265,9 @@ private:
   //! the screen (fractions of its size, the centre by default) meets the world. "decal size texture
   //! terrain x y": on the terrain at world (x, y), without an owner.
   void DecalCommand(const char *szArgs);
+  //! "goto x y z [ax ay az]": puts the first entity of class "Player" and the view camera there (the
+  //! camera at that point, the entity lowered by its eye height, as the SDK game code does).
+  void GotoCommand(const char *szArgs);
 
   IRenderer *m_pReal;
   int m_nRealType;

@@ -528,7 +528,22 @@ bool CRendererProxy::EF_UpdateDLight(CDLight *pDL)
   if (TRACE_DUMP)
     Dump_Light(pDL);
   CWatchArg WatchLight(WT_CDLight, pDL);
+  // XRENDERTRACED_PROBE=ProjectorFrustum: a projected light gets the frustum angles 15, 30, ..., 90
+  // in turn for this call (restored after it), and the texture matrix the renderer makes is written.
+  static int s_nProbe = 0;
+  const bool bProbe = pDL && (pDL->m_Flags & DLF_PROJECT) && Trace_IsListed("XRENDERTRACED_PROBE", "ProjectorFrustum");
+  const float fFrustum = pDL ? pDL->m_fLightFrustumAngle : 0;
+  if (bProbe)
+    pDL->m_fLightFrustumAngle = 15.0f * (1 + s_nProbe++ % 6);
   bool bRes = m_pReal->EF_UpdateDLight(pDL);
+  if (bProbe)
+  {
+    const Matrix44 &M = pDL->m_TextureMatrix;
+    Trace_Write("    probe: frustum %.0f -> textureMatrix [%g %g %g %g] [%g %g %g %g] [%g %g %g %g] [%g %g %g %g]",
+      pDL->m_fLightFrustumAngle, M(0, 0), M(0, 1), M(0, 2), M(0, 3), M(1, 0), M(1, 1), M(1, 2), M(1, 3), M(2, 0), M(2, 1),
+      M(2, 2), M(2, 3), M(3, 0), M(3, 1), M(3, 2), M(3, 3));
+    pDL->m_fLightFrustumAngle = fFrustum;
+  }
   TRACE_RESULT("%d", bRes);
   return bRes;
 }

@@ -169,6 +169,120 @@ static void DescribeShader(const char *szKind, const void *pShader, UINT nSize, 
     nVersion & 0xFF, nSize);
 }
 
+//! Colour of a 565 value as B, G, R, A bytes.
+static void Color565(WORD c, BYTE *pOut)
+{
+  pOut[0] = (BYTE)((c & 31) * 255 / 31);
+  pOut[1] = (BYTE)(((c >> 5) & 63) * 255 / 63);
+  pOut[2] = (BYTE)((c >> 11) * 255 / 31);
+  pOut[3] = 255;
+}
+
+//! One 4x4 block of DXT1 (or the colour half of DXT3/DXT5) into B, G, R, A rows of nPitch bytes.
+static void DecodeColorBlock(const BYTE *pBlock, bool bDXT1, BYTE *pOut, UINT nPitch)
+{
+  BYTE Colors[4][4];
+  const WORD c0 = (WORD)(pBlock[0] | (pBlock[1] << 8)), c1 = (WORD)(pBlock[2] | (pBlock[3] << 8));
+  Color565(c0, Colors[0]);
+  Color565(c1, Colors[1]);
+  for (int i = 0; i < 4; i++)
+  {
+    if (!bDXT1 || c0 > c1)
+    {
+      Colors[2][i] = (BYTE)((2 * Colors[0][i] + Colors[1][i]) / 3);
+      Colors[3][i] = (BYTE)((Colors[0][i] + 2 * Colors[1][i]) / 3);
+    }
+    else
+    {
+      Colors[2][i] = (BYTE)((Colors[0][i] + Colors[1][i]) / 2);
+      Colors[3][i] = 0;
+    }
+  }
+  const DWORD nBits = pBlock[4] | (pBlock[5] << 8) | (pBlock[6] << 16) | ((DWORD)pBlock[7] << 24);
+  for (int n = 0; n < 16; n++)
+    memcpy(pOut + (n / 4) * nPitch + (n % 4) * 4, Colors[(nBits >> (2 * n)) & 3], 4);
+}
+
+//! XRENDERTRACED_D3D_CUBESAVE=prefix: the first time a draw of the captured frame uses a cube
+//! texture, level 0 of each face is saved as an uncompressed 32-bit TGA file
+//! "<prefix><texture>_<face>.tga" (faces in D3DCUBEMAP_FACES order: +X, -X, +Y, -Y, +Z, -Z).
+static void SaveCubeFaces(IDirect3DCubeTexture9 *pCube, const D3DSURFACE_DESC &Desc)
+{
+  char szPrefix[MAX_PATH] = "";
+  if (!GetEnvironmentVariableA("XRENDERTRACED_D3D_CUBESAVE", szPrefix, sizeof(szPrefix)) || !szPrefix[0])
+    return;
+  const bool bDXT = Desc.Format == D3DFMT_DXT1 || Desc.Format == D3DFMT_DXT3 || Desc.Format == D3DFMT_DXT5;
+  if (!bDXT && Desc.Format != D3DFMT_X8R8G8B8 && Desc.Format != D3DFMT_A8R8G8B8)
+  {
+    Trace_Write("    [d3d] cube %p: format %u is not saved", pCube, Desc.Format);
+    return;
+  }
+  BYTE *pPixels = (BYTE *)malloc(Desc.Width * Desc.Height * 4);
+  for (int nFace = 0; nFace < 6 && pPixels; nFace++)
+  {
+    D3DLOCKED_RECT Rect = {};
+    if (FAILED(pCube->LockRect((D3DCUBEMAP_FACES)nFace, 0, &Rect, NULL, D3DLOCK_READONLY)))
+    {
+      Trace_Write("    [d3d] cube %p face %d: LockRect failed", pCube, nFace);
+      continue;
+    }
+    const BYTE *pSrc = (const BYTE *)Rect.pBits;
+    if (!bDXT)
+    {
+      for (UINT y = 0; y < Desc.Height; y++)
+        memcpy(pPixels + y * Desc.Width * 4, pSrc + y * Rect.Pitch, Desc.Width * 4);
+    }
+    else
+    {
+      const UINT nBlockSize = Desc.Format == D3DFMT_DXT1 ? 8 : 16;
+      for (UINT by = 0; by < Desc.Height; by += 4)
+      {
+        for (UINT bx = 0; bx < Desc.Width; bx += 4)
+        {
+          const BYTE *pBlock = pSrc + (by / 4) * Rect.Pitch + (bx / 4) * nBlockSize;
+          BYTE *pOut = pPixels + (by * Desc.Width + bx) * 4;
+          DecodeColorBlock(pBlock + nBlockSize - 8, Desc.Format == D3DFMT_DXT1, pOut, Desc.Width * 4);
+          for (int n = 0; n < 16 && Desc.Format != D3DFMT_DXT1; n++)
+          {
+            BYTE nAlpha;
+            if (Desc.Format == D3DFMT_DXT3)
+              nAlpha = (BYTE)(((pBlock[n / 2] >> (4 * (n & 1))) & 15) * 17);
+            else
+            {
+              const BYTE a0 = pBlock[0], a1 = pBlock[1];
+              const int nBit = 16 + 3 * n;
+              const int i = (int)(((pBlock[nBit / 8] | (pBlock[nBit / 8 + 1] << 8)) >> (nBit % 8)) & 7);
+              if (i < 2)
+                nAlpha = i ? a1 : a0;
+              else if (a0 > a1)
+                nAlpha = (BYTE)(((8 - i) * a0 + (i - 1) * a1) / 7);
+              else if (i < 6)
+                nAlpha = (BYTE)(((6 - i) * a0 + (i - 1) * a1) / 5);
+              else
+                nAlpha = i == 6 ? 0 : 255;
+            }
+            pOut[(n / 4) * Desc.Width * 4 + (n % 4) * 4 + 3] = nAlpha;
+          }
+        }
+      }
+    }
+    pCube->UnlockRect((D3DCUBEMAP_FACES)nFace, 0);
+    char szFile[MAX_PATH + 32];
+    sprintf_s(szFile, "%s%p_%d.tga", szPrefix, pCube, nFace);
+    FILE *pFile = NULL;
+    if (!fopen_s(&pFile, szFile, "wb"))
+    {
+      const BYTE Header[18] = { 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, (BYTE)Desc.Width, (BYTE)(Desc.Width >> 8), (BYTE)Desc.Height,
+        (BYTE)(Desc.Height >> 8), 32, 0x28 };
+      fwrite(Header, 1, sizeof(Header), pFile);
+      fwrite(pPixels, 4, Desc.Width * Desc.Height, pFile);
+      fclose(pFile);
+      Trace_Write("    [d3d] cube %p face %d saved to '%s'", pCube, nFace, szFile);
+    }
+  }
+  free(pPixels);
+}
+
 static void DescribeTexture(IDirect3DBaseTexture9 *pTex)
 {
   D3DRESOURCETYPE eType = pTex->GetType();
@@ -177,8 +291,11 @@ static void DescribeTexture(IDirect3DBaseTexture9 *pTex)
     Trace_Write("    [d3d] tex %p: %ux%u format %u levels %u pool %u usage 0x%x", pTex, Desc.Width, Desc.Height, Desc.Format,
       pTex->GetLevelCount(), Desc.Pool, Desc.Usage);
   else if (eType == D3DRTYPE_CUBETEXTURE && SUCCEEDED(((IDirect3DCubeTexture9 *)pTex)->GetLevelDesc(0, &Desc)))
+  {
     Trace_Write("    [d3d] tex %p: cube %u format %u levels %u pool %u usage 0x%x", pTex, Desc.Width, Desc.Format, pTex->GetLevelCount(),
       Desc.Pool, Desc.Usage);
+    SaveCubeFaces((IDirect3DCubeTexture9 *)pTex, Desc);
+  }
   else
     Trace_Write("    [d3d] tex %p: type %d levels %u", pTex, eType, pTex->GetLevelCount());
 }
