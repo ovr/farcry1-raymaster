@@ -186,7 +186,20 @@ static const int nHeapAlignment = 4;
 //   Unlike for characters (below) a0 and a1 change from object to object for the same light: a0
 //   from 0.01 to 464, a1 from 0 to 2.2 (Carrier, Bunker, Steam, River; a1 = 0 for distant grass;
 //   on Carrier one light of radius 4 gives a1 0.42 to 2.22 on objects of scale 1, against 1.269
-//   for characters). How they follow from the light and the object was not found.
+//   for characters). How they follow from the light and the object was not found. They depend on
+//   where the light is (in the object's space) and on its radius, not only on the distance. One
+//   object (Bunker, three chunks in the box (-0.06, -0.16, 0.11)-(1.0, 0.16, 2.11)) with the light
+//   put on the line from the box centre along -y, at the distance t from the centre:
+//     t       0.25   0.5    1      1.5    2      2.5    3      4      5      6      8      10
+//     R 7  a0 0.438  0.435  0.420  0.397  0.276  0.01   0.01   0.01   0.01   0.01   -      -
+//          a1 0.113  0.119  0.139  0.173  0.248  0.377  0.323  0.307  0.401  0.838  -      -
+//     R 14 a0 0.473  0.472  0.467  0.462  0.455  0.441  0.407  0.295  0.077  0.01   0.01   0.01
+//          a1 0.0320 0.0329 0.0360 0.0402 0.0452 0.0523 0.0645 0.0965 0.146  0.151  0.168  0.269
+//   (-: the object gets no light at all; R 7 at t 8 is already outside the radius). a0 never goes
+//   below 0.01. Over the object, 1 / (a0 + a1 d) stays close to 2.1 * (1 - d / R) while the light
+//   is near (within 3 % for R 14 and t up to 3) and falls below it farther out. With the light
+//   just outside the radius from the object's origin but nearer than it to the box, the values
+//   were (186.283, 0): a constant attenuation of 1/186.
 //   Vegetation (River): texture * vertex colour * 2 * m_Color * the colour of EF_SetWorldColor
 //   (m_Color 0.75 and the world colour (0.843, 0.780, 0.659) give the factor bytes 161, 149, 126).
 //   For grass the factor's alpha is the square of m_Color's alpha (0.84 gives 179, 0.12 gives 3),
