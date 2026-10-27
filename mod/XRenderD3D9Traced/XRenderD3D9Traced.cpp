@@ -15,6 +15,7 @@
 #include "RenderTrace.h"
 #include "RendererProxy.h"
 #include "VCallHooks.h"
+#include "Dpi.h"
 #include <RendererAbiChecks.h>
 #include <intrin.h>
 
@@ -120,6 +121,8 @@ extern "C" __declspec(dllexport) IRenderer *PackageRenderConstructor(int argc, c
   Trace_Write("PackageRenderConstructor(argc %d, argv %p, sp %p): log %p console %p timer %p system %p test_int %p physics %p",
     argc, argv, sp, sp->ipLog, sp->ipConsole, sp->ipTimer, sp->ipSystem, sp->ipTest_int, sp->pIPhysicalWorld);
   Trace_Write("  called from %s", Trace_Addr(_ReturnAddress()));
+  // Before the renderer makes the game's window in Init.
+  Dpi_MakeAware();
 
   char szPath[MAX_PATH];
   GetRealDllPath(szPath, sizeof(szPath));

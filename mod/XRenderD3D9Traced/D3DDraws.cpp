@@ -16,6 +16,7 @@
 #include "VCallHooks.h"
 #include "D3DState.h"
 #include "D3DDraws.h"
+#include "Dpi.h"
 
 //! Slots of IDirect3DDevice9 (declaration order in d3d9.h).
 enum
@@ -1165,12 +1166,14 @@ void D3DDraws_WatchDisplay(IRenderer *pRenderer, int nFrame)
   HWND hWnd = (HWND)pRenderer->GetHWND();
   if (hWnd)
     GetClientRect(hWnd, &Client);
+  char szDpi[64];
+  Dpi_Describe(hWnd, szDpi, sizeof(szDpi));
   char szLine[512];
   _snprintf_s(szLine, _TRUNCATE, "device %p back buffer %ux%u format %d count %u windowed %d refresh %u swap %d interval 0x%x "
-    "depth %d format %d; window %p client %dx%d; GetWidth %d GetHeight %d", pDev, PP.BackBufferWidth, PP.BackBufferHeight,
+    "depth %d format %d; window %p client %dx%d, %s; GetWidth %d GetHeight %d", pDev, PP.BackBufferWidth, PP.BackBufferHeight,
     (int)PP.BackBufferFormat, PP.BackBufferCount, PP.Windowed, PP.FullScreen_RefreshRateInHz, (int)PP.SwapEffect,
     PP.PresentationInterval, PP.EnableAutoDepthStencil, (int)PP.AutoDepthStencilFormat, hWnd, Client.right - Client.left,
-    Client.bottom - Client.top, pRenderer->GetWidth(), pRenderer->GetHeight());
+    Client.bottom - Client.top, szDpi, pRenderer->GetWidth(), pRenderer->GetHeight());
   static char s_szLast[512] = "";
   if (strcmp(szLine, s_szLast))
   {

@@ -56,7 +56,7 @@ void D3DDraws_RestartRenderTargets();
 //! At the end of the frame (after Update).
 void D3DDraws_End();
 //! XRENDERTRACED_DISPLAY=1: after every Update, the device, its back buffer (the present parameters)
-//! and the window's client area; a line "[display] frame N: ..." whenever one of them changes (a
+//! and the window's client area and DPI; a line "[display] frame N: ..." whenever one of them changes (a
 //! change of r_Width, r_Height or r_Fullscreen).
 void D3DDraws_WatchDisplay(IRenderer *pRenderer, int nFrame);
 //! Saves the back buffer as an uncompressed 32-bit TGA file (before Update presents it).

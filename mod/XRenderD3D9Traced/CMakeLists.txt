@@ -51,6 +51,8 @@ set(XRENDERD3D9TRACED_SOURCES
     D3DState.h
     D3DDraws.cpp
     D3DDraws.h
+    Dpi.cpp
+    Dpi.h
     DemoPlugin.h
 )
 if(FARCRY_X64)
