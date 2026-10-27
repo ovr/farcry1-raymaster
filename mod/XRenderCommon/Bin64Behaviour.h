@@ -1059,6 +1059,11 @@ static const int nHeapAlignment = 4;
 // Its m_ObjFlags are 0x70a00000 (FOB_TRANS_ROTATE | FOB_TRANS_SCALE | FOB_TRANS_TRANSLATE |
 // FOB_HASALPHA | FOB_BENDED); the corona is tested and drawn at m_Origin in every frame in which
 // the light is added.
+// The projected light on Steam (m_fCoronaScale 1) has instead a light beam shader as m_pShader
+// ("LightBeamHangingYellow02": sort 14, flags 0x2000000, one element of type eDATA_Beam). The
+// renderer stores an object for it in m_pObject[1][0] as well, with m_ObjFlags 0x70200000 (no
+// FOB_HASALPHA) and m_pRE set; it makes no visibility test for it and draws no Beam element,
+// with r_Beams 0 (farcry1_testing1's settings) and with r_Beams 1 set before the level loads.
 // The renderer also calls I3DEngine::GetSunPosition and GetSunColor about once a frame.
 
 //////////////////////////////////////////////////////////////////////////
