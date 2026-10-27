@@ -326,10 +326,11 @@ static const int nHeapAlignment = 4;
 // Shadows (Training with e_shadow_maps 1 and e_stencil_shadows 1)
 //
 // Shadow maps (frustum layout in RendererStructures.h, "Shadow maps"). The D3D9 renderer renders
-// a frustum's map inside EF_EndEf3D of a frame that draws a receiver of it (frames 7, 38, 67, ...
-// after the load); later frames draw the receivers without rendering the static casters' maps
-// again:
-// - into a 512 x 512 D3DFMT_A8R8G8B8 render target, viewport 512 x 512, no culling, no fog;
+// a frustum's map inside EF_EndEf3D of a frame that draws a receiver of it: a static caster's map
+// once (frames 7, 8, 10, 38, 67, ... after the load), the maps of characters every frame:
+// - into a D3DFMT_A8R8G8B8 render target of the map's size (512 x 512 and 128 x 128 for static
+//   objects, 32 x 32 for the characters seen), cleared first to colour 0x00FFE000, depth 1 and
+//   stencil 0; viewport of the map's size, no culling, no fog;
 // - from the light: for the sun the eye is 10000 units from the caster along the sun direction,
 //   with a perspective projection whose near and far plane lie around that distance (9989.6 and
 //   10005.9 for the caster seen) and a field of view of about 0.08 degrees, so practically
