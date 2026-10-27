@@ -1091,7 +1091,9 @@ static const int nHeapAlignment = 4;
 // ("LightBeamHangingYellow02": sort 14, flags 0x2000000, one element of type eDATA_Beam). The
 // renderer stores an object for it in m_pObject[1][0] as well, with m_ObjFlags 0x70200000 (no
 // FOB_HASALPHA) and m_pRE set; it makes no visibility test for it and draws no Beam element,
-// with r_Beams 0 (farcry1_testing1's settings) and with r_Beams 1 set before the level loads.
+// with r_Beams 0 (farcry1_testing1's settings), with r_Beams 1 set before the level loads, and
+// with r_Quality_BumpMapping 2 as well. The beam of light under that lamp that does show is an
+// ordinary static object (material "s_testBeam", template TemplBeamProc, see the templates).
 // The renderer also calls I3DEngine::GetSunPosition and GetSunColor about once a frame.
 
 //////////////////////////////////////////////////////////////////////////
