@@ -857,6 +857,28 @@ static const int nHeapAlignment = 4;
 //   texture factor being the volume's colour (alpha 255);
 // - then the caps ("VolFogTopCircle", see Geometry) with the same stages, depth test LESSEQUAL
 //   without depth writes, no culling, blended the same way.
+//
+// Camera under water (Pier; the ocean is volume 1: fMaxFogDist 40, fFogLayerZ 16, colour (0.188,
+// 0.306, 0.573); the player moved below the surface with the console command goto, looking ahead
+// and looking down). The engine changes the frame's fog and the ocean's elements:
+// - Every frame on land: SetFog(0, 600, 900, the level's fog colour (0.384, 0.549, 0.780),
+//   R_FOGMODE_LINEAR), EnableFog(true), SetClearColor(the same colour). Under water: SetFog(0, 0.4,
+//   40, the volume's colour, R_FOGMODE_LINEAR) (the end is fMaxFogDist), EnableFog(true), then
+//   SetClearColor twice, first with the level's fog colour, then with the volume's; the frame is
+//   cleared with the last one (0x304e92).
+// - The ocean ring ("OutdoorWaterCircle") is added with AddRenderElements nFogID 1 and sort 17
+//   (eS_Water); on land with nFogID 0 and sort 14 (eS_SeeThrough). The ocean bottom
+//   ("OceanBottomCircle") has nFogID 1 and sort 0 in both cases.
+// The D3D9 renderer draws the same elements in the same order as on land (the sky first, without
+// fog, then terrain, the ocean bottom, the weapon, then the ring with its usual shader and states);
+// the ring is seen from below (no culling) and fades into the fog colour, and it hides the sky. One
+// difference with r_WaterReflections 0: right before the ring the renderer copies the whole back
+// buffer (StretchRect into a 1024 x 768 render target texture that no draw of the frame reads),
+// which on land it does only with r_WaterReflections 1. Air bubbles are particles
+// (EF_AddSpriteToScene, "particlelight_fp"), drawn after the ring. There is no full screen pass
+// for the water: the blue comes from the fog and the clear colour, and ScreenProcess draws nothing
+// unless a screen effect is active (the ScreenFade fade in after the level start shows as a black
+// quad).
 
 //////////////////////////////////////////////////////////////////////////
 // Screen effects (Training)
