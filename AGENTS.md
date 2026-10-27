@@ -72,6 +72,9 @@ it as well: it holds local, machine-specific instructions and is not committed (
   Direct3D 9 state of the original renderer after those calls (`D3DState.h`; read only, through
   `EF_Query(EFQ_D3DDevice)`). `XRENDERTRACED_PROBE=FontSetBlending` passes (i, 12 - i) in the first
   13 calls of `FontSetBlending` instead of the engine's arguments.
+  `XRENDERTRACED_TEMPLATE=TemplDecalModulate` gives every material that names a template
+  (`Templ...`) that template instead, to see how the renderer draws templates that are not in
+  view.
 - `XRENDERTRACED_D3D_DRAWS=1` writes the Direct3D 9 draw calls of the original renderer in the
   captured frame (`D3DDraws.h`): buffers, vertex declaration, shaders, textures and the render
   element being drawn (x64), the first vertices of the non-indexed draws (8, or

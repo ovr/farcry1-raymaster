@@ -201,6 +201,13 @@ SShaderItem CRendererProxy::EF_LoadShaderItem(const char *name, EShClass Class, 
   if (TRACE_DUMP && Res)
     Dump_InputResources(Res);
   CWatchArg WatchRes(WT_SInputShaderResources, Res);
+  // XRENDERTRACED_TEMPLATE=TemplDecalModulate: every material that names a template ("Templ...")
+  // gets this one instead, to see how the renderer draws it.
+  static char s_szTemplate[64] = "?";
+  if (s_szTemplate[0] == '?' && !GetEnvironmentVariableA("XRENDERTRACED_TEMPLATE", s_szTemplate, sizeof(s_szTemplate)))
+    s_szTemplate[0] = 0;
+  if (s_szTemplate[0] && templName && !_strnicmp(templName, "Templ", 5))
+    templName = s_szTemplate;
   SShaderItem Item = m_pReal->EF_LoadShaderItem(name, Class, bShare, templName, flags, Res, nMaskGen);
   TRACE_RESULT("shader %p res %p", Item.m_pShader, Item.m_pShaderResources);
   Watch_RendererObject(WT_SRenderShaderResources, Item.m_pShaderResources);
