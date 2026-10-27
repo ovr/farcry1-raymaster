@@ -109,7 +109,8 @@ it as well: it holds local, machine-specific instructions and is not committed (
   `XRENDERTRACED_D3D_VERTS`), the `Clear` calls, the render target and depth buffer changes
   (`SetRenderTarget`, `SetDepthStencilSurface`), the surface copies and fills (`StretchRect`,
   `UpdateSurface`, `ColorFill`) and `Present`; `2` adds the device state after each (with
-  the stencil state when stencil is on), `3` also the shader constants.
+  the stencil state when stencil is on) and the box of the positions an indexed draw uses (when
+  its vertex buffer can be read back), `3` also the shader constants.
   `XRENDERTRACED_D3D_CUBESAVE=<path prefix>` saves level 0 of the six faces of every cube texture
   a draw uses as TGA files (DXT decoded; keep them in the scratchpad, never commit them).
   `XRENDERTRACED_D3D_RT=1` writes the first `SetRenderTarget` of every frame to a surface other

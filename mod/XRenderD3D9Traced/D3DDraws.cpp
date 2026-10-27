@@ -417,6 +417,48 @@ static void DumpVertices(IDirect3DVertexDeclaration9 *pDecl, UINT nStream, const
   }
 }
 
+//! The box of the positions (FLOAT3 POSITION0 of stream 0) of the vertices an indexed draw may use,
+//! when the buffer can be read back: the extent of the object in the space its vertices are in.
+static void WriteVertexBox(IDirect3DVertexDeclaration9 *pDecl, IUnknown *pVB0, UINT nOffset, UINT nStride, UINT nFirst, UINT nCount)
+{
+  D3DVERTEXELEMENT9 Elements[MAXD3DDECLLENGTH + 1];
+  UINT nElements = MAXD3DDECLLENGTH + 1;
+  if (!pDecl || !pVB0 || !nStride || !nCount || FAILED(pDecl->GetDeclaration(Elements, &nElements)))
+    return;
+  int nPos = -1;
+  for (UINT i = 0; i < nElements && Elements[i].Stream != 0xFF; i++)
+  {
+    if (Elements[i].Stream == 0 && Elements[i].Usage == D3DDECLUSAGE_POSITION && Elements[i].UsageIndex == 0
+      && Elements[i].Type == D3DDECLTYPE_FLOAT3)
+      nPos = Elements[i].Offset;
+  }
+  IDirect3DVertexBuffer9 *pVB = (IDirect3DVertexBuffer9 *)pVB0;
+  D3DVERTEXBUFFER_DESC Desc = {};
+  pVB->GetDesc(&Desc);
+  const UINT nStart = nOffset + nFirst * nStride, nSize = nCount * nStride;
+  if (nPos < 0 || nStart + nSize > Desc.Size)
+    return;
+  void *pData = NULL;
+  const BYTE *pShadow = ShadowData(pVB0, nStart, nSize);
+  if (!pShadow && ((Desc.Pool == D3DPOOL_DEFAULT && (Desc.Usage & D3DUSAGE_WRITEONLY))
+    || FAILED(pVB->Lock(nStart, nSize, &pData, D3DLOCK_READONLY))))
+    return;
+  const BYTE *pVerts = pShadow ? pShadow : (const BYTE *)pData;
+  float fMin[3] = { 1e30f, 1e30f, 1e30f }, fMax[3] = { -1e30f, -1e30f, -1e30f };
+  for (UINT v = 0; v < nCount; v++)
+  {
+    const float *pPos = (const float *)(pVerts + v * nStride + nPos);
+    for (int c = 0; c < 3; c++)
+    {
+      fMin[c] = min(fMin[c], pPos[c]);
+      fMax[c] = max(fMax[c], pPos[c]);
+    }
+  }
+  if (!pShadow)
+    pVB->Unlock();
+  Trace_Write("    [d3d] box (%g %g %g)-(%g %g %g) of %u vertices", fMin[0], fMin[1], fMin[2], fMax[0], fMax[1], fMax[2], nCount);
+}
+
 //! The render element whose mfDraw is running and, for a leaf buffer element, its buffer and
 //! material.
 static void AppendRE(char *szBuf, size_t nSize)
@@ -457,7 +499,7 @@ static void AppendRE(char *szBuf, size_t nSize)
 //! the first vertices of a non-indexed draw (nStart is its first vertex, the first index of an
 //! indexed draw; pUPVerts the vertices of a *UP draw).
 static void WriteDraw(IDirect3DDevice9 *pDev, const char *szCall, bool bStreams, bool bIndexed, UINT nStart, UINT nVerts,
-  const void *pUPVerts, UINT nUPStride, void *pCaller)
+  const void *pUPVerts, UINT nUPStride, void *pCaller, UINT nBoxFirst = 0, UINT nBoxCount = 0)
 {
   const UINT nStartIndex = bIndexed ? nStart : 0;
   IUnknown *pVB0 = NULL;
@@ -531,6 +573,8 @@ static void WriteDraw(IDirect3DDevice9 *pDev, const char *szCall, bool bStreams,
       DumpVertices(pDecl, 0, (const BYTE *)pUPVerts, nUPStride, nDumped);
     else if (!bIndexed && pVB0 && nStride0)
       DumpVertices(pDecl, 0, ShadowData(pVB0, nOffset0 + nStart * nStride0, nDumped * nStride0), nStride0, nDumped);
+    if (bIndexed && s_nLevel >= 2)
+      WriteVertexBox(pDecl, pVB0, nOffset0, nStride0, nBoxFirst, nBoxCount);
     pDecl->Release();
   }
   if (pVS)
@@ -605,7 +649,7 @@ static HRESULT STDMETHODCALLTYPE Hook_DrawIndexedPrimitive(IDirect3DDevice9 *pDe
   char szCall[160];
   _snprintf_s(szCall, _TRUNCATE, "DrawIndexedPrimitive(%s base %d min %u verts %u start %u prims %u)", PrimName(eType), nBaseVertex, nMinIndex,
     nVerts, nStartIndex, nPrims);
-  WriteDraw(pDev, szCall, true, true, nStartIndex, 0, NULL, 0, _ReturnAddress());
+  WriteDraw(pDev, szCall, true, true, nStartIndex, 0, NULL, 0, _ReturnAddress(), (UINT)(nBaseVertex + (INT)nMinIndex), nVerts);
   return ((PFN_DrawIndexedPrimitive)s_pOrigVTable[DEV_DrawIndexedPrimitive])(pDev, eType, nBaseVertex, nMinIndex, nVerts, nStartIndex, nPrims);
 }
 
