@@ -479,6 +479,14 @@ static const int nHeapAlignment = 4;
 // vertex colour (CheckUpdate to VERTEX_FORMAT_P3F_COL4UB_TEX2F; the characters' dynamic buffers
 // become P3F_N_COL4UB_TEX2F), without fixed function lighting; terrain, water, sky and sprites
 // are drawn as without heat vision. It renders into no texture and adds no full screen pass.
+// The objects' pixel shader is the same for every template, with the pixel constants c0 (0.85,
+// 0.85, 0.85, 1), c1 (0.1, 0.1, 0.1, 0.4) and c2 (0.5, 0.7, 1, 1). In the back buffer (Training
+// and Steam intros, three frames after heat vision is switched on, compared with the frame
+// before) buildings and rocks come out nearly black (bytes up to about 30), water dark blue (about
+// (30, 44, 66)), plants a darker green of their texture (up to (113, 178, 77)), and the sky is
+// dimmed. The two characters of the Steam intro did not show up in the heat vision frame (their
+// draws were made, with a view matrix whose first two rows are about 25 times longer than
+// without heat vision).
 //
 // Night vision is the screen effect "NightVision" (Active 1, see RendererStructures.h, "Screen
 // effects"); r_Cryvision 1 has the same effect. The ScreenProcess element then draws two quads
