@@ -232,9 +232,11 @@ static const int nHeapAlignment = 4;
 //     horizontal centre at P + k * the horizontal centre of O's box; so a fading quad shrinks
 //     towards P. The horizontal edge is perpendicular to the horizontal direction from the camera
 //     to the instance.
-//   - Width: k times a constant of O, 0.9 to 2.4 times O's box height for the objects seen. It
-//     comes from how the sprite picture is framed, so a renderer that makes its own sprites picks it
-//     together with the picture.
+//   - Width: 2 * k * r0, with r0 the largest horizontal distance of a corner of O's box from O's
+//     vertical axis (x = y = 0 in O's space): the largest sqrt(x * x + y * y) over the box's four
+//     corners. That is the room O needs when it turns about its axis, so the picture of every angle
+//     fits. Median width / (2 * k * r0) 1.000 for 60 objects on River, Pier and Research, all
+//     within 0.02 but one (1.05).
 //   - Texture: with a the angle of the horizontal direction from the camera to the instance
 //     (atan2(dy, dx) in degrees, 0 to 360), the sprite made with fAngle = 165 - 15 * floor(a / 15),
 //     brought into 90 to 435 by adding or subtracting 360 (a from 75 to 90 uses fAngle 90, from 90
