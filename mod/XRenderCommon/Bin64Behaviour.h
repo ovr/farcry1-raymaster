@@ -249,6 +249,25 @@ static const int nHeapAlignment = 4;
 //   renderer draws both with that template only, none of the material's own passes. The
 //   character's CCObject::m_ShaderParams holds one float, "refraction" (0.049 and 0.01 seen; the
 //   weapon has none), read when the template is drawn ("mutantstealth_fp" under "Shaders").
+//   First person weapon (the player's AG36 and hands; Archive, Bunker, Regulator, River): a
+//   character like the others, its render elements submitted with nSort eS_Nearest (26) and one
+//   CCObject with FOB_NEAREST in m_ObjFlags (0x70000804 or 0x70100804), whose matrix puts the model
+//   at the camera position. The D3D9 renderer draws them after everything else of the sorted list
+//   (the opaque world, the characters, eS_Decal), before the blended elements sorted by distance
+//   and the screen effects, with:
+//   - the same view as every object (the object's matrix folded into the camera's view);
+//   - a projection of its own: near 0.01, far 40, m11 = 1 / tan(fov * ratio / 3) and m00 = m11 *
+//     ratio, where the world gets near and far from the camera and m11 = 1 / tan(fov * ratio / 2)
+//     (fov and ratio of the CCamera given to SetCamera; the console command "fov" changes both).
+//     With fov pi/2 and ratio 0.75 (1024 x 768): [1.81086 0 0 0] [0 2.41448 0 0]
+//     [0 0 -1.00025 -1] [0 0 -0.0100025 0] against the world's [1.12245 0 0 0] [0 1.49661 0 0];
+//   - the viewport depth range 0..0.1 (the world 0..1) and no clear of the depth buffer between
+//     them, so the weapon is in front of all world geometry further than about 0.28 m (camera
+//     near 0.25, far 305) and depth tested against itself (LESSEQUAL with depth writes; the
+//     additional light passes EQUAL);
+//   - the lighting of the other characters.
+//   The scope glass ("s_ag36scope", template RLScopeRefraction, eS_Refractive) is submitted in the
+//   same way and not drawn with r_ScopeLens_fx 0 (see "aw50scoperefraction").
 //
 // Terrain ("TerrainSector")
 //   One leaf buffer per 64 m x 64 m sector, created with
@@ -982,7 +1001,10 @@ static const int nHeapAlignment = 4;
 // SetCamera: CCamera::GetVCMatrixD3D9() equals the matrix returned by GetModelViewMatrix. The
 // projection returned by GetProjectionMatrix for ProjRatio 0.75, ZMin 0.25, ZMax 700:
 //   [1.013 0 0 0] [0 1.35 0 0] [0 0 -1.000 -1] [0 0 -0.250 0]
-// i.e. a right-handed D3D projection (m23 = -1) with m00 = m11 * ProjRatio.
+// i.e. a right-handed D3D projection (m23 = -1) with m00 = m11 * ProjRatio. The D3D9 renderer draws
+// the scene with m11 = 1 / tan(fov * ratio / 2) (CCamera's fov and ratio; ratio = height / width
+// of the render surface: 0.75 at 1024 x 768, 0.559 in a 1270 x 710 window) and the first person
+// weapon with a narrower one of its own ("Characters").
 
 //////////////////////////////////////////////////////////////////////////
 // Lights
