@@ -110,6 +110,28 @@ static const int nHeapAlignment = 4;
 // swapping is off, and the frame count (GetFrameID) goes on in these frames.
 
 //////////////////////////////////////////////////////////////////////////
+// Features (GetFeatures, Training)
+//
+// The D3D9 renderer returned 0x95D39753 on an AMD adapter: RFT_MULTITEXTURE | RFT_BUMP |
+// RFT_HWGAMMA | RFT_COMPRESSTEXTURE | RFT_ALLOWANISOTROPIC | RFT_SUPPORTZBIAS |
+// RFT_HW_ENVBUMPPROJECTED | RFT_DETAILTEXTURE | RFT_OCCLUSIONTEST | RFT_HW_RADEON | RFT_HW_VS |
+// 0x400000 (RFT_HW_TS) | RFT_HW_PS20 | RFT_HW_PS30 | RFT_ZLOCKABLE | RFT_DIRECTACCESSTOVIDEOMEMORY |
+// RFT_SHADOWMAP_SELFSHADOW; not RFT_OCCLUSIONQUERY, RFT_HW_HDR, RFT_FOGVP, RFT_RGBA or
+// RFT_DEPTHMAPS. The RFT_HW_MASK part names the adapter's class, so the value depends on it.
+// Cry3DEngine asks three times at start-up, once before each material it loads (908 times on
+// Training) and some hundred times while drawing; CryFont before every block of text.
+// What the engine does with it (the value replaced before the engine got it):
+// - Without RFT_OCCLUSIONTEST it loads no "OcclusionTest" shader and makes no CREOcclusionQuery
+//   elements (it makes two otherwise).
+// - With RFT_RGBA, CryFont writes the vertex colours of text in the byte order R, G, B, A; without
+//   it B, G, R, A (a D3DCOLOR): red text is 0xFFFF0000 as a dword, with RFT_RGBA 0xFF0000FF. The
+//   colours of the leaf buffers the 3D engine makes did not change.
+// - Nothing else changed (materials and their textures, shaders, leaf buffers, the calls of a
+//   frame, also with e_shadow_maps 1 and e_stencil_shadows 1) with every bit cleared, with the
+//   bits above that the renderer leaves out set (0x4A286828), or with RFT_HW_NV4X in place of
+//   RFT_HW_RADEON.
+
+//////////////////////////////////////////////////////////////////////////
 // Console variables (Training)
 //
 // The D3D9 renderer registers its console variables (254: 223 "r_...", 28 "d3d9_..." and 3

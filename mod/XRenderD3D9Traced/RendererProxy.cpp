@@ -130,11 +130,29 @@ bool CRendererProxy::DeleteContext(WIN_HWND hWnd)
   return bRes;
 }
 
+//! A hexadecimal mask from the environment, 0 if the variable is not set.
+static unsigned int EnvMask(const char *szVar)
+{
+  char szEnv[32];
+  if (!GetEnvironmentVariableA(szVar, szEnv, sizeof(szEnv)))
+    return 0;
+  return (unsigned int)strtoul(szEnv, NULL, 16);
+}
+
 int CRendererProxy::GetFeatures()
 {
-  TRACE_CALL("");
+  TRACE_CALL("from %s", Trace_Addr(_ReturnAddress()));
   int nRes = m_pReal->GetFeatures();
-  TRACE_RESULT("0x%x", nRes);
+  // XRENDERTRACED_FEATURES_CLEAR / _SET (hexadecimal RFT_* masks): what the engine gets instead, to
+  // see what it does with each feature.
+  static const unsigned int s_nClear = EnvMask("XRENDERTRACED_FEATURES_CLEAR");
+  static const unsigned int s_nSet = EnvMask("XRENDERTRACED_FEATURES_SET");
+  const int nOrig = nRes;
+  nRes = (int)(((unsigned int)nRes & ~s_nClear) | s_nSet);
+  if (nRes != nOrig)
+    TRACE_RESULT("0x%x, passed on as 0x%x", nOrig, nRes);
+  else
+    TRACE_RESULT("0x%x", nRes);
   return nRes;
 }
 

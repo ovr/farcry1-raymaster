@@ -101,6 +101,9 @@ it as well: it holds local, machine-specific instructions and is not committed (
   `XRENDERTRACED_TRACE_METHODS_MAX=30000` writes every file the renderer opens. A traced
   `GetAnimTexInfoFromId` or `RemoveAnimatedTexture` writes the `AnimTexInfo` (name, frames,
   references, texture IDs).
+- `XRENDERTRACED_FEATURES_CLEAR` and `XRENDERTRACED_FEATURES_SET` (hexadecimal `RFT_*` masks)
+  change the value of `GetFeatures` before the engine gets it, to see what the engine does with
+  each feature; the traced call writes the caller and both values.
 - A call into the renderer from another thread than the one that loaded it (an IRenderer or
   CLeafBuffer method, a hooked virtual function, or a call of the renderer into the engine) writes
   a `[thread]` line, once per method.
