@@ -325,8 +325,9 @@ void CLeafBufferHooks::AddRenderElements(CCObject *pObj, int DLightMask, int nTe
 
 void CLeafBufferHooks::Render(const SRendParams &rParams, CCObject *pObj, TArray<int> &ShaderTemplates, int e_overlay_geometry, bool bNotCurArea, IMatInfo *pMaterial, bool bSupportDefaultShaderTemplates)
 {
-  TRACE_CALL("lb %p '%s' params %p obj %p templates %d overlay %d notCurArea %d material %p defaultTemplates %d", LB(), Source(), &rParams,
-    pObj, ShaderTemplates.Num(), e_overlay_geometry, bNotCurArea, pMaterial, bSupportDefaultShaderTemplates);
+  TRACE_CALL("lb %p '%s' params %p obj %p templates %d overlay %d notCurArea %d material %p defaultTemplates %d box (%g %g %g)-(%g %g %g)",
+    LB(), Source(), &rParams, pObj, ShaderTemplates.Num(), e_overlay_geometry, bNotCurArea, pMaterial, bSupportDefaultShaderTemplates,
+    LB()->m_vBoxMin.x, LB()->m_vBoxMin.y, LB()->m_vBoxMin.z, LB()->m_vBoxMax.x, LB()->m_vBoxMax.y, LB()->m_vBoxMax.z);
   if (TRACE_DUMP)
   {
     char szTemplates[256] = "";
