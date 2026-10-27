@@ -504,7 +504,7 @@ static const int nHeapAlignment = 4;
 // texture, also with r_MotionBlur 1 and r_Glare 1 set before the level load.
 
 //////////////////////////////////////////////////////////////////////////
-// Heat vision and night vision (Training)
+// Heat vision and night vision (Training, River, Pier, Steam)
 //
 // I3DEngine::EnableHeatVision(b) calls EF_EnableHeatVision(b) right away; EF_GetHeatVision must
 // return the stored value, the engine asks it for every object it draws (about 730 times per frame
@@ -523,13 +523,18 @@ static const int nHeapAlignment = 4;
 // become P3F_N_COL4UB_TEX2F), without fixed function lighting; terrain, water, sky and sprites
 // are drawn as without heat vision. It renders into no texture and adds no full screen pass.
 // The objects' pixel shader is the same for every template, with the pixel constants c0 (0.85,
-// 0.85, 0.85, 1), c1 (0.1, 0.1, 0.1, 0.4) and c2 (0.5, 0.7, 1, 1). In the back buffer (Training
-// and Steam intros, three frames after heat vision is switched on, compared with the frame
-// before) buildings and rocks come out nearly black (bytes up to about 30), water dark blue (about
-// (30, 44, 66)), plants a darker green of their texture (up to (113, 178, 77)), and the sky is
-// dimmed. The two characters of the Steam intro did not show up in the heat vision frame (their
-// draws were made, with a view matrix whose first two rows are about 25 times longer than
-// without heat vision).
+// 0.85, 0.85, 1), c1 (0.1, 0.1, 0.1, 0.4) and c2 (0.5, 0.7, 1, 1).
+// None of these objects (static objects, plants, characters with the player's hands and weapon)
+// gets its own transform: where the D3D9 renderer normally folds the object's matrix into the view
+// matrix, every one of them is drawn with the view matrix the draw before it left. After the
+// terrain that is the camera's, so the vertices are placed as if object space were world space;
+// after the ocean bottom it is the ocean bottom's (the camera's rotation with world x and y scaled
+// by far plane distance / 16 and the eye at (0, 0, camera height + 0.1); 31.25 on River, 43.75
+// on Training, 25 on Steam), which puts them beyond the far plane. In the frames of River, Pier,
+// Training and Steam none of them could be seen: where they should be, what is behind them shows
+// (the clear colour, black, inside buildings). Terrain, water, sky and the far tree sprites keep
+// the camera and stay in place; in the back buffer water comes out dark blue (about (30, 44, 66)),
+// the far tree sprites dark green, and the sky is dimmed.
 //
 // Night vision is the screen effect "NightVision" (Active 1, see RendererStructures.h, "Screen
 // effects"); r_Cryvision 1 has the same effect. The ScreenProcess element then draws two quads
