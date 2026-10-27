@@ -1011,6 +1011,23 @@ static const int nHeapAlignment = 4;
 // weapon with a narrower one of its own ("Characters").
 
 //////////////////////////////////////////////////////////////////////////
+// Resolution change (Archive, windowed, the console commands r_Width and r_Height)
+//
+// At start-up the window gets the outer size r_Width x r_Height (1024 x 768: client area 1014 x 758)
+// and the back buffer r_Width x r_Height; GetWidth and GetHeight return r_Width and r_Height, and
+// ChangeViewport is not called.
+// When r_Width or r_Height change the engine calls no IRenderer method for it (no
+// ChangeResolution). The D3D9 renderer applies the new values itself within the next frame: it
+// resets its device (the same device) with a back buffer of the new size and gives the window the
+// outer size r_Width x r_Height; meanwhile CLeafBuffer::Unload is called on the leaf buffers with
+// dynamic vertices ("Unknown", "ModelState", the water and fog circles, "LowResTerrain"), whose
+// video buffers are made again when they are drawn. FarCry.exe then calls
+// ChangeViewport(0, 0, client width, client height) (1270 x 710 for 1280 x 720, 1014 x 758 for
+// 1024 x 768); from then on GetWidth and GetHeight return that size, the 3D viewport has it and the
+// camera's ratio is its height / width (0.559). Both commands in one frame give one change. The
+// engine reloads nothing (textures, shaders and leaf buffers stay).
+
+//////////////////////////////////////////////////////////////////////////
 // Lights
 //
 // The sun is added every frame with EF_ADDDlight: flags DLF_DIRECTIONAL | DLF_CASTSHADOW_MAPS |

@@ -162,5 +162,9 @@ it as well: it holds local, machine-specific instructions and is not committed (
   indexed draw where it changed, with the frame and the time (60000 lines, counted again after
   each level load); `XRENDERTRACED_CAPTURE=1`
   captures the first frame after the load.
+  `XRENDERTRACED_DISPLAY=1` writes a line `[display] frame N: ...` (device, back buffer, window
+  client area, `GetWidth` / `GetHeight`) whenever one of them changes, e.g. after `r_Width 1280`.
+  A device reset after a frame captured with `XRENDERTRACED_D3D_DRAWS` fails (the tracer keeps
+  references to the dynamic vertex buffers), so do not capture between resolution changes.
 - The log is `farcry1_testing1/XRenderD3D9Traced.log`; the engine log is
   `farcry1_testing1/log.txt`.

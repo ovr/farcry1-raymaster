@@ -1105,6 +1105,46 @@ void D3DDraws_WatchRenderTargets(IRenderer *pRenderer, int nFrame)
     Trace_Write("d3d vs register: c%d at the indexed draws of device %p", s_nVSReg, pDev);
 }
 
+void D3DDraws_WatchDisplay(IRenderer *pRenderer, int nFrame)
+{
+  static int s_nEnabled = -1;
+  if (s_nEnabled < 0)
+  {
+    char szEnv[8] = "";
+    s_nEnabled = GetEnvironmentVariableA("XRENDERTRACED_DISPLAY", szEnv, sizeof(szEnv)) && szEnv[0] == '1';
+  }
+  if (!s_nEnabled)
+    return;
+  // Not D3DState_GetDevice: it keeps the first device, and a watcher may have replaced its vtable.
+  IDirect3DDevice9 *pDev = (IDirect3DDevice9 *)pRenderer->EF_Query(EFQ_D3DDevice);
+  if (!pDev || !Trace_IsReadable(pDev, sizeof(void *)))
+    return;
+  D3DPRESENT_PARAMETERS PP;
+  memset(&PP, 0, sizeof(PP));
+  IDirect3DSwapChain9 *pSC = NULL;
+  if (SUCCEEDED(pDev->GetSwapChain(0, &pSC)) && pSC)
+  {
+    pSC->GetPresentParameters(&PP);
+    pSC->Release();
+  }
+  RECT Client = { 0, 0, 0, 0 };
+  HWND hWnd = (HWND)pRenderer->GetHWND();
+  if (hWnd)
+    GetClientRect(hWnd, &Client);
+  char szLine[512];
+  _snprintf_s(szLine, _TRUNCATE, "device %p back buffer %ux%u format %d count %u windowed %d refresh %u swap %d interval 0x%x "
+    "depth %d format %d; window %p client %dx%d; GetWidth %d GetHeight %d", pDev, PP.BackBufferWidth, PP.BackBufferHeight,
+    (int)PP.BackBufferFormat, PP.BackBufferCount, PP.Windowed, PP.FullScreen_RefreshRateInHz, (int)PP.SwapEffect,
+    PP.PresentationInterval, PP.EnableAutoDepthStencil, (int)PP.AutoDepthStencilFormat, hWnd, Client.right - Client.left,
+    Client.bottom - Client.top, pRenderer->GetWidth(), pRenderer->GetHeight());
+  static char s_szLast[512] = "";
+  if (strcmp(szLine, s_szLast))
+  {
+    strcpy_s(s_szLast, szLine);
+    Trace_Write("[display] frame %d: %s", nFrame, szLine);
+  }
+}
+
 void D3DDraws_SaveBackBuffer(IRenderer *pRenderer, const char *szFile)
 {
   IDirect3DDevice9 *pDev = D3DState_GetDevice(pRenderer);

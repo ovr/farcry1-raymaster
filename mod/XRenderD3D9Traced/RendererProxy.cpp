@@ -258,6 +258,7 @@ void CRendererProxy::Update()
     if (m_nFrames + 1 == m_nCaptureFrame)
       Trace_CaptureFrame();
   }
+  D3DDraws_WatchDisplay(m_pReal, m_nFrames);
   WatchScreenFx();
   // Outside the traced call: the commands run engine code (a level load) that calls the renderer,
   // and those calls are calls of the engine, not of the renderer to itself.
@@ -769,7 +770,7 @@ bool CRendererProxy::ChangeDisplay(unsigned int width, unsigned int height, unsi
 
 void CRendererProxy::ChangeViewport(unsigned int x, unsigned int y, unsigned int width, unsigned int height)
 {
-  TRACE_CALL("%u %u %ux%u", x, y, width, height);
+  TRACE_CALL("%u %u %ux%u from %s", x, y, width, height, Trace_Addr(_ReturnAddress()));
   m_pReal->ChangeViewport(x, y, width, height);
 }
 
