@@ -58,6 +58,28 @@ static const int nHeapAlignment = 4;
 // RemoveTexture and DeleteLeafBuffer have to accept the same ID several times, -1 and NULL.
 
 //////////////////////////////////////////////////////////////////////////
+// Level change (Training, then the console command "map River")
+//
+// Before PreLoad of the new level the engine frees the old one, in this order:
+// - EF_LoadTexture of the new level's loading screen picture; OnEntityDeleted for the game's
+//   entities with DeleteLeafBuffer of their buffers; one frame (BeginFrame, Draw2dImage of the
+//   loading screen, FlushTextMessages, Update); the game's particle textures again (EF_LoadTexture,
+//   SetTexture, SetTexClampMode, LoadAnimatedTexture; these stay loaded).
+// - Then the level: every leaf buffer the engine created for it, the terrain sectors (each
+//   followed by RemoveTexture of its texture), "LMapTexCoords", "MergedLB", "WaterVolume",
+//   "LowResTerrain", "OutdoorWaterCircle" and "OceanBottomCircle" included (4275 DeleteLeafBuffer
+//   calls, 1133 of them with NULL), RemoveTexture (2007 calls, 13 of them with 0, one ID up to 40
+//   times), RemoveAnimatedTexture (16),
+//   CRendElement::Release of the CRETerrainDetailTextureLayers element and of both
+//   CREOcclusionQuery elements, and the Release of the shaders and their resources (more than
+//   4000 calls of IShader::Release and of SRenderShaderResources::Release, from Cry3DEngine and
+//   CryAnimation) and of the CREOcLeaf elements (2291). OnEntityDeleted comes 102768 times in all.
+// While loading the new level the engine creates a new CRETerrainDetailTextureLayers element; the
+// other elements of EF_CreateRE (Sky, Dummy, 2DQuad, ScreenProcess, ShadowMapGen, FarTreeSprites,
+// TerrainParticles, ClearStencil) are made once at start-up and kept. A renderer must survive any
+// number of these cycles: every object the engine got from it can be released at a level change.
+
+//////////////////////////////////////////////////////////////////////////
 // Frame
 //
 // IRenderer calls of one game frame in the level (frame 5000):

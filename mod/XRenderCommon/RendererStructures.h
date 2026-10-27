@@ -157,7 +157,8 @@ namespace RendererStructures
 //     GetTextureID, GetFlags, IsTextureLoaded (from Cry3DEngine, CrySystem, CryGame and
 //     CryEntitySystem); with decals on also SetFilter and SetClamp (Bin64Behaviour.h, "Decals").
 //   - SRenderShaderResources: Release, its only virtual function.
-//   - CRendElement: Release (of the CREOcLeaf of the leaf buffer materials).
+//   - CRendElement: Release (of the CREOcLeaf of the leaf buffer materials; at a level change also
+//     of CRETerrainDetailTextureLayers and CREOcclusionQuery, Bin64Behaviour.h "Level change").
 //   - CREScreenProcess: mfSetParameter, mfGetParameter (see "Screen effects" below).
 //   - CCObject: AddWaves, RemovePermanent (see CCObject above); SetShaderFloat is not called.
 //   CMatInfo's virtual functions are inline in IShader.h, so every module has its own copy.
