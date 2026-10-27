@@ -849,6 +849,11 @@ void Dump_Light(const CDLight *pL)
   Trace_Write("      projAngles (%.2f %.2f %.2f) frustum %.2f shader %p image %p owner %p style %d corona %.2f lifeTime %.2f creator '%.8s'",
     pL->m_ProjAngles.x, pL->m_ProjAngles.y, pL->m_ProjAngles.z, pL->m_fLightFrustumAngle, pL->m_pShader, pL->m_pLightImage,
     pL->m_pOwner, pL->m_nLightStyle, pL->m_fCoronaScale, pL->m_fLifeTime, pL->m_sDebugName);
+  // The objects of the light's coronas and flares (filled by the renderer).
+  for (int i = 0; i < 4; i++)
+    for (int j = 0; j < 4; j++)
+      if (pL->m_pObject[i][j])
+        Trace_Write("      object [%d][%d] %p", i, j, pL->m_pObject[i][j]);
   if (pL->m_Flags & DLF_PROJECT)
   {
     const COrthoNormalBasis &O = pL->m_Orientation;

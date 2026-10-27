@@ -455,6 +455,41 @@ CCObject *CRendererProxy::EF_GetObject(bool bTemp, int num)
   return pRes;
 }
 
+//! A probe value from the environment: one number, or several ("1.5 3 6") taken in turn, one per
+//! frame.
+static float ProbeValue(const char *szVar, float fDefault, int nFrame)
+{
+  const char *szValue = getenv(szVar);
+  if (!szValue)
+    return fDefault;
+  float Values[16];
+  int nValues = 0;
+  for (const char *p = szValue; *p && nValues < 16;)
+  {
+    char *pEnd;
+    Values[nValues] = (float)strtod(p, &pEnd);
+    if (pEnd == p)
+      break;
+    nValues++;
+    p = pEnd;
+  }
+  return nValues ? Values[nFrame % nValues] : fDefault;
+}
+
+//! The camera's line of sight, turned by XRENDERTRACED_FLARE_DIR="dx dy" (dx times the right and dy
+//! times the up vector of the view; the view space looks down -z).
+static Vec3 ProbeDirection(const CCamera &Cam)
+{
+  const Matrix44 View = Cam.GetVCMatrixD3D9();
+  float fRight = 0, fUp = 0;
+  if (const char *szDir = getenv("XRENDERTRACED_FLARE_DIR"))
+    sscanf_s(szDir, "%f %f", &fRight, &fUp);
+  Vec3 Dir = Vec3(-View(0, 2), -View(1, 2), -View(2, 2)) + Vec3(View(0, 0), View(1, 0), View(2, 0)) * fRight
+    + Vec3(View(0, 1), View(1, 1), View(2, 1)) * fUp;
+  Dir.Normalize();
+  return Dir;
+}
+
 void CRendererProxy::EF_AddEf(int NumFog, CRendElement *re, IShader *ef, SRenderShaderResources *sr, CCObject *obj, int nTempl, IShader *efState, int nSort)
 {
   TRACE_CALL("fog %d RE %p %s shader %p '%s' res %p obj %p templ %d state %p '%s' sort %d", NumFog, re, re ? Trace_RETypeName(re->m_Type) : "",
@@ -477,22 +512,14 @@ void CRendererProxy::EF_AddEf(int NumFog, CRendElement *re, IShader *ef, SRender
     Dump_Object(obj);
   }
   // XRENDERTRACED_PROBE=FlareInView: a flare is moved onto the line of sight of the camera, at its
-  // own distance, to see how the renderer draws one in view; XRENDERTRACED_FLARE_DIR="dx dy" turns
-  // that line by dx times the right and dy times the up vector of the view.
+  // own distance or XRENDERTRACED_FLARE_DIST (ProbeValue), to see how the renderer draws one in
+  // view (ProbeDirection).
   if (re && re->m_Type == eDATA_Flare && obj && Trace_IsListed("XRENDERTRACED_PROBE", "FlareInView"))
   {
     const CCamera &Cam = m_pReal->GetCamera();
-    const Matrix44 View = Cam.GetVCMatrixD3D9();
     const Vec3 Eye = Cam.GetPos();
     const Vec3 Pos(obj->m_Matrix(3, 0), obj->m_Matrix(3, 1), obj->m_Matrix(3, 2));
-    float fRight = 0, fUp = 0;
-    if (const char *szDir = getenv("XRENDERTRACED_FLARE_DIR"))
-      sscanf_s(szDir, "%f %f", &fRight, &fUp);
-    // The view space looks down -z.
-    Vec3 Dir = Vec3(-View(0, 2), -View(1, 2), -View(2, 2)) + Vec3(View(0, 0), View(1, 0), View(2, 0)) * fRight
-      + Vec3(View(0, 1), View(1, 1), View(2, 1)) * fUp;
-    Dir.Normalize();
-    const Vec3 New = Eye + Dir * (Pos - Eye).Length();
+    const Vec3 New = Eye + ProbeDirection(Cam) * ProbeValue("XRENDERTRACED_FLARE_DIST", (Pos - Eye).Length(), m_nFrames);
     Trace_Write("    probe: flare from (%.3f %.3f %.3f) to (%.3f %.3f %.3f)", Pos.x, Pos.y, Pos.z, New.x, New.y, New.z);
     obj->m_Matrix(3, 0) = New.x;
     obj->m_Matrix(3, 1) = New.y;
@@ -503,7 +530,7 @@ void CRendererProxy::EF_AddEf(int NumFog, CRendElement *re, IShader *ef, SRender
   if (re && re->m_Type == eDATA_Flare && obj && Trace_IsListed("XRENDERTRACED_FLARES", "1"))
   {
     m_pFlareObj = obj;
-    WriteFlareObject("", ShaderName(ef));
+    WriteFlareObject(obj, "", ShaderName(ef));
   }
   // The elements of a shader (GetREs, e.g. the flares) reach the renderer only here.
   VCallHooks_InstallRE(re);
@@ -523,16 +550,18 @@ void CRendererProxy::EF_EndEf3D(int nFlags)
   Dump_OpaqueList("shadow casters after EF_EndEf3D", pCasters);
   g_pTraceLastShadowCasters = NULL;
   if (m_pFlareObj)
-    WriteFlareObject(" after EF_EndEf3D", "");
+    WriteFlareObject(m_pFlareObj, " after EF_EndEf3D", "");
+  if (m_pCoronaObj)
+    WriteFlareObject(m_pCoronaObj, " corona after EF_EndEf3D", "");
   m_pFlareObj = NULL;
+  m_pCoronaObj = NULL;
 }
 
-void CRendererProxy::WriteFlareObject(const char *szWhen, const char *szShader)
+void CRendererProxy::WriteFlareObject(const CCObject *obj, const char *szWhen, const char *szShader)
 {
   static int s_nLines = 0;
   if (s_nLines++ >= 40000)
     return;
-  const CCObject *obj = m_pFlareObj;
   const Vec3 Eye = m_pReal->GetCamera().GetPos();
   const Vec3 Pos(obj->m_Matrix(3, 0), obj->m_Matrix(3, 1), obj->m_Matrix(3, 2));
   Trace_Write("[flare%s] frame %d time %.4f '%s' obj %d flags 0x%x color (%g %g %g %g) amb (%g %g %g) fadeTime %g startTime %g "
@@ -578,11 +607,37 @@ void CRendererProxy::EF_ADDDlight(CDLight *Source)
       Source->m_Color = CFColor(Orig.r * m_fLightColor, Orig.g * m_fLightColor, Orig.b * m_fLightColor, 1);
     }
   }
+  // XRENDERTRACED_PROBE=CoronaInView: a light with a corona is moved onto the line of sight of the
+  // camera (ProbeDirection), XRENDERTRACED_CORONA_DIST (5) units in front of it, to see how the
+  // renderer draws its corona; XRENDERTRACED_CORONA_SCALE replaces its m_fCoronaScale (both
+  // ProbeValue).
+  if (Source && Source->m_fCoronaScale > 0 && Trace_IsListed("XRENDERTRACED_PROBE", "CoronaInView"))
+  {
+    const CCamera &Cam = m_pReal->GetCamera();
+    const Vec3 New = Cam.GetPos() + ProbeDirection(Cam) * ProbeValue("XRENDERTRACED_CORONA_DIST", 5.0f, m_nFrames);
+    Source->m_fCoronaScale = ProbeValue("XRENDERTRACED_CORONA_SCALE", Source->m_fCoronaScale, m_nFrames);
+    Trace_Write("    probe: light from (%.3f %.3f %.3f) to (%.3f %.3f %.3f)", Source->m_Origin.x, Source->m_Origin.y,
+      Source->m_Origin.z, New.x, New.y, New.z);
+    Source->m_Origin = New;
+  }
   if (TRACE_DUMP)
     Dump_Light(Source);
   CWatchArg WatchLight(WT_CDLight, Source);
   m_pReal->EF_ADDDlight(Source);
   TRACE_RESULT("id %d", Source ? Source->m_Id : -1);
+  if (Source)
+    for (int i = 0; i < 4; i++)
+      for (int j = 0; j < 4; j++)
+        if (Source->m_pObject[i][j])
+        {
+          if (TRACE_DUMP)
+            Trace_Write("    object [%d][%d] %p after the call", i, j, Source->m_pObject[i][j]);
+          if (Trace_IsListed("XRENDERTRACED_FLARES", "1"))
+          {
+            m_pCoronaObj = Source->m_pObject[i][j];
+            WriteFlareObject(m_pCoronaObj, " corona", Source->m_pShader ? Source->m_pShader->GetName() : "");
+          }
+        }
 }
 
 void CRendererProxy::EF_ClearLightsList()

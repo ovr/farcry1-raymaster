@@ -103,14 +103,19 @@ it as well: it holds local, machine-specific instructions and is not committed (
   `XRENDERTRACED_SKIP_SPRITES=particlelight_fp,...` holds back the `EF_AddSpriteToScene` calls
   of these shaders, to tell which Direct3D draw belongs to which sprite.
   `XRENDERTRACED_PROBE=FlareInView` moves the object of every flare (`EF_AddEf` with a Flare
-  element) onto the camera's line of sight at its own distance, so that the renderer tests and
-  draws it; `XRENDERTRACED_FLARE_DIR="dx dy"` turns that line by dx times the view's right and dy
-  times its up vector (e.g. `0.6 0` towards the right edge of the screen).
+  element) onto the camera's line of sight at its own distance or `XRENDERTRACED_FLARE_DIST`, so
+  that the renderer tests and draws it; `XRENDERTRACED_FLARE_DIR="dx dy"` turns that line by dx
+  times the view's right and dy times its up vector (e.g. `0.6 0` towards the right edge of the
+  screen). `XRENDERTRACED_PROBE=CoronaInView` moves every light with a corona
+  (`m_fCoronaScale > 0`) in `EF_ADDDlight` onto that line, `XRENDERTRACED_CORONA_DIST` (5) in front
+  of the camera, and `XRENDERTRACED_CORONA_SCALE` replaces its `m_fCoronaScale`. These three take
+  one number or several (`"0.75 1.5 3"`), used in turn, one per frame.
   `XRENDERTRACED_FLARES=1` writes the object of the flare as the engine passes it and again after
   `EF_EndEf3D` as `[flare]` lines (colour, `m_AmbColor`, `m_TempVars`, `m_Trans2`, `m_Angs2`,
   `m_RE` and the distance to the camera; up to 40000 lines), for the state the renderer keeps
-  in it. The flares are off in farcry1_testing1's settings: put `r_Flares 1` (and `r_Coronas 1`)
-  in front of `map` in `XRENDERTRACED_EXEC`.
+  in it, and in the same way (`[flare corona]`) the object the renderer keeps for a light's corona
+  (`CDLight::m_pObject`, written in the light's dump as well). Flares and coronas are off in
+  farcry1_testing1's settings: put `r_Coronas 1` in front of `map` in `XRENDERTRACED_EXEC`.
   The render elements a shader holds (`GetREs`, e.g. the flares) are hooked when they reach
   `EF_AddEf`, so their draws carry the element in the Direct3D draw log.
 - `XRENDERTRACED_D3D_DRAWS=1` writes the Direct3D 9 draw calls of the original renderer in the
