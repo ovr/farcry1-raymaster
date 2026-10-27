@@ -168,7 +168,7 @@ bool Trace_IsListed(const char *szVar, const char *szName)
     const char *m_szVar;
     char m_szNames[1024];
   };
-  static SList s_Lists[4];
+  static SList s_Lists[8];
   SList *pList = NULL;
   for (int i = 0; i < (int)(sizeof(s_Lists) / sizeof(s_Lists[0])) && !pList; i++)
   {

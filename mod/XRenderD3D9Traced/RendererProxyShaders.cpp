@@ -221,12 +221,28 @@ SShaderItem CRendererProxy::EF_LoadShaderItem(const char *name, EShClass Class, 
     Dump_InputResources(Res);
   CWatchArg WatchRes(WT_SInputShaderResources, Res);
   // XRENDERTRACED_TEMPLATE=TemplDecalModulate: every material that names a template ("Templ...")
-  // gets this one instead, to see how the renderer draws it.
+  // gets this one instead, to see how the renderer draws it; with XRENDERTRACED_TEMPLATE_ONLY
+  // ("name,name,...") only the materials of those names, and XRENDERTRACED_TEMPLATE_OPACITY
+  // replaces their opacity as well.
   static char s_szTemplate[64] = "?";
-  if (s_szTemplate[0] == '?' && !GetEnvironmentVariableA("XRENDERTRACED_TEMPLATE", s_szTemplate, sizeof(s_szTemplate)))
-    s_szTemplate[0] = 0;
-  if (s_szTemplate[0] && templName && !_strnicmp(templName, "Templ", 5))
+  static bool s_bOnlyListed = false;
+  static float s_fOpacity = -1;
+  if (s_szTemplate[0] == '?')
+  {
+    if (!GetEnvironmentVariableA("XRENDERTRACED_TEMPLATE", s_szTemplate, sizeof(s_szTemplate)))
+      s_szTemplate[0] = 0;
+    s_bOnlyListed = GetEnvironmentVariableA("XRENDERTRACED_TEMPLATE_ONLY", NULL, 0) != 0;
+    char szOpacity[32];
+    if (GetEnvironmentVariableA("XRENDERTRACED_TEMPLATE_OPACITY", szOpacity, sizeof(szOpacity)))
+      s_fOpacity = (float)atof(szOpacity);
+  }
+  if (s_szTemplate[0] && templName && !_strnicmp(templName, "Templ", 5) &&
+      (!s_bOnlyListed || name && Trace_IsListed("XRENDERTRACED_TEMPLATE_ONLY", name)))
+  {
     templName = s_szTemplate;
+    if (s_bOnlyListed && s_fOpacity >= 0 && Res)
+      Res->m_Opacity = s_fOpacity;
+  }
   SShaderItem Item = m_pReal->EF_LoadShaderItem(name, Class, bShare, templName, flags, Res, nMaskGen);
   TRACE_RESULT("shader %p res %p", Item.m_pShader, Item.m_pShaderResources);
   Watch_RendererObject(WT_SRenderShaderResources, Item.m_pShaderResources);

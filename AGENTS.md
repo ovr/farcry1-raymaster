@@ -99,7 +99,9 @@ it as well: it holds local, machine-specific instructions and is not committed (
   texture matrix the renderer makes from it.
   `XRENDERTRACED_TEMPLATE=TemplDecalModulate` gives every material that names a template
   (`Templ...`) that template instead, to see how the renderer draws templates that are not in
-  view.
+  view; `XRENDERTRACED_TEMPLATE_ONLY=name,name` limits it to the materials of those names (as
+  passed to `EF_LoadShaderItem`), and `XRENDERTRACED_TEMPLATE_OPACITY=0.5` then gives them that
+  opacity too.
   `XRENDERTRACED_SKIP_SPRITES=particlelight_fp,...` holds back the `EF_AddSpriteToScene` calls
   of these shaders, to tell which Direct3D draw belongs to which sprite.
   `XRENDERTRACED_PROBE=FlareInView` moves the object of every flare (`EF_AddEf` with a Flare
