@@ -381,6 +381,22 @@ static const int nHeapAlignment = 4;
 //   without depth writes, no culling, blended the same way.
 
 //////////////////////////////////////////////////////////////////////////
+// Screen effects (Training)
+//
+// The ScreenProcess element (EF_AddEf every frame, RendererStructures.h, "Screen effects") draws
+// the active effects at the end of the 3D frame, before the 2D calls. FlashBang and ScreenFade
+// each draw one quad over the whole screen, FlashBang first. Positions go from -0.5 pixel to the
+// last pixel minus 0.5 (0..1 with an orthographic projection, y down), uv 0..1. The texture is a
+// 16 x 16 DXT1 texture of the renderer (the same one for both), clamped, with linear filtering.
+// There is no depth test or depth write and no culling. Colour and alpha = texture * texture
+// factor:
+// - FlashBang: added (ONE, ONE); the texture factor is grey, c * 255 with alpha 255, where c falls
+//   with the flash value v (parameter 24): c = 1.08 * v - 0.07 within 2 / 255 for v from 0.22 to
+//   0.92. With the defaults nothing else is drawn at the flash position.
+// - ScreenFade fading in: blended (SRCALPHA, INVSRCALPHA); the texture factor is black, with an
+//   alpha that falls linearly from 255 to 0 over the fade time (102 per second for -2.5).
+
+//////////////////////////////////////////////////////////////////////////
 // Heat vision and night vision (Training)
 //
 // I3DEngine::EnableHeatVision(b) calls EF_EnableHeatVision(b) right away; EF_GetHeatVision must
