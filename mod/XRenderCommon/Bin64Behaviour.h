@@ -1047,7 +1047,9 @@ static const int nHeapAlignment = 4;
 // Shaders whose GetREs hold one Flare render element (eDATA_Flare, no SDK class): the sun flares
 // ("sun_evening" in Factory, Boat and Bunker with the colour (1, 0.70, 0.46); "flare_training" in
 // Training and Pier with (0.5, 0.4, 0.3)), "crylight", and "flare_from_light", which is m_pShader of
-// the lights with a corona (light entities, CDLight::m_fCoronaScale 1).
+// the lights with a corona (light entities, CDLight::m_fCoronaScale 1). The engine loads "CryLight"
+// at start-up (EF_LoadShader with flags 0x20000000) and never hands it back to the renderer in any
+// of the traces (no light, EF_AddEf or sprite uses it); it only has to load.
 //
 // The engine adds the sun's flare every frame in which the sun is near the view (not when it is
 // behind the camera), whatever the settings: EF_AddEf(0, the Flare element, the shader, NULL, obj,
