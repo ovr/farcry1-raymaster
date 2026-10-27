@@ -6,7 +6,8 @@
 //	PackageRenderConstructor loads the original renderer (XRenderD3D9.dll
 //	next to this DLL, or the DLL named by the XRENDERTRACED_DLL environment
 //	variable), creates it with the same arguments and hands the engine a
-//	CRendererProxy around it.
+//	CRendererProxy around it. XRENDERTRACED_DEMO names a demo DLL that the
+//	proxy calls at every frame (DemoPlugin.h).
 //
 //////////////////////////////////////////////////////////////////////
 
@@ -30,6 +31,8 @@ ITimer *iTimer = NULL;
 
 static const char szDefaultRealDll[] = "XRenderD3D9.dll";
 static const char szRealDllEnv[] = "XRENDERTRACED_DLL";
+static const char szDemoEnv[] = "XRENDERTRACED_DEMO";
+static const char szDemoArgsEnv[] = "XRENDERTRACED_DEMO_ARGS";
 static const char szTraceFile[] = "XRenderD3D9Traced.log";
 
 static HMODULE GetThisModule()
@@ -39,13 +42,9 @@ static HMODULE GetThisModule()
   return hMod;
 }
 
-//! Full path of the original renderer: a bare file name is looked up in the directory of this DLL.
-static void GetRealDllPath(char *szPath, size_t nSize)
+//! Full path of a DLL: a bare file name is looked up in the directory of this DLL.
+static void GetDllPath(const char *szName, char *szPath, size_t nSize)
 {
-  char szName[MAX_PATH];
-  DWORD nLen = GetEnvironmentVariableA(szRealDllEnv, szName, sizeof(szName));
-  if (!nLen || nLen >= sizeof(szName))
-    strcpy(szName, szDefaultRealDll);
   if (strchr(szName, '\\') || strchr(szName, '/'))
   {
     _snprintf(szPath, nSize, "%s", szName);
@@ -62,6 +61,38 @@ static void GetRealDllPath(char *szPath, size_t nSize)
     _snprintf(szPath, nSize, "%s%s", szDir, szName);
   }
   szPath[nSize - 1] = 0;
+}
+
+//! Full path of the original renderer.
+static void GetRealDllPath(char *szPath, size_t nSize)
+{
+  char szName[MAX_PATH];
+  DWORD nLen = GetEnvironmentVariableA(szRealDllEnv, szName, sizeof(szName));
+  if (!nLen || nLen >= sizeof(szName))
+    strcpy(szName, szDefaultRealDll);
+  GetDllPath(szName, szPath, nSize);
+}
+
+//! The demo named by XRENDERTRACED_DEMO, created around the proxy; NULL without one. Like the
+//! original renderer, its DLL is never unloaded.
+static IDemoPlugin *LoadDemo(IRenderer *pProxy)
+{
+  char szName[MAX_PATH], szArgs[2048] = "", szPath[MAX_PATH];
+  DWORD nLen = GetEnvironmentVariableA(szDemoEnv, szName, sizeof(szName));
+  if (!nLen || nLen >= sizeof(szName))
+    return NULL;
+  nLen = GetEnvironmentVariableA(szDemoArgsEnv, szArgs, sizeof(szArgs));
+  if (nLen >= sizeof(szArgs))
+    szArgs[0] = 0;
+  GetDllPath(szName, szPath, sizeof(szPath));
+  HMODULE hDemo = LoadLibraryA(szPath);
+  PFN_CreateDemoPlugin pfnCreate = hDemo ? (PFN_CreateDemoPlugin)GetProcAddress(hDemo, DEMO_PLUGIN_CREATE) : NULL;
+  IDemoPlugin *pDemo = pfnCreate ? pfnCreate(DEMO_PLUGIN_VERSION, iSystem, pProxy, szArgs) : NULL;
+  const char *szResult = pDemo ? "created" : !hDemo ? "can't be loaded" : !pfnCreate ? "has no " DEMO_PLUGIN_CREATE : "not created";
+  Trace_Write("Demo '%s' (arguments '%s'): %s", szPath, szArgs, szResult);
+  if (!pDemo && iLog)
+    iLog->LogError("XRenderD3D9Traced: demo '%s' %s", szPath, szResult);
+  return pDemo;
 }
 
 //! R_*_RENDERER type of a retail renderer DLL, by its file name; -1 if it is not one of them.
@@ -128,7 +159,9 @@ extern "C" __declspec(dllexport) IRenderer *PackageRenderConstructor(int argc, c
     return NULL;
   if (iLog)
     iLog->Log("XRenderD3D9Traced: tracing '%s' to %s", szPath, szTraceFile);
-  return new CRendererProxy(pReal, GetRendererType(szPath));
+  CRendererProxy *pProxy = new CRendererProxy(pReal, GetRendererType(szPath));
+  pProxy->SetDemo(LoadDemo(pProxy));
+  return pProxy;
 }
 
 BOOL APIENTRY DllMain(HANDLE hModule, DWORD dwReason, LPVOID lpReserved)

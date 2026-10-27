@@ -94,8 +94,32 @@ IRenderer *CRendererProxy::Unwrap(IRenderer *pRenderer)
 //////////////////////////////////////////////////////////////////////////
 // Device
 
+//! XRENDERTRACED_RESOLUTION=<width>x<height>: the size the renderer starts with instead of r_Width x
+//! r_Height of system.cfg. The console variables are set to it too, before Init, so that they agree
+//! with the renderer's size. A window larger than the screen is made smaller by Windows; the back
+//! buffer keeps the size.
+static void ApplyResolution(int &width, int &height)
+{
+  char szEnv[64];
+  int nWidth = 0, nHeight = 0;
+  if (!GetEnvironmentVariableA("XRENDERTRACED_RESOLUTION", szEnv, sizeof(szEnv)) || sscanf(szEnv, "%dx%d", &nWidth, &nHeight) != 2 ||
+    nWidth <= 0 || nHeight <= 0)
+    return;
+  ICVar *pWidth = iConsole ? iConsole->GetCVar("r_Width") : NULL;
+  ICVar *pHeight = iConsole ? iConsole->GetCVar("r_Height") : NULL;
+  if (pWidth)
+    pWidth->Set(nWidth);
+  if (pHeight)
+    pHeight->Set(nHeight);
+  Trace_Write("XRENDERTRACED_RESOLUTION: %dx%d instead of %dx%d", nWidth, nHeight, width, height);
+  width = nWidth;
+  height = nHeight;
+}
+
 WIN_HWND CRendererProxy::Init(int x, int y, int width, int height, unsigned int cbpp, int zbpp, int sbits, bool fullscreen, WIN_HINSTANCE hinst, WIN_HWND Glhwnd, WIN_HDC Glhdc, WIN_HGLRC hGLrc, bool bReInit)
 {
+  if (!bReInit)
+    ApplyResolution(width, height);
   TRACE_CALL("x %d y %d %dx%d cbpp %u zbpp %d sbits %d fullscreen %d hinst %p hwnd %p hdc %p hglrc %p reinit %d",
     x, y, width, height, cbpp, zbpp, sbits, fullscreen, hinst, Glhwnd, Glhdc, hGLrc, bReInit);
   WIN_HWND hWnd = m_pReal->Init(x, y, width, height, cbpp, zbpp, sbits, fullscreen, hinst, Glhwnd, Glhdc, hGLrc, bReInit);
@@ -193,6 +217,11 @@ bool CRendererProxy::ChangeResolution(int nNewWidth, int nNewHeight, int nNewCol
 
 void CRendererProxy::Release()
 {
+  if (m_pDemo)
+  {
+    m_pDemo->Release();
+    m_pDemo = NULL;
+  }
   TRACE_CALL("");
   Watch_WriteSummary("renderer released");
   VCallHooks_WriteSummary("renderer released");
@@ -247,6 +276,8 @@ void CRendererProxy::PostLoad()
 
 void CRendererProxy::BeginFrame()
 {
+  if (m_pDemo)
+    m_pDemo->BeginFrame(m_nFrames + 1);
   TRACE_CALL("frame %d time %.4f", m_nFrames + 1, iTimer ? iTimer->GetCurrTime() : 0.0f);
   Watch_NewFrame();
   // The renderer's calls back into the engine.
@@ -267,6 +298,13 @@ void CRendererProxy::BeginFrame()
 
 void CRendererProxy::Update()
 {
+  if (m_nInFrameLeft > 0 && iConsole)
+  {
+    m_nInFrameLeft--;
+    iConsole->ExecuteString(m_szInFrame, false, true);
+  }
+  if (m_pDemo)
+    m_pDemo->EndFrame(m_nFrames + 1);
   if (m_nFrames + 1 == m_nShotFrame)
   {
     D3DDraws_SaveBackBuffer(m_pReal, m_szShot);
@@ -303,6 +341,8 @@ void CRendererProxy::Update()
     m_Deferred[i] = m_Deferred[--m_nDeferred];
     ExecuteCommands(szCmd);
   }
+  if (m_pDemo)
+    m_pDemo->AfterFrame(m_nFrames);
 }
 
 void CRendererProxy::WatchScreenFx()
@@ -346,6 +386,8 @@ void CRendererProxy::ExecuteCommands(const char *szCommands)
       DecalCommand(szCmd + 6);
     else if (!strncmp(szCmd, "goto ", 5))
       GotoCommand(szCmd + 5);
+    else if (!strncmp(szCmd, "playerevent ", 12))
+      PlayerEventCommand(szCmd + 12);
     else if (!strncmp(szCmd, "entities", 8) && (!szCmd[8] || szCmd[8] == ' '))
     {
       // "entities [part of a class name]": the entities with their class, name and position, to find
@@ -377,23 +419,61 @@ void CRendererProxy::ExecuteCommands(const char *szCommands)
         pIt->Release();
       Trace_Write("  %d entities", nListed);
     }
-    else if (!strcmp(szCmd, "mouse down") || !strcmp(szCmd, "mouse up") || !strncmp(szCmd, "mouse move ", 11))
+    else if (!strncmp(szCmd, "mouse down", 10) || !strncmp(szCmd, "mouse up", 8) || !strncmp(szCmd, "mouse move ", 11) ||
+             !strncmp(szCmd, "key down ", 9) || !strncmp(szCmd, "key up ", 7))
     {
-      // The left mouse button or a relative move, only while the game window is in front (the input
-      // goes to that window).
+      // "mouse down|up [right]": the left (or right) mouse button, "mouse move dx dy": a relative
+      // move, "key down|up <letter or digit>": a key (as a scan code, which DirectInput reads); only
+      // while the game window is in front (the input goes to that window).
       const HWND hWnd = (HWND)m_pReal->GetHWND();
       const bool bFront = hWnd && GetForegroundWindow() == hWnd;
       INPUT Input = {};
-      Input.type = INPUT_MOUSE;
-      if (!strncmp(szCmd + 6, "move ", 5))
+      if (szCmd[0] == 'k')
       {
+        const bool bDown = szCmd[4] == 'd';
+        const char cKey = (char)toupper((unsigned char)szCmd[bDown ? 9 : 7]);
+        Input.type = INPUT_KEYBOARD;
+        Input.ki.wScan = (WORD)MapVirtualKeyA((UINT)(unsigned char)cKey, MAPVK_VK_TO_VSC);
+        Input.ki.dwFlags = KEYEVENTF_SCANCODE | (bDown ? 0 : KEYEVENTF_KEYUP);
+      }
+      else if (!strncmp(szCmd + 6, "move ", 5))
+      {
+        Input.type = INPUT_MOUSE;
         sscanf_s(szCmd + 11, "%ld %ld", &Input.mi.dx, &Input.mi.dy);
         Input.mi.dwFlags = MOUSEEVENTF_MOVE;
       }
       else
-        Input.mi.dwFlags = !strcmp(szCmd + 6, "down") ? MOUSEEVENTF_LEFTDOWN : MOUSEEVENTF_LEFTUP;
+      {
+        const bool bDown = !strncmp(szCmd + 6, "down", 4);
+        const bool bRight = strstr(szCmd, " right") != NULL;
+        Input.type = INPUT_MOUSE;
+        Input.mi.dwFlags = bRight ? (bDown ? MOUSEEVENTF_RIGHTDOWN : MOUSEEVENTF_RIGHTUP)
+                                  : (bDown ? MOUSEEVENTF_LEFTDOWN : MOUSEEVENTF_LEFTUP);
+      }
       const UINT nSent = bFront ? SendInput(1, &Input, sizeof(Input)) : 0;
       Trace_Write("  game window %sin front, %u input sent", bFront ? "" : "not ", nSent);
+    }
+    else if (!strncmp(szCmd, "screenshader ", 13) || !strncmp(szCmd, "screenmask ", 11) || !strncmp(szCmd, "blurmask ", 9))
+    {
+      // "screenshader <shader>|-": I3DEngine::SetScreenShader(shader or ""); "screenmask
+      // <texture>|-" and "blurmask <texture>|-": SetScreenMask / SetBlurMask with that texture
+      // (LoadTexture) or NULL.
+      I3DEngine *p3DEngine = iSystem ? iSystem->GetI3DEngine() : NULL;
+      const char *szArg = strchr(szCmd, ' ') + 1;
+      const bool bNone = !strcmp(szArg, "-");
+      if (!p3DEngine)
+        ;
+      else if (!strncmp(szCmd, "screenshader ", 13))
+        p3DEngine->SetScreenShader(bNone ? "" : szArg);
+      else
+      {
+        ITexPic *pTex = bNone ? NULL : m_pReal->EF_LoadTexture(szArg, 0, 0, eTT_Base);
+        Trace_Write("  texture %p (id %d)", pTex, pTex ? pTex->GetTextureID() : -1);
+        if (!strncmp(szCmd, "screenmask ", 11))
+          p3DEngine->SetScreenMask(pTex);
+        else
+          p3DEngine->SetBlurMask(pTex);
+      }
     }
     else if (!strncmp(szCmd, "lightradius ", 12))
     {
@@ -433,6 +513,12 @@ void CRendererProxy::ExecuteCommands(const char *szCommands)
         strcpy_s(m_Deferred[m_nDeferred].szCmd, szCmd + 6 + nLen);
         m_nDeferred++;
       }
+    }
+    else if (!strncmp(szCmd, "inframe ", 8))
+    {
+      int nLen = 0;
+      if (sscanf_s(szCmd + 8, "%d %n", &m_nInFrameLeft, &nLen) >= 1)
+        strcpy_s(m_szInFrame, szCmd + 8 + nLen);
     }
     else if (!strncmp(szCmd, "texsave ", 8))
       sscanf_s(szCmd + 8, "%259s", m_szTexSave, (unsigned)sizeof(m_szTexSave));
@@ -495,13 +581,9 @@ void CRendererProxy::CVarsCommand(const char *szArgs)
   Trace_Write("    %d console variables starting with '%s'", Sink.m_nFound, szArgs);
 }
 
-void CRendererProxy::GotoCommand(const char *szArgs)
+//! The player: the first entity of class "Player".
+static IEntity *FindPlayer(IEntitySystem *pEntitySystem)
 {
-  Vec3 Pos(0, 0, 0), Angles(0, 0, 0);
-  const int nArgs = sscanf_s(szArgs, "%f %f %f %f %f %f", &Pos.x, &Pos.y, &Pos.z, &Angles.x, &Angles.y, &Angles.z);
-  IEntitySystem *pEntitySystem = iSystem ? iSystem->GetIEntitySystem() : NULL;
-  if (nArgs < 3 || !pEntitySystem)
-    return;
   IEntity *pPlayer = NULL;
   IEntityIt *pIt = pEntitySystem->GetEntityIterator();
   while (pIt && !pIt->IsEnd() && !pPlayer)
@@ -514,10 +596,39 @@ void CRendererProxy::GotoCommand(const char *szArgs)
   if (pIt)
     pIt->Release();
   if (!pPlayer)
-  {
     Trace_Write("  no entity of class 'Player'");
+  return pPlayer;
+}
+
+//! "playerevent item n" / "playerevent zoom 1|0": the script event the game's client sends to the
+//! player for the item keys (ScriptEvent_ItemActivated n: 0 binoculars, 1 heat vision) and for
+//! pressing and releasing the zoom button (ScriptEvent_ZoomToggle), without any input.
+void CRendererProxy::PlayerEventCommand(const char *szArgs)
+{
+  char szEvent[16] = "";
+  int nParam = 0;
+  IEntitySystem *pEntitySystem = iSystem ? iSystem->GetIEntitySystem() : NULL;
+  if (sscanf_s(szArgs, "%15s %d", szEvent, (unsigned)sizeof(szEvent), &nParam) < 2 || !pEntitySystem)
     return;
-  }
+  IEntity *pPlayer = FindPlayer(pEntitySystem);
+  if (!pPlayer)
+    return;
+  if (!strcmp(szEvent, "item"))
+    pPlayer->SendScriptEvent(ScriptEvent_ItemActivated, nParam);
+  else if (!strcmp(szEvent, "zoom"))
+    pPlayer->SendScriptEvent(ScriptEvent_ZoomToggle, nParam);
+}
+
+void CRendererProxy::GotoCommand(const char *szArgs)
+{
+  Vec3 Pos(0, 0, 0), Angles(0, 0, 0);
+  const int nArgs = sscanf_s(szArgs, "%f %f %f %f %f %f", &Pos.x, &Pos.y, &Pos.z, &Angles.x, &Angles.y, &Angles.z);
+  IEntitySystem *pEntitySystem = iSystem ? iSystem->GetIEntitySystem() : NULL;
+  if (nArgs < 3 || !pEntitySystem)
+    return;
+  IEntity *pPlayer = FindPlayer(pEntitySystem);
+  if (!pPlayer)
+    return;
   const Vec3 OldPos = pPlayer->GetPos();
   Trace_Write("  '%s' from (%.2f %.2f %.2f) to (%.2f %.2f %.2f)", pPlayer->GetName(), OldPos.x, OldPos.y, OldPos.z, Pos.x, Pos.y,
     Pos.z);

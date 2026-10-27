@@ -6,3 +6,6 @@ add_subdirectory(XRenderCommon)
 # Tracing proxy of the retail D3D9 renderer. x86 is ABI compatible with the retail Far Cry 1.4
 # engine (STLport); x64 builds with the MSVC STL, like CryGame, and is not verified.
 add_subdirectory(XRenderD3D9Traced)
+
+# Demo scenes drawn by the game's engine, to compare the original renderer with ours (x64 only).
+add_subdirectory(Demos)

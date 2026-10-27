@@ -304,7 +304,7 @@ void CLeafBufferHooks::ReleaseShaders()
 //! XRENDERTRACED_CAPTURE_SHADER: the shaders of the material and of the chunks.
 static void CaptureOnShaders(CLeafBuffer *pLB, IMatInfo *pMaterial, const char *szWhere)
 {
-  if (pMaterial)
+  if (pMaterial && Trace_IsMatInfo(pMaterial))
     D3DDraws_CaptureOnShader(pMaterial->GetShaderItem().m_pShader, szWhere);
   if (!pLB->m_pMats)
     return;
@@ -331,6 +331,8 @@ void CLeafBufferHooks::AddRenderElements(CCObject *pObj, int DLightMask, int nTe
     Dump_Object(pObj);
     Dump_IMatInfo(pIMatInfo);
   }
+  if (pIMatInfo)
+    VCallHooks_InstallEngine("IMatInfo", pIMatInfo);
   CaptureOnShaders(LB(), pIMatInfo, "CLeafBuffer::AddRenderElements");
   LB_ORIG(LBS_AddRenderElements, void, (CCObject *, int, int, int, int, IMatInfo *))(pObj, DLightMask, nTemplate, nFogVolumeID, nSortId,
     pIMatInfo);
@@ -348,12 +350,19 @@ void CLeafBufferHooks::Render(const SRendParams &rParams, CCObject *pObj, TArray
     int nLen = 0;
     for (int i = 0; i < (int)ShaderTemplates.Num() && nLen < (int)sizeof(szTemplates) - 16; i++)
       nLen += sprintf_s(szTemplates + nLen, sizeof(szTemplates) - nLen, " %d", ShaderTemplates[i]);
-    const char *szMaterial = pMaterial ? pMaterial->GetName() : NULL;
+    const char *szMaterial = pMaterial && Trace_IsMatInfo(pMaterial) ? pMaterial->GetName() : NULL;
     Trace_Write("    templates:%s material '%s'", szTemplates, szMaterial ? szMaterial : "");
+    Dump_IMatInfo(pMaterial);
+    // With a material, the chunks of the buffer (to see which material each one gets).
+    if (pMaterial && LB()->m_pMats)
+      for (int i = 0; i < (int)LB()->m_pMats->Count(); i++)
+        Dump_MatInfo(&(*LB()->m_pMats)[i], i);
     Dump_RendParams(rParams);
     Dump_Object(pObj);
   }
   CWatchArg WatchParams(WT_SRendParams, &rParams);
+  if (pMaterial)
+    VCallHooks_InstallEngine("IMatInfo", pMaterial);
   CaptureOnShaders(LB(), pMaterial, "CLeafBuffer::Render");
   LB_ORIG(LBS_Render, void, (const SRendParams &, CCObject *, TArray<int> &, int, bool, IMatInfo *, bool))(rParams, pObj, ShaderTemplates,
     e_overlay_geometry, bNotCurArea, pMaterial, bSupportDefaultShaderTemplates);

@@ -16,6 +16,8 @@
 
 #pragma once
 
+#include "DemoPlugin.h"
+
 //! Formats the arguments of a variadic IRenderer method into szBuf, so they can be forwarded with "%s".
 #define PROXY_VFORMAT(szBuf, szFormat)   char szBuf[2048];   {     va_list args;     va_start(args, szFormat);     if (szFormat)       _vsnprintf(szBuf, sizeof(szBuf) - 1, szFormat, args);     else       szBuf[0] = 0;     va_end(args);     szBuf[sizeof(szBuf) - 1] = 0;   }
 
@@ -27,6 +29,8 @@ public:
   ~CRendererProxy();
 
   IRenderer *GetReal() const { return m_pReal; }
+  //! The demo called at every frame (XRENDERTRACED_DEMO), released with the renderer.
+  void SetDemo(IDemoPlugin *pDemo) { m_pDemo = pDemo; }
 
   //! The original renderer behind pRenderer, if it is a proxy.
   static IRenderer *Unwrap(IRenderer *pRenderer);
@@ -268,9 +272,11 @@ private:
   //! "goto x y z [ax ay az]": puts the first entity of class "Player" and the view camera there (the
   //! camera at that point, the entity lowered by its eye height, as the SDK game code does).
   void GotoCommand(const char *szArgs);
+  void PlayerEventCommand(const char *szArgs);
 
   IRenderer *m_pReal;
   int m_nRealType;
+  IDemoPlugin *m_pDemo = NULL;
   //! Console commands executed once after frame m_nExecFrame (XRENDERTRACED_EXEC, separated by ';').
   char m_szExec[2048];
   int m_nExecFrame;
@@ -311,6 +317,10 @@ private:
   //! is saved as a TGA file before it is presented (D3DDraws_SaveBackBuffer).
   char m_szShot[MAX_PATH] = "";
   int m_nShotFrame = -1;
+  //! "inframe n command": the console command runs at the end of each of the next n frames, inside
+  //! the frame (before Update presents it), e.g. a script call that draws.
+  char m_szInFrame[256] = "";
+  int m_nInFrameLeft = 0;
   //! "texsave name": the pixels of the next DownLoadToVideoMemory or UpdateTextureInVideoMemory
   //! call with eTF_0888 or eTF_8888 are saved as a 32-bit TGA file, 4 bytes per pixel as they are
   //! and the rows from the top.
