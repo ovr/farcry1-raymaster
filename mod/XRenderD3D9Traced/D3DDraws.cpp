@@ -758,7 +758,8 @@ void D3DDraws_Begin(IRenderer *pRenderer)
   s_pDevice = pDev;
   s_nDraws = 0;
   *(void ***)pDev = s_HookedVTable;
-  Trace_Write("==== Direct3D draws of this frame (device %p) ====", pDev);
+  // The timer time, for the animated texture transforms of the frame.
+  Trace_Write("==== Direct3D draws of this frame (device %p, time %.4f) ====", pDev, iTimer ? iTimer->GetCurrTime() : 0.0f);
 }
 
 //! XRENDERTRACED_D3D_RT: the device keeps a vtable copy with SetRenderTarget hooked in every frame.

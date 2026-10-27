@@ -99,7 +99,8 @@ it as well: it holds local, machine-specific instructions and is not committed (
   (`Templ...`) that template instead, to see how the renderer draws templates that are not in
   view.
 - `XRENDERTRACED_D3D_DRAWS=1` writes the Direct3D 9 draw calls of the original renderer in the
-  captured frame (`D3DDraws.h`): buffers, vertex declaration, shaders, textures and the render
+  captured frame (`D3DDraws.h`; the header line gives `ITimer::GetCurrTime()`, for animated
+  values): buffers, vertex declaration, shaders, textures and the render
   element being drawn (x64), the first vertices of the non-indexed draws (8, or
   `XRENDERTRACED_D3D_VERTS`), the `Clear` calls, the render target and depth buffer changes
   (`SetRenderTarget`, `SetDepthStencilSurface`), the surface copies and fills (`StretchRect`,

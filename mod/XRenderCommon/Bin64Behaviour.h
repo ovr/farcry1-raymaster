@@ -512,6 +512,55 @@ static const int nHeapAlignment = 4;
 //     without depth writes, culling D3DCULL_CW, fog. r_ScreenRefract 1 alone makes the copy but no
 //     draws. With r_Quality_BumpMapping 1 or 2 the same copy is made once per frame before the
 //     ocean, and no draw of the frame reads it (r_WaterRefractions 0).
+// The templates that only the other 13 levels name, given in the same way to every material of
+// River (t is ITimer::GetCurrTime(); "texture" is the material's diffuse texture, "factor" the
+// texture factor, which holds the object's ambient colour unless said otherwise; all with depth
+// test LESSEQUAL and fog):
+//   "templreflcm" (TemplReflCM, TemplBumpReflCM): a 64 texel D3DFMT_X8R8G8B8 cube map (clamp)
+//     looked up with the camera space reflection vector and a COUNT3 texture transform back to
+//     world space (as for "templreflcmdecal"), * factor or * vertex lighting; no diffuse texture,
+//     the vertices carry positions and normals only; opaque, depth writes.
+//   "templreflcmdecaladdsig": stage 0 the same cube map lookup, stage 1 texture ADDSIGNED result
+//     (alpha texture * result); opaque, depth writes.
+//   "templreflcmdecal_reflamountopacity": a pixel shader (ps_2_0) with sampler 0 the texture,
+//     sampler 1 a 128 x 128 DXT1 texture that is the same for every material, sampler 2 the cube
+//     map; opaque, depth writes.
+//   "templtextureshiftt02", "templtextureshiftt05": like "templdecal" (texture * factor or *
+//     vertex lighting, opaque, depth writes) with a COUNT2 texture transform that moves v by
+//     0.2 * t and 0.5 * t (the offset stands in the third and fourth rows of the matrix).
+//   "templdecalopacityshift2_fp", "templdecalopacityshift3_fp": colour the texture, alpha texture
+//     alpha * factor alpha, blended (SRCALPHA, INVSRCALPHA) without depth writes or culling, v moved
+//     by -0.35 * t. The first takes positions and texture coordinates; the second asks for
+//     positions and normals only (no texture coordinates in the stream).
+//   "templdecalopacity": a pixel shader (ps_2_0), sampler 0 the texture, sampler 1 a 128 x 128
+//     DXT1 texture that is the same for every material; blended (SRCALPHA, INVSRCALPHA), no depth
+//     writes.
+//   "templdecalglowselfillumanimated": the two passes of "templdecalglowselfillum", the second
+//     (depth test EQUAL, ONE, ONE, no depth writes) texture * factor with factor = (g, g, g) and
+//     g = 0.75 + 0.75 * sin(2 * pi * 0.5 * t) clamped to 0..1 (ten frames fitted to 1/255).
+//   "templdecaladd_vlight": texture * factor, added (ONE, ONE), no depth writes.
+//   "templhologram_fp": stage 0 the texture, stage 1 result * factor with the alpha of the texture
+//     at the second coordinate set (which the stream does not have), added (ONE, ONE), no depth
+//     writes, no culling.
+//   "templdecalalphatestforshadows": texture * factor * 2, alpha test (>= 128), depth writes, no
+//     culling; positions and texture coordinates only.
+//   "s_objectcolor": a 16 x 16 DXT1 texture of its own (clamp) * factor, the factor being the
+//     object's colour (0xffbfbfbf, 0xffffffff seen); blended (SRCALPHA, INVSRCALPHA), no depth
+//     writes; positions only.
+//   "templinvlight": drawn for only 25 of the elements (grass, trees, weapons lying about; which
+//     ones was not worked out), after CheckUpdate with nFlags 0x9; a vertex and a pixel shader
+//     (vs_1_1, ps_2_0), the position from stream 0 and three FLOAT3 (TEXCOORD2, TEXCOORD3,
+//     BLENDWEIGHT0) from stream 1, sampler 0 a 16 x 16 DXT1 and sampler 1 a 32 x 32
+//     D3DFMT_X8R8G8B8 texture (clamp), both the same for every material; mostly blended
+//     (DESTCOLOR, ZERO), i.e. multiplied into the frame, else (SRCALPHA, INVSRCALPHA); no depth
+//     writes.
+//   "lavavolume": vs_1_1 and ps_2_0, sampler 0 the texture, sampler 1 a 512 x 512
+//     D3DFMT_X8L8V8U8 bump map, sampler 2 a 32 x 32 DXT1 texture; opaque, depth writes.
+//   "mutantstealth_fp": a 32 x 32 DXT1 texture of its own * factor * 2 with the factor black
+//     (0xff000000), added (ONE, ONE), no depth writes: nothing visible.
+//   "templbeamproc": a vertex shader (vs_1_1) with fixed function stages, texture * diffuse,
+//     blended (SRCALPHA, INVSRCALPHA), no depth writes, no culling.
+//   "flareproc", "particlemedheathaze": no draw at all for the objects.
 
 //////////////////////////////////////////////////////////////////////////
 // Water reflections and refractions (Pier, r_Quality_BumpMapping 0)
