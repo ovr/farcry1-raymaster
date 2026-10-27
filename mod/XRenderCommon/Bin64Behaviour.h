@@ -187,9 +187,10 @@ static const int nHeapAlignment = 4;
 //   attenuation 1 / (a0 + a1 x) follows the falloff
 //     f(x) = 2 * (1 - 3 v^2 + 2 v^3),  v = min(x / (0.9 * R), 1)      (R = the light's m_fRadius)
 //   over the object: 2 at the light, 0 from 0.9 R on. The object counts as a sphere. Its centre C is
-//   the instance position plus the centre of the box around the object's vertices (in the object's
-//   own space), added without the instance rotation; its radius r is half the diagonal of that box.
-//   With d = max(|light origin - C|, 0.1):
+//   the instance position plus the centre of the leaf buffer's box (m_vBoxMin, m_vBoxMax, in the
+//   object's own space; it can be larger than the chunks that are drawn), added without the
+//   instance rotation; its radius r is half the diagonal of that box. With
+//   d = max(|light origin - C|, 0.1):
 //     x1 = max(d - r, 0.1 R)                   (the nearest point, never nearer than 0.1 R)
 //     x2 = min(max(d + r, 0.1 R), 0.99 R)      (the farthest point)
 //     g1 = 1 / f(x1),  g2 = 1 / max(f(x2), 0.1)
@@ -199,13 +200,16 @@ static const int nHeapAlignment = 4;
 //   The line goes through the falloff at the nearest point, and also at the farthest one unless a0
 //   had to be raised. All chunks of the object get the same values. While the whole object is
 //   within 0.1 R of the light (d + r <= 0.1 R) the result is (1 / f(0.1 R), 0) = (0.517756, 0), a
-//   constant 1.931. Seen on Bunker (vertex box (-0.060, -0.161, 0.109)-(1.002, 0.156, 2.109), so
+//   constant 1.931. When the light is inside the sphere (d - r <= 0.1 R) and the far point gets
+//   clamped, the result is (0.01, (1 / f(0.1 R) - 0.01) / (0.1 R)) = (0.01, 5.07756 / R): the
+//   attenuation every character gets (below). When even the nearest point is beyond 0.99 R the
+//   result is (10, 0). Seen on Bunker (box (-0.060, -0.161, 0.109)-(1.002, 0.156, 2.109), so
 //   r = 1.143; the instance is rotated by 180 degrees about z, which puts C outside the rotated box)
 //   for radii 3.5 to 100, the light from inside the object to just outside the radius, in several
-//   directions: all values within 0.1 %. The renderer adds no cut-off of its own: the object is lit
-//   as long as the engine sets the light's bit in nDLightMask (a0 up to 186 seen, with the light
-//   7.01 from C for R 7). Other levels give a0 from 0.01 to 464 and a1 from 0 to 2.2 (Carrier,
-//   Steam, River).
+//   directions: all values within 0.1 %; and on the objects of Steam under the projected light
+//   (below). The renderer adds no cut-off of its own: the object is lit as long as the engine sets
+//   the light's bit in nDLightMask (a0 up to 186 seen, with the light 7.01 from C for R 7). Other
+//   levels give a0 from 0.01 to 464 and a1 from 0 to 2.2 (Carrier, Steam, River).
 //   Vegetation (River): texture * vertex colour * 2 * m_Color * the colour of EF_SetWorldColor
 //   (m_Color 0.75 and the world colour (0.843, 0.780, 0.659) give the factor bytes 161, 149, 126).
 //   For grass the factor's alpha is the square of m_Color's alpha (0.84 gives 179, 0.12 gives 3),
@@ -229,7 +233,9 @@ static const int nHeapAlignment = 4;
 //   directional light with the CDLight colour as diffuse. A dynamic point light becomes a D3D point
 //   light with diffuse = m_Color (m_fDirectFactor not applied), specular = m_SpecColor in the draws
 //   with specular lighting, range 50.416 * m_fRadius and attenuation (0.01, 5.07756 / m_fRadius, 0),
-//   which reaches 1/256 at the range (radius 1, 2.06 and 4 seen).
+//   which reaches 1/256 at the range (radius 1, 2.06 and 4 seen). These are the static objects'
+//   values for a light inside the object ("Static objects": the falloff 2 (1 - 3 v^2 + 2 v^3) met
+//   at 0.1 m_fRadius), whatever the distance.
 //
 // Terrain ("TerrainSector")
 //   One leaf buffer per 64 m x 64 m sector, created with
@@ -1008,9 +1014,10 @@ static const int nHeapAlignment = 4;
 //     inverse(camera view) * m_TextureMatrix (COUNT3), the same for every object (the
 //     camera's view matrix, not the view of the draw, which holds the object's matrix);
 //     fixed function lighting with light 0 only: a point light at m_Origin with diffuse m_Color,
-//     material diffuse 1, no ambient, attenuation (0.01, 256 / range, 0). The range is
-//     50.416 * m_fRadius for characters and some static objects, and up to 121 * m_fRadius for
-//     other static objects; how that range is chosen was not found.
+//     material diffuse 1, no ambient, and the attenuation and range a point light of that radius
+//     gets on the object ("Static objects" above; for characters (0.01, 5.07756 / m_fRadius)).
+//     Seen: (0.01, 0.30 to 0.73) on the objects around the lamp (range 50.4 to 121 * m_fRadius)
+//     and (10, 0) on objects farther away than the radius.
 
 //////////////////////////////////////////////////////////////////////////
 // Flares and light coronas (the sun: Factory, Boat, Bunker, Training, Pier; a lamp in Bunker)
