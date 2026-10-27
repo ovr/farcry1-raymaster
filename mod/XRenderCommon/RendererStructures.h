@@ -48,8 +48,11 @@ namespace RendererStructures
 //     CreateLeafBuffer and before CreateBuffer(CIndexedMesh *), and sets it to NULL before
 //     DeleteLeafBuffer: the list belongs to the engine. For CreateBuffer(VertexBufferSource *) the
 //     renderer takes the list over (see VertexBufferSource).
-//   - m_vBoxMin, m_vBoxMax of the "WaterVolume" buffers (made with CreateLeafBufferInitialized),
-//     every frame: both hold the camera position, not the bounds.
+//   - m_vBoxMin, m_vBoxMax of the "WaterVolume" and "Grass" buffers (made with
+//     CreateLeafBufferInitialized), every frame: both hold the camera position, not the bounds.
+//   - The vertices of the "Grass" buffer, from its PrepareBufferCallback, straight into
+//     m_pVertexBuffer->m_VS[VSF_GENERAL].m_VData between two UpdateBuffer calls (see CVertexBuffer
+//     and Bin64Behaviour.h, "Detail grass").
 //   - m_pVertexContainer of the "Dynamic" buffers (SetVertexContainer, inline in LeafBuffer.h): the
 //     terrain sector whose vertices they use (Bin64Behaviour.h, "Terrain under a dynamic light").
 //   Renderer writes:
@@ -80,6 +83,11 @@ namespace RendererStructures
 //   Created by IRenderer::CreateBuffer and by the leaf buffer (m_pVertexBuffer, m_pSecVertBuffer);
 //   released by ReleaseBuffer. The renderer changes m_vertexformat and m_VS when CheckUpdate
 //   re-creates a video buffer in another vertex format (during EF_EndEf3D).
+//   IRenderer::UpdateBuffer(pVB, NULL, 0, false, 0, 0) locks the buffer for the engine:
+//   m_VS[VSF_GENERAL].m_VData then points to writable memory for all its vertices and m_bLocked is
+//   true, until UpdateBuffer(pVB, NULL, 0, true, 0, 1) unlocks it (m_bLocked false; the D3D9
+//   renderer leaves the old pointer in m_VData). With a source, UpdateBuffer(pVB, pSrc, n, true, 0,
+//   0) copies n vertices in (the characters).
 
 // CCObject
 //   Taken from the renderer's pool with EF_GetObject(true, -1); a temporary object is valid for

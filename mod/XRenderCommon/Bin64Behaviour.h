@@ -120,7 +120,8 @@ static const int nHeapAlignment = 4;
 // All leaf buffers, including the ones the renderer creates for itself, share one CLeafBuffer
 // vtable, and the CLeafBuffer methods call each other through it (CreateBuffer calls
 // UpdateSysIndices, CheckUpdate calls CreateVidVertices and UpdateVidIndices, ...). CheckUpdate
-// returned false in every traced call. m_sSource tells what a leaf buffer is for.
+// returned false in every traced call except for the detail grass (below). m_sSource tells what a
+// leaf buffer is for.
 //
 // Static objects ("StatObj", the geometry of IStatObj)
 //   Created with CreateLeafBuffer(false, "StatObj", NULL) followed by
@@ -298,6 +299,30 @@ static const int nHeapAlignment = 4;
 //   buffer with one lightmap UV per vertex. None of them was drawn from the start position on
 //   Carrier; on River they are drawn like the other lightmapped objects, one draw per material,
 //   from a video buffer in the format they were created with (the vertex colours stay unused).
+//
+// Detail grass ("Grass"; Cooler, the only one of the 20 levels that makes it)
+//   CreateLeafBufferInitialized(NULL, 50000, VERTEX_FORMAT_P3F_COL4UB_TEX2F, pInds, 150000,
+//   R_PRIMV_TRIANGLES, "Grass", eBT_Dynamic, 1, 0, PrepareBufferCallback, pCustomData, false, true)
+//   with all indices 0, then SetRECustomData(pData, 0, 1) and SetChunk(pShader, 0, 50000, 0,
+//   150000, 0) with the shader "TerrainDetailObjects". The renderer calls the callback once during
+//   the creation, after CreateVidVertices; it returns false then.
+//   In every frame with grass near the camera the engine calls InvalidateVideoBuffer(-1) and
+//   AddRenderElements(pObj, nLightMask, -1, nFogVolume, 21, NULL) (sort group 21); m_vBoxMin and
+//   m_vBoxMax both hold the camera position. In EF_EndEf3D the renderer calls CheckUpdate on the
+//   buffer, and CheckUpdate calls PrepareBufferCallback(pLB, false) before the buffer is drawn;
+//   the callback and CheckUpdate return true. Inside the callback the engine
+//   - when the camera has moved (6 m here), rebuilds the grass around it:
+//     UpdateBuffer(pLB->m_pVertexBuffer, NULL, 0, false, 0, 0) locks the video buffer and has to
+//     leave writable memory for the whole buffer in m_VS[VSF_GENERAL].m_VData (m_bLocked true);
+//     the engine writes the vertices there (copies of a small vegetation object, 36 vertices each,
+//     in world space, colour 0xff999999 here); UpdateBuffer(pLB->m_pVertexBuffer, NULL, 0, true,
+//     0, 1) unlocks it; then UpdateVidIndices(pInds, n) with the list 0, 1, 2, ..., n - 1,
+//     SetChunk(pShader, 0, n, 0, n, 0) and SetShader(pShader, nTexId) with the grass texture;
+//   - in every call, SetRECustomData(pData, 0, 1) with pData = (0, 0, 1/36, -(y - 18) / 36,
+//     -(x - 18) / 36, 0, ...) for the camera at (x, y): a 36 m square around the camera.
+//   The D3D9 renderer draws the chunk as one indexed triangle list (21024 and 22680 vertices seen)
+//   with depth test, no depth writes, alpha test (> 0), alpha blending (SRCALPHA, INVSRCALPHA), no
+//   culling, fog, and a pixel shader with two textures.
 //
 // Far vegetation sprites ("FarTreeSprites"; River, Research, Pier)
 //   DrawObjSprites (RendererStructures.h) gets the instances to draw as sprites; the D3D9 renderer
