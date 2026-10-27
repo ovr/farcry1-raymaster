@@ -183,23 +183,29 @@ static const int nHeapAlignment = 4;
 //   stage 0 adds the vertex lighting instead of the texture factor.
 //   The D3D point light of a static object has the attenuation (a0, a1, 0) and the range
 //   (256 - a0) / max(a1, 0.01), 0 when a0 > 256 (the distance where the attenuation reaches 1/256).
-//   Unlike for characters (below) a0 and a1 change from object to object for the same light: a0
-//   from 0.01 to 464, a1 from 0 to 2.2 (Carrier, Bunker, Steam, River; a1 = 0 for distant grass;
-//   on Carrier one light of radius 4 gives a1 0.42 to 2.22 on objects of scale 1, against 1.269
-//   for characters). How they follow from the light and the object was not found. They depend on
-//   where the light is (in the object's space) and on its radius, not only on the distance. One
-//   object (Bunker, three chunks in the box (-0.06, -0.16, 0.11)-(1.0, 0.16, 2.11)) with the light
-//   put on the line from the box centre along -y, at the distance t from the centre:
-//     t       0.25   0.5    1      1.5    2      2.5    3      4      5      6      8      10
-//     R 7  a0 0.438  0.435  0.420  0.397  0.276  0.01   0.01   0.01   0.01   0.01   -      -
-//          a1 0.113  0.119  0.139  0.173  0.248  0.377  0.323  0.307  0.401  0.838  -      -
-//     R 14 a0 0.473  0.472  0.467  0.462  0.455  0.441  0.407  0.295  0.077  0.01   0.01   0.01
-//          a1 0.0320 0.0329 0.0360 0.0402 0.0452 0.0523 0.0645 0.0965 0.146  0.151  0.168  0.269
-//   (-: the object gets no light at all; R 7 at t 8 is already outside the radius). a0 never goes
-//   below 0.01. Over the object, 1 / (a0 + a1 d) stays close to 2.1 * (1 - d / R) while the light
-//   is near (within 3 % for R 14 and t up to 3) and falls below it farther out. With the light
-//   just outside the radius from the object's origin but nearer than it to the box, the values
-//   were (186.283, 0): a constant attenuation of 1/186.
+//   Unlike for characters (below), a0 and a1 are fitted per object and light, so that the Direct3D
+//   attenuation 1 / (a0 + a1 x) follows the falloff
+//     f(x) = 2 * (1 - 3 v^2 + 2 v^3),  v = min(x / (0.9 * R), 1)      (R = the light's m_fRadius)
+//   over the object: 2 at the light, 0 from 0.9 R on. The object counts as a sphere. Its centre C is
+//   the instance position plus the centre of the box around the object's vertices (in the object's
+//   own space), added without the instance rotation; its radius r is half the diagonal of that box.
+//   With d = max(|light origin - C|, 0.1):
+//     x1 = max(d - r, 0.1 R)                   (the nearest point, never nearer than 0.1 R)
+//     x2 = min(max(d + r, 0.1 R), 0.99 R)      (the farthest point)
+//     g1 = 1 / f(x1),  g2 = 1 / max(f(x2), 0.1)
+//     s  = (g2 - g1) / (x2 - x1)               (0 when x2 = x1)
+//     a0 = g1 - s * x1;  when a0 < 0.01: a0 = 0.01 and s = (g1 - 0.01) / x1
+//     a1 = max(s, 0)
+//   The line goes through the falloff at the nearest point, and also at the farthest one unless a0
+//   had to be raised. All chunks of the object get the same values. While the whole object is
+//   within 0.1 R of the light (d + r <= 0.1 R) the result is (1 / f(0.1 R), 0) = (0.517756, 0), a
+//   constant 1.931. Seen on Bunker (vertex box (-0.060, -0.161, 0.109)-(1.002, 0.156, 2.109), so
+//   r = 1.143; the instance is rotated by 180 degrees about z, which puts C outside the rotated box)
+//   for radii 3.5 to 100, the light from inside the object to just outside the radius, in several
+//   directions: all values within 0.1 %. The renderer adds no cut-off of its own: the object is lit
+//   as long as the engine sets the light's bit in nDLightMask (a0 up to 186 seen, with the light
+//   7.01 from C for R 7). Other levels give a0 from 0.01 to 464 and a1 from 0 to 2.2 (Carrier,
+//   Steam, River).
 //   Vegetation (River): texture * vertex colour * 2 * m_Color * the colour of EF_SetWorldColor
 //   (m_Color 0.75 and the world colour (0.843, 0.780, 0.659) give the factor bytes 161, 149, 126).
 //   For grass the factor's alpha is the square of m_Color's alpha (0.84 gives 179, 0.12 gives 3),
