@@ -171,9 +171,13 @@ static const int nHeapAlignment = 4;
 //   SetRECustomData(pData, 1, 1) and AddRenderElements(pObj, 0, -1, 0, 0, NULL). pData holds
 //   (1, 1, 1/2048, 0), (0, 0, 0, 0), four floats that are not set, and the camera position
 //   (x, y, z, 0).
-//   The buffer never gets a material: m_pMats is empty right after the creation and stays empty
-//   (a SetChunk without indices adds none), so AddRenderElements adds no render element and the
-//   D3D9 renderer never draws it (Training, Steam, River).
+//   As long as UpdateSysIndices gets no indices the buffer has no material: m_pMats is empty after
+//   the creation and a SetChunk without indices adds none, so AddRenderElements adds no render
+//   element and nothing is drawn (Training at the start, Steam, River). When the engine has far
+//   terrain for it (Training, frame 152 after the load) it calls UpdateSysIndices(pInds, 96) and
+//   SetChunk(pShader, 0, 16641, 0, 96, 0, false), which adds the material; the D3D9 renderer then
+//   draws an indexed triangle list over the 129 x 129 grid (32 triangles) with vs_1_1 / ps_2_0, the
+//   texture nTexId (256 x 256 DXT1, clamped) in stage 0, depth test and writes, fog.
 //
 // Terrain under a dynamic light ("Dynamic", Steam)
 //   When a dynamic point light reaches the terrain (here a light of radius 2 next to the player),
