@@ -479,15 +479,17 @@ static const int nHeapAlignment = 4;
 //   (wrap), stage 1 the copy of the back buffer (clamp, linear without mip maps).
 //
 // The reflection. In EF_EndEf3D, before it draws anything of the frame, the renderer calls
-// I3DEngine::GetDistanceToSectorWithWater() (134.3 and 186.8 on Pier), GetWaterLevel() (no
-// arguments: W = 16) and GetMaxViewDistance() (1500). It then sets the render target texture with
+// I3DEngine::GetDistanceToSectorWithWater() (D: 134.3 and 186.8 in Pier's intro, 5.67 at the
+// start position, 111.4 on River), GetWaterLevel() (no arguments: W = 16 on Pier, 28 on River)
+// and GetMaxViewDistance() (1500). It does this in every frame; when the reflection is due (below)
+// it then sets the render target texture with
 // a 1024 x 768 D24S8 depth surface of its own (not the back buffer's) and a 512 x 512 viewport,
 // clears colour, depth and stencil (the colour of SetClearColor), and calls
 //   I3DEngine::SetCamera(cam, false);
 //   I3DEngine::DrawLowDetail(DLD_TERRAIN | DLD_TERRAIN_FULLRES);   // 0x1040
 // with cam the frame's camera mirrored in the water plane: position (x, y, 2 * W - z), the pitch
-// negated, no roll, the same field of view and far plane, the near plane at (z - W) / 20 (5.799
-// for a camera 116 m above the water; 16 in the level's intro). Inside DrawLowDetail the engine
+// negated, no roll, the same field of view and far plane, the near plane at D but at most 16 (5.67
+// at Pier's start position, 16 in its intro and on River). Inside DrawLowDetail the engine
 // renders a frame of its own: GetWidth, GetHeight, IRenderer::SetCamera(cam), GetFrameID(true),
 // EF_Query(EFQ_RecurseLevel) (1 here), EF_StartEf, EF_ClearLightsList, the sun (EF_ADDDlight),
 // the sky and its flare (EF_AddEf), the terrain sectors and "LowResTerrain"
@@ -496,9 +498,16 @@ static const int nHeapAlignment = 4;
 // the terrain (depth test and writes, culling D3DCULL_CW, fog) into the texture, then sets the back
 // buffer and its depth surface again, clears them and draws the frame. The camera is an ordinary
 // one (its view matrix is a rotation, not a mirror), and the culling is the frame's.
-// The reflection is not drawn every frame, and the ocean reads the last one in between: in the
-// level's intro every one to four frames. The renderer has the cvars r_WaterUpdateDeltaAngle (5),
-// r_WaterUpdateDistance (2) and r_WaterUpdateFactor (0.02); their effect was not measured.
+// The reflection is not drawn every frame, and the ocean reads the last one in between. It is
+// drawn again (timer time of ITimer::GetCurrTime, camera of the frame against the one of the last
+// reflection) when
+//   - the time since the last one exceeds r_WaterUpdateFactor * D, at most 0.3 s (default factor
+//     0.02: 0.114 s on Pier with D = 5.67; factor 0.04: 0.228 s; on River 0.002 * 111.4 = 0.223 s,
+//     and 0.3 s with the default factor);
+//   - or the camera moved more than r_WaterUpdateDistance (2 m; with 0.1 every 0.1 m of a slowly
+//     moving camera);
+//   - or it turned more than r_WaterUpdateDeltaAngle degrees (5: a turn of 6.4 degrees redraws it
+//     in the same frame, 3.2 degrees does not).
 
 //////////////////////////////////////////////////////////////////////////
 // Particles
