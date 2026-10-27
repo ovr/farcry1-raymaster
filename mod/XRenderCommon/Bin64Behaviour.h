@@ -977,6 +977,58 @@ static const int nHeapAlignment = 4;
 //     other static objects; how that range is chosen was not found.
 
 //////////////////////////////////////////////////////////////////////////
+// Flares (the sun's flare: Factory, Boat, Bunker, Training, Pier)
+//
+// Shaders whose GetREs hold one Flare render element (eDATA_Flare, no SDK class): the sun flares
+// ("sun_evening" in Factory, Boat and Bunker with the colour (1, 0.70, 0.46); "flare_training" in
+// Training and Pier with (0.5, 0.4, 0.3)), "crylight", and "flare_from_light", which is m_pShader of
+// lights with a corona (light entities, CDLight::m_fCoronaScale 1). No corona of these lights was
+// ever added or drawn (Bunker, r_Coronas 1).
+//
+// The engine adds the sun's flare every frame in which the sun is near the view (not when it is
+// behind the camera): EF_AddEf(0, the Flare element, the shader, NULL, obj, -1, NULL,
+// EFSLIST_DISTSORT). obj comes from EF_GetObject(false, ...) and is the same object every frame:
+//   m_ObjFlags FOB_DRSUN | FOB_TRANS_TRANSLATE, an identity matrix with the translation
+//   camera + sun direction * 0.9 * far plane (180 for a far plane of 200, 540 for 600);
+//   m_SortId -1e6; m_TempVars[2] = 1 at every add (the renderer sets it back to 0).
+// A new object has m_Color (1, 1, 1, 1) and m_AmbColor (1, 1, 1).
+//
+// The D3D9 renderer draws nothing for it (no test either) with r_Flares 0 (the value in
+// farcry1_testing1's settings). With r_Flares 1:
+//   Visibility test. At the start of EF_EndEf3D, before the Clear of the frame (so against the
+//   depth buffer of the frame before), it draws a white square around the flare's position,
+//   facing the camera, with the side 0.04 * distance (7.2 at 180): a D3DPT_TRIANGLEFAN of 2
+//   triangles, P3F_COL4UB_TEX2F with the texture coordinates (0,0), (0,1), (1,1), (1,0), world
+//   space (identity world matrix), the camera's view and projection, depth test LESSEQUAL, no
+//   depth writes, no colour writes, fog on, a 16 x 16 DXT1 texture bound. It does this only while
+//   the flare's centre projects into the viewport. The result arrives 2 frames later as a sample:
+//   the number of pixels that passed divided by the area of the projected square in pixels (about
+//   1 when nothing covers it, a few percent either way; 0.5 when half of it is off the screen; 0
+//   when hidden). The renderer reads back no surface for this and makes no ray tests in the 3D
+//   engine or the physics.
+//   State in the object. The renderer keeps the last 8 samples in the flare's object, oldest
+//   first: m_AmbColor.x, .y, .z, m_TempVars[3], m_Angs2[0], [1], [2], m_TempVars[4] (each test
+//   shifts them by one). m_Color is the colour of the shader's flare with alpha = the mean of the
+//   8 samples (it can exceed 1 a little). m_Trans2 is the projected position: screen x, y in
+//   pixels and depth (0..1). m_fLightFadeTime is ITimer::GetCurrTime() of the last test, m_RE a
+//   value of the renderer's own from the first test on, and FOB_HASALPHA is added to m_ObjFlags.
+//   While the centre is off the screen the samples and the alpha stay as they are.
+//   Draw. Nothing while the mean is 0. Otherwise the flare is the last draw of the 3D scene
+//   (before the screen effects): a D3DPT_TRIANGLEFAN of 8 triangles, 10 vertices
+//   (P3F_COL4UB_TEX2F, world space): the centre (texture coordinates 0.5, 0.5), then the corners
+//   and edge midpoints of a square facing the camera, with the first of them repeated at the end.
+//   The square's half side is 0.2 * distance (36 at 180, whatever the alpha). With R and U the
+//   camera's right and up vectors and h the half side, the point with the texture coordinates
+//   (u, v) is centre + h * ((1 - 2v) R + (1 - 2u) U): (0,0) is the top right corner on the
+//   screen, (0,1) the top left, (1,1) the bottom left, (1,0) the bottom right; the order is (0,0),
+//   (0,0.5), (0,1), (0.5,1), (1,1), (1,0.5), (1,0), (0.5,0), (0,0).
+//   Vertex colour: rgb = the flare's colour * min(alpha, 1), a = alpha, each converted to a byte
+//   by truncation (alpha 0.9936 with (1, 0.70, 0.46) gives 0xfdfdb174).
+//   Texture: 128 x 128 X8R8G8B8, one level. Stage 0 colour and alpha = texture * diffuse; blending
+//   ONE, ONE; no depth test and no depth writes; no fog; no culling; fixed function.
+// The renderer also calls I3DEngine::GetSunPosition and GetSunColor about once a frame.
+
+//////////////////////////////////////////////////////////////////////////
 // Textures
 //
 // Texture IDs start at 4096. A texture that is not found ('black.tga', 'Textures/fl') comes back
