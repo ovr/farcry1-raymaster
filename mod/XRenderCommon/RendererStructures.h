@@ -190,6 +190,7 @@ static const int nBin64ScreenParam_FlashBangFlashSizeY = 23;
 static const int nBin64ScreenParam_FlashBangCurrent = 24;       // written by the renderer, see below
 static const int nBin64ScreenParam_FlashBangForce = 25;
 //   No other process codes were used; the SDK names only these four effects.
+//   How NightVision is drawn: Bin64Behaviour.h, "Heat vision and night vision".
 //   The engine reads NightVision's Active every frame. While FlashBang is active it reads its
 //   parameters back (Active, 19, 24, 20 to 23), among them 24, which only the renderer writes: a
 //   float that falls from 1 towards 0 as the flash fades (0.99 shortly after the flash started,

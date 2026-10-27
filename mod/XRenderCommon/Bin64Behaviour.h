@@ -381,6 +381,37 @@ static const int nHeapAlignment = 4;
 //   without depth writes, no culling, blended the same way.
 
 //////////////////////////////////////////////////////////////////////////
+// Heat vision and night vision (Training)
+//
+// I3DEngine::EnableHeatVision(b) calls EF_EnableHeatVision(b) right away; EF_GetHeatVision must
+// return the stored value, the engine asks it for every object it draws (about 730 times per frame
+// on Training). While it returns true the engine changes what it hands over:
+// - every CLeafBuffer::Render gets SRendParams::nTempl EFT_HEATVISION (19) instead of -2;
+// - characters are added with EF_AddEf(nTempl 19) and their CCObject has m_nTemplId 19 and
+//   FOB_HOTAMBIENT in m_ObjFlags (m_fHeatFactor is 1, as without heat vision);
+// - the terrain sector objects get FOB_HEATVISION in m_ObjFlags;
+// - before an object a character carries (its weapon) is drawn, the engine adds a heat source with
+//   EF_ADDDlight: flags DLF_POINT | DLF_HEATSOURCE | DLF_LOCAL (0x108020), name "local_hs_weapon",
+//   white, radius 0.15 to 0.42, direct factor 0, at the object; that object's SRendParams has no
+//   lights and its CCObject::m_DynLMMask holds only the bit of this light;
+// - SetFog gets the colour (0, 0, 0, 0).
+// The D3D9 renderer then draws every static object, plant and character with pixel shaders and a
+// vertex colour (CheckUpdate to VERTEX_FORMAT_P3F_COL4UB_TEX2F; the characters' dynamic buffers
+// become P3F_N_COL4UB_TEX2F), without fixed function lighting; terrain, water, sky and sprites
+// are drawn as without heat vision. It renders into no texture and adds no full screen pass.
+//
+// Night vision is the screen effect "NightVision" (Active 1, see RendererStructures.h, "Screen
+// effects"); r_Cryvision 1 has the same effect. The ScreenProcess element then draws two quads
+// over the whole screen at the end of the 3D frame: positions 0..1 with an orthographic
+// projection (y down), u 0..2, v from an offset that changes with time to the offset + 2; no depth
+// test or writes, no culling, linear filtering with wrapping; colour and alpha = texture * texture
+// factor:
+//   1. a 16 x 16 DXT1 texture, texture factor (0, 51, 76), added (ONE, ONE);
+//   2. a 64 x 64 DXT1 texture, texture factor (102, 153, 204), blended (DESTCOLOR, SRCCOLOR),
+//      i.e. the screen times twice the quad colour.
+// Night vision changes nothing else in the frame; heat vision alone draws no such quads.
+
+//////////////////////////////////////////////////////////////////////////
 // 2D and text
 //
 // Draw2dImage takes coordinates of an 800 x 600 virtual screen: the engine clears the screen and
