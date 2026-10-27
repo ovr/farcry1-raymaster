@@ -11,6 +11,7 @@
 #include "D3DDraws.h"
 
 #include <map>
+#include <string>
 
 //! The virtual functions of an SDK class in slot order.
 struct SVTableInfo
@@ -57,6 +58,7 @@ enum ESpecial
   SPECIAL_ScreenActivate,
   SPECIAL_ScreenSetParameter,
   SPECIAL_ScreenGetParameter,
+  SPECIAL_ConsoleGetCVar,
 };
 
 struct SHookedVTable;
@@ -141,11 +143,15 @@ static SModule s_Modules[nMaxModules];
 static volatile LONG s_nModules = 0;
 static int s_nRenderer = -1;
 static int s_nSelf = -1;
+//! The IConsole entry of s_VTableInfos, once the console is hooked.
+static const SVTableInfo *s_pConsoleInfo = NULL;
 
 //! The screen effect calls by method, process and parameter, and how often each was made.
 static std::map<unsigned int, int> s_ScreenCalls;
 //! XRENDERTRACED_SCREENFX_ALL=1: every screen effect call is written out, with the timer's time.
 static int s_nScreenAll = -1;
+//! The console variables looked up with IConsole::GetCVar ("module name"), and how often.
+static std::map<std::string, int> s_CVarLookups;
 
 //////////////////////////////////////////////////////////////////////////
 // Modules
@@ -271,6 +277,83 @@ static void ScreenCall_Leave(SVCallFrame *pFrame)
     Trace_Write("[screenfx] %p mfGetParameter(process %d, param %d) -> %p: %s, from %s, time %.4f", (void *)pFrame->Args[0], nProcess,
       nParam, (void *)pFrame->nResult, ScreenValueText((void *)pFrame->nResult), Trace_Addr(pFrame->pReturn),
       iTimer ? iTimer->GetCurrTime() : 0.0f);
+}
+
+//! An argument as a quoted string if it points to a printable one, else as a number.
+static const char *ArgText(UINT_PTR nArg)
+{
+  static char s_szBuf[8][96];
+  static volatile LONG s_nBuf = 0;
+  char *szOut = s_szBuf[InterlockedIncrement(&s_nBuf) & 7];
+  const char *sz = (const char *)nArg;
+  int n = 0;
+  if (nArg >= 0x10000)
+  {
+    for (; n < 1024; n++)
+    {
+      if ((n == 0 || ((UINT_PTR)(sz + n) & 0xFFF) == 0) && !Trace_IsReadable(sz + n, 1))
+        break;
+      if (sz[n] < 0x20 || sz[n] >= 0x7F)
+        break;
+    }
+  }
+  if (nArg >= 0x10000 && n < 1024 && Trace_IsReadable(sz + n, 1) && sz[n] == 0)
+    _snprintf(szOut, 95, n > 80 ? "'%.77s...'" : "'%s'", sz);
+  else
+    _snprintf(szOut, 95, "0x%llx", (unsigned long long)nArg);
+  szOut[95] = 0;
+  return szOut;
+}
+
+//! The type, flags and value of a console variable.
+static const char *CVarText(ICVar *pVar)
+{
+  static char s_szBuf[160];
+  if (!pVar || !Trace_IsReadable(pVar, sizeof(void *)))
+    return "";
+  const char *szValue = pVar->GetString();
+  _snprintf(s_szBuf, sizeof(s_szBuf) - 1, " '%s' type %d flags 0x%x value '%.60s'", pVar->GetName(), pVar->GetType(), pVar->GetFlags(),
+    szValue ? szValue : "(null)");
+  s_szBuf[sizeof(s_szBuf) - 1] = 0;
+  return s_szBuf;
+}
+
+//! IConsole::GetCVar, from any module: the first lookup of each name by each module is written.
+static void ConsoleGetCVar_Enter(SVCallFrame *pFrame, int nModule)
+{
+  const char *szName = (const char *)pFrame->Args[1];
+  if (CV_xrt_Trace <= 0 || !szName || !Trace_IsReadable(szName, 1))
+    return;
+  std::string Key = std::string(nModule >= 0 ? s_Modules[nModule].szName : "?") + " " + szName;
+  AcquireSRWLockExclusive(&s_Lock);
+  const int nCount = ++s_CVarLookups[Key];
+  ReleaseSRWLockExclusive(&s_Lock);
+  if (nCount == 1)
+    pFrame->nFlags |= FRAME_LOG;
+}
+
+static void ConsoleGetCVar_Leave(SVCallFrame *pFrame)
+{
+  Trace_Write("[console] GetCVar(%s, case sensitive %d) from %s -> %p%s", ArgText(pFrame->Args[1]), (int)(BYTE)pFrame->Args[2],
+    Trace_Addr(pFrame->pReturn), (void *)pFrame->nResult, CVarText((ICVar *)pFrame->nResult));
+}
+
+//! The other IConsole methods the renderer calls: every register argument and the first three
+//! stack arguments (the overloads share a name; the slot tells them apart).
+static void ConsoleCall_Enter(SVCallFrame *pFrame)
+{
+  SVSlot *pSlot = pFrame->pSlot;
+  const UINT_PTR *pStack = pFrame->StackArgs;
+  Trace_Write("[console] %s (slot %d) from %s: rdx %s, r8 %s, r9 %s; xmm2 %g, xmm3 %g; stack %s %s %s", pSlot->szMethod, pSlot->nSlot,
+    Trace_Addr(pFrame->pReturn), ArgText(pFrame->Args[1]), ArgText(pFrame->Args[2]), ArgText(pFrame->Args[3]), pFrame->Xmm[2][0],
+    pFrame->Xmm[3][0], ArgText(pStack[0]), ArgText(pStack[1]), ArgText(pStack[2]));
+}
+
+static void ConsoleCall_Leave(SVCallFrame *pFrame)
+{
+  SVSlot *pSlot = pFrame->pSlot;
+  Trace_Write("[console]   %s -> 0x%llx (xmm0 %g)%s", pSlot->szMethod, (unsigned long long)pFrame->nResult, pFrame->XmmResult[0],
+    !strcmp(pSlot->szMethod, "CreateVariable") ? CVarText((ICVar *)pFrame->nResult) : "");
 }
 
 //! AddWaves(SWaveForm2 **wf): the renderer points wf[0] and wf[1] to the object's two new waves and
@@ -407,13 +490,21 @@ extern "C" void VCall_Enter(SVCallFrame *pFrame)
   const int nModule = ModuleIndex(pFrame->pReturn);
   ECaller eCaller = nModule == s_nRenderer ? CALLER_Renderer : nModule == s_nSelf ? CALLER_Proxy : CALLER_Engine;
 #ifdef _WIN64
-  // A hooked function that ends with a jump to another one (e.g. Release to the destructor).
+  // A hooked function that ends with a jump to another one (e.g. Release to the destructor); in an
+  // engine interface the jump is made by the engine's own function (IConsole::Clear is reached so).
   if (pFrame->pReturn == (void *)&VCall_ThunkReturn)
-    eCaller = CALLER_Renderer;
+    eCaller = pSlot->pTable->bEngine ? CALLER_Engine : CALLER_Renderer;
 #endif
   InterlockedIncrement(&pSlot->nCalls[eCaller]);
   if (eCaller == CALLER_Engine && nModule >= 0)
     InterlockedOr(&pSlot->nEngineModules, 1 << nModule);
+  // The console variables every module looks up, the engine's modules as well.
+  if (pSlot->eSpecial == SPECIAL_ConsoleGetCVar)
+  {
+    if (eCaller != CALLER_Proxy)
+      ConsoleGetCVar_Enter(pFrame, nModule);
+    return;
+  }
   // The engine's interfaces: the calls of the renderer into the engine are the ones to write.
   if (eCaller != (pSlot->pTable->bEngine ? CALLER_Renderer : CALLER_Engine))
     return;
@@ -427,6 +518,11 @@ extern "C" void VCall_Enter(SVCallFrame *pFrame)
   if (InterlockedIncrement(&pSlot->nLogged) > (pSlot->bListed ? nLogListed : nLogPerSlot))
     return;
   pFrame->nFlags |= FRAME_LOG;
+  if (pSlot->pTable->pInfo == s_pConsoleInfo)
+  {
+    ConsoleCall_Enter(pFrame);
+    return;
+  }
   Trace_Write("[vcall] %s::%s(this %p, rdx 0x%llx, r8 0x%llx, r9 0x%llx; xmm1 %g, xmm2 %g, xmm3 %g; stack 0x%llx 0x%llx) from %s",
     pSlot->pTable->szName, pSlot->szMethod, (void *)pFrame->Args[0], (unsigned long long)pFrame->Args[1], (unsigned long long)pFrame->Args[2],
     (unsigned long long)pFrame->Args[3], pFrame->Xmm[1][0], pFrame->Xmm[2][0], pFrame->Xmm[3][0], (unsigned long long)pFrame->StackArgs[0],
@@ -443,8 +539,12 @@ extern "C" void VCall_Leave(SVCallFrame *pFrame)
   if (!(pFrame->nFlags & FRAME_LOG))
     return;
   SVSlot *pSlot = pFrame->pSlot;
-  if (pSlot->eSpecial != SPECIAL_None)
+  if (pSlot->eSpecial == SPECIAL_ConsoleGetCVar)
+    ConsoleGetCVar_Leave(pFrame);
+  else if (pSlot->eSpecial != SPECIAL_None)
     ScreenCall_Leave(pFrame);
+  else if (pSlot->pTable->pInfo == s_pConsoleInfo)
+    ConsoleCall_Leave(pFrame);
   else
   {
     Trace_Write("[vcall]   %s::%s -> rax 0x%llx (xmm0 %g)", pSlot->pTable->szName, pSlot->szMethod, (unsigned long long)pFrame->nResult,
@@ -494,6 +594,8 @@ static bool WriteVTable(void **pVTable, void *const *pEntries, int nSlots)
 
 static ESpecial SpecialOf(const char *szClass, const char *szMethod)
 {
+  if (!strcmp(szClass, "IConsole") && !strcmp(szMethod, "GetCVar"))
+    return SPECIAL_ConsoleGetCVar;
   if (strcmp(szClass, "CREScreenProcess"))
     return SPECIAL_None;
   if (!strcmp(szMethod, "mfActivate"))
@@ -562,6 +664,8 @@ static void InstallLocked(const char *szClass, void **pVTable, const char *szTag
     if (!strcmp(s_VTableInfos[i].szClass, szClass))
       pInfo = &s_VTableInfos[i];
   }
+  if (pInfo && !strcmp(pInfo->szClass, "IConsole"))
+    s_pConsoleInfo = pInfo;
   if (!pInfo || s_nTables == nMaxTables)
   {
     Trace_Write("vcall hooks: %s vtable %s: %s, not hooked", szClass, Trace_Addr(pVTable), pInfo ? "too many vtables" : "unknown class");
@@ -627,7 +731,7 @@ static void InstallLocked(const char *szClass, void **pVTable, const char *szTag
     char szName[128];
     _snprintf(szName, sizeof(szName) - 1, "%s::%s", Table.szName, Slot.szMethod);
     szName[sizeof(szName) - 1] = 0;
-    Slot.bListed = Trace_IsListed("XRENDERTRACED_TRACE_METHODS", szName);
+    Slot.bListed = pInfo == s_pConsoleInfo || Trace_IsListed("XRENDERTRACED_TRACE_METHODS", szName);
     WriteStub(pStubs + i * nStubSize, &Slot);
     pEntries[i] = pStubs + i * nStubSize;
   }
@@ -750,6 +854,12 @@ void VCallHooks_WriteSummary(const char *szReason)
     Trace_Write("  screen effect calls from the engine: method(process, param) count");
     for (std::map<unsigned int, int>::const_iterator it = s_ScreenCalls.begin(); it != s_ScreenCalls.end(); ++it)
       Trace_Write("    %s(%d, %d) %d", s_Methods[(it->first >> 24) & 3], (it->first >> 12) & 0xFFF, it->first & 0xFFF, it->second);
+  }
+  if (!s_CVarLookups.empty())
+  {
+    Trace_Write("  IConsole::GetCVar lookups: module, name, count");
+    for (std::map<std::string, int>::const_iterator it = s_CVarLookups.begin(); it != s_CVarLookups.end(); ++it)
+      Trace_Write("    %s %d", it->first.c_str(), it->second);
   }
   ReleaseSRWLockShared(&s_Lock);
 }

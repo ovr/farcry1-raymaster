@@ -90,6 +90,10 @@ it as well: it holds local, machine-specific instructions and is not committed (
   renderer makes into it are written as `[vcall] I3DEngine::...` lines (with the camera of
   `SetCamera` and the flags of `DrawLowDetail`) and counted in the renderer column of the virtual
   call summary; `XRENDERTRACED_TRACE_METHODS` takes them as e.g. `I3DEngine::DrawLowDetail`.
+- The console (`IConsole`) is hooked before the original renderer is constructed: every call the
+  renderer makes into it (the variables it registers) is a `[console]` line with its arguments,
+  and the first `GetCVar` of each name by each module (the engine's modules too) a
+  `[console] GetCVar(...)` line with the variable found; the summary counts the lookups.
 - `XRENDERTRACED_D3D_STATE` (names as in the log, e.g. `DrawDynVB,Draw2dImage`) writes the
   Direct3D 9 state of the original renderer after those calls (`D3DState.h`; read only, through
   `EF_Query(EFQ_D3DDevice)`). `XRENDERTRACED_PROBE=FontSetBlending` passes (i, 12 - i) in the first

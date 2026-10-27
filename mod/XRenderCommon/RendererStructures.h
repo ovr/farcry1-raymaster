@@ -197,6 +197,13 @@ namespace RendererStructures
 //   draws the detail layers as leaf buffers (Bin64Behaviour.h, "Terrain detail layers"). Nothing
 //   else of I3DEngine was called by the renderer.
 
+// The console (IConsole, SCryRenderInterface::ipConsole; slots in VTables.inl; Bin64, runtime:
+// Training): the renderer calls Register and CreateVariable while PackageRenderConstructor runs,
+// GetCVar, and GetFont once per frame in Update (it returns NULL); nothing else (Bin64Behaviour.h,
+// "Console variables"). MSVC puts the overloads of one name next to each other in reverse order of
+// declaration, as the arguments show: CreateVariable with a string value is slot 3 (float 1, int
+// 2), Register with an int pointer slot 9 and with a float pointer slot 10 (void pointer 11).
+
 // Screen effects (CREScreenProcess)
 //   The 3D engine creates one CREScreenProcess with EF_CreateRE(eDATA_ScreenProcess) and turns
 //   I3DEngine::SetScreenFx, SetScreenFxParam, GetScreenFx and GetScreenFxParam (effect and

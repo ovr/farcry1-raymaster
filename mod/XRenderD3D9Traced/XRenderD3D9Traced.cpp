@@ -111,6 +111,9 @@ extern "C" __declspec(dllexport) IRenderer *PackageRenderConstructor(int argc, c
   }
   Trace_Write("Original renderer '%s' loaded at %p", szPath, hReal);
   VCallHooks_SetRenderer(hReal);
+  // The console variables and commands the original renderer registers (it does so from here on),
+  // and the variables each module looks up.
+  VCallHooks_InstallEngine("IConsole", sp->ipConsole);
 
   IRenderer *pReal = pfnCreate(argc, argv, sp);
   Trace_Write("  -> real IRenderer %p (vtbl %s)", pReal, Trace_VTable(pReal));

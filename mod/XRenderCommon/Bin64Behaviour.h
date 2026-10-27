@@ -56,6 +56,8 @@ static const int nHeapAlignment = 4;
 // IRenderer::Release(). ShutDown and FreeResources are not called, and the terrain buffers
 // ("TerrainSector", "LowResTerrain") are not deleted: Release has to free what is left, and
 // RemoveTexture and DeleteLeafBuffer have to accept the same ID several times, -1 and NULL.
+// While the D3D9 renderer's Release runs, GetType is called once on the IRenderer the engine
+// holds (it returns R_DX9_RENDERER), so the object has to answer until Release returns.
 
 //////////////////////////////////////////////////////////////////////////
 // Level change (Training, then the console command "map River")
@@ -96,6 +98,27 @@ static const int nHeapAlignment = 4;
 // EnableSwapBuffers(true), RemoveTexture for a few textures (one ID 28 times), 5 frames of the
 // loading screen with the full progress bar, and the game. Update has to skip Present while
 // swapping is off, and the frame count (GetFrameID) goes on in these frames.
+
+//////////////////////////////////////////////////////////////////////////
+// Console variables (Training)
+//
+// The D3D9 renderer registers its console variables (254: 223 "r_...", 28 "d3d9_..." and 3
+// "CV_ind_...") inside PackageRenderConstructor, before SetType and Init: integers and floats with
+// IConsole::Register, bound to variables of its own, and 9 strings with CreateVariable. CrySystem
+// reads system.cfg before it loads the renderer, and a variable set there gets that value at
+// registration: Register returns it and stores it in the bound variable instead of the default
+// (r_WaterReflections: default 1, 0 from farcry1_testing1's system.cfg).
+// Other modules look some of them up by name (IConsole::GetCVar, which ignores case; seen from the
+// renderer's construction to the first frames of a level): Cry3DEngine reads r_Quality_BumpMapping
+// right after Init and while a level loads (911 lookups on Training), r_WaterReflections and
+// r_WaterRefractions while a level loads, and r_DisableSfx and r_ResetScreenFx in the first frame
+// of a level. No other module looked up a renderer variable. A replacement renderer has to
+// register these five; what the engine does without them was not tried.
+// The renderer itself looks up CrySystem's r_Width, r_Height, r_Fullscreen and r_ColorBits and
+// Cry3DEngine's e_fog, e_shadow_maps, e_stencil_shadows, e_shadow_maps_debug and
+// e_hw_occlusion_culling_objects; "GPU", "hud_fadeamount" and "r_ScreenColorTransfer" are
+// registered by no one (GetCVar returns NULL). It calls Register for r_LogTextureUsage again for
+// every texture it loads (2931 times on Training); the console keeps the one variable.
 
 //////////////////////////////////////////////////////////////////////////
 // Frame
