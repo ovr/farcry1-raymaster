@@ -24,6 +24,8 @@ static int s_nExceptionsLogged = 0;
 static int s_nLastFrame = 0;
 static int s_nRestartFrame = 0;
 static bool s_bCapture = false;
+//! Trace_CaptureRest: the capture does not end with the frame.
+static bool s_bCaptureRest = false;
 //! The thread that loaded the renderer (the engine's main thread).
 static DWORD s_dwMainThread = 0;
 
@@ -301,7 +303,7 @@ void Trace_FrameEnd(int nFrameID)
   }
   for (STraceSite *pSite = s_pSites; pSite; pSite = pSite->m_pNext)
     pSite->m_nFrameCalls = 0;
-  if (s_bCapture)
+  if (s_bCapture && !s_bCaptureRest)
   {
     Trace_Write("==== end of captured frame %d ====", nFrameID);
     s_bCapture = false;
@@ -367,6 +369,13 @@ void Trace_CaptureFrame(const char *szReason)
 {
   Trace_Restart(szReason);
   s_bCapture = true;
+}
+
+void Trace_CaptureRest(const char *szReason)
+{
+  Trace_Restart(szReason);
+  s_bCapture = true;
+  s_bCaptureRest = true;
 }
 
 bool Trace_IsCapturing()

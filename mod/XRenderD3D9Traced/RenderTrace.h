@@ -32,6 +32,9 @@ void Trace_Restart(const char *szReason);
 //! Writes every call of the next frame (up to the next Trace_FrameEnd), regardless of xrt_TraceCalls;
 //! called within a frame, every call of the rest of it.
 void Trace_CaptureFrame(const char *szReason = "capture of the next frame");
+//! Writes every call from now on, through all later frames, until the renderer is released (the
+//! shutdown).
+void Trace_CaptureRest(const char *szReason);
 //! Whether the current frame is the captured one.
 bool Trace_IsCapturing();
 

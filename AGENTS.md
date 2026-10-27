@@ -61,7 +61,8 @@ it as well: it holds local, machine-specific instructions and is not committed (
   taken as the SDK game code does, and `decal size texture terrain x y` puts one on the terrain at
   world (x, y) (decals need `e_decals 1` before the level loads); `mouse down`, `mouse up` and
   `mouse move dx dy` send the left button or a relative move with `SendInput`, only while the game
-  window is in front.
+  window is in front; `capture` writes every call from then on until the renderer is released
+  (e.g. `capture; quit` in `XRENDERTRACED_EXEC_LEVEL` for the shutdown).
 - The screen effect calls (`CREScreenProcess::mfSetParameter`, `mfGetParameter`) are written as
   `[screenfx]` lines (the first 8 of each parameter, then every 50th); `XRENDERTRACED_SCREENFX_ALL=1`
   writes all of them, with the timer's time. `XRENDERTRACED_SCREENFX_WATCH=8.24,8.30` reads those

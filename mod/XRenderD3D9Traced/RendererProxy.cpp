@@ -362,6 +362,8 @@ void CRendererProxy::ExecuteCommands(const char *szCommands)
     }
     else if (!strcmp(szCmd, "vcalls"))
       VCallHooks_RestartListed();
+    else if (!strcmp(szCmd, "capture"))
+      Trace_CaptureRest("capture of every call from here on (command 'capture')");
     else if (!strncmp(szCmd, "after ", 6))
     {
       int nAfter = 0, nLen = 0;
