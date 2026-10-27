@@ -518,9 +518,21 @@ static const int nHeapAlignment = 4;
 //   "templglasscm_fp": texture * texture factor (grey 25) plus a cube map looked up with the
 //     camera space reflection vector (texture transform as for "templreflcmdecal"); opaque,
 //     depth writes.
-//   "templdecalmodulate_fp" and "templdecalalphablend" (eS_Decal): nothing is drawn (the first
-//     also not with r_Quality_BumpMapping 2). The engine renders the objects as usual (the same
-//     CLeafBuffer::Render calls), but the renderer makes no draw for their elements on their own.
+//   "templdecalmodulate_fp" and "templdecalalphablend" (eS_Decal): with every material of the
+//     frame given one of them nothing at all is drawn (the first also not with
+//     r_Quality_BumpMapping 2), although the engine renders the objects as usual (the same
+//     CLeafBuffer::Render calls). Given to some materials only (Training, the first frames;
+//     both templates alike):
+//       lightmapped objects: drawn with the two stages of the lightmapped objects, opaque,
+//       depth writes, as if the template were "templdiffuse_fp";
+//       static objects without lightmap: no draw, also with the material's opacity set below 1
+//       (the same material with "templdiffuse_fp" and opacity 0.5 is drawn blended);
+//       decal entities (SRendParams::pMaterial a material of the entity, loaded as
+//       "MaterialContainer" with TemplDecalModulate, opacity 0.99, a 2 triangle quad): drawn
+//       with lighting on, stage 0 colour texture * vertex lighting * 2 (MODULATE2X), alpha
+//       texture * material alpha (the opacity), blended (SRCALPHA, INVSRCALPHA), depth test
+//       LESSEQUAL without depth writes, culling D3DCULL_CW, fog; among the blended objects of
+//       the frame. With the opacity set to 1 the same decals get no draw.
 //   "aw50scoperefraction" (eS_Refractive): nothing is drawn with r_ScopeLens_fx 0 (the default).
 //     With r_ScopeLens_fx 1 (River) the renderer first copies the whole back buffer
 //     (IDirect3DDevice9::StretchRect, no filter) into a 1024 x 768 D3DFMT_A8R8G8B8 render target
