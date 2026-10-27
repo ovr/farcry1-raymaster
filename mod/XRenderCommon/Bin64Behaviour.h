@@ -566,8 +566,11 @@ static const int nHeapAlignment = 4;
 //   "s_objectcolor": a 16 x 16 DXT1 texture of its own (clamp) * factor, the factor being the
 //     object's colour (0xffbfbfbf, 0xffffffff seen); blended (SRCALPHA, INVSRCALPHA), no depth
 //     writes; positions only.
-//   "templinvlight": drawn for only 25 of the elements (grass, trees, weapons lying about; which
-//     ones was not worked out), after CheckUpdate with nFlags 0x9; a vertex and a pixel shader
+//   "templinvlight": drawn once for each element of every object that has no lightmap
+//     (SRendParams::pLightMapInfo NULL) and a dynamic light in SRendParams::nDLightMask (grass,
+//     trees, weapons lying about, rocks; one draw whether the mask holds one light or more);
+//     objects without dynamic lights and lightmapped objects (lit or not, MergedLB as well) get no
+//     draw at all. After CheckUpdate with nFlags 0x9; a vertex and a pixel shader
 //     (vs_1_1, ps_2_0), the position from stream 0 and three FLOAT3 (TEXCOORD2, TEXCOORD3,
 //     BLENDWEIGHT0) from stream 1, sampler 0 a 16 x 16 DXT1 and sampler 1 a 32 x 32
 //     D3DFMT_X8R8G8B8 texture (clamp), both the same for every material; mostly blended
