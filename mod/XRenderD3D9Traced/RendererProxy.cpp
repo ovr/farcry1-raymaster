@@ -228,7 +228,7 @@ void CRendererProxy::PostLoad()
 
 void CRendererProxy::BeginFrame()
 {
-  TRACE_CALL("frame %d", m_nFrames + 1);
+  TRACE_CALL("frame %d time %.4f", m_nFrames + 1, iTimer ? iTimer->GetCurrTime() : 0.0f);
   Watch_NewFrame();
   // The renderer's calls back into the engine.
   static bool s_bEngineHooked = false;
