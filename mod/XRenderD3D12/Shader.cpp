@@ -955,7 +955,13 @@ CShader *CShaderManager::LoadMaterial(const char *szName, const char *szTemplate
 {
   CShader *pTempl = GetTemplate(szTemplate, nMaskGen);
   std::string Name = Lower(szName);
-  std::string Key = Name + '\n' + pTempl->GetName();
+  std::string Templ = Lower(szTemplate);
+  // The templates with vertex and pixel shaders when bump mapping is on: their names stay then
+  // (GetTemplate(-1) is the template as named), each a shader of its own, so that materials of one
+  // name keep their own lighting (all those of a level's material library are "MaterialContainer").
+  const bool bPixelLighting = Templ.starts_with("templbump") || Templ.starts_with("templmodel") || Templ.starts_with("templlightdiffuse");
+  const bool bBump = bPixelLighting && g_pRenderer && g_pRenderer->CV_r_Quality_BumpMapping > 0;
+  std::string Key = Name + '\n' + (bBump ? Templ : std::string(pTempl->GetName()));
   if (auto it = m_Materials.find(Key); it != m_Materials.end())
     return it->second;
 
@@ -966,15 +972,13 @@ CShader *CShaderManager::LoadMaterial(const char *szName, const char *szTemplate
 
   SShaderProps Props = pTempl->GetProps();
   Props.nFlags = EF_COMPILEDLAYERS | EF_NEEDNORMALS | EF_NOTFOUND;
-  // The templates with vertex and pixel shaders when bump mapping is on (their names stay then).
-  Props.Template = Lower(szTemplate);
-  const std::string &Templ = Props.Template;
-  Props.bPixelLighting = Templ.starts_with("templbump") || Templ.starts_with("templmodel") || Templ.starts_with("templlightdiffuse");
-  Props.bSpecular = Props.bPixelLighting && Templ.find("spec") != std::string::npos;
-  Props.bGlossAlpha = Props.bSpecular && Templ.find("glossalpha") != std::string::npos;
+  Props.Template = std::move(Templ);
+  Props.bPixelLighting = bPixelLighting;
+  Props.bSpecular = bPixelLighting && Props.Template.find("spec") != std::string::npos;
+  Props.bGlossAlpha = Props.bSpecular && Props.Template.find("glossalpha") != std::string::npos;
   // Their bump mapping needs tangent frames: the tangent stream of a character is filled for the
   // materials that report EF_NEEDTANGENTS.
-  if (Props.bPixelLighting && g_pRenderer && g_pRenderer->CV_r_Quality_BumpMapping > 0)
+  if (bBump)
     Props.nFlags |= EF_NEEDTANGENTS;
   CShader *pSH = Create(std::move(ShaderName), EShaderKind::Material, Props, pTempl, nMaskGen);
   m_Materials.emplace(std::move(Key), pSH);

@@ -1164,8 +1164,9 @@ void CD3D12Renderer::DumpDraw(const SDrawConstants &dc, const SPipelineKey &Key,
   if (dc.nFlags & DF_SHADOWS)
     fprintf(f, " shadow maps %d", (int)dc.vShadowParams[0]);
   for (uint32 i = 0; i < dc.nLights; i++)
-    fprintf(f, " {(%.1f %.1f %.1f %.0f) col (%.2f %.2f %.2f) att (%.3f %.3f %.1f)}", dc.vLightPos[i][0], dc.vLightPos[i][1], dc.vLightPos[i][2],
-            dc.vLightPos[i][3], dc.vLightColor[i][0], dc.vLightColor[i][1], dc.vLightColor[i][2], dc.vLightAtten[i][0], dc.vLightAtten[i][1], dc.vLightAtten[i][2]);
+    fprintf(f, " {(%.1f %.1f %.1f %.0f) col (%.2f %.2f %.2f) att (%.3f %.3f %.1f) 1/r %.4f}", dc.vLightPos[i][0], dc.vLightPos[i][1], dc.vLightPos[i][2],
+            dc.vLightPos[i][3], dc.vLightColor[i][0], dc.vLightColor[i][1], dc.vLightColor[i][2], dc.vLightAtten[i][0], dc.vLightAtten[i][1], dc.vLightAtten[i][2],
+            dc.vLightAtten[i][3]);
   fprintf(f, "\n");
 }
 
