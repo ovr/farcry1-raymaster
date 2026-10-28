@@ -782,20 +782,23 @@ void CD3D12Renderer::DrawLeafItem(const SRenderItem &it)
   }
   case eDC_TerrainShadow:
   {
-    // The shadow of static objects on a terrain sector ("EntityShadowOnTerrain": triangles of the
+    // The shadow of casters on a terrain sector ("EntityShadowOnTerrain": triangles of the
     // sector under the casters, over the sector's vertices; the object's m_pShadowCasters lists
     // the casters): the sector's texture (the one the buffer was given) at the sector's texture
-    // coordinates (u = y * float 2 + float 0, v = x * float 2 + float 1 of the custom data) times
-    // twice the object's colour (the terrain in the shadow), blended over the terrain where the
-    // casters' maps hide the sun; no depth writes, before the detail layers.
+    // coordinates (u = y * float 2 + float 0, v = x * float 2 + float 1 of the custom data) as the
+    // terrain draws it (twice the world colour) times the object's colour (the terrain in the
+    // shadow), blended over the terrain where the casters' maps hide the sun, the more weakly the
+    // farther behind its casters (by the depth across the map's range); no depth writes, before
+    // the detail layers.
     const float *pCustom = (const float *)pLeaf->m_CustomData;
     if (!pTex || !pCustom || !SetupShadowReceiver(dc, pObj))
       return;
     dc.nFlags = (dc.nFlags & ~DF_TEXMATRIX) | DF_TEXGEN_WORLD | DF_SHADOW_PASS | DF_ALPHATEST;
     dc.fAlphaRef = 1.0f / 255.0f;
+    dc.vShadowParams[1] = 1;
     Set4(dc.vTexGenU, 0, pCustom[2], 0, pCustom[0]);
     Set4(dc.vTexGenV, pCustom[2], 0, 0, pCustom[1]);
-    Set4(dc.vColor, 2 * pObj->m_Color.r, 2 * pObj->m_Color.g, 2 * pObj->m_Color.b, 1);
+    Set4(dc.vColor, 2 * m_WorldColor[0] * pObj->m_Color.r, 2 * m_WorldColor[1] * pObj->m_Color.g, 2 * m_WorldColor[2] * pObj->m_Color.b, 1);
     dc.nSamplers = XR_SAMPLER_LINEAR_CLAMP;
     Key.nState = GS_BLSRC_SRCALPHA | GS_BLDST_ONEMINUSSRCALPHA;
     if (dc.nFlags & DF_SHADOW_DEBUG)
@@ -954,6 +957,10 @@ void CD3D12Renderer::DumpItem(int nIndex, const SRenderItem &it, int eList)
           pObj->m_Color.r, pObj->m_Color.g, pObj->m_Color.b, pObj->m_Color.a, it.pRes ? it.pRes->m_AlphaRef : 0.0f,
           it.pRes ? it.pRes->m_Opacity : 1.0f, it.pRes ? it.pRes->m_ResFlags : 0,
           pObj->m_pShadowCasters ? reinterpret_cast<const int *>(pObj->m_pShadowCasters)[2] : -1);
+  // The rotation and scale of the object's matrix, when it has one.
+  const float *m = pObj->m_Matrix.data;
+  if (m[0] != 1 || m[1] != 0 || m[2] != 0 || m[4] != 0 || m[5] != 1 || m[6] != 0 || m[8] != 0 || m[9] != 0 || m[10] != 1)
+    fprintf(m_pFrameDump.get(), "    matrix x (%.3f %.3f %.3f) y (%.3f %.3f %.3f) z (%.3f %.3f %.3f)\n", m[0], m[1], m[2], m[4], m[5], m[6], m[8], m[9], m[10]);
 
   // Shader parameters of the object and the resources, the element's custom data.
   auto Params = [](const TArray<SShaderParam> *pParams)

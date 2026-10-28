@@ -375,14 +375,15 @@ bool CD3D12Renderer::DrawShadowMap(void *pFrustum, const Vec3 &vOrigin)
     if (!pEnt)
       continue;
     // As the main view draws it (its level of detail at its distance from the camera); characters
-    // draw nothing without FOB_RENDER_INTO_SHADOWMAP.
+    // draw nothing without FOB_RENDER_INTO_SHADOWMAP, and the objects' matrices turn them only
+    // with FOB_TRANS_MASK (a vehicle, the things a character holds).
     SRendParams Params;
     Params.vPos = pEnt->GetPos();
     Params.vAngles = pEnt->GetAngles();
     Params.fScale = pEnt->GetScale();
     Params.fDistance = (Params.vPos - m_Camera.GetPos()).GetLength();
     Params.fSQDistance = Params.fDistance * Params.fDistance;
-    Params.dwFObjFlags = FOB_RENDER_INTO_SHADOWMAP;
+    Params.dwFObjFlags = FOB_RENDER_INTO_SHADOWMAP | FOB_TRANS_MASK;
     if (m_pFrameDump)
       fprintf(m_pFrameDump.get(), "  entity at (%.2f %.2f %.2f) angles (%.1f %.1f %.1f) scale %g\n", Params.vPos.x, Params.vPos.y, Params.vPos.z, Params.vAngles.x,
               Params.vAngles.y, Params.vAngles.z, Params.fScale);
@@ -484,8 +485,8 @@ bool CD3D12Renderer::SetupShadowReceiver(SDrawConstants &dc, const CCObject *pOb
       M[14] -= SHADOW_DEPTH_BIAS_M / (2 * pMap->fRadius * s);
       dc.nShadowTex[n] = (uint32)pMap->nSRV;
       if (m_pFrameDump)
-        fprintf(m_pFrameDump.get(), "    shadow map %d: SRV %d%s, caster (%.2f %.2f %.2f) scale %g\n", n, pMap->nSRV, pMap->bEntities ? " (entities)" : "", vPos.x, vPos.y,
-                vPos.z, s);
+        fprintf(m_pFrameDump.get(), "    shadow map %d: SRV %d%s, caster (%.2f %.2f %.2f) scale %g, world to map x (%g %g %g %g) y (%g %g %g %g) z (%g %g %g %g)\n", n, pMap->nSRV,
+                pMap->bEntities ? " (entities)" : "", vPos.x, vPos.y, vPos.z, s, M[0], M[4], M[8], M[12], M[1], M[5], M[9], M[13], M[2], M[6], M[10], M[14]);
       n++;
     }
   }

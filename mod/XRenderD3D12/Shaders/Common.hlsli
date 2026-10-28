@@ -146,7 +146,9 @@ float4 SampleTextureArray(uint nIndex, uint nSampler, float3 vUVW)
 //! How much of the sun reaches world position vPos (normal vNormal, may be zero) through the
 //! draw's shadow maps (DF_SHADOWS): 1 lit, 0 in shadow. Each map is a percentage closer filter of
 //! 16 bilinear comparisons on a rotated disc (vShadowParams.z texels), its shadow fading out
-//! towards the edge of the map's circle; the maps multiply.
+//! towards the edge of the map's circle and, with vShadowParams.y, with the depth behind its
+//! casters (times saturate(1 - y * (depth - the mean depth of the casters seen))); the maps
+//! multiply.
 float SunVisibility(float3 vPos, float3 vNormal, float2 vScreenPos)
 {
   static const float2 Disc[8] =
@@ -172,16 +174,28 @@ float SunVisibility(float3 vPos, float3 vNormal, float2 vScreenPos)
     Map.GetDimensions(vSize.x, vSize.y);
     float2 vUV = float2(0.5 + 0.5 * v.x, 0.5 - 0.5 * v.y);
     float2 vStep = g_Draw.vShadowParams.z / vSize;
-    float fDepth = min(v.z, 1) - g_Draw.vShadowParams.y;
-    float fSum = 0;
+    float fDepth = min(v.z, 1);
+    float fSum = 0, fCasters = 0, fCasterDepth = 0;
     [unroll]
-    for (uint k = 0; k < 8; k++)
+    for (uint k = 0; k < 16; k++)
     {
-      float2 d = float2(Disc[k].x * vRot.x - Disc[k].y * vRot.y, Disc[k].x * vRot.y + Disc[k].y * vRot.x);
-      fSum += Map.SampleCmpLevelZero(g_SamplerShadow, vUV + d * vStep, fDepth);
-      fSum += Map.SampleCmpLevelZero(g_SamplerShadow, vUV + d * vStep * 0.5, fDepth);
+      float2 d = float2(Disc[k / 2].x * vRot.x - Disc[k / 2].y * vRot.y, Disc[k / 2].x * vRot.y + Disc[k / 2].y * vRot.x);
+      float2 vUVk = vUV + d * vStep * ((k & 1) ? 0.5 : 1);
+      fSum += Map.SampleCmpLevelZero(g_SamplerShadow, vUVk, fDepth);
+      if (g_Draw.vShadowParams.y > 0)
+      {
+        float fMap = Map.SampleLevel(g_SamplerPointClamp, vUVk, 0).r;
+        if (fMap < fDepth)
+        {
+          fCasters += 1;
+          fCasterDepth += fMap;
+        }
+      }
     }
-    fLit *= lerp(1, fSum / 16, fEdge);
+    float fShadow = (1 - fSum / 16) * fEdge;
+    if (fCasters > 0)
+      fShadow *= saturate(1 - g_Draw.vShadowParams.y * (fDepth - fCasterDepth / fCasters));
+    fLit *= 1 - fShadow;
   }
   return fLit;
 }
