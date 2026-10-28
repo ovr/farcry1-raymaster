@@ -28,9 +28,10 @@
 //
 //	A procedural flare (a material of FlareProc) is a glow around its
 //	surface: the outline of the surface's vertices as the camera sees them,
-//	each corner kept at its depth and grown across the view by FlareSize
-//	metres with rounded corners, added with the material's colour, full
-//	inside the outline and fading out to the grown edge (DrawProcFlare).
+//	grown across the view by FlareSize metres with rounded corners, added
+//	with the material's colour, full inside the outline and fading out to
+//	the grown edge, depth tested at its front: FlareSize nearer than the
+//	surface (DrawProcFlare).
 //
 //////////////////////////////////////////////////////////////////////
 
@@ -409,16 +410,34 @@ void CD3D12Renderer::DrawProcFlare(const SRenderItem &it, const Matrix44 &World)
   }
   const float *w = World.data;
   const float fDet = w[0] * (w[5] * w[10] - w[6] * w[9]) - w[1] * (w[4] * w[10] - w[6] * w[8]) + w[2] * (w[4] * w[9] - w[5] * w[8]);
-  if (vFront.Dot(vFront) > 0 && (fDet < 0 ? -1.0f : 1.0f) * vFront.Dot(m_Camera.GetPos() - vCenter) <= 0)
+  const Vec3 vCamPos = m_Camera.GetPos();
+  if (vFront.Dot(vFront) > 0 && (fDet < 0 ? -1.0f : 1.0f) * vFront.Dot(vCamPos - vCenter) <= 0)
     return;
 
-  // Their outline as the camera sees them (x right, y up), without points closer than a
-  // millimetre.
+  // Their outline as the camera sees them: on the plane through their centre across the line of
+  // sight, each point where its line of sight meets it (x right, y up), without points closer than
+  // a millimetre. Off the middle of the view the camera's own axes would turn and fold the glow.
+  Vec3 vDir = vCenter - vCamPos;
+  const float fCenterDist = vDir.GetLength();
+  if (fCenterDist < 1e-3f)
+    return;
+  vDir = vDir / fCenterDist;
   const float *v = m_CameraView.data;
-  const Vec3 vRight(v[0], v[4], v[8]), vUp(v[1], v[5], v[9]);
+  Vec3 vRight = vDir.Cross(Vec3(v[1], v[5], v[9]));
+  if (vRight.GetLength() < 1e-3f)
+    vRight = Vec3(v[0], v[4], v[8]);
+  vRight.Normalize();
+  const Vec3 vUp = vRight.Cross(vDir);
+  std::vector<Vec3> Seen(Points.size());
   std::vector<SPoint2> Flat;
   for (size_t i = 0; i < Points.size(); i++)
-    Flat.push_back({ (Points[i] - vCenter).Dot(vRight), (Points[i] - vCenter).Dot(vUp), (int)i });
+  {
+    const float fDepth = (Points[i] - vCamPos).Dot(vDir);
+    if (fDepth < 1e-3f)
+      return;
+    Seen[i] = vCamPos + (Points[i] - vCamPos) * (fCenterDist / fDepth);
+    Flat.push_back({ (Seen[i] - vCenter).Dot(vRight), (Seen[i] - vCenter).Dot(vUp), (int)i });
+  }
   std::vector<SPoint2> Hull = ConvexHull(std::move(Flat));
   auto Near = [](const SPoint2 &a, const SPoint2 &b) { return fabsf(a.x - b.x) < 1e-3f && fabsf(a.y - b.y) < 1e-3f; };
   Hull.erase(std::unique(Hull.begin(), Hull.end(), Near), Hull.end());
@@ -428,9 +447,9 @@ void CD3D12Renderer::DrawProcFlare(const SRenderItem &it, const Matrix44 &World)
   if (!n)
     return;
 
-  // The outline's points where they are (u 0) and around each of them an arc fSize out across the
-  // view (u 1), from the outward normal of the edge before it to that of the edge after it (all
-  // around a single point): the glow keeps the depth of the surface.
+  // The outline's points (u 0) and around each of them an arc fSize out on the plane (u 1), from
+  // the outward normal of the edge before it to that of the edge after it (all around a single
+  // point).
   std::vector<struct_VERTEX_FORMAT_P3F_COL4UB_TEX2F> Verts;
   std::vector<ushort> Inds;
   auto AddVertex = [&](const Vec3 &vPos, float u)
@@ -443,7 +462,7 @@ void CD3D12Renderer::DrawProcFlare(const SRenderItem &it, const Matrix44 &World)
     return (ushort)(Verts.size() - 1);
   };
   for (const SPoint2 &p : Hull)
-    AddVertex(Points[p.nPoint], 0);
+    AddVertex(Seen[p.nPoint], 0);
   std::vector<std::pair<ushort, ushort>> Arcs(n);     // the first and the last vertex of each corner's arc
   for (size_t i = 0; i < n; i++)
   {
@@ -461,7 +480,7 @@ void CD3D12Renderer::DrawProcFlare(const SRenderItem &it, const Matrix44 &World)
     for (int k = 0; k <= nSegments; k++)
     {
       const float a = a0 + fSpan * k / nSegments;
-      const ushort nVert = AddVertex(Points[c.nPoint] + vRight * (fSize * cosf(a)) + vUp * (fSize * sinf(a)), 1);
+      const ushort nVert = AddVertex(Seen[c.nPoint] + vRight * (fSize * cosf(a)) + vUp * (fSize * sinf(a)), 1);
       if (k == 0)
         Arcs[i].first = nVert;
       else
@@ -476,6 +495,16 @@ void CD3D12Renderer::DrawProcFlare(const SRenderItem &it, const Matrix44 &World)
   {
     const size_t j = (i + 1) % n;
     Inds.insert(Inds.end(), { (ushort)i, Arcs[i].second, Arcs[j].first, (ushort)i, Arcs[j].first, (ushort)j });
+  }
+  // The glow is fSize deep around the surface: its depth is that of its front, every point moved
+  // along its line of sight fSize nearer (at most half way), so that the lamp around the surface
+  // does not cut it.
+  for (struct_VERTEX_FORMAT_P3F_COL4UB_TEX2F &Vert : Verts)
+  {
+    const Vec3 vToCam = vCamPos - Vert.xyz;
+    const float fDist = vToCam.GetLength();
+    if (fDist > 1e-3f)
+      Vert.xyz += vToCam * (std::min(fSize, 0.5f * fDist) / fDist);
   }
 
   // The material's colour (the ambient of its light material) times the object's colour, added,
