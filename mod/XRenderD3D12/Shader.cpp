@@ -77,8 +77,9 @@ constexpr STemplateEntry s_Templates[] =
   { "templtextureshiftt02",            "",                              eS_Opaque,                kOpaque2,                               0,              eDC_Opaque,           eCULL_Back, 0.0f,         0.2f },
   { "templtextureshiftt05",            "",                              eS_Opaque,                kOpaque2,                               0,              eDC_Opaque,           eCULL_Back, 0.0f,         0.5f },
   { "lavavolume",                      "",                              eS_Opaque,                kOpaque2,                               0,              eDC_Opaque,           eCULL_Back },
-  // Glass: drawn blended so that what is behind shows (texture alpha * opacity).
+  // Glass: drawn blended so that what is behind shows (alpha: the opacity).
   { "templglasscm",                    "templglasscm_fp",               eS_Opaque,                kOpaque2,                               0,              eDC_AlphaBlend,       eCULL_Back },
+  { "templglasscm_fp",                 "",                              eS_Opaque,                kOpaque2,                               0,              eDC_AlphaBlend,       eCULL_Back },
   // Not drawn: a light pass of dynamic lights, decals the original draws nothing for.
   { "templinvlight",                   "",                              eS_Opaque,                EF2_FOGOVERLAY1 | EF2_DONTSORTBYDIST,   0,              eDC_NoDraw,           eCULL_Back },
   { "templdecalmodulate",              "templdecalmodulate_fp",         eS_Decal,                 EF2_DONTSORTBYDIST,                     0,              eDC_NoDraw,           eCULL_Back },
@@ -126,13 +127,14 @@ constexpr STemplateEntry s_Templates[] =
   { "watervolume*",                    "",                              eS_Water,                 0,                                      0,              eDC_Water,            eCULL_None },
 };
 
-//! The templates lit otherwise than by 2 (ELighting::Overbright), and those that add their gloss
-//! map. Looked up like s_Templates, by the name the material gives.
+//! The templates lit otherwise than by 2 (ELighting::Overbright), those that add their gloss map
+//! and those that show their cube map. Looked up like s_Templates, by the name the material gives.
 struct STemplateLighting
 {
   std::string_view Name;
   ELighting eLighting;
   EGlow eGlow = EGlow::None;
+  EEnvMap eEnvMap = EEnvMap::None;
 };
 
 constexpr STemplateLighting s_TemplateLighting[] =
@@ -145,9 +147,15 @@ constexpr STemplateLighting s_TemplateLighting[] =
   { "templdecalglowselfillumanimated", ELighting::Vertex,   EGlow::Pulse },
   { "templtextureshiftt02",            ELighting::Vertex },
   { "templtextureshiftt05",            ELighting::Vertex },
-  { "templreflcm",                     ELighting::Vertex },
-  { "templreflcmdecal",                ELighting::Vertex },
-  { "templbumpreflcm*",                ELighting::Vertex },
+  // The cube map alone (its material's ambient is white: the light saturates), the cube map lit
+  // plus the texture, the glass unlit.
+  { "templreflcm",                     ELighting::None,     EGlow::None, EEnvMap::Cube },
+  { "templbumpreflcm*",                ELighting::None,     EGlow::None, EEnvMap::Cube },
+  { "templreflcmdecal",                ELighting::Vertex,   EGlow::None, EEnvMap::CubeDecal },
+  { "templreflcmdecal_reflamountopacity", ELighting::Vertex, EGlow::None, EEnvMap::CubeDecal },
+  { "templreflcmdecaladdsig",          ELighting::Vertex,   EGlow::None, EEnvMap::CubeAddSigned },
+  { "templglasscm",                    ELighting::None,     EGlow::None, EEnvMap::Glass },
+  { "templglasscm_fp",                 ELighting::None,     EGlow::None, EEnvMap::GlassFixed },
   // No lights: the texture times the object's ambient colour, or the texture alone (also added).
   { "templalphablend",                 ELighting::Ambient },
   { "templdecalopacity",               ELighting::Ambient },
@@ -287,6 +295,7 @@ SResolvedTemplate ResolveTemplate(const std::string &Name, uint64 nMaskGen)
   {
     R.Props.eLighting = pL->eLighting;
     R.Props.eGlow = pL->eGlow;
+    R.Props.eEnvMap = pL->eEnvMap;
   }
   return R;
 }
@@ -636,8 +645,7 @@ CShader *CShaderManager::LoadMaterial(const char *szName, const char *szTemplate
   // The templates with vertex and pixel shaders when bump mapping is on (their names stay then).
   Props.Template = Lower(szTemplate);
   const std::string &Templ = Props.Template;
-  Props.bPixelLighting = Templ.starts_with("templbump") || Templ.starts_with("templmodel") || Templ.starts_with("templlightdiffuse") ||
-    Templ == "templglasscm";
+  Props.bPixelLighting = Templ.starts_with("templbump") || Templ.starts_with("templmodel") || Templ.starts_with("templlightdiffuse");
   Props.bSpecular = Props.bPixelLighting && Templ.find("spec") != std::string::npos;
   Props.bGlossAlpha = Props.bSpecular && Templ.find("glossalpha") != std::string::npos;
   // Their bump mapping needs tangent frames: the tangent stream of a character is filled for the
@@ -754,6 +762,9 @@ CTexture *CShaderManager::LoadResourceTexture(SRenderShaderResources *pRes, int 
   SShaderTexUnit &TU = pTex->m_TU;
   if (!TU.m_ITexPic && !TU.m_AnimInfo && !pTex->m_Name.empty() && g_pRenderer && g_pRenderer->m_pTextures)
   {
+    // The cube map slot names a face of the cube (<base>_posx), as a plain texture.
+    if (nSlot == EFTT_CUBEMAP)
+      TU.m_eTexType = eTT_Cubemap;
     const char *szPath = pRes->m_TexturePath.c_str();
     SAnimTexName Anim;
     if (ParseAnimTexName(pTex->m_Name.c_str(), Anim))

@@ -20,7 +20,10 @@
 //	    uv0: DF_TEXGEN_WORLD (dot(float4(world pos, 1), vTexGenU / V)), then
 //	      DF_TEXMATRIX
 //	  pixel shader
-//	    tex0: DF_CUBE0 (g_Cubes, reflected view vector), else DF_TEX0_ARRAY
+//	    tex0: DF_CUBE0 (g_Cubes, the view vector reflected about the normal,
+//	      N' with DF_BUMP; DF2_GLASS: lerp(cube(T), cube(R), F), T the view
+//	      vector refracted with vParams2.w, F = saturate(vParams2.z +
+//	      vParams2.x * (1 - N.V)^vParams2.y)), else DF_TEX0_ARRAY
 //	      (g_TextureArrays, slice floor(u / 2) at (u - 2 * slice, v)), else DF_TEX0
 //	      (g_Textures), else white; sampler from nSamplers bits 0-3
 //	    colour * tex0; DF_TEX0_ALPHA_ONLY: rgb = colour, a = colour a * tex a;
@@ -59,8 +62,8 @@
 //	      (texture alpha if vSpecular.w, else 1) * the sum over the sun (times
 //	      v) and the lights of their specular colour (clamped to 1) * falloff
 //	      * saturate(R.V)^32, R the light reflected about the normal
-//	    DF2_SELF_ILLUM: rgb += tex4 at uv0 * vSelfIllum.rgb (a glow map added,
-//	      unlit)
+//	    DF2_ADD_TEX4: rgb += tex4 at uv0 * vAddColor.rgb + vAddColor.w (a glow
+//	      map or a texture added, unlit); with DF2_GLASS also a *= tex4 a
 //	    DF_CAUSTICS (the terrain under the ocean, multiplied in twice): rgb =
 //	      0.5 + 0.5 * k * (I - 1), I = min of two layers of the caustics texture
 //	      tex0 drifting apart, sampled where the sun's refracted ray crossed
@@ -221,20 +224,6 @@ float4 PSMain(SVertexOutput In) : SV_Target
   uint nSampler0 = g_Draw.nSamplers & 15;
   uint nSampler1 = (g_Draw.nSamplers >> 4) & 15;
 
-  float4 vTex = float4(1, 1, 1, 1);
-  if (HasFlag(DF_CUBE0))
-  {
-    float3 vView = In.vWorldPos - g_Frame.vCameraPos.xyz;
-    vTex = SampleCube(g_Draw.nTex0, nSampler0, reflect(vView, SafeNormalize(In.vNormal)));
-  }
-  else if (HasFlag(DF_TEX0_ARRAY))
-  {
-    float fSlice = floor(In.vTex0.x * 0.5);
-    vTex = SampleTextureArray(g_Draw.nTex0, nSampler0, float3(In.vTex0.x - 2 * fSlice, In.vTex0.y, fSlice));
-  }
-  else if (HasFlag(DF_TEX0))
-    vTex = SampleTexture(g_Draw.nTex0, nSampler0, In.vTex0);
-
   // Bump mapping: the normal map in tangent space (vMap) and in world space (vBumpN).
   float3 vMap = float3(0, 0, 1);
   float3 vBumpN = 0;
@@ -244,6 +233,27 @@ float4 PSMain(SVertexOutput In) : SV_Target
     vMap.y *= g_Draw.vParams1.y;
     vBumpN = SafeNormalize(vMap.x * In.vTangent + vMap.y * In.vBinormal + vMap.z * In.vTNormal);
   }
+
+  float4 vTex = float4(1, 1, 1, 1);
+  if (HasFlag(DF_CUBE0))
+  {
+    float3 vView = SafeNormalize(In.vWorldPos - g_Frame.vCameraPos.xyz);
+    float3 vN = HasFlag(DF_BUMP) ? vBumpN : SafeNormalize(In.vNormal);
+    vTex = SampleCube(g_Draw.nTex0, nSampler0, reflect(vView, vN));
+    if (HasFlag2(DF2_GLASS))
+    {
+      float4 vThrough = SampleCube(g_Draw.nTex0, nSampler0, refract(vView, vN, g_Draw.vParams2.w));
+      float fFresnel = saturate(g_Draw.vParams2.z + g_Draw.vParams2.x * pow(1 - saturate(-dot(vView, vN)), g_Draw.vParams2.y));
+      vTex = lerp(vThrough, vTex, fFresnel);
+    }
+  }
+  else if (HasFlag(DF_TEX0_ARRAY))
+  {
+    float fSlice = floor(In.vTex0.x * 0.5);
+    vTex = SampleTextureArray(g_Draw.nTex0, nSampler0, float3(In.vTex0.x - 2 * fSlice, In.vTex0.y, fSlice));
+  }
+  else if (HasFlag(DF_TEX0))
+    vTex = SampleTexture(g_Draw.nTex0, nSampler0, In.vTex0);
 
   float fSun = HasFlag(DF_SHADOWS) ? SunVisibility(In.vWorldPos, In.vNormal, In.vPos.xy) : 1;
   float4 vVertexColor = In.vColor;
@@ -266,8 +276,13 @@ float4 PSMain(SVertexOutput In) : SV_Target
   else
     vColor = vVertexColor * vTex;
   vColor.rgb += vSpecular;
-  if (HasFlag2(DF2_SELF_ILLUM))
-    vColor.rgb += SampleTexture(g_Draw.nTex4, XR_SAMPLER_LINEAR_WRAP, In.vTex0).rgb * g_Draw.vSelfIllum.rgb;
+  if (HasFlag2(DF2_ADD_TEX4))
+  {
+    float4 vTex4 = SampleTexture(g_Draw.nTex4, XR_SAMPLER_LINEAR_WRAP, In.vTex0);
+    vColor.rgb += vTex4.rgb * g_Draw.vAddColor.rgb + g_Draw.vAddColor.w;
+    if (HasFlag2(DF2_GLASS))
+      vColor.a *= vTex4.a;
+  }
   if (HasFlag(DF_SHADOW_PASS))
     vColor.a = 1 - fSun;
   if (HasFlag(DF_ALPHA_FROM_TEX))

@@ -239,7 +239,7 @@ private:
   //! it; true when it could be decoded. Bases from nPlain on are in a material's folder.
   bool Search(const std::vector<std::string> &Bases, size_t nPlain, SImage &Out, SSearch &Res);
   //! A cube map: six files <base>_posx ... _negz, else the file <base> (a cube file, or one
-  //! picture on +X).
+  //! picture on +X). Base may be the name of any face.
   bool SearchCube(const std::string &Base, const std::string &Dir, SImage &Out, SSearch &Res);
   //! Reads a whole file through ICryPak; false when it does not open.
   bool ReadFile(const char *szPath, std::vector<byte> &Data);

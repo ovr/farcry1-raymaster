@@ -288,6 +288,34 @@ void CD3D12Renderer::DrawLeafItem(const SRenderItem &it)
     dc.nTex0 = pTex->GetSRV();
     dc.nSamplers = pTex->GetSampler();
   }
+  // The cube map templates: the environment cube map in place of the texture, which is added
+  // unlit: whole (TemplReflCMDecal), signed (- 0.5, TemplReflCMDecalAddSig), a tenth of it
+  // (TemplGlassCM, 0.098 for TemplGlassCM_FP). The glass sees the cube through itself (the view
+  // vector refracted with the ratio 1.05) and reflected, mixed by F = saturate(0.2 + 2 *
+  // (1 - N.V)^2); not lit.
+  const SShaderProps &Props = pSh->GetProps();
+  if (Props.eEnvMap != EEnvMap::None)
+  {
+    if (CTexture *pCube = GetEnvCubeMap(it.pRes))
+    {
+      if (Props.eEnvMap != EEnvMap::Cube && (dc.nFlags & DF_TEX0))
+      {
+        const float k = Props.eEnvMap == EEnvMap::Glass ? 0.1f : Props.eEnvMap == EEnvMap::GlassFixed ? 25.0f / 255.0f : 1.0f;
+        dc.nFlags2 |= DF2_ADD_TEX4;
+        dc.nTex4 = dc.nTex0;
+        Set4(dc.vAddColor, k, k, k, Props.eEnvMap == EEnvMap::CubeAddSigned ? -0.5f : 0.0f);
+      }
+      if (Props.eEnvMap == EEnvMap::Glass)
+      {
+        dc.nFlags2 |= DF2_GLASS;
+        Set4(dc.vParams2, 2, 2, 0.2f, 1.05f);
+      }
+      dc.nFlags = (dc.nFlags & ~DF_TEX0) | DF_CUBE0;
+      dc.nTex0 = pCube->GetSRV();
+      dc.nSamplers = XR_SAMPLER_LINEAR_CLAMP;
+      pTex = pCube;
+    }
+  }
   float fScale[2], fOffset[2];
   GetTexTransform(pSh, pRes, EFTT_DIFFUSE, fScale, fOffset);
   if (fScale[0] != 1 || fScale[1] != 1 || fOffset[0] != 0 || fOffset[1] != 0)
@@ -300,7 +328,6 @@ void CD3D12Renderer::DrawLeafItem(const SRenderItem &it)
   const int nFormat = Geom->nVertexFormat;
   const CFColor MatColor = GetMaterialColor(pRes);
   const float fOpacity = GetOpacity(pRes);
-  const SShaderProps &Props = pSh->GetProps();
   // TemplDecalGlowSelfIllum with bump mapping on: the texture unlit, the gloss map added twice.
   const bool bSelfIllum = Props.eGlow == EGlow::SelfIllum && CV_r_Quality_BumpMapping > 0;
   const ELighting eLighting = bSelfIllum ? ELighting::None : Props.eLighting;
@@ -336,9 +363,9 @@ void CD3D12Renderer::DrawLeafItem(const SRenderItem &it)
       {
         const float t = iTimer ? iTimer->GetCurrTime() : 0.0f;
         const float g = Props.eGlow == EGlow::Pulse ? std::clamp(0.75f + 0.75f * sinf(gf_PI * t), 0.0f, 1.0f) : bSelfIllum ? 2.0f : 1.0f;
-        dc.nFlags2 |= DF2_SELF_ILLUM;
+        dc.nFlags2 |= DF2_ADD_TEX4;
         dc.nTex4 = pGlow->GetSRV();
-        Set4(dc.vSelfIllum, g, g, g, 0);
+        Set4(dc.vAddColor, g, g, g, 0);
       }
     }
     if (eLighting == ELighting::Ambient || eLighting == ELighting::Ambient2 || eLighting == ELighting::None)
@@ -433,7 +460,10 @@ void CD3D12Renderer::DrawLeafItem(const SRenderItem &it)
     Light();
     const CFColor Color = LitColor();
     Set4(dc.vColor, Color.r * pObj->m_Color.r, Color.g * pObj->m_Color.g, Color.b * pObj->m_Color.b, fOpacity * pObj->m_Color.a);
-    Key.nState = GS_BLSRC_SRCALPHA | GS_BLDST_ONEMINUSSRCALPHA;
+    // Glass of opacity 1 is opaque, whatever its texture's alpha.
+    const bool bOpaqueGlass = (Props.eEnvMap == EEnvMap::Glass || Props.eEnvMap == EEnvMap::GlassFixed) && dc.vColor[3] >= 1;
+    if (!bOpaqueGlass)
+      Key.nState = GS_BLSRC_SRCALPHA | GS_BLDST_ONEMINUSSRCALPHA;
     if (GetAlphaRef(pSh, pRes) > 0)
     {
       dc.nFlags |= DF_ALPHATEST;
@@ -818,8 +848,10 @@ void CD3D12Renderer::DumpDraw(const SDrawConstants &dc, const SPipelineKey &Key,
     if (dc.nFlags & (1u << i))
       Flags += (Flags.empty() ? "" : "|") + std::string(s_Flags[i]);
   FILE *f = m_pFrameDump.get();
-  if (dc.nFlags2 & DF2_SELF_ILLUM)
-    Flags += (Flags.empty() ? "" : "|") + std::string("SELF_ILLUM");
+  if (dc.nFlags2 & DF2_ADD_TEX4)
+    Flags += (Flags.empty() ? "" : "|") + std::string("ADD_TEX4");
+  if (dc.nFlags2 & DF2_GLASS)
+    Flags += (Flags.empty() ? "" : "|") + std::string("GLASS");
   fprintf(f, "    draw: fmt %d state 0x%x cull %d bias %d flags %s tex0 '%s' alpharef %.3f col (%.2f %.2f %.2f %.2f) amb (%.2f %.2f %.2f) x%g lights %u",
           Key.nVertexFormat, Key.nState, Key.nCull, Key.bDepthBias, Flags.c_str(), (dc.nFlags & DF_TEX0) && pTex ? pTex->m_Name.c_str() : "",
           dc.fAlphaRef, dc.vColor[0], dc.vColor[1], dc.vColor[2], dc.vColor[3], dc.vAmbient[0], dc.vAmbient[1], dc.vAmbient[2], dc.vAmbient[3], dc.nLights);
@@ -935,6 +967,19 @@ CTexture *CD3D12Renderer::GetGlowMap(SRenderShaderResources *pRes)
     return nullptr;
   CTexture *pMap = m_pShaders->LoadResourceTexture(pRes, EFTT_GLOSS);
   return pMap && !pMap->IsCube() && !(pMap->GetFlags() & FT_NOTFOUND) && pMap->IsTextureLoaded() ? pMap : nullptr;
+}
+
+CTexture *CD3D12Renderer::GetEnvCubeMap(SRenderShaderResources *pRes)
+{
+  if (!m_pShaders || !m_pTextures)
+    return nullptr;
+  // The material's cube is EFTT_CUBEMAP, the name of a face; EFTT_REFLECTION is not used.
+  CTexture *pCube = pRes ? m_pShaders->LoadResourceTexture(pRes, EFTT_CUBEMAP) : nullptr;
+  if (pCube && pCube->IsCube() && pCube->IsTextureLoaded())
+    return pCube;
+  if (!m_pDefaultCube)
+    m_pDefaultCube = m_pTextures->LoadTexture("textures/defaults/defaultcm", 0, 0, eTT_Cubemap, -1, -1, -1, 0);
+  return m_pDefaultCube && m_pDefaultCube->IsCube() && m_pDefaultCube->IsTextureLoaded() ? m_pDefaultCube : nullptr;
 }
 
 void CD3D12Renderer::DrawSkyItem(const SRenderItem &it)

@@ -691,7 +691,11 @@ bool CTextureManager::Search(const std::vector<std::string> &Bases, size_t nPlai
 
 bool CTextureManager::SearchCube(const std::string &Base, const std::string &Dir, SImage &Out, SSearch &Res)
 {
-  const std::string FaceBase = EndsWith(Base, g_CubeFaces[0]) ? Base.substr(0, Base.size() - strlen(g_CubeFaces[0])) : Base;
+  // A name of any face stands for the cube.
+  std::string FaceBase = Base;
+  for (const char *szFace : g_CubeFaces)
+    if (EndsWith(Base, szFace))
+      FaceBase = Base.substr(0, Base.size() - strlen(szFace));
   std::vector<std::string> Bases;
 
   // Six files <base>_posx ... <base>_negz, the others in the folder +X was found in.

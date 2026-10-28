@@ -378,6 +378,9 @@ public:
   CTexture *GetNormalMap(SRenderShaderResources *pRes);
   //! The gloss map (EFTT_GLOSS) a glow template adds, nullptr without a usable one.
   CTexture *GetGlowMap(SRenderShaderResources *pRes);
+  //! The environment cube map of a cube map template: the material's EFTT_CUBEMAP, else the
+  //! default cube textures/defaults/defaultcm; nullptr without either.
+  CTexture *GetEnvCubeMap(SRenderShaderResources *pRes);
   //! The sky box of a CRESky element drawn with a sky shader (CShaderManager::FindSkyBox).
   void DrawSkyItem(const SRenderItem &it);
   //! The particle sprites of the scene (EF_AddSpriteToScene).
@@ -395,6 +398,7 @@ public:
 
   int m_nSceneFlags = 0;                    //!< SHDF_* of the EF_EndEf3D being drawn
   CTexture *m_pDetailTexture = nullptr;     //!< GetDetailTexture (one reference)
+  CTexture *m_pDefaultCube = nullptr;       //!< GetEnvCubeMap without a cube of the material (one reference)
   //! The textures of a sky box: <name>_5 (the top), <name>_12 (the sides x = 32 and y = -32),
   //! <name>_34 (the sides x = -32 and y = 32); one reference each.
   struct SSkyBoxTextures

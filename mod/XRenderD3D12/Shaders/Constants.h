@@ -56,7 +56,7 @@ typedef float float4x4_t[16];
 #define DF_TEX1_DETAIL      0x00000200  //!< rgb = 2 * rgb + tex1 - 0.5 (terrain detail texture); else colour *= tex1
 #define DF_TEX1_LIGHTMAP    0x00000400  //!< colour = tex0 * (4 * lightmap + ambient) (lightmapped objects)
 #define DF_ALPHA_FROM_TEX   0x00000800  //!< alpha = texture alpha only (no vertex or constant alpha)
-#define DF_CUBE0            0x00001000  //!< tex0 is g_Cubes[nTex0], sampled with the reflected view vector
+#define DF_CUBE0            0x00001000  //!< tex0 is g_Cubes[nTex0], sampled with the view vector reflected about the normal (N' with DF_BUMP), world space
 #define DF_TEX0_ALPHA_ONLY  0x00002000  //!< rgb = colour, a = texture alpha * colour alpha (fonts)
 #define DF_SCREEN_POS       0x00004000  //!< POSITION is in pixels (x, y from the top left, z); mViewProj is ignored
 #define DF_ALPHATEST_LESS   0x00008000  //!< with DF_ALPHATEST: clip when alpha >= fAlphaRef instead (GS_ALPHATEST_LESS128)
@@ -78,7 +78,8 @@ typedef float float4x4_t[16];
 #define DF_BUMP             0x20000000  //!< bump mapping: N' = the normal map tex3 at uv0 (rgb * 2 - 1, its green times vParams1.y) in the vertex's tangent frame (TANGENT, BINORMAL, TNORMAL) for DF_PIXEL_LIGHTING; DF_LIGHTMAP_DIR takes saturate(dot(N', D)) for D.z
 
 // SDrawConstants::nFlags2
-#define DF2_SELF_ILLUM      0x00000001  //!< rgb += tex4 (g_Textures[nTex4] at uv0) * vSelfIllum.rgb: a glow map added, unlit
+#define DF2_ADD_TEX4        0x00000001  //!< rgb += tex4 (g_Textures[nTex4] at uv0) * vAddColor.rgb + vAddColor.w: a glow map or a texture added, unlit
+#define DF2_GLASS           0x00000002  //!< with DF_CUBE0: lerp(cube(T), cube(R), F), T the view vector refracted with the ratio vParams2.w, F = saturate(vParams2.z + vParams2.x * (1 - N.V)^vParams2.y); with DF2_ADD_TEX4 a *= tex4 a
 
 #define XR_SAMPLER_LINEAR_WRAP  0
 #define XR_SAMPLER_LINEAR_CLAMP 1
@@ -126,7 +127,7 @@ struct SDrawConstants
   XR_UINT(nLights);               //!< the lights in vLightPos
   XR_UINT(nTex2);                 //!< more textures for the other programs (Water.hlsl) and DF_TERRAIN_CLIFF
   XR_UINT(nTex3);
-  XR_FLOAT4(vParams0);            //!< parameters of the other programs (Water.hlsl), DF_DETAIL_LAYER and DF_TERRAIN_CLIFF
+  XR_FLOAT4(vParams0);            //!< parameters of the other programs (Water.hlsl), DF_DETAIL_LAYER, DF_TERRAIN_CLIFF and DF2_GLASS
   XR_FLOAT4(vParams1);
   XR_FLOAT4(vParams2);
   XR_FLOAT4(vParams3);
@@ -140,7 +141,7 @@ struct SDrawConstants
   XR_FLOAT4(vShadowParams);       //!< x the number of maps, y depth bias, z filter radius in texels, w offset along the normal (m)
   XR_FLOAT4_ARRAY(vLightSpec, XR_MAX_DRAW_LIGHTS);  //!< DF_SPECULAR: rgb the light's specular colour
   XR_FLOAT4(vSpecular);           //!< DF_SPECULAR: rgb the material's specular colour, w 1: times the texture's alpha (gloss)
-  XR_FLOAT4(vSelfIllum);          //!< DF2_SELF_ILLUM: rgb the factor of the glow map
+  XR_FLOAT4(vAddColor);           //!< DF2_ADD_TEX4: rgb the factor of tex4, w added
 };
 
 #endif

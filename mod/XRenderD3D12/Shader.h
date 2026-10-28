@@ -84,6 +84,18 @@ enum class EGlow : uint8
   SelfIllum,              //!< bump mapping on: the texture unlit + 2 * gloss map; off: + gloss map
 };
 
+//! The environment cube map (CD3D12Renderer::GetEnvCubeMap) in place of the material's texture,
+//! looked up with the view vector reflected about the normal, in world space.
+enum class EEnvMap : uint8
+{
+  None,
+  Cube,                   //!< cube map * light
+  CubeDecal,              //!< cube map * light + texture
+  CubeAddSigned,          //!< cube map * light + texture - 0.5
+  Glass,                  //!< the cube map seen through (refracted) and reflected, by a fresnel term, + 0.1 * texture
+  GlassFixed,             //!< cube map + 0.098 * texture
+};
+
 //! What a shader is.
 enum class EShaderKind
 {
@@ -104,6 +116,7 @@ struct SShaderProps
   EDrawClass eDrawClass = eDC_Opaque;
   ELighting eLighting = ELighting::Overbright;
   EGlow eGlow = EGlow::None;
+  EEnvMap eEnvMap = EEnvMap::None;
   float fAlphaRef = 0.0f;                        //!< alpha test reference (0..1, texture alpha >= it passes); 0: none
   float fScrollV = 0.0f;                          //!< texture v moves by fScrollV * ITimer::GetCurrTime()
   bool bLightmap = false;                         //!< combines the lightmap of lightmapped objects
