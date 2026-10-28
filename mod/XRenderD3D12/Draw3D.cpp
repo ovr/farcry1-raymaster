@@ -159,6 +159,8 @@ void CD3D12Renderer::BeginScene3D()
   vDir.Normalize();
   m_SunDir[0] = vDir.x; m_SunDir[1] = vDir.y; m_SunDir[2] = vDir.z;
   m_SunColor[0] = Color.r; m_SunColor[1] = Color.g; m_SunColor[2] = Color.b;
+  if (m_pFrameDump)
+    fprintf(m_pFrameDump.get(), "sun: direction (%.3f %.3f %.3f) colour (%.2f %.2f %.2f)\n", vDir.x, vDir.y, vDir.z, Color.r, Color.g, Color.b);
   m_NearestProj = MakeNearestProjection(m_Camera);
   m_nSceneSkyBox = -1;
   InvalidateFrameConstants();

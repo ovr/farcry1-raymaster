@@ -268,6 +268,12 @@ bool CD3D12Renderer::DrawShadowMap(void *pFrustum, const Vec3 &vOrigin)
   const Vec3 vLight = At<Vec3>(pLs, nBin64Offset_ShadowMapLightSource_Pos);
   const Vec3 vAt = At<Vec3>(pFrustum, nBin64Offset_ShadowMapFrustum_ObjPos);
   const float d = (vLight - vAt).GetLength();
+  if (m_pFrameDump)
+  {
+    const Vec3 vDir = (vLight - vAt) / std::max(d, 1e-6f);
+    fprintf(m_pFrameDump.get(), "  light (%.1f %.1f %.1f), at (%.2f %.2f %.2f): direction (%.3f %.3f %.3f), fov %g\n", vLight.x, vLight.y, vLight.z, vAt.x,
+            vAt.y, vAt.z, vDir.x, vDir.y, vDir.z, At<float>(pFrustum, nBin64Offset_ShadowMapFrustum_Fov));
+  }
   // Across the light: the frustum's field of view at vAt (an entity's frustum is wider than its
   // depth range), else the radius.
   const float fFov = At<float>(pFrustum, nBin64Offset_ShadowMapFrustum_Fov) * (gf_PI / 180.0f);
@@ -377,6 +383,9 @@ bool CD3D12Renderer::DrawShadowMap(void *pFrustum, const Vec3 &vOrigin)
     Params.fDistance = (Params.vPos - m_Camera.GetPos()).GetLength();
     Params.fSQDistance = Params.fDistance * Params.fDistance;
     Params.dwFObjFlags = FOB_RENDER_INTO_SHADOWMAP;
+    if (m_pFrameDump)
+      fprintf(m_pFrameDump.get(), "  entity at (%.2f %.2f %.2f) angles (%.1f %.1f %.1f) scale %g\n", Params.vPos.x, Params.vPos.y, Params.vPos.z, Params.vAngles.x,
+              Params.vAngles.y, Params.vAngles.z, Params.fScale);
     pEnt->DrawEntity(Params);
   }
   EF_EndEf3D(0);
