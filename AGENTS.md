@@ -100,6 +100,9 @@ it as well: it holds local, machine-specific instructions and is not committed (
 - Whole leaf buffers: `XRENDERTRACED_MESH_FULL=n` writes a mesh of at most n faces whole before
   `CLeafBuffer::CreateBufferFromMesh` (faces, positions, texture coordinates, colours, normals) and
   the buffer after it (vertices, tangents, indices, the strip map).
+  `XRENDERTRACED_VERTS=n` writes at least n vertices wherever vertices are dumped (e.g. the
+  skinned vertices the engine passes to `UpdateBuffer` in a captured frame), positions with 5
+  decimals.
   `XRENDERTRACED_UCL_FULL=n` makes `CLeafBuffer::UpdateCustomLighting` of a buffer of at most n
   vertices (with colours in its vertex format) write every vertex (position, temp normal, loaded
   colour, the colour before and after the call), the buffer with its chunks, its indices and the

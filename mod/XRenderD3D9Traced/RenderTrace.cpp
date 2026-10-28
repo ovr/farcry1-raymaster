@@ -965,6 +965,10 @@ void Dump_Vertices(const char *szName, const void *pData, int nFormat, int nVert
   const int nStride = m_VertexSize[nFormat];
   const SBufInfoTable &Offs = gBufInfoTable[nFormat];
   Trace_Write("    %s: %d verts, format %s (%d bytes)", szName, nVerts, Trace_VertexFormatName(nFormat), nStride);
+  // XRENDERTRACED_VERTS=N: at least N vertices, positions with 5 decimals.
+  static const int nEnvMax = getenv("XRENDERTRACED_VERTS") ? atoi(getenv("XRENDERTRACED_VERTS")) : 0;
+  if (nEnvMax > nMax)
+    nMax = nEnvMax;
   for (int i = 0; i < nVerts && i < nMax; i++)
   {
     const byte *v = (const byte *)pData + i * nStride;
@@ -975,7 +979,7 @@ void Dump_Vertices(const char *szName, const void *pData, int nFormat, int nVert
     else
     {
       const float *pos = (const float *)v;
-      n += _snprintf(szLine + n, sizeof(szLine) - n, "pos (%.2f %.2f %.2f)", pos[0], pos[1], pos[2]);
+      n += _snprintf(szLine + n, sizeof(szLine) - n, nEnvMax ? "pos (%.5f %.5f %.5f)" : "pos (%.2f %.2f %.2f)", pos[0], pos[1], pos[2]);
       if (Offs.OffsNormal)
       {
         const float *nm = (const float *)(v + Offs.OffsNormal);
