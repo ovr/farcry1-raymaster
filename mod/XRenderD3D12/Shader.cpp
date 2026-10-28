@@ -177,8 +177,9 @@ constexpr STemplateLighting s_TemplateLighting[] =
   { "templdecalopacityshift2",         ELighting::None },
   { "templdecalopacityshift3",         ELighting::None },
   { "templtexturev22rotate",           ELighting::None },
-  // No lights: the texture times the vertex colour.
+  // No lights: the texture times the vertex colour (also added by its alpha).
   { "templdecalalphablend",            ELighting::VColor },
+  { "templdecalalphaadd",              ELighting::VColor },
 };
 
 //! An engine shader (EF_LoadShader by name).

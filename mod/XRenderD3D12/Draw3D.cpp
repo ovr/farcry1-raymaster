@@ -443,8 +443,9 @@ void CD3D12Renderer::DrawLeafItem(const SRenderItem &it)
   const int nFormat = Geom->nVertexFormat;
   const CFColor MatColor = GetMaterialColor(pRes);
   const float fOpacity = GetOpacity(pRes);
-  // TemplDecalGlowSelfIllum with bump mapping on: the texture unlit, the gloss map added twice.
-  const bool bSelfIllum = Props.eGlow == EGlow::SelfIllum && CV_r_Quality_BumpMapping > 0;
+  // TemplDecalGlowSelfIllum with r_Quality_BumpMapping 3: the texture unlit, the gloss map added
+  // twice; below as TemplDecalGlow.
+  const bool bSelfIllum = Props.eGlow == EGlow::SelfIllum && CV_r_Quality_BumpMapping >= 3;
   const ELighting eLighting = bSelfIllum ? ELighting::None : Props.eLighting;
   Set4(dc.vAmbient, pObj->m_AmbColor.x, pObj->m_AmbColor.y, pObj->m_AmbColor.z, eLighting == ELighting::Vertex ? 1.0f : 2.0f);
   std::optional<D3D12_VERTEX_BUFFER_VIEW> TexCoord1, Tangents;
@@ -662,11 +663,17 @@ void CD3D12Renderer::DrawLeafItem(const SRenderItem &it)
   }
   case eDC_Additive:
   {
-    // The texture alone (times the object's ambient colour for TemplDecalAdd_VLight).
+    // The texture alone (times the object's ambient colour for TemplDecalAdd_VLight); TemplDecalAlphaAdd
+    // the texture times the vertex colour, added by its alpha (SRCALPHA, ONE).
     const float s = GetColorScale(pSh, pObj);
     const CFColor Color = eLighting == ELighting::Ambient ? LitColor() : CFColor(1, 1, 1, 1);
     Set4(dc.vColor, s * Color.r, s * Color.g, s * Color.b, 1);
     Key.nState = GS_BLSRC_ONE | GS_BLDST_ONE;
+    if (eLighting == ELighting::VColor)
+    {
+      dc.nFlags |= DF_VCOLOR;
+      Key.nState = GS_BLSRC_SRCALPHA | GS_BLDST_ONE;
+    }
     break;
   }
   case eDC_Modulate:
