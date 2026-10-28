@@ -195,6 +195,9 @@ void CD3D12Renderer::DrawItems(SRenderItem *pItems, int nItems, int eList)
   GpuSection(eList == eRL_Opaque ? "opaque" : eList == eRL_Nearest ? "nearest" : "water");
   if (m_pFrameDump)
     fprintf(m_pFrameDump.get(), "list %d: %d items, recursion %d, scene flags 0x%x\n", eList, nItems, m_nRecurseLevel, m_nSceneFlags);
+  // Heat vision colours the main view's scene (DrawGeometry adds DF2_HEAT).
+  m_bHeatPass = m_bHeatVision && (m_nSceneFlags & SHDF_ALLOWHDR) && m_nRecurseLevel <= 1 && !m_bReflectionPass && !m_bSpritePass &&
+                !m_bShadowMapPass;
   for (int i = 0; i < nItems; i++)
   {
     const SRenderItem &it = pItems[i];
@@ -203,11 +206,13 @@ void CD3D12Renderer::DrawItems(SRenderItem *pItems, int nItems, int eList)
     if (!bSprites && it.eDrawClass != eDC_Water && it.eDrawClass != eDC_WaterBeach)
     {
       GpuSection("blended");
+      m_fDrawHeat = 0;
       DrawSprites();
       bSprites = true;
     }
     if (m_pFrameDump)
       DumpItem(i, it, eList);
+    m_fDrawHeat = m_bHeatPass ? ItemHeat(it) : 0;
     switch (it.pRE->m_Type)
     {
     case eDATA_OcLeaf:
@@ -229,11 +234,33 @@ void CD3D12Renderer::DrawItems(SRenderItem *pItems, int nItems, int eList)
   if (!bSprites)
   {
     GpuSection("blended");
+    m_fDrawHeat = 0;
     DrawSprites();
   }
+  m_bHeatPass = false;
+  m_fDrawHeat = 0;
   m_bItemScissor = false;
   m_fDepthMin = 0;
   m_fDepthMax = 1;
+}
+
+float CD3D12Renderer::ItemHeat(const SRenderItem &it) const
+{
+  // Characters come with FOB_HOTAMBIENT (m_fHeatFactor 1); the object a character carries has a
+  // heat source (DLF_HEATSOURCE) of its own in its light mask.
+  const CCObject *pObj = it.pObj;
+  if (!pObj)
+    return 0;
+  float fHeat = 0;
+  if (pObj->m_ObjFlags & FOB_HOTAMBIENT)
+    fHeat = pObj->m_fHeatFactor > 0 ? std::min(pObj->m_fHeatFactor, 1.0f) : 1.0f;
+  const std::span<CDLight *const> Lights = m_pScene->GetLights();
+  for (size_t i = 0; i < Lights.size() && i < 32; i++)
+  {
+    if (Lights[i] && (Lights[i]->m_Flags & DLF_HEATSOURCE) && (pObj->m_DynLMMask & (1u << i)))
+      fHeat = std::max(fHeat, 0.7f);
+  }
+  return fHeat;
 }
 
 void CD3D12Renderer::DrawLeafItem(const SRenderItem &it)
@@ -943,6 +970,9 @@ void CD3D12Renderer::SetObjectLights(SDrawConstants &dc, const CCObject *pObj, c
   {
     const CDLight *pLight = Lights[i];
     if (!pLight || (pLight->m_Flags & (DLF_SUN | DLF_PROJECT)))
+      continue;
+    // A heat source alone gives no light (heat vision, ItemHeat).
+    if ((pLight->m_Flags & (DLF_HEATSOURCE | DLF_LIGHTSOURCE)) == DLF_HEATSOURCE)
       continue;
     // A light baked into light maps (DLF_LM) lights an object with a light map through it only.
     if ((pLight->m_Flags & DLF_LM) && pObj->m_nLMId > 0)

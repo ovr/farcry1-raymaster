@@ -77,6 +77,8 @@
 //	    DF_FOG (with vFogParams.w set): linear fog by the distance to the
 //	      camera, per pixel (towards 0.5 with DF_DETAIL_LAYER, DF_CAUSTICS, 0
 //	      with DF2_FOG_BLACK)
+//	    DF2_HEAT (heat vision): before the fog, the colour through HeatVision
+//	      (Common.hlsli)
 //	  DF2_NO_SUN leaves the sun out of DF_LIGHTING (a light pass of its own).
 //
 //////////////////////////////////////////////////////////////////////
@@ -399,6 +401,13 @@ float4 PSMain(SVertexOutput In) : SV_Target
     float fFade = saturate(fDepth) * saturate(1 - fDepth / g_Draw.vParams1.z);
     vColor = float4(saturate(0.5 + 0.5 * g_Draw.vParams0.w * fFade * (fLight - 1)).xxx, 1);
     vFogColor = 0.5;
+  }
+
+  if (HasFlag2(DF2_HEAT))
+  {
+    float3 vN = HasFlag(DF_BUMP) ? vBumpN : SafeNormalize(In.vNormal);
+    float fFacing = dot(vN, vN) > 0 ? abs(dot(vN, SafeNormalize(g_Frame.vCameraPos.xyz - In.vWorldPos))) : 1;
+    vColor.rgb = HeatVision(vColor.rgb, fFacing);
   }
 
   if (HasFlag(DF_FOG) && g_Frame.vFogParams.w != 0)

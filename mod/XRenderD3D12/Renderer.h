@@ -370,6 +370,8 @@ public:
   //! Before the first list: the sun, the first person projection, the clear of the main view.
   void BeginScene3D();
   void DrawLeafItem(const SRenderItem &it);
+  //! Heat vision: how hot an item is, 0 to 1 (FOB_HOTAMBIENT, a heat source among its lights).
+  float ItemHeat(const SRenderItem &it) const;
   //! The lights of an object besides the sun as the draw's own lights (SDrawConstants::vLightPos).
   void SetObjectLights(SDrawConstants &dc, const CCObject *pObj, const Matrix44 &World, CLeafBuffer *pLB);
   //! The detail texture of the terrain sectors (TerrainWithDefaultDetailTexture: always
@@ -631,7 +633,9 @@ public:
   float m_FogColor[4] = {};
   float m_WorldColor[4] = { 1, 1, 1, 1 };  //!< EF_SetWorldColor
   bool m_bDepthBias = false;
-  bool m_bHeatVision = false;
+  bool m_bHeatVision = false;               //!< EF_EnableHeatVision
+  bool m_bHeatPass = false;                 //!< the main view's items are drawn in heat vision (DF2_HEAT)
+  float m_fDrawHeat = 0;                    //!< the heat of the item being drawn (vHeat.x)
   float m_fLineWidth = 1;
 
   // Console variables

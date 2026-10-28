@@ -376,6 +376,8 @@ float4 PSMain(SWaterOutput In) : SV_Target
     vColor = lerp(vScatter, vScene, fWindow);
   }
 
+  if (HasFlag2(DF2_HEAT))
+    vColor = HeatVision(vColor, 1);
   if (g_Frame.vFogParams.w != 0)
   {
     float fFog = saturate((g_Frame.vFogParams.y - fDistance) * g_Frame.vFogParams.z);

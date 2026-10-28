@@ -124,10 +124,23 @@ void CD3D12Renderer::DrawGeometry(const SPipelineKey &Key, const SDrawConstants 
     MakeFrameConstants(fc);
     m_nFrameCB = UploadConstants(*m_pUpload, fc);
   }
+  // Heat vision: the main view's scene through HeatVision (Common.hlsli), not the passes multiplied
+  // in or the fog volumes; an additive draw other than a light pass is hot (fire, muzzle flashes).
+  const SDrawConstants *pDC = &dc;
+  SDrawConstants HeatDC;
+  if (m_bHeatPass && (Key.nProgram == eD3D12P_General || Key.nProgram == eD3D12P_Water) &&
+      !(dc.nFlags & (DF_DETAIL_LAYER | DF_CAUSTICS | DF_SHADOW_PASS | DF_SCREEN_POS)) && !(dc.nFlags2 & DF2_FOG_VOLUME))
+  {
+    const bool bAdditive = (Key.nState & GS_BLDST_MASK) == GS_BLDST_ONE;
+    HeatDC = dc;
+    HeatDC.nFlags2 |= DF2_HEAT;
+    Set4(HeatDC.vHeat, bAdditive && !(dc.nFlags2 & DF2_NO_SUN) ? 1.0f : m_fDrawHeat, bAdditive ? 1.0f : 0.0f, 0, 0);
+    pDC = &HeatDC;
+  }
   ID3D12GraphicsCommandList *pList = m_pDevice->GetCmdList();
   pList->SetPipelineState(pPSO);
   pList->SetGraphicsRootConstantBufferView(0, m_nFrameCB);
-  pList->SetGraphicsRootConstantBufferView(1, UploadConstants(*m_pUpload, dc));
+  pList->SetGraphicsRootConstantBufferView(1, UploadConstants(*m_pUpload, *pDC));
   pList->IASetVertexBuffers(0, 1, &VB);
   m_pPipeline->BindDefaultStream(pList);
   if (pTexCoord1)

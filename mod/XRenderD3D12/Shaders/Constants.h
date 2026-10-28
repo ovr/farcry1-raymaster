@@ -83,6 +83,7 @@ typedef float float4x4_t[16];
 #define DF2_NO_SUN          0x00000004  //!< with DF_LIGHTING: the draw's lights without the sun (a light pass added over the object)
 #define DF2_FOG_BLACK       0x00000008  //!< with DF_FOG: fogged towards black (an additive pass)
 #define DF2_FOG_VOLUME      0x00000010  //!< the fog of a fog volume over an object in it: rgb = vColor.rgb, a = FogVolumeAlpha (General.hlsl; vParams0: x the layer's height, y ln 100 / (2 * fog distance), z 1 for the volume's cap, w 1: times the alpha after the alpha test)
+#define DF2_HEAT            0x00000020  //!< heat vision: the colour before the fog through HeatVision (Common.hlsli) with vHeat
 
 // SDrawConstants::nFlags of the post program (Post.hlsl): one mode, with POST_EFFECTS the effects drawn
 #define POST_DOWNSAMPLE     0x00000001  //!< the mean of tex0 over the target's pixel: vParams0.z x vParams0.z bilinear taps
@@ -154,6 +155,7 @@ struct SDrawConstants
   XR_FLOAT4_ARRAY(vLightSpec, XR_MAX_DRAW_LIGHTS);  //!< DF_SPECULAR: rgb the light's specular colour
   XR_FLOAT4(vSpecular);           //!< DF_SPECULAR: rgb the material's specular colour, w 1: times the texture's alpha (gloss)
   XR_FLOAT4(vAddColor);           //!< DF2_ADD_TEX4: rgb the factor of tex4, w added
+  XR_FLOAT4(vHeat);               //!< DF2_HEAT: x the heat 0 (cold) to 1 (hot), y 1 for an additive draw
 };
 
 #endif

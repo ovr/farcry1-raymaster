@@ -83,6 +83,21 @@ float3 SafeNormalize(float3 v)
   return fLen2 > 1e-12 ? v * rsqrt(fLen2) : float3(0, 0, 0);
 }
 
+//! Heat vision (DF2_HEAT): a cold surface shows the luminance L of its colour in a light blue
+//! over a dark floor, a hot one (vHeat.x towards 1) glows from red to pale yellow whatever its
+//! texture, less where it turns away from the camera (fFacing: |N.V|); an additive draw (vHeat.y)
+//! adds the same colours times its L, without the floor.
+float3 HeatVision(float3 vColor, float fFacing)
+{
+  static const float3 COLD = float3(0.5, 0.7, 1);
+  float L = saturate(dot(vColor, float3(0.299, 0.587, 0.114)));
+  float fHeat = saturate(g_Draw.vHeat.x) * lerp(0.55, 1, saturate(fFacing));
+  float3 vHot = lerp(float3(0.9, 0.3, 0.06), float3(1, 0.95, 0.65), saturate(0.3 + L));
+  if (g_Draw.vHeat.y > 0)
+    return lerp(COLD * 0.5, vHot, fHeat) * L;
+  return lerp(COLD * (0.08 + 0.42 * L), vHot, fHeat);
+}
+
 //! A position in pixels of the viewport (x, y from the top left, z depth, w rhw) to a clip
 //! position. vScreen holds the viewport size. With rhw the clip position keeps 1 / rhw as w, so
 //! that the attributes are interpolated with perspective, as for Direct3D 9's pre-transformed
