@@ -591,6 +591,41 @@ public:
   ICVar *m_pMotionBlurAmount = nullptr;     //!< r_MotionBlurAmount
 
   //////////////////////////////////////////////////////////////////////////
+  // Flares.cpp: the sun's flare and the coronas of the lights
+
+  //! In the main view's blended list, after the rest of the 3D scene: tests and draws the flares
+  //! of the scene (its Flare items, the coronas of its lights), with r_Coronas.
+  void DrawFlares(std::span<const SRenderItem> Items);
+  //! After the BeginFrame of a frame slot: the results of its last frame's tests into the flares'
+  //! objects.
+  void ReadFlareTests();
+  //! CCObject::RemovePermanent: the results still to come for pObj are dropped.
+  void ForgetFlare(const CCObject *pObj);
+  //! The texture of a corona's map (loaded on first use), nullptr when it is not found.
+  CTexture *GetFlareTexture(const std::string &Map);
+  //! With r_checkSunVis 2: the mask of how much sky there is around the sun at the pixel (sx, sy)
+  //! of the screen (m_pSunMask); false when it could not be made.
+  bool DrawSunMask(float sx, float sy);
+  void ReleaseFlares();
+
+  //! A visibility test waiting for its result: the flare's object, the area of its square on the
+  //! screen in pixels.
+  struct SFlareTest
+  {
+    CCObject *pObj;
+    float fArea;
+  };
+  static constexpr int FLARE_SLOTS = 2;     //!< D3D12_FRAMES
+  std::vector<SFlareTest> m_FlareTests[FLARE_SLOTS];  //!< by frame slot, in the order of its occlusion queries
+  std::vector<std::pair<std::string, CTexture *>> m_FlareTextures;  //!< GetFlareTexture's maps so far (released with every texture)
+  ICVar *m_pCoronas = nullptr;              //!< r_Coronas, looked up on first use
+  ICVar *m_pCoronaSizeScale = nullptr;      //!< r_CoronaSizeScale
+  ICVar *m_pCoronaFade = nullptr;           //!< r_CoronaFade
+  ICVar *m_pCheckSunVis = nullptr;          //!< r_checkSunVis
+  CD3D12Texture *m_pSunPatch = nullptr;     //!< DrawSunMask: the sky around the sun
+  CD3D12Texture *m_pSunMask = nullptr;      //!< DrawSunMask: the mask
+
+  //////////////////////////////////////////////////////////////////////////
   // State (public: the subsystems' files use it)
 
   std::unique_ptr<CD3D12Device> m_pDevice;

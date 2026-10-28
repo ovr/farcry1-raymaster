@@ -15,7 +15,9 @@
 
 #pragma once
 
-constexpr int D3D12_FRAMES = 2;          //!< frames in flight
+#include <span>
+
+constexpr int D3D12_FRAMES = 2;         //!< frames in flight
 constexpr int D3D12_BACKBUFFERS = 3;     //!< swap chain buffers
 
 constexpr DXGI_FORMAT D3D12_BACKBUFFER_FORMAT = DXGI_FORMAT_B8G8R8A8_UNORM;   //!< with alpha (the HUD masks through it)
@@ -140,10 +142,22 @@ public:
     m_nGpuTimedFrames = 0;
   }
 
+  //! Occlusion queries: BeginOcclusion .. EndOcclusion count the samples drawn in between that
+  //! pass the depth test, at most OCCLUSION_QUERIES per frame. A frame's counts come when the GPU
+  //! has finished it: from the BeginFrame of its slot on, GetOcclusionResults() holds them in the
+  //! order of the queries (D3D12_FRAMES frames later).
+  static constexpr int OCCLUSION_QUERIES = 256;
+  //! The query's index in the frame, -1 when none is left (or out of a frame).
+  int BeginOcclusion();
+  void EndOcclusion(int nQuery);
+  std::span<const uint64> GetOcclusionResults() const { return m_OcclusionResults; }
+
 private:
   static constexpr int GPU_MARKS = 64;              //!< timestamps per frame (the last one ends the frame)
   //! Adds the timestamps of the current slot's last frame (finished) to m_GpuTimes.
   void ReadGpuTimes();
+  //! The occlusion counts of the current slot's last frame (finished) into m_OcclusionResults.
+  void ReadOcclusionResults();
 
   bool CreateSwapChainBuffers();
   void ReleaseSwapChainBuffers();
@@ -192,6 +206,11 @@ private:
   int m_nGpuMarks[D3D12_FRAMES] = {};
   std::vector<std::pair<const char *, double>> m_GpuTimes;
   int m_nGpuTimedFrames = 0;
+
+  ComPtr<ID3D12QueryHeap> m_pOcclusion;             //!< OCCLUSION_QUERIES per frame slot; NULL: no queries
+  ComPtr<ID3D12Resource> m_pOcclusionReadback;      //!< the resolved counts, in the same places
+  int m_nOcclusions[D3D12_FRAMES] = {};             //!< queries begun in the slot's frame
+  std::vector<uint64> m_OcclusionResults;
 
   struct SDeferred
   {

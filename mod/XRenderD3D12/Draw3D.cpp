@@ -13,7 +13,8 @@
 //	shadow map pass the items are the casters' depth). FOB_NEAREST objects (the first
 //	person weapon) get a projection of their own and the depth range
 //	0..0.1. The particle sprites of the scene are drawn in the blended
-//	list after the water surfaces.
+//	list after the water surfaces, the flares (Flares.cpp) after the rest
+//	of the scene.
 //
 //////////////////////////////////////////////////////////////////////
 
@@ -190,6 +191,8 @@ void CD3D12Renderer::DrawItems(SRenderItem *pItems, int nItems, int eList)
   // The blended list starts with the water surfaces (over a copy of the scene so far); the
   // particle sprites come after them.
   bool bSprites = eList != eRL_Blended;
+  // The flares after the rest of the scene, before the elements over it.
+  bool bFlares = eList != eRL_Blended;
   if (eList == eRL_Blended)
     m_bSceneCopied = false;
   GpuSection(eList == eRL_Opaque ? "opaque" : eList == eRL_Nearest ? "nearest" : "water");
@@ -209,6 +212,11 @@ void CD3D12Renderer::DrawItems(SRenderItem *pItems, int nItems, int eList)
       m_fDrawHeat = 0;
       DrawSprites();
       bSprites = true;
+    }
+    if (!bFlares && ScreenElementRank(it.pRE) > 0)
+    {
+      DrawFlares({ pItems, (size_t)nItems });
+      bFlares = true;
     }
     if (m_pFrameDump)
       DumpItem(i, it, eList);
@@ -237,6 +245,8 @@ void CD3D12Renderer::DrawItems(SRenderItem *pItems, int nItems, int eList)
     m_fDrawHeat = 0;
     DrawSprites();
   }
+  if (!bFlares)
+    DrawFlares({ pItems, (size_t)nItems });
   m_bHeatPass = false;
   m_fDrawHeat = 0;
   m_bItemScissor = false;
@@ -777,7 +787,7 @@ void CD3D12Renderer::DrawLeafItem(const SRenderItem &it)
 void CD3D12Renderer::DumpItem(int nIndex, const SRenderItem &it, int eList)
 {
   static const char *const s_DrawClasses[] = { "NoDraw", "Opaque", "AlphaTest", "AlphaTestVColor", "VColor", "AlphaBlend", "Additive", "Terrain", "Sky", "Engine", "Water", "WaterBottom", "WaterBeach", "TerrainLayer", "Decal",
-                                                "TerrainShadow", "Caustics", "FogLayer", "ScopeLens" };
+                                                "TerrainShadow", "Caustics", "FogLayer", "ScopeLens", "Flare" };
   const CCObject *pObj = it.pObj;
   const char *szLB = "";
   if (it.pRE->m_Type == eDATA_OcLeaf && static_cast<CREOcLeaf *>(it.pRE)->m_pBuffer)

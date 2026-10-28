@@ -27,6 +27,14 @@
 //	    POST_FADE         times 1 - vParams0.z (to black)
 //	                   vParams0.w: the grain's seed (a new one every frame).
 //	                   The alpha of the scene stays.
+//	  POST_SUN_PATCH   the sky around the sun (Flares.cpp): 1 where the depth
+//	                   copy tex0 is the far plane, else 0, at the pixel
+//	                   vParams1.xy + (texel - the middle) * vParams1.z (clamped
+//	                   to the screen, vParams1.w its width, vParams2.x height)
+//	  POST_SUN_MASK    the sun's mask: SUN_MASK_BASE plus, for each of
+//	                   SUN_MASK_STEPS squares of the patch tex0 smaller and
+//	                   smaller around the middle, SUN_MASK_STEP times the patch
+//	                   where the square covers the texel; in every channel
 //
 //////////////////////////////////////////////////////////////////////
 
@@ -150,8 +158,42 @@ float4 Effects(float2 vPixel)
   return float4(c, vScene.a);
 }
 
+// The sun's mask: SUN_MASK_SIZE texels, the patch SUN_PATCH_SIZE; the first square is the patch
+// SUN_MASK_SIZE * 2 across, each next one SUN_MASK_SHRINK texels less to each side.
+static const float SUN_PATCH_SIZE = 64;
+static const float SUN_MASK_SIZE = 128;
+static const float SUN_MASK_BASE = 0.2;
+static const int SUN_MASK_STEPS = 32;
+static const float SUN_MASK_STEP = 7.0 / 255;
+static const float SUN_MASK_SHRINK = 43.0 / 12;
+
+float4 SunPatch(float2 vPixel)
+{
+  float2 vScreen = g_Draw.vParams1.xy + (vPixel - SUN_PATCH_SIZE / 2) * g_Draw.vParams1.z;
+  int2 vLoad = clamp((int2)floor(vScreen), 0, int2(g_Draw.vParams1.w, g_Draw.vParams2.x) - 1);
+  return g_Textures[g_Draw.nTex0].Load(int3(vLoad, 0)).r >= 1 ? 1 : 0;
+}
+
+float4 SunMask(float2 vPixel)
+{
+  float2 d = vPixel - SUN_MASK_SIZE / 2;
+  float fFar = max(abs(d.x), abs(d.y));
+  float m = SUN_MASK_BASE;
+  for (int k = 0; k < SUN_MASK_STEPS; k++)
+  {
+    float s = SUN_MASK_SIZE - k * SUN_MASK_SHRINK;
+    if (fFar < s)
+      m += SUN_MASK_STEP * SampleClamp(g_Draw.nTex0, 0.5 + d / (2 * s)).a;
+  }
+  return saturate(m);
+}
+
 float4 PSMain(SPostOutput In) : SV_Target
 {
+  if (HasFlag(POST_SUN_PATCH))
+    return SunPatch(In.vPos.xy);
+  if (HasFlag(POST_SUN_MASK))
+    return SunMask(In.vPos.xy);
   if (HasFlag(POST_DOWNSAMPLE))
     return Downsample(In.vPos.xy);
   if (HasFlag(POST_BLUR))

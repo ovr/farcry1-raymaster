@@ -281,7 +281,8 @@ it as well: it holds local, machine-specific instructions and is not committed (
 - The demos in a level: DemoLevel (a level drawn by the engine from a fixed camera, the game's,
   a camera path of keyframes, or one of its cut scenes), DemoShadows (shadows under a moving
   light; also in the main menu), DemoParticles (fire, smoke and sparks), DemoScreenFx (the screen
-  effects one after the other), DemoDecals (bullet holes, blood and scorch marks), DemoSkyFog
+  effects one after the other), DemoDecals (bullet holes, blood and scorch marks), DemoFlares
+  (the sun's flare passing behind what stands in front of it, and the coronas of two lamps), DemoSkyFog
   (fog and sky changed), DemoQuality (the quality presets of the video options) and DemoReplay
   (the game's time demos played back).
 - The keys of each scene file are in the head comment of the demo's source (a line starting with

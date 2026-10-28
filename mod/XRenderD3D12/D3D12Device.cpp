@@ -186,6 +186,26 @@ bool CD3D12Device::Init(HWND hWnd, int nWidth, int nHeight, bool bDebug)
       m_pTimestamps.Reset();
     m_fTimestampMs = 1000.0 / (double)nFrequency;
   }
+
+  // Occlusion queries and their readback buffer (none: no queries).
+  QueryDesc.Type = D3D12_QUERY_HEAP_TYPE_OCCLUSION;
+  QueryDesc.Count = D3D12_FRAMES * OCCLUSION_QUERIES;
+  if (SUCCEEDED(m_pDevice->CreateQueryHeap(&QueryDesc, IID_PPV_ARGS(&m_pOcclusion))))
+  {
+    D3D12_HEAP_PROPERTIES Heap = {};
+    Heap.Type = D3D12_HEAP_TYPE_READBACK;
+    D3D12_RESOURCE_DESC Desc = {};
+    Desc.Dimension = D3D12_RESOURCE_DIMENSION_BUFFER;
+    Desc.Width = sizeof(uint64) * D3D12_FRAMES * OCCLUSION_QUERIES;
+    Desc.Height = 1;
+    Desc.DepthOrArraySize = 1;
+    Desc.MipLevels = 1;
+    Desc.SampleDesc.Count = 1;
+    Desc.Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
+    if (FAILED(m_pDevice->CreateCommittedResource(&Heap, D3D12_HEAP_FLAG_NONE, &Desc, D3D12_RESOURCE_STATE_COPY_DEST, nullptr,
+                                                  IID_PPV_ARGS(&m_pOcclusionReadback))))
+      m_pOcclusion.Reset();
+  }
   return CreateSwapChainBuffers();
 }
 
@@ -240,6 +260,11 @@ void CD3D12Device::Shutdown()
     p.Reset();
   m_pTimestamps.Reset();
   m_pTimestampReadback.Reset();
+  m_pOcclusion.Reset();
+  m_pOcclusionReadback.Reset();
+  m_OcclusionResults.clear();
+  for (int &n : m_nOcclusions)
+    n = 0;
   m_pFence.Reset();
   if (m_hFenceEvent)
   {
@@ -475,6 +500,7 @@ void CD3D12Device::BeginFrame()
     return;
   WaitForFence(m_nFrameFence[m_nFrameSlot]);
   ReadGpuTimes();
+  ReadOcclusionResults();
   CollectGarbage();
   if (g_pRenderer->m_pUpload)
     g_pRenderer->m_pUpload->BeginFrame(m_nFrameSlot);
@@ -506,6 +532,11 @@ void CD3D12Device::EndFrame(bool bPresent, bool bVSync)
     m_GpuSections[m_nFrameSlot][n] = nullptr;
     m_nGpuMarks[m_nFrameSlot] = n + 1;
     m_pCmdList->ResolveQueryData(m_pTimestamps.Get(), D3D12_QUERY_TYPE_TIMESTAMP, nFirst, n + 1, m_pTimestampReadback.Get(), sizeof(uint64) * nFirst);
+  }
+  if (const int n = m_nOcclusions[m_nFrameSlot]; n > 0)
+  {
+    const uint32 nFirst = m_nFrameSlot * OCCLUSION_QUERIES;
+    m_pCmdList->ResolveQueryData(m_pOcclusion.Get(), D3D12_QUERY_TYPE_OCCLUSION, nFirst, n, m_pOcclusionReadback.Get(), sizeof(uint64) * nFirst);
   }
   Barrier(m_pCmdList.Get(), GetBackBuffer(), D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_PRESENT);
   m_pCmdList->Close();
@@ -585,6 +616,38 @@ void CD3D12Device::ReadGpuTimes()
   const D3D12_RANGE Written = {};
   m_pTimestampReadback->Unmap(0, &Written);
   m_nGpuTimedFrames++;
+}
+
+int CD3D12Device::BeginOcclusion()
+{
+  int &n = m_nOcclusions[m_nFrameSlot];
+  if (!m_bInFrame || !m_pOcclusion || n >= OCCLUSION_QUERIES)
+    return -1;
+  m_pCmdList->BeginQuery(m_pOcclusion.Get(), D3D12_QUERY_TYPE_OCCLUSION, m_nFrameSlot * OCCLUSION_QUERIES + n);
+  return n++;
+}
+
+void CD3D12Device::EndOcclusion(int nQuery)
+{
+  if (m_bInFrame && m_pOcclusion && nQuery >= 0 && nQuery < m_nOcclusions[m_nFrameSlot])
+    m_pCmdList->EndQuery(m_pOcclusion.Get(), D3D12_QUERY_TYPE_OCCLUSION, m_nFrameSlot * OCCLUSION_QUERIES + nQuery);
+}
+
+void CD3D12Device::ReadOcclusionResults()
+{
+  const int n = m_nOcclusions[m_nFrameSlot];
+  m_nOcclusions[m_nFrameSlot] = 0;
+  m_OcclusionResults.clear();
+  if (n <= 0)
+    return;
+  const size_t nFirst = (size_t)m_nFrameSlot * OCCLUSION_QUERIES;
+  const D3D12_RANGE Range = { sizeof(uint64) * nFirst, sizeof(uint64) * (nFirst + n) };
+  const uint64 *pCounts = nullptr;
+  if (FAILED(m_pOcclusionReadback->Map(0, &Range, (void **)&pCounts)))
+    return;
+  m_OcclusionResults.assign(pCounts + nFirst, pCounts + nFirst + n);
+  const D3D12_RANGE Written = {};
+  m_pOcclusionReadback->Unmap(0, &Written);
 }
 
 void CD3D12Device::ClearColor(const float rgba[4])

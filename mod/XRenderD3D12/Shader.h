@@ -4,7 +4,7 @@
 //	Description: Shaders (IShader), shader resources and the shader manager.
 //
 //	The renderer does not run the engine's shader scripts (it only reads
-//	the sky boxes they name). A CShader is a name with the getter values the
+//	the sky boxes and the coronas they give). A CShader is a name with the getter values the
 //	engine depends on and a draw class: how this renderer draws what uses it
 //	(one of a few fixed ways). The IRenderer shader methods are in
 //	RendererShaders.cpp.
@@ -64,6 +64,17 @@ enum EDrawClass
   eDC_Caustics,           //!< the light the ocean's waves focus on the terrain under it, multiplied in
   eDC_FogLayer,           //!< the cap of a fog volume (its layer), blended with the volume's fog
   eDC_ScopeLens,          //!< the glass of a weapon's scope (r_ScopeLens_fx): the scene seen through it, blended
+  eDC_Flare,              //!< a flare (its Flare element; the sun's): drawn by the flare pass (Flares.cpp)
+};
+
+//! The corona of a flare shader: the "ClientEffect 'Corona'" block of its script.
+struct SCorona
+{
+  bool bFromLight = false;            //!< RGBStyle = FromLight: the colour of the light, else Color
+  float Color[4] = { 1, 1, 1, 1 };    //!< RGBStyle 'Fixed' (r g b a)
+  float fScale = 1;                   //!< Scale: the half side of the square at a distance of 1
+  float fDistFactor = 1;              //!< DistFactor: the half side grows with the distance to this power
+  std::string Map;                    //!< Map: the texture
 };
 
 //! How the colour of a lit draw class (opaque, alpha test, alpha blend) is lit.
@@ -162,7 +173,7 @@ public:
   void SetFlags3(int Flags) override { m_Props.nFlags3 = Flags; }
   //! Nothing to reload (no scripts); true.
   bool Reload(int nFlags) override { return true; }
-  //! Always empty: no shader holds render elements (no flares or beams).
+  //! Empty, except for a flare shader (SetCorona): one Flare element (eDATA_Flare).
   TArray<CRendElement *> *GetREs() override { return &m_REs; }
   //! Registers the template Name under TemplId (-1: a new id from EFT_USER_FIRST, written back;
   //! otherwise the id is kept). The ids are global (CShaderManager::AddUserTemplate): GetTemplate of
@@ -209,6 +220,12 @@ public:
   CShader *GetSourceTemplate() const { return m_pTemplate; }
   //! The name of the template that is used ("templdiffuse_fp"); the shader's own name if it is no material.
   const char *GetTemplateName() const { return m_pTemplate ? m_pTemplate->m_Name.c_str() : m_Name.c_str(); }
+  //! Makes this a flare shader: the corona and a Flare element in GetREs.
+  void SetCorona(const SCorona &Corona);
+  //! The corona of a flare shader; NULL for the others.
+  const SCorona *GetCorona() const { return m_pCorona.get(); }
+  //! The Flare element of a flare shader; NULL for the others.
+  CRendElement *GetFlare() const { return m_pFlare.get(); }
 
 private:
   CShader *GetUserTemplate(int nTempl);
@@ -225,6 +242,8 @@ private:
   TArray<CRendElement *> m_REs;
   TArray<SShaderParam> m_PublicParams;
   SEfTemplates m_Templates;
+  std::unique_ptr<SCorona> m_pCorona;
+  std::unique_ptr<CRendElement> m_pFlare;     //!< the Flare element of a flare shader (in m_REs)
 };
 
 //! All shaders, the user templates and the light materials (one per renderer, CD3D12Renderer::m_pShaders).
@@ -283,6 +302,9 @@ public:
   //! its three textures <name>_5 (top), <name>_12 and <name>_34 (sides), lower case; NULL when the
   //! shader has none.
   const std::string *FindSkyBox(const char *szShader);
+  //! The corona a flare shader's script gives it ("ClientEffect 'Corona'" in its "Shader" block of
+  //! the same scripts); NULL when the shader has none.
+  const SCorona *FindCorona(const char *szShader);
 
   //! IShader::AddTemplate: registers the template szName under nTemplId (-1: a new id from
   //! EFT_USER_FIRST up); returns the id, -1 when there is nothing to register.
@@ -321,6 +343,8 @@ private:
   //! material's folder); the placeholder of the first try when no file is found.
   CTexture *LoadTextureFile(const char *szName, const char *szPath, const SShaderTexUnit &TU);
   void AddAttenuationTextures(SRenderShaderResources *pRes);
+  //! Reads the sky boxes and the coronas of the shader scripts, once.
+  void ReadScripts();
 
   std::vector<std::unique_ptr<CShader>> m_Shaders;              //!< indexed by ID
   std::unordered_map<std::string, CShader *> m_ByName;          //!< engine shaders and templates by name
@@ -330,7 +354,8 @@ private:
   std::unordered_map<int, CShader *> m_UserTemplates;           //!< user template ids
   std::vector<std::unique_ptr<SLightMaterial>> m_LightMaterials; //!< [0] the default one
   std::unordered_map<std::string, std::string> m_SkyBoxes;      //!< FindSkyBox: sky box by shader name
-  bool m_bSkyBoxesRead = false;
+  std::unordered_map<std::string, SCorona> m_Coronas;           //!< FindCorona: corona by shader name
+  bool m_bScriptsRead = false;
   CShader *m_pDefault = nullptr;
   int m_nNextUserTemplate = EFT_USER_FIRST;
   int m_nGlobalTemplate = -2;

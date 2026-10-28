@@ -316,6 +316,8 @@ void CScene::RemovePermanent(CCObject *pObj)
     return;
   slot.bUsed = false;
   // A removed object can be handed out again (a light's corona): it starts anew.
+  if (g_pRenderer)
+    g_pRenderer->ForgetFlare(pObj);
   pObj->Init();
   pObj->m_Id = (short)nId;
 }

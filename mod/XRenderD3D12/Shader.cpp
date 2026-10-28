@@ -14,6 +14,7 @@
 #include "StdAfx.h"
 #include "Renderer.h"
 #include "Shader.h"
+#include "Scene.h"
 #include "Texture.h"
 
 #include <cctype>
@@ -420,6 +421,159 @@ void ParseSkyBoxes(std::string_view Text, std::unordered_map<std::string, std::s
   }
 }
 
+//! The text without its "/* */" comments.
+std::string StripBlockComments(std::string_view Text)
+{
+  std::string Out;
+  Out.reserve(Text.size());
+  size_t nPos = 0;
+  while (nPos < Text.size())
+  {
+    const size_t nStart = Text.find("/*", nPos);
+    if (nStart == std::string_view::npos)
+    {
+      Out.append(Text.substr(nPos));
+      break;
+    }
+    Out.append(Text.substr(nPos, nStart - nPos));
+    const size_t nEnd = Text.find("*/", nStart + 2);
+    if (nEnd == std::string_view::npos)
+      break;
+    nPos = nEnd + 2;
+  }
+  return Out;
+}
+
+//! The numbers of a string, in order (as many as fit in pOut).
+int ParseFloats(std::string_view s, float *pOut, int nMax)
+{
+  int n = 0;
+  const char *p = s.data(), *pEnd = s.data() + s.size();
+  while (p < pEnd && n < nMax)
+  {
+    if (isdigit((unsigned char)*p) || ((*p == '-' || *p == '.') && p + 1 < pEnd && (isdigit((unsigned char)p[1]) || p[1] == '.')))
+    {
+      auto [pNext, ec] = std::from_chars(p, pEnd, pOut[n]);
+      if (ec == std::errc())
+      {
+        n++;
+        p = pNext;
+        continue;
+      }
+    }
+    p++;
+  }
+  return n;
+}
+
+//! The value after the '=' of "Key = value" (empty without one).
+std::string_view ValueOf(std::string_view Line)
+{
+  const size_t nEq = Line.find('=');
+  return nEq == std::string_view::npos ? std::string_view() : Trim(Line.substr(nEq + 1));
+}
+
+//! The "ClientEffect 'Corona'" blocks of a shader script, under the name of the "Shader '<name>'"
+//! block they are in (lower case): RGBStyle ('Fixed' (r g b a) or = FromLight), Scale (a number,
+//! or 'Comp' with a sine wave of Level, Amp, Phase and Freq: its Level), DistFactor and Map; the
+//! other keys are not read. "/* */" and "//" start comments.
+void ParseCoronas(std::string_view Text, std::unordered_map<std::string, SCorona> &Coronas)
+{
+  const std::string Clean = StripBlockComments(Text);
+  std::string Shader;
+  SCorona Corona;
+  int nDepth = -1;          // braces open in the corona block; -1: not in one
+  bool bOpened = false;
+  bool bScaleComp = false;  // Scale 'Comp': the next Level is the scale
+  size_t nPos = 0;
+  while (nPos < Clean.size())
+  {
+    size_t nEnd = Clean.find('\n', nPos);
+    if (nEnd == std::string::npos)
+      nEnd = Clean.size();
+    std::string_view Line(Clean.data() + nPos, nEnd - nPos);
+    nPos = nEnd + 1;
+    Line = Trim(Line.substr(0, std::min(Line.find("//"), Line.size())));
+    if (nDepth < 0)
+    {
+      if (StartsWithWord(Line, "Shader"))
+      {
+        const size_t q1 = Line.find('\'');
+        const size_t q2 = q1 == std::string_view::npos ? q1 : Line.find('\'', q1 + 1);
+        if (q2 != std::string_view::npos)
+          Shader = Lower(std::string(Line.substr(q1 + 1, q2 - q1 - 1)).c_str());
+      }
+      else if (StartsWithWord(Line, "ClientEffect") && !Shader.empty() && Lower(std::string(Line).c_str()).find("'corona'") != std::string::npos)
+      {
+        Corona = SCorona();
+        nDepth = 0;
+        bOpened = false;
+        bScaleComp = false;
+        Line = Line.substr(Line.find('\'', Line.find('\'') + 1) + 1);
+      }
+      else
+        continue;
+    }
+    if (StartsWithWord(Line, "RGBStyle"))
+    {
+      const std::string Low = Lower(std::string(Line).c_str());
+      if (Low.find("fromlight") != std::string::npos)
+        Corona.bFromLight = true;
+      else if (Low.find("'fixed'") != std::string::npos)
+        ParseFloats(Line.substr(Line.find('(') == std::string_view::npos ? Line.size() : Line.find('(')), Corona.Color, 4);
+    }
+    else if (StartsWithWord(Line, "Scale"))
+    {
+      float f;
+      if (!ValueOf(Line).empty() && ParseFloats(ValueOf(Line), &f, 1) == 1)
+        Corona.fScale = f;
+      else
+        bScaleComp = true;
+    }
+    else if (StartsWithWord(Line, "DistFactor"))
+    {
+      float f;
+      if (ParseFloats(ValueOf(Line), &f, 1) == 1)
+        Corona.fDistFactor = f;
+    }
+    else if (StartsWithWord(Line, "Map"))
+    {
+      std::string_view Value = ValueOf(Line);
+      Value = Value.substr(0, std::min(Value.find_first_of(" \t"), Value.size()));
+      Corona.Map = std::string(Value);
+      std::replace(Corona.Map.begin(), Corona.Map.end(), '\\', '/');
+    }
+    if (bScaleComp)
+    {
+      const std::string Low = Lower(std::string(Line).c_str());
+      if (const size_t nLevel = Low.find("level"); nLevel != std::string::npos)
+      {
+        float f;
+        if (ParseFloats(Line.substr(nLevel), &f, 1) == 1)
+        {
+          Corona.fScale = f;
+          bScaleComp = false;
+        }
+      }
+    }
+    for (char c : Line)
+    {
+      if (c == '{')
+      {
+        nDepth++;
+        bOpened = true;
+      }
+      else if (c == '}' && nDepth > 0)
+        nDepth--;
+    }
+    if (bOpened && nDepth == 0)
+    {
+      Coronas[Shader] = Corona;
+      nDepth = -1;
+    }
+  }
+}
+
 } // namespace
 
 //////////////////////////////////////////////////////////////////////////
@@ -472,6 +626,17 @@ CShader *CShader::GetUserTemplate(int nTempl)
   return pTempl ? pTempl : this;
 }
 
+void CShader::SetCorona(const SCorona &Corona)
+{
+  m_pCorona = std::make_unique<SCorona>(Corona);
+  if (!m_pFlare)
+  {
+    // The engine adds it with the sun's object; the renderer draws it in its flare pass.
+    m_pFlare.reset(RE_CreateGeneric(eDATA_Flare));
+    m_REs.AddElem(m_pFlare.get());
+  }
+}
+
 //////////////////////////////////////////////////////////////////////////
 // CShaderManager
 
@@ -498,40 +663,57 @@ void CShaderManager::Shutdown()
   m_Shaders.clear();
   m_LightMaterials.clear();
   m_SkyBoxes.clear();
-  m_bSkyBoxesRead = false;
+  m_Coronas.clear();
+  m_bScriptsRead = false;
   m_pDefault = nullptr;
   m_nNextUserTemplate = EFT_USER_FIRST;
   m_nGlobalTemplate = -2;
 }
 
+void CShaderManager::ReadScripts()
+{
+  if (m_bScriptsRead)
+    return;
+  ICryPak *pPak = iSystem ? iSystem->GetIPak() : nullptr;
+  if (!pPak)
+    return;
+  m_bScriptsRead = true;
+  const std::string Dir = "Shaders/Scripts/CryShaders/";
+  std::vector<std::string> Files;
+  _finddata_t fd;
+  const intptr_t hFind = pPak->FindFirst((Dir + "*.csl").c_str(), &fd);
+  if (hFind != -1)
+  {
+    do
+    {
+      if (!(fd.attrib & _A_SUBDIR))
+        Files.push_back(Dir + fd.name);
+    } while (pPak->FindNext(hFind, &fd) == 0);
+    pPak->FindClose(hFind);
+  }
+  std::string Text;
+  for (const std::string &File : Files)
+  {
+    if (ReadTextFile(pPak, File.c_str(), Text))
+    {
+      ParseSkyBoxes(Text, m_SkyBoxes);
+      ParseCoronas(Text, m_Coronas);
+    }
+  }
+}
+
 const std::string *CShaderManager::FindSkyBox(const char *szShader)
 {
-  if (!m_bSkyBoxesRead)
-  {
-    ICryPak *pPak = iSystem ? iSystem->GetIPak() : nullptr;
-    if (!pPak)
-      return nullptr;
-    m_bSkyBoxesRead = true;
-    const std::string Dir = "Shaders/Scripts/CryShaders/";
-    std::vector<std::string> Files;
-    _finddata_t fd;
-    const intptr_t hFind = pPak->FindFirst((Dir + "*.csl").c_str(), &fd);
-    if (hFind != -1)
-    {
-      do
-      {
-        if (!(fd.attrib & _A_SUBDIR))
-          Files.push_back(Dir + fd.name);
-      } while (pPak->FindNext(hFind, &fd) == 0);
-      pPak->FindClose(hFind);
-    }
-    std::string Text;
-    for (const std::string &File : Files)
-      if (ReadTextFile(pPak, File.c_str(), Text))
-        ParseSkyBoxes(Text, m_SkyBoxes);
-  }
+  ReadScripts();
   const auto it = m_SkyBoxes.find(Lower(szShader));
   return it == m_SkyBoxes.end() ? nullptr : &it->second;
+}
+
+const SCorona *CShaderManager::FindCorona(const char *szShader)
+{
+  ReadScripts();
+  const auto it = m_Coronas.find(Lower(szShader));
+  return it == m_Coronas.end() ? nullptr : &it->second;
 }
 
 CShader *CShaderManager::GetDefault()
@@ -594,12 +776,22 @@ CShader *CShaderManager::LoadShader(const char *szName, EShClass eClass, int nFl
         }
         else
         {
-          // Flares and lights, screen shaders, ...: nothing this renderer can draw from the name
-          // alone.
+          // Lights without a corona, screen shaders, ...: nothing this renderer can draw from the
+          // name alone.
           Props.eDrawClass = eDC_NoDraw;
+        }
+        // A flare (a corona in its script: the sun's, the lights'): sorted with the nearest, its
+        // Flare element drawn by the flare pass.
+        const SCorona *pCorona = FindCorona(Name.c_str());
+        if (pCorona)
+        {
+          Props.eSort = eS_Nearest;
+          Props.eDrawClass = eDC_Flare;
         }
         Props.nFlags |= nFlags & EF_SYSTEM;
         pSH = Create(Resolved, EShaderKind::Engine, Props, nullptr, nMaskGen);
+        if (pCorona)
+          pSH->SetCorona(*pCorona);
         m_ByName.emplace(std::move(Resolved), pSH);
       }
     }

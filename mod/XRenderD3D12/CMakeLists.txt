@@ -34,6 +34,7 @@ set(XRENDERD3D12_SOURCES
     FarSprites.cpp
     Shadows.cpp
     PostFx.cpp
+    Flares.cpp
     D3D12Device.h
     D3D12Device.cpp
     D3D12Upload.h

@@ -114,6 +114,9 @@ CRendElement *RE_Create(EDataType edt);
 //! A render element of a type without an SDK class (flares and beams of the shaders): a bare
 //! CRendElement of that type, destroyed by Release. Not marked: its creator releases it.
 CRendElement *RE_CreateGeneric(EDataType edt);
+//! The elements drawn over the finished 3D scene, in this order: 1 flares, 2 screen quads, 3 glare
+//! and flash bang, 4 screen effects; 0 for the others.
+int ScreenElementRank(const CRendElement *pRE);
 
 //! The value of a wave of CCObject::m_Waves at time t: level + amp * f(t * freq + phase) with
 //! f the wave form over one period (eWF_Sin: sin(2 pi x)).

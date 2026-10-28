@@ -347,6 +347,7 @@ void CD3D12Renderer::Release()
   ReleaseSprites();
   ReleaseShadowMaps();
   ReleaseScreenEffects();
+  ReleaseFlares();
   m_pDetailTexture = nullptr;   // released with every texture
   m_pDefaultCube = nullptr;
   m_pBeachTexture = nullptr;
@@ -411,6 +412,7 @@ bool CD3D12Renderer::EnsureFrame()
     m_pDevice->SetGpuTiming(CV_d3d12_GpuTimes > 0);
     m_pDevice->BeginFrame();
     InvalidateFrameConstants();   // the frame memory of the slot starts again
+    ReadFlareTests();
   }
   return true;
 }

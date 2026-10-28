@@ -95,6 +95,8 @@ typedef float float4x4_t[16];
 #define POST_SCREENBLUR     0x00000020
 #define POST_FLASHBANG      0x00000040
 #define POST_FADE           0x00000080
+#define POST_SUN_PATCH      0x00000100  //!< 1 where the depth copy tex0 is the far plane, around the sun (SunPatch, Post.hlsl)
+#define POST_SUN_MASK       0x00000200  //!< the sun's mask: the patch tex0 blurred towards its middle (SunMask, Post.hlsl)
 
 #define XR_SAMPLER_LINEAR_WRAP  0
 #define XR_SAMPLER_LINEAR_CLAMP 1

@@ -17,6 +17,20 @@
 #include <cmath>
 #include <numbers>
 
+int ScreenElementRank(const CRendElement *pRE)
+{
+  switch (pRE->m_Type)
+  {
+  case eDATA_Flare:         return 1;
+  case eDATA_2DQuad:        return 2;
+  case eDATA_Glare:
+  case eDATA_HDRProcess:
+  case eDATA_FlashBang:     return 3;
+  case eDATA_ScreenProcess: return 4;
+  default:                  return 0;
+  }
+}
+
 namespace
 {
   //! CLeafBuffer::CheckUpdate flag for the buffers of characters: their skinned vertices arrive
@@ -69,21 +83,6 @@ namespace
     if ((it.nSort & ~EFSLIST_MASK) == eS_FogShader || (it.pObj->m_ObjFlags & FOB_FOGPASS))
       return 2;
     return (it.pObj->m_ObjFlags & FOB_LIGHTPASS) ? 1 : 0;
-  }
-
-  //! Elements drawn over the finished 3D scene, in this order (0: not one of them).
-  int ScreenElementRank(const CRendElement *pRE)
-  {
-    switch (pRE->m_Type)
-    {
-    case eDATA_Flare:         return 1;
-    case eDATA_2DQuad:        return 2;
-    case eDATA_Glare:
-    case eDATA_HDRProcess:
-    case eDATA_FlashBang:     return 3;
-    case eDATA_ScreenProcess: return 4;
-    default:                  return 0;
-    }
   }
 
   //! Rendering order of the EFSLIST_* lists of the SDK (IShader.h).
