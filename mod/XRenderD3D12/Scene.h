@@ -173,7 +173,7 @@ public:
   Vec3 GetSunDirection() const;
   //! The sun's colour (CDLight::m_Color; black without a sun).
   CFColor GetSunColor() const;
-  //! EF_UpdateDLight: m_Orientation and m_TextureMatrix of a DLF_PROJECT light.
+  //! EF_UpdateDLight: m_Orientation and m_TextureMatrix of a DLF_PROJECT light; always false.
   static bool UpdateLight(CDLight *pLight);
 
   //////////////////////////////////////////////////////////////////////////

@@ -574,10 +574,9 @@ void CScene::CheckCorona(CDLight *pLight)
 
 bool CScene::UpdateLight(CDLight *pLight)
 {
-  if (!pLight)
+  // Always false: the engine adds (EF_ADDDlight) only the lights for which this returns false.
+  if (!pLight || !(pLight->m_Flags & DLF_PROJECT))
     return false;
-  if (!(pLight->m_Flags & DLF_PROJECT))
-    return true;
 
   // R = Rz(z) * Ry(y) * Rx(x), right-handed rotations about the world axes (column vectors),
   // angles in degrees.
@@ -617,7 +616,7 @@ bool CScene::UpdateLight(CDLight *pLight)
   M(3, 1) = -(sU | o);
   M(3, 2) = -(sV | o);
   M(3, 3) = 1;
-  return true;
+  return false;
 }
 
 //////////////////////////////////////////////////////////////////////////

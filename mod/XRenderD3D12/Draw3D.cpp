@@ -214,6 +214,11 @@ void CD3D12Renderer::DrawLeafItem(const SRenderItem &it)
   const EDrawClass eDC = it.eDrawClass;
   if (eDC == eDC_NoDraw || eDC == eDC_Engine || eDC == eDC_Sky)
     return;
+  // The fog volume pass: the element once more, with the ID of the fog volume it is in, in the
+  // sort group eS_FogShader (the object of a static one has FOB_FOGPASS). The original draws
+  // it only with r_VolumetricFog; not drawn yet.
+  if ((it.nSort & ~EFSLIST_MASK) == eS_FogShader || (pObj->m_ObjFlags & FOB_FOGPASS))
+    return;
 
   // Transform, depth range and scissor.
   const Matrix44 World = GetWorldMatrix(pObj);
@@ -374,10 +379,10 @@ void CD3D12Renderer::DrawLeafItem(const SRenderItem &it)
 
 void CD3D12Renderer::SetObjectLights(SDrawConstants &dc, const CCObject *pObj, const Matrix44 &World, CLeafBuffer *pLB)
 {
-  // The lights of the object's m_DynLMMask besides the sun (without a sun all lights when the
-  // mask is empty), at most XR_MAX_DRAW_LIGHTS; projected lights are not among them. Point lights
-  // are lit per vertex with the attenuation 1 / (a0 + a1 d) up to their range. Characters get
-  // (0.01, 5.07756 / R) up to 50.416 R. Static objects get a line through the falloff
+  // The lights of the object's m_DynLMMask besides the sun (an empty mask: none), at most
+  // XR_MAX_DRAW_LIGHTS; projected lights are not among them. Point lights are lit per vertex
+  // with the attenuation 1 / (a0 + a1 d) up to their range. Characters get (0.01, 5.07756 / R)
+  // up to 50.416 R. Static objects get a line through the falloff
   // f(x) = 2 (1 - 3 v^2 + 2 v^3), v = min(x / (0.9 R), 1), at the nearest and the farthest point
   // of the object's sphere (the centre of the leaf buffer's box plus the object's position, half
   // the box diagonal), up to where it reaches 1/256. Directional lights come from their origin.
@@ -389,7 +394,6 @@ void CD3D12Renderer::SetObjectLights(SDrawConstants &dc, const CCObject *pObj, c
     vCenter += (pVC->m_vBoxMin + pVC->m_vBoxMax) * 0.5f;
     r = (pVC->m_vBoxMax - pVC->m_vBoxMin).GetLength() * 0.5f;
   }
-  const bool bSun = m_pScene->GetSun() != nullptr;
   const std::span<CDLight *const> Lights = m_pScene->GetLights();
   uint32 n = 0;
   for (size_t i = 0; i < Lights.size() && i < 32 && n < XR_MAX_DRAW_LIGHTS; i++)
@@ -397,7 +401,10 @@ void CD3D12Renderer::SetObjectLights(SDrawConstants &dc, const CCObject *pObj, c
     const CDLight *pLight = Lights[i];
     if (!pLight || (pLight->m_Flags & (DLF_SUN | DLF_PROJECT)))
       continue;
-    if (pObj->m_DynLMMask ? (pObj->m_DynLMMask & (1u << i)) == 0 : bSun)
+    // A light baked into light maps (DLF_LM) lights an object with a light map through it only.
+    if ((pLight->m_Flags & DLF_LM) && pObj->m_nLMId > 0)
+      continue;
+    if ((pObj->m_DynLMMask & (1u << i)) == 0)
       continue;
     Set4(dc.vLightColor[n], pLight->m_Color.r, pLight->m_Color.g, pLight->m_Color.b, 1);
     if (pLight->m_Flags & DLF_DIRECTIONAL)

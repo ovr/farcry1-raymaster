@@ -298,10 +298,11 @@ CTexture *GetDiffuseTexture(const SRenderShaderResources *pRes);
 CTexture *GetResourceTexture(const SRenderShaderResources *pRes, int nSlot);
 //! The material's opacity, 0..1 (1 without resources): blended draws use texture alpha * opacity.
 float GetOpacity(const SRenderShaderResources *pRes);
-//! Alpha test reference 0..1 (texture alpha >= it passes), 0 for no alpha test: the template's
-//! (128 / 255 for vegetation and the alpha tested decals). SBaseShaderResources::m_AlphaRef is not
-//! used: the SDK's material loader (MakMatInfoFromMAT_ENTITY.h) fills it with an unrelated value
-//! for materials not made with the Cry shader flag.
+//! Alpha test reference 0..1 (texture alpha >= it passes), 0 for no alpha test: the material's
+//! SBaseShaderResources::m_AlphaRef when it is made with the Cry shader flag (MTLFLAG_CRYSHADER in
+//! m_ResFlags; without it the SDK's material loader, MakMatInfoFromMAT_ENTITY.h, fills the field
+//! with an unrelated value), rounded down to 1 / 255 steps; else the template's (128 / 255 for
+//! vegetation and the alpha tested decals).
 float GetAlphaRef(const CShader *pShader, const SRenderShaderResources *pRes);
 //! Face culling (eCULL_Back for most, eCULL_None for vegetation leaves, additive decals,
 //! holograms, ...); eCULL_None also for a two-sided material (bit 0x2 of m_ResFlags, the

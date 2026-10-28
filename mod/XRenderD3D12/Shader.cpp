@@ -29,6 +29,9 @@ constexpr float kAlphaRef2 = 2.0f / 255.0f;
 //! Two-sided material: MTLFLAG_2SIDED of the CGF material, copied into m_ResFlags by the SDK's
 //! material loader (MakMatInfoFromMAT_ENTITY.h).
 constexpr int kResFlag2Sided = 0x2;
+//! Material made with the Cry shader flag (MTLFLAG_CRYSHADER): only then is m_AlphaRef its alpha
+//! reference.
+constexpr int kResFlagCryShader = 0x40;
 //! The texture slots EF_LoadShaderItem loads; the others keep only their names.
 constexpr int kLoadedSlots[] = { EFTT_DIFFUSE };
 
@@ -786,6 +789,8 @@ float GetOpacity(const SRenderShaderResources *pRes)
 
 float GetAlphaRef(const CShader *pShader, const SRenderShaderResources *pRes)
 {
+  if (pRes && (pRes->m_ResFlags & kResFlagCryShader) && pRes->m_AlphaRef > 0)
+    return floorf(std::min(pRes->m_AlphaRef, 1.0f) * 255.0f) / 255.0f;
   return pShader ? pShader->GetProps().fAlphaRef : 0.0f;
 }
 
