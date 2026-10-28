@@ -298,6 +298,79 @@ float CurrentTime()
   return iTimer ? iTimer->GetCurrTime() : 0.0f;
 }
 
+bool ReadTextFile(ICryPak *pPak, const char *szPath, std::string &Text)
+{
+  FILE *f = pPak->FOpen(szPath, "rb");
+  if (!f)
+    return false;
+  Text.clear();
+  if (pPak->FSeek(f, 0, SEEK_END) == 0)
+  {
+    const long nSize = pPak->FTell(f);
+    if (nSize > 0 && pPak->FSeek(f, 0, SEEK_SET) == 0)
+    {
+      Text.resize((size_t)nSize);
+      Text.resize(pPak->FRead(Text.data(), 1, (size_t)nSize, f));
+    }
+  }
+  pPak->FClose(f);
+  return true;
+}
+
+std::string_view Trim(std::string_view s)
+{
+  while (!s.empty() && isspace((unsigned char)s.front()))
+    s.remove_prefix(1);
+  while (!s.empty() && isspace((unsigned char)s.back()))
+    s.remove_suffix(1);
+  return s;
+}
+
+bool StartsWithWord(std::string_view Line, std::string_view Word)
+{
+  if (Line.size() < Word.size() || _strnicmp(Line.data(), Word.data(), Word.size()) != 0)
+    return false;
+  return Line.size() == Word.size() || !isalnum((unsigned char)Line[Word.size()]);
+}
+
+//! The "SkyBox = <name>" lines of a shader script, under the name of the "Shader '<name>'" block
+//! they are in (both lower case, '\' as '/'). ';' and "//" start comments.
+void ParseSkyBoxes(std::string_view Text, std::unordered_map<std::string, std::string> &SkyBoxes)
+{
+  std::string Shader;
+  size_t nPos = 0;
+  while (nPos < Text.size())
+  {
+    size_t nEnd = Text.find('\n', nPos);
+    if (nEnd == std::string_view::npos)
+      nEnd = Text.size();
+    std::string_view Line = Text.substr(nPos, nEnd - nPos);
+    nPos = nEnd + 1;
+    Line = Line.substr(0, std::min(Line.find("//"), Line.find(';')));
+    Line = Trim(Line);
+    if (StartsWithWord(Line, "Shader"))
+    {
+      const size_t q1 = Line.find('\'');
+      const size_t q2 = q1 == std::string_view::npos ? q1 : Line.find('\'', q1 + 1);
+      if (q2 != std::string_view::npos)
+        Shader = Lower(std::string(Line.substr(q1 + 1, q2 - q1 - 1)).c_str());
+    }
+    else if (StartsWithWord(Line, "SkyBox") && !Shader.empty())
+    {
+      std::string_view Value = Line.substr(6);
+      const size_t nEq = Value.find('=');
+      if (nEq == std::string_view::npos)
+        continue;
+      Value = Trim(Value.substr(nEq + 1));
+      Value = Value.substr(0, std::min(Value.find_first_of(" \t"), Value.size()));
+      std::string Name = Lower(std::string(Value).c_str());
+      std::replace(Name.begin(), Name.end(), '\\', '/');
+      if (!Name.empty())
+        SkyBoxes[Shader] = std::move(Name);
+    }
+  }
+}
+
 } // namespace
 
 //////////////////////////////////////////////////////////////////////////
@@ -375,9 +448,41 @@ void CShaderManager::Shutdown()
   m_UserTemplates.clear();
   m_Shaders.clear();
   m_LightMaterials.clear();
+  m_SkyBoxes.clear();
+  m_bSkyBoxesRead = false;
   m_pDefault = nullptr;
   m_nNextUserTemplate = EFT_USER_FIRST;
   m_nGlobalTemplate = -2;
+}
+
+const std::string *CShaderManager::FindSkyBox(const char *szShader)
+{
+  if (!m_bSkyBoxesRead)
+  {
+    ICryPak *pPak = iSystem ? iSystem->GetIPak() : nullptr;
+    if (!pPak)
+      return nullptr;
+    m_bSkyBoxesRead = true;
+    const std::string Dir = "Shaders/Scripts/CryShaders/";
+    std::vector<std::string> Files;
+    _finddata_t fd;
+    const intptr_t hFind = pPak->FindFirst((Dir + "*.csl").c_str(), &fd);
+    if (hFind != -1)
+    {
+      do
+      {
+        if (!(fd.attrib & _A_SUBDIR))
+          Files.push_back(Dir + fd.name);
+      } while (pPak->FindNext(hFind, &fd) == 0);
+      pPak->FindClose(hFind);
+    }
+    std::string Text;
+    for (const std::string &File : Files)
+      if (ReadTextFile(pPak, File.c_str(), Text))
+        ParseSkyBoxes(Text, m_SkyBoxes);
+  }
+  const auto it = m_SkyBoxes.find(Lower(szShader));
+  return it == m_SkyBoxes.end() ? nullptr : &it->second;
 }
 
 CShader *CShaderManager::GetDefault()
@@ -430,10 +535,18 @@ CShader *CShaderManager::LoadShader(const char *szName, EShClass eClass, int nFl
           Props.nLFlags = pE->nLFlags;
           Props.eDrawClass = pE->eClass;
         }
+        else if (FindSkyBox(Name.c_str()))
+        {
+          // A sky shader of the scripts (I3DEngine::SetSkyBox): the level's CRESky element is
+          // drawn with it as a sky box.
+          Props.eSort = eS_Sky;
+          Props.nFlags |= EF_SKY;
+          Props.eDrawClass = eDC_Sky;
+        }
         else
         {
-          // The level's sky, flares and lights, screen shaders, ...: nothing this renderer can
-          // draw from the name alone (the scene draws a CRESky element as the sky).
+          // Flares and lights, screen shaders, ...: nothing this renderer can draw from the name
+          // alone.
           Props.eDrawClass = eDC_NoDraw;
         }
         Props.nFlags |= nFlags & EF_SYSTEM;

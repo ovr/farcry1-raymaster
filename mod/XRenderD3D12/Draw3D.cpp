@@ -4,8 +4,9 @@
 //	Description: Drawing the render items of EF_EndEf3D.
 //
 //	Each item is a render element with an object, a shader (its draw class,
-//	Shader.h) and resources. Only leaf buffer elements (CREOcLeaf) are
-//	drawn, with the general program: the diffuse texture lit by the sun
+//	Shader.h) and resources. The sky (CRESky) is drawn as the sky box its
+//	shader's script names; leaf buffer elements (CREOcLeaf) are drawn with
+//	the general program: the diffuse texture lit by the sun
 //	and the object's ambient colour, or by its lightmap; vegetation by its
 //	vertex colours; the terrain with texture coordinates from the world
 //	position. FOB_NEAREST objects (the first person weapon) get a
@@ -187,6 +188,9 @@ void CD3D12Renderer::DrawItems(SRenderItem *pItems, int nItems, int eList)
     {
     case eDATA_OcLeaf:
       DrawLeafItem(it);
+      break;
+    case eDATA_Sky:
+      DrawSkyItem(it);
       break;
     case eDATA_FarTreeSprites:
     case eDATA_TerrainDetailTextureLayers:
@@ -501,6 +505,108 @@ CTexture *CD3D12Renderer::GetDetailTexture()
   if (!m_pDetailTexture)
     m_pDetailTexture = m_pTextures->LoadTexture("textures/terrain/detail/default", 0, 0, eTT_Base, -1, -1, -1, 0);
   return m_pDetailTexture && m_pDetailTexture->IsTextureLoaded() ? m_pDetailTexture : nullptr;
+}
+
+void CD3D12Renderer::DrawSkyItem(const SRenderItem &it)
+{
+  if (it.eDrawClass != eDC_Sky || !m_pShaders || !m_pTextures)
+    return;
+  const std::string *pName = m_pShaders->FindSkyBox(it.pShader->GetName());
+  if (!pName)
+    return;
+  auto Box = std::find_if(m_SkyBoxes.begin(), m_SkyBoxes.end(), [&](const SSkyBoxTextures &b) { return b.Name == *pName; });
+  if (Box == m_SkyBoxes.end())
+  {
+    SSkyBoxTextures New;
+    New.Name = *pName;
+    static const char *const s_Suffixes[3] = { "_5", "_12", "_34" };
+    for (int i = 0; i < 3; i++)
+      New.pTex[i] = m_pTextures->LoadTexture(("textures/" + *pName + s_Suffixes[i]).c_str(), FT_CLAMP | FT_NOMIPS, 0, eTT_Base, -1, -1, -1, 0);
+    m_SkyBoxes.push_back(New);
+    Box = m_SkyBoxes.end() - 1;
+  }
+
+  // A box around the camera, of half size 32 in world axes: the top at z = 32 with u = (32 - y) / 64,
+  // v = (x + 32) / 64, and the four sides from z = 32 down to z1 and on to z2. Seen from inside, the
+  // sides make one picture from left to right: x = 32 (the upper half of _12), y = -32 (its lower
+  // half, upside down), x = -32 (the upper half of _34), y = 32 (its lower half); along each side u
+  // runs from 1 to 0 counter-clockwise (seen from above), and v from 0 (upper half) or 1 (lower
+  // half) at the top to 0.5 at z1, which it keeps down to z2. With h the camera's height over the
+  // water level, s the sky box stretching and F the far plane, z1 = -s h (30.72 / F + 1 / 128) and
+  // z2 = -8 + h (30.72 / F - 0.018); both 0 below the water.
+  const CRESky *pSky = static_cast<const CRESky *>(it.pRE);
+  const float F = std::max(m_Camera.GetZMax(), 1.0f);
+  const float h = m_Camera.GetPos().z - pSky->m_fTerrainWaterLevel;
+  float z1 = 0, z2 = 0;
+  if (h >= 0)
+  {
+    z1 = -pSky->m_fSkyBoxStretching * h * (30.72f / F + 1.0f / 128);
+    z2 = -8 + h * (30.72f / F - 0.018f);
+  }
+  struct SSide
+  {
+    float x0, y0, x1, y1;   //!< from (u 1) to (u 0)
+    float vTop;
+    int nTex;
+  };
+  static const SSide s_Sides[4] =
+  {
+    {  32, -32,  32,  32, 0, 1 },
+    { -32, -32,  32, -32, 1, 1 },
+    { -32,  32, -32, -32, 0, 2 },
+    {  32,  32, -32,  32, 1, 2 },
+  };
+
+  // The view without its translation; no depth test or writes, no fog; texture * (1, 1, 1, alpha),
+  // blended below alpha 1.
+  Matrix44 View = m_CameraView;
+  View.data[12] = View.data[13] = View.data[14] = 0;
+  const Matrix44 ViewProj = View * m_ProjMatrix;
+  const float fAlpha = std::clamp(pSky->m_fAlpha, 0.0f, 1.0f);
+  SPipelineKey Key = {};
+  Key.nState = GS_NODEPTHTEST | (fAlpha < 1 ? GS_BLSRC_SRCALPHA | GS_BLDST_ONEMINUSSRCALPHA : 0);
+  Key.nProgram = eD3D12P_General;
+  Key.nCull = R_CULL_NONE;
+  m_fDepthMin = 0;
+  m_fDepthMax = 1;
+  m_bItemScissor = false;
+
+  auto Draw = [&](int nTex, const struct_VERTEX_FORMAT_P3F_TEX2F *pVerts, int nVerts)
+  {
+    CTexture *pTex = Box->pTex[nTex];
+    if (!pTex || !pTex->IsTextureLoaded() || pTex->IsCube())
+      return;
+    SDrawConstants dc = DefaultDrawConstants();
+    memcpy(dc.mWorldViewProj, ViewProj.data, sizeof(dc.mWorldViewProj));
+    dc.nFlags = DF_TEX0;
+    dc.nTex0 = pTex->GetSRV();
+    dc.nSamplers = XR_SAMPLER_LINEAR_CLAMP;
+    Set4(dc.vColor, 1, 1, 1, fAlpha);
+    if (m_pFrameDump)
+      DumpDraw(dc, Key, pTex);
+    DrawImmediate(Key, dc, D3D_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP, VERTEX_FORMAT_P3F_TEX2F, pVerts, nVerts);
+  };
+  const struct_VERTEX_FORMAT_P3F_TEX2F Top[4] =
+  {
+    { Vec3(-32, -32, 32), { 1, 0 } },
+    { Vec3( 32, -32, 32), { 1, 1 } },
+    { Vec3(-32,  32, 32), { 0, 0 } },
+    { Vec3( 32,  32, 32), { 0, 1 } },
+  };
+  Draw(0, Top, 4);
+  for (const SSide &s : s_Sides)
+  {
+    const struct_VERTEX_FORMAT_P3F_TEX2F Verts[6] =
+    {
+      { Vec3(s.x0, s.y0, 32), { 1, s.vTop } },
+      { Vec3(s.x1, s.y1, 32), { 0, s.vTop } },
+      { Vec3(s.x0, s.y0, z1), { 1, 0.5f } },
+      { Vec3(s.x1, s.y1, z1), { 0, 0.5f } },
+      { Vec3(s.x0, s.y0, z2), { 1, 0.5f } },
+      { Vec3(s.x1, s.y1, z2), { 0, 0.5f } },
+    };
+    Draw(s.nTex, Verts, 6);
+  }
 }
 
 void CD3D12Renderer::DrawSprites()

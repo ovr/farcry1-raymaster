@@ -317,6 +317,7 @@ void CD3D12Renderer::Release()
   if (m_pShaders)
     m_pShaders->Shutdown();
   m_pDetailTexture = nullptr;   // released with every texture
+  m_SkyBoxes.clear();
   if (m_pTextures)
     m_pTextures->Shutdown();
   if (m_pPipeline)
@@ -388,8 +389,15 @@ void CD3D12Renderer::BeginFrame (void)
     if (m_pFrameDump)
     {
       const Vec3 vPos = m_Camera.GetPos(), vAngles = m_Camera.GetAngles();
-      fprintf(m_pFrameDump.get(), "frame %d: camera (%.2f %.2f %.2f) angles (%.2f %.2f %.2f) fov %.3f\n", m_nFrameID,
-              vPos.x, vPos.y, vPos.z, vAngles.x, vAngles.y, vAngles.z, m_Camera.GetFov());
+      fprintf(m_pFrameDump.get(), "frame %d: camera (%.2f %.2f %.2f) angles (%.2f %.2f %.2f) fov %.3f near %.3f far %.1f\n", m_nFrameID,
+              vPos.x, vPos.y, vPos.z, vAngles.x, vAngles.y, vAngles.z, m_Camera.GetFov(), m_Camera.GetZMin(), m_Camera.GetZMax());
+      for (const Matrix44 *pM : { &m_CameraView, &m_ProjMatrix })
+      {
+        fprintf(m_pFrameDump.get(), pM == &m_CameraView ? "view" : "projection");
+        for (float f : pM->data)
+          fprintf(m_pFrameDump.get(), " %g", f);
+        fprintf(m_pFrameDump.get(), "\n");
+      }
     }
   }
 }

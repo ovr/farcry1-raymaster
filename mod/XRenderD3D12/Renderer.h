@@ -364,6 +364,8 @@ public:
   //! textures/terrain/detail/default, whatever r_DetailDefault and r_DetailTextures say); NULL
   //! without one.
   CTexture *GetDetailTexture();
+  //! The sky box of a CRESky element drawn with a sky shader (CShaderManager::FindSkyBox).
+  void DrawSkyItem(const SRenderItem &it);
   //! The particle sprites of the scene (EF_AddSpriteToScene).
   void DrawSprites();
   //! d3d12_DumpFrame: one line per render item, then one per draw with what the draw got.
@@ -378,6 +380,14 @@ public:
 
   int m_nSceneFlags = 0;                    //!< SHDF_* of the EF_EndEf3D being drawn
   CTexture *m_pDetailTexture = nullptr;     //!< GetDetailTexture (one reference)
+  //! The textures of a sky box: <name>_5 (the top), <name>_12 (the sides x = 32 and y = -32),
+  //! <name>_34 (the sides x = -32 and y = 32); one reference each.
+  struct SSkyBoxTextures
+  {
+    std::string Name;
+    CTexture *pTex[3] = {};
+  };
+  std::vector<SSkyBoxTextures> m_SkyBoxes;  //!< DrawSkyItem, the sky boxes used so far
   Matrix44 m_NearestProj;                   //!< FOB_NEAREST objects
 
   //////////////////////////////////////////////////////////////////////////

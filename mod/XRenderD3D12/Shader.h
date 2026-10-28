@@ -3,10 +3,11 @@
 //	File: Shader.h
 //	Description: Shaders (IShader), shader resources and the shader manager.
 //
-//	The renderer does not run the engine's shader scripts. A CShader is a
-//	name with the getter values the engine depends on and a draw class:
-//	how this renderer draws what uses it (one of a few fixed ways). The
-//	IRenderer shader methods are in RendererShaders.cpp.
+//	The renderer does not run the engine's shader scripts (it only reads
+//	the sky boxes they name). A CShader is a name with the getter values the
+//	engine depends on and a draw class: how this renderer draws what uses it
+//	(one of a few fixed ways). The IRenderer shader methods are in
+//	RendererShaders.cpp.
 //
 //	Three kinds of shaders:
 //	  - engine shaders, loaded by name with EF_LoadShader ("Terrain",
@@ -228,6 +229,11 @@ public:
   int GetCount() const { return (int)m_Shaders.size(); }
   //! The template shader for a template name (as a material names it), made on first use.
   CShader *GetTemplate(const char *szName, uint64 nMaskGen);
+  //! The sky box a sky shader's script names ("SkyBox = Skys/Training/Box" in a "Shader
+  //! '01_Training'" block of Shaders/Scripts/CryShaders/*.csl, read on first use): the base name of
+  //! its three textures <name>_5 (top), <name>_12 and <name>_34 (sides), lower case; NULL when the
+  //! shader has none.
+  const std::string *FindSkyBox(const char *szShader);
 
   //! IShader::AddTemplate: registers the template szName under nTemplId (-1: a new id from
   //! EFT_USER_FIRST up); returns the id, -1 when there is nothing to register.
@@ -274,6 +280,8 @@ private:
   std::unordered_map<std::string, int> m_MaterialCounts;        //!< shaders made per material name
   std::unordered_map<int, CShader *> m_UserTemplates;           //!< user template ids
   std::vector<std::unique_ptr<SLightMaterial>> m_LightMaterials; //!< [0] the default one
+  std::unordered_map<std::string, std::string> m_SkyBoxes;      //!< FindSkyBox: sky box by shader name
+  bool m_bSkyBoxesRead = false;
   CShader *m_pDefault = nullptr;
   int m_nNextUserTemplate = EFT_USER_FIRST;
   int m_nGlobalTemplate = -2;

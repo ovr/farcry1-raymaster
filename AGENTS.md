@@ -300,7 +300,8 @@ it as well: it holds local, machine-specific instructions and is not committed (
 - `XRENDERD3D12_DEBUG=1` (or `d3d12_Debug 1`, read at start-up) turns on the debug layer and GPU
   based validation; their messages go to the engine log, starting with `[D3D12]`.
 - `d3d12_DumpFrame 1` writes the render items of the next frame to
-  `farcry1_testing1/XRenderD3D12_frame.txt` (never committed): for each item its list, sort
+  `farcry1_testing1/XRenderD3D12_frame.txt` (never committed): the camera (position, angles,
+  field of view, near and far plane, view and projection matrices), then for each item its list, sort
   group, draw class, shader, diffuse texture, leaf buffer, object (position, flags, light map,
   light mask, ambient and colour) and resources (alpha reference, opacity, flags), and for each
   draw what it got (vertex format, states, shader flags, textures, colour, lights). With
