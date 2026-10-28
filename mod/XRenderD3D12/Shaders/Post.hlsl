@@ -44,14 +44,15 @@ SPostOutput VSMain(SVertexInput In)
 
 static const float3 LUMINANCE = float3(0.299, 0.587, 0.114);
 
-// Night vision: v = saturate(sharp * L + glow * L(blur) + bias + grain), from dark to bright.
-static const float NV_SHARP = 1.36;
-static const float NV_GLOW = 1.45;
-static const float NV_BIAS = -0.27;
-static const float NV_GRAIN = 0.5;            //!< the grain's range in v
-static const float NV_GRAIN_ROWS = 384;       //!< the grain's cells across the screen's height
-static const float3 NV_DARK = float3(0.08, 0.25, 0.24);
-static const float3 NV_BRIGHT = float3(0.965, 0.953, 0.969);
+// Night vision: x = max(sharp * L + glow * L(blur) + bias, 0), colour = saturate(NV_DARK + NV_SLOPE * x):
+// cyan in the mid tones, white where every channel saturates; then grey grain (it shows in the whites too).
+static const float NV_SHARP = 1.57;
+static const float NV_GLOW = 1.27;
+static const float NV_BIAS = -0.243;
+static const float3 NV_DARK = float3(0.087, 0.224, 0.211);
+static const float3 NV_SLOPE = float3(0.778, 0.726, 0.755);
+static const float NV_GRAIN = 0.34;           //!< the grain's range
+static const float NV_GRAIN_ROWS = 576;       //!< the grain's cells across the screen's height (smooth noise)
 
 // Screen blur, amount a, colour C: scene * max(1 - SHARP_LOSS * a, 0) + a * C * (GAIN * L(blur) + BIAS).
 static const float BLUR_SHARP_LOSS = 1.42;
@@ -73,6 +74,17 @@ float Hash(uint2 vCell, uint nSeed)
   n *= 0x27d4eb2du;
   n ^= n >> 15;
   return n * (1.0 / 4294967296.0);
+}
+
+//! Smooth noise in 0..1: Hash on the lattice of vPos, blended bilinearly.
+float ValueNoise(float2 vPos, uint nSeed)
+{
+  float2 vCell = floor(vPos);
+  float2 f = vPos - vCell;
+  uint2 c = (uint2)vCell;
+  float n00 = Hash(c, nSeed), n10 = Hash(c + uint2(1, 0), nSeed);
+  float n01 = Hash(c + uint2(0, 1), nSeed), n11 = Hash(c + uint2(1, 1), nSeed);
+  return lerp(lerp(n00, n10, f.x), lerp(n01, n11, f.x), f.y);
 }
 
 float4 Downsample(float2 vPixel)
@@ -114,10 +126,9 @@ float4 Effects(float2 vPixel)
   float3 c = vScene.rgb;
   if (HasFlag(POST_NIGHTVISION))
   {
-    float fCell = max(round(1 / (g_Draw.vParams0.y * NV_GRAIN_ROWS)), 1);
-    float fGrain = Hash((uint2)(vPixel / fCell), (uint)g_Draw.vParams0.w) - 0.5;
-    float v = saturate(NV_SHARP * dot(c, LUMINANCE) + NV_GLOW * dot(vBlur, LUMINANCE) + NV_BIAS + NV_GRAIN * fGrain);
-    c = lerp(NV_DARK, NV_BRIGHT, v);
+    float fGrain = ValueNoise(vUV * float2(NV_GRAIN_ROWS * g_Draw.vParams0.y / g_Draw.vParams0.x, NV_GRAIN_ROWS), (uint)g_Draw.vParams0.w) - 0.5;
+    float x = max(NV_SHARP * dot(c, LUMINANCE) + NV_GLOW * dot(vBlur, LUMINANCE) + NV_BIAS, 0);
+    c = saturate(NV_DARK + NV_SLOPE * x) + NV_GRAIN * fGrain;
   }
   if (HasFlag(POST_SCREENBLUR))
   {
