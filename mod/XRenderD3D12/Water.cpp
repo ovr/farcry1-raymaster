@@ -336,7 +336,7 @@ bool CD3D12Renderer::CopySceneForWater()
   if (!m_pSceneColorCopy || w != m_nSceneCopyWidth || h != m_nSceneCopyHeight)
   {
     ReleaseWaterResources();
-    if (!m_pDevice->CreateTargetCopies(m_pSceneColorCopy, m_pSceneDepthCopy))
+    if (!m_pDevice->CreateTargetCopies(m_pSceneColorCopy, &m_pSceneDepthCopy))
       return false;
     m_nSceneColorSRV = m_pDescriptors->AllocSRV(m_pSceneColorCopy.Get(), nullptr);
     D3D12_SHADER_RESOURCE_VIEW_DESC Desc = {};

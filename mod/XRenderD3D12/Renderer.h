@@ -32,6 +32,7 @@ class CTextureManager;
 class CShaderManager;
 class CScene;
 struct SRenderItem;
+struct SScreenFxState;
 
 class CD3D12Renderer : public IRenderer
 {
@@ -557,6 +558,8 @@ public:
 
   //! After the main view's 3D scene: the screen effects asked for, over the scene drawn.
   void DrawScreenEffects();
+  //! Night vision, the screen blur, the flash bang and (bFade) the fade in one pass over a copy of the scene.
+  void DrawScreenComposite(const SScreenFxState &fx, bool bBlur, bool bFade);
   //! The targets of Blur for the back buffer reduced by nFactor (made when it changes). False: none.
   bool EnsurePostBlur(SPostBlur &Blur, int nFactor);
   //! The scene into Blur.pTex[0]: reduced, then a gaussian of fSigma of its texels across and down.
@@ -564,12 +567,24 @@ public:
   //! A pass of the post program into pTarget (one of the blur targets).
   void DrawPostPass(CD3D12Texture *pTarget, const SDrawConstants &dc);
   void ReleasePostBlur(SPostBlur &Blur);
+  //! The share of the frame before in this one (r_MotionBlur, r_MotionBlurAmount, the frame time); 0: none.
+  float MotionBlurShare();
+  //! A full screen draw blended (SRCALPHA, INVSRCALPHA) over the back buffer: the texture nTexSRV
+  //! times vColor; its alpha too with bAlpha, else the back buffer's alpha stays.
+  void DrawPostBlend(int nTexSRV, const float vColor[4], bool bAlpha);
+  void ReleaseMotionHistory();
   void ReleaseScreenEffects();
 
   SPostBlur m_PostGlow;                     //!< about POST_BLUR_ROWS rows: night vision's glow, the flash's afterimage
   SPostBlur m_PostSoft;                     //!< the screen blur's (its own radius)
   CD3D12Texture *m_pPostGhost = nullptr;    //!< the flash bang's afterimage: the glow blur at the start of the flash
   bool m_bFlashGhost = false;               //!< m_pPostGhost holds the current flash's afterimage
+  ComPtr<ID3D12Resource> m_pMotionHistory;  //!< motion blur: the frame before, as the screen effects left it before the fade
+  int m_nMotionHistorySRV = -1;
+  int m_nMotionHistoryWidth = 0, m_nMotionHistoryHeight = 0;
+  int m_nMotionHistoryFrame = -1;           //!< the m_nFrames it was copied in
+  ICVar *m_pMotionBlur = nullptr;           //!< r_MotionBlur, looked up on first use
+  ICVar *m_pMotionBlurAmount = nullptr;     //!< r_MotionBlurAmount
 
   //////////////////////////////////////////////////////////////////////////
   // State (public: the subsystems' files use it)

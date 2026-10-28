@@ -14,6 +14,9 @@
 //	    over an afterimage (the blurred scene at the start of the flash) and
 //	    a bright spot at the flash's position (FlashPos, FlashSize: the
 //	    virtual 800 x 600 screen) that shrinks as it fades.
+//	  - Motion blur (r_MotionBlur): after those, the frame before blends in
+//	    (MotionBlurShare), then the result is kept for the next frame; the
+//	    fade comes last, so it stays out of the trail.
 //	The blurs: the copy of the back buffer reduced by a whole factor, then a
 //	gaussian across and down. The glow (night vision, the afterimage) is
 //	reduced to about POST_BLUR_ROWS rows and blurred by 2 of its texels, so
@@ -26,6 +29,7 @@
 #include "Renderer.h"
 #include "D3D12Device.h"
 #include "D3D12Upload.h"
+#include "D3D12Descriptors.h"
 #include "D3D12Pipeline.h"
 #include "Scene.h"
 
@@ -44,6 +48,11 @@ void Set4(float v[4], float x, float y, float z, float w)
 
 //! A triangle over the whole target (clip space).
 const float s_FullScreen[3][3] = { { -1, -1, 0 }, { -1, 3, 0 }, { 3, -1, 0 } };
+
+//! Motion blur: the share of the frame before is 1 - MOTION_BLUR_RATE * r_MotionBlurAmount * the
+//! frame time, so at the default amount 0.9 there is none from 1 / 67.5 s a frame on (the demos'
+//! 0.02 s), and a short trail at higher frame rates.
+constexpr float MOTION_BLUR_RATE = 75;
 
 //! The screen blur's gaussian in pixels of a back buffer nHeight rows high: a part fixed in
 //! pixels and a part of the screen, 5.5 at 768 rows, 10 at 2160.
@@ -83,17 +92,56 @@ void CD3D12Renderer::DrawScreenEffects()
   const SScreenFxState fx = m_pScene->GetScreenFx();
   const bool bBlur = fx.bScreenBlur && fx.fBlurAmount > 0;
   const bool bFade = fx.bScreenFade && fx.fFadeAlpha > 0;
+  const float fMotion = MotionBlurShare();
   if (!fx.bFlashBang)
     m_bFlashGhost = false;
-  if (!fx.bNightVision && !bBlur && !fx.bFlashBang && !bFade)
+  if (!fx.bNightVision && !bBlur && !fx.bFlashBang && !bFade && fMotion <= 0)
     return;
   if (m_pFrameDump)
   {
-    fprintf(m_pFrameDump.get(), "screen effects: night vision %d, blur %g (%.2f %.2f %.2f), flash bang %d (%g), fade %g\n",
+    fprintf(m_pFrameDump.get(), "screen effects: night vision %d, blur %g (%.2f %.2f %.2f), flash bang %d (%g), fade %g, motion blur %g\n",
             fx.bNightVision, bBlur ? fx.fBlurAmount : 0.0f, fx.fBlurColor[0], fx.fBlurColor[1], fx.fBlurColor[2], fx.bFlashBang,
-            fx.fFlashBang, bFade ? fx.fFadeAlpha : 0.0f);
+            fx.fFlashBang, bFade ? fx.fFadeAlpha : 0.0f, fMotion);
   }
   GpuSection("screen effects");
+  // With motion blur the fade is a pass of its own after the frame is kept.
+  if (fx.bNightVision || bBlur || fx.bFlashBang || (bFade && fMotion <= 0))
+    DrawScreenComposite(fx, bBlur, bFade && fMotion <= 0);
+  if (fMotion <= 0)
+    return;
+  const int w = m_pDevice->GetWidth(), h = m_pDevice->GetHeight();
+  if (!m_pMotionHistory || w != m_nMotionHistoryWidth || h != m_nMotionHistoryHeight)
+  {
+    ReleaseMotionHistory();
+    if (!m_pDevice->CreateTargetCopies(m_pMotionHistory, nullptr) ||
+        (m_nMotionHistorySRV = m_pDescriptors->AllocSRV(m_pMotionHistory.Get(), nullptr)) < 0)
+    {
+      ReleaseMotionHistory();
+      return;
+    }
+    m_nMotionHistoryWidth = w;
+    m_nMotionHistoryHeight = h;
+  }
+  m_pDevice->SetBackBufferTargets();
+  // Only a frame kept in the frame just before blends in (not one from before a pause). Its share
+  // is times its alpha, and the blend leaves w * w + alpha * (1 - w) in the back buffer's alpha, w
+  // its share: the alpha kept falls to about 0.76 where the scene's is 1 (share 0.55: 0.42).
+  if (m_nMotionHistoryFrame == m_nFrames - 1)
+  {
+    const float vColor[4] = { 1, 1, 1, fMotion };
+    DrawPostBlend(m_nMotionHistorySRV, vColor, true);
+  }
+  m_pDevice->CopyTargets(m_pMotionHistory.Get(), nullptr);
+  m_nMotionHistoryFrame = m_nFrames;
+  if (bFade)
+  {
+    const float vBlack[4] = { 0, 0, 0, fx.fFadeAlpha };
+    DrawPostBlend(D3D12_SRV_WHITE, vBlack, false);
+  }
+}
+
+void CD3D12Renderer::DrawScreenComposite(const SScreenFxState &fx, bool bBlur, bool bFade)
+{
   if (!CopySceneForWater())
     return;
   const int w = m_pDevice->GetWidth(), h = m_pDevice->GetHeight();
@@ -236,6 +284,47 @@ void CD3D12Renderer::DrawPostPass(CD3D12Texture *pTarget, const SDrawConstants &
   DrawImmediate(Key, dc, D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST, VERTEX_FORMAT_P3F, s_FullScreen, 3);
 }
 
+float CD3D12Renderer::MotionBlurShare()
+{
+  if (!iConsole)
+    return 0;
+  if (!m_pMotionBlur)
+    m_pMotionBlur = iConsole->GetCVar("r_MotionBlur");
+  if (!m_pMotionBlurAmount)
+    m_pMotionBlurAmount = iConsole->GetCVar("r_MotionBlurAmount");
+  if (!m_pMotionBlur || !m_pMotionBlur->GetIVal() || !m_pMotionBlurAmount || !iTimer)
+    return 0;
+  // in steps of 1 / 255, down, as an 8 bit colour would hold it
+  const float fShare = std::clamp(1 - MOTION_BLUR_RATE * m_pMotionBlurAmount->GetFVal() * iTimer->GetFrameTime(), 0.0f, 1.0f);
+  return floorf(fShare * 255) / 255;
+}
+
+void CD3D12Renderer::DrawPostBlend(int nTexSRV, const float vColor[4], bool bAlpha)
+{
+  SPipelineKey Key = {};
+  Key.nProgram = eD3D12P_Post;
+  Key.nState = GS_NODEPTHTEST | GS_BLSRC_SRCALPHA | GS_BLDST_ONEMINUSSRCALPHA | (bAlpha ? 0 : GS_COLMASKONLYRGB);
+  Key.nCull = R_CULL_NONE;
+  SDrawConstants dc = DefaultDrawConstants();
+  dc.nFlags = POST_BLEND;
+  dc.nTex0 = (uint32)nTexSRV;
+  Set4(dc.vParams0, 1.0f / m_pDevice->GetWidth(), 1.0f / m_pDevice->GetHeight(), 0, 0);
+  Set4(dc.vParams1, vColor[0], vColor[1], vColor[2], vColor[3]);
+  DrawImmediate(Key, dc, D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST, VERTEX_FORMAT_P3F, s_FullScreen, 3);
+}
+
+void CD3D12Renderer::ReleaseMotionHistory()
+{
+  if (m_pDescriptors && m_nMotionHistorySRV >= 0)
+    m_pDescriptors->FreeSRV(m_nMotionHistorySRV);
+  m_nMotionHistorySRV = -1;
+  if (m_pDevice)
+    m_pDevice->DeferredRelease(m_pMotionHistory);
+  m_pMotionHistory.Reset();
+  m_nMotionHistoryWidth = m_nMotionHistoryHeight = 0;
+  m_nMotionHistoryFrame = -1;
+}
+
 void CD3D12Renderer::ReleaseScreenEffects()
 {
   ReleasePostBlur(m_PostGlow);
@@ -244,4 +333,5 @@ void CD3D12Renderer::ReleaseScreenEffects()
     m_pUpload->ReleaseTexture(m_pPostGhost);
   m_pPostGhost = nullptr;
   m_bFlashGhost = false;
+  ReleaseMotionHistory();
 }

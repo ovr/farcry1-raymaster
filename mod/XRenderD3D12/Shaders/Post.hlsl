@@ -11,6 +11,8 @@
 //	                   vParams0.z x vParams0.z bilinear taps (1: a copy)
 //	  POST_BLUR        a gaussian of tex0, sigma vParams1.z texels (up to
 //	                   about 2.5), along vParams1.xy (one texel of tex0 in uv)
+//	  POST_BLEND       tex0 (point sampled) times vParams1, for a draw blended
+//	                   over the target (motion blur, fade)
 //	  POST_EFFECTS     tex0 the copy of the scene, tex1 its glow blur, tex2
 //	                   the flash's afterimage, tex3 the screen blur's blur:
 //	    POST_NIGHTVISION  the luminance of the scene plus that of its glow,
@@ -154,5 +156,7 @@ float4 PSMain(SPostOutput In) : SV_Target
     return Downsample(In.vPos.xy);
   if (HasFlag(POST_BLUR))
     return Blur(In.vPos.xy);
+  if (HasFlag(POST_BLEND))
+    return g_Textures[g_Draw.nTex0].SampleLevel(g_SamplerPointClamp, In.vPos.xy * g_Draw.vParams0.xy, 0) * g_Draw.vParams1;
   return Effects(In.vPos.xy);
 }
