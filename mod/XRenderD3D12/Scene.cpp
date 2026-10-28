@@ -59,7 +59,7 @@ namespace
 
   bool IsBlendedClass(EDrawClass eDC)
   {
-    return eDC == eDC_AlphaBlend || eDC == eDC_Additive || eDC == eDC_FogLayer || IsWaterClass(eDC);
+    return eDC == eDC_AlphaBlend || eDC == eDC_Additive || eDC == eDC_FogLayer || eDC == eDC_ScopeLens || IsWaterClass(eDC);
   }
 
   //! The order of the passes of an object drawn one over another: its first pass, its light

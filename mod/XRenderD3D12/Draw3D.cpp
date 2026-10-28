@@ -739,6 +739,11 @@ void CD3D12Renderer::DrawLeafItem(const SRenderItem &it)
       return;
     pTex = nullptr;
     break;
+  case eDC_ScopeLens:
+    if (!SetupScopeLensDraw(Key, dc))
+      return;
+    pTex = nullptr;
+    break;
   default:
     return;
   }
@@ -772,7 +777,7 @@ void CD3D12Renderer::DrawLeafItem(const SRenderItem &it)
 void CD3D12Renderer::DumpItem(int nIndex, const SRenderItem &it, int eList)
 {
   static const char *const s_DrawClasses[] = { "NoDraw", "Opaque", "AlphaTest", "AlphaTestVColor", "VColor", "AlphaBlend", "Additive", "Terrain", "Sky", "Engine", "Water", "WaterBottom", "WaterBeach", "TerrainLayer", "Decal",
-                                                "TerrainShadow", "Caustics", "FogLayer" };
+                                                "TerrainShadow", "Caustics", "FogLayer", "ScopeLens" };
   const CCObject *pObj = it.pObj;
   const char *szLB = "";
   if (it.pRE->m_Type == eDATA_OcLeaf && static_cast<CREOcLeaf *>(it.pRE)->m_pBuffer)
@@ -949,7 +954,7 @@ void CD3D12Renderer::DumpDraw(const SDrawConstants &dc, const SPipelineKey &Key,
 
 void CD3D12Renderer::SetObjectLights(SDrawConstants &dc, const CCObject *pObj, const Matrix44 &World, CLeafBuffer *pLB)
 {
-  // The lights of the object's m_DynLMMask besides the sun (an empty mask: none), at most
+  // The lights of the object's m_DynLMMask besides the sun (an empty mask: none, and no sun), at most
   // XR_MAX_DRAW_LIGHTS; projected lights are not among them. Point lights are lit per vertex
   // with the attenuation 1 / (a0 + a1 d) up to their range. Characters get (0.01, 5.07756 / R)
   // up to 50.416 R. Static objects get a line through the falloff
@@ -965,6 +970,14 @@ void CD3D12Renderer::SetObjectLights(SDrawConstants &dc, const CCObject *pObj, c
     r = (pVC->m_vBoxMax - pVC->m_vBoxMin).GetLength() * 0.5f;
   }
   const std::span<CDLight *const> Lights = m_pScene->GetLights();
+  // The sun lights the object only with its bit in the mask: the engine leaves it out where the sun
+  // does not reach (the first person weapon in a tunnel).
+  const CDLight *pSun = m_pScene->GetSun();
+  for (size_t i = 0; pSun && i < Lights.size() && i < 32; i++)
+  {
+    if (Lights[i] == pSun && !(pObj->m_DynLMMask & (1u << i)))
+      dc.nFlags2 |= DF2_NO_SUN;
+  }
   uint32 n = 0;
   for (size_t i = 0; i < Lights.size() && i < 32 && n < XR_MAX_DRAW_LIGHTS; i++)
   {

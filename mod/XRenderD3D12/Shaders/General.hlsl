@@ -80,6 +80,8 @@
 //	    DF2_HEAT (heat vision): before the fog, the colour through HeatVision
 //	      (Common.hlsli)
 //	  DF2_NO_SUN leaves the sun out of DF_LIGHTING (a light pass of its own).
+//	  DF2_SCOPE_LENS (the glass of a scope) replaces the pixel shader with
+//	  ScopeLens.
 //
 //////////////////////////////////////////////////////////////////////
 
@@ -184,6 +186,31 @@ float FogVolumeAlpha(float3 vPos)
   return fGate * (1 - exp(-distance(vPos, g_Frame.vCameraPos.xyz) * g_Draw.vParams0.y));
 }
 
+//! The glass of a scope (DF2_SCOPE_LENS): the copy of the scene (tex0) around the middle of the
+//! screen, where the scope aims, as through a real one: each pixel shows the scene at its own offset
+//! from the middle of the glass times vParams0.x from there. The middle of the glass is uv0 (0.5,
+//! 0.5); the offset in pixels comes from uv0 through its screen derivatives, so the picture stands
+//! upright whichever way the glass's texture coordinates run. The wave slopes (tex1, unit RMS) times
+//! vParams0.y move it in uv0: the glass is not quite even. rgb times vColor.rgb; alpha vColor.a *
+//! 2^-(r / vParams0.z)^4, r = |uv0 - 0.5|.
+float4 ScopeLens(SVertexOutput In)
+{
+  float2 vMiddle = 0.5 * g_Frame.vScreen.xy;
+  float2 vUV = In.vTex0;
+  float2 s1 = (g_Textures[g_Draw.nTex1].Sample(g_SamplerLinearWrap, 2 * vUV).rg * 255 - 128) / 32;
+  float2 s2 = (g_Textures[g_Draw.nTex1].Sample(g_SamplerLinearWrap, 2 * vUV.yx + 0.5).gr * 255 - 128) / 32;
+  float2 vOffset = vUV - 0.5 + (s1 + s2) * (0.7071 * g_Draw.vParams0.y);
+  // The offset in pixels p: vOffset = p.x * ddx(uv0) + p.y * ddy(uv0).
+  float2 a = ddx(vUV), b = ddy(vUV);
+  float fDet = a.x * b.y - b.x * a.y;
+  float2 vPixels = abs(fDet) > 1e-12 ? float2(vOffset.x * b.y - b.x * vOffset.y, a.x * vOffset.y - vOffset.x * a.y) / fDet : 0;
+  float3 vScene = g_Textures[g_Draw.nTex0].SampleLevel(g_SamplerLinearClamp, (vMiddle + vPixels * g_Draw.vParams0.x) * g_Frame.vScreen.zw, 0).rgb;
+
+  float2 d = (vUV - 0.5) / g_Draw.vParams0.z;
+  float r2 = dot(d, d);
+  return float4(vScene * g_Draw.vColor.rgb, g_Draw.vColor.a * exp2(-r2 * r2));
+}
+
 SVertexOutput VSMain(SVertexInput In)
 {
   SVertexOutput Out;
@@ -252,6 +279,8 @@ SVertexOutput VSMain(SVertexInput In)
 
 float4 PSMain(SVertexOutput In) : SV_Target
 {
+  if (HasFlag2(DF2_SCOPE_LENS))
+    return ScopeLens(In);
   uint nSampler0 = g_Draw.nSamplers & 15;
   uint nSampler1 = (g_Draw.nSamplers >> 4) & 15;
 

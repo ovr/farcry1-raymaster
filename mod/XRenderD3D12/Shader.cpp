@@ -103,16 +103,17 @@ constexpr STemplateEntry s_Templates[] =
   { "terrainlayer",                    "terrainlayer(",                 eS_TerrainDetailTextures, EF2_FOGOVERLAY1 | EF2_DONTSORTBYDIST,   0,              eDC_TerrainLayer,     eCULL_Back },
   // Flares: no draw for the objects.
   { "flareproc",                       "",                              eS_Banner,                0,                                      0,              eDC_NoDraw,           eCULL_Back },
-  // Not drawn: invisible surfaces, heat haze, scopes.
+  // Not drawn: invisible surfaces, heat haze.
   { "nodraw",                          "",                              eS_Opaque,                kOpaque2,                               EF3_NODRAW,     eDC_NoDraw,           eCULL_Back },
   { "no_draw",                         "nodraw",                        eS_Opaque,                kOpaque2,                               EF3_NODRAW,     eDC_NoDraw,           eCULL_Back },
   { "particleminheathaze",             "",                              eS_HeatVision,            0,                                      0,              eDC_NoDraw,           eCULL_None },
   { "particlemedheathaze",             "",                              eS_HeatVision,            0,                                      0,              eDC_NoDraw,           eCULL_None },
   { "particlemaxheathaze",             "",                              eS_HeatVision,            0,                                      0,              eDC_NoDraw,           eCULL_None },
-  { "ag36scoperefraction",             "",                              eS_Refractive,            0,                                      0,              eDC_NoDraw,           eCULL_Back },
-  { "aw50scoperefraction",             "",                              eS_Refractive,            0,                                      0,              eDC_NoDraw,           eCULL_Back },
-  { "oicwscoperefraction",             "",                              eS_Refractive,            0,                                      0,              eDC_NoDraw,           eCULL_Back },
-  { "rlscoperefraction",               "",                              eS_Refractive,            0,                                      0,              eDC_NoDraw,           eCULL_Back },
+  // The glass of the scopes (drawn with r_ScopeLens_fx).
+  { "ag36scoperefraction",             "",                              eS_Refractive,            0,                                      0,              eDC_ScopeLens,        eCULL_Back },
+  { "aw50scoperefraction",             "",                              eS_Refractive,            0,                                      0,              eDC_ScopeLens,        eCULL_Back },
+  { "oicwscoperefraction",             "",                              eS_Refractive,            0,                                      0,              eDC_ScopeLens,        eCULL_Back },
+  { "rlscoperefraction",               "",                              eS_Refractive,            0,                                      0,              eDC_ScopeLens,        eCULL_Back },
 
   // Prefixes, longest first.
   { "templbumpreflcm*",                "templreflcm",                   eS_Opaque,                kOpaque2,                               0,              eDC_Opaque,           eCULL_Back },

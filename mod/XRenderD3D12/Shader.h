@@ -63,6 +63,7 @@ enum EDrawClass
   eDC_TerrainShadow,      //!< the shadow of static objects on the terrain (their shadow maps), blended
   eDC_Caustics,           //!< the light the ocean's waves focus on the terrain under it, multiplied in
   eDC_FogLayer,           //!< the cap of a fog volume (its layer), blended with the volume's fog
+  eDC_ScopeLens,          //!< the glass of a weapon's scope (r_ScopeLens_fx): the scene seen through it, blended
 };
 
 //! How the colour of a lit draw class (opaque, alpha test, alpha blend) is lit.

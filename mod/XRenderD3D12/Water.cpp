@@ -4,7 +4,8 @@
 //	Description: The water: the ocean around the camera and the water
 //	volumes (eDC_Water), the foam on the beach (eDC_WaterBeach), the
 //	sea floor under the ocean (eDC_WaterBottom) and the caustics on the
-//	terrain under it (eDC_Caustics).
+//	terrain under it (eDC_Caustics); also the glass of the scopes
+//	(eDC_ScopeLens), which shows the same copy of the scene.
 //
 //	The water surfaces come first in the blended list. Before the first
 //	one, the back buffer and the depth buffer are copied; the water program
@@ -98,6 +99,17 @@ constexpr float CAUSTICS_RANGE = 6.0f;
 constexpr float CAUSTICS_SIZE = 4.0f;
 constexpr float CAUSTICS_STRENGTH = 0.2f;
 constexpr float CAUSTICS_DEPTH = 12.0f;
+
+// The glass of a scope: the picture through it is the scene around the middle of the screen (where
+// the scope aims), this many times as wide as the glass (it shows a little more than it covers);
+// the unevenness of the glass moves it by this RMS in the glass's texture coordinates; its tint
+// (blue: the red mostly goes), how opaque its middle is, and the distance from the middle (in its
+// texture coordinates) where that halves, falling off steeply beyond.
+constexpr float SCOPE_LENS_FIELD = 1.2f;
+constexpr float SCOPE_LENS_WOBBLE = 0.004f;
+constexpr float SCOPE_LENS_TINT[3] = { 0.37f, 0.58f, 0.82f };
+constexpr float SCOPE_LENS_OPACITY = 0.9f;
+constexpr float SCOPE_LENS_RADIUS = 0.3f;
 
 //! The wave texture, B, G, R, A bytes: the slopes of a height field that tiles over the texture,
 //! dH/du in red and dH/dv in green, the height in blue (128: 0; 32 units: the RMS of the slopes,
@@ -312,6 +324,24 @@ bool CD3D12Renderer::SetupCausticsDraw(SPipelineKey &Key, SDrawConstants &dc, co
   const float fTime = iTimer ? iTimer->GetCurrTime() : 0.0f;
   Set4(dc.vParams0, pFV->fFogLayerZ, 1 / CAUSTICS_SIZE, fTime, CAUSTICS_STRENGTH * fSun);
   Set4(dc.vParams1, m_SunDir[0] * fShift, m_SunDir[1] * fShift, CAUSTICS_DEPTH, CAUSTICS_RANGE / m_fCausticsMinMean);
+  return true;
+}
+
+bool CD3D12Renderer::SetupScopeLensDraw(SPipelineKey &Key, SDrawConstants &dc)
+{
+  // With r_ScopeLens_fx, in the main view: over the copy of the scene the blended list starts with
+  // (the water's; made here when no water came before), blended, without depth writes.
+  if (!IsScopeLensOn() || m_bReflectionPass || m_bShadowMapPass || m_bSpritePass || m_nRecurseLevel > 1)
+    return false;
+  if (!m_bSceneCopied && !CopySceneForWater())
+    return false;
+  dc.nFlags = 0;
+  dc.nFlags2 = DF2_SCOPE_LENS;
+  dc.nTex0 = (uint32)m_nSceneColorSRV;
+  dc.nTex1 = (uint32)GetWaveTexture();
+  Set4(dc.vColor, SCOPE_LENS_TINT[0], SCOPE_LENS_TINT[1], SCOPE_LENS_TINT[2], SCOPE_LENS_OPACITY);
+  Set4(dc.vParams0, SCOPE_LENS_FIELD, SCOPE_LENS_WOBBLE, SCOPE_LENS_RADIUS, 0);
+  Key.nState = GS_BLSRC_SRCALPHA | GS_BLDST_ONEMINUSSRCALPHA;
   return true;
 }
 

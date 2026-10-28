@@ -278,3 +278,10 @@ bool CD3D12Renderer::IsVolumetricFogOn()
     m_pVolumetricFog = iConsole->GetCVar("r_VolumetricFog");
   return m_pVolumetricFog && m_pVolumetricFog->GetIVal() != 0;
 }
+
+bool CD3D12Renderer::IsScopeLensOn()
+{
+  if (!m_pScopeLens && iConsole)
+    m_pScopeLens = iConsole->GetCVar("r_ScopeLens_fx");
+  return m_pScopeLens && m_pScopeLens->GetIVal() != 0;
+}

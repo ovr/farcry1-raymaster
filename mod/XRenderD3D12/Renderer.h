@@ -46,6 +46,8 @@ public:
   void RegisterOtherVariables();
   //! r_VolumetricFog (one of them): the fog volume passes are drawn.
   bool IsVolumetricFogOn();
+  //! r_ScopeLens_fx (one of them): the glass of the scopes is drawn.
+  bool IsScopeLensOn();
 
   //////////////////////////////////////////////////////////////////////////
   // Renderer.cpp
@@ -439,6 +441,8 @@ public:
   bool SetupCausticsDraw(SPipelineKey &Key, SDrawConstants &dc, const SRenderItem &it);
   //! The texture index of the caustics pattern (made on first use), -1 without one.
   int GetCausticsTexture();
+  //! The glass of a scope (eDC_ScopeLens). False: not drawn.
+  bool SetupScopeLensDraw(SPipelineKey &Key, SDrawConstants &dc);
   //! Before the main view is drawn (Items: its render items): with r_WaterReflections and an
   //! ocean surface among the items, the scene mirrored in the water plane into m_pReflectionColor,
   //! when the last one is out of date (r_WaterUpdate*): the 3D engine renders it with
@@ -672,6 +676,7 @@ public:
   int CV_d3d12_debug = 0;             //!< debug layer (also XRENDERD3D12_DEBUG=1); only read at Init
   int CV_d3d12_DumpFrame = 0;         //!< non-zero: the next frame's 3D draws go to XRenderD3D12_frame.txt, then 0
   ICVar *m_pVolumetricFog = nullptr;  //!< r_VolumetricFog, looked up on first use
+  ICVar *m_pScopeLens = nullptr;      //!< r_ScopeLens_fx, looked up on first use
   int CV_d3d12_WaterDebug = 0;        //!< non-zero: the water shows one term of its colour (Water.hlsl)
   int CV_d3d12_Caustics = 1;          //!< 0: no caustics under the ocean
   float CV_d3d12_WaterSunGlint = 0;   //!< strength of the sun's highlight on water (0: none)
