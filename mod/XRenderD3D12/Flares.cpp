@@ -31,7 +31,8 @@
 //	grown across the view by FlareSize metres with rounded corners, added
 //	with the material's colour, full inside the outline and fading out to
 //	the grown edge, depth tested at its front: FlareSize nearer than the
-//	surface (DrawProcFlare).
+//	surface (DrawProcFlare). Seen from the side it fades, gone edge on and
+//	from behind.
 //
 //////////////////////////////////////////////////////////////////////
 
@@ -59,10 +60,12 @@ constexpr float FLARE_TEST_SIZE = 0.2f;     //!< the side of the test square ove
 constexpr int SUN_PATCH_SIZE = 64;
 constexpr int SUN_MASK_SIZE = 128;
 constexpr float SUN_MASK_ROWS = 768;
-// A procedural flare: the fall off of its glow (saturate(1 - u)^k from the outline out) and the
-// largest angle of a segment of its rounded corners.
+// A procedural flare: the fall off of its glow (saturate(1 - u)^k from the outline out), the
+// largest angle of a segment of its rounded corners and the cosine between its surface's front and
+// the camera below which the glow fades (to nothing edge on).
 constexpr float PROC_FLARE_FALLOFF = 1.8f;
 constexpr float PROC_FLARE_CORNER_STEP = gf_PI / 8;
+constexpr float PROC_FLARE_FADE_COS = 0.125f;
 
 //! A flare of the scene being drawn.
 struct SFlare
@@ -398,7 +401,8 @@ void CD3D12Renderer::DrawProcFlare(const SRenderItem &it, const Matrix44 &World)
   vCenter = vCenter / (float)Points.size();
 
   // Cull Back: no glow while the surface turns its back to the camera (its front: where its
-  // triangles go round counter-clockwise; the other way in a mirroring matrix).
+  // triangles go round counter-clockwise; the other way in a mirroring matrix); seen from the side
+  // the glow fades with the cosine between the front and the camera, from PROC_FLARE_FADE_COS down.
   Vec3 vFront(0, 0, 0);
   const std::span<const uint16> Tris = Geometry::GetTriangles(pLeaf->m_pBuffer, pChunk);
   auto At = [&](uint16 i) { return i >= nFirst && i < nEnd ? &Points[i - nFirst] : nullptr; };
@@ -411,8 +415,14 @@ void CD3D12Renderer::DrawProcFlare(const SRenderItem &it, const Matrix44 &World)
   const float *w = World.data;
   const float fDet = w[0] * (w[5] * w[10] - w[6] * w[9]) - w[1] * (w[4] * w[10] - w[6] * w[8]) + w[2] * (w[4] * w[9] - w[5] * w[8]);
   const Vec3 vCamPos = m_Camera.GetPos();
-  if (vFront.Dot(vFront) > 0 && (fDet < 0 ? -1.0f : 1.0f) * vFront.Dot(vCamPos - vCenter) <= 0)
-    return;
+  float fFacing = 1;
+  if (const float fLen = vFront.GetLength() * (vCamPos - vCenter).GetLength(); fLen > 0)
+  {
+    const float fCos = (fDet < 0 ? -1.0f : 1.0f) * vFront.Dot(vCamPos - vCenter) / fLen;
+    if (fCos <= 0)
+      return;
+    fFacing = std::min(fCos / PROC_FLARE_FADE_COS, 1.0f);
+  }
 
   // Their outline as the camera sees them: on the plane through their centre across the line of
   // sight, each point where its line of sight meets it (x right, y up), without points closer than
@@ -507,8 +517,8 @@ void CD3D12Renderer::DrawProcFlare(const SRenderItem &it, const Matrix44 &World)
       Vert.xyz += vToCam * (std::min(fSize, 0.5f * fDist) / fDist);
   }
 
-  // The material's colour (the ambient of its light material) times the object's colour, added,
-  // depth tested, fogged towards black.
+  // The material's colour (the ambient of its light material) times the object's colour and the
+  // fade, added, depth tested, fogged towards black.
   const SLightMaterial *pMat = it.pRes ? it.pRes->m_LMaterial : nullptr;
   const CFColor MatColor = pMat ? pMat->Front.m_Ambient : CFColor(1, 1, 1, 1);
   const CCObject *pObj = it.pObj;
@@ -523,14 +533,14 @@ void CD3D12Renderer::DrawProcFlare(const SRenderItem &it, const Matrix44 &World)
   dc.nFlags = m_bFog ? DF_FOG : 0;
   dc.nFlags2 = DF2_GLOW_FALLOFF | DF2_FOG_BLACK;
   dc.vParams0[0] = PROC_FLARE_FALLOFF;
-  dc.vColor[0] = MatColor.r * pObj->m_Color.r;
-  dc.vColor[1] = MatColor.g * pObj->m_Color.g;
-  dc.vColor[2] = MatColor.b * pObj->m_Color.b;
+  dc.vColor[0] = MatColor.r * pObj->m_Color.r * fFacing;
+  dc.vColor[1] = MatColor.g * pObj->m_Color.g * fFacing;
+  dc.vColor[2] = MatColor.b * pObj->m_Color.b * fFacing;
   dc.vColor[3] = 1;
   if (m_pFrameDump)
   {
-    fprintf(m_pFrameDump.get(), "  proc flare: %d vertices, outline %d, size %g, centre (%.2f %.2f %.2f)", nEnd - nFirst, (int)n, fSize, vCenter.x,
-            vCenter.y, vCenter.z);
+    fprintf(m_pFrameDump.get(), "  proc flare: %d vertices, outline %d, size %g, centre (%.2f %.2f %.2f), facing %.3f", nEnd - nFirst, (int)n, fSize,
+            vCenter.x, vCenter.y, vCenter.z, fFacing);
     if (pMat)
       fprintf(m_pFrameDump.get(), ", material ambient (%.3f %.3f %.3f) diffuse (%.3f %.3f %.3f) specular (%.3f %.3f %.3f) emission (%.3f %.3f %.3f)",
               pMat->Front.m_Ambient.r, pMat->Front.m_Ambient.g, pMat->Front.m_Ambient.b, pMat->Front.m_Diffuse.r, pMat->Front.m_Diffuse.g,
