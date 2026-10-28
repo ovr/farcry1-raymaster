@@ -582,6 +582,8 @@ void CD3D12Renderer::DrawLeafItem(const SRenderItem &it)
     }
   };
 
+  // False: only the projected lights' passes below.
+  bool bFirstPass = true;
   switch (eDC)
   {
   case eDC_Opaque:
@@ -800,6 +802,28 @@ void CD3D12Renderer::DrawLeafItem(const SRenderItem &it)
       dc.nFlags &= ~DF_ALPHATEST;
     break;
   }
+  case eDC_TerrainLight:
+  {
+    // The terrain under dynamic lights ("Dynamic": triangles of a sector near the lights, over the
+    // sector's vertices; the lights in the object's m_DynLMMask): the sector's texture at the
+    // sector's texture coordinates (as eDC_TerrainShadow) as 0.75 * texture + 0.25, lit by the
+    // point lights alone per pixel with the vertex normal, falling off as saturate(1 - (d / R)^2),
+    // added to the picture without depth writes, fogged towards black; the projected lights below.
+    const float *pCustom = (const float *)pLeaf->m_CustomData;
+    if (!(dc.nFlags & DF_TEX0) || !pCustom || !HasNormal(nFormat))
+      return;
+    dc.nFlags = DF_TEX0 | DF_TEXGEN_WORLD | DF_LIGHTING | DF_PIXEL_LIGHTING;
+    dc.nFlags2 = DF2_NO_SUN | DF2_TERRAIN_LIGHT | DF2_FOG_BLACK;
+    Set4(dc.vTexGenU, 0, pCustom[2], 0, pCustom[0]);
+    Set4(dc.vTexGenV, pCustom[2], 0, 0, pCustom[1]);
+    Set4(dc.vColor, 1, 1, 1, 1);
+    Set4(dc.vAmbient, 0, 0, 0, 1);
+    dc.nSamplers = XR_SAMPLER_LINEAR_CLAMP;
+    SetObjectLights(dc, pObj, World, pLB);
+    Key.nState = GS_BLSRC_ONE | GS_BLDST_ONE;
+    bFirstPass = dc.nLights > 0;
+    break;
+  }
   case eDC_Water:
     // Not in its own reflection.
     if (m_bReflectionPass || !SetupWaterDraw(Key, dc, it))
@@ -844,7 +868,8 @@ void CD3D12Renderer::DrawLeafItem(const SRenderItem &it)
   // The picture of a far vegetation sprite: where the object is, whatever the texture's alpha.
   if (m_bSpritePass)
     dc.nFlags |= DF_ALPHA_ONE;
-  Draw();
+  if (bFirstPass)
+    Draw();
   // The beach: the other waves.
   for (int nWave = 1; eDC == eDC_WaterBeach && nWave < BEACH_WAVES && SetupBeachDraw(Key, dc, nWave); nWave++)
   {
@@ -859,13 +884,16 @@ void CD3D12Renderer::DrawLeafItem(const SRenderItem &it)
   // light alone (no ambient, sun or light map) times twice the cube at the point's lookup vector
   // (the light's m_TextureMatrix), alpha times the cube's, fogged towards black. The light: per
   // pixel as the object's other lights where bump mapping lights it per pixel (with its normal
-  // map and specular), else per vertex as a point light of its radius, clamped to 1.
-  if (bLightPass || m_bSpritePass || m_bReflectionPass || !HasNormal(nFormat) || (eDC != eDC_Opaque && eDC != eDC_AlphaTest && eDC != eDC_AlphaBlend))
+  // map and specular), else per vertex as a point light of its radius, clamped to 1. The terrain
+  // under the light (eDC_TerrainLight): 0.75 * texture + 0.25 lit per pixel, falling off linearly to
+  // the radius, added.
+  const bool bTerrain = eDC == eDC_TerrainLight;
+  if (bLightPass || m_bSpritePass || m_bReflectionPass || !HasNormal(nFormat) || (eDC != eDC_Opaque && eDC != eDC_AlphaTest && eDC != eDC_AlphaBlend && !bTerrain))
     return;
   const std::span<CDLight *const> Lights = m_pScene->GetLights();
-  const bool bBlended = (Key.nState & GS_BLEND_MASK) != 0;
-  const bool bPixel = CV_r_Quality_BumpMapping > 0 && Props.bPixelLighting && eLighting != ELighting::None;
-  const uint32 nKeep = DF_TEXMATRIX | DF_ALPHATEST | DF_ALPHATEST_LESS | (bPixel ? DF_BUMP | DF_SPECULAR : 0);
+  const bool bBlended = (Key.nState & GS_BLEND_MASK) != 0 && !bTerrain;
+  const bool bPixel = bTerrain || (CV_r_Quality_BumpMapping > 0 && Props.bPixelLighting && eLighting != ELighting::None);
+  const uint32 nKeep = bTerrain ? DF_TEXGEN_WORLD : DF_TEXMATRIX | DF_ALPHATEST | DF_ALPHATEST_LESS | (bPixel ? DF_BUMP | DF_SPECULAR : 0);
   const uint32 nFlags = (dc.nFlags & nKeep) | DF_LIGHTING | (bPixel ? DF_PIXEL_LIGHTING : 0) | (m_bFog ? DF_FOG : 0);
   Vec3 vCenter;
   float r;
@@ -881,20 +909,25 @@ void CD3D12Renderer::DrawLeafItem(const SRenderItem &it)
     if (!pCube || !pCube->IsCube() || !pCube->IsTextureLoaded())
       continue;
     dc.nFlags = nFlags;
-    dc.nFlags2 = DF2_NO_SUN | DF2_PROJECTOR | DF2_FOG_BLACK;
+    dc.nFlags2 = DF2_NO_SUN | DF2_PROJECTOR | DF2_FOG_BLACK | (bTerrain ? DF2_TERRAIN_LIGHT : 0);
     if (pDiffuse)
     {
       dc.nFlags |= DF_TEX0;
       dc.nTex0 = pDiffuse->GetSRV();
-      dc.nSamplers = pDiffuse->GetSampler();
+      dc.nSamplers = bTerrain ? XR_SAMPLER_LINEAR_CLAMP : pDiffuse->GetSampler();
     }
-    Set4(dc.vColor, MatColor.r * pObj->m_Color.r, MatColor.g * pObj->m_Color.g, MatColor.b * pObj->m_Color.b, 1);
-    Set4(dc.vAmbient, 0, 0, 0, 2);
+    if (bTerrain)
+      Set4(dc.vColor, 1, 1, 1, 1);
+    else
+      Set4(dc.vColor, MatColor.r * pObj->m_Color.r, MatColor.g * pObj->m_Color.g, MatColor.b * pObj->m_Color.b, 1);
+    Set4(dc.vAmbient, 0, 0, 0, bTerrain ? 1.0f : 2.0f);
     SetPointLight(dc, 0, pLight, pObj, vCenter, r);
     dc.nLights = 1;
     dc.nTex5 = pCube->GetSRV();
     memcpy(dc.mParams0, pLight->m_TextureMatrix.data, sizeof(dc.mParams0));
-    Key.nState = bBlended ? GS_BLSRC_SRCALPHA | GS_BLDST_ONE : GS_BLSRC_ONE | GS_BLDST_ONE | GS_DEPTHFUNC_EQUAL;
+    Key.nState = bTerrain ? GS_BLSRC_ONE | GS_BLDST_ONE
+                 : bBlended ? GS_BLSRC_SRCALPHA | GS_BLDST_ONE
+                            : GS_BLSRC_ONE | GS_BLDST_ONE | GS_DEPTHFUNC_EQUAL;
     TexCoord1.reset();
     if (!(dc.nFlags & DF_BUMP))
       Tangents.reset();
@@ -906,7 +939,7 @@ void CD3D12Renderer::DrawLeafItem(const SRenderItem &it)
 void CD3D12Renderer::DumpItem(int nIndex, const SRenderItem &it, int eList)
 {
   static const char *const s_DrawClasses[] = { "NoDraw", "Opaque", "AlphaTest", "AlphaTestVColor", "VColor", "AlphaBlend", "Additive", "Terrain", "Sky", "Engine", "Water", "WaterBottom", "WaterBeach", "TerrainLayer", "Decal",
-                                                "TerrainShadow", "Caustics", "FogLayer", "ScopeLens", "Flare", "Modulate" };
+                                                "TerrainShadow", "Caustics", "FogLayer", "ScopeLens", "Flare", "Modulate", "TerrainLight" };
   const CCObject *pObj = it.pObj;
   const char *szLB = "";
   if (it.pRE->m_Type == eDATA_OcLeaf && static_cast<CREOcLeaf *>(it.pRE)->m_pBuffer)
@@ -1084,6 +1117,8 @@ void CD3D12Renderer::DumpDraw(const SDrawConstants &dc, const SPipelineKey &Key,
     Flags += (Flags.empty() ? "" : "|") + std::string("GLASS");
   if (dc.nFlags2 & DF2_PROJECTOR)
     Flags += (Flags.empty() ? "" : "|") + std::string("PROJECTOR");
+  if (dc.nFlags2 & DF2_TERRAIN_LIGHT)
+    Flags += (Flags.empty() ? "" : "|") + std::string("TERRAIN_LIGHT");
   fprintf(f, "    draw: fmt %d state 0x%x cull %d bias %d flags %s tex0 '%s' alpharef %.3f col (%.2f %.2f %.2f %.2f) amb (%.2f %.2f %.2f) x%g lights %u",
           Key.nVertexFormat, Key.nState, Key.nCull, Key.bDepthBias, Flags.c_str(), (dc.nFlags & DF_TEX0) && pTex ? pTex->m_Name.c_str() : "",
           dc.fAlphaRef, dc.vColor[0], dc.vColor[1], dc.vColor[2], dc.vColor[3], dc.vAmbient[0], dc.vAmbient[1], dc.vAmbient[2], dc.vAmbient[3], dc.nLights);

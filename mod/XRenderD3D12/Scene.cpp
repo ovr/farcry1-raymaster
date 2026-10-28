@@ -186,13 +186,13 @@ namespace
       return (1ull << 63) | nKey | (FarFirstBits(it.fDistance) >> 9);
     // In a sort group the caustics come after the terrain and the opaque objects (over what they
     // left of the terrain), the terrain's shadows after them (they replace the shadowed terrain),
-    // the light passes of the objects lit in passes after everything they add to, the decals
-    // multiplied in (they write no depth) after the lit surfaces under them.
-    const uint64 nRank = it.eDrawClass == eDC_Caustics           ? 1
-                         : it.eDrawClass == eDC_TerrainShadow    ? 2
-                         : (it.pObj->m_ObjFlags & FOB_LIGHTPASS) ? 3
-                         : it.eDrawClass == eDC_Modulate         ? 4
-                                                                 : 0;
+    // the light passes of the objects lit in passes and of the terrain after everything they add
+    // to, the decals multiplied in (they write no depth) after the lit surfaces under them.
+    const uint64 nRank = it.eDrawClass == eDC_Caustics                                              ? 1
+                         : it.eDrawClass == eDC_TerrainShadow                                       ? 2
+                         : (it.pObj->m_ObjFlags & FOB_LIGHTPASS) || it.eDrawClass == eDC_TerrainLight ? 3
+                         : it.eDrawClass == eDC_Modulate                                            ? 4
+                                                                                                    : 0;
     const uint64 nShader = (uint64)(it.pShader->GetID() & 0xFFFFF);
     const uint64 nRes = it.pRes ? (uint64)(uint32)it.pRes->m_Id : 0;
     return nKey | (nRank << 52) | (nShader << 32) | nRes;

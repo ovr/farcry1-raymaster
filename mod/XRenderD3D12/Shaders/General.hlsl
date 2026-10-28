@@ -26,6 +26,8 @@
 //	      vParams2.x * (1 - N.V)^vParams2.y)), else DF_TEX0_ARRAY
 //	      (g_TextureArrays, slice floor(u / 2) at (u - 2 * slice, v)), else DF_TEX0
 //	      (g_Textures), else white; sampler from nSamplers bits 0-3
+//	      (DF2_TERRAIN_LIGHT, the terrain under dynamic lights: rgb as 0.75 *
+//	      rgb + 0.25)
 //	    colour * tex0; DF_TEX0_ALPHA_ONLY: rgb = colour, a = colour a * tex a;
 //	      DF_ALPHA_FROM_TEX: a = tex a
 //	    uv1: DF_TEXGEN1_WORLD (dot(float4(world pos, 1), vTexGen1U / V)), else
@@ -54,7 +56,9 @@
 //	      4 * v * tex1 + vAmbient; DF_SHADOW_PASS rgb = colour * tex0, a = 1 - v
 //	    DF_PIXEL_LIGHTING: DF_LIGHTING is lit here instead of per vertex
 //	      (DrawLighting: the same sum, but the lights' colours clamped to 1 and
-//	      point lights falling off as saturate(1 - d / radius)), with the
+//	      point lights falling off as saturate(1 - d / radius); on the terrain
+//	      (DF2_TERRAIN_LIGHT) but for a projector as saturate(1 - (d /
+//	      radius)^2)), with the
 //	      vertex normal or, with DF_BUMP (bump mapping), N' = the normal map
 //	      (tex3 at uv0, its y times vParams1.y) in the vertex's tangent frame;
 //	      the dot3 light map takes N'.D for D.z
@@ -144,7 +148,10 @@ float3 DrawLighting(float3 vPos, float3 vN, bool bPerPixel, out float3 vNoSunLig
       vToLight = vLightPos.xyz - vPos;
       float fDist = length(vToLight);
       if (bPerPixel)
-        fAtten = saturate(1 - fDist * vAtten.w);
+      {
+        float x = fDist * vAtten.w;
+        fAtten = saturate(1 - (HasFlag2(DF2_TERRAIN_LIGHT) && !HasFlag2(DF2_PROJECTOR) ? x * x : x));
+      }
       else
         fAtten = fDist < vAtten.z ? 1 / (vAtten.x + vAtten.y * fDist) : 0;
       vToLight /= max(fDist, 1e-4);
@@ -318,6 +325,8 @@ float4 PSMain(SVertexOutput In) : SV_Target
   }
   else if (HasFlag(DF_TEX0))
     vTex = SampleTexture(g_Draw.nTex0, nSampler0, In.vTex0);
+  if (HasFlag2(DF2_TERRAIN_LIGHT))
+    vTex.rgb = 0.75 * vTex.rgb + 0.25;
 
   float fSun = HasFlag(DF_SHADOWS) ? SunVisibility(In.vWorldPos, In.vNormal, In.vPos.xy) : 1;
   float4 vVertexColor = In.vColor;

@@ -66,6 +66,7 @@ enum EDrawClass
   eDC_ScopeLens,          //!< the glass of a weapon's scope (r_ScopeLens_fx): the scene seen through it, blended
   eDC_Flare,              //!< a flare (its Flare element; the sun's): drawn by the flare pass (Flares.cpp)
   eDC_Modulate,           //!< a decal multiplied into the frame (DESTCOLOR, ZERO): the texture, fading to white with the object
+  eDC_TerrainLight,       //!< the terrain under dynamic lights (triangles of a sector near them): their light alone, added
 };
 
 //! The corona of a flare shader: the "ClientEffect 'Corona'" block of its script.

@@ -222,7 +222,7 @@ constexpr SEngineEntry s_EngineShaders[] =
   { "terraindetaillayers",             "",                     eS_TerrainDetailTextures, 0,             kTerrainLayer2,      0,                eDC_NoDraw },
   { "terraindetailtexturelayers",      "",                     eS_TerrainDetailTextures, 0,             kTerrainLayer2,      0,                eDC_NoDraw },
   { "terrainlayer",                    "",                     eS_TerrainDetailTextures, 0,             kTerrainLayer2,      0,                eDC_TerrainLayer },
-  { "terrainlightpass",                "",                     eS_TerrainLightPass,      0,             EF2_DONTSORTBYDIST,  0,                eDC_NoDraw },
+  { "terrainlightpass",                "",                     eS_TerrainLightPass,      0,             EF2_DONTSORTBYDIST,  0,                eDC_TerrainLight },
   { "terrainshadowpass",               "",                     eS_TerrainShadowPass,     0,             EF2_DONTSORTBYDIST,  0,                eDC_TerrainShadow },
   { "terraindetailobjects",            "",                     eS_TerrainDetailObjects,  0,             0,                   0,                eDC_AlphaTestVColor },
   // Water.
