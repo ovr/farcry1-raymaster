@@ -125,7 +125,31 @@ namespace
     return (uint64)(0xFFFFFFFFu - DistanceBits(fDist));
   }
 
-  uint64 MakeSortKey(const SRenderItem &it)
+  //! The highest point of an element's leaf buffer box in the world; FLT_MAX without one.
+  float TopZ(const SRenderItem &it)
+  {
+    if (it.pRE->m_Type != eDATA_OcLeaf)
+      return FLT_MAX;
+    CREOcLeaf *pLeaf = static_cast<CREOcLeaf *>(it.pRE);
+    if (!pLeaf->m_pBuffer)
+      return FLT_MAX;
+    const CLeafBuffer *pVC = pLeaf->m_pBuffer->GetVertexContainer();
+    const Vec3 &a = pVC->m_vBoxMin, &b = pVC->m_vBoxMax;
+    if (!(a.x <= b.x && a.y <= b.y && a.z <= b.z))
+      return FLT_MAX;
+    const float *m = it.pObj->m_Matrix.data;
+    float fTop = -FLT_MAX;
+    for (int i = 0; i < 8; i++)
+    {
+      const float x = (i & 1) ? b.x : a.x, y = (i & 2) ? b.y : a.y, z = (i & 4) ? b.z : a.z;
+      fTop = std::max(fTop, x * m[2] + y * m[6] + z * m[10] + m[14]);
+    }
+    return fTop;
+  }
+
+  //! fWaterZ: the ocean's level, under which blended objects (water plants faded by the engine)
+  //! count as under water.
+  uint64 MakeSortKey(const SRenderItem &it, float fWaterZ)
   {
     const uint64 nPass = (uint64)PassRank(it.nSort);
     const uint64 nGroup = (uint64)SortGroup(it.nSort);
@@ -137,10 +161,14 @@ namespace
         // Over the scene: flares, screen quads, screen effects, then by sort group.
         return (1ull << 63) | ((uint64)nRank << 56) | (nGroup << 48);
       }
-      // The water surfaces first (they show what the opaque scene left behind them) by sort group
-      // (the ocean and water volumes before the beach), then the rest far to near.
+      // Blended objects wholly under the ocean first, far to near: the water shows them through
+      // the scene it copies (refracted, in its fog, under its reflection). Then the water surfaces
+      // (they show what the scene left behind them) by sort group (the ocean and water volumes
+      // before the beach), then the rest far to near.
       if (IsWaterClass(it.eDrawClass))
-        return (nGroup << 32) | FarFirstBits(it.fDistance);
+        return (1ull << 61) | (nGroup << 32) | FarFirstBits(it.fDistance);
+      if (it.eDrawClass != eDC_Additive && TopZ(it) < fWaterZ)
+        return FarFirstBits(it.fDistance);
       return (1ull << 62) | (FarFirstBits(it.fDistance) << 30);
     }
     // Opaque and nearest: by pass, sort group, shader and resources; in the nearest list the
@@ -404,6 +432,8 @@ void CScene::BuildLists(SSceneSlot &Slot, int nItems, bool bSort)
   for (int i = 0; i < nItems && nTerrainSort < 0; i++)
     if (Slot.Items[i].eDrawClass == eDC_Terrain)
       nTerrainSort = Slot.Items[i].nSort;
+  I3DEngine *p3DEngine = iSystem ? iSystem->GetI3DEngine() : nullptr;
+  const float fWaterZ = p3DEngine ? p3DEngine->GetWaterLevel() : -FLT_MAX;
   for (int i = 0; i < nItems; i++)
   {
     SRenderItem &it = Slot.Items[i];
@@ -414,7 +444,7 @@ void CScene::BuildLists(SSceneSlot &Slot, int nItems, bool bSort)
       it.nSort = nTerrainSort;
       it.eList = ChooseList(it);
     }
-    it.nSortKey = MakeSortKey(it);
+    it.nSortKey = MakeSortKey(it, fWaterZ);
     Slot.Lists[it.eList].push_back(it);
   }
   if (!bSort)
