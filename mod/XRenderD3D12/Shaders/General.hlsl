@@ -26,8 +26,10 @@
 //	    uv1: DF_TEXGEN1_WORLD (dot(float4(world pos, 1), vTexGen1U / V)), else
 //	      the vertex's second texture coordinates
 //	    tex1 with uv1 (any of DF_TEX1, DF_TEX1_DETAIL, DF_TEX1_LIGHTMAP;
-//	      sampler from bits 4-7): DF_TEX1_LIGHTMAP rgb *= 4 * tex1 + vAmbient,
-//	      DF_TEX1_DETAIL rgb = 2 * rgb + tex1 - 0.5, else *= tex1
+//	      sampler from bits 4-7): DF_TEX1_LIGHTMAP rgb *= 4 * tex1 + vAmbient
+//	      (DF_LIGHTMAP_DIR, a dot3 light map: tex1 * saturate(D.z) * D.a, D =
+//	      tex2 at uv1, rgb * 2 - 1), DF_TEX1_DETAIL rgb = 2 * rgb + tex1 - 0.5,
+//	      else *= tex1
 //	    DF_TERRAIN_CLIFF (terrain with cliffs): rgb = 2 * rgb * lerp(1, 2 * tex2,
 //	      w.x) * lerp(1, 2 * tex3, w.y), w = vertex colour rg * vTexGen1V.xy, uv
 //	      of tex2 from the world position with vParams0 / 1, of tex3 with 2 / 3
@@ -188,7 +190,15 @@ float4 PSMain(SVertexOutput In) : SV_Target
   {
     float4 vTex1 = SampleTexture(g_Draw.nTex1, nSampler1, In.vTex1);
     if (HasFlag(DF_TEX1_LIGHTMAP))
-      vColor.rgb *= 4 * fSun * vTex1.rgb + g_Draw.vAmbient.rgb;
+    {
+      float3 vLight = vTex1.rgb;
+      if (HasFlag(DF_LIGHTMAP_DIR))
+      {
+        float4 vDir = SampleTexture(g_Draw.nTex2, nSampler1, In.vTex1);
+        vLight *= saturate(vDir.z * 2 - 1) * vDir.a;
+      }
+      vColor.rgb *= 4 * fSun * vLight + g_Draw.vAmbient.rgb;
+    }
     else if (HasFlag(DF_TEX1_DETAIL))
       vColor.rgb = 2 * vColor.rgb + vTex1.rgb - 0.5;
     else

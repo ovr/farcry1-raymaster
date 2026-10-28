@@ -272,6 +272,10 @@ static const int nBin64ScreenParam_FlashBangForce = 25;
 //   RenderLMData) and pLMTCBuffer (the "LMapTexCoords" buffer), and the engine has set
 //   CCObject::m_nLMId (the colour texture's ID) and m_pLMTCBufferO (the same buffer);
 //   m_nLMDirId and m_nOcclId stay 0. No object flag marks a lightmapped object.
+//   With r_Quality_BumpMapping on, the engine loads dot3 lightmaps instead: "hN.dds" (colour,
+//   32 bit) in m_nLMId and "dN.dds" (the light's dominant direction) in m_nLMDirId. dN: rgb the
+//   direction in the surface's tangent space (* 0.5 + 0.5), a its strength. The plain lightmap
+//   xN holds the same light for the unbumped surface: xN = hN * saturate(dir.z) * a.
 
 // SShaderItem, SRenderShaderResources
 //   From EF_LoadShaderItem; the shader resources are reference counted (m_nRefCounter).

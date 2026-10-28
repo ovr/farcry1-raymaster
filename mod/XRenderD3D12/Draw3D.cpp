@@ -320,6 +320,12 @@ void CD3D12Renderer::DrawLeafItem(const SRenderItem &it)
       dc.nFlags |= DF_TEX1_LIGHTMAP;
       dc.nTex1 = m_pTextures->GetSRV(pObj->m_nLMId);
       dc.nSamplers |= XR_SAMPLER_LINEAR_CLAMP << 4;
+      // A dot3 light map (bump mapping on): the dominant direction of its light beside it.
+      if (pObj->m_nLMDirId > 0 && m_pTextures->GetByID(pObj->m_nLMDirId))
+      {
+        dc.nFlags |= DF_LIGHTMAP_DIR;
+        dc.nTex2 = m_pTextures->GetSRV(pObj->m_nLMDirId);
+      }
     }
     else if (HasNormal(nFormat))
     {
@@ -577,11 +583,11 @@ void CD3D12Renderer::DumpItem(int nIndex, const SRenderItem &it, int eList)
   if (it.pRE->m_Type == eDATA_OcLeaf && static_cast<CREOcLeaf *>(it.pRE)->m_pBuffer)
     szLB = static_cast<CREOcLeaf *>(it.pRE)->m_pBuffer->m_sSource;
   const CTexture *pTex = GetDiffuseTexture(it.pRes);
-  fprintf(m_pFrameDump.get(), "[%d] list %d sort 0x%x %s RE %d shader '%s' tex '%s' lb '%s' pos (%.2f %.2f %.2f) flags 0x%x LM %d LMTC %d mask 0x%x amb (%.2f %.2f %.2f) col (%.2f %.2f %.2f %.2f) res aref %.3f opacity %.2f flags 0x%x casters %d\n",
+  fprintf(m_pFrameDump.get(), "[%d] list %d sort 0x%x %s RE %d shader '%s' tex '%s' lb '%s' pos (%.2f %.2f %.2f) flags 0x%x LM %d (dir %d occl %d HDR %d) LMTC %d mask 0x%x amb (%.2f %.2f %.2f) col (%.2f %.2f %.2f %.2f) res aref %.3f opacity %.2f flags 0x%x casters %d\n",
           nIndex, eList, it.nSort, (unsigned)it.eDrawClass < std::size(s_DrawClasses) ? s_DrawClasses[it.eDrawClass] : "?", it.pRE->m_Type,
           it.pShader ? it.pShader->GetName() : "", pTex ? pTex->m_Name.c_str() : "", szLB ? szLB : "",
           pObj->m_Matrix.data[12], pObj->m_Matrix.data[13], pObj->m_Matrix.data[14], pObj->m_ObjFlags, pObj->m_nLMId,
-          pObj->m_pLMTCBufferO ? 1 : 0, pObj->m_DynLMMask, pObj->m_AmbColor.x, pObj->m_AmbColor.y, pObj->m_AmbColor.z,
+          pObj->m_nLMDirId, pObj->m_nOcclId, pObj->m_nHDRLMId, pObj->m_pLMTCBufferO ? 1 : 0, pObj->m_DynLMMask, pObj->m_AmbColor.x, pObj->m_AmbColor.y, pObj->m_AmbColor.z,
           pObj->m_Color.r, pObj->m_Color.g, pObj->m_Color.b, pObj->m_Color.a, it.pRes ? it.pRes->m_AlphaRef : 0.0f,
           it.pRes ? it.pRes->m_Opacity : 1.0f, it.pRes ? it.pRes->m_ResFlags : 0,
           pObj->m_pShadowCasters ? reinterpret_cast<const int *>(pObj->m_pShadowCasters)[2] : -1);
@@ -660,6 +666,12 @@ void CD3D12Renderer::DumpItem(int nIndex, const SRenderItem &it, int eList)
 
   // Light mapped elements: the chunk's vertices and indices, the object's light map texture
   // coordinates (count, those of the chunk's first vertex).
+  if (pObj->m_nLMId > 0 && m_pTextures)
+  {
+    const CTexture *pLM = m_pTextures->GetByID(pObj->m_nLMId), *pDir = pObj->m_nLMDirId > 0 ? m_pTextures->GetByID(pObj->m_nLMDirId) : nullptr;
+    fprintf(m_pFrameDump.get(), "    light map '%s' %dx%d, direction '%s'\n", pLM ? pLM->m_Name.c_str() : "?", pLM ? pLM->m_nWidth : 0, pLM ? pLM->m_nHeight : 0,
+            pDir ? pDir->m_Name.c_str() : "");
+  }
   if (pLeaf && pLeaf->m_pChunk && pObj->m_pLMTCBufferO)
   {
     const CMatInfo *pC = pLeaf->m_pChunk;

@@ -69,6 +69,7 @@ typedef float float4x4_t[16];
 #define DF_SHADOWS          0x00800000  //!< the sun is shadowed by the draw's shadow maps (SunVisibility): DF_LIGHTING lerps to the vertex light without the sun, DF_TEX1_LIGHTMAP scales the lightmap by the visibility
 #define DF_SHADOW_PASS      0x01000000  //!< with DF_SHADOWS: rgb = colour * tex0, a = 1 - visibility (a shadow blended over the terrain)
 #define DF_SHADOW_DEBUG     0x02000000  //!< with DF_SHADOWS: the result is the sun's visibility in grey (d3d12_ShadowDebug 2)
+#define DF_LIGHTMAP_DIR     0x04000000  //!< with DF_TEX1_LIGHTMAP, a dot3 light map: the light map times saturate(D.z) * D.a, D = tex2 at uv1 (rgb * 2 - 1: the light's dominant direction in the surface's tangent space, a: its strength)
 #define DF_DETAIL_LAYER     0x00080000  //!< rgb = lerp(0.5, tex0, colour a * saturate((vParams0.y - d) * vParams0.z)), a = 1, fogged towards 0.5 (d: distance to the camera)
 
 #define XR_SAMPLER_LINEAR_WRAP  0
