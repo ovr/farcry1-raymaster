@@ -290,3 +290,19 @@ it as well: it holds local, machine-specific instructions and is not committed (
   DemoParticles, the water of DemoQuality from its medium preset on and the walking figures in
   the background of the beach demos differ more and are compared by eye. So a larger difference
   between `DemoShots/old` and the frames of our renderer is the renderer's.
+
+## XRenderD3D12
+
+- `mod/XRenderD3D12` (x64 only) is our renderer on Direct3D 12; the x64 preset builds
+  `XRenderD3D12.dll` into `farcry1_testing1/Bin64`. For now XRenderD3D9Traced loads it:
+  `r_Driver = "Direct3D8"` with `XRENDERTRACED_DLL=XRenderD3D12.dll`, or
+  `RunDemo.ps1 -Renderer XRenderD3D12.dll`.
+- `XRENDERD3D12_DEBUG=1` (or `d3d12_Debug 1`, read at start-up) turns on the debug layer and GPU
+  based validation; their messages go to the engine log, starting with `[D3D12]`.
+- `d3d12_DumpFrame 1` writes the render items of the next frame to
+  `farcry1_testing1/XRenderD3D12_frame.txt` (never committed): for each item its list, sort
+  group, draw class, shader, diffuse texture, leaf buffer, object (position, flags, light map,
+  light mask, ambient and colour) and resources (alpha reference, opacity, flags), and for each
+  draw what it got (vertex format, states, shader flags, textures, colour, lights). With
+  `XRENDERTRACED_EXEC_LEVEL="d3d12_DumpFrame 1"` and `XRENDERTRACED_EXEC_LEVEL_FRAME=<n - 1>` it
+  is the frame that `XRENDERTRACED_CAPTURE=<n>` captures of the original.

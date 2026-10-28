@@ -366,6 +366,15 @@ public:
   CTexture *GetDetailTexture();
   //! The particle sprites of the scene (EF_AddSpriteToScene).
   void DrawSprites();
+  //! d3d12_DumpFrame: one line per render item, then one per draw with what the draw got.
+  void DumpItem(int nIndex, const SRenderItem &it, int eList);
+  void DumpDraw(const SDrawConstants &dc, const SPipelineKey &Key, const CTexture *pTex);
+
+  struct SFileClose
+  {
+    void operator()(FILE *f) const { fclose(f); }
+  };
+  std::unique_ptr<FILE, SFileClose> m_pFrameDump; //!< open for the frame being dumped (d3d12_DumpFrame)
 
   int m_nSceneFlags = 0;                    //!< SHDF_* of the EF_EndEf3D being drawn
   CTexture *m_pDetailTexture = nullptr;     //!< GetDetailTexture (one reference)
@@ -445,6 +454,7 @@ public:
   int CV_r_DetailTextures = 1;        //!< the terrain's detail layers (not drawn)
   float CV_r_DetailScale = 8;         //!< metres per repeat of the detail texture
   int CV_d3d12_debug = 0;             //!< debug layer (also XRENDERD3D12_DEBUG=1); only read at Init
+  int CV_d3d12_DumpFrame = 0;         //!< non-zero: the next frame's 3D draws go to XRenderD3D12_frame.txt, then 0
 };
 
 extern CD3D12Renderer *g_pRenderer;

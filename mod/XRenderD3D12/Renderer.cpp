@@ -107,6 +107,7 @@ void CD3D12Renderer::RegisterVariables()
   iConsole->Register("r_VSync", &CV_r_vsync, 0, VF_DUMPTODISK);
   RegisterOtherVariables();
   iConsole->Register("d3d12_Debug", &CV_d3d12_debug, 0, VF_DUMPTODISK, "Direct3D 12 debug layer and GPU based validation (read at start-up)");
+  iConsole->Register("d3d12_DumpFrame", &CV_d3d12_DumpFrame, 0, 0, "Writes the render items and draws of the next frame to XRenderD3D12_frame.txt");
 }
 
 //////////////////////////////////////////////////////////////////////////
@@ -381,6 +382,16 @@ void CD3D12Renderer::BeginFrame (void)
   m_b2DMode = false;
   m_nMatrixDepth = 0;
   m_ViewMatrix = m_CameraView;
+  if (CV_d3d12_DumpFrame && !m_pFrameDump)
+  {
+    m_pFrameDump.reset(fopen("XRenderD3D12_frame.txt", "w"));
+    if (m_pFrameDump)
+    {
+      const Vec3 vPos = m_Camera.GetPos(), vAngles = m_Camera.GetAngles();
+      fprintf(m_pFrameDump.get(), "frame %d: camera (%.2f %.2f %.2f) angles (%.2f %.2f %.2f) fov %.3f\n", m_nFrameID,
+              vPos.x, vPos.y, vPos.z, vAngles.x, vAngles.y, vAngles.z, m_Camera.GetFov());
+    }
+  }
 }
 
 void CD3D12Renderer::Update (void)
@@ -391,6 +402,12 @@ void CD3D12Renderer::Update (void)
   DrawQueuedBoxes();
   // Shown only when swapping is on: the hidden frames of a level load are drawn but never seen.
   m_pDevice->EndFrame(m_bSwapBuffers, m_bVSync || CV_r_vsync != 0);
+  if (m_pFrameDump)
+  {
+    m_pFrameDump.reset();
+    CV_d3d12_DumpFrame = 0;
+    iLog->Log("XRenderD3D12: frame %d written to XRenderD3D12_frame.txt", m_nFrameID);
+  }
   m_nFrameID++;
   m_nFrames++;
   CheckResolutionChange();
