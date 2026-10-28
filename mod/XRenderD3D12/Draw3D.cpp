@@ -417,16 +417,25 @@ void CD3D12Renderer::DrawLeafItem(const SRenderItem &it)
   case eDC_TerrainLayer:
   {
     // A detail layer of the terrain near the camera (world positions, the terrain normal, the
-    // layer's weight in the vertex alpha): the layer's texture u = y / 4, v = x / 4, the weight
-    // faded out between r_DetailDistance and twice that, multiplied in twice (DESTCOLOR,
-    // SRCCOLOR); no depth writes. (Layers with a material of their own, bump mapped, have the
-    // template "terrainlayer" and are not drawn yet.)
+    // layer's weight in the vertex alpha): the layer's texture coordinates from the world position
+    // with the element's custom data (u row in floats 0..2, v row in 4..6, the layer's own scale;
+    // u = y / 4, v = x / 4 without it), the weight faded out between r_DetailDistance and twice
+    // that, multiplied in twice (DESTCOLOR, SRCCOLOR); no depth writes. (Layers with a material
+    // of their own, bump mapped, have the template "terrainlayer" and are not drawn yet.)
     if (!pTex || pRes || !CV_r_DetailTextures)
       return;
     const float fStart = std::max(CV_r_DetailDistance, 0.01f), fEnd = 2 * fStart;
     dc.nFlags = (dc.nFlags & ~DF_TEXMATRIX) | DF_TEX0 | DF_TEXGEN_WORLD | DF_VCOLOR | DF_DETAIL_LAYER;
-    Set4(dc.vTexGenU, 0, 0.25f, 0, 0);
-    Set4(dc.vTexGenV, 0.25f, 0, 0, 0);
+    if (const float *pCustom = (const float *)pLeaf->m_CustomData)
+    {
+      Set4(dc.vTexGenU, pCustom[0], pCustom[1], pCustom[2], 0);
+      Set4(dc.vTexGenV, pCustom[4], pCustom[5], pCustom[6], 0);
+    }
+    else
+    {
+      Set4(dc.vTexGenU, 0, 0.25f, 0, 0);
+      Set4(dc.vTexGenV, 0.25f, 0, 0, 0);
+    }
     Set4(dc.vParams0, fStart, fEnd, 1.0f / (fEnd - fStart), 0);
     dc.nSamplers = XR_SAMPLER_LINEAR_WRAP;
     Key.nState = GS_BLSRC_DSTCOL | GS_BLDST_SRCCOL;
