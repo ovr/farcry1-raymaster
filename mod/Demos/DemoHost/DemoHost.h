@@ -32,7 +32,7 @@
 //	  --fps <n>             frames per second of the video (default 50: one
 //	                        frame of the fixed time step, real time)
 //	  --exec-at <frame> <commands>  console commands at the start of that frame
-//	                        (separated by ';' or '|', e.g. "d3d12_DumpFrame 1")
+//	                        (separated by ';' or '|', e.g. "d3d12_DumpFrame 1"); may repeat
 //	  --trace               keep the tracing of XRenderD3D9Traced on
 //	  --hold                keep the game running after the last frame
 //
