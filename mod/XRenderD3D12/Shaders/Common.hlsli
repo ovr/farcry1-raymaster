@@ -71,6 +71,11 @@ bool HasFlag(uint nFlags)
   return (g_Draw.nFlags & nFlags) != 0;
 }
 
+bool HasFlag2(uint nFlags2)
+{
+  return (g_Draw.nFlags2 & nFlags2) != 0;
+}
+
 //! A normalised vector, (0, 0, 0) for a zero vector.
 float3 SafeNormalize(float3 v)
 {

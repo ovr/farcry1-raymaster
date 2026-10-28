@@ -92,9 +92,9 @@ constexpr STemplateEntry s_Templates[] =
   { "s_objectcolor",                   "",                              eS_Banner,                0,                                      0,              eDC_AlphaBlend,       eCULL_Back },
   { "templbeamproc",                   "",                              eS_Banner,                EF2_IGNORERESOURCESTATES,               0,              eDC_AlphaBlend,       eCULL_None },
   // Added (ONE, ONE).
-  { "templdecaladd",                   "",                              eS_Banner,                0,                                      0,              eDC_Additive,         eCULL_None },
-  { "templdecaladd_vlight",            "",                              eS_Banner,                0,                                      0,              eDC_Additive,         eCULL_None },
-  { "templdecalalphaadd",              "",                              eS_Banner,                0,                                      0,              eDC_Additive,         eCULL_None },
+  { "templdecaladd",                   "",                              eS_Banner,                0,                                      0,              eDC_Additive,         eCULL_Back },
+  { "templdecaladd_vlight",            "",                              eS_Banner,                0,                                      0,              eDC_Additive,         eCULL_Back },
+  { "templdecalalphaadd",              "",                              eS_Banner,                0,                                      0,              eDC_Additive,         eCULL_Back },
   { "templhologram",                   "templhologram_fp",              eS_Banner,                0,                                      0,              eDC_Additive,         eCULL_None },
   { "templmuzzleflash_auto",           "templmuzzleflash_auto_fp",      eS_MuzzleFlash,           0,                                      0,              eDC_Additive,         eCULL_Back },
   { "mutantstealth",                   "mutantstealth_fp",              eS_Banner,                0,                                      0,              eDC_Additive,         eCULL_Back, 0.0f,         0.0f,     false, false, true },
@@ -119,11 +119,43 @@ constexpr STemplateEntry s_Templates[] =
   { "templmodel*",                     "templdiffuse_fp",               eS_Opaque,                kOpaque2,                               0,              eDC_Opaque,           eCULL_Back, 0.0f,         0.0f,     true },
   { "templplants*",                    "templdecalalphatest_vcolors",   eS_Trees,                 EF2_OPAQUE,                             EF3_DEPTHWRITE, eDC_AlphaTestVColor,  eCULL_None, kAlphaRef128 },
   { "templmuzzleflash*",               "",                              eS_MuzzleFlash,           0,                                      0,              eDC_Additive,         eCULL_Back },
-  { "templdecaladd*",                  "",                              eS_Banner,                0,                                      0,              eDC_Additive,         eCULL_None },
+  { "templdecaladd*",                  "",                              eS_Banner,                0,                                      0,              eDC_Additive,         eCULL_Back },
   { "flareproc *",                     "",                              eS_Banner,                0,                                      0,              eDC_NoDraw,           eCULL_Back },
   { "flareproc_*",                     "",                              eS_Opaque,                kOpaque2,                               EF3_NOTEMPLATE, eDC_NoDraw,           eCULL_Back, 0.0f,         0.0f,     false, true },
   // Water volumes (lakes, rivers): drawn as water.
   { "watervolume*",                    "",                              eS_Water,                 0,                                      0,              eDC_Water,            eCULL_None },
+};
+
+//! The templates lit otherwise than by 2 (ELighting::Overbright), and those that add their gloss
+//! map. Looked up like s_Templates, by the name the material gives.
+struct STemplateLighting
+{
+  std::string_view Name;
+  ELighting eLighting;
+  EGlow eGlow = EGlow::None;
+};
+
+constexpr STemplateLighting s_TemplateLighting[] =
+{
+  // Texture * fixed function vertex lighting (ambient and lights), not modulated by 2.
+  { "templdecal",                      ELighting::Vertex },
+  { "templdecalalphatest",             ELighting::Vertex },
+  { "templdecalglow",                  ELighting::Vertex,   EGlow::Glow },
+  { "templdecalglowselfillum",         ELighting::Vertex,   EGlow::SelfIllum },
+  { "templdecalglowselfillumanimated", ELighting::Vertex,   EGlow::Pulse },
+  { "templtextureshiftt02",            ELighting::Vertex },
+  { "templtextureshiftt05",            ELighting::Vertex },
+  { "templreflcm",                     ELighting::Vertex },
+  { "templreflcmdecal",                ELighting::Vertex },
+  { "templbumpreflcm*",                ELighting::Vertex },
+  // No lights: the texture times the object's ambient colour, or the texture alone (also added).
+  { "templalphablend",                 ELighting::Ambient },
+  { "templdecalopacity",               ELighting::Ambient },
+  { "templdecalalphatestforshadows",   ELighting::Ambient2 },
+  { "templdecaladd_vlight",            ELighting::Ambient },
+  { "templdecalopacityshift2",         ELighting::None },
+  { "templdecalopacityshift3",         ELighting::None },
+  { "templtexturev22rotate",           ELighting::None },
 };
 
 //! An engine shader (EF_LoadShader by name).
@@ -251,6 +283,11 @@ SResolvedTemplate ResolveTemplate(const std::string &Name, uint64 nMaskGen)
   R.Props.bStealth = pE->bStealth;
   if (pE->bNotFound)
     R.Props.nFlags |= EF_NOTFOUND;
+  if (const STemplateLighting *pL = FindEntry(s_TemplateLighting, Name))
+  {
+    R.Props.eLighting = pL->eLighting;
+    R.Props.eGlow = pL->eGlow;
+  }
   return R;
 }
 

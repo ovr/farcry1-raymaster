@@ -300,7 +300,11 @@ void CD3D12Renderer::DrawLeafItem(const SRenderItem &it)
   const int nFormat = Geom->nVertexFormat;
   const CFColor MatColor = GetMaterialColor(pRes);
   const float fOpacity = GetOpacity(pRes);
-  Set4(dc.vAmbient, pObj->m_AmbColor.x, pObj->m_AmbColor.y, pObj->m_AmbColor.z, 1);
+  const SShaderProps &Props = pSh->GetProps();
+  // TemplDecalGlowSelfIllum with bump mapping on: the texture unlit, the gloss map added twice.
+  const bool bSelfIllum = Props.eGlow == EGlow::SelfIllum && CV_r_Quality_BumpMapping > 0;
+  const ELighting eLighting = bSelfIllum ? ELighting::None : Props.eLighting;
+  Set4(dc.vAmbient, pObj->m_AmbColor.x, pObj->m_AmbColor.y, pObj->m_AmbColor.z, eLighting == ELighting::Vertex ? 1.0f : 2.0f);
   std::optional<D3D12_VERTEX_BUFFER_VIEW> TexCoord1, Tangents;
 
   auto Draw = [&]()
@@ -321,9 +325,24 @@ void CD3D12Renderer::DrawLeafItem(const SRenderItem &it)
     return;
   }
 
-  //! Sun and ambient, or the lightmap; vertex colours when there are no normals.
+  //! Sun and ambient, or the lightmap; vertex colours when there are no normals. The templates
+  //! without lights get their colour from LitColor alone; the glow templates add their gloss map,
+  //! unlit.
   auto Light = [&]()
   {
+    if (Props.eGlow != EGlow::None)
+    {
+      if (CTexture *pGlow = GetGlowMap(it.pRes))
+      {
+        const float t = iTimer ? iTimer->GetCurrTime() : 0.0f;
+        const float g = Props.eGlow == EGlow::Pulse ? std::clamp(0.75f + 0.75f * sinf(gf_PI * t), 0.0f, 1.0f) : bSelfIllum ? 2.0f : 1.0f;
+        dc.nFlags2 |= DF2_SELF_ILLUM;
+        dc.nTex4 = pGlow->GetSRV();
+        Set4(dc.vSelfIllum, g, g, g, 0);
+      }
+    }
+    if (eLighting == ELighting::Ambient || eLighting == ELighting::Ambient2 || eLighting == ELighting::None)
+      return;
     if (pSh->UsesLightmap() && pObj->m_nLMId > 0 && pObj->m_pLMTCBufferO && m_pTextures && m_pTextures->GetByID(pObj->m_nLMId))
       TexCoord1 = Geometry::GetTexCoordStream(pObj->m_pLMTCBufferO);
     if (TexCoord1)
@@ -351,7 +370,6 @@ void CD3D12Renderer::DrawLeafItem(const SRenderItem &it)
     // the binormal (the direction of growing v). The specular templates add the highlights of the
     // lights' specular colours, with the material's specular colour (times the texture's alpha
     // for the gloss alpha ones).
-    const SShaderProps &Props = pSh->GetProps();
     if (CV_r_Quality_BumpMapping > 0 && Props.bPixelLighting && (dc.nFlags & (DF_LIGHTING | DF_LIGHTMAP_DIR)))
     {
       if (dc.nFlags & DF_LIGHTING)
@@ -377,21 +395,44 @@ void CD3D12Renderer::DrawLeafItem(const SRenderItem &it)
       SetupShadowReceiver(dc, pObj);
   };
 
+  //! What the texture is multiplied by besides the light: the material's colour, or for the
+  //! templates without lights the object's ambient colour (twice for Ambient2) or white.
+  auto LitColor = [&]() -> CFColor
+  {
+    const Vec3 &a = pObj->m_AmbColor;
+    switch (eLighting)
+    {
+    case ELighting::Ambient:
+      return CFColor(a.x, a.y, a.z, 1);
+    case ELighting::Ambient2:
+      return CFColor(2 * a.x, 2 * a.y, 2 * a.z, 1);
+    case ELighting::None:
+      return CFColor(1, 1, 1, 1);
+    default:
+      return MatColor;
+    }
+  };
+
   switch (eDC)
   {
   case eDC_Opaque:
   case eDC_AlphaTest:
+  {
     Light();
-    Set4(dc.vColor, MatColor.r * pObj->m_Color.r, MatColor.g * pObj->m_Color.g, MatColor.b * pObj->m_Color.b, 1);
+    const CFColor Color = LitColor();
+    Set4(dc.vColor, Color.r * pObj->m_Color.r, Color.g * pObj->m_Color.g, Color.b * pObj->m_Color.b, 1);
     if (eDC == eDC_AlphaTest || GetAlphaRef(pSh, pRes) > 0)
     {
       dc.nFlags |= DF_ALPHATEST;
       dc.fAlphaRef = GetAlphaRef(pSh, pRes) > 0 ? GetAlphaRef(pSh, pRes) : 0.5f;
     }
     break;
+  }
   case eDC_AlphaBlend:
+  {
     Light();
-    Set4(dc.vColor, MatColor.r * pObj->m_Color.r, MatColor.g * pObj->m_Color.g, MatColor.b * pObj->m_Color.b, fOpacity * pObj->m_Color.a);
+    const CFColor Color = LitColor();
+    Set4(dc.vColor, Color.r * pObj->m_Color.r, Color.g * pObj->m_Color.g, Color.b * pObj->m_Color.b, fOpacity * pObj->m_Color.a);
     Key.nState = GS_BLSRC_SRCALPHA | GS_BLDST_ONEMINUSSRCALPHA;
     if (GetAlphaRef(pSh, pRes) > 0)
     {
@@ -399,6 +440,7 @@ void CD3D12Renderer::DrawLeafItem(const SRenderItem &it)
       dc.fAlphaRef = GetAlphaRef(pSh, pRes);
     }
     break;
+  }
   case eDC_AlphaTestVColor:
   case eDC_VColor:
   {
@@ -423,8 +465,10 @@ void CD3D12Renderer::DrawLeafItem(const SRenderItem &it)
   }
   case eDC_Additive:
   {
+    // The texture alone (times the object's ambient colour for TemplDecalAdd_VLight).
     const float s = GetColorScale(pSh, pObj);
-    Set4(dc.vColor, s, s, s, 1);
+    const CFColor Color = eLighting == ELighting::Ambient ? LitColor() : CFColor(1, 1, 1, 1);
+    Set4(dc.vColor, s * Color.r, s * Color.g, s * Color.b, 1);
     Key.nState = GS_BLSRC_ONE | GS_BLDST_ONE;
     break;
   }
@@ -774,9 +818,11 @@ void CD3D12Renderer::DumpDraw(const SDrawConstants &dc, const SPipelineKey &Key,
     if (dc.nFlags & (1u << i))
       Flags += (Flags.empty() ? "" : "|") + std::string(s_Flags[i]);
   FILE *f = m_pFrameDump.get();
-  fprintf(f, "    draw: fmt %d state 0x%x cull %d bias %d flags %s tex0 '%s' alpharef %.3f col (%.2f %.2f %.2f %.2f) amb (%.2f %.2f %.2f) lights %u",
+  if (dc.nFlags2 & DF2_SELF_ILLUM)
+    Flags += (Flags.empty() ? "" : "|") + std::string("SELF_ILLUM");
+  fprintf(f, "    draw: fmt %d state 0x%x cull %d bias %d flags %s tex0 '%s' alpharef %.3f col (%.2f %.2f %.2f %.2f) amb (%.2f %.2f %.2f) x%g lights %u",
           Key.nVertexFormat, Key.nState, Key.nCull, Key.bDepthBias, Flags.c_str(), (dc.nFlags & DF_TEX0) && pTex ? pTex->m_Name.c_str() : "",
-          dc.fAlphaRef, dc.vColor[0], dc.vColor[1], dc.vColor[2], dc.vColor[3], dc.vAmbient[0], dc.vAmbient[1], dc.vAmbient[2], dc.nLights);
+          dc.fAlphaRef, dc.vColor[0], dc.vColor[1], dc.vColor[2], dc.vColor[3], dc.vAmbient[0], dc.vAmbient[1], dc.vAmbient[2], dc.vAmbient[3], dc.nLights);
   if (dc.nFlags & DF_SHADOWS)
     fprintf(f, " shadow maps %d", (int)dc.vShadowParams[0]);
   for (uint32 i = 0; i < dc.nLights; i++)
@@ -881,6 +927,14 @@ CTexture *CD3D12Renderer::GetNormalMap(SRenderShaderResources *pRes)
   if (!Usable(pMap))
     pMap = m_pShaders->LoadResourceTexture(pRes, EFTT_BUMP);
   return Usable(pMap) ? pMap : nullptr;
+}
+
+CTexture *CD3D12Renderer::GetGlowMap(SRenderShaderResources *pRes)
+{
+  if (!pRes || !m_pShaders)
+    return nullptr;
+  CTexture *pMap = m_pShaders->LoadResourceTexture(pRes, EFTT_GLOSS);
+  return pMap && !pMap->IsCube() && !(pMap->GetFlags() & FT_NOTFOUND) && pMap->IsTextureLoaded() ? pMap : nullptr;
 }
 
 void CD3D12Renderer::DrawSkyItem(const SRenderItem &it)

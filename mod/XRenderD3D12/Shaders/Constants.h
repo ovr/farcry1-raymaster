@@ -48,7 +48,7 @@ typedef float float4x4_t[16];
 #define DF_TEX1             0x00000002  //!< second texture g_Textures[nTex1] with uv1 (lightmap, detail)
 #define DF_VCOLOR           0x00000004  //!< multiply by the vertex colour (COLOR0; the default stream is white)
 #define DF_VCOLOR_X2        0x00000008  //!< the vertex colour times 2 (vegetation)
-#define DF_LIGHTING         0x00000010  //!< per vertex 2 * (saturate(ambient / 2 + sun N.L + light 0) + saturate(each other light)), normal from NORMAL
+#define DF_LIGHTING         0x00000010  //!< per vertex s * (saturate(ambient / s + sun N.L + light 0) + saturate(each other light)), s = vAmbient.w (2: overbright, 1: none), normal from NORMAL
 #define DF_ALPHATEST        0x00000020  //!< clip when alpha < fAlphaRef (GREATER0: fAlphaRef 1/255)
 #define DF_TEXGEN_WORLD     0x00000040  //!< uv0 = (dot(world pos, vTexGenU), dot(world pos, vTexGenV))
 #define DF_TEXMATRIX        0x00000080  //!< uv0 = (uv0, 1) * the 2x3 texture matrix vTexMat0/vTexMat1
@@ -76,6 +76,9 @@ typedef float float4x4_t[16];
 #define DF_PIXEL_LIGHTING   0x40000000  //!< with DF_LIGHTING: lit per pixel (each light's colour clamped to 1, point lights falling off as saturate(1 - d * vLightAtten.w)), with the vertex normal or N' (DF_BUMP)
 #define DF_SPECULAR         0x80000000  //!< with DF_PIXEL_LIGHTING: + 2 * vSpecular.rgb * gloss * sum of the lights' specular colour (clamped to 1) * falloff * saturate(R.V)^32, R the light reflected about N', where N'.L > 0
 #define DF_BUMP             0x20000000  //!< bump mapping: N' = the normal map tex3 at uv0 (rgb * 2 - 1, its green times vParams1.y) in the vertex's tangent frame (TANGENT, BINORMAL, TNORMAL) for DF_PIXEL_LIGHTING; DF_LIGHTMAP_DIR takes saturate(dot(N', D)) for D.z
+
+// SDrawConstants::nFlags2
+#define DF2_SELF_ILLUM      0x00000001  //!< rgb += tex4 (g_Textures[nTex4] at uv0) * vSelfIllum.rgb: a glow map added, unlit
 
 #define XR_SAMPLER_LINEAR_WRAP  0
 #define XR_SAMPLER_LINEAR_CLAMP 1
@@ -105,7 +108,7 @@ struct SDrawConstants
   XR_FLOAT4X4(mWorld);            //!< object to world (identity for world space vertices)
   XR_FLOAT4X4(mWorldViewProj);    //!< object to clip
   XR_FLOAT4(vColor);              //!< multiplies the result (material / object colour)
-  XR_FLOAT4(vAmbient);            //!< rgb ambient for DF_LIGHTING / DF_TEX1_LIGHTMAP
+  XR_FLOAT4(vAmbient);            //!< rgb ambient for DF_LIGHTING / DF_TEX1_LIGHTMAP; w the scale s of DF_LIGHTING (2 or 1)
   XR_FLOAT4(vTexGenU);            //!< DF_TEXGEN_WORLD
   XR_FLOAT4(vTexGenV);
   XR_FLOAT4(vTexMat0);            //!< DF_TEXMATRIX: u' = dot(float3(u, v, 1), vTexMat0.xyz)
@@ -130,13 +133,14 @@ struct SDrawConstants
   XR_UINT(nTex4);
   XR_UINT(nTex5);
   XR_UINT(nTex6);
-  XR_FLOAT(fPad1);
+  XR_UINT(nFlags2);               //!< DF2_*
   XR_FLOAT4X4(mParams0);          //!< a matrix of the other programs (Water.hlsl)
   XR_FLOAT4X4_ARRAY(mShadow, XR_MAX_DRAW_SHADOWS);  //!< DF_SHADOWS: world to a shadow map: x, y -1..1 across its circle, z depth 0..1 (away from the sun)
   XR_UINT4(nShadowTex);           //!< their depth textures (texture table indices)
   XR_FLOAT4(vShadowParams);       //!< x the number of maps, y depth bias, z filter radius in texels, w offset along the normal (m)
   XR_FLOAT4_ARRAY(vLightSpec, XR_MAX_DRAW_LIGHTS);  //!< DF_SPECULAR: rgb the light's specular colour
   XR_FLOAT4(vSpecular);           //!< DF_SPECULAR: rgb the material's specular colour, w 1: times the texture's alpha (gloss)
+  XR_FLOAT4(vSelfIllum);          //!< DF2_SELF_ILLUM: rgb the factor of the glow map
 };
 
 #endif

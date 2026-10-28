@@ -12,10 +12,11 @@
 //	    colour: vColor, times the vertex colour (DF_VCOLOR; DF_VCOLOR_X2 also
 //	      doubles its rgb, DF_VALPHA_ONLY keeps only its alpha), times the
 //	      vertex lighting (DF_LIGHTING, rgb only):
-//	      2 * (saturate(ambient / 2 + sun N.L + light 0) + the sum of
+//	      s * (saturate(ambient / s + sun N.L + light 0) + the sum of
 //	      saturate(light) of the draw's other lights), light = colour * N.L,
 //	      point lights times 1 / (a0 + a1 d): each light is clamped on its own,
-//	      as in a pass of its own; the light of a texture modulated by 2
+//	      as in a pass of its own; s = vAmbient.w: 2 the light of a texture
+//	      modulated by 2, 1 of a texture modulated
 //	    uv0: DF_TEXGEN_WORLD (dot(float4(world pos, 1), vTexGenU / V)), then
 //	      DF_TEXMATRIX
 //	  pixel shader
@@ -58,6 +59,8 @@
 //	      (texture alpha if vSpecular.w, else 1) * the sum over the sun (times
 //	      v) and the lights of their specular colour (clamped to 1) * falloff
 //	      * saturate(R.V)^32, R the light reflected about the normal
+//	    DF2_SELF_ILLUM: rgb += tex4 at uv0 * vSelfIllum.rgb (a glow map added,
+//	      unlit)
 //	    DF_CAUSTICS (the terrain under the ocean, multiplied in twice): rgb =
 //	      0.5 + 0.5 * k * (I - 1), I = min of two layers of the caustics texture
 //	      tex0 drifting apart, sampled where the sun's refracted ray crossed
@@ -88,11 +91,12 @@ struct SVertexOutput
 };
 
 //! The light of the sun, the ambient colour and the draw's lights at world position vPos with the
-//! normalised normal vN, which multiplies the colour (DF_LIGHTING): 2 * (saturate(ambient / 2 +
+//! normalised normal vN, which multiplies the colour (DF_LIGHTING): s * (saturate(ambient / s +
 //! sun N.L + light 0) + the sum of saturate(light) of the other lights), light = colour * N.L *
-//! attenuation, with the sun; vNoSunLight the same without it. Per vertex a point light attenuates
-//! by 1 / (a0 + a1 d) up to its range; per pixel (bPerPixel, DF_BUMP) by saturate(1 - d / radius),
-//! and each light's colour is clamped to 1.
+//! attenuation, s = vAmbient.w (2: a texture modulated by 2, 1: modulated), with the sun;
+//! vNoSunLight the same without it. Per vertex a point light attenuates by 1 / (a0 + a1 d) up to
+//! its range; per pixel (bPerPixel, DF_BUMP) by saturate(1 - d / radius), and each light's colour
+//! is clamped to 1.
 //! The specular power of a light: saturate(R.V)^32, R = L reflected about N, 0 where N.L <= 0.
 float Specular(float3 vN, float3 vToLight, float3 vToEye)
 {
@@ -104,8 +108,9 @@ float Specular(float3 vN, float3 vToLight, float3 vToEye)
 
 float3 DrawLighting(float3 vPos, float3 vN, bool bPerPixel, out float3 vNoSunLight, out float3 vSunSpec, out float3 vOtherSpec)
 {
-  float3 vLight = 0.5 * g_Draw.vAmbient.rgb + g_Frame.vSunColor.rgb * saturate(dot(vN, g_Frame.vSunDir.xyz));
-  float3 vNoSun = 0.5 * g_Draw.vAmbient.rgb;
+  float fScale = g_Draw.vAmbient.w;
+  float3 vLight = g_Draw.vAmbient.rgb / fScale + g_Frame.vSunColor.rgb * saturate(dot(vN, g_Frame.vSunDir.xyz));
+  float3 vNoSun = g_Draw.vAmbient.rgb / fScale;
   float3 vOthers = 0;
   bool bSpecular = bPerPixel && HasFlag(DF_SPECULAR);
   float3 vToEye = SafeNormalize(g_Frame.vCameraPos.xyz - vPos);
@@ -141,8 +146,8 @@ float3 DrawLighting(float3 vPos, float3 vN, bool bPerPixel, out float3 vNoSunLig
     else
       vOthers += saturate(vThis);
   }
-  vNoSunLight = 2 * (saturate(vNoSun) + vOthers);
-  return 2 * (saturate(vLight) + vOthers);
+  vNoSunLight = fScale * (saturate(vNoSun) + vOthers);
+  return fScale * (saturate(vLight) + vOthers);
 }
 
 SVertexOutput VSMain(SVertexInput In)
@@ -261,6 +266,8 @@ float4 PSMain(SVertexOutput In) : SV_Target
   else
     vColor = vVertexColor * vTex;
   vColor.rgb += vSpecular;
+  if (HasFlag2(DF2_SELF_ILLUM))
+    vColor.rgb += SampleTexture(g_Draw.nTex4, XR_SAMPLER_LINEAR_WRAP, In.vTex0).rgb * g_Draw.vSelfIllum.rgb;
   if (HasFlag(DF_SHADOW_PASS))
     vColor.a = 1 - fSun;
   if (HasFlag(DF_ALPHA_FROM_TEX))

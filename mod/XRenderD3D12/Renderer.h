@@ -376,6 +376,8 @@ public:
   //! The normal map of a material (EFTT_NORMALMAP, else EFTT_BUMP; loaded on first use); NULL
   //! without one or when its file is missing.
   CTexture *GetNormalMap(SRenderShaderResources *pRes);
+  //! The gloss map (EFTT_GLOSS) a glow template adds, nullptr without a usable one.
+  CTexture *GetGlowMap(SRenderShaderResources *pRes);
   //! The sky box of a CRESky element drawn with a sky shader (CShaderManager::FindSkyBox).
   void DrawSkyItem(const SRenderItem &it);
   //! The particle sprites of the scene (EF_AddSpriteToScene).

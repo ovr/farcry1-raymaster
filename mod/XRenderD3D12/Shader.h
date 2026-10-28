@@ -64,6 +64,26 @@ enum EDrawClass
   eDC_Caustics,           //!< the light the ocean's waves focus on the terrain under it, multiplied in
 };
 
+//! How the colour of a lit draw class (opaque, alpha test, alpha blend) is lit.
+enum class ELighting : uint8
+{
+  Overbright,             //!< the lightmap, or texture * 2 * (saturate(ambient / 2 + sun + light 0) + saturate(each other
+                          //!< light)); per pixel for bPixelLighting with bump mapping on
+  Vertex,                 //!< texture * (saturate(ambient + sun + light 0) + saturate(each other light)): modulated, not by 2
+  Ambient,                //!< texture * the object's ambient colour, no lights
+  Ambient2,               //!< texture * 2 * the object's ambient colour, no lights
+  None,                   //!< the texture alone
+};
+
+//! The material's gloss map (EFTT_GLOSS) added, unlit: the glowing parts of the glow templates.
+enum class EGlow : uint8
+{
+  None,
+  Glow,                   //!< + gloss map
+  Pulse,                  //!< + gloss map * saturate(0.75 + 0.75 * sin(pi * t))
+  SelfIllum,              //!< bump mapping on: the texture unlit + 2 * gloss map; off: + gloss map
+};
+
 //! What a shader is.
 enum class EShaderKind
 {
@@ -82,7 +102,9 @@ struct SShaderProps
   int nLFlags = 0;                                //!< GetLFlags (LMF_*)
   ECull eCull = eCULL_Back;                       //!< GetCull
   EDrawClass eDrawClass = eDC_Opaque;
-  float fAlphaRef = 0.0f;                         //!< alpha test reference (0..1, texture alpha >= it passes); 0: none
+  ELighting eLighting = ELighting::Overbright;
+  EGlow eGlow = EGlow::None;
+  float fAlphaRef = 0.0f;                        //!< alpha test reference (0..1, texture alpha >= it passes); 0: none
   float fScrollV = 0.0f;                          //!< texture v moves by fScrollV * ITimer::GetCurrTime()
   bool bLightmap = false;                         //!< combines the lightmap of lightmapped objects
   bool bStealth = false;                          //!< colour scaled by the object's "refraction" (GetColorScale)
