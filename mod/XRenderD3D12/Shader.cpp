@@ -205,7 +205,7 @@ constexpr SEngineEntry s_EngineShaders[] =
   { "screendistort",                   "",                     eS_Glare,                 0,             0,                   0,                eDC_NoDraw },
   // Lights and flares (coronas are off by default), fog layers.
   { "crylight",                        "",                     eS_Nearest,               0,             0,                   0,                eDC_NoDraw },
-  { "foglayer",                        "",                     eS_FogShader,             EF_FOGSHADER,  0,                   0,                eDC_NoDraw },
+  { "foglayer",                        "",                     eS_FogShader,             EF_FOGSHADER,  0,                   0,                eDC_FogLayer },
   // Decals with an owner (only added with r_Quality_BumpMapping above 0): one shader for both.
   { "decal_vp",                        "decal_fp",             eS_Banner,                0,             EF2_DONTSORTBYDIST,  LMF_DISABLE,      eDC_Decal },
   { "decal_2d_vp",                     "decal_fp",             eS_Banner,                0,             EF2_DONTSORTBYDIST,  LMF_DISABLE,      eDC_Decal },

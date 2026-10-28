@@ -59,7 +59,16 @@ namespace
 
   bool IsBlendedClass(EDrawClass eDC)
   {
-    return eDC == eDC_AlphaBlend || eDC == eDC_Additive || IsWaterClass(eDC);
+    return eDC == eDC_AlphaBlend || eDC == eDC_Additive || eDC == eDC_FogLayer || IsWaterClass(eDC);
+  }
+
+  //! The order of the passes of an object drawn one over another: its first pass, its light
+  //! passes (FOB_LIGHTPASS), its fog volume pass (eS_FogShader, FOB_FOGPASS).
+  uint64 PassOrder(const SRenderItem &it)
+  {
+    if ((it.nSort & ~EFSLIST_MASK) == eS_FogShader || (it.pObj->m_ObjFlags & FOB_FOGPASS))
+      return 2;
+    return (it.pObj->m_ObjFlags & FOB_LIGHTPASS) ? 1 : 0;
   }
 
   //! Elements drawn over the finished 3D scene, in this order (0: not one of them).
@@ -168,8 +177,8 @@ namespace
       if (IsWaterClass(it.eDrawClass))
         return (1ull << 61) | (nGroup << 32) | FarFirstBits(it.fDistance);
       if (it.eDrawClass != eDC_Additive && TopZ(it) < fWaterZ)
-        return FarFirstBits(it.fDistance);
-      return (1ull << 62) | (FarFirstBits(it.fDistance) << 30);
+        return (FarFirstBits(it.fDistance) << 2) | PassOrder(it);
+      return (1ull << 62) | (FarFirstBits(it.fDistance) << 30) | PassOrder(it);
     }
     // Opaque and nearest: by pass, sort group, shader and resources; in the nearest list the
     // blended ones after the opaque ones, far to near.
@@ -177,8 +186,12 @@ namespace
     if (it.eList == eRL_Nearest && bBlended)
       return (1ull << 63) | nKey | (FarFirstBits(it.fDistance) >> 9);
     // In a sort group the caustics come after the terrain and the opaque objects (over what they
-    // left of the terrain), the terrain's shadows after them (they replace the shadowed terrain).
-    const uint64 nRank = it.eDrawClass == eDC_Caustics ? 1 : it.eDrawClass == eDC_TerrainShadow ? 2 : 0;
+    // left of the terrain), the terrain's shadows after them (they replace the shadowed terrain),
+    // the light passes of the objects lit in passes after everything they add to.
+    const uint64 nRank = it.eDrawClass == eDC_Caustics           ? 1
+                         : it.eDrawClass == eDC_TerrainShadow    ? 2
+                         : (it.pObj->m_ObjFlags & FOB_LIGHTPASS) ? 3
+                                                                 : 0;
     const uint64 nShader = (uint64)(it.pShader->GetID() & 0xFFFFF);
     const uint64 nRes = it.pRes ? (uint64)(uint32)it.pRes->m_Id : 0;
     return nKey | (nRank << 52) | (nShader << 32) | nRes;

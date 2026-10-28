@@ -271,3 +271,10 @@ void CD3D12Renderer::RegisterOtherVariables()
   for (const SStringVar &v : s_StringVars)
     iConsole->CreateVariable(v.szName, v.szDefault, v.nFlags);
 }
+
+bool CD3D12Renderer::IsVolumetricFogOn()
+{
+  if (!m_pVolumetricFog && iConsole)
+    m_pVolumetricFog = iConsole->GetCVar("r_VolumetricFog");
+  return m_pVolumetricFog && m_pVolumetricFog->GetIVal() != 0;
+}

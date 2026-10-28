@@ -42,6 +42,8 @@ public:
   void RegisterVariables();
   //! The variables of the original renderer this one does not read (ConsoleVariables.cpp).
   void RegisterOtherVariables();
+  //! r_VolumetricFog (one of them): the fog volume passes are drawn.
+  bool IsVolumetricFogOn();
 
   //////////////////////////////////////////////////////////////////////////
   // Renderer.cpp
@@ -622,6 +624,7 @@ public:
   float CV_r_DetailDistance = 4;      //!< the terrain's detail layers fade out from here to twice this far
   int CV_d3d12_debug = 0;             //!< debug layer (also XRENDERD3D12_DEBUG=1); only read at Init
   int CV_d3d12_DumpFrame = 0;         //!< non-zero: the next frame's 3D draws go to XRenderD3D12_frame.txt, then 0
+  ICVar *m_pVolumetricFog = nullptr;  //!< r_VolumetricFog, looked up on first use
   int CV_d3d12_WaterDebug = 0;        //!< non-zero: the water shows one term of its colour (Water.hlsl)
   int CV_d3d12_Caustics = 1;          //!< 0: no caustics under the ocean
   float CV_d3d12_WaterSunGlint = 0;   //!< strength of the sun's highlight on water (0: none)

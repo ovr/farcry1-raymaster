@@ -162,8 +162,12 @@ void CD3D12Renderer::BeginScene3D()
   m_SunColor[0] = Color.r; m_SunColor[1] = Color.g; m_SunColor[2] = Color.b;
   m_SunSpec[0] = Spec.r; m_SunSpec[1] = Spec.g; m_SunSpec[2] = Spec.b;
   if (m_pFrameDump)
+  {
     fprintf(m_pFrameDump.get(), "sun: direction (%.3f %.3f %.3f) colour (%.2f %.2f %.2f) specular (%.2f %.2f %.2f)\n", vDir.x, vDir.y, vDir.z,
             Color.r, Color.g, Color.b, Spec.r, Spec.g, Spec.b);
+    fprintf(m_pFrameDump.get(), "fog: %s, %g to %g, colour (%.3f %.3f %.3f)\n", m_bFog ? "on" : "off", m_fFogStart, m_fFogEnd, m_FogColor[0],
+            m_FogColor[1], m_FogColor[2]);
+  }
   m_NearestProj = MakeNearestProjection(m_Camera);
   m_nSceneSkyBox = -1;
   InvalidateFrameConstants();
@@ -248,9 +252,13 @@ void CD3D12Renderer::DrawLeafItem(const SRenderItem &it)
   if (eDC == eDC_NoDraw || eDC == eDC_Engine || eDC == eDC_Sky)
     return;
   // The fog volume pass: the element once more, with the ID of the fog volume it is in, in the
-  // sort group eS_FogShader (the object of a static one has FOB_FOGPASS). The original draws
-  // it only with r_VolumetricFog; not drawn yet, but for the caustics under the ocean.
-  if (eDC != eDC_Caustics && ((it.nSort & ~EFSLIST_MASK) == eS_FogShader || (pObj->m_ObjFlags & FOB_FOGPASS)))
+  // sort group eS_FogShader (the object of a static one has FOB_FOGPASS), and the volume's cap
+  // ("foglayer"); drawn with r_VolumetricFog. The fog of the ocean's volume over what is under it
+  // is the water's (Water.cpp), but for the caustics of its sectors.
+  const bool bFogPass = eDC == eDC_FogLayer ||
+                        (eDC != eDC_Caustics && ((it.nSort & ~EFSLIST_MASK) == eS_FogShader || (pObj->m_ObjFlags & FOB_FOGPASS)));
+  const SFogVolume *pFogVolume = bFogPass ? m_pScene->GetFogVolume(it.nFog) : nullptr;
+  if (bFogPass && (!pFogVolume || pFogVolume->bCaustics || !IsVolumetricFogOn() || m_bShadowMapPass || m_bSpritePass))
     return;
 
   // Transform, depth range and scissor.
@@ -344,11 +352,44 @@ void CD3D12Renderer::DrawLeafItem(const SRenderItem &it)
     else
       DrawGeometry(Key, dc, Geom->Topology, Geom->VB, nullptr, Geom->nNumVertices, Geom->nFirstVertex, 0, pTC1, pTangents);
   };
+  // An object lit in passes (FOB_ZPASS: the ambient and the light map; then for each light an
+  // FOB_LIGHTPASS element with that light alone in m_DynLMMask and no ambient): the light passes
+  // add their light over the first pass (see below).
+  const bool bLightPass = (pObj->m_ObjFlags & FOB_LIGHTPASS) != 0;
   // A shadow map: the depth of the casters.
   if (m_bShadowMapPass)
   {
+    if (bLightPass)
+      return;
     if (SetupShadowCasterDraw(Key, dc, it))
       Draw();
+    return;
+  }
+
+  // A fog volume over the object (FogVolumeAlpha, General.hlsl) where its first pass is: blended
+  // objects where they are seen, by their alpha; alpha tested ones where the test passes. The cap
+  // from both sides.
+  if (pFogVolume)
+  {
+    const bool bCap = eDC == eDC_FogLayer;
+    const bool bBlended = eDC == eDC_AlphaBlend || IsBlendedVColor(eDC, pRes, pObj);
+    const float fAlphaRef = GetAlphaRef(pSh, pRes);
+    const bool bAlphaTest = eDC == eDC_AlphaTest || eDC == eDC_AlphaTestVColor || fAlphaRef > 0;
+    dc.nFlags &= (bBlended || bAlphaTest) ? (DF_TEX0 | DF_TEXMATRIX) : 0;
+    dc.nFlags2 = DF2_FOG_VOLUME;
+    if (bAlphaTest)
+    {
+      dc.nFlags |= DF_ALPHATEST;
+      dc.fAlphaRef = fAlphaRef > 0 ? fAlphaRef : eDC == eDC_AlphaTestVColor ? 128.0f / 255.0f : 0.5f;
+    }
+    const CFColor &c = pFogVolume->Color;
+    Set4(dc.vColor, c.r, c.g, c.b, bBlended ? fOpacity * pObj->m_Color.a : 1.0f);
+    Set4(dc.vParams0, pFogVolume->fFogLayerZ, logf(100) / (2 * std::max(pFogVolume->fMaxFogDist, 0.01f)), bCap ? 1.0f : 0.0f,
+         bBlended ? 1.0f : 0.0f);
+    Key.nState = GS_BLSRC_SRCALPHA | GS_BLDST_ONEMINUSSRCALPHA | (bBlended || bCap ? 0 : GS_DEPTHFUNC_EQUAL);
+    if (bCap)
+      Key.nCull = R_CULL_NONE;
+    Draw();
     return;
   }
 
@@ -357,7 +398,7 @@ void CD3D12Renderer::DrawLeafItem(const SRenderItem &it)
   //! unlit.
   auto Light = [&]()
   {
-    if (Props.eGlow != EGlow::None)
+    if (Props.eGlow != EGlow::None && !bLightPass)
     {
       if (CTexture *pGlow = GetGlowMap(it.pRes))
       {
@@ -370,7 +411,7 @@ void CD3D12Renderer::DrawLeafItem(const SRenderItem &it)
     }
     if (eLighting == ELighting::Ambient || eLighting == ELighting::Ambient2 || eLighting == ELighting::None)
       return;
-    if (pSh->UsesLightmap() && pObj->m_nLMId > 0 && pObj->m_pLMTCBufferO && m_pTextures && m_pTextures->GetByID(pObj->m_nLMId))
+    if (!bLightPass && pSh->UsesLightmap() && pObj->m_nLMId > 0 && pObj->m_pLMTCBufferO && m_pTextures && m_pTextures->GetByID(pObj->m_nLMId))
       TexCoord1 = Geometry::GetTexCoordStream(pObj->m_pLMTCBufferO);
     if (TexCoord1)
     {
@@ -670,6 +711,18 @@ void CD3D12Renderer::DrawLeafItem(const SRenderItem &it)
   default:
     return;
   }
+  // A light pass: the light alone (no ambient, sun or light map), added where the first pass is
+  // (blended objects: where they are seen, by their alpha), fogged towards black.
+  if (bLightPass)
+  {
+    if (!(dc.nFlags & DF_LIGHTING) || !dc.nLights)
+      return;
+    dc.nFlags &= ~(DF_SHADOWS | DF_SHADOW_DEBUG);
+    dc.nFlags2 |= DF2_NO_SUN | DF2_FOG_BLACK;
+    Set4(dc.vAmbient, 0, 0, 0, dc.vAmbient[3]);
+    const bool bBlended = (Key.nState & GS_BLEND_MASK) != 0;
+    Key.nState = bBlended ? GS_BLSRC_SRCALPHA | GS_BLDST_ONE : GS_BLSRC_ONE | GS_BLDST_ONE | GS_DEPTHFUNC_EQUAL;
+  }
   if (m_bFog)
     dc.nFlags |= DF_FOG;
   // The picture of a far vegetation sprite: where the object is, whatever the texture's alpha.
@@ -688,14 +741,14 @@ void CD3D12Renderer::DrawLeafItem(const SRenderItem &it)
 void CD3D12Renderer::DumpItem(int nIndex, const SRenderItem &it, int eList)
 {
   static const char *const s_DrawClasses[] = { "NoDraw", "Opaque", "AlphaTest", "AlphaTestVColor", "VColor", "AlphaBlend", "Additive", "Terrain", "Sky", "Engine", "Water", "WaterBottom", "WaterBeach", "TerrainLayer", "Decal",
-                                                "TerrainShadow", "Caustics" };
+                                                "TerrainShadow", "Caustics", "FogLayer" };
   const CCObject *pObj = it.pObj;
   const char *szLB = "";
   if (it.pRE->m_Type == eDATA_OcLeaf && static_cast<CREOcLeaf *>(it.pRE)->m_pBuffer)
     szLB = static_cast<CREOcLeaf *>(it.pRE)->m_pBuffer->m_sSource;
   const CTexture *pTex = GetDiffuseTexture(it.pRes);
-  fprintf(m_pFrameDump.get(), "[%d] list %d sort 0x%x %s RE %d shader '%s' templ '%s' tex '%s' lb '%s' pos (%.2f %.2f %.2f) flags 0x%x LM %d (dir %d occl %d HDR %d) LMTC %d mask 0x%x amb (%.2f %.2f %.2f) col (%.2f %.2f %.2f %.2f) res aref %.3f opacity %.2f flags 0x%x casters %d\n",
-          nIndex, eList, it.nSort, (unsigned)it.eDrawClass < std::size(s_DrawClasses) ? s_DrawClasses[it.eDrawClass] : "?", it.pRE->m_Type,
+  fprintf(m_pFrameDump.get(), "[%d] list %d sort 0x%x fog %d %s RE %d shader '%s' templ '%s' tex '%s' lb '%s' pos (%.2f %.2f %.2f) flags 0x%x LM %d (dir %d occl %d HDR %d) LMTC %d mask 0x%x amb (%.2f %.2f %.2f) col (%.2f %.2f %.2f %.2f) res aref %.3f opacity %.2f flags 0x%x casters %d\n",
+          nIndex, eList, it.nSort, it.nFog, (unsigned)it.eDrawClass < std::size(s_DrawClasses) ? s_DrawClasses[it.eDrawClass] : "?", it.pRE->m_Type,
           it.pShader ? it.pShader->GetName() : "", it.pShader ? it.pShader->GetProps().Template.c_str() : "", pTex ? pTex->m_Name.c_str() : "",
           szLB ? szLB : "",
           pObj->m_Matrix.data[12], pObj->m_Matrix.data[13], pObj->m_Matrix.data[14], pObj->m_ObjFlags, pObj->m_nLMId,

@@ -80,6 +80,9 @@ typedef float float4x4_t[16];
 // SDrawConstants::nFlags2
 #define DF2_ADD_TEX4        0x00000001  //!< rgb += tex4 (g_Textures[nTex4] at uv0) * vAddColor.rgb + vAddColor.w: a glow map or a texture added, unlit
 #define DF2_GLASS           0x00000002  //!< with DF_CUBE0: lerp(cube(T), cube(R), F), T the view vector refracted with the ratio vParams2.w, F = saturate(vParams2.z + vParams2.x * (1 - N.V)^vParams2.y); with DF2_ADD_TEX4 a *= tex4 a
+#define DF2_NO_SUN          0x00000004  //!< with DF_LIGHTING: the draw's lights without the sun (a light pass added over the object)
+#define DF2_FOG_BLACK       0x00000008  //!< with DF_FOG: fogged towards black (an additive pass)
+#define DF2_FOG_VOLUME      0x00000010  //!< the fog of a fog volume over an object in it: rgb = vColor.rgb, a = FogVolumeAlpha (General.hlsl; vParams0: x the layer's height, y ln 100 / (2 * fog distance), z 1 for the volume's cap, w 1: times the alpha after the alpha test)
 
 #define XR_SAMPLER_LINEAR_WRAP  0
 #define XR_SAMPLER_LINEAR_CLAMP 1

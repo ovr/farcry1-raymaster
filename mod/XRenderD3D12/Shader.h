@@ -62,6 +62,7 @@ enum EDrawClass
   eDC_Decal,              //!< a decal on a static object: over its owner's vertices, blended
   eDC_TerrainShadow,      //!< the shadow of static objects on the terrain (their shadow maps), blended
   eDC_Caustics,           //!< the light the ocean's waves focus on the terrain under it, multiplied in
+  eDC_FogLayer,           //!< the cap of a fog volume (its layer), blended with the volume's fog
 };
 
 //! How the colour of a lit draw class (opaque, alpha test, alpha blend) is lit.

@@ -71,8 +71,13 @@
 //	      w k; vParams1: xy the ray's shift per metre of depth, z the depth
 //	      where the caustics are gone, w the texture's scale to a mean of 1),
 //	      fading in over the first metre of depth
+//	    DF2_FOG_VOLUME (a fog volume over an object in it): the volume's colour
+//	      (vColor.rgb), alpha FogVolumeAlpha (times the alpha with vParams0.w);
+//	      nothing below applies
 //	    DF_FOG (with vFogParams.w set): linear fog by the distance to the
-//	      camera, per pixel (towards 0.5 with DF_DETAIL_LAYER, DF_CAUSTICS)
+//	      camera, per pixel (towards 0.5 with DF_DETAIL_LAYER, DF_CAUSTICS, 0
+//	      with DF2_FOG_BLACK)
+//	  DF2_NO_SUN leaves the sun out of DF_LIGHTING (a light pass of its own).
 //
 //////////////////////////////////////////////////////////////////////
 
@@ -112,12 +117,13 @@ float Specular(float3 vN, float3 vToLight, float3 vToEye)
 float3 DrawLighting(float3 vPos, float3 vN, bool bPerPixel, out float3 vNoSunLight, out float3 vSunSpec, out float3 vOtherSpec)
 {
   float fScale = g_Draw.vAmbient.w;
-  float3 vLight = g_Draw.vAmbient.rgb / fScale + g_Frame.vSunColor.rgb * saturate(dot(vN, g_Frame.vSunDir.xyz));
+  bool bSun = !HasFlag2(DF2_NO_SUN);
+  float3 vLight = g_Draw.vAmbient.rgb / fScale + (bSun ? g_Frame.vSunColor.rgb * saturate(dot(vN, g_Frame.vSunDir.xyz)) : 0);
   float3 vNoSun = g_Draw.vAmbient.rgb / fScale;
   float3 vOthers = 0;
   bool bSpecular = bPerPixel && HasFlag(DF_SPECULAR);
   float3 vToEye = SafeNormalize(g_Frame.vCameraPos.xyz - vPos);
-  vSunSpec = bSpecular ? saturate(g_Frame.vSunSpec.rgb) * Specular(vN, g_Frame.vSunDir.xyz, vToEye) : 0;
+  vSunSpec = bSpecular && bSun ? saturate(g_Frame.vSunSpec.rgb) * Specular(vN, g_Frame.vSunDir.xyz, vToEye) : 0;
   vOtherSpec = 0;
   for (uint i = 0; i < min(g_Draw.nLights, XR_MAX_DRAW_LIGHTS); i++)
   {
@@ -151,6 +157,29 @@ float3 DrawLighting(float3 vPos, float3 vN, bool bPerPixel, out float3 vNoSunLig
   }
   vNoSunLight = fScale * (saturate(vNoSun) + vOthers);
   return fScale * (saturate(vLight) + vOthers);
+}
+
+//! How much of a fog volume's colour covers the point vPos of an object in it (DF2_FOG_VOLUME):
+//! the fog lies under the volume's layer (vParams0.x). Seen from inside, every point under the
+//! layer is in it; seen from above, the fog of a point grows from nothing at the layer to all of
+//! it 5 m down, the faster the nearer the camera is to the layer (the view crosses less of the
+//! fog the steeper it looks down into it). Times the fog of the distance, 1 - exp(-d * vParams0.y),
+//! 99 % at twice the volume's fog distance. The volume's cap (vParams0.z), the layer seen from
+//! below, has the fog of the distance from inside and none from above.
+float FogVolumeAlpha(float3 vPos)
+{
+  float fCamera = g_Frame.vCameraPos.z - g_Draw.vParams0.x;
+  float fDepth = g_Draw.vParams0.x - vPos.z;
+  float fGate;
+  if (g_Draw.vParams0.z > 0)
+    fGate = fCamera <= 0 ? 1 : 0;
+  else if (fDepth <= 0)
+    fGate = 0;
+  else if (fCamera <= 0)
+    fGate = 1;
+  else
+    fGate = 1 - pow(1 - saturate(fDepth / 5), lerp(3, 1.6, saturate(fCamera / 5)));
+  return fGate * (1 - exp(-distance(vPos, g_Frame.vCameraPos.xyz) * g_Draw.vParams0.y));
 }
 
 SVertexOutput VSMain(SVertexInput In)
@@ -333,8 +362,10 @@ float4 PSMain(SVertexOutput In) : SV_Target
   }
   if (HasFlag(DF_ALPHA_ONE))
     vColor.a = 1;
+  if (HasFlag2(DF2_FOG_VOLUME))
+    return float4(g_Draw.vColor.rgb, FogVolumeAlpha(In.vWorldPos) * (g_Draw.vParams0.w > 0 ? vColor.a : 1));
 
-  float3 vFogColor = g_Frame.vFogColor.rgb;
+  float3 vFogColor = HasFlag2(DF2_FOG_BLACK) ? 0 : g_Frame.vFogColor.rgb;
   if (HasFlag(DF_DETAIL_LAYER))
   {
     float fDist = distance(In.vWorldPos, g_Frame.vCameraPos.xyz);
