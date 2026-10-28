@@ -81,6 +81,13 @@ public:
   void ClearColor(const float rgba[4]);
   void ClearDepth(float fDepth, uint8 nStencil, bool bDepth, bool bStencil);
 
+  //! Textures of the back buffer's size for CopyTargets: pColor in the back buffer's format, pDepth
+  //! R24G8_TYPELESS (read as R24_UNORM_X8_TYPELESS); both in PIXEL_SHADER_RESOURCE state.
+  bool CreateTargetCopies(ComPtr<ID3D12Resource> &pColor, ComPtr<ID3D12Resource> &pDepth);
+  //! Copies the back buffer and the depth buffer as drawn so far in this frame into the textures
+  //! of CreateTargetCopies (PIXEL_SHADER_RESOURCE before and after).
+  void CopyTargets(ID3D12Resource *pColor, ID3D12Resource *pDepth);
+
   //! Copies the current back buffer (as drawn so far in this frame, or the last presented one
   //! between frames) to pDst: nWidth x nHeight pixels of B, G, R, A, rows from the top.
   //! Waits for the GPU.

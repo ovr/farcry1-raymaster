@@ -34,6 +34,7 @@
 enum ED3D12Program
 {
   eD3D12P_General = 0,    //!< Shaders/General.hlsl: everything the DF_* flags describe
+  eD3D12P_Water,          //!< Shaders/Water.hlsl: water surfaces (refraction, reflection, waves)
   eD3D12P_Num
 };
 

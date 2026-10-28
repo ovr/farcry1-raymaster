@@ -403,6 +403,60 @@ void CD3D12Device::ClearDepth(float fDepth, uint8 nStencil, bool bDepth, bool bS
     m_pCmdList->ClearDepthStencilView(GetDSV(), Flags, fDepth, nStencil, 0, nullptr);
 }
 
+bool CD3D12Device::CreateTargetCopies(ComPtr<ID3D12Resource> &pColor, ComPtr<ID3D12Resource> &pDepth)
+{
+  if (!m_pDevice)
+    return false;
+  D3D12_HEAP_PROPERTIES Heap = {};
+  Heap.Type = D3D12_HEAP_TYPE_DEFAULT;
+  D3D12_RESOURCE_DESC Desc = {};
+  Desc.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
+  Desc.Width = m_nWidth;
+  Desc.Height = m_nHeight;
+  Desc.DepthOrArraySize = 1;
+  Desc.MipLevels = 1;
+  Desc.Format = D3D12_BACKBUFFER_FORMAT;
+  Desc.SampleDesc.Count = 1;
+  if (Failed(m_pDevice->CreateCommittedResource(&Heap, D3D12_HEAP_FLAG_NONE, &Desc, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, nullptr,
+    IID_PPV_ARGS(&pColor)), "CreateCommittedResource (colour copy)"))
+    return false;
+  // The depth copy: the same format family and layout as the depth buffer, read through an SRV.
+  Desc.Format = DXGI_FORMAT_R24G8_TYPELESS;
+  Desc.Flags = D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL;
+  if (Failed(m_pDevice->CreateCommittedResource(&Heap, D3D12_HEAP_FLAG_NONE, &Desc, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, nullptr,
+    IID_PPV_ARGS(&pDepth)), "CreateCommittedResource (depth copy)"))
+  {
+    pColor.Reset();
+    return false;
+  }
+  return true;
+}
+
+void CD3D12Device::CopyTargets(ID3D12Resource *pColor, ID3D12Resource *pDepth)
+{
+  if (!m_bInFrame || !pColor || !pDepth)
+    return;
+  D3D12_RESOURCE_BARRIER b[4] = {};
+  const auto Set = [](D3D12_RESOURCE_BARRIER &r, ID3D12Resource *pRes, D3D12_RESOURCE_STATES Before, D3D12_RESOURCE_STATES After)
+  {
+    r.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+    r.Transition.pResource = pRes;
+    r.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
+    r.Transition.StateBefore = Before;
+    r.Transition.StateAfter = After;
+  };
+  Set(b[0], GetBackBuffer(), D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_COPY_SOURCE);
+  Set(b[1], m_pDepth.Get(), D3D12_RESOURCE_STATE_DEPTH_WRITE, D3D12_RESOURCE_STATE_COPY_SOURCE);
+  Set(b[2], pColor, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, D3D12_RESOURCE_STATE_COPY_DEST);
+  Set(b[3], pDepth, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, D3D12_RESOURCE_STATE_COPY_DEST);
+  m_pCmdList->ResourceBarrier(4, b);
+  m_pCmdList->CopyResource(pColor, GetBackBuffer());
+  m_pCmdList->CopyResource(pDepth, m_pDepth.Get());
+  for (auto &r : b)
+    std::swap(r.Transition.StateBefore, r.Transition.StateAfter);
+  m_pCmdList->ResourceBarrier(4, b);
+}
+
 bool CD3D12Device::ReadBackBuffer(uint8 *pDst, int nWidth, int nHeight)
 {
   if (!m_pDevice || !pDst || nWidth <= 0 || nHeight <= 0)

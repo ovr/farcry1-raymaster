@@ -53,9 +53,14 @@ namespace
     return eDC;
   }
 
+  bool IsWaterClass(EDrawClass eDC)
+  {
+    return eDC == eDC_Water || eDC == eDC_WaterBeach;
+  }
+
   bool IsBlendedClass(EDrawClass eDC)
   {
-    return eDC == eDC_AlphaBlend || eDC == eDC_Additive;
+    return eDC == eDC_AlphaBlend || eDC == eDC_Additive || IsWaterClass(eDC);
   }
 
   //! Elements drawn over the finished 3D scene, in this order (0: not one of them).
@@ -133,8 +138,11 @@ namespace
         // Over the scene: flares, screen quads, screen effects, then by sort group.
         return (1ull << 63) | ((uint64)nRank << 56) | (nGroup << 48);
       }
-      // Far to near.
-      return FarFirstBits(it.fDistance) << 31;
+      // The water surfaces first (they show what the opaque scene left behind them) by sort group
+      // (the ocean and water volumes before the beach), then the rest far to near.
+      if (IsWaterClass(it.eDrawClass))
+        return (nGroup << 32) | FarFirstBits(it.fDistance);
+      return (1ull << 62) | (FarFirstBits(it.fDistance) << 30);
     }
     // Opaque and nearest: by pass, sort group, shader and resources; in the nearest list the
     // blended ones after the opaque ones, far to near.

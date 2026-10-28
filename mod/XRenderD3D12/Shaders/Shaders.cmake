@@ -4,3 +4,7 @@
 # The general program (D3D12Pipeline.h, eD3D12P_General): every DF_* flag of Constants.h.
 xrender_d3d12_shader(General_VS General.hlsl vs_6_0 VSMain)
 xrender_d3d12_shader(General_PS General.hlsl ps_6_0 PSMain)
+
+# Water surfaces (eD3D12P_Water).
+xrender_d3d12_shader(Water_VS Water.hlsl vs_6_0 VSMain)
+xrender_d3d12_shader(Water_PS Water.hlsl ps_6_0 PSMain)

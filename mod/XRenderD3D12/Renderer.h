@@ -388,7 +388,33 @@ public:
     CTexture *pTex[3] = {};
   };
   std::vector<SSkyBoxTextures> m_SkyBoxes;  //!< DrawSkyItem, the sky boxes used so far
+  int m_nSceneSkyBox = -1;                  //!< the m_SkyBoxes entry the scene's sky drew, -1 none (the water reflects it)
+  float m_fSceneSkyZ1 = 0;                  //!< where its sides end (DrawSkyItem)
+  float m_fSceneSkyAlpha = 1;
   Matrix44 m_NearestProj;                   //!< FOB_NEAREST objects
+
+  //////////////////////////////////////////////////////////////////////////
+  // Water.cpp
+
+  //! Key and constants of a water surface (eDC_Water): the water program over the copy of the
+  //! scene drawn so far (made before the first surface of the list). False: not drawn.
+  bool SetupWaterDraw(SPipelineKey &Key, SDrawConstants &dc, const SRenderItem &it);
+  //! The foam on the beach (eDC_WaterBeach), wave nWave (0, 1). False: not drawn.
+  bool SetupBeachDraw(SPipelineKey &Key, SDrawConstants &dc, int nWave);
+  //! The sea floor under the ocean (eDC_WaterBottom) with the element's texture pTex (may be NULL).
+  void SetupWaterBottomDraw(SPipelineKey &Key, SDrawConstants &dc, CTexture *pTex);
+  //! Copies the back buffer and the depth buffer as drawn so far (m_bSceneCopied).
+  bool CopySceneForWater();
+  void ReleaseWaterResources();
+  //! The texture index of the wave slopes the water program samples (made on first use).
+  int GetWaveTexture();
+
+  ComPtr<ID3D12Resource> m_pSceneColorCopy, m_pSceneDepthCopy;
+  int m_nSceneColorSRV = -1, m_nSceneDepthSRV = -1;
+  int m_nSceneCopyWidth = 0, m_nSceneCopyHeight = 0;
+  bool m_bSceneCopied = false;              //!< the copies hold the current list's scene
+  CTexture *m_pBeachTexture = nullptr;      //!< textures/wave1 (one reference)
+  int m_nWaveTexture = 0;                   //!< GetWaveTexture: its ID, 0 not made yet, -1 failed
 
   //////////////////////////////////////////////////////////////////////////
   // State (public: the subsystems' files use it)
@@ -465,6 +491,7 @@ public:
   float CV_r_DetailScale = 8;         //!< metres per repeat of the detail texture
   int CV_d3d12_debug = 0;             //!< debug layer (also XRENDERD3D12_DEBUG=1); only read at Init
   int CV_d3d12_DumpFrame = 0;         //!< non-zero: the next frame's 3D draws go to XRenderD3D12_frame.txt, then 0
+  int CV_d3d12_WaterDebug = 0;        //!< non-zero: the water shows one term of its colour (Water.hlsl)
 };
 
 extern CD3D12Renderer *g_pRenderer;

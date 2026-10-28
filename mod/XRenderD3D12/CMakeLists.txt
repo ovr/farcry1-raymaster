@@ -30,6 +30,7 @@ set(XRENDERD3D12_SOURCES
     Renderer2D.cpp
     Draw.cpp
     Draw3D.cpp
+    Water.cpp
     D3D12Device.h
     D3D12Device.cpp
     D3D12Upload.h

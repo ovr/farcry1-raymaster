@@ -15,6 +15,8 @@
 // The programs, compiled by dxc at build time (Shaders/Shaders.cmake).
 #include "General_VS.h"
 #include "General_PS.h"
+#include "Water_VS.h"
+#include "Water_PS.h"
 
 using Microsoft::WRL::ComPtr;
 
@@ -42,6 +44,7 @@ namespace
   const SProgram s_Programs[eD3D12P_Num] =
   {
     { "General", g_General_VS, sizeof(g_General_VS), g_General_PS, sizeof(g_General_PS) },
+    { "Water", g_Water_VS, sizeof(g_Water_VS), g_Water_PS, sizeof(g_Water_PS) },
   };
 
   //! Input slot 1: what a vertex format lacks, read with stride 0 by every vertex.

@@ -108,6 +108,8 @@ void CD3D12Renderer::RegisterVariables()
   RegisterOtherVariables();
   iConsole->Register("d3d12_Debug", &CV_d3d12_debug, 0, VF_DUMPTODISK, "Direct3D 12 debug layer and GPU based validation (read at start-up)");
   iConsole->Register("d3d12_DumpFrame", &CV_d3d12_DumpFrame, 0, 0, "Writes the render items and draws of the next frame to XRenderD3D12_frame.txt");
+  iConsole->Register("d3d12_WaterDebug", &CV_d3d12_WaterDebug, 0, 0,
+                     "Water surfaces show one term: 1 refraction, 2 reflection, 3 water thickness (0-2 m: black-white), 4 normal, 5 screen space reflection hits, 6 their colour");
 }
 
 //////////////////////////////////////////////////////////////////////////
@@ -316,8 +318,12 @@ void CD3D12Renderer::Release()
   Geometry::Shutdown();     // the leaf buffers the engine left, before the upload heap goes
   if (m_pShaders)
     m_pShaders->Shutdown();
+  ReleaseWaterResources();
   m_pDetailTexture = nullptr;   // released with every texture
+  m_pBeachTexture = nullptr;
+  m_nWaveTexture = 0;
   m_SkyBoxes.clear();
+  m_nSceneSkyBox = -1;
   if (m_pTextures)
     m_pTextures->Shutdown();
   if (m_pPipeline)

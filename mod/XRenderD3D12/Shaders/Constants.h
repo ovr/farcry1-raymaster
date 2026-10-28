@@ -73,6 +73,7 @@ struct SFrameConstants
   XR_FLOAT4(vScreen);             //!< x width, y height, z 1 / width, w 1 / height (pixels)
   XR_FLOAT4(vTime);               //!< x ITimer::GetCurrTime()
   XR_FLOAT4(vWorldColor);         //!< EF_SetWorldColor
+  XR_FLOAT4(vDepthParams);        //!< the projection's m22 (x) and m32 (y): distance along the view axis = y / (depth + x)
 };
 
 //! b1: per draw.
@@ -97,6 +98,14 @@ struct SDrawConstants
   XR_UINT(nSamplers);             //!< bits 0-3 sampler of tex0, bits 4-7 sampler of tex1 (XR_SAMPLER_*)
   XR_FLOAT(fAlphaRef);
   XR_UINT(nLights);               //!< the lights in vLightPos
+  XR_UINT(nTex2);                 //!< more textures for the other programs (Water.hlsl)
+  XR_UINT(nTex3);
+  XR_FLOAT4(vParams0);            //!< parameters of the other programs (Water.hlsl)
+  XR_FLOAT4(vParams1);
+  XR_FLOAT4(vParams2);
+  XR_FLOAT4(vParams3);
+  XR_UINT(nTex4);
+  XR_UINT(nTex5);
   XR_FLOAT(fPad1);
   XR_FLOAT(fPad2);
 };

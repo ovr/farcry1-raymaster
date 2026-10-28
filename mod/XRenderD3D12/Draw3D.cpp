@@ -9,9 +9,10 @@
 //	the general program: the diffuse texture lit by the sun
 //	and the object's ambient colour, or by its lightmap; vegetation by its
 //	vertex colours; the terrain with texture coordinates from the world
-//	position. FOB_NEAREST objects (the first person weapon) get a
-//	projection of their own and the depth range 0..0.1. The particle
-//	sprites of the scene are drawn before the blended list.
+//	position; the water by Water.cpp. FOB_NEAREST objects (the first
+//	person weapon) get a projection of their own and the depth range
+//	0..0.1. The particle sprites of the scene are drawn in the blended
+//	list after the water surfaces.
 //
 //////////////////////////////////////////////////////////////////////
 
@@ -22,6 +23,8 @@
 #include "Texture.h"
 #include "Scene.h"
 #include "Geometry.h"
+
+#include <bit>
 
 namespace
 {
@@ -156,6 +159,7 @@ void CD3D12Renderer::BeginScene3D()
   m_SunDir[0] = vDir.x; m_SunDir[1] = vDir.y; m_SunDir[2] = vDir.z;
   m_SunColor[0] = Color.r; m_SunColor[1] = Color.g; m_SunColor[2] = Color.b;
   m_NearestProj = MakeNearestProjection(m_Camera);
+  m_nSceneSkyBox = -1;
   InvalidateFrameConstants();
 
   // The main view of the game clears colour and depth before its scene.
@@ -173,8 +177,11 @@ void CD3D12Renderer::DrawItems(SRenderItem *pItems, int nItems, int eList)
     return;
   if (eList == eRL_Opaque)
     BeginScene3D();
+  // The blended list starts with the water surfaces (over a copy of the scene so far); the
+  // particle sprites come after them.
+  bool bSprites = eList != eRL_Blended;
   if (eList == eRL_Blended)
-    DrawSprites();
+    m_bSceneCopied = false;
   if (m_pFrameDump)
     fprintf(m_pFrameDump.get(), "list %d: %d items, recursion %d, scene flags 0x%x\n", eList, nItems, m_nRecurseLevel, m_nSceneFlags);
   for (int i = 0; i < nItems; i++)
@@ -182,6 +189,11 @@ void CD3D12Renderer::DrawItems(SRenderItem *pItems, int nItems, int eList)
     const SRenderItem &it = pItems[i];
     if (!it.pRE)
       continue;
+    if (!bSprites && it.eDrawClass != eDC_Water && it.eDrawClass != eDC_WaterBeach)
+    {
+      DrawSprites();
+      bSprites = true;
+    }
     if (m_pFrameDump)
       DumpItem(i, it, eList);
     switch (it.pRE->m_Type)
@@ -202,6 +214,8 @@ void CD3D12Renderer::DrawItems(SRenderItem *pItems, int nItems, int eList)
       break;
     }
   }
+  if (!bSprites)
+    DrawSprites();
   m_bItemScissor = false;
   m_fDepthMin = 0;
   m_fDepthMax = 1;
@@ -373,23 +387,47 @@ void CD3D12Renderer::DrawLeafItem(const SRenderItem &it)
     }
     break;
   }
+  case eDC_Water:
+    if (!SetupWaterDraw(Key, dc, it))
+      return;
+    pTex = nullptr;
+    break;
+  case eDC_WaterBeach:
+    if (!SetupBeachDraw(Key, dc, 0))
+      return;
+    pTex = m_pBeachTexture;
+    break;
+  case eDC_WaterBottom:
+    SetupWaterBottomDraw(Key, dc, (dc.nFlags & DF_TEX0) ? pTex : nullptr);
+    break;
   default:
     return;
   }
   if (m_bFog)
     dc.nFlags |= DF_FOG;
-  if (m_pFrameDump)
-    DumpDraw(dc, Key, pTex);
 
-  if (Geom->IsIndexed())
-    DrawGeometry(Key, dc, Geom->Topology, Geom->VB, &Geom->IB, Geom->nNumIndices, Geom->nFirstIndex, Geom->nBaseVertex, TexCoord1 ? &*TexCoord1 : nullptr);
-  else
-    DrawGeometry(Key, dc, Geom->Topology, Geom->VB, nullptr, Geom->nNumVertices, Geom->nFirstVertex, 0, TexCoord1 ? &*TexCoord1 : nullptr);
+  auto Draw = [&]()
+  {
+    if (m_pFrameDump)
+      DumpDraw(dc, Key, pTex);
+    if (Geom->IsIndexed())
+      DrawGeometry(Key, dc, Geom->Topology, Geom->VB, &Geom->IB, Geom->nNumIndices, Geom->nFirstIndex, Geom->nBaseVertex, TexCoord1 ? &*TexCoord1 : nullptr);
+    else
+      DrawGeometry(Key, dc, Geom->Topology, Geom->VB, nullptr, Geom->nNumVertices, Geom->nFirstVertex, 0, TexCoord1 ? &*TexCoord1 : nullptr);
+  };
+  Draw();
+  // The beach: the second wave.
+  if (eDC == eDC_WaterBeach && SetupBeachDraw(Key, dc, 1))
+  {
+    if (m_bFog)
+      dc.nFlags |= DF_FOG;
+    Draw();
+  }
 }
 
 void CD3D12Renderer::DumpItem(int nIndex, const SRenderItem &it, int eList)
 {
-  static const char *const s_DrawClasses[] = { "NoDraw", "Opaque", "AlphaTest", "AlphaTestVColor", "VColor", "AlphaBlend", "Additive", "Terrain", "Sky", "Engine" };
+  static const char *const s_DrawClasses[] = { "NoDraw", "Opaque", "AlphaTest", "AlphaTestVColor", "VColor", "AlphaBlend", "Additive", "Terrain", "Sky", "Engine", "Water", "WaterBottom", "WaterBeach" };
   const CCObject *pObj = it.pObj;
   const char *szLB = "";
   if (it.pRE->m_Type == eDATA_OcLeaf && static_cast<CREOcLeaf *>(it.pRE)->m_pBuffer)
@@ -402,6 +440,68 @@ void CD3D12Renderer::DumpItem(int nIndex, const SRenderItem &it, int eList)
           pObj->m_pLMTCBufferO ? 1 : 0, pObj->m_DynLMMask, pObj->m_AmbColor.x, pObj->m_AmbColor.y, pObj->m_AmbColor.z,
           pObj->m_Color.r, pObj->m_Color.g, pObj->m_Color.b, pObj->m_Color.a, it.pRes ? it.pRes->m_AlphaRef : 0.0f,
           it.pRes ? it.pRes->m_Opacity : 1.0f, it.pRes ? it.pRes->m_ResFlags : 0);
+
+  // Shader parameters of the object and the resources, the element's custom data.
+  auto Params = [](const TArray<SShaderParam> *pParams)
+  {
+    std::string s;
+    for (int i = 0; pParams && i < pParams->Num(); i++)
+    {
+      const SShaderParam &p = (*pParams)[i];
+      char sz[128];
+      switch (p.m_Type)
+      {
+      case eType_FLOAT:  snprintf(sz, sizeof(sz), " %s=%g", p.m_Name, p.m_Value.m_Float); break;
+      case eType_STRING: snprintf(sz, sizeof(sz), " %s='%s'", p.m_Name, p.m_Value.m_String ? p.m_Value.m_String : ""); break;
+      case eType_FCOLOR: snprintf(sz, sizeof(sz), " %s=(%g %g %g %g)", p.m_Name, p.m_Value.m_Color[0], p.m_Value.m_Color[1], p.m_Value.m_Color[2], p.m_Value.m_Color[3]); break;
+      case eType_VECTOR: snprintf(sz, sizeof(sz), " %s=(%g %g %g)", p.m_Name, p.m_Value.m_Vector[0], p.m_Value.m_Vector[1], p.m_Value.m_Vector[2]); break;
+      default:           snprintf(sz, sizeof(sz), " %s=%d", p.m_Name, p.m_Value.m_Int); break;
+      }
+      s += sz;
+    }
+    return s;
+  };
+  const std::string ObjParams = Params(pObj->m_ShaderParams), ResParams = Params(it.pRes ? &it.pRes->m_ShaderParams : nullptr);
+  const CREOcLeaf *pLeaf = it.pRE->m_Type == eDATA_OcLeaf ? static_cast<const CREOcLeaf *>(it.pRE) : nullptr;
+  if (!ObjParams.empty() || !ResParams.empty() || (pLeaf && pLeaf->m_CustomData))
+  {
+    fprintf(m_pFrameDump.get(), "    params: object {%s } resources {%s }", ObjParams.c_str(), ResParams.c_str());
+    if (pLeaf && pLeaf->m_CustomData)
+    {
+      fprintf(m_pFrameDump.get(), " custom data %d:", pLeaf->m_nCountCustomData);
+      for (int i = 0; i < std::min(pLeaf->m_nCountCustomData, 4) * 4; i++)
+        fprintf(m_pFrameDump.get(), " %g", ((const float *)pLeaf->m_CustomData)[i]);
+    }
+    fprintf(m_pFrameDump.get(), "\n");
+  }
+
+  // Water elements: the object's matrix and the first vertices, word by word (float and hex).
+  if (pLeaf && pLeaf->m_pBuffer && (it.eDrawClass == eDC_Water || it.eDrawClass == eDC_WaterBottom || it.eDrawClass == eDC_WaterBeach))
+  {
+    const CLeafBuffer *pVC = pLeaf->m_pBuffer->GetVertexContainer();
+    const CVertexBuffer *pVB = pVC->m_pSecVertBuffer && pVC->m_pSecVertBuffer->m_VS[VSF_GENERAL].m_VData ? pVC->m_pSecVertBuffer : pVC->m_pVertexBuffer;
+    FILE *f = m_pFrameDump.get();
+    fprintf(f, "    matrix");
+    for (float v : pObj->m_Matrix.data)
+      fprintf(f, " %g", v);
+    if (pLeaf->m_pChunk)
+      fprintf(f, " chunk: vertices %d + %d, indices %d + %d", pLeaf->m_pChunk->nFirstVertId, pLeaf->m_pChunk->nNumVerts,
+              pLeaf->m_pChunk->nFirstIndexId, pLeaf->m_pChunk->nNumIndices);
+    fprintf(f, "\n");
+    if (pVB && pVB->m_VS[VSF_GENERAL].m_VData)
+    {
+      const int nStride = CD3D12Pipeline::GetVertexSize(pVB->m_vertexformat);
+      fprintf(f, "    vertices: format %d, %d of them\n", pVB->m_vertexformat, pVB->m_NumVerts);
+      for (int i = 0; i < std::min(pVB->m_NumVerts, 8) && nStride > 0; i++)
+      {
+        const uint32 *w = (const uint32 *)((const byte *)pVB->m_VS[VSF_GENERAL].m_VData + (size_t)i * nStride);
+        fprintf(f, "     ");
+        for (int k = 0; k < nStride / 4; k++)
+          fprintf(f, " %g/%08x", std::bit_cast<float>(w[k]), w[k]);
+        fprintf(f, "\n");
+      }
+    }
+  }
 }
 
 void CD3D12Renderer::DumpDraw(const SDrawConstants &dc, const SPipelineKey &Key, const CTexture *pTex)
@@ -525,6 +625,7 @@ void CD3D12Renderer::DrawSkyItem(const SRenderItem &it)
     m_SkyBoxes.push_back(New);
     Box = m_SkyBoxes.end() - 1;
   }
+  m_nSceneSkyBox = (int)(Box - m_SkyBoxes.begin());
 
   // A box around the camera, of half size 32 in world axes: the top at z = 32 with u = (32 - y) / 64,
   // v = (x + 32) / 64, and the four sides from z = 32 down to z1 and on to z2. Seen from inside, the
@@ -563,6 +664,8 @@ void CD3D12Renderer::DrawSkyItem(const SRenderItem &it)
   View.data[12] = View.data[13] = View.data[14] = 0;
   const Matrix44 ViewProj = View * m_ProjMatrix;
   const float fAlpha = std::clamp(pSky->m_fAlpha, 0.0f, 1.0f);
+  m_fSceneSkyZ1 = z1;
+  m_fSceneSkyAlpha = fAlpha;
   SPipelineKey Key = {};
   Key.nState = GS_NODEPTHTEST | (fAlpha < 1 ? GS_BLSRC_SRCALPHA | GS_BLDST_ONEMINUSSRCALPHA : 0);
   Key.nProgram = eD3D12P_General;

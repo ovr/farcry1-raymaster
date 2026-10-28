@@ -307,3 +307,6 @@ it as well: it holds local, machine-specific instructions and is not committed (
   draw what it got (vertex format, states, shader flags, textures, colour, lights). With
   `XRENDERTRACED_EXEC_LEVEL="d3d12_DumpFrame 1"` and `XRENDERTRACED_EXEC_LEVEL_FRAME=<n - 1>` it
   is the frame that `XRENDERTRACED_CAPTURE=<n>` captures of the original.
+- `d3d12_WaterDebug <n>` shows one term of the water's colour instead of the whole: 1 refraction,
+  2 reflection, 3 water thickness (black to white over 0-2 m), 4 normal, 5 where the screen space
+  reflection hits, 6 its colour.

@@ -55,6 +55,9 @@ enum EDrawClass
   eDC_Terrain,            //!< terrain sector: texture coordinates from the world position
   eDC_Sky,                //!< sky box
   eDC_Engine,             //!< drawn by its render element (2D quads, screen effects, ...)
+  eDC_Water,              //!< water surface: the ocean ring, water volumes (refraction, reflection, waves)
+  eDC_WaterBottom,        //!< the ocean floor ring beyond the terrain
+  eDC_WaterBeach,         //!< surf along the shores
 };
 
 //! What a shader is.

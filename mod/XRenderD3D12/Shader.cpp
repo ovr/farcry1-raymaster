@@ -100,7 +100,7 @@ constexpr STemplateEntry s_Templates[] =
   { "mutantstealth",                   "mutantstealth_fp",              eS_Banner,                0,                                      0,              eDC_Additive,         eCULL_Back, 0.0f,         0.0f,     false, false, true },
   // Flares: no draw for the objects.
   { "flareproc",                       "",                              eS_Banner,                0,                                      0,              eDC_NoDraw,           eCULL_Back },
-  // Not drawn: invisible surfaces, the terrain layers' material, water volumes, heat haze, scopes.
+  // Not drawn: invisible surfaces, the terrain layers' material, heat haze, scopes.
   { "nodraw",                          "",                              eS_Opaque,                kOpaque2,                               EF3_NODRAW,     eDC_NoDraw,           eCULL_Back },
   { "no_draw",                         "nodraw",                        eS_Opaque,                kOpaque2,                               EF3_NODRAW,     eDC_NoDraw,           eCULL_Back },
   { "terrainlayer",                    "terrainlayer(",                 eS_TerrainDetailTextures, EF2_FOGOVERLAY1 | EF2_DONTSORTBYDIST,   0,              eDC_NoDraw,           eCULL_Back },
@@ -121,7 +121,8 @@ constexpr STemplateEntry s_Templates[] =
   { "templdecaladd*",                  "",                              eS_Banner,                0,                                      0,              eDC_Additive,         eCULL_None },
   { "flareproc *",                     "",                              eS_Banner,                0,                                      0,              eDC_NoDraw,           eCULL_Back },
   { "flareproc_*",                     "",                              eS_Opaque,                kOpaque2,                               EF3_NOTEMPLATE, eDC_NoDraw,           eCULL_Back, 0.0f,         0.0f,     false, true },
-  { "watervolume*",                    "",                              eS_Water,                 0,                                      0,              eDC_NoDraw,           eCULL_None },
+  // Water volumes (lakes, rivers): drawn as water.
+  { "watervolume*",                    "",                              eS_Water,                 0,                                      0,              eDC_Water,            eCULL_None },
 };
 
 //! An engine shader (EF_LoadShader by name).
@@ -178,11 +179,11 @@ constexpr SEngineEntry s_EngineShaders[] =
   { "terrainlightpass",                "",                     eS_TerrainLightPass,      0,             EF2_DONTSORTBYDIST,  0,                eDC_NoDraw },
   { "terrainshadowpass",               "",                     eS_TerrainShadowPass,     0,             EF2_DONTSORTBYDIST,  0,                eDC_NoDraw },
   { "terraindetailobjects",            "",                     eS_TerrainDetailObjects,  0,             0,                   0,                eDC_AlphaTestVColor },
-  // Water (not supported yet).
-  { "terrainlake",                     "",                     eS_Water,                 0,             0,                   LMF_BUMPMATERIAL, eDC_NoDraw },
-  { "terrainwater_onlysky",            "",                     eS_Water,                 0,             0,                   LMF_BUMPMATERIAL, eDC_NoDraw },
-  { "terrainwaterbeach",               "",                     eS_WaterBeach,            0,             0,                   LMF_BUMPMATERIAL, eDC_NoDraw },
-  { "terrainwaterbottomsimple",        "",                     eS_UnderWater,            0,             0,                   0,                eDC_NoDraw },
+  // Water.
+  { "terrainlake",                     "",                     eS_Water,                 0,             0,                   LMF_BUMPMATERIAL, eDC_Water },
+  { "terrainwater_onlysky",            "",                     eS_Water,                 0,             0,                   LMF_BUMPMATERIAL, eDC_Water },
+  { "terrainwaterbeach",               "",                     eS_WaterBeach,            0,             0,                   LMF_BUMPMATERIAL, eDC_WaterBeach },
+  { "terrainwaterbottomsimple",        "",                     eS_UnderWater,            0,             0,                   0,                eDC_WaterBottom },
 };
 
 template <class T, size_t N>
