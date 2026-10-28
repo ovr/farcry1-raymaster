@@ -30,6 +30,7 @@
 //	                          textures/)
 //	  cubemap = <file>        the cube map, its +x face (default: the first
 //	                          *_posx.dds under textures/)
+//	  gloss = <file>          the gloss map (default: none)
 //	  light = <r g b>         the light's colour (default: 0.9 0.9 0.9)
 //	  lightpos = <x y z>      the light's position (default: above and left of
 //	                          the camera); the grid is in the plane y = 0
@@ -107,6 +108,7 @@ public:
     m_Bump = Scene.Has("bump") ? Scene.Get("bump") : Host.FindFirstFileDeep("textures/", "*_ddn.dds");
     m_CubeMap = Scene.Has("cubemap") ? Scene.Get("cubemap") : Host.FindFirstFileDeep("textures/", "*_posx.dds");
     Host.Log("DemoShaders: texture '%s', bump '%s', cube map '%s'", m_Texture.c_str(), m_Bump.c_str(), m_CubeMap.c_str());
+    m_Gloss = Scene.Get("gloss");
     m_LightColor = ColorOf(Scene, "light", m_LightColor);
     m_LightPos = Scene.GetFloats("lightpos");
     m_LightSpecColor = ColorOf(Scene, "lightspec", m_LightSpecColor);
@@ -251,6 +253,7 @@ private:
     Res.m_Textures[EFTT_DIFFUSE].m_Name = m_Texture.c_str();
     Res.m_Textures[EFTT_BUMP].m_Name = m_Bump.c_str();
     Res.m_Textures[EFTT_BUMP].m_TU.m_eTexType = (byte)eTT_Bumpmap;
+    Res.m_Textures[EFTT_GLOSS].m_Name = m_Gloss.c_str();
     Res.m_Textures[EFTT_CUBEMAP].m_Name = m_CubeMap.c_str();
     Res.m_Textures[EFTT_REFLECTION].m_Name = m_CubeMap.c_str();
     Res.m_Textures[EFTT_REFLECTION].m_TU.m_eTexType = (byte)eTT_Cubemap;
@@ -280,7 +283,7 @@ private:
 
   IStatObj *m_pObj = NULL;
   IFFont *m_pFont = NULL;
-  std::string m_Texture, m_Bump, m_CubeMap;
+  std::string m_Texture, m_Bump, m_CubeMap, m_Gloss;
   CFColor m_LightColor = CFColor(0.9f, 0.9f, 0.9f, 1);
   CFColor m_LightSpecColor = CFColor(0, 0, 0, 1);
   std::vector<float> m_LightPos;
