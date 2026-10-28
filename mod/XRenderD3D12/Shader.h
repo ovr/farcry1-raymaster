@@ -68,6 +68,7 @@ enum EDrawClass
   eDC_Modulate,           //!< a decal multiplied into the frame (DESTCOLOR, ZERO): the texture, fading to white with the object
   eDC_TerrainLight,       //!< the terrain under dynamic lights (triangles of a sector near them): their light alone, added
   eDC_ShadowOnly,         //!< not seen, only in the shadow maps: it casts its shadow (TemplRefrEnvCM)
+  eDC_ProcFlare,          //!< a glow around the surface facing the camera, added (FlareProc; Flares.cpp)
 };
 
 //! The corona of a flare shader: the "ClientEffect 'Corona'" block of its script.
@@ -158,6 +159,7 @@ struct SShaderProps
   EEnvMap eEnvMap = EEnvMap::None;
   float fAlphaRef = 0.0f;                        //!< alpha test reference (0..1, texture alpha >= it passes); 0: none
   float fScrollV = 0.0f;                          //!< texture v moves by fScrollV * ITimer::GetCurrTime()
+  float fFlareSize = 0.0f;                        //!< eDC_ProcFlare: how far the glow reaches beyond the surface, in metres
   bool bLightmap = false;                         //!< combines the lightmap of lightmapped objects
   bool bStealth = false;                          //!< colour scaled by the object's "refraction" (GetColorScale)
   bool bPixelLighting = false;                    //!< a material of a bump, model, light diffuse or glass template: with bump

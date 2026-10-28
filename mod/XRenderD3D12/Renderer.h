@@ -626,6 +626,9 @@ public:
   //! In the main view's blended list, after the rest of the 3D scene: tests and draws the flares
   //! of the scene (its Flare items, the coronas of its lights), with r_Coronas.
   void DrawFlares(std::span<const SRenderItem> Items);
+  //! The glow of a procedural flare (eDC_ProcFlare) around the vertices of its element's chunk,
+  //! placed in the world by World.
+  void DrawProcFlare(const SRenderItem &it, const Matrix44 &World);
   //! After the BeginFrame of a frame slot: the results of its last frame's tests into the flares'
   //! objects.
   void ReadFlareTests();

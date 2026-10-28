@@ -45,6 +45,7 @@
 #pragma once
 
 #include <optional>
+#include <span>
 
 //! What a draw of leaf buffer geometry needs; valid for the current frame.
 struct SGeomDraw
@@ -67,6 +68,10 @@ namespace Geometry
   //! vertex container (CLeafBuffer::GetVertexContainer). Empty when there is nothing to draw (no
   //! indices, no vertices, a format that is not drawn, pChunk not in m_pMats).
   std::optional<SGeomDraw> GetDraw(CLeafBuffer *pLB, const CMatInfo *pChunk);
+
+  //! The triangles of that draw on the CPU: a list of indices of the vertex container's vertices.
+  //! Empty when there are none; valid until the buffer's indices or materials change.
+  std::span<const uint16> GetTriangles(CLeafBuffer *pLB, const CMatInfo *pChunk);
 
   //! Vertices nFirstVert .. nFirstVert + nVerts - 1 of a CVertexBuffer as primitives of type
   //! nPrimType (R_PRIMV_TRIANGLES, R_PRIMV_TRIANGLE_STRIP, R_PRIMV_TRIANGLE_FAN, R_PRIMV_QUADS),

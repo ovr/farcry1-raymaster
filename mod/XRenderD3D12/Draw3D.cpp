@@ -365,6 +365,13 @@ void CD3D12Renderer::DrawLeafItem(const SRenderItem &it)
   m_fDepthMax = bNearest ? 0.1f : 1.0f;
   m_bItemScissor = pObj->m_nScissorX2 > pObj->m_nScissorX1 && pObj->m_nScissorY2 > pObj->m_nScissorY1;
   m_ItemScissor = { pObj->m_nScissorX1, pObj->m_nScissorY1, pObj->m_nScissorX2, pObj->m_nScissorY2 };
+  // A procedural flare: a glow built around the chunk (Flares.cpp), casting no shadow.
+  if (eDC == eDC_ProcFlare)
+  {
+    if (!m_bShadowMapPass && !m_bSpritePass)
+      DrawProcFlare(it, World);
+    return;
+  }
 
   SPipelineKey Key = {};
   Key.nState = GS_DEPTHWRITE;

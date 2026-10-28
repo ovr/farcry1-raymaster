@@ -2215,6 +2215,23 @@ std::optional<SGeomDraw> Geometry::GetDraw(CLeafBuffer *pLB, const CMatInfo *pCh
   return d;
 }
 
+std::span<const uint16> Geometry::GetTriangles(CLeafBuffer *pLB, const CMatInfo *pChunk)
+{
+  if (!pLB || !pChunk || !GeometryImpl::IsLeafBuffer(pLB) || !MatCount(pLB))
+    return {};
+  const ptrdiff_t nMat = pChunk - &(*pLB->m_pMats)[0];
+  if (nMat < 0 || nMat >= MatCount(pLB))
+    return {};
+  SGeomStream &IS = LeafIndices(pLB);
+  UpdateList(pLB, IS);
+  if (nMat >= (ptrdiff_t)IS.Ranges.size())
+    return {};
+  const SGeomRange r = IS.Ranges[nMat];
+  if ((size_t)r.nFirst + r.nCount > IS.List.size())
+    return {};
+  return { IS.List.data() + r.nFirst, r.nCount };
+}
+
 std::optional<SGeomDraw> Geometry::GetDraw(CVertexBuffer *pVB, int nPrimType, int nFirstVert, int nVerts)
 {
   if (!pVB || nVerts < 3 || nFirstVert < 0 || !GeometryImpl::IsDrawableFormat(pVB->m_vertexformat) || !pVB->m_VS[VSF_GENERAL].m_VData)

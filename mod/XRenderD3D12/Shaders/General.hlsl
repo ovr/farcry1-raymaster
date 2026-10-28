@@ -42,6 +42,8 @@
 //	      of tex2 from the world position with vParams0 / 1, of tex3 with 2 / 3
 //	    DF_DECAL_FADE (decals): a *= 1 - f(r), r = 2 * |uv0 - 0.5| (1 on the circle
 //	      inside the decal's square), f(r) = (r + smoothstep(0, 1, r)) / 2
+//	    DF2_GLOW_FALLOFF (procedural flares): rgb *= saturate(1 - u)^vParams0.x,
+//	      u of uv0 0 on the glow's inner edge, 1 on its outer edge
 //	    DF_ALPHATEST: discard when a < fAlphaRef (DF_ALPHATEST_LESS: when a >= fAlphaRef);
 //	      then DF_ALPHA_ONE: a = 1
 //	    DF_DETAIL_LAYER (a terrain detail layer, multiplied in twice): rgb =
@@ -448,6 +450,8 @@ float4 PSMain(SVertexOutput In) : SV_Target
     float r = saturate(2 * length(In.vTex0 - 0.5));
     vColor.a *= 1 - 0.5 * (r + smoothstep(0, 1, r));
   }
+  if (HasFlag2(DF2_GLOW_FALLOFF))
+    vColor.rgb *= pow(saturate(1 - In.vTex0.x), g_Draw.vParams0.x);
 
   if (HasFlag(DF_ALPHATEST))
   {

@@ -26,15 +26,24 @@
 //	through gaps. Otherwise a flare is the first square without the depth
 //	test.
 //
+//	A procedural flare (a material of FlareProc) is a glow around its
+//	surface: the outline of the surface's vertices as the camera sees them,
+//	each corner kept at its depth and grown across the view by FlareSize
+//	metres with rounded corners, added with the material's colour, full
+//	inside the outline and fading out to the grown edge (DrawProcFlare).
+//
 //////////////////////////////////////////////////////////////////////
 
 #include "StdAfx.h"
 #include "Renderer.h"
 #include "D3D12Device.h"
+#include "D3D12Pipeline.h"
 #include "D3D12Upload.h"
+#include "Geometry.h"
 #include "Texture.h"
 #include "Scene.h"
 
+#include <algorithm>
 #include <array>
 
 static_assert(CD3D12Renderer::FLARE_SLOTS == D3D12_FRAMES);
@@ -49,6 +58,10 @@ constexpr float FLARE_TEST_SIZE = 0.2f;     //!< the side of the test square ove
 constexpr int SUN_PATCH_SIZE = 64;
 constexpr int SUN_MASK_SIZE = 128;
 constexpr float SUN_MASK_ROWS = 768;
+// A procedural flare: the fall off of its glow (saturate(1 - u)^k from the outline out) and the
+// largest angle of a segment of its rounded corners.
+constexpr float PROC_FLARE_FALLOFF = 1.8f;
+constexpr float PROC_FLARE_CORNER_STEP = gf_PI / 8;
 
 //! A flare of the scene being drawn.
 struct SFlare
@@ -90,6 +103,39 @@ void Transform(const Matrix44 &m, const Vec3 &p, float Out[4])
   const float *d = m.data;
   for (int c = 0; c < 4; c++)
     Out[c] = p.x * d[c] + p.y * d[4 + c] + p.z * d[8 + c] + d[12 + c];
+}
+
+struct SPoint2
+{
+  float x, y;
+  int nPoint;     //!< the point it was made from
+};
+
+//! The convex hull of the points, counter-clockwise (x right, y up); one or two points when they
+//! are all at one place or on one line.
+std::vector<SPoint2> ConvexHull(std::vector<SPoint2> Points)
+{
+  std::sort(Points.begin(), Points.end(), [](const SPoint2 &a, const SPoint2 &b) { return a.x < b.x || (a.x == b.x && a.y < b.y); });
+  auto Cross = [](const SPoint2 &o, const SPoint2 &a, const SPoint2 &b) { return (a.x - o.x) * (b.y - o.y) - (a.y - o.y) * (b.x - o.x); };
+  const size_t n = Points.size();
+  if (n < 3)
+    return Points;
+  std::vector<SPoint2> Hull(2 * n);
+  size_t k = 0;
+  for (size_t i = 0; i < n; i++)
+  {
+    while (k >= 2 && Cross(Hull[k - 2], Hull[k - 1], Points[i]) <= 0)
+      k--;
+    Hull[k++] = Points[i];
+  }
+  for (size_t i = n - 1, t = k + 1; i > 0; i--)
+  {
+    while (k >= t && Cross(Hull[k - 2], Hull[k - 1], Points[i - 1]) <= 0)
+      k--;
+    Hull[k++] = Points[i - 1];
+  }
+  Hull.resize(k - 1);
+  return Hull;
 }
 
 } // namespace
@@ -319,6 +365,154 @@ void CD3D12Renderer::DrawFlares(std::span<const SRenderItem> Items)
       DumpDraw(dc, Key, pTex);
     DrawImmediate(Key, dc, D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST, VERTEX_FORMAT_P3F_COL4UB_TEX2F, Fan, 10, Inds, 24);
   }
+}
+
+void CD3D12Renderer::DrawProcFlare(const SRenderItem &it, const Matrix44 &World)
+{
+  // The vertices of the element's chunk, in the world.
+  const CREOcLeaf *pLeaf = static_cast<const CREOcLeaf *>(it.pRE);
+  const CMatInfo *pChunk = pLeaf->m_pChunk;
+  const CLeafBuffer *pVC = pLeaf->m_pBuffer ? pLeaf->m_pBuffer->GetVertexContainer() : nullptr;
+  if (!pChunk || !pVC)
+    return;
+  const CVertexBuffer *pVB = pVC->m_pSecVertBuffer && pVC->m_pSecVertBuffer->m_VS[VSF_GENERAL].m_VData ? pVC->m_pSecVertBuffer : pVC->m_pVertexBuffer;
+  if (!pVB || !pVB->m_VS[VSF_GENERAL].m_VData)
+    return;
+  const int nStride = CD3D12Pipeline::GetVertexSize(pVB->m_vertexformat);
+  const int nFirst = std::max(pChunk->nFirstVertId, 0);
+  const int nEnd = std::min(nFirst + pChunk->nNumVerts, pVB->m_NumVerts);
+  const float fSize = it.pShader->GetProps().fFlareSize;
+  if (nStride < (int)sizeof(Vec3) || nFirst >= nEnd || fSize <= 0)
+    return;
+  const byte *pData = (const byte *)pVB->m_VS[VSF_GENERAL].m_VData;
+  std::vector<Vec3> Points;
+  Vec3 vCenter(0, 0, 0);
+  for (int i = nFirst; i < nEnd; i++)
+  {
+    float p[4];
+    Transform(World, *(const Vec3 *)(pData + (size_t)i * nStride), p);
+    Points.emplace_back(p[0], p[1], p[2]);
+    vCenter += Points.back();
+  }
+  vCenter = vCenter / (float)Points.size();
+
+  // Cull Back: no glow while the surface turns its back to the camera (its front: where its
+  // triangles go round counter-clockwise; the other way in a mirroring matrix).
+  Vec3 vFront(0, 0, 0);
+  const std::span<const uint16> Tris = Geometry::GetTriangles(pLeaf->m_pBuffer, pChunk);
+  auto At = [&](uint16 i) { return i >= nFirst && i < nEnd ? &Points[i - nFirst] : nullptr; };
+  for (size_t i = 0; i + 2 < Tris.size(); i += 3)
+  {
+    const Vec3 *a = At(Tris[i]), *b = At(Tris[i + 1]), *c = At(Tris[i + 2]);
+    if (a && b && c)
+      vFront += (*b - *a).Cross(*c - *a);
+  }
+  const float *w = World.data;
+  const float fDet = w[0] * (w[5] * w[10] - w[6] * w[9]) - w[1] * (w[4] * w[10] - w[6] * w[8]) + w[2] * (w[4] * w[9] - w[5] * w[8]);
+  if (vFront.Dot(vFront) > 0 && (fDet < 0 ? -1.0f : 1.0f) * vFront.Dot(m_Camera.GetPos() - vCenter) <= 0)
+    return;
+
+  // Their outline as the camera sees them (x right, y up), without points closer than a
+  // millimetre.
+  const float *v = m_CameraView.data;
+  const Vec3 vRight(v[0], v[4], v[8]), vUp(v[1], v[5], v[9]);
+  std::vector<SPoint2> Flat;
+  for (size_t i = 0; i < Points.size(); i++)
+    Flat.push_back({ (Points[i] - vCenter).Dot(vRight), (Points[i] - vCenter).Dot(vUp), (int)i });
+  std::vector<SPoint2> Hull = ConvexHull(std::move(Flat));
+  auto Near = [](const SPoint2 &a, const SPoint2 &b) { return fabsf(a.x - b.x) < 1e-3f && fabsf(a.y - b.y) < 1e-3f; };
+  Hull.erase(std::unique(Hull.begin(), Hull.end(), Near), Hull.end());
+  while (Hull.size() > 1 && Near(Hull.front(), Hull.back()))
+    Hull.pop_back();
+  const size_t n = Hull.size();
+  if (!n)
+    return;
+
+  // The outline's points where they are (u 0) and around each of them an arc fSize out across the
+  // view (u 1), from the outward normal of the edge before it to that of the edge after it (all
+  // around a single point): the glow keeps the depth of the surface.
+  std::vector<struct_VERTEX_FORMAT_P3F_COL4UB_TEX2F> Verts;
+  std::vector<ushort> Inds;
+  auto AddVertex = [&](const Vec3 &vPos, float u)
+  {
+    struct_VERTEX_FORMAT_P3F_COL4UB_TEX2F Vert = {};
+    Vert.xyz = vPos;
+    Vert.color.dcolor = 0xffffffff;
+    Vert.st[0] = u;
+    Verts.push_back(Vert);
+    return (ushort)(Verts.size() - 1);
+  };
+  for (const SPoint2 &p : Hull)
+    AddVertex(Points[p.nPoint], 0);
+  std::vector<std::pair<ushort, ushort>> Arcs(n);     // the first and the last vertex of each corner's arc
+  for (size_t i = 0; i < n; i++)
+  {
+    const SPoint2 &c = Hull[i];
+    float a0 = 0, fSpan = 2 * gf_PI;
+    if (n > 1)
+    {
+      const SPoint2 &a = Hull[(i + n - 1) % n], &b = Hull[(i + 1) % n];
+      a0 = atan2f(-(c.x - a.x), c.y - a.y);
+      fSpan = atan2f(-(b.x - c.x), b.y - c.y) - a0;
+      while (fSpan < 0)
+        fSpan += 2 * gf_PI;
+    }
+    const int nSegments = std::max(1, (int)ceilf(fSpan / PROC_FLARE_CORNER_STEP - 1e-3f));
+    for (int k = 0; k <= nSegments; k++)
+    {
+      const float a = a0 + fSpan * k / nSegments;
+      const ushort nVert = AddVertex(Points[c.nPoint] + vRight * (fSize * cosf(a)) + vUp * (fSize * sinf(a)), 1);
+      if (k == 0)
+        Arcs[i].first = nVert;
+      else
+        Inds.insert(Inds.end(), { (ushort)i, (ushort)(nVert - 1), nVert });
+      Arcs[i].second = nVert;
+    }
+  }
+  // Inside the outline, and along each of its edges a band from the edge out.
+  for (size_t i = 1; i + 1 < n; i++)
+    Inds.insert(Inds.end(), { 0, (ushort)i, (ushort)(i + 1) });
+  for (size_t i = 0; i < n && n > 1; i++)
+  {
+    const size_t j = (i + 1) % n;
+    Inds.insert(Inds.end(), { (ushort)i, Arcs[i].second, Arcs[j].first, (ushort)i, Arcs[j].first, (ushort)j });
+  }
+
+  // The material's colour (the ambient of its light material) times the object's colour, added,
+  // depth tested, fogged towards black.
+  const SLightMaterial *pMat = it.pRes ? it.pRes->m_LMaterial : nullptr;
+  const CFColor MatColor = pMat ? pMat->Front.m_Ambient : CFColor(1, 1, 1, 1);
+  const CCObject *pObj = it.pObj;
+  SPipelineKey Key = {};
+  Key.nState = GS_BLSRC_ONE | GS_BLDST_ONE;
+  Key.nProgram = eD3D12P_General;
+  Key.nCull = R_CULL_NONE;
+  Key.nVertexFormat = VERTEX_FORMAT_P3F_COL4UB_TEX2F;
+  SDrawConstants dc = DefaultDrawConstants();
+  const Matrix44 ViewProj = m_CameraView * m_ProjMatrix;
+  memcpy(dc.mWorldViewProj, ViewProj.data, sizeof(dc.mWorldViewProj));
+  dc.nFlags = m_bFog ? DF_FOG : 0;
+  dc.nFlags2 = DF2_GLOW_FALLOFF | DF2_FOG_BLACK;
+  dc.vParams0[0] = PROC_FLARE_FALLOFF;
+  dc.vColor[0] = MatColor.r * pObj->m_Color.r;
+  dc.vColor[1] = MatColor.g * pObj->m_Color.g;
+  dc.vColor[2] = MatColor.b * pObj->m_Color.b;
+  dc.vColor[3] = 1;
+  if (m_pFrameDump)
+  {
+    fprintf(m_pFrameDump.get(), "  proc flare: %d vertices, outline %d, size %g, centre (%.2f %.2f %.2f)", nEnd - nFirst, (int)n, fSize, vCenter.x,
+            vCenter.y, vCenter.z);
+    if (pMat)
+      fprintf(m_pFrameDump.get(), ", material ambient (%.3f %.3f %.3f) diffuse (%.3f %.3f %.3f) specular (%.3f %.3f %.3f) emission (%.3f %.3f %.3f)",
+              pMat->Front.m_Ambient.r, pMat->Front.m_Ambient.g, pMat->Front.m_Ambient.b, pMat->Front.m_Diffuse.r, pMat->Front.m_Diffuse.g,
+              pMat->Front.m_Diffuse.b, pMat->Front.m_Specular.r, pMat->Front.m_Specular.g, pMat->Front.m_Specular.b, pMat->Front.m_Emission.r,
+              pMat->Front.m_Emission.g, pMat->Front.m_Emission.b);
+    fprintf(m_pFrameDump.get(), ", object colour (%.3f %.3f %.3f %.3f) ambient (%.3f %.3f %.3f)\n", pObj->m_Color.r, pObj->m_Color.g, pObj->m_Color.b,
+            pObj->m_Color.a, pObj->m_AmbColor.x, pObj->m_AmbColor.y, pObj->m_AmbColor.z);
+    DumpDraw(dc, Key, nullptr);
+  }
+  DrawImmediate(Key, dc, D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST, VERTEX_FORMAT_P3F_COL4UB_TEX2F, Verts.data(), (int)Verts.size(), Inds.data(),
+                (int)Inds.size());
 }
 
 bool CD3D12Renderer::DrawSunMask(float sx, float sy)

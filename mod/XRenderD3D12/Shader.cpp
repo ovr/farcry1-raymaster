@@ -109,8 +109,8 @@ constexpr STemplateEntry s_Templates[] =
   { "mutantstealth",                   "mutantstealth_fp",              eS_Banner,                0,                                      0,              eDC_Additive,         eCULL_Back, 0.0f,         0.0f,     false, false, true },
   // The terrain layers with a material of their own (bump mapped cliffs).
   { "terrainlayer",                    "terrainlayer(",                 eS_TerrainDetailTextures, EF2_FOGOVERLAY1 | EF2_DONTSORTBYDIST,   0,              eDC_TerrainLayer,     eCULL_Back },
-  // Flares: no draw for the objects.
-  { "flareproc",                       "",                              eS_Banner,                0,                                      0,              eDC_NoDraw,           eCULL_Back },
+  // Procedural flares: a glow around the surface (FlareSize 1, or the number after the name).
+  { "flareproc",                       "",                              eS_Banner,                0,                                      0,              eDC_ProcFlare,        eCULL_Back },
   // Not drawn: invisible surfaces, heat haze.
   { "nodraw",                          "",                              eS_Opaque,                kOpaque2,                               EF3_NODRAW,     eDC_NoDraw,           eCULL_Back },
   { "no_draw",                         "nodraw",                        eS_Opaque,                kOpaque2,                               EF3_NODRAW,     eDC_NoDraw,           eCULL_Back },
@@ -130,7 +130,7 @@ constexpr STemplateEntry s_Templates[] =
   { "templplants*",                    "templdecalalphatest_vcolors",   eS_Trees,                 EF2_OPAQUE,                             EF3_DEPTHWRITE, eDC_AlphaTestVColor,  eCULL_None, kAlphaRef128 },
   { "templmuzzleflash*",               "",                              eS_MuzzleFlash,           0,                                      0,              eDC_Additive,         eCULL_Back },
   { "templdecaladd*",                  "",                              eS_Banner,                0,                                      0,              eDC_Additive,         eCULL_Back },
-  { "flareproc *",                     "",                              eS_Banner,                0,                                      0,              eDC_NoDraw,           eCULL_Back },
+  { "flareproc *",                     "",                              eS_Banner,                0,                                      0,              eDC_ProcFlare,        eCULL_Back },
   { "flareproc_*",                     "",                              eS_Opaque,                kOpaque2,                               EF3_NOTEMPLATE, eDC_NoDraw,           eCULL_Back, 0.0f,         0.0f,     false, true },
   // Water volumes (lakes, rivers): drawn as water.
   { "watervolume*",                    "",                              eS_Water,                 0,                                      0,              eDC_Water,            eCULL_None },
@@ -304,6 +304,17 @@ SResolvedTemplate ResolveTemplate(const std::string &Name, uint64 nMaskGen)
   R.Props.fScrollV = pE->fScrollV;
   R.Props.bLightmap = pE->bLightmap;
   R.Props.bStealth = pE->bStealth;
+  if (pE->eClass == eDC_ProcFlare)
+  {
+    // "flareproc <size>"; 1 for "flareproc".
+    R.Props.fFlareSize = 1.0f;
+    if (const size_t nSpace = Name.find(' '); nSpace != std::string::npos)
+    {
+      float fSize = 0;
+      if (std::from_chars(Name.data() + nSpace + 1, Name.data() + Name.size(), fSize).ec == std::errc() && fSize > 0)
+        R.Props.fFlareSize = fSize;
+    }
+  }
   if (pE->bNotFound)
     R.Props.nFlags |= EF_NOTFOUND;
   if (const STemplateLighting *pL = FindEntry(s_TemplateLighting, Name))

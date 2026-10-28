@@ -73,7 +73,7 @@ namespace
 
   bool IsBlendedClass(EDrawClass eDC)
   {
-    return eDC == eDC_AlphaBlend || eDC == eDC_Additive || eDC == eDC_FogLayer || eDC == eDC_ScopeLens || IsWaterClass(eDC);
+    return eDC == eDC_AlphaBlend || eDC == eDC_Additive || eDC == eDC_ProcFlare || eDC == eDC_FogLayer || eDC == eDC_ScopeLens || IsWaterClass(eDC);
   }
 
   //! The order of the passes of an object drawn one over another: its first pass, its light
@@ -175,7 +175,7 @@ namespace
       // before the beach), then the rest far to near.
       if (IsWaterClass(it.eDrawClass))
         return (1ull << 61) | (nGroup << 32) | FarFirstBits(it.fDistance);
-      if (it.eDrawClass != eDC_Additive && TopZ(it) < fWaterZ)
+      if (it.eDrawClass != eDC_Additive && it.eDrawClass != eDC_ProcFlare && TopZ(it) < fWaterZ)
         return (FarFirstBits(it.fDistance) << 2) | PassOrder(it);
       return (1ull << 62) | (FarFirstBits(it.fDistance) << 30) | PassOrder(it);
     }
@@ -370,7 +370,12 @@ void CScene::AddEf(int nFog, CRendElement *pRE, IShader *pEf, SRenderShaderResou
   if (g_pRenderer)
     g_pRenderer->NoteShadowCasters(pObj);
   if (eDC == eDC_NoDraw)
+  {
+    if (g_pRenderer && g_pRenderer->m_pFrameDump)
+      fprintf(g_pRenderer->m_pFrameDump.get(), "not drawn: RE %d shader '%s' templ '%s'\n", (int)pRE->m_Type, pSh ? pSh->GetName() : "",
+              pSh && pSh->GetTemplate(-1) ? pSh->GetTemplate(-1)->GetName() : "");
     return;
+  }
 
   SRenderItem it;
   it.pRE = pRE;

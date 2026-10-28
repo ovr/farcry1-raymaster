@@ -89,6 +89,7 @@ typedef float float4x4_t[16];
 #define DF2_PROJECTOR       0x00000100  //!< a projected light's pass: the colour (with the specular) times the cube g_Cubes[nTex5] at float4(world pos, 1) * mParams0 (the light's m_TextureMatrix)
 #define DF2_TERRAIN_LIGHT   0x00000200  //!< the terrain under dynamic lights: tex0 rgb as 0.75 * rgb + 0.25; with DF_PIXEL_LIGHTING point lights fall off as saturate(1 - (d * vLightAtten.w)^2) (linearly with DF2_PROJECTOR)
 #define DF2_MATERIAL_LIGHT  0x00000400  //!< with DF_LIGHTING: lit per pixel as the fixed function lights a material: saturate(vAmbient.rgb + vColor.rgb * the lights' colour * N.L) * texture + saturate(vSpecular.rgb * the lights' specular colour * (N.H)^vParams3.x)
+#define DF2_GLOW_FALLOFF    0x00000800  //!< rgb *= saturate(1 - uv0.x)^vParams0.x: a glow fading out from its inner edge (u 0) to its outer edge (u 1)
 
 // SDrawConstants::nFlags of the post program (Post.hlsl): one mode, with POST_EFFECTS the effects drawn
 #define POST_DOWNSAMPLE     0x00000001  //!< the mean of tex0 over the target's pixel: vParams0.z x vParams0.z bilinear taps
