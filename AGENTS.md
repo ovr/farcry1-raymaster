@@ -331,10 +331,11 @@ it as well: it holds local, machine-specific instructions and is not committed (
   32 to 256) into a texture array per object; the log says how many were made and how long it
   took.
 - The terrain's detail layers near the camera (very high: `e_detail_texture_quality 1`) are drawn
-  while `r_DetailTextures` is 1 and fade out between `r_DetailDistance` and twice that distance
-  (16 and 32 m in the very high preset); a layer with a material of its own (the cliffs, projected
-  on a vertical plane) is drawn with the material's diffuse texture, bump mapped with its normal
-  map, and fades out linearly to the distance in its custom data (156 m). With the layers on, the
+  while `r_DetailTextures` is 1 and fade out between a quarter of the distance the engine puts in
+  the layer's custom data and that distance (13 and 52 m on Training, whatever `r_DetailDistance`
+  is); a layer with a material of its own (the cliffs, projected on a vertical plane) is drawn with
+  the material's diffuse texture, bump mapped with its normal map, and fades out linearly to the
+  distance in its custom data (156 m). With the layers on, the
   sectors (shader "terrain") get no detail texture, only their cliff texture where the engine
   marks cliffs; without them (shader "terrainwithdefaultdetailtexture") the detail texture
   everywhere.

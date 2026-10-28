@@ -744,21 +744,22 @@ void CD3D12Renderer::DrawLeafItem(const SRenderItem &it)
     // A detail layer of the terrain near the camera (world positions, the terrain normal, the
     // layer's weight in the vertex alpha): the layer's texture coordinates from the world position
     // with the element's custom data (u row in floats 0..2, v row in 4..6, the layer's own scale;
-    // u = y / 4, v = x / 4 without it), the weight faded out between r_DetailDistance and twice
-    // that, multiplied in twice (DESTCOLOR, SRCCOLOR); no depth writes. A layer with a material of
+    // u = y / 4, v = x / 4 without it), the weight faded out from a quarter of the distance in float
+    // 3 of the custom data to that distance (13 to 52 m; r_DetailDistance to twice that without
+    // it), multiplied in twice (DESTCOLOR, SRCCOLOR); no depth writes. A layer with a material of
     // its own (the template "terrainlayer": the cliffs, projected on a vertical plane, one element
     // for each plane) is the material's diffuse texture, bump mapped with its normal map
     // (EFTT_NORMALMAP, else EFTT_BUMP): the sun's light on the bumps relative to its light on the
     // terrain's own normal, which the terrain's texture already has; its weight fades out linearly
-    // to the distance in float 3 of its custom data (156 m).
+    // from the camera to the distance in float 3 (156 m).
     if (!pTex || !CV_r_DetailTextures)
       return;
     CTexture *pBump = GetNormalMap(it.pRes);
     float fStart = std::max(CV_r_DetailDistance, 0.01f), fEnd = 2 * fStart;
-    if (it.pRes && pLeaf->m_CustomData && ((const float *)pLeaf->m_CustomData)[3] > 0)
+    if (const float *pCustom = (const float *)pLeaf->m_CustomData; pCustom && pCustom[3] > 0)
     {
-      fStart = 0;
-      fEnd = ((const float *)pLeaf->m_CustomData)[3];
+      fEnd = pCustom[3];
+      fStart = it.pRes ? 0 : fEnd / 4;
     }
     dc.nFlags = (dc.nFlags & ~DF_TEXMATRIX) | DF_TEX0 | DF_TEXGEN_WORLD | DF_VCOLOR | DF_DETAIL_LAYER;
     if (const float *pCustom = (const float *)pLeaf->m_CustomData)
