@@ -147,14 +147,23 @@ namespace
   }
 
   //! The vertex format the leaf buffer of an element is checked with: the format of the
-  //! buffer that holds its vertices (the draw classes of this renderer take every format).
+  //! buffer that holds its vertices (the draw classes of this renderer take every format). The
+  //! lit draw classes ask for normals as well (P3F_N_TEX2F) when the buffer keeps them outside
+  //! its vertices (m_TempNormals of a mesh with vertex colours): such an object is lit per vertex
+  //! like any other, its vertex colours are not used.
   int VertexFormatOf(const SRenderItem &it)
   {
     if (it.pRE->m_Type == eDATA_OcLeaf)
     {
       CREOcLeaf *pLeaf = static_cast<CREOcLeaf *>(it.pRE);
       if (pLeaf->m_pBuffer)
-        return pLeaf->m_pBuffer->GetVertexContainer()->m_nVertexFormat;
+      {
+        const CLeafBuffer *pVC = pLeaf->m_pBuffer->GetVertexContainer();
+        const bool bLit = it.eDrawClass == eDC_Opaque || it.eDrawClass == eDC_AlphaTest || it.eDrawClass == eDC_AlphaBlend;
+        if (bLit && pVC->m_TempNormals)
+          return VERTEX_FORMAT_P3F_N_TEX2F;
+        return pVC->m_nVertexFormat;
+      }
     }
     return it.pShader->GetVertexFormat();
   }
