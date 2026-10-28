@@ -148,9 +148,12 @@ namespace
     uint64 nKey = (nPass << 60) | (nGroup << 55);
     if (it.eList == eRL_Nearest && bBlended)
       return (1ull << 63) | nKey | (FarFirstBits(it.fDistance) >> 9);
-    const uint64 nShader = (uint64)(it.pShader->GetID() & 0x7FFFFF);
+    // In a sort group the caustics come after the terrain and the opaque objects (over what they
+    // left of the terrain), the terrain's shadows after them (they replace the shadowed terrain).
+    const uint64 nRank = it.eDrawClass == eDC_Caustics ? 1 : it.eDrawClass == eDC_TerrainShadow ? 2 : 0;
+    const uint64 nShader = (uint64)(it.pShader->GetID() & 0xFFFFF);
     const uint64 nRes = it.pRes ? (uint64)(uint32)it.pRes->m_Id : 0;
-    return nKey | (nShader << 32) | nRes;
+    return nKey | (nRank << 52) | (nShader << 32) | nRes;
   }
 
   //! The vertex format the leaf buffer of an element is checked with: the format of the
@@ -304,7 +307,14 @@ void CScene::AddEf(int nFog, CRendElement *pRE, IShader *pEf, SRenderShaderResou
   if (pRE->m_Type == eDATA_OcclusionQuery)
     pRE->mfPrepare();
   CShader *pSh = ResolveShader(pEf, nTempl);
-  const EDrawClass eDC = DrawClassOf(pSh, pRes);
+  EDrawClass eDC = DrawClassOf(pSh, pRes);
+  // The fog pass of a terrain sector (FOB_FOGPASS, the ID of the fog volume it is in): under the
+  // ocean, whose volume has caustics, the caustics; the other fog passes are not drawn.
+  if (eDC == eDC_Terrain && pObj && (pObj->m_ObjFlags & FOB_FOGPASS))
+  {
+    const SFogVolume *pFV = GetFogVolume(nFog);
+    eDC = pFV && pFV->bCaustics ? eDC_Caustics : eDC_NoDraw;
+  }
   // The casters whose shadow maps the frame needs (also of the elements not drawn: the engine
   // names them with a shadow map element).
   if (g_pRenderer)
@@ -382,9 +392,21 @@ void CScene::BuildLists(SSceneSlot &Slot, int nItems, bool bSort)
 {
   for (std::vector<SRenderItem> &l : Slot.Lists)
     l.clear();
+  // The caustics go with the terrain: in its list and sort group (all its sectors share them).
+  int nTerrainSort = -1;
+  for (int i = 0; i < nItems && nTerrainSort < 0; i++)
+    if (Slot.Items[i].eDrawClass == eDC_Terrain)
+      nTerrainSort = Slot.Items[i].nSort;
   for (int i = 0; i < nItems; i++)
   {
     SRenderItem &it = Slot.Items[i];
+    if (it.eDrawClass == eDC_Caustics)
+    {
+      if (nTerrainSort < 0)
+        continue;
+      it.nSort = nTerrainSort;
+      it.eList = ChooseList(it);
+    }
     it.nSortKey = MakeSortKey(it);
     Slot.Lists[it.eList].push_back(it);
   }
@@ -673,6 +695,14 @@ const SFogVolume *CScene::GetFogVolume(int nId) const
   if (nId <= 0 || nId > (int)m_FogVolumes.size())
     return nullptr;
   return &m_FogVolumes[nId - 1];
+}
+
+const SFogVolume *CScene::GetOceanFogVolume() const
+{
+  for (const SFogVolume &fv : m_FogVolumes)
+    if (fv.bCaustics)
+      return &fv;
+  return nullptr;
 }
 
 //////////////////////////////////////////////////////////////////////////

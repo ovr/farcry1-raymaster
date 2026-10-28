@@ -239,8 +239,8 @@ void CD3D12Renderer::DrawLeafItem(const SRenderItem &it)
     return;
   // The fog volume pass: the element once more, with the ID of the fog volume it is in, in the
   // sort group eS_FogShader (the object of a static one has FOB_FOGPASS). The original draws
-  // it only with r_VolumetricFog; not drawn yet.
-  if ((it.nSort & ~EFSLIST_MASK) == eS_FogShader || (pObj->m_ObjFlags & FOB_FOGPASS))
+  // it only with r_VolumetricFog; not drawn yet, but for the caustics under the ocean.
+  if (eDC != eDC_Caustics && ((it.nSort & ~EFSLIST_MASK) == eS_FogShader || (pObj->m_ObjFlags & FOB_FOGPASS)))
     return;
 
   // Transform, depth range and scissor.
@@ -556,6 +556,11 @@ void CD3D12Renderer::DrawLeafItem(const SRenderItem &it)
   case eDC_WaterBottom:
     SetupWaterBottomDraw(Key, dc, (dc.nFlags & DF_TEX0) ? pTex : nullptr);
     break;
+  case eDC_Caustics:
+    if (!SetupCausticsDraw(Key, dc, it))
+      return;
+    pTex = nullptr;
+    break;
   default:
     return;
   }
@@ -565,8 +570,8 @@ void CD3D12Renderer::DrawLeafItem(const SRenderItem &it)
   if (m_bSpritePass)
     dc.nFlags |= DF_ALPHA_ONE;
   Draw();
-  // The beach: the second wave.
-  if (eDC == eDC_WaterBeach && SetupBeachDraw(Key, dc, 1))
+  // The beach: the other waves.
+  for (int nWave = 1; eDC == eDC_WaterBeach && nWave < BEACH_WAVES && SetupBeachDraw(Key, dc, nWave); nWave++)
   {
     if (m_bFog)
       dc.nFlags |= DF_FOG;
@@ -577,7 +582,7 @@ void CD3D12Renderer::DrawLeafItem(const SRenderItem &it)
 void CD3D12Renderer::DumpItem(int nIndex, const SRenderItem &it, int eList)
 {
   static const char *const s_DrawClasses[] = { "NoDraw", "Opaque", "AlphaTest", "AlphaTestVColor", "VColor", "AlphaBlend", "Additive", "Terrain", "Sky", "Engine", "Water", "WaterBottom", "WaterBeach", "TerrainLayer", "Decal",
-                                                "TerrainShadow" };
+                                                "TerrainShadow", "Caustics" };
   const CCObject *pObj = it.pObj;
   const char *szLB = "";
   if (it.pRE->m_Type == eDATA_OcLeaf && static_cast<CREOcLeaf *>(it.pRE)->m_pBuffer)

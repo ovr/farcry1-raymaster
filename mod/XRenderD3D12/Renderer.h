@@ -401,7 +401,9 @@ public:
   //! Key and constants of a water surface (eDC_Water): the water program over the copy of the
   //! scene drawn so far (made before the first surface of the list). False: not drawn.
   bool SetupWaterDraw(SPipelineKey &Key, SDrawConstants &dc, const SRenderItem &it);
-  //! The foam on the beach (eDC_WaterBeach), wave nWave (0, 1). False: not drawn.
+  //! The waves of foam on the beach drawn at a time.
+  static constexpr int BEACH_WAVES = 4;
+  //! The foam on the beach (eDC_WaterBeach), wave nWave (0 to BEACH_WAVES - 1). False: not drawn.
   bool SetupBeachDraw(SPipelineKey &Key, SDrawConstants &dc, int nWave);
   //! The sea floor under the ocean (eDC_WaterBottom) with the element's texture pTex (may be NULL).
   void SetupWaterBottomDraw(SPipelineKey &Key, SDrawConstants &dc, CTexture *pTex);
@@ -410,6 +412,10 @@ public:
   void ReleaseWaterResources();
   //! The texture index of the wave slopes the water program samples (made on first use).
   int GetWaveTexture();
+  //! The caustics on the terrain under the ocean (eDC_Caustics). False: not drawn.
+  bool SetupCausticsDraw(SPipelineKey &Key, SDrawConstants &dc, const SRenderItem &it);
+  //! The texture index of the caustics pattern (made on first use), -1 without one.
+  int GetCausticsTexture();
   //! Before the main view is drawn (Items: its render items): with r_WaterReflections and an
   //! ocean surface among the items, the scene mirrored in the water plane into m_pReflectionColor,
   //! when the last one is out of date (r_WaterUpdate*): the 3D engine renders it with
@@ -426,6 +432,8 @@ public:
   bool m_bSceneCopied = false;              //!< the copies hold the current list's scene
   CTexture *m_pBeachTexture = nullptr;      //!< textures/wave1 (one reference)
   int m_nWaveTexture = 0;                   //!< GetWaveTexture: its ID, 0 not made yet, -1 failed
+  int m_nCausticsTexture = 0;               //!< GetCausticsTexture: its ID, 0 not made yet, -1 failed
+  float m_fCausticsMinMean = 1;             //!< the mean of the smaller of two texels of it (its mean 1)
   ComPtr<ID3D12Resource> m_pReflectionColor, m_pReflectionDepth;
   D3D12_CPU_DESCRIPTOR_HANDLE m_hReflectionRTV = {}, m_hReflectionDSV = {};
   int m_nReflectionSRV = -1;
@@ -595,6 +603,7 @@ public:
   int CV_d3d12_debug = 0;             //!< debug layer (also XRENDERD3D12_DEBUG=1); only read at Init
   int CV_d3d12_DumpFrame = 0;         //!< non-zero: the next frame's 3D draws go to XRenderD3D12_frame.txt, then 0
   int CV_d3d12_WaterDebug = 0;        //!< non-zero: the water shows one term of its colour (Water.hlsl)
+  int CV_d3d12_Caustics = 1;          //!< 0: no caustics under the ocean
   float CV_d3d12_WaterReflectionScale = 0.5f;   //!< size of the water reflection, a fraction of the screen's
   int CV_d3d12_WaterReflectionFlags = DLD_TERRAIN | DLD_TERRAIN_FULLRES;   //!< what the water reflects (EDrawLowDetailFlags)
   int CV_d3d12_SpriteRes = 128;             //!< size of the far vegetation sprites' textures (made at the level load)

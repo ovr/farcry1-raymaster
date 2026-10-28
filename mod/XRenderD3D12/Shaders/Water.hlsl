@@ -9,14 +9,23 @@
 //	    slopes (made by the renderer, Water.cpp);
 //	  - refraction: the copy of the colour buffer, displaced by the normal,
 //	    seen through the water between the surface and the scene behind it
-//	    (the copy of the depth buffer): transmittance exp(-absorption *
-//	    path), the rest the water's own scattered colour;
+//	    (the copy of the depth buffer): the light of the scene behind went
+//	    down to it through the water and comes up along the view ray, so it
+//	    keeps exp(-extinction * (light path + view path)), the light path
+//	    being its depth under the surface along the refracted sun; the water
+//	    adds its own colour, the light it scatters towards the camera, by
+//	    1 - exp(-extinction * view path) (extinction = absorption +
+//	    turbidity); besides, the scene behind fades out linearly along the
+//	    light's whole path (down to it and back up), gone at the visibility
+//	    under water, where the water shows only its own colour;
 //	  - reflection: the scene where the colour and depth copies show it
 //	    (a ray marched in screen space), else the ocean's planar reflection
 //	    (the scene seen by the camera mirrored in the water plane), else the
 //	    sky box in the reflected direction (the box as the sky draws it;
-//	    without a sky, none), weighted by 1 - 0.8 N.V (much more than the
-//	    fresnel of real water, as the original's water) and the reflection
+//	    without a sky, none); the scene is looked up along the reflection of
+//	    a calmer normal (half the slopes), so that it ripples rather than
+//	    breaks up. Weighted by a fresnel term (Schlick's: 2 % looking
+//	    straight down, all of it at grazing angles) and the reflection
 //	    amount;
 //	  - the sun's highlight on the waves;
 //	  - near the shore (close to the camera) the surface fades into the
@@ -27,13 +36,15 @@
 //	The result replaces the pixel (no blending).
 //
 //	SDrawConstants:
-//	  vParams0  x wave slope scale, y reflection amount, z d3d12_WaterDebug
+//	  vParams0  x wave slope scale, y reflection amount, z d3d12_WaterDebug,
+//	            w 1 / the visibility under water (0: no limit)
 //	  vParams1  x z1 of the sky box sides, y 1 when there is a sky box,
 //	            z the sky box's alpha (blends it towards the fog colour),
 //	            w 1 when there is a planar reflection
-//	  vParams2  rgb absorption per metre, w refraction displacement
-//	  vParams3  rgb the water's scattered colour (lit); w 1: lit by the scene
-//	            behind it instead (water volumes, which may be indoors)
+//	  vParams2  rgb extinction per metre, w refraction displacement
+//	  vParams3  rgb the colour of deep water; w 0 as it is, 1 lit by the
+//	            scene behind it (water volumes, which may be indoors), 2 lit
+//	            by the sky
 //	  nTex0     colour copy, nTex1 depth copy (R24 of D24S8)
 //	  nTex2..4  the sky box textures: top, _12, _34
 //	  nTex5     the wave slopes (red dH/du, green dH/dv; 128 flat, 32 the RMS)
@@ -155,10 +166,11 @@ float3 PlanarReflection(float3 P, float3 R, float fReach)
 }
 
 //! The scene in direction R from P where the frame's copies show it: the ray marches in steps
-//! that grow with the distance until it is behind the depth buffer but not far behind (not
-//! passing behind an object), then the crossing is refined. Never hits the sky (the far plane)
-//! or the first person weapon (nearer than 0.5 m). w: how much to trust it, 0 on a miss, fading
-//! towards the screen's edges.
+//! that grow with the distance; when it gets behind the depth buffer the crossing is refined, and
+//! it is a hit if the ray is then no more than a few centimetres behind the surface there (more
+//! means it passed behind an object, whose back the copies do not show: it goes on). Never hits
+//! the sky (the far plane) or the first person weapon (nearer than 0.5 m). w: how much to trust
+//! it, 0 on a miss, fading towards the screen's edges.
 float4 ScreenReflection(float3 P, float3 R, float2 vViewToBuffer)
 {
   float tPrev = 0, t = 0.4;
@@ -173,24 +185,30 @@ float4 ScreenReflection(float3 P, float3 R, float2 vViewToBuffer)
       break;
     float fDepth = g_Textures[g_Draw.nTex1].SampleLevel(g_SamplerPointClamp, vUV, 0).r;
     float fScene = LinearDepth(fDepth);
-    if (vClip.w > fScene && fScene > 0.5 && fDepth < 0.99999 && vClip.w - fScene < max(0.3, (t - tPrev) * 2))
+    if (vClip.w > fScene && fScene > 0.5 && fDepth < 0.99999)
     {
-      float a = tPrev, b = t;
+      float a = tPrev, b = t, fBehind = vClip.w - fScene;
       [unroll]
-      for (int k = 0; k < 5; k++)
+      for (int k = 0; k < 6; k++)
       {
         float m = (a + b) * 0.5;
         float4 vClipM = mul(float4(P + R * m, 1), g_Frame.mViewProj);
         float fSceneM = LinearDepth(g_Textures[g_Draw.nTex1].SampleLevel(g_SamplerPointClamp, ClipToUV(vClipM, vViewToBuffer), 0).r);
         if (vClipM.w > fSceneM)
+        {
           b = m;
+          fBehind = vClipM.w - fSceneM;
+        }
         else
           a = m;
       }
-      float2 vHit = ClipToUV(mul(float4(P + R * b, 1), g_Frame.mViewProj), vViewToBuffer);
-      float2 vEdge = min(vHit, vViewToBuffer - vHit) / vViewToBuffer;
-      float fTrust = saturate(min(vEdge.x, vEdge.y) * 12);
-      return float4(g_Textures[g_Draw.nTex0].SampleLevel(g_SamplerLinearClamp, vHit, 0).rgb, fTrust);
+      if (fBehind < 0.05 + 0.01 * vClip.w)
+      {
+        float2 vHit = ClipToUV(mul(float4(P + R * b, 1), g_Frame.mViewProj), vViewToBuffer);
+        float2 vEdge = min(vHit, vViewToBuffer - vHit) / vViewToBuffer;
+        float fTrust = saturate(min(vEdge.x, vEdge.y) * 12);
+        return float4(g_Textures[g_Draw.nTex0].SampleLevel(g_SamplerLinearClamp, vHit, 0).rgb, fTrust);
+      }
     }
     tPrev = t;
     t = t * 1.18 + 0.15;
@@ -232,16 +250,23 @@ float4 PSMain(SWaterOutput In) : SV_Target
   float3 vScene = g_Textures[g_Draw.nTex0].SampleLevel(g_SamplerLinearClamp, vUV, 0).rgb;
   float3 vScene0 = g_Textures[g_Draw.nTex0].SampleLevel(g_SamplerPointClamp, vUV0, 0).rgb;
 
-  // The path through the water along the view ray (the depths are along the view axis).
+  // The path through the water along the view ray (the depths are along the view axis), and the
+  // light's path down to the scene behind: its depth under the surface over the cosine of the
+  // sun's ray refracted into the water (at least 0.66).
   float fPath = max(fBehind - fSurface, 0) * fDistance / max(fSurface, 1e-3);
-  // The water's own colour is light the sky (or, in a water volume, its surroundings) scatters
-  // into it: from 60 % under a black sky to all of it under a bright day sky (the sky box's
-  // brightness in five directions), or in proportion to the brightness of what is behind a water
-  // volume.
+  float3 vFloor = vCamera - V * (fDistance * fBehind0 / max(fSurface, 1e-3));
+  float fDepthBelow = max(In.vWorldPos.z - vFloor.z, 0);
+  float3 L = g_Frame.vSunDir.xyz;
+  float fLightPath = fDepthBelow / sqrt(1 - saturate(1 - L.z * L.z) / (1.33 * 1.33));
+  float3 vExtinction = g_Draw.vParams2.rgb;
+  // The water's own colour is light scattered into it: as given (w 0), in proportion to the
+  // brightness of what is behind a water volume (w 1), or light the sky scatters into it (w 2):
+  // from 60 % under a black sky to all of it under a bright day sky (the sky box's brightness in
+  // five directions).
   float3 vScatter = g_Draw.vParams3.rgb;
-  if (g_Draw.vParams3.w > 0)
+  if (g_Draw.vParams3.w == 1)
     vScatter *= saturate(dot(vScene0, float3(0.30, 0.59, 0.11)) * 2.5);
-  else if (g_Draw.vParams1.y != 0)
+  else if (g_Draw.vParams3.w == 2 && g_Draw.vParams1.y != 0)
   {
     float3 vSky = SkyBoxColor(float3(0, 0, 1)) + SkyBoxColor(float3(1, 0, 0.3)) + SkyBoxColor(float3(-1, 0, 0.3)) +
                   SkyBoxColor(float3(0, 1, 0.3)) + SkyBoxColor(float3(0, -1, 0.3));
@@ -250,22 +275,25 @@ float4 PSMain(SWaterOutput In) : SV_Target
   float3 vColor;
   if (!bBelow)
   {
-    float3 T = exp(-g_Draw.vParams2.rgb * fPath);
-    float3 vRefracted = vScene * T + vScatter * (1 - T);
+    float3 T = exp(-vExtinction * fPath) * saturate(1 - (fPath + fLightPath) * g_Draw.vParams0.w);
+    float3 vRefracted = vScene * T * exp(-vExtinction * fLightPath) + vScatter * (1 - T);
 
-    // The reflection: a fifth of the sky looking straight down, all of it at grazing angles.
+    // The reflection: 2 % straight down, all of it at grazing angles.
     float NdotV = saturate(dot(N, V));
-    float F = (1 - 0.8 * NdotV) * g_Draw.vParams0.y;
+    float F = (0.02 + 0.98 * pow(1 - NdotV, 5)) * g_Draw.vParams0.y;
     float3 R = reflect(-V, N);
+    float3 Rs = reflect(-V, normalize(float3(N.xy * 0.5, N.z)));
     float3 vReflected = g_Draw.vParams1.y != 0 ? SkyBoxColor(R) : vScatter;
     if (g_Draw.vParams1.w != 0)
-      vReflected = PlanarReflection(In.vWorldPos, R, fDistance * 0.3);
-    float4 vSSR = ScreenReflection(In.vWorldPos, R, g_Frame.vScreen.xy * vInvSize);
+      vReflected = PlanarReflection(In.vWorldPos, Rs, fDistance * 0.3);
+    float4 vSSR = ScreenReflection(In.vWorldPos, Rs, g_Frame.vScreen.xy * vInvSize);
     vReflected = lerp(vReflected, vSSR.rgb, vSSR.w);
 
-    float3 L = g_Frame.vSunDir.xyz;
+    // The sun's highlight, as much of it as the facets reflect (fresnel at the half vector): faint
+    // looking down on the water, glaring towards a low sun.
     float3 H = normalize(L + V);
-    float fSpec = pow(saturate(dot(N, H)), 700) * 4 + pow(saturate(dot(N, H)), 90) * 0.15;
+    float fSunF = 0.02 + 0.98 * pow(1 - saturate(dot(V, H)), 5);
+    float fSpec = (pow(saturate(dot(N, H)), 700) * 40 + pow(saturate(dot(N, H)), 90) * 1.5) * fSunF;
     float3 vSun = g_Frame.vSunColor.rgb * fSpec * saturate(L.z * 4);
 
     // The shore: the surface fades in over the first 15 cm of water, up to 40 m away; beyond 100 m
@@ -286,7 +314,11 @@ float4 PSMain(SWaterOutput In) : SV_Target
     if (g_Draw.vParams0.z == 6)
       return float4(vSSR.rgb, 1);
     if (g_Draw.vParams0.z == 7)
-      return float4(g_Draw.vParams1.w != 0 ? PlanarReflection(In.vWorldPos, R, fDistance * 0.3) : 0, 1);
+      return float4(g_Draw.vParams1.w != 0 ? PlanarReflection(In.vWorldPos, Rs, fDistance * 0.3) : 0, 1);
+    if (g_Draw.vParams0.z == 8)
+      return float4(vScene0, 1);
+    if (g_Draw.vParams0.z == 9)
+      return float4(saturate(fPath / 32), saturate(fDepthBelow / 16), F, 1);
   }
   else
   {

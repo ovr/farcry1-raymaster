@@ -183,6 +183,8 @@ public:
   int RegisterFogVolume(float fMaxFogDist, float fFogLayerZ, const CFColor &Color, int nIndex, bool bCaustics);
   //! nullptr for 0 and unknown IDs.
   const SFogVolume *GetFogVolume(int nId) const;
+  //! The ocean's fog volume (the first with caustics), NULL without one.
+  const SFogVolume *GetOceanFogVolume() const;
   //! Forgets the volumes (a new level registers its own; call at PreLoad).
   void ResetFogVolumes() { m_FogVolumes.clear(); }
 

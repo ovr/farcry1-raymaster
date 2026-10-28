@@ -10,7 +10,8 @@
 //	    position: DF_SCREEN_POS pixels (ScreenToClip), else mWorldViewProj;
 //	      the world position (mWorld) for texgen, cube reflections and fog
 //	    colour: vColor, times the vertex colour (DF_VCOLOR; DF_VCOLOR_X2 also
-//	      doubles its rgb), times the vertex lighting (DF_LIGHTING, rgb only):
+//	      doubles its rgb, DF_VALPHA_ONLY keeps only its alpha), times the
+//	      vertex lighting (DF_LIGHTING, rgb only):
 //	      2 * (saturate(ambient / 2 + sun N.L + light 0) + the sum of
 //	      saturate(light) of the draw's other lights), light = colour * N.L,
 //	      point lights times 1 / (a0 + a1 d): each light is clamped on its own,
@@ -47,8 +48,15 @@
 //	      (SunVisibility, Common.hlsli) v: DF_LIGHTING colour = lerp(the vertex
 //	      light without the sun, with it, v) * texture; DF_TEX1_LIGHTMAP rgb *=
 //	      4 * v * tex1 + vAmbient; DF_SHADOW_PASS rgb = colour * tex0, a = 1 - v
+//	    DF_CAUSTICS (the terrain under the ocean, multiplied in twice): rgb =
+//	      0.5 + 0.5 * k * (I - 1), I = min of two layers of the caustics texture
+//	      tex0 drifting apart, sampled where the sun's refracted ray crossed
+//	      the surface (vParams0: x water level, y 1 / pattern size, z time,
+//	      w k; vParams1: xy the ray's shift per metre of depth, z the depth
+//	      where the caustics are gone, w the texture's scale to a mean of 1),
+//	      fading in over the first metre of depth
 //	    DF_FOG (with vFogParams.w set): linear fog by the distance to the
-//	      camera, per pixel (towards 0.5 with DF_DETAIL_LAYER)
+//	      camera, per pixel (towards 0.5 with DF_DETAIL_LAYER, DF_CAUSTICS)
 //
 //////////////////////////////////////////////////////////////////////
 
@@ -90,6 +98,8 @@ SVertexOutput VSMain(SVertexInput In)
     float4 vVertexColor = DecodeVertexColor(In.vColor0);
     if (HasFlag(DF_VCOLOR_X2))
       vVertexColor.rgb *= 2;
+    if (HasFlag(DF_VALPHA_ONLY))
+      vVertexColor.rgb = 1;
     vColor *= vVertexColor;
   }
   float4 vColorNoSun = vColor;
@@ -252,6 +262,19 @@ float4 PSMain(SVertexOutput In) : SV_Target
       vDetail *= clamp(1 + (dot(vBump, vL) - fN) / (g_Draw.vParams1.x + saturate(fN)), 0, 2);
     }
     vColor = float4(lerp(0.5, vDetail, fWeight), 1);
+    vFogColor = 0.5;
+  }
+
+  if (HasFlag(DF_CAUSTICS))
+  {
+    float fDepth = g_Draw.vParams0.x - In.vWorldPos.z;
+    float2 vP = (In.vWorldPos.xy + g_Draw.vParams1.xy * fDepth) * g_Draw.vParams0.y;
+    float t = g_Draw.vParams0.z;
+    float c1 = SampleTexture(g_Draw.nTex0, XR_SAMPLER_LINEAR_WRAP, vP + float2(0.031, 0.017) * t).r;
+    float c2 = SampleTexture(g_Draw.nTex0, XR_SAMPLER_LINEAR_WRAP, vP * 1.37 + float2(-0.023, 0.029) * t).r;
+    float fLight = min(c1, c2) * g_Draw.vParams1.w;
+    float fFade = saturate(fDepth) * saturate(1 - fDepth / g_Draw.vParams1.z);
+    vColor = float4(saturate(0.5 + 0.5 * g_Draw.vParams0.w * fFade * (fLight - 1)).xxx, 1);
     vFogColor = 0.5;
   }
 

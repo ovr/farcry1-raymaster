@@ -115,7 +115,9 @@ void CD3D12Renderer::RegisterVariables()
   iConsole->Register("d3d12_Debug", &CV_d3d12_debug, 0, VF_DUMPTODISK, "Direct3D 12 debug layer and GPU based validation (read at start-up)");
   iConsole->Register("d3d12_DumpFrame", &CV_d3d12_DumpFrame, 0, 0, "Writes the render items and draws of the next frame to XRenderD3D12_frame.txt");
   iConsole->Register("d3d12_WaterDebug", &CV_d3d12_WaterDebug, 0, 0,
-                     "Water surfaces show one term: 1 refraction, 2 reflection, 3 water thickness (0-2 m: black-white), 4 normal, 5 screen space reflection hits, 6 their colour, 7 the planar reflection");
+                     "Water surfaces show one term: 1 refraction, 2 reflection, 3 water thickness (0-2 m: black-white), 4 normal, 5 screen space reflection hits, 6 their colour, 7 the planar reflection, "
+                     "8 the scene behind, 9 view path (red, 0-32 m), depth (green, 0-16 m) and fresnel (blue)");
+  iConsole->Register("d3d12_Caustics", &CV_d3d12_Caustics, 1, VF_DUMPTODISK, "Caustics on the terrain under the ocean; 0 off");
   iConsole->Register("d3d12_WaterReflectionScale", &CV_d3d12_WaterReflectionScale, 0.5f, VF_DUMPTODISK,
                      "Size of the water reflection (r_WaterReflections), a fraction of the screen's");
   iConsole->Register("d3d12_WaterReflectionFlags", &CV_d3d12_WaterReflectionFlags, DLD_TERRAIN | DLD_TERRAIN_FULLRES, VF_DUMPTODISK,
@@ -342,6 +344,7 @@ void CD3D12Renderer::Release()
   m_pDetailTexture = nullptr;   // released with every texture
   m_pBeachTexture = nullptr;
   m_nWaveTexture = 0;
+  m_nCausticsTexture = 0;
   m_SkyBoxes.clear();
   m_nSceneSkyBox = -1;
   if (m_pTextures)
@@ -426,6 +429,12 @@ void CD3D12Renderer::BeginFrame (void)
         for (float f : pM->data)
           fprintf(m_pFrameDump.get(), " %g", f);
         fprintf(m_pFrameDump.get(), "\n");
+      }
+      for (int i = 1; m_pScene && m_pScene->GetFogVolume(i); i++)
+      {
+        const SFogVolume *pFV = m_pScene->GetFogVolume(i);
+        fprintf(m_pFrameDump.get(), "fog volume %d: max distance %g, layer z %g, colour (%.3f %.3f %.3f), caustics %d\n", i, pFV->fMaxFogDist,
+                pFV->fFogLayerZ, pFV->Color.r, pFV->Color.g, pFV->Color.b, (int)pFV->bCaustics);
       }
     }
   }

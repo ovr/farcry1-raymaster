@@ -2,8 +2,9 @@
 //
 //	File: Water.cpp
 //	Description: The water: the ocean around the camera and the water
-//	volumes (eDC_Water), the foam on the beach (eDC_WaterBeach) and the
-//	sea floor under the ocean (eDC_WaterBottom).
+//	volumes (eDC_Water), the foam on the beach (eDC_WaterBeach), the
+//	sea floor under the ocean (eDC_WaterBottom) and the caustics on the
+//	terrain under it (eDC_Caustics).
 //
 //	The water surfaces come first in the blended list. Before the first
 //	one, the back buffer and the depth buffer are copied; the water program
@@ -71,17 +72,35 @@ float Sign(float f)
 constexpr float REFLECTION_MAX_INTERVAL = 0.3f;
 constexpr float REFLECTION_MAX_NEAR = 16.0f;
 
-// The water's optics: absorption per metre (red goes first), the colour it scatters back in full
-// light, and how far the waves move the refracted picture (a fraction of the screen).
-constexpr float WATER_ABSORPTION[3] = { 0.9f, 0.4f, 0.3f };
-constexpr float WATER_SCATTER[3] = { 0.10f, 0.23f, 0.50f };
+// The water's optics: absorption per metre (red goes first; weak, as the levels paint the sea floor
+// in the colours of the water above it), the light scattered per metre, the colour of deep water in
+// full light where the level gives none (in the ocean's fog volume), the visibility under water as
+// a share of the fog volume's distance (along the light's path down to the sea floor and back up;
+// fitted to the look of the levels), and how far the waves move the refracted picture (a fraction
+// of the screen).
+constexpr float WATER_ABSORPTION[3] = { 0.030f, 0.024f, 0.005f };
+constexpr float WATER_TURBIDITY = 0.005f;
+constexpr float WATER_SCATTER[3] = { 0.18f, 0.28f, 0.54f };
+constexpr float WATER_VISIBILITY = 2.0f / 3.0f;
 constexpr float WATER_DISPLACEMENT = 0.03f;
 
-// A beach wave runs up the shore in this many seconds; the front of the foam texture is at this v.
+// A beach wave runs up the shore in this many seconds (BEACH_WAVES of them at a time); the front of
+// the foam texture is at this v; the foam is white, this many times the world colour's mean (about
+// as bright as the sand, so that it shows over the water).
 constexpr float BEACH_WAVE_PERIOD = 7.0f;
 constexpr float BEACH_WAVE_FRONT = 0.85f;
+constexpr float BEACH_FOAM_BRIGHTNESS = 1.05f;
 
 constexpr int WAVE_TEXTURE_SIZE = 256;
+
+// The caustics: the pattern repeats every so many metres, the light of a texel of the texture is
+// stored as 255 / CAUSTICS_RANGE per unit of the mean; the share of the light on the sea floor that
+// they move around (the direct sun's), and the depth where they are gone.
+constexpr int CAUSTICS_TEXTURE_SIZE = 256;
+constexpr float CAUSTICS_RANGE = 6.0f;
+constexpr float CAUSTICS_SIZE = 4.0f;
+constexpr float CAUSTICS_STRENGTH = 0.2f;
+constexpr float CAUSTICS_DEPTH = 12.0f;
 
 //! The wave texture, B, G, R, A bytes: the slopes of a height field that tiles over the texture,
 //! dH/du in red and dH/dv in green, the height in blue (128: 0; 32 units: the RMS of the slopes,
@@ -162,6 +181,141 @@ std::vector<byte> MakeWaveTexture(int N)
   return Pixels;
 }
 
+//! The caustics texture, B, G, R, A bytes (the same in each): the light a uniform beam gives a
+//! plane under a tiling wave field, as the density of rays refracted by its slopes (a few rays
+//! per texel, each moved by the slope where it crosses the surface and spread over the four
+//! nearest texels), scaled to a mean of 1 and stored as 255 / CAUSTICS_RANGE per unit.
+//! fMinMean: the mean of the smaller of two texels taken at random (of the stored values).
+std::vector<byte> MakeCausticsTexture(int N, float &fMinMean)
+{
+  constexpr int TABLE = 4096;               // a whole cycle; N divides it
+  constexpr float PI = 3.14159265f;
+  std::vector<float> Sin(TABLE);
+  for (int i = 0; i < TABLE; i++)
+    Sin[i] = sinf(i * 2 * PI / TABLE);
+  uint32 nRand = 0x1F3D5B79u;
+  auto Rand = [&nRand]()
+  {
+    nRand ^= nRand << 13;
+    nRand ^= nRand >> 17;
+    nRand ^= nRand << 5;
+    return (nRand & 0xFFFFFF) / 16777216.0f;
+  };
+
+  // The slopes of a height field of waves in every direction, whole numbers of cycles per tile,
+  // their heights falling with the wave number; RMS 1.
+  constexpr int K_MIN = 2, K_MAX = 24;
+  const int nStep = TABLE / N;
+  std::vector<float> SX((size_t)N * N), SY((size_t)N * N);
+  for (int ky = 0; ky <= K_MAX; ky++)
+    for (int kx = -K_MAX; kx <= K_MAX; kx++)
+    {
+      if (ky == 0 && kx <= 0)
+        continue;
+      const float k = sqrtf((float)(kx * kx + ky * ky));
+      const float fChance = Rand();
+      if (k < K_MIN || k > K_MAX || fChance > 0.25f)
+        continue;
+      const float a = powf(k, -1.9f) * (0.5f + Rand());
+      const int nPhase = (int)(Rand() * TABLE);
+      for (int y = 0; y < N; y++)
+        for (int x = 0; x < N; x++)
+        {
+          const float s = a * Sin[((kx * x + ky * y) * nStep + nPhase) & (TABLE - 1)];
+          SX[(size_t)y * N + x] -= s * kx;
+          SY[(size_t)y * N + x] -= s * ky;
+        }
+    }
+  double fSq = 0;
+  for (size_t i = 0; i < SX.size(); i++)
+    fSq += 0.5 * (SX[i] * SX[i] + SY[i] * SY[i]);
+  const float fNorm = 1 / std::max((float)sqrt(fSq / SX.size()), 1e-6f);
+
+  // The rays: RAYS x RAYS per texel, moved by DISPLACEMENT texels per unit of slope.
+  constexpr int RAYS = 4;
+  constexpr float DISPLACEMENT = 4.0f;
+  const auto Wrap = [N](int i) { return ((i % N) + N) % N; };
+  const auto Bilinear = [&](const std::vector<float> &F, float x, float y)
+  {
+    const int x0 = (int)floorf(x), y0 = (int)floorf(y);
+    const float tx = x - x0, ty = y - y0;
+    const int xa = Wrap(x0), xb = Wrap(x0 + 1), ya = Wrap(y0), yb = Wrap(y0 + 1);
+    return (F[(size_t)ya * N + xa] * (1 - tx) + F[(size_t)ya * N + xb] * tx) * (1 - ty) +
+           (F[(size_t)yb * N + xa] * (1 - tx) + F[(size_t)yb * N + xb] * tx) * ty;
+  };
+  std::vector<float> Light((size_t)N * N);
+  for (int ry = 0; ry < N * RAYS; ry++)
+    for (int rx = 0; rx < N * RAYS; rx++)
+    {
+      const float x = (float)rx / RAYS, y = (float)ry / RAYS;
+      const float px = x - DISPLACEMENT * fNorm * Bilinear(SX, x, y), py = y - DISPLACEMENT * fNorm * Bilinear(SY, x, y);
+      const int x0 = (int)floorf(px), y0 = (int)floorf(py);
+      const float tx = px - x0, ty = py - y0;
+      const int xa = Wrap(x0), xb = Wrap(x0 + 1), ya = Wrap(y0), yb = Wrap(y0 + 1);
+      Light[(size_t)ya * N + xa] += (1 - tx) * (1 - ty);
+      Light[(size_t)ya * N + xb] += tx * (1 - ty);
+      Light[(size_t)yb * N + xa] += (1 - tx) * ty;
+      Light[(size_t)yb * N + xb] += tx * ty;
+    }
+
+  // Each texel got RAYS * RAYS rays on average.
+  std::vector<byte> Pixels((size_t)N * N * 4);
+  std::vector<float> Stored(Light.size());
+  for (size_t i = 0; i < Light.size(); i++)
+  {
+    const int v = std::clamp((int)lrintf(Light[i] / (RAYS * RAYS) * 255 / CAUSTICS_RANGE), 0, 255);
+    Pixels[i * 4 + 0] = Pixels[i * 4 + 1] = Pixels[i * 4 + 2] = Pixels[i * 4 + 3] = (byte)v;
+    Stored[i] = v * CAUSTICS_RANGE / 255;
+  }
+  // The smaller of two: the i-th of n sorted values (from 0) is it with chance (2 (n - i) - 1) / n^2.
+  std::sort(Stored.begin(), Stored.end());
+  const double n = (double)Stored.size();
+  double fSum = 0;
+  for (size_t i = 0; i < Stored.size(); i++)
+    fSum += Stored[i] * (2 * (n - i) - 1);
+  fMinMean = (float)(fSum / (n * n));
+  return Pixels;
+}
+
+}
+
+int CD3D12Renderer::GetCausticsTexture()
+{
+  if (!m_nCausticsTexture && m_pTextures)
+  {
+    const std::vector<byte> Pixels = MakeCausticsTexture(CAUSTICS_TEXTURE_SIZE, m_fCausticsMinMean);
+    m_nCausticsTexture = m_pTextures->CreateFromMemory(Pixels.data(), CAUSTICS_TEXTURE_SIZE, CAUSTICS_TEXTURE_SIZE, eTF_8888, 2, true,
+                                                       FILTER_TRILINEAR, 0, "$Caustics", 0);
+    if (!m_nCausticsTexture || !(m_fCausticsMinMean > 0))
+      m_nCausticsTexture = -1;
+  }
+  return m_nCausticsTexture > 0 ? m_pTextures->GetSRV(m_nCausticsTexture) : -1;
+}
+
+bool CD3D12Renderer::SetupCausticsDraw(SPipelineKey &Key, SDrawConstants &dc, const SRenderItem &it)
+{
+  // The fog pass of a sector under the ocean (Scene.cpp), in daylight.
+  const SFogVolume *pFV = m_pScene->GetFogVolume(it.nFog);
+  const float fSun = std::clamp(m_SunDir[2] * 4, 0.0f, 1.0f);
+  if (!CV_d3d12_Caustics || !pFV || !pFV->bCaustics || fSun <= 0 || m_bReflectionPass || m_bSpritePass)
+    return false;
+  const int nTex = GetCausticsTexture();
+  if (nTex < 0)
+    return false;
+
+  // Multiplied in twice over the terrain drawn (before its shadows), without depth writes.
+  Key.nProgram = eD3D12P_General;
+  Key.nState = GS_BLSRC_DSTCOL | GS_BLDST_SRCCOL;
+  dc.nFlags = DF_CAUSTICS;
+  dc.nTex0 = (uint32)nTex;
+  // The light under a point of the floor crossed the surface towards the sun, refracted (sine over
+  // 1.33): its horizontal shift per metre of depth.
+  const float fH = sqrtf(m_SunDir[0] * m_SunDir[0] + m_SunDir[1] * m_SunDir[1]);
+  const float fSinW = std::min(fH / 1.33f, 0.99f), fShift = fSinW / sqrtf(1 - fSinW * fSinW) / std::max(fH, 1e-4f);
+  const float fTime = iTimer ? iTimer->GetCurrTime() : 0.0f;
+  Set4(dc.vParams0, pFV->fFogLayerZ, 1 / CAUSTICS_SIZE, fTime, CAUSTICS_STRENGTH * fSun);
+  Set4(dc.vParams1, m_SunDir[0] * fShift, m_SunDir[1] * fShift, CAUSTICS_DEPTH, CAUSTICS_RANGE / m_fCausticsMinMean);
+  return true;
 }
 
 int CD3D12Renderer::GetWaveTexture()
@@ -400,7 +554,10 @@ bool CD3D12Renderer::SetupWaterDraw(SPipelineKey &Key, SDrawConstants &dc, const
   const CCObject *pObj = it.pObj;
   const float fBumpX = GetObjectParam(pObj, "bumpamountx", 0.03f), fBumpY = GetObjectParam(pObj, "bumpamounty", 0.02f);
   const float fReflect = std::clamp(GetObjectParam(pObj, "reflectamount", 1.0f), 0.0f, 1.0f);
-  Set4(dc.vParams0, (fBumpX + fBumpY) * 1.2f, fReflect, (float)CV_d3d12_WaterDebug, 0);
+  const bool bVolume = !IsOcean(it);
+  const SFogVolume *pFV = bVolume ? nullptr : m_pScene->GetOceanFogVolume();
+  const float fInvVisibility = pFV && pFV->fMaxFogDist > 0 ? 1 / (pFV->fMaxFogDist * WATER_VISIBILITY) : 0.0f;
+  Set4(dc.vParams0, (fBumpX + fBumpY) * 1.2f, fReflect, (float)CV_d3d12_WaterDebug, fInvVisibility);
   dc.nTex5 = GetWaveTexture();
 
   // The sky box the scene's sky drew (as it drew it).
@@ -420,7 +577,6 @@ bool CD3D12Renderer::SetupWaterDraw(SPipelineKey &Key, SDrawConstants &dc, const
   }
 
   // The ocean's planar reflection (UpdateWaterReflection).
-  const bool bVolume = !IsOcean(it);
   dc.nTex6 = D3D12_SRV_WHITE;
   if (!bVolume && m_bReflectionValid && m_nReflectionSRV >= 0)
   {
@@ -429,12 +585,20 @@ bool CD3D12Renderer::SetupWaterDraw(SPipelineKey &Key, SDrawConstants &dc, const
     memcpy(dc.mParams0, m_ReflectionViewProj.data, sizeof(dc.mParams0));
   }
 
-  // The water's own colour, lit by the world colour and the sun's height; a water volume (not one of
-  // the terrain's water shaders) by what is behind it, as it may be indoors.
-  const float fLight = 0.4f + 0.6f * std::clamp(m_SunDir[2], 0.0f, 1.0f);
-  Set4(dc.vParams2, WATER_ABSORPTION[0], WATER_ABSORPTION[1], WATER_ABSORPTION[2], WATER_DISPLACEMENT);
-  Set4(dc.vParams3, WATER_SCATTER[0] * m_WorldColor[0] * fLight, WATER_SCATTER[1] * m_WorldColor[1] * fLight,
-       WATER_SCATTER[2] * m_WorldColor[2] * fLight, bVolume ? 1.0f : 0.0f);
+  Set4(dc.vParams2, WATER_ABSORPTION[0] + WATER_TURBIDITY, WATER_ABSORPTION[1] + WATER_TURBIDITY, WATER_ABSORPTION[2] + WATER_TURBIDITY,
+       WATER_DISPLACEMENT);
+
+  // The colour of deep water: the ocean's that of its fog volume (the one with caustics) as the level
+  // gives it, else lit by the world colour, the sun's height and the sky; a water volume (not one of
+  // the terrain's water shaders) lit by what is behind it, as it may be indoors.
+  if (pFV)
+    Set4(dc.vParams3, pFV->Color.r, pFV->Color.g, pFV->Color.b, 0);
+  else
+  {
+    const float fLight = 0.4f + 0.6f * std::clamp(m_SunDir[2], 0.0f, 1.0f);
+    Set4(dc.vParams3, WATER_SCATTER[0] * m_WorldColor[0] * fLight, WATER_SCATTER[1] * m_WorldColor[1] * fLight,
+         WATER_SCATTER[2] * m_WorldColor[2] * fLight, bVolume ? 1.0f : 2.0f);
+  }
   return true;
 }
 
@@ -447,15 +611,16 @@ bool CD3D12Renderer::SetupBeachDraw(SPipelineKey &Key, SDrawConstants &dc, int n
   if (!m_pBeachTexture || !m_pBeachTexture->IsTextureLoaded() || m_pBeachTexture->IsCube())
     return false;
 
-  // The mesh runs from the sea (v 0) to the land (v 1) and fades out at both edges (vertex alpha).
-  // The front of the foam moves from the sea to the land and fades in and out on its way; the
-  // second wave is half a period behind, mirrored along the shore.
+  // The mesh runs from the sea (v 0) to the land (v 1) and fades out at both edges (vertex alpha;
+  // its rgb, darker in places, is not used: foam is white). The front of the foam moves from the
+  // sea to the land, appears quickly and fades out slowly on its way; each wave is a fraction of a
+  // period behind the one before, every other one mirrored along the shore.
   Key.nProgram = eD3D12P_General;
   Key.nState = GS_BLSRC_SRCALPHA | GS_BLDST_ONEMINUSSRCALPHA;
   Key.nCull = R_CULL_NONE;
   const float fTime = iTimer ? iTimer->GetCurrTime() : 0.0f;
-  const float fPhase = Frac(fTime / BEACH_WAVE_PERIOD + nWave * 0.5f);
-  dc.nFlags = DF_TEX0 | DF_VCOLOR | DF_TEXMATRIX;
+  const float fPhase = Frac(fTime / BEACH_WAVE_PERIOD + (float)nWave / BEACH_WAVES);
+  dc.nFlags = DF_TEX0 | DF_VCOLOR | DF_VALPHA_ONLY | DF_TEXMATRIX;
   dc.nTex0 = m_pBeachTexture->GetSRV();
   dc.nSamplers = XR_SAMPLER_LINEAR_CLAMP;
   if (nWave & 1)
@@ -463,8 +628,10 @@ bool CD3D12Renderer::SetupBeachDraw(SPipelineKey &Key, SDrawConstants &dc, int n
   else
     Set4(dc.vTexMat0, 1, 0, 0, 0);
   Set4(dc.vTexMat1, 0, 1, BEACH_WAVE_FRONT - fPhase, 0);
-  const float fFade = sinf(fPhase * 3.14159265f);
-  Set4(dc.vColor, m_WorldColor[0] * 0.9f, m_WorldColor[1] * 0.9f, m_WorldColor[2] * 0.9f, fFade);
+  const auto SmoothStep = [](float a, float b, float x) { const float t = std::clamp((x - a) / (b - a), 0.0f, 1.0f); return t * t * (3 - 2 * t); };
+  const float fFade = SmoothStep(0.0f, 0.12f, fPhase) * (1 - SmoothStep(0.4f, 1.0f, fPhase));
+  const float b = BEACH_FOAM_BRIGHTNESS * (m_WorldColor[0] + m_WorldColor[1] + m_WorldColor[2]) / 3;
+  Set4(dc.vColor, b, b, b, fFade);
   return true;
 }
 

@@ -61,6 +61,7 @@ enum EDrawClass
   eDC_TerrainLayer,       //!< a detail layer of the terrain near the camera, multiplied in twice
   eDC_Decal,              //!< a decal on a static object: over its owner's vertices, blended
   eDC_TerrainShadow,      //!< the shadow of static objects on the terrain (their shadow maps), blended
+  eDC_Caustics,           //!< the light the ocean's waves focus on the terrain under it, multiplied in
 };
 
 //! What a shader is.
