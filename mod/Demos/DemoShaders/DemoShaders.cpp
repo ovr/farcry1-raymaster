@@ -30,6 +30,13 @@
 //	                          textures/)
 //	  cubemap = <file>        the cube map, its +x face (default: the first
 //	                          *_posx.dds under textures/)
+//	  light = <r g b>         the light's colour (default: 0.9 0.9 0.9)
+//	  lightpos = <x y z>      the light's position (default: above and left of
+//	                          the camera); the grid is in the plane y = 0
+//	  lightspec = <r g b>     the light's specular colour (default: 0 0 0, as a
+//	                          CDLight is made)
+//	  specular = <r g b>      the materials' specular colour (default: 0.8 0.8 0.8)
+//	  shininess = <n>         the materials' specular power (default: 32)
 //	  exec = <commands>       console commands before the materials are made,
 //	                          separated by ';' or '|'
 //
@@ -100,6 +107,11 @@ public:
     m_Bump = Scene.Has("bump") ? Scene.Get("bump") : Host.FindFirstFileDeep("textures/", "*_ddn.dds");
     m_CubeMap = Scene.Has("cubemap") ? Scene.Get("cubemap") : Host.FindFirstFileDeep("textures/", "*_posx.dds");
     Host.Log("DemoShaders: texture '%s', bump '%s', cube map '%s'", m_Texture.c_str(), m_Bump.c_str(), m_CubeMap.c_str());
+    m_LightColor = ColorOf(Scene, "light", m_LightColor);
+    m_LightPos = Scene.GetFloats("lightpos");
+    m_LightSpecColor = ColorOf(Scene, "lightspec", m_LightSpecColor);
+    m_LightMat.Front.m_Specular = ColorOf(Scene, "specular", CFColor(0.8f, 0.8f, 0.8f, 1));
+    m_LightMat.Front.m_SpecShininess = Scene.GetFloat("shininess", 32);
 
     ICryFont *pCryFont = Host.GetSystem()->GetICryFont();
     m_pFont = pCryFont ? pCryFont->GetFont("Default") : NULL;
@@ -141,9 +153,10 @@ public:
 
     CDLight Light;
     Light.m_Flags = DLF_POINT;
-    Light.m_Origin = vEye + Vec3(-fHalfX * 0.5f, fDist * 0.2f, fHalfZ * 1.5f);
+    Light.m_Origin = m_LightPos.size() >= 3 ? Vec3(m_LightPos[0], m_LightPos[1], m_LightPos[2]) : vEye + Vec3(-fHalfX * 0.5f, fDist * 0.2f, fHalfZ * 1.5f);
     Light.m_fRadius = Light.m_fEndRadius = fDist * 10;
-    Light.m_Color = CFColor(0.9f, 0.9f, 0.9f, 1);
+    Light.m_Color = m_LightColor;
+    Light.m_SpecColor = m_LightSpecColor;
 
     SRendParams Base;
     Base.vAmbientColor = Vec3(0.25f, 0.25f, 0.25f);
@@ -232,8 +245,6 @@ private:
   //! CIndexedMesh__LoadMaterial makes it (MakMatInfoFromMAT_ENTITY.h).
   void MakeMaterial(CDemoHost &Host, SCell &Cell, int nCell)
   {
-    m_LightMat.Front.m_Specular = CFColor(0.8f, 0.8f, 0.8f, 1);
-    m_LightMat.Front.m_SpecShininess = 32;
     SInputShaderResources Res;
     Res.m_LMaterial = &m_LightMat;
     Res.m_Opacity = Cell.fOpacity;
@@ -270,9 +281,19 @@ private:
   IStatObj *m_pObj = NULL;
   IFFont *m_pFont = NULL;
   std::string m_Texture, m_Bump, m_CubeMap;
-  //! The lighting of the materials (white, specular 0.8, shininess 32).
+  CFColor m_LightColor = CFColor(0.9f, 0.9f, 0.9f, 1);
+  CFColor m_LightSpecColor = CFColor(0, 0, 0, 1);
+  std::vector<float> m_LightPos;
+  //! The lighting of the materials (white, specular 0.8 and shininess 32 by default).
   SLightMaterial m_LightMat;
   std::vector<SCell> m_Cells;
+
+  //! The colour "r g b" of szKey, or Default.
+  static CFColor ColorOf(const CSceneFile &Scene, const char *szKey, const CFColor &Default)
+  {
+    const std::vector<float> v = Scene.GetFloats(szKey);
+    return v.size() >= 3 ? CFColor(v[0], v[1], v[2], 1) : Default;
+  }
 };
 
 DEMO_PLUGIN(CDemoShaders)
