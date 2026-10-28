@@ -255,9 +255,14 @@ it as well: it holds local, machine-specific instructions and is not committed (
   `farcry1_testing1/Demos/<demo>.ini`; neither is ever committed. `-Resolution 3840x2160` sets
   `XRENDERTRACED_RESOLUTION`: XRenderD3D9Traced starts the renderer with that size (r_Width and
   r_Height set before `Init`), also when it is larger than the screen; the back buffer and the
-  frames have it, `system.cfg` is not changed. The demo's `--video <file.mp4>` writes every frame
-  of the run into a video through ffmpeg (on PATH), `--until <frame>` makes the run longer than
-  its frames to save.
+  frames have it, `system.cfg` is not changed. `-Quality` (default `veryhigh`) writes the game's
+  quality settings into `system.cfg` for the run: `veryhigh` is the most the Advanced Video
+  Options offer (the very high preset and anisotropic filtering level 8), `high`, `medium` and
+  `low` the other presets (the values of `DemoQuality.cpp`), `keep` leaves `system.cfg` as it is.
+  Demos are run at the maximum quality, with the original renderer and ours alike, and frames
+  are compared only between runs at the same quality. The demo's `--video <file.mp4>` writes
+  every frame of the run into a video through ffmpeg (on PATH), `--until <frame>` makes the run
+  longer than its frames to save.
 - The demos in the main menu: DemoTextures (a texture of the game and the demo's own test
   texture, drawn in 2D in several ways), DemoFonts (the game's fonts), DemoCamera (lines and
   textured cubes in 3D under an orbiting camera), DemoObject (a static object turning), DemoLight
