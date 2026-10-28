@@ -446,7 +446,9 @@ void CD3D12Renderer::DrawLeafItem(const SRenderItem &it)
         Set4(dc.vAddColor, g, g, g, 0);
       }
     }
-    if (eLighting == ELighting::Ambient || eLighting == ELighting::Ambient2 || eLighting == ELighting::None)
+    if (eLighting == ELighting::VColor)
+      dc.nFlags |= DF_VCOLOR;
+    if (eLighting == ELighting::Ambient || eLighting == ELighting::Ambient2 || eLighting == ELighting::None || eLighting == ELighting::VColor)
       return;
     if (!bLightPass && pSh->UsesLightmap() && pObj->m_nLMId > 0 && pObj->m_pLMTCBufferO && m_pTextures && m_pTextures->GetByID(pObj->m_nLMId))
       TexCoord1 = Geometry::GetTexCoordStream(pObj->m_pLMTCBufferO);
@@ -516,6 +518,7 @@ void CD3D12Renderer::DrawLeafItem(const SRenderItem &it)
     case ELighting::Ambient2:
       return CFColor(2 * a.x, 2 * a.y, 2 * a.z, 1);
     case ELighting::None:
+    case ELighting::VColor:
       return CFColor(1, 1, 1, 1);
     default:
       return (dc.nFlags & DF_TEX1_LIGHTMAP) ? CFColor(1, 1, 1, 1) : MatColor;
@@ -582,6 +585,16 @@ void CD3D12Renderer::DrawLeafItem(const SRenderItem &it)
     const CFColor Color = eLighting == ELighting::Ambient ? LitColor() : CFColor(1, 1, 1, 1);
     Set4(dc.vColor, s * Color.r, s * Color.g, s * Color.b, 1);
     Key.nState = GS_BLSRC_ONE | GS_BLDST_ONE;
+    break;
+  }
+  case eDC_Modulate:
+  {
+    // The texture multiplied into the frame (DESTCOLOR, ZERO), no depth writes; an object fading
+    // out (its colour's alpha a below 1) fades the decal towards white: saturate(texture + 1 - a).
+    dc.nFlags2 |= DF2_MODULATE;
+    Set4(dc.vColor, 1, 1, 1, 1);
+    Set4(dc.vAddColor, 0, 0, 0, 1 - std::clamp(pObj->m_Color.a, 0.0f, 1.0f));
+    Key.nState = GS_BLSRC_DSTCOL | GS_BLDST_ZERO;
     break;
   }
   case eDC_Terrain:
@@ -787,7 +800,7 @@ void CD3D12Renderer::DrawLeafItem(const SRenderItem &it)
 void CD3D12Renderer::DumpItem(int nIndex, const SRenderItem &it, int eList)
 {
   static const char *const s_DrawClasses[] = { "NoDraw", "Opaque", "AlphaTest", "AlphaTestVColor", "VColor", "AlphaBlend", "Additive", "Terrain", "Sky", "Engine", "Water", "WaterBottom", "WaterBeach", "TerrainLayer", "Decal",
-                                                "TerrainShadow", "Caustics", "FogLayer", "ScopeLens", "Flare" };
+                                                "TerrainShadow", "Caustics", "FogLayer", "ScopeLens", "Flare", "Modulate" };
   const CCObject *pObj = it.pObj;
   const char *szLB = "";
   if (it.pRE->m_Type == eDATA_OcLeaf && static_cast<CREOcLeaf *>(it.pRE)->m_pBuffer)

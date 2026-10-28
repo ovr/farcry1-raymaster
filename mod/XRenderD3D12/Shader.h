@@ -45,7 +45,7 @@ class CTexture;
 //! How the renderer draws an element with this shader.
 enum EDrawClass
 {
-  eDC_NoDraw = 0,         //!< not drawn (unsupported, decals that need what we do not have, ...)
+  eDC_NoDraw = 0,         //!< not drawn (unsupported, invisible surfaces, ...)
   eDC_Opaque,             //!< diffuse texture, lit (sun + ambient) or lightmapped
   eDC_AlphaTest,          //!< as opaque, alpha test
   eDC_AlphaTestVColor,    //!< vegetation leaves: texture * vertex colour * 2, alpha test
@@ -65,6 +65,7 @@ enum EDrawClass
   eDC_FogLayer,           //!< the cap of a fog volume (its layer), blended with the volume's fog
   eDC_ScopeLens,          //!< the glass of a weapon's scope (r_ScopeLens_fx): the scene seen through it, blended
   eDC_Flare,              //!< a flare (its Flare element; the sun's): drawn by the flare pass (Flares.cpp)
+  eDC_Modulate,           //!< a decal multiplied into the frame (DESTCOLOR, ZERO): the texture, fading to white with the object
 };
 
 //! The corona of a flare shader: the "ClientEffect 'Corona'" block of its script.
@@ -86,6 +87,7 @@ enum class ELighting : uint8
   Ambient,                //!< texture * the object's ambient colour, no lights
   Ambient2,               //!< texture * 2 * the object's ambient colour, no lights
   None,                   //!< the texture alone
+  VColor,                 //!< texture * the vertex colour (white without one), no lights
 };
 
 //! The material's gloss map (EFTT_GLOSS) added, unlit: the glowing parts of the glow templates.

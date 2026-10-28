@@ -64,6 +64,8 @@
 //	      * saturate(R.V)^32, R the light reflected about the normal
 //	    DF2_ADD_TEX4: rgb += tex4 at uv0 * vAddColor.rgb + vAddColor.w (a glow
 //	      map or a texture added, unlit); with DF2_GLASS also a *= tex4 a
+//	    DF2_MODULATE (a decal multiplied into the frame): rgb = saturate(rgb +
+//	      vAddColor.w), a = 1
 //	    DF_CAUSTICS (the terrain under the ocean, multiplied in twice): rgb =
 //	      0.5 + 0.5 * k * (I - 1), I = min of two layers of the caustics texture
 //	      tex0 drifting apart, sampled where the sun's refracted ray crossed
@@ -76,7 +78,7 @@
 //	      nothing below applies
 //	    DF_FOG (with vFogParams.w set): linear fog by the distance to the
 //	      camera, per pixel (towards 0.5 with DF_DETAIL_LAYER, DF_CAUSTICS, 0
-//	      with DF2_FOG_BLACK)
+//	      with DF2_FOG_BLACK, 1 with DF2_MODULATE)
 //	    DF2_HEAT (heat vision): before the fog, the colour through HeatVision
 //	      (Common.hlsli)
 //	  DF2_NO_SUN leaves the sun out of DF_LIGHTING (a light pass of its own).
@@ -343,6 +345,8 @@ float4 PSMain(SVertexOutput In) : SV_Target
     if (HasFlag2(DF2_GLASS))
       vColor.a *= vTex4.a;
   }
+  if (HasFlag2(DF2_MODULATE))
+    vColor = float4(saturate(vColor.rgb + g_Draw.vAddColor.w), 1);
   if (HasFlag(DF_SHADOW_PASS))
     vColor.a = 1 - fSun;
   if (HasFlag(DF_ALPHA_FROM_TEX))
@@ -396,7 +400,7 @@ float4 PSMain(SVertexOutput In) : SV_Target
   if (HasFlag2(DF2_FOG_VOLUME))
     return float4(g_Draw.vColor.rgb, FogVolumeAlpha(In.vWorldPos) * (g_Draw.vParams0.w > 0 ? vColor.a : 1));
 
-  float3 vFogColor = HasFlag2(DF2_FOG_BLACK) ? 0 : g_Frame.vFogColor.rgb;
+  float3 vFogColor = HasFlag2(DF2_FOG_BLACK) ? 0 : HasFlag2(DF2_MODULATE) ? 1 : g_Frame.vFogColor.rgb;
   if (HasFlag(DF_DETAIL_LAYER))
   {
     float fDist = distance(In.vWorldPos, g_Frame.vCameraPos.xyz);

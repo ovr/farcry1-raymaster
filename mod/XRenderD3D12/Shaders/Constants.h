@@ -85,6 +85,7 @@ typedef float float4x4_t[16];
 #define DF2_FOG_VOLUME      0x00000010  //!< the fog of a fog volume over an object in it: rgb = vColor.rgb, a = FogVolumeAlpha (General.hlsl; vParams0: x the layer's height, y ln 100 / (2 * fog distance), z 1 for the volume's cap, w 1: times the alpha after the alpha test)
 #define DF2_HEAT            0x00000020  //!< heat vision: the colour before the fog through HeatVision (Common.hlsli) with vHeat
 #define DF2_SCOPE_LENS      0x00000040  //!< the glass of a scope: the scene copy tex0 around the middle of the screen (ScopeLens, General.hlsl); nothing else applies
+#define DF2_MODULATE        0x00000080  //!< a decal multiplied into the frame (DESTCOLOR, ZERO): rgb = saturate(rgb + vAddColor.w), a = 1, fogged towards white
 
 // SDrawConstants::nFlags of the post program (Post.hlsl): one mode, with POST_EFFECTS the effects drawn
 #define POST_DOWNSAMPLE     0x00000001  //!< the mean of tex0 over the target's pixel: vParams0.z x vParams0.z bilinear taps

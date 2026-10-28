@@ -186,10 +186,12 @@ namespace
       return (1ull << 63) | nKey | (FarFirstBits(it.fDistance) >> 9);
     // In a sort group the caustics come after the terrain and the opaque objects (over what they
     // left of the terrain), the terrain's shadows after them (they replace the shadowed terrain),
-    // the light passes of the objects lit in passes after everything they add to.
+    // the light passes of the objects lit in passes after everything they add to, the decals
+    // multiplied in (they write no depth) after the lit surfaces under them.
     const uint64 nRank = it.eDrawClass == eDC_Caustics           ? 1
                          : it.eDrawClass == eDC_TerrainShadow    ? 2
                          : (it.pObj->m_ObjFlags & FOB_LIGHTPASS) ? 3
+                         : it.eDrawClass == eDC_Modulate         ? 4
                                                                  : 0;
     const uint64 nShader = (uint64)(it.pShader->GetID() & 0xFFFFF);
     const uint64 nRes = it.pRes ? (uint64)(uint32)it.pRes->m_Id : 0;
@@ -200,7 +202,7 @@ namespace
   //! buffer that holds its vertices (the draw classes of this renderer take every format). The
   //! lit draw classes ask for normals as well (P3F_N_TEX2F) when the buffer keeps them outside
   //! its vertices (m_TempNormals of a mesh with vertex colours): such an object is lit per vertex
-  //! like any other, its vertex colours are not used.
+  //! like any other, its vertex colours are not used (but by the templates coloured by them).
   int VertexFormatOf(const SRenderItem &it)
   {
     if (it.pRE->m_Type == eDATA_OcLeaf)
@@ -209,7 +211,8 @@ namespace
       if (pLeaf->m_pBuffer)
       {
         const CLeafBuffer *pVC = pLeaf->m_pBuffer->GetVertexContainer();
-        const bool bLit = it.eDrawClass == eDC_Opaque || it.eDrawClass == eDC_AlphaTest || it.eDrawClass == eDC_AlphaBlend;
+        const bool bLit = (it.eDrawClass == eDC_Opaque || it.eDrawClass == eDC_AlphaTest || it.eDrawClass == eDC_AlphaBlend) &&
+                          it.pShader->GetProps().eLighting != ELighting::VColor;
         if (bLit && pVC->m_TempNormals)
           return VERTEX_FORMAT_P3F_N_TEX2F;
         return pVC->m_nVertexFormat;

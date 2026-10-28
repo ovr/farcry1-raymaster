@@ -81,10 +81,11 @@ constexpr STemplateEntry s_Templates[] =
   // Glass: drawn blended so that what is behind shows (alpha: the opacity).
   { "templglasscm",                    "templglasscm_fp",               eS_Opaque,                kOpaque2,                               0,              eDC_AlphaBlend,       eCULL_Back },
   { "templglasscm_fp",                 "",                              eS_Opaque,                kOpaque2,                               0,              eDC_AlphaBlend,       eCULL_Back },
-  // Not drawn: a light pass of dynamic lights, decals the original draws nothing for.
+  // Not drawn: a light pass of dynamic lights.
   { "templinvlight",                   "",                              eS_Opaque,                EF2_FOGOVERLAY1 | EF2_DONTSORTBYDIST,   0,              eDC_NoDraw,           eCULL_Back },
-  { "templdecalmodulate",              "templdecalmodulate_fp",         eS_Decal,                 EF2_DONTSORTBYDIST,                     0,              eDC_NoDraw,           eCULL_Back },
-  { "templdecalalphablend",            "",                              eS_Decal,                 EF2_DONTSORTBYDIST,                     0,              eDC_NoDraw,           eCULL_Back },
+  // Decals over surfaces, after the opaque ones: multiplied in, blended.
+  { "templdecalmodulate",              "templdecalmodulate_fp",         eS_Decal,                 EF2_DONTSORTBYDIST,                     0,              eDC_Modulate,         eCULL_Back },
+  { "templdecalalphablend",            "",                              eS_Decal,                 EF2_DONTSORTBYDIST,                     0,              eDC_AlphaBlend,       eCULL_Back },
   // Blended (no depth writes).
   { "templalphablend",                 "",                              eS_Banner,                0,                                      0,              eDC_AlphaBlend,       eCULL_Back },
   { "templdecalopacity",               "",                              eS_Banner,                0,                                      0,              eDC_AlphaBlend,       eCULL_Back },
@@ -166,6 +167,8 @@ constexpr STemplateLighting s_TemplateLighting[] =
   { "templdecalopacityshift2",         ELighting::None },
   { "templdecalopacityshift3",         ELighting::None },
   { "templtexturev22rotate",           ELighting::None },
+  // No lights: the texture times the vertex colour.
+  { "templdecalalphablend",            ELighting::VColor },
 };
 
 //! An engine shader (EF_LoadShader by name).
