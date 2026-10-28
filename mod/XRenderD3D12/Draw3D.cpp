@@ -688,17 +688,30 @@ void CD3D12Renderer::DrawLeafItem(const SRenderItem &it)
   }
   case eDC_Terrain:
   {
-    // The sector texture over the sector: u = (y - y0) / 64, v = (x - x0) / 64; the low detail
-    // terrain gets its scale from its custom data (1 / terrain size).
-    float fScale = 1.0f / TERRAIN_SECTOR_SIZE, x0 = 0, y0 = 0;
-    if (nFormat == VERTEX_FORMAT_P3F && pLeaf->m_CustomData && pLeaf->m_nCountCustomData > 0)
-      fScale = ((const float *)pLeaf->m_CustomData)[2];
+    // The sector texture over the sector: u = y * s + u0, v = x * s + v0 from the element's custom
+    // data (u0, v0, s): s = 1 / 64 and the sector's corner with its own texture; the far sectors and
+    // the low detail terrain get the texture of the whole terrain with s = 1 / terrain size and 0.
+    // Without custom data: the corner of the sector's vertices. (m_nCountCustomData is not set for
+    // the sectors.)
+    const float *pCD = (const float *)pLeaf->m_CustomData;
+    float fScale = 1.0f / TERRAIN_SECTOR_SIZE, fU0 = 0, fV0 = 0;
+    if (pCD && pCD[2] > 0)
+    {
+      fU0 = pCD[0];
+      fV0 = pCD[1];
+      fScale = pCD[2];
+    }
     else
+    {
+      float x0 = 0, y0 = 0;
       GetSectorCorner(pLB, x0, y0);
+      fU0 = -y0 * fScale;
+      fV0 = -x0 * fScale;
+    }
     dc.nFlags |= DF_TEXGEN_WORLD;
     dc.nFlags &= ~DF_TEXMATRIX;
-    Set4(dc.vTexGenU, 0, fScale, 0, -y0 * fScale);
-    Set4(dc.vTexGenV, fScale, 0, 0, -x0 * fScale);
+    Set4(dc.vTexGenU, 0, fScale, 0, fU0);
+    Set4(dc.vTexGenV, fScale, 0, 0, fV0);
     Set4(dc.vColor, m_WorldColor[0], m_WorldColor[1], m_WorldColor[2], 1);
     if (pTex)
       dc.nSamplers = (dc.nSamplers == XR_SAMPLER_POINT_WRAP || dc.nSamplers == XR_SAMPLER_POINT_CLAMP) ? XR_SAMPLER_POINT_CLAMP : XR_SAMPLER_LINEAR_CLAMP;
