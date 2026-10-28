@@ -415,9 +415,12 @@ void CD3D12Renderer::DrawLeafItem(const SRenderItem &it)
       TexCoord1 = Geometry::GetTexCoordStream(pObj->m_pLMTCBufferO);
     if (TexCoord1)
     {
+      // The light map is not tinted by the material's colour, only the ambient under it is
+      // (LitColor is white).
       dc.nFlags |= DF_TEX1_LIGHTMAP;
       dc.nTex1 = m_pTextures->GetSRV(pObj->m_nLMId);
       dc.nSamplers |= XR_SAMPLER_LINEAR_CLAMP << 4;
+      Set4(dc.vAmbient, dc.vAmbient[0] * MatColor.r, dc.vAmbient[1] * MatColor.g, dc.vAmbient[2] * MatColor.b, dc.vAmbient[3]);
       // A dot3 light map (bump mapping on): the dominant direction of its light beside it.
       if (pObj->m_nLMDirId > 0 && m_pTextures->GetByID(pObj->m_nLMDirId))
       {
@@ -463,8 +466,9 @@ void CD3D12Renderer::DrawLeafItem(const SRenderItem &it)
       SetupShadowReceiver(dc, pObj);
   };
 
-  //! What the texture is multiplied by besides the light: the material's colour, or for the
-  //! templates without lights the object's ambient colour (twice for Ambient2) or white.
+  //! What the texture is multiplied by besides the light: the material's colour (white under a
+  //! light map), or for the templates without lights the object's ambient colour (twice for
+  //! Ambient2) or white.
   auto LitColor = [&]() -> CFColor
   {
     const Vec3 &a = pObj->m_AmbColor;
@@ -477,7 +481,7 @@ void CD3D12Renderer::DrawLeafItem(const SRenderItem &it)
     case ELighting::None:
       return CFColor(1, 1, 1, 1);
     default:
-      return MatColor;
+      return (dc.nFlags & DF_TEX1_LIGHTMAP) ? CFColor(1, 1, 1, 1) : MatColor;
     }
   };
 

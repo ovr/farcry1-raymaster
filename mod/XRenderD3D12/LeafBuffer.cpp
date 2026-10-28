@@ -726,7 +726,9 @@ D3D12_GPU_VIRTUAL_ADDRESS FrameCopy(const void *pData, uint32 nBytes)
 //! The shader item a material is drawn with: with a material of the object (pIMat), the SDK's
 //! CMatInfo::OverrideShaderItem rule (chunk id 0 or none: the material's own item, n: sub material
 //! n - 1), read from the members (the engine also passes blocks with the CMatInfo layout and no
-//! vtable). Falls back to the chunk's own item.
+//! vtable). Unlike the SDK's inline version, chunks without an id (-1) take the material's own item
+//! too: the engine relies on it (the fog volumes inside buildings, among others). Falls back to the
+//! chunk's own item.
 SShaderItem ResolveShaderItem(const CMatInfo &Chunk, IMatInfo *pIMat)
 {
   SShaderItem si = Chunk.shaderItem;
