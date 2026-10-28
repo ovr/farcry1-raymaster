@@ -144,6 +144,62 @@ uint8 CullOf(ECull eCull, bool bMirrored)
   }
 }
 
+//! The sphere an object's point lights attenuate over: the centre of the leaf buffer's box plus the
+//! object's position, half the box diagonal.
+void GetLightSphere(const Matrix44 &World, CLeafBuffer *pLB, Vec3 &vCenter, float &r)
+{
+  vCenter = Vec3(World.data[12], World.data[13], World.data[14]);
+  r = 0;
+  const CLeafBuffer *pVC = pLB->GetVertexContainer();
+  if (pVC->m_vBoxMin.x <= pVC->m_vBoxMax.x)
+  {
+    vCenter += (pVC->m_vBoxMin + pVC->m_vBoxMax) * 0.5f;
+    r = (pVC->m_vBoxMax - pVC->m_vBoxMin).GetLength() * 0.5f;
+  }
+}
+
+//! Light n of the draw: the point light pLight on the object, lit per vertex with the attenuation
+//! 1 / (a0 + a1 d) up to its range. Characters get (0.01, 5.07756 / R) up to 50.416 R. Static
+//! objects get a line through the falloff f(x) = 2 (1 - 3 v^2 + 2 v^3), v = min(x / (0.9 R), 1),
+//! at the nearest and the farthest point of the object's sphere (GetLightSphere), up to where it
+//! reaches 1/256. Bump mapped draws light per pixel, falling off linearly to the radius.
+void SetPointLight(SDrawConstants &dc, uint32 n, const CDLight *pLight, const CCObject *pObj, const Vec3 &vCenter, float r)
+{
+  const float R = std::max(pLight->m_fRadius, 0.01f);
+  float a0, a1, fRange;
+  if (pObj->m_pCharInstance)
+  {
+    a0 = 0.01f;
+    a1 = 5.07756f / R;
+    fRange = 50.416f * R;
+  }
+  else
+  {
+    auto Falloff = [R](float x)
+    {
+      const float v = std::min(x / (0.9f * R), 1.0f);
+      return 2 * (1 - 3 * v * v + 2 * v * v * v);
+    };
+    const float d = std::max((pLight->m_Origin - vCenter).GetLength(), 0.1f);
+    const float x1 = std::max(d - r, 0.1f * R);
+    const float x2 = std::min(std::max(d + r, 0.1f * R), 0.99f * R);
+    const float g1 = 1 / std::max(Falloff(x1), 0.1f), g2 = 1 / std::max(Falloff(x2), 0.1f);
+    float s = x2 > x1 ? (g2 - g1) / (x2 - x1) : 0.0f;
+    a0 = g1 - s * x1;
+    if (a0 < 0.01f)
+    {
+      a0 = 0.01f;
+      s = (g1 - 0.01f) / x1;
+    }
+    a1 = std::max(s, 0.0f);
+    fRange = a0 > 256 ? 0.0f : (256 - a0) / std::max(a1, 0.01f);
+  }
+  Set4(dc.vLightColor[n], pLight->m_Color.r, pLight->m_Color.g, pLight->m_Color.b, 1);
+  Set4(dc.vLightSpec[n], pLight->m_SpecColor.r, pLight->m_SpecColor.g, pLight->m_SpecColor.b, 1);
+  Set4(dc.vLightPos[n], pLight->m_Origin.x, pLight->m_Origin.y, pLight->m_Origin.z, 1);
+  Set4(dc.vLightAtten[n], a0, a1, fRange, 1 / R);
+}
+
 }
 
 void CD3D12Renderer::BeginScene3D()
@@ -333,6 +389,7 @@ void CD3D12Renderer::DrawLeafItem(const SRenderItem &it)
     dc.nTex0 = pTex->GetSRV();
     dc.nSamplers = pTex->GetSampler();
   }
+  CTexture *const pDiffuse = (dc.nFlags & DF_TEX0) ? pTex : nullptr;
   // The cube map templates: the environment cube map in place of the texture, which is added
   // unlit: whole (TemplReflCMDecal), signed (- 0.5, TemplReflCMDecalAddSig), a tenth of it
   // (TemplGlassCM, 0.098 for TemplGlassCM_FP). The glass sees the cube through itself (the view
@@ -795,6 +852,55 @@ void CD3D12Renderer::DrawLeafItem(const SRenderItem &it)
       dc.nFlags |= DF_FOG;
     Draw();
   }
+
+  // The projected lights of the object's m_DynLMMask (DLF_PROJECT with an image, a cube with the
+  // picture on +X): the object once more for each, where its first pass is (blended objects: by
+  // their alpha, where they are seen): the diffuse texture times the material's colour lit by the
+  // light alone (no ambient, sun or light map) times twice the cube at the point's lookup vector
+  // (the light's m_TextureMatrix), alpha times the cube's, fogged towards black. The light: per
+  // pixel as the object's other lights where bump mapping lights it per pixel (with its normal
+  // map and specular), else per vertex as a point light of its radius, clamped to 1.
+  if (bLightPass || m_bSpritePass || m_bReflectionPass || !HasNormal(nFormat) || (eDC != eDC_Opaque && eDC != eDC_AlphaTest && eDC != eDC_AlphaBlend))
+    return;
+  const std::span<CDLight *const> Lights = m_pScene->GetLights();
+  const bool bBlended = (Key.nState & GS_BLEND_MASK) != 0;
+  const bool bPixel = CV_r_Quality_BumpMapping > 0 && Props.bPixelLighting && eLighting != ELighting::None;
+  const uint32 nKeep = DF_TEXMATRIX | DF_ALPHATEST | DF_ALPHATEST_LESS | (bPixel ? DF_BUMP | DF_SPECULAR : 0);
+  const uint32 nFlags = (dc.nFlags & nKeep) | DF_LIGHTING | (bPixel ? DF_PIXEL_LIGHTING : 0) | (m_bFog ? DF_FOG : 0);
+  Vec3 vCenter;
+  float r;
+  GetLightSphere(World, pLB, vCenter, r);
+  for (size_t i = 0; i < Lights.size() && i < 32; i++)
+  {
+    const CDLight *pLight = Lights[i];
+    if (!pLight || !(pLight->m_Flags & DLF_PROJECT) || !(pObj->m_DynLMMask & (1u << i)))
+      continue;
+    if ((pLight->m_Flags & (DLF_HEATSOURCE | DLF_LIGHTSOURCE)) == DLF_HEATSOURCE)
+      continue;
+    CTexture *pCube = static_cast<CTexture *>(pLight->m_pLightImage);
+    if (!pCube || !pCube->IsCube() || !pCube->IsTextureLoaded())
+      continue;
+    dc.nFlags = nFlags;
+    dc.nFlags2 = DF2_NO_SUN | DF2_PROJECTOR | DF2_FOG_BLACK;
+    if (pDiffuse)
+    {
+      dc.nFlags |= DF_TEX0;
+      dc.nTex0 = pDiffuse->GetSRV();
+      dc.nSamplers = pDiffuse->GetSampler();
+    }
+    Set4(dc.vColor, MatColor.r * pObj->m_Color.r, MatColor.g * pObj->m_Color.g, MatColor.b * pObj->m_Color.b, 1);
+    Set4(dc.vAmbient, 0, 0, 0, 2);
+    SetPointLight(dc, 0, pLight, pObj, vCenter, r);
+    dc.nLights = 1;
+    dc.nTex5 = pCube->GetSRV();
+    memcpy(dc.mParams0, pLight->m_TextureMatrix.data, sizeof(dc.mParams0));
+    Key.nState = bBlended ? GS_BLSRC_SRCALPHA | GS_BLDST_ONE : GS_BLSRC_ONE | GS_BLDST_ONE | GS_DEPTHFUNC_EQUAL;
+    TexCoord1.reset();
+    if (!(dc.nFlags & DF_BUMP))
+      Tangents.reset();
+    pTex = pDiffuse;
+    Draw();
+  }
 }
 
 void CD3D12Renderer::DumpItem(int nIndex, const SRenderItem &it, int eList)
@@ -976,6 +1082,8 @@ void CD3D12Renderer::DumpDraw(const SDrawConstants &dc, const SPipelineKey &Key,
     Flags += (Flags.empty() ? "" : "|") + std::string("ADD_TEX4");
   if (dc.nFlags2 & DF2_GLASS)
     Flags += (Flags.empty() ? "" : "|") + std::string("GLASS");
+  if (dc.nFlags2 & DF2_PROJECTOR)
+    Flags += (Flags.empty() ? "" : "|") + std::string("PROJECTOR");
   fprintf(f, "    draw: fmt %d state 0x%x cull %d bias %d flags %s tex0 '%s' alpharef %.3f col (%.2f %.2f %.2f %.2f) amb (%.2f %.2f %.2f) x%g lights %u",
           Key.nVertexFormat, Key.nState, Key.nCull, Key.bDepthBias, Flags.c_str(), (dc.nFlags & DF_TEX0) && pTex ? pTex->m_Name.c_str() : "",
           dc.fAlphaRef, dc.vColor[0], dc.vColor[1], dc.vColor[2], dc.vColor[3], dc.vAmbient[0], dc.vAmbient[1], dc.vAmbient[2], dc.vAmbient[3], dc.nLights);
@@ -990,20 +1098,11 @@ void CD3D12Renderer::DumpDraw(const SDrawConstants &dc, const SPipelineKey &Key,
 void CD3D12Renderer::SetObjectLights(SDrawConstants &dc, const CCObject *pObj, const Matrix44 &World, CLeafBuffer *pLB)
 {
   // The lights of the object's m_DynLMMask besides the sun (an empty mask: none, and no sun), at most
-  // XR_MAX_DRAW_LIGHTS; projected lights are not among them. Point lights are lit per vertex
-  // with the attenuation 1 / (a0 + a1 d) up to their range. Characters get (0.01, 5.07756 / R)
-  // up to 50.416 R. Static objects get a line through the falloff
-  // f(x) = 2 (1 - 3 v^2 + 2 v^3), v = min(x / (0.9 R), 1), at the nearest and the farthest point
-  // of the object's sphere (the centre of the leaf buffer's box plus the object's position, half
-  // the box diagonal), up to where it reaches 1/256. Directional lights come from their origin.
-  Vec3 vCenter(World.data[12], World.data[13], World.data[14]);
-  float r = 0;
-  const CLeafBuffer *pVC = pLB->GetVertexContainer();
-  if (pVC->m_vBoxMin.x <= pVC->m_vBoxMax.x)
-  {
-    vCenter += (pVC->m_vBoxMin + pVC->m_vBoxMax) * 0.5f;
-    r = (pVC->m_vBoxMax - pVC->m_vBoxMin).GetLength() * 0.5f;
-  }
+  // XR_MAX_DRAW_LIGHTS; projected lights are not among them (their pass is of its own, DrawLeafItem).
+  // Point lights: SetPointLight. Directional lights come from their origin.
+  Vec3 vCenter;
+  float r;
+  GetLightSphere(World, pLB, vCenter, r);
   const std::span<CDLight *const> Lights = m_pScene->GetLights();
   // The sun lights the object only with its bit in the mask: the engine leaves it out where the sun
   // does not reach (the first person weapon in a tunnel).
@@ -1027,51 +1126,19 @@ void CD3D12Renderer::SetObjectLights(SDrawConstants &dc, const CCObject *pObj, c
       continue;
     if ((pObj->m_DynLMMask & (1u << i)) == 0)
       continue;
-    Set4(dc.vLightColor[n], pLight->m_Color.r, pLight->m_Color.g, pLight->m_Color.b, 1);
-    Set4(dc.vLightSpec[n], pLight->m_SpecColor.r, pLight->m_SpecColor.g, pLight->m_SpecColor.b, 1);
     if (pLight->m_Flags & DLF_DIRECTIONAL)
     {
       Vec3 vDir = pLight->m_Origin - vCenter;
       const float fLen = vDir.GetLength();
       vDir = fLen > 0 ? vDir / fLen : Vec3(0, 0, 1);
+      Set4(dc.vLightColor[n], pLight->m_Color.r, pLight->m_Color.g, pLight->m_Color.b, 1);
+      Set4(dc.vLightSpec[n], pLight->m_SpecColor.r, pLight->m_SpecColor.g, pLight->m_SpecColor.b, 1);
       Set4(dc.vLightPos[n], vDir.x, vDir.y, vDir.z, 2);
       Set4(dc.vLightAtten[n], 1, 0, 0, 0);
       n++;
       continue;
     }
-    const float R = std::max(pLight->m_fRadius, 0.01f);
-    float a0, a1, fRange;
-    if (pObj->m_pCharInstance)
-    {
-      a0 = 0.01f;
-      a1 = 5.07756f / R;
-      fRange = 50.416f * R;
-    }
-    else
-    {
-      auto Falloff = [R](float x)
-      {
-        const float v = std::min(x / (0.9f * R), 1.0f);
-        return 2 * (1 - 3 * v * v + 2 * v * v * v);
-      };
-      const float d = std::max((pLight->m_Origin - vCenter).GetLength(), 0.1f);
-      const float x1 = std::max(d - r, 0.1f * R);
-      const float x2 = std::min(std::max(d + r, 0.1f * R), 0.99f * R);
-      const float g1 = 1 / std::max(Falloff(x1), 0.1f), g2 = 1 / std::max(Falloff(x2), 0.1f);
-      float s = x2 > x1 ? (g2 - g1) / (x2 - x1) : 0.0f;
-      a0 = g1 - s * x1;
-      if (a0 < 0.01f)
-      {
-        a0 = 0.01f;
-        s = (g1 - 0.01f) / x1;
-      }
-      a1 = std::max(s, 0.0f);
-      fRange = a0 > 256 ? 0.0f : (256 - a0) / std::max(a1, 0.01f);
-    }
-    // Bump mapped draws light per pixel, falling off linearly to the radius.
-    Set4(dc.vLightPos[n], pLight->m_Origin.x, pLight->m_Origin.y, pLight->m_Origin.z, 1);
-    Set4(dc.vLightAtten[n], a0, a1, fRange, 1 / R);
-    n++;
+    SetPointLight(dc, n++, pLight, pObj, vCenter, r);
   }
   dc.nLights = n;
 }

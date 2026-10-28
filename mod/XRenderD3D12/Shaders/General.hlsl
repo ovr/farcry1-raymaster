@@ -64,6 +64,8 @@
 //	      * saturate(R.V)^32, R the light reflected about the normal
 //	    DF2_ADD_TEX4: rgb += tex4 at uv0 * vAddColor.rgb + vAddColor.w (a glow
 //	      map or a texture added, unlit); with DF2_GLASS also a *= tex4 a
+//	    DF2_PROJECTOR (a projected light's pass): the colour times the cube
+//	      g_Cubes[nTex5] at the lookup vector float4(world pos, 1) * mParams0
 //	    DF2_MODULATE (a decal multiplied into the frame): rgb = saturate(rgb +
 //	      vAddColor.w), a = 1
 //	    DF_CAUSTICS (the terrain under the ocean, multiplied in twice): rgb =
@@ -345,6 +347,8 @@ float4 PSMain(SVertexOutput In) : SV_Target
     if (HasFlag2(DF2_GLASS))
       vColor.a *= vTex4.a;
   }
+  if (HasFlag2(DF2_PROJECTOR))
+    vColor *= SampleCube(g_Draw.nTex5, XR_SAMPLER_LINEAR_CLAMP, mul(float4(In.vWorldPos, 1), g_Draw.mParams0).xyz);
   if (HasFlag2(DF2_MODULATE))
     vColor = float4(saturate(vColor.rgb + g_Draw.vAddColor.w), 1);
   if (HasFlag(DF_SHADOW_PASS))

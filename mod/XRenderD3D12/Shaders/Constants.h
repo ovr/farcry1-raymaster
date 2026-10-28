@@ -86,6 +86,7 @@ typedef float float4x4_t[16];
 #define DF2_HEAT            0x00000020  //!< heat vision: the colour before the fog through HeatVision (Common.hlsli) with vHeat
 #define DF2_SCOPE_LENS      0x00000040  //!< the glass of a scope: the scene copy tex0 around the middle of the screen (ScopeLens, General.hlsl); nothing else applies
 #define DF2_MODULATE        0x00000080  //!< a decal multiplied into the frame (DESTCOLOR, ZERO): rgb = saturate(rgb + vAddColor.w), a = 1, fogged towards white
+#define DF2_PROJECTOR       0x00000100  //!< a projected light's pass: the colour (with the specular) times the cube g_Cubes[nTex5] at float4(world pos, 1) * mParams0 (the light's m_TextureMatrix)
 
 // SDrawConstants::nFlags of the post program (Post.hlsl): one mode, with POST_EFFECTS the effects drawn
 #define POST_DOWNSAMPLE     0x00000001  //!< the mean of tex0 over the target's pixel: vParams0.z x vParams0.z bilinear taps
@@ -153,7 +154,7 @@ struct SDrawConstants
   XR_UINT(nTex5);
   XR_UINT(nTex6);
   XR_UINT(nFlags2);               //!< DF2_*
-  XR_FLOAT4X4(mParams0);          //!< a matrix of the other programs (Water.hlsl)
+  XR_FLOAT4X4(mParams0);          //!< a matrix of the other programs (Water.hlsl) and DF2_PROJECTOR
   XR_FLOAT4X4_ARRAY(mShadow, XR_MAX_DRAW_SHADOWS);  //!< DF_SHADOWS: world to a shadow map: x, y -1..1 across its circle, z depth 0..1 (away from the sun)
   XR_UINT4(nShadowTex);           //!< their depth textures (texture table indices)
   XR_FLOAT4(vShadowParams);       //!< x the number of maps, y depth bias, z filter radius in texels, w offset along the normal (m)
