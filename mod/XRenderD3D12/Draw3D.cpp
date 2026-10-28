@@ -150,17 +150,20 @@ void CD3D12Renderer::BeginScene3D()
   // The sun of the scene as the directional light (black without one); each object can also get
   // lights of its own (SetObjectLights).
   Vec3 vDir(0, 0, 1);
-  CFColor Color(0, 0, 0, 1);
-  if (m_pScene->GetSun())
+  CFColor Color(0, 0, 0, 1), Spec(0, 0, 0, 1);
+  if (const CDLight *pSun = m_pScene->GetSun())
   {
     vDir = m_pScene->GetSunDirection();
     Color = m_pScene->GetSunColor();
+    Spec = pSun->m_SpecColor;
   }
   vDir.Normalize();
   m_SunDir[0] = vDir.x; m_SunDir[1] = vDir.y; m_SunDir[2] = vDir.z;
   m_SunColor[0] = Color.r; m_SunColor[1] = Color.g; m_SunColor[2] = Color.b;
+  m_SunSpec[0] = Spec.r; m_SunSpec[1] = Spec.g; m_SunSpec[2] = Spec.b;
   if (m_pFrameDump)
-    fprintf(m_pFrameDump.get(), "sun: direction (%.3f %.3f %.3f) colour (%.2f %.2f %.2f)\n", vDir.x, vDir.y, vDir.z, Color.r, Color.g, Color.b);
+    fprintf(m_pFrameDump.get(), "sun: direction (%.3f %.3f %.3f) colour (%.2f %.2f %.2f) specular (%.2f %.2f %.2f)\n", vDir.x, vDir.y, vDir.z,
+            Color.r, Color.g, Color.b, Spec.r, Spec.g, Spec.b);
   m_NearestProj = MakeNearestProjection(m_Camera);
   m_nSceneSkyBox = -1;
   InvalidateFrameConstants();
@@ -345,11 +348,22 @@ void CD3D12Renderer::DrawLeafItem(const SRenderItem &it)
     // Bump mapping on (r_Quality_BumpMapping): the materials of the bump, model and light diffuse
     // templates are lit per pixel, with the material's normal map over the leaf buffer's tangent
     // frames when it has one (also for the dot3 light maps). The normal maps' green runs along
-    // the binormal (the direction of growing v).
-    if (CV_r_Quality_BumpMapping > 0 && pSh->GetProps().bPixelLighting && (dc.nFlags & (DF_LIGHTING | DF_LIGHTMAP_DIR)))
+    // the binormal (the direction of growing v). The specular templates add the highlights of the
+    // lights' specular colours, with the material's specular colour (times the texture's alpha
+    // for the gloss alpha ones).
+    const SShaderProps &Props = pSh->GetProps();
+    if (CV_r_Quality_BumpMapping > 0 && Props.bPixelLighting && (dc.nFlags & (DF_LIGHTING | DF_LIGHTMAP_DIR)))
     {
       if (dc.nFlags & DF_LIGHTING)
+      {
         dc.nFlags |= DF_PIXEL_LIGHTING;
+        if (Props.bSpecular && it.pRes && it.pRes->m_LMaterial)
+        {
+          const CFColor &Spec = it.pRes->m_LMaterial->Front.m_Specular;
+          dc.nFlags |= DF_SPECULAR;
+          Set4(dc.vSpecular, Spec.r, Spec.g, Spec.b, Props.bGlossAlpha ? 1.0f : 0.0f);
+        }
+      }
       CTexture *pBump = GetNormalMap(it.pRes);
       if (pBump && (Tangents = Geometry::GetTangentStream(pLB)))
       {
@@ -606,9 +620,10 @@ void CD3D12Renderer::DumpItem(int nIndex, const SRenderItem &it, int eList)
   if (it.pRE->m_Type == eDATA_OcLeaf && static_cast<CREOcLeaf *>(it.pRE)->m_pBuffer)
     szLB = static_cast<CREOcLeaf *>(it.pRE)->m_pBuffer->m_sSource;
   const CTexture *pTex = GetDiffuseTexture(it.pRes);
-  fprintf(m_pFrameDump.get(), "[%d] list %d sort 0x%x %s RE %d shader '%s' tex '%s' lb '%s' pos (%.2f %.2f %.2f) flags 0x%x LM %d (dir %d occl %d HDR %d) LMTC %d mask 0x%x amb (%.2f %.2f %.2f) col (%.2f %.2f %.2f %.2f) res aref %.3f opacity %.2f flags 0x%x casters %d\n",
+  fprintf(m_pFrameDump.get(), "[%d] list %d sort 0x%x %s RE %d shader '%s' templ '%s' tex '%s' lb '%s' pos (%.2f %.2f %.2f) flags 0x%x LM %d (dir %d occl %d HDR %d) LMTC %d mask 0x%x amb (%.2f %.2f %.2f) col (%.2f %.2f %.2f %.2f) res aref %.3f opacity %.2f flags 0x%x casters %d\n",
           nIndex, eList, it.nSort, (unsigned)it.eDrawClass < std::size(s_DrawClasses) ? s_DrawClasses[it.eDrawClass] : "?", it.pRE->m_Type,
-          it.pShader ? it.pShader->GetName() : "", pTex ? pTex->m_Name.c_str() : "", szLB ? szLB : "",
+          it.pShader ? it.pShader->GetName() : "", it.pShader ? it.pShader->GetProps().Template.c_str() : "", pTex ? pTex->m_Name.c_str() : "",
+          szLB ? szLB : "",
           pObj->m_Matrix.data[12], pObj->m_Matrix.data[13], pObj->m_Matrix.data[14], pObj->m_ObjFlags, pObj->m_nLMId,
           pObj->m_nLMDirId, pObj->m_nOcclId, pObj->m_nHDRLMId, pObj->m_pLMTCBufferO ? 1 : 0, pObj->m_DynLMMask, pObj->m_AmbColor.x, pObj->m_AmbColor.y, pObj->m_AmbColor.z,
           pObj->m_Color.r, pObj->m_Color.g, pObj->m_Color.b, pObj->m_Color.a, it.pRes ? it.pRes->m_AlphaRef : 0.0f,
@@ -753,7 +768,7 @@ void CD3D12Renderer::DumpDraw(const SDrawConstants &dc, const SPipelineKey &Key,
   static const char *const s_Flags[] = { "TEX0", "TEX1", "VCOLOR", "VCOLOR_X2", "LIGHTING", "ALPHATEST", "TEXGEN_WORLD", "TEXMATRIX", "FOG",
                                          "TEX1_DETAIL", "TEX1_LIGHTMAP", "ALPHA_FROM_TEX", "CUBE0", "TEX0_ALPHA_ONLY", "SCREEN_POS", "ALPHATEST_LESS", "TEXGEN1_WORLD",
                                          "ALPHA_ONE", "TEX0_ARRAY", "DETAIL_LAYER", "TERRAIN_CLIFF", "DETAIL_BUMP", "DECAL_FADE", "SHADOWS",
-                                         "SHADOW_PASS", "SHADOW_DEBUG", "LIGHTMAP_DIR", "VALPHA_ONLY", "CAUSTICS", "BUMP", "PIXEL_LIGHTING" };
+                                         "SHADOW_PASS", "SHADOW_DEBUG", "LIGHTMAP_DIR", "VALPHA_ONLY", "CAUSTICS", "BUMP", "PIXEL_LIGHTING", "SPECULAR" };
   std::string Flags;
   for (size_t i = 0; i < std::size(s_Flags); i++)
     if (dc.nFlags & (1u << i))
@@ -800,6 +815,7 @@ void CD3D12Renderer::SetObjectLights(SDrawConstants &dc, const CCObject *pObj, c
     if ((pObj->m_DynLMMask & (1u << i)) == 0)
       continue;
     Set4(dc.vLightColor[n], pLight->m_Color.r, pLight->m_Color.g, pLight->m_Color.b, 1);
+    Set4(dc.vLightSpec[n], pLight->m_SpecColor.r, pLight->m_SpecColor.g, pLight->m_SpecColor.b, 1);
     if (pLight->m_Flags & DLF_DIRECTIONAL)
     {
       Vec3 vDir = pLight->m_Origin - vCenter;

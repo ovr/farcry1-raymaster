@@ -94,6 +94,7 @@ void CD3D12Renderer::MakeFrameConstants(SFrameConstants &fc) const
     fLen = 1;
   Set4(fc.vSunDir, m_SunDir[0] / fLen, m_SunDir[1] / fLen, m_SunDir[2] / fLen, 0);
   Set4(fc.vSunColor, m_SunColor[0], m_SunColor[1], m_SunColor[2], 1);
+  Set4(fc.vSunSpec, m_SunSpec[0], m_SunSpec[1], m_SunSpec[2], 1);
   Set4(fc.vFogColor, m_FogColor[0], m_FogColor[1], m_FogColor[2], 1);
   const float fRange = m_fFogEnd - m_fFogStart;
   Set4(fc.vFogParams, m_fFogStart, m_fFogEnd, fRange > 0 ? 1.0f / fRange : 0.0f, m_bFog ? 1.0f : 0.0f);

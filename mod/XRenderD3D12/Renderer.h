@@ -330,6 +330,7 @@ public:
   D3D12_GPU_VIRTUAL_ADDRESS m_nFrameCB = 0; //!< b0, 0 when it has to be made again
   float m_SunDir[3] = { 0, 0, 1 };          //!< towards the sun, world space (frame constants)
   float m_SunColor[3] = { 1, 1, 1 };
+  float m_SunSpec[3] = { 0, 0, 0 };          //!< the sun's specular colour
 
   //////////////////////////////////////////////////////////////////////////
   // Renderer2D.cpp helpers

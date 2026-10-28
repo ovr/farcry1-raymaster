@@ -597,9 +597,12 @@ CShader *CShaderManager::LoadMaterial(const char *szName, const char *szTemplate
   SShaderProps Props = pTempl->GetProps();
   Props.nFlags = EF_COMPILEDLAYERS | EF_NEEDNORMALS | EF_NOTFOUND;
   // The templates with vertex and pixel shaders when bump mapping is on (their names stay then).
-  const std::string Templ = Lower(szTemplate);
+  Props.Template = Lower(szTemplate);
+  const std::string &Templ = Props.Template;
   Props.bPixelLighting = Templ.starts_with("templbump") || Templ.starts_with("templmodel") || Templ.starts_with("templlightdiffuse") ||
     Templ == "templglasscm";
+  Props.bSpecular = Props.bPixelLighting && Templ.find("spec") != std::string::npos;
+  Props.bGlossAlpha = Props.bSpecular && Templ.find("glossalpha") != std::string::npos;
   // Their bump mapping needs tangent frames: the tangent stream of a character is filled for the
   // materials that report EF_NEEDTANGENTS.
   if (Props.bPixelLighting && g_pRenderer && g_pRenderer->CV_r_Quality_BumpMapping > 0)

@@ -74,6 +74,7 @@ typedef float float4x4_t[16];
 #define DF_LIGHTMAP_DIR     0x04000000  //!< with DF_TEX1_LIGHTMAP, a dot3 light map: the light map times saturate(D.z) * D.a, D = tex2 at uv1 (rgb * 2 - 1: the light's dominant direction in the surface's tangent space, a: its strength)
 #define DF_DETAIL_LAYER     0x00080000  //!< rgb = lerp(0.5, tex0, colour a * saturate((vParams0.y - d) * vParams0.z)), a = 1, fogged towards 0.5 (d: distance to the camera)
 #define DF_PIXEL_LIGHTING   0x40000000  //!< with DF_LIGHTING: lit per pixel (each light's colour clamped to 1, point lights falling off as saturate(1 - d * vLightAtten.w)), with the vertex normal or N' (DF_BUMP)
+#define DF_SPECULAR         0x80000000  //!< with DF_PIXEL_LIGHTING: + 2 * vSpecular.rgb * gloss * sum of the lights' specular colour (clamped to 1) * falloff * saturate(R.V)^32, R the light reflected about N', where N'.L > 0
 #define DF_BUMP             0x20000000  //!< bump mapping: N' = the normal map tex3 at uv0 (rgb * 2 - 1, its green times vParams1.y) in the vertex's tangent frame (TANGENT, BINORMAL, TNORMAL) for DF_PIXEL_LIGHTING; DF_LIGHTMAP_DIR takes saturate(dot(N', D)) for D.z
 
 #define XR_SAMPLER_LINEAR_WRAP  0
@@ -95,6 +96,7 @@ struct SFrameConstants
   XR_FLOAT4(vTime);               //!< x ITimer::GetCurrTime()
   XR_FLOAT4(vWorldColor);         //!< EF_SetWorldColor
   XR_FLOAT4(vDepthParams);        //!< the projection's m22 (x) and m32 (y): distance along the view axis = y / (depth + x)
+  XR_FLOAT4(vSunSpec);            //!< rgb: the sun's specular colour (DF_SPECULAR)
 };
 
 //! b1: per draw.
@@ -133,6 +135,8 @@ struct SDrawConstants
   XR_FLOAT4X4_ARRAY(mShadow, XR_MAX_DRAW_SHADOWS);  //!< DF_SHADOWS: world to a shadow map: x, y -1..1 across its circle, z depth 0..1 (away from the sun)
   XR_UINT4(nShadowTex);           //!< their depth textures (texture table indices)
   XR_FLOAT4(vShadowParams);       //!< x the number of maps, y depth bias, z filter radius in texels, w offset along the normal (m)
+  XR_FLOAT4_ARRAY(vLightSpec, XR_MAX_DRAW_LIGHTS);  //!< DF_SPECULAR: rgb the light's specular colour
+  XR_FLOAT4(vSpecular);           //!< DF_SPECULAR: rgb the material's specular colour, w 1: times the texture's alpha (gloss)
 };
 
 #endif

@@ -88,6 +88,9 @@ struct SShaderProps
   bool bStealth = false;                          //!< colour scaled by the object's "refraction" (GetColorScale)
   bool bPixelLighting = false;                    //!< a material of a bump, model, light diffuse or glass template: with bump
                                                   //!< mapping on it is lit per pixel, with its normal map when it has one
+  bool bSpecular = false;                         //!< with bPixelLighting: a specular template (TemplBumpSpec*, TemplModelBumpSpec*)
+  bool bGlossAlpha = false;                       //!< with bSpecular: the specular is times the texture's alpha (*GlossAlpha)
+  std::string Template;                           //!< materials: the template the material names (lower case)
 };
 
 //! A shader of this renderer (an engine shader, a template or a material; see above).

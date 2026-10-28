@@ -54,6 +54,10 @@
 //	      vertex normal or, with DF_BUMP (bump mapping), N' = the normal map
 //	      (tex3 at uv0, its y times vParams1.y) in the vertex's tangent frame;
 //	      the dot3 light map takes N'.D for D.z
+//	    DF_SPECULAR (with DF_PIXEL_LIGHTING): rgb += 2 * vSpecular.rgb * gloss
+//	      (texture alpha if vSpecular.w, else 1) * the sum over the sun (times
+//	      v) and the lights of their specular colour (clamped to 1) * falloff
+//	      * saturate(R.V)^32, R the light reflected about the normal
 //	    DF_CAUSTICS (the terrain under the ocean, multiplied in twice): rgb =
 //	      0.5 + 0.5 * k * (I - 1), I = min of two layers of the caustics texture
 //	      tex0 drifting apart, sampled where the sun's refracted ray crossed
@@ -89,11 +93,24 @@ struct SVertexOutput
 //! attenuation, with the sun; vNoSunLight the same without it. Per vertex a point light attenuates
 //! by 1 / (a0 + a1 d) up to its range; per pixel (bPerPixel, DF_BUMP) by saturate(1 - d / radius),
 //! and each light's colour is clamped to 1.
-float3 DrawLighting(float3 vPos, float3 vN, bool bPerPixel, out float3 vNoSunLight)
+//! The specular power of a light: saturate(R.V)^32, R = L reflected about N, 0 where N.L <= 0.
+float Specular(float3 vN, float3 vToLight, float3 vToEye)
+{
+  float fNL = dot(vN, vToLight);
+  float fRV = saturate(dot(2 * fNL * vN - vToLight, vToEye));
+  float f2 = fRV * fRV, f4 = f2 * f2, f8 = f4 * f4, f16 = f8 * f8;
+  return fNL > 0 ? f16 * f16 : 0;
+}
+
+float3 DrawLighting(float3 vPos, float3 vN, bool bPerPixel, out float3 vNoSunLight, out float3 vSunSpec, out float3 vOtherSpec)
 {
   float3 vLight = 0.5 * g_Draw.vAmbient.rgb + g_Frame.vSunColor.rgb * saturate(dot(vN, g_Frame.vSunDir.xyz));
   float3 vNoSun = 0.5 * g_Draw.vAmbient.rgb;
   float3 vOthers = 0;
+  bool bSpecular = bPerPixel && HasFlag(DF_SPECULAR);
+  float3 vToEye = SafeNormalize(g_Frame.vCameraPos.xyz - vPos);
+  vSunSpec = bSpecular ? saturate(g_Frame.vSunSpec.rgb) * Specular(vN, g_Frame.vSunDir.xyz, vToEye) : 0;
+  vOtherSpec = 0;
   for (uint i = 0; i < min(g_Draw.nLights, XR_MAX_DRAW_LIGHTS); i++)
   {
     float4 vLightPos = g_Draw.vLightPos[i];
@@ -114,6 +131,8 @@ float3 DrawLighting(float3 vPos, float3 vN, bool bPerPixel, out float3 vNoSunLig
     if (bPerPixel)
       vColor = saturate(vColor);
     float3 vThis = vColor * saturate(dot(vN, vToLight)) * fAtten;
+    if (bSpecular)
+      vOtherSpec += saturate(g_Draw.vLightSpec[i].rgb) * (fAtten * Specular(vN, vToLight, vToEye));
     if (i == 0)
     {
       vLight += vThis;
@@ -157,8 +176,8 @@ SVertexOutput VSMain(SVertexInput In)
   float4 vColorNoSun = vColor;
   if (HasFlag(DF_LIGHTING) && !HasFlag(DF_PIXEL_LIGHTING))
   {
-    float3 vNoSunLight;
-    vColor.rgb *= DrawLighting(vWorldPos, SafeNormalize(vNormal), false, vNoSunLight);
+    float3 vNoSunLight, vSunSpec, vOtherSpec;
+    vColor.rgb *= DrawLighting(vWorldPos, SafeNormalize(vNormal), false, vNoSunLight, vSunSpec, vOtherSpec);
     vColorNoSun.rgb *= vNoSunLight;
   }
 
@@ -223,12 +242,15 @@ float4 PSMain(SVertexOutput In) : SV_Target
 
   float fSun = HasFlag(DF_SHADOWS) ? SunVisibility(In.vWorldPos, In.vNormal, In.vPos.xy) : 1;
   float4 vVertexColor = In.vColor;
+  float3 vSpecular = 0;
   if (HasFlag(DF_LIGHTING) && HasFlag(DF_PIXEL_LIGHTING))
   {
-    float3 vNoSunLight;
+    float3 vNoSunLight, vSunSpec, vOtherSpec;
     float3 vN = HasFlag(DF_BUMP) ? vBumpN : SafeNormalize(In.vNormal);
-    float3 vLight = DrawLighting(In.vWorldPos, vN, true, vNoSunLight);
+    float3 vLight = DrawLighting(In.vWorldPos, vN, true, vNoSunLight, vSunSpec, vOtherSpec);
     vVertexColor.rgb *= lerp(vNoSunLight, vLight, fSun);
+    if (HasFlag(DF_SPECULAR))
+      vSpecular = 2 * g_Draw.vSpecular.rgb * (g_Draw.vSpecular.w > 0 ? vTex.a : 1) * (fSun * vSunSpec + vOtherSpec);
   }
   else if (HasFlag(DF_SHADOWS) && HasFlag(DF_LIGHTING))
     vVertexColor.rgb = lerp(In.vColorNoSun.rgb, In.vColor.rgb, fSun);
@@ -238,6 +260,7 @@ float4 PSMain(SVertexOutput In) : SV_Target
     vColor = float4(vVertexColor.rgb, vVertexColor.a * vTex.a);
   else
     vColor = vVertexColor * vTex;
+  vColor.rgb += vSpecular;
   if (HasFlag(DF_SHADOW_PASS))
     vColor.a = 1 - fSun;
   if (HasFlag(DF_ALPHA_FROM_TEX))
