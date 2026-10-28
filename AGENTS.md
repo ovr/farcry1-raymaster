@@ -307,9 +307,9 @@ it as well: it holds local, machine-specific instructions and is not committed (
   `farcry1_testing1/XRenderD3D12_frame.txt` (never committed): the camera (position, angles,
   field of view, near and far plane, view and projection matrices), then for each item its list, sort
   group, draw class, shader, diffuse texture, leaf buffer, object (position, flags, light map,
-  light mask, ambient and colour) and resources (alpha reference, opacity, flags), and for each
-  draw what it got (vertex format, states, shader flags, textures, colour, lights), and each draw
-  of particle sprites (a run of sprites with the same texture and blending: their count, texture,
+  light mask, ambient and colour) and resources (alpha reference, opacity, flags, the names of the
+  other texture slots, `*` when loaded), and for each draw what it got (vertex format, states,
+  shader flags, textures, colour, lights), and each draw of particle sprites (a run of sprites with the same texture and blending: their count, texture,
   state, sort, the first one's ambient colour, a vertex colour's bytes); for a terrain sector, its
   custom texture binds and custom data. With
   `XRENDERTRACED_EXEC_LEVEL="d3d12_DumpFrame 1"` and `XRENDERTRACED_EXEC_LEVEL_FRAME=<n - 1>` it
@@ -329,7 +329,9 @@ it as well: it holds local, machine-specific instructions and is not committed (
   took.
 - The terrain's detail layers near the camera (very high: `e_detail_texture_quality 1`) are drawn
   while `r_DetailTextures` is 1 and fade out between `r_DetailDistance` and twice that distance
-  (16 and 32 m in the very high preset); the layers with a material of their own (bump mapped
-  cliffs) are not drawn yet. With the layers on, the sectors (shader "terrain") get no detail
-  texture, only their cliff texture where the engine marks cliffs; without them (shader
-  "terrainwithdefaultdetailtexture") the detail texture everywhere.
+  (16 and 32 m in the very high preset); a layer with a material of its own (the cliffs, projected
+  on a vertical plane) is drawn with the material's diffuse texture, bump mapped with its normal
+  map, and fades out linearly to the distance in its custom data (156 m). With the layers on, the
+  sectors (shader "terrain") get no detail texture, only their cliff texture where the engine
+  marks cliffs; without them (shader "terrainwithdefaultdetailtexture") the detail texture
+  everywhere.

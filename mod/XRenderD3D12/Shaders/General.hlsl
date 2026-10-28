@@ -34,7 +34,11 @@
 //	    DF_ALPHATEST: discard when a < fAlphaRef (DF_ALPHATEST_LESS: when a >= fAlphaRef);
 //	      then DF_ALPHA_ONE: a = 1
 //	    DF_DETAIL_LAYER (a terrain detail layer, multiplied in twice): rgb =
-//	      lerp(0.5, tex0, a * the fade by the distance), a = 1
+//	      lerp(0.5, tex0, a * the fade by the distance), a = 1; DF_DETAIL_BUMP
+//	      (bump mapped layer) first scales tex0 by 1 + (sun N'.L - sun N.L) /
+//	      (vParams1.x + saturate(N.L)), clamped to 0..2: N the vertex normal, N'
+//	      the normal map (tex1 at uv0) in its frame (tangent along vTexGenU made
+//	      orthogonal to N, binormal along vTexGenV, the map's y times vParams1.y)
 //	    DF_FOG (with vFogParams.w set): linear fog by the distance to the
 //	      camera, per pixel (towards 0.5 with DF_DETAIL_LAYER)
 //
@@ -196,7 +200,21 @@ float4 PSMain(SVertexOutput In) : SV_Target
   {
     float fDist = distance(In.vWorldPos, g_Frame.vCameraPos.xyz);
     float fWeight = vColor.a * saturate((g_Draw.vParams0.y - fDist) * g_Draw.vParams0.z);
-    vColor = float4(lerp(0.5, vTex.rgb, fWeight), 1);
+    float3 vDetail = vTex.rgb;
+    if (HasFlag(DF_DETAIL_BUMP))
+    {
+      float3 vN = SafeNormalize(In.vNormal);
+      float3 vT = SafeNormalize(g_Draw.vTexGenU.xyz - vN * dot(g_Draw.vTexGenU.xyz, vN));
+      float3 vB = cross(vN, vT);
+      if (dot(vB, g_Draw.vTexGenV.xyz) < 0)
+        vB = -vB;
+      float3 vMap = SampleTexture(g_Draw.nTex1, nSampler1, In.vTex0).rgb * 2 - 1;
+      float3 vBump = SafeNormalize(vMap.x * vT + vMap.y * g_Draw.vParams1.y * vB + vMap.z * vN);
+      float3 vL = g_Frame.vSunDir.xyz;
+      float fN = dot(vN, vL);
+      vDetail *= clamp(1 + (dot(vBump, vL) - fN) / (g_Draw.vParams1.x + saturate(fN)), 0, 2);
+    }
+    vColor = float4(lerp(0.5, vDetail, fWeight), 1);
     vFogColor = 0.5;
   }
 

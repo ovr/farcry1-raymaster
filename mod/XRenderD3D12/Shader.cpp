@@ -98,12 +98,13 @@ constexpr STemplateEntry s_Templates[] =
   { "templhologram",                   "templhologram_fp",              eS_Banner,                0,                                      0,              eDC_Additive,         eCULL_None },
   { "templmuzzleflash_auto",           "templmuzzleflash_auto_fp",      eS_MuzzleFlash,           0,                                      0,              eDC_Additive,         eCULL_Back },
   { "mutantstealth",                   "mutantstealth_fp",              eS_Banner,                0,                                      0,              eDC_Additive,         eCULL_Back, 0.0f,         0.0f,     false, false, true },
+  // The terrain layers with a material of their own (bump mapped cliffs).
+  { "terrainlayer",                    "terrainlayer(",                 eS_TerrainDetailTextures, EF2_FOGOVERLAY1 | EF2_DONTSORTBYDIST,   0,              eDC_TerrainLayer,     eCULL_Back },
   // Flares: no draw for the objects.
   { "flareproc",                       "",                              eS_Banner,                0,                                      0,              eDC_NoDraw,           eCULL_Back },
-  // Not drawn: invisible surfaces, the terrain layers' material, heat haze, scopes.
+  // Not drawn: invisible surfaces, heat haze, scopes.
   { "nodraw",                          "",                              eS_Opaque,                kOpaque2,                               EF3_NODRAW,     eDC_NoDraw,           eCULL_Back },
   { "no_draw",                         "nodraw",                        eS_Opaque,                kOpaque2,                               EF3_NODRAW,     eDC_NoDraw,           eCULL_Back },
-  { "terrainlayer",                    "terrainlayer(",                 eS_TerrainDetailTextures, EF2_FOGOVERLAY1 | EF2_DONTSORTBYDIST,   0,              eDC_NoDraw,           eCULL_Back },
   { "particleminheathaze",             "",                              eS_HeatVision,            0,                                      0,              eDC_NoDraw,           eCULL_None },
   { "particlemedheathaze",             "",                              eS_HeatVision,            0,                                      0,              eDC_NoDraw,           eCULL_None },
   { "particlemaxheathaze",             "",                              eS_HeatVision,            0,                                      0,              eDC_NoDraw,           eCULL_None },

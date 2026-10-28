@@ -422,11 +422,27 @@ void CD3D12Renderer::DrawLeafItem(const SRenderItem &it)
     // layer's weight in the vertex alpha): the layer's texture coordinates from the world position
     // with the element's custom data (u row in floats 0..2, v row in 4..6, the layer's own scale;
     // u = y / 4, v = x / 4 without it), the weight faded out between r_DetailDistance and twice
-    // that, multiplied in twice (DESTCOLOR, SRCCOLOR); no depth writes. (Layers with a material
-    // of their own, bump mapped, have the template "terrainlayer" and are not drawn yet.)
-    if (!pTex || pRes || !CV_r_DetailTextures)
+    // that, multiplied in twice (DESTCOLOR, SRCCOLOR); no depth writes. A layer with a material of
+    // its own (the template "terrainlayer": the cliffs, projected on a vertical plane, one element
+    // for each plane) is the material's diffuse texture, bump mapped with its normal map
+    // (EFTT_NORMALMAP, else EFTT_BUMP): the sun's light on the bumps relative to its light on the
+    // terrain's own normal, which the terrain's texture already has; its weight fades out linearly
+    // to the distance in float 3 of its custom data (156 m).
+    if (!pTex || !CV_r_DetailTextures)
       return;
-    const float fStart = std::max(CV_r_DetailDistance, 0.01f), fEnd = 2 * fStart;
+    CTexture *pBump = nullptr;
+    if (it.pRes && m_pShaders)
+    {
+      pBump = m_pShaders->LoadResourceTexture(it.pRes, EFTT_NORMALMAP);
+      if (!pBump)
+        pBump = m_pShaders->LoadResourceTexture(it.pRes, EFTT_BUMP);
+    }
+    float fStart = std::max(CV_r_DetailDistance, 0.01f), fEnd = 2 * fStart;
+    if (it.pRes && pLeaf->m_CustomData && ((const float *)pLeaf->m_CustomData)[3] > 0)
+    {
+      fStart = 0;
+      fEnd = ((const float *)pLeaf->m_CustomData)[3];
+    }
     dc.nFlags = (dc.nFlags & ~DF_TEXMATRIX) | DF_TEX0 | DF_TEXGEN_WORLD | DF_VCOLOR | DF_DETAIL_LAYER;
     if (const float *pCustom = (const float *)pLeaf->m_CustomData)
     {
@@ -440,6 +456,14 @@ void CD3D12Renderer::DrawLeafItem(const SRenderItem &it)
     }
     Set4(dc.vParams0, fStart, fEnd, 1.0f / (fEnd - fStart), 0);
     dc.nSamplers = XR_SAMPLER_LINEAR_WRAP;
+    if (pBump && !pBump->IsCube())
+    {
+      // Ambient 0.3; the normal maps' green runs against the v row.
+      dc.nFlags |= DF_DETAIL_BUMP;
+      dc.nTex1 = pBump->GetSRV();
+      dc.nSamplers |= XR_SAMPLER_LINEAR_WRAP << 4;
+      Set4(dc.vParams1, 0.3f, -1, 0, 0);
+    }
     Key.nState = GS_BLSRC_DSTCOL | GS_BLDST_SRCCOL;
     break;
   }
@@ -487,7 +511,7 @@ void CD3D12Renderer::DrawLeafItem(const SRenderItem &it)
 
 void CD3D12Renderer::DumpItem(int nIndex, const SRenderItem &it, int eList)
 {
-  static const char *const s_DrawClasses[] = { "NoDraw", "Opaque", "AlphaTest", "AlphaTestVColor", "VColor", "AlphaBlend", "Additive", "Terrain", "Sky", "Engine", "Water", "WaterBottom", "WaterBeach" };
+  static const char *const s_DrawClasses[] = { "NoDraw", "Opaque", "AlphaTest", "AlphaTestVColor", "VColor", "AlphaBlend", "Additive", "Terrain", "Sky", "Engine", "Water", "WaterBottom", "WaterBeach", "TerrainLayer" };
   const CCObject *pObj = it.pObj;
   const char *szLB = "";
   if (it.pRE->m_Type == eDATA_OcLeaf && static_cast<CREOcLeaf *>(it.pRE)->m_pBuffer)
@@ -533,6 +557,23 @@ void CD3D12Renderer::DumpItem(int nIndex, const SRenderItem &it, int eList)
         fprintf(m_pFrameDump.get(), " %g", ((const float *)pLeaf->m_CustomData)[i]);
     }
     fprintf(m_pFrameDump.get(), "\n");
+  }
+
+  // The material's other texture slots by name, '*' when loaded.
+  if (it.pRes)
+  {
+    std::string Slots;
+    for (int i = 0; i < EFTT_MAX; i++)
+    {
+      const SEfResTexture *pT = it.pRes->m_Textures[i];
+      if (i == EFTT_DIFFUSE || !pT || pT->m_Name.empty())
+        continue;
+      char sz[300];
+      snprintf(sz, sizeof(sz), " %d '%s'%s", i, pT->m_Name.c_str(), pT->m_TU.m_ITexPic ? "*" : "");
+      Slots += sz;
+    }
+    if (!Slots.empty())
+      fprintf(m_pFrameDump.get(), "    texture slots:%s\n", Slots.c_str());
   }
 
   // Terrain sectors: the element's custom texture binds and the texture coordinates in its custom
