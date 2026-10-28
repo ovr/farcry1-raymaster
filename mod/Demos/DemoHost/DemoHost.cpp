@@ -309,6 +309,8 @@ struct SDemoArgs
   int nWait = 3000;
   int nUntil = 0;
   int nFps = 0;
+  int nExecAt = 0;
+  std::string ExecAt;
   bool bTrace = false;
   bool bHold = false;
 };
@@ -367,6 +369,11 @@ static bool ParseArgs(const char *szCmdLine, SDemoArgs &Args)
       Args.nUntil = atoi(List[++i].c_str());
     else if (Arg == "--fps" && bValue)
       Args.nFps = atoi(List[++i].c_str());
+    else if (Arg == "--exec-at" && i + 2 < List.size())
+    {
+      Args.nExecAt = atoi(List[++i].c_str());
+      Args.ExecAt = List[++i];
+    }
     else
     {
       HostLog("unknown argument '%s'", Arg.c_str());
@@ -434,6 +441,8 @@ public:
     int nDemoFrame = DemoFrame(nFrame);
     if (nDemoFrame < 1)
       return;
+    if (nDemoFrame == m_Args.nExecAt)
+      m_Host.ExecList(m_Args.ExecAt);
     ISystem *pSystem = m_Host.m_pSystem;
     CCamera Cam = pSystem->GetViewCamera();
     if (m_Demo.GetCamera(m_Host, nDemoFrame, Cam))
