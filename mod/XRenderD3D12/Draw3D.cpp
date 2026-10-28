@@ -467,6 +467,32 @@ void CD3D12Renderer::DrawLeafItem(const SRenderItem &it)
     Key.nState = GS_BLSRC_DSTCOL | GS_BLDST_SRCCOL;
     break;
   }
+  case eDC_Decal:
+  {
+    // A decal on a static object (a "BigDecal" buffer: the indices of the owner's triangles it
+    // covers, over the owner's vertices, with the owner's matrix): the texture the buffer was
+    // given, its coordinates from the position in the owner's object space with the u and v
+    // planes in floats 0..3 and 4..7 of the element's custom data, clamped to the edge; colour
+    // and alpha as the texture has them, the alpha fading out from the centre to the circle
+    // inside the square (0.5 at half the radius), blended over the owner where alpha > 0, both
+    // sides, no depth writes. The planes go to world space for the texgen.
+    const float *pCustom = (const float *)pLeaf->m_CustomData;
+    if (!pTex || !pCustom)
+      return;
+    const Matrix44 Inv = GetInverted44(World);
+    float *pRows[2] = { dc.vTexGenU, dc.vTexGenV };
+    for (int r = 0; r < 2; r++)
+      for (int i = 0; i < 4; i++)
+        pRows[r][i] = Inv(i, 0) * pCustom[r * 4] + Inv(i, 1) * pCustom[r * 4 + 1] + Inv(i, 2) * pCustom[r * 4 + 2] + Inv(i, 3) * pCustom[r * 4 + 3];
+    dc.nFlags = (dc.nFlags & ~DF_TEXMATRIX) | DF_TEXGEN_WORLD | DF_DECAL_FADE | DF_ALPHATEST;
+    dc.fAlphaRef = 1.0f / 255.0f;
+    dc.nSamplers = XR_SAMPLER_LINEAR_CLAMP;
+    Set4(dc.vColor, 1, 1, 1, 1);
+    Key.nState = GS_BLSRC_SRCALPHA | GS_BLDST_ONEMINUSSRCALPHA;
+    Key.nCull = R_CULL_NONE;
+    Key.bDepthBias = 1;
+    break;
+  }
   case eDC_Water:
     // Not in its own reflection.
     if (m_bReflectionPass || !SetupWaterDraw(Key, dc, it))
@@ -511,7 +537,7 @@ void CD3D12Renderer::DrawLeafItem(const SRenderItem &it)
 
 void CD3D12Renderer::DumpItem(int nIndex, const SRenderItem &it, int eList)
 {
-  static const char *const s_DrawClasses[] = { "NoDraw", "Opaque", "AlphaTest", "AlphaTestVColor", "VColor", "AlphaBlend", "Additive", "Terrain", "Sky", "Engine", "Water", "WaterBottom", "WaterBeach", "TerrainLayer" };
+  static const char *const s_DrawClasses[] = { "NoDraw", "Opaque", "AlphaTest", "AlphaTestVColor", "VColor", "AlphaBlend", "Additive", "Terrain", "Sky", "Engine", "Water", "WaterBottom", "WaterBeach", "TerrainLayer", "Decal" };
   const CCObject *pObj = it.pObj;
   const char *szLB = "";
   if (it.pRE->m_Type == eDATA_OcLeaf && static_cast<CREOcLeaf *>(it.pRE)->m_pBuffer)

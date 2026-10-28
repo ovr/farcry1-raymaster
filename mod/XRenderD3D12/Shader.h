@@ -59,6 +59,7 @@ enum EDrawClass
   eDC_WaterBottom,        //!< the ocean floor ring beyond the terrain
   eDC_WaterBeach,         //!< surf along the shores
   eDC_TerrainLayer,       //!< a detail layer of the terrain near the camera, multiplied in twice
+  eDC_Decal,              //!< a decal on a static object: over its owner's vertices, blended
 };
 
 //! What a shader is.

@@ -31,6 +31,8 @@
 //	    DF_TERRAIN_CLIFF (terrain with cliffs): rgb = 2 * rgb * lerp(1, 2 * tex2,
 //	      w.x) * lerp(1, 2 * tex3, w.y), w = vertex colour rg * vTexGen1V.xy, uv
 //	      of tex2 from the world position with vParams0 / 1, of tex3 with 2 / 3
+//	    DF_DECAL_FADE (decals): a *= 1 - f(r), r = 2 * |uv0 - 0.5| (1 on the circle
+//	      inside the decal's square), f(r) = (r + smoothstep(0, 1, r)) / 2
 //	    DF_ALPHATEST: discard when a < fAlphaRef (DF_ALPHATEST_LESS: when a >= fAlphaRef);
 //	      then DF_ALPHA_ONE: a = 1
 //	    DF_DETAIL_LAYER (a terrain detail layer, multiplied in twice): rgb =
@@ -183,6 +185,12 @@ float4 PSMain(SVertexOutput In) : SV_Target
       vColor.rgb *= lerp(1, 2 * SampleTexture(g_Draw.nTex2, XR_SAMPLER_LINEAR_WRAP, float2(dot(vPos, g_Draw.vParams0), dot(vPos, g_Draw.vParams1))).rgb, vW.x);
     if (vW.y > 0)
       vColor.rgb *= lerp(1, 2 * SampleTexture(g_Draw.nTex3, XR_SAMPLER_LINEAR_WRAP, float2(dot(vPos, g_Draw.vParams2), dot(vPos, g_Draw.vParams3))).rgb, vW.y);
+  }
+
+  if (HasFlag(DF_DECAL_FADE))
+  {
+    float r = saturate(2 * length(In.vTex0 - 0.5));
+    vColor.a *= 1 - 0.5 * (r + smoothstep(0, 1, r));
   }
 
   if (HasFlag(DF_ALPHATEST))

@@ -167,8 +167,8 @@ constexpr SEngineEntry s_EngineShaders[] =
   { "crylight",                        "",                     eS_Nearest,               0,             0,                   0,                eDC_NoDraw },
   { "foglayer",                        "",                     eS_FogShader,             EF_FOGSHADER,  0,                   0,                eDC_NoDraw },
   // Decals with an owner (only added with r_Quality_BumpMapping above 0): one shader for both.
-  { "decal_vp",                        "decal_fp",             eS_Banner,                0,             EF2_DONTSORTBYDIST,  LMF_DISABLE,      eDC_NoDraw },
-  { "decal_2d_vp",                     "decal_fp",             eS_Banner,                0,             EF2_DONTSORTBYDIST,  LMF_DISABLE,      eDC_NoDraw },
+  { "decal_vp",                        "decal_fp",             eS_Banner,                0,             EF2_DONTSORTBYDIST,  LMF_DISABLE,      eDC_Decal },
+  { "decal_2d_vp",                     "decal_fp",             eS_Banner,                0,             EF2_DONTSORTBYDIST,  LMF_DISABLE,      eDC_Decal },
   // Terrain.
   { "terrain",                         "",                     eS_Terrain,               0,             kOpaque2,            LMF_BUMPMATERIAL, eDC_Terrain },
   { "terrainwithfog",                  "",                     eS_Terrain,               0,             kOpaque2,            LMF_BUMPMATERIAL, eDC_Terrain },
