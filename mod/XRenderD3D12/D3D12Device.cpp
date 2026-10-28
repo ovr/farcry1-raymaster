@@ -163,6 +163,29 @@ bool CD3D12Device::Init(HWND hWnd, int nWidth, int nHeight, bool bDebug)
     return false;
   m_hFenceEvent = CreateEventA(nullptr, FALSE, FALSE, nullptr);
 
+  // GPU timing: a timestamp query heap and its readback buffer (none: no timing).
+  uint64 nFrequency = 0;
+  D3D12_QUERY_HEAP_DESC QueryDesc = {};
+  QueryDesc.Type = D3D12_QUERY_HEAP_TYPE_TIMESTAMP;
+  QueryDesc.Count = D3D12_FRAMES * GPU_MARKS;
+  if (SUCCEEDED(m_pQueue->GetTimestampFrequency(&nFrequency)) && nFrequency &&
+      SUCCEEDED(m_pDevice->CreateQueryHeap(&QueryDesc, IID_PPV_ARGS(&m_pTimestamps))))
+  {
+    D3D12_HEAP_PROPERTIES Heap = {};
+    Heap.Type = D3D12_HEAP_TYPE_READBACK;
+    D3D12_RESOURCE_DESC Desc = {};
+    Desc.Dimension = D3D12_RESOURCE_DIMENSION_BUFFER;
+    Desc.Width = sizeof(uint64) * D3D12_FRAMES * GPU_MARKS;
+    Desc.Height = 1;
+    Desc.DepthOrArraySize = 1;
+    Desc.MipLevels = 1;
+    Desc.SampleDesc.Count = 1;
+    Desc.Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
+    if (FAILED(m_pDevice->CreateCommittedResource(&Heap, D3D12_HEAP_FLAG_NONE, &Desc, D3D12_RESOURCE_STATE_COPY_DEST, nullptr,
+                                                  IID_PPV_ARGS(&m_pTimestampReadback))))
+      m_pTimestamps.Reset();
+    m_fTimestampMs = 1000.0 / (double)nFrequency;
+  }
   return CreateSwapChainBuffers();
 }
 
@@ -215,6 +238,8 @@ void CD3D12Device::Shutdown()
   m_pCmdList.Reset();
   for (auto &p : m_pAllocators)
     p.Reset();
+  m_pTimestamps.Reset();
+  m_pTimestampReadback.Reset();
   m_pFence.Reset();
   if (m_hFenceEvent)
   {
@@ -449,12 +474,14 @@ void CD3D12Device::BeginFrame()
   if (m_bInFrame || !m_pDevice)
     return;
   WaitForFence(m_nFrameFence[m_nFrameSlot]);
+  ReadGpuTimes();
   CollectGarbage();
   if (g_pRenderer->m_pUpload)
     g_pRenderer->m_pUpload->BeginFrame(m_nFrameSlot);
   m_nBackBuffer = m_pSwapChain->GetCurrentBackBufferIndex();
   m_bInFrame = true;
   OpenCmdList();
+  GpuSection("other");
   Barrier(m_pCmdList.Get(), GetBackBuffer(), D3D12_RESOURCE_STATE_PRESENT, D3D12_RESOURCE_STATE_RENDER_TARGET);
   if (g_pRenderer->m_pDescriptors && g_pRenderer->m_pPipeline)
   {
@@ -471,6 +498,15 @@ void CD3D12Device::EndFrame(bool bPresent, bool bVSync)
   if (!m_bInFrame)
     return;
   EndOffscreen();
+  // The timestamp that ends the frame's last section; all of them to the readback buffer.
+  if (const int n = m_nGpuMarks[m_nFrameSlot]; n > 0)
+  {
+    const uint32 nFirst = m_nFrameSlot * GPU_MARKS;
+    m_pCmdList->EndQuery(m_pTimestamps.Get(), D3D12_QUERY_TYPE_TIMESTAMP, nFirst + n);
+    m_GpuSections[m_nFrameSlot][n] = nullptr;
+    m_nGpuMarks[m_nFrameSlot] = n + 1;
+    m_pCmdList->ResolveQueryData(m_pTimestamps.Get(), D3D12_QUERY_TYPE_TIMESTAMP, nFirst, n + 1, m_pTimestampReadback.Get(), sizeof(uint64) * nFirst);
+  }
   Barrier(m_pCmdList.Get(), GetBackBuffer(), D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_PRESENT);
   m_pCmdList->Close();
   if (g_pRenderer->m_pUpload)
@@ -513,6 +549,42 @@ void CD3D12Device::FlushFrame()
     m_pCmdList->SetGraphicsRootDescriptorTable(2, g_pRenderer->m_pDescriptors->GetTableStart());
   }
   SetBackBufferTargets();
+}
+
+void CD3D12Device::GpuSection(const char *szSection)
+{
+  int &n = m_nGpuMarks[m_nFrameSlot];
+  if (!m_bInFrame || !m_bGpuTiming || !m_pTimestamps || n >= GPU_MARKS - 1 || (n > 0 && m_GpuSections[m_nFrameSlot][n - 1] == szSection))
+    return;
+  m_pCmdList->EndQuery(m_pTimestamps.Get(), D3D12_QUERY_TYPE_TIMESTAMP, m_nFrameSlot * GPU_MARKS + n);
+  m_GpuSections[m_nFrameSlot][n++] = szSection;
+}
+
+void CD3D12Device::ReadGpuTimes()
+{
+  const int n = m_nGpuMarks[m_nFrameSlot];
+  m_nGpuMarks[m_nFrameSlot] = 0;
+  if (n < 2)
+    return;
+  const size_t nFirst = (size_t)m_nFrameSlot * GPU_MARKS;
+  const D3D12_RANGE Range = { sizeof(uint64) * nFirst, sizeof(uint64) * (nFirst + n) };
+  const uint64 *pTicks = nullptr;
+  if (FAILED(m_pTimestampReadback->Map(0, &Range, (void **)&pTicks)))
+    return;
+  pTicks += nFirst;
+  for (int i = 0; i + 1 < n; i++)
+  {
+    const char *szSection = m_GpuSections[m_nFrameSlot][i];
+    const double fMs = pTicks[i + 1] > pTicks[i] ? (double)(pTicks[i + 1] - pTicks[i]) * m_fTimestampMs : 0.0;
+    auto It = std::find_if(m_GpuTimes.begin(), m_GpuTimes.end(), [szSection](const auto &e) { return strcmp(e.first, szSection) == 0; });
+    if (It == m_GpuTimes.end())
+      m_GpuTimes.emplace_back(szSection, fMs);
+    else
+      It->second += fMs;
+  }
+  const D3D12_RANGE Written = {};
+  m_pTimestampReadback->Unmap(0, &Written);
+  m_nGpuTimedFrames++;
 }
 
 void CD3D12Device::ClearColor(const float rgba[4])

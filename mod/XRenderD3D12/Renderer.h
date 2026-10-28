@@ -290,6 +290,11 @@ public:
   bool EnsureFrame();
   //! The engine's r_Width / r_Height changed: new window and back buffer size (checked in Update).
   void CheckResolutionChange();
+  //! d3d12_GpuTimes: from here on the GPU time counts for szSection (static storage), in the main
+  //! view only (a nested scene counts for the section that renders it).
+  void GpuSection(const char *szSection);
+  //! d3d12_GpuTimes: after each frame; every so many frames the averages to the log.
+  void ReportGpuTimes();
   //! The projection of the main view from the camera.
   static Matrix44 MakeProjection(const CCamera &cam);
 
@@ -379,6 +384,7 @@ public:
     void operator()(FILE *f) const { fclose(f); }
   };
   std::unique_ptr<FILE, SFileClose> m_pFrameDump; //!< open for the frame being dumped (d3d12_DumpFrame)
+  std::unique_ptr<FILE, SFileClose> m_pGpuTimes;  //!< XRenderD3D12_gpu.txt, open while d3d12_GpuTimes is on
 
   int m_nSceneFlags = 0;                    //!< SHDF_* of the EF_EndEf3D being drawn
   CTexture *m_pDetailTexture = nullptr;     //!< GetDetailTexture (one reference)
@@ -544,6 +550,9 @@ public:
   bool m_bVSync = false;
   int m_nFrameID = 65535;             //!< GetFrameID, from 65535; the engine keeps a pointer to it (EFQ_Pointer2FrameID)
   int m_nFrames = 0;                  //!< frames ended by Update
+  int64 m_nLastFrameTicks = 0;        //!< ReportGpuTimes: when the last frame ended (0: timing off)
+  double m_fFrameMs = 0;              //!< ReportGpuTimes: the time between frames added up
+  int m_nTimedFrames = 0;
   int m_nRecurseLevel = 1;            //!< EFQ_RecurseLevel: 1 for the main view
   int m_nDeviceLost = 0;              //!< EFQ_DeviceLost
   int m_nPolygonMode = R_SOLID_MODE;
@@ -604,6 +613,7 @@ public:
   int CV_d3d12_DumpFrame = 0;         //!< non-zero: the next frame's 3D draws go to XRenderD3D12_frame.txt, then 0
   int CV_d3d12_WaterDebug = 0;        //!< non-zero: the water shows one term of its colour (Water.hlsl)
   int CV_d3d12_Caustics = 1;          //!< 0: no caustics under the ocean
+  int CV_d3d12_GpuTimes = 0;          //!< N: the GPU time of the frame's sections to the log every N frames
   float CV_d3d12_WaterReflectionScale = 0.5f;   //!< size of the water reflection, a fraction of the screen's
   int CV_d3d12_WaterReflectionFlags = DLD_TERRAIN | DLD_TERRAIN_FULLRES;   //!< what the water reflects (EDrawLowDetailFlags)
   int CV_d3d12_SpriteRes = 128;             //!< size of the far vegetation sprites' textures (made at the level load)

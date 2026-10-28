@@ -121,7 +121,28 @@ public:
   //! The debug layer's messages to the engine's log.
   void LogDebugMessages();
 
+  //! GPU timing (d3d12_GpuTimes): while on, the GPU time of each frame is split into sections,
+  //! each from its GpuSection call to the next one or the end of the frame (the first one of a
+  //! frame is "other"). A frame's times are read when the GPU has finished it (BeginFrame of its
+  //! slot) and add up in GetGpuTimes.
+  void SetGpuTiming(bool bOn) { m_bGpuTiming = bOn; }
+  //! From here on the GPU time counts for szSection (a string with static storage).
+  void GpuSection(const char *szSection);
+  //! The sections' GPU milliseconds added up over GetGpuTimedFrames() frames, in the order they
+  //! first came; ResetGpuTimes starts again.
+  const std::vector<std::pair<const char *, double>> &GetGpuTimes() const { return m_GpuTimes; }
+  int GetGpuTimedFrames() const { return m_nGpuTimedFrames; }
+  void ResetGpuTimes()
+  {
+    m_GpuTimes.clear();
+    m_nGpuTimedFrames = 0;
+  }
+
 private:
+  static constexpr int GPU_MARKS = 64;              //!< timestamps per frame (the last one ends the frame)
+  //! Adds the timestamps of the current slot's last frame (finished) to m_GpuTimes.
+  void ReadGpuTimes();
+
   bool CreateSwapChainBuffers();
   void ReleaseSwapChainBuffers();
   //! Resets the slot's allocator and the list and binds the heap, root signature and targets.
@@ -160,6 +181,15 @@ private:
   int m_nWidth = 0, m_nHeight = 0;
   int m_nFrameSlot = 0;
   bool m_bInFrame = false;
+
+  ComPtr<ID3D12QueryHeap> m_pTimestamps;            //!< GPU_MARKS per frame slot; NULL: no GPU timing
+  ComPtr<ID3D12Resource> m_pTimestampReadback;      //!< the resolved timestamps, in the same places
+  double m_fTimestampMs = 0;                        //!< milliseconds per tick
+  bool m_bGpuTiming = false;
+  const char *m_GpuSections[D3D12_FRAMES][GPU_MARKS] = {};   //!< the section each timestamp starts
+  int m_nGpuMarks[D3D12_FRAMES] = {};
+  std::vector<std::pair<const char *, double>> m_GpuTimes;
+  int m_nGpuTimedFrames = 0;
 
   struct SDeferred
   {

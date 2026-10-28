@@ -183,6 +183,7 @@ void CD3D12Renderer::DrawItems(SRenderItem *pItems, int nItems, int eList)
   bool bSprites = eList != eRL_Blended;
   if (eList == eRL_Blended)
     m_bSceneCopied = false;
+  GpuSection(eList == eRL_Opaque ? "opaque" : eList == eRL_Nearest ? "nearest" : "water");
   if (m_pFrameDump)
     fprintf(m_pFrameDump.get(), "list %d: %d items, recursion %d, scene flags 0x%x\n", eList, nItems, m_nRecurseLevel, m_nSceneFlags);
   for (int i = 0; i < nItems; i++)
@@ -192,6 +193,7 @@ void CD3D12Renderer::DrawItems(SRenderItem *pItems, int nItems, int eList)
       continue;
     if (!bSprites && it.eDrawClass != eDC_Water && it.eDrawClass != eDC_WaterBeach)
     {
+      GpuSection("blended");
       DrawSprites();
       bSprites = true;
     }
@@ -216,7 +218,10 @@ void CD3D12Renderer::DrawItems(SRenderItem *pItems, int nItems, int eList)
     }
   }
   if (!bSprites)
+  {
+    GpuSection("blended");
     DrawSprites();
+  }
   m_bItemScissor = false;
   m_fDepthMin = 0;
   m_fDepthMax = 1;

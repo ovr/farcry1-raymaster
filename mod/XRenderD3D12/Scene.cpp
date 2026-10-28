@@ -435,8 +435,11 @@ void CScene::EndEf3D(int nFlags)
     UpdateScreenFx();
     // The scenes this one shows (the pictures of new far vegetation sprites, the shadow maps, the
     // water reflection), rendered from here, nested in this one.
+    g_pRenderer->GpuSection("sprites");
     g_pRenderer->BakeSprites();
+    g_pRenderer->GpuSection("shadow maps");
     g_pRenderer->UpdateShadowMaps();
+    g_pRenderer->GpuSection("water reflection");
     g_pRenderer->UpdateWaterReflection(s.Items);
   }
 
@@ -448,7 +451,10 @@ void CScene::EndEf3D(int nFlags)
     g_pRenderer->DrawItems(list.data(), (int)list.size(), l);
   }
   if (m_nDrawing == 1)
+  {
     g_pRenderer->DrawShadowMapDebug();
+    g_pRenderer->GpuSection("other");
+  }
 
   m_nDrawing--;
   s.ClearItems();
