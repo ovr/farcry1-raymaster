@@ -209,7 +209,6 @@ constexpr SFloatVar s_FloatVars[] =
   { "r_CoronaColorScale", 1.0f, 0 },
   { "r_CoronaFade", 0.125f, VF_DUMPTODISK },
   { "r_CoronaSizeScale", 1.0f, VF_DUMPTODISK },
-  { "r_DetailDistance", 4.0f, VF_DUMPTODISK },
   { "r_DofBlurAmount", 1.0f, 0 },
   { "r_DofFocalArea", 5.0f, 0 },
   { "r_DofFocalAreaCurr", 5.0f, 0 },

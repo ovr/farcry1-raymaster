@@ -545,8 +545,9 @@ public:
   int CV_r_TexResolution = 0;         //!< mip levels dropped from loaded textures
   int CV_r_TexBumpResolution = 0;     //!< the same for bump maps
   int CV_r_TexSkyResolution = 0;
-  int CV_r_DetailTextures = 1;        //!< the terrain's detail layers (not drawn)
+  int CV_r_DetailTextures = 1;        //!< 0: the terrain's detail layers are not drawn
   float CV_r_DetailScale = 8;         //!< metres per repeat of the detail texture
+  float CV_r_DetailDistance = 4;      //!< the terrain's detail layers fade out from here to twice this far
   int CV_d3d12_debug = 0;             //!< debug layer (also XRENDERD3D12_DEBUG=1); only read at Init
   int CV_d3d12_DumpFrame = 0;         //!< non-zero: the next frame's 3D draws go to XRenderD3D12_frame.txt, then 0
   int CV_d3d12_WaterDebug = 0;        //!< non-zero: the water shows one term of its colour (Water.hlsl)

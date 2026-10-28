@@ -175,7 +175,7 @@ constexpr SEngineEntry s_EngineShaders[] =
   { "terrainlowlod",                   "",                     eS_Terrain,               0,             kOpaque2,            LMF_BUMPMATERIAL, eDC_Terrain },
   { "terraindetaillayers",             "",                     eS_TerrainDetailTextures, 0,             kTerrainLayer2,      0,                eDC_NoDraw },
   { "terraindetailtexturelayers",      "",                     eS_TerrainDetailTextures, 0,             kTerrainLayer2,      0,                eDC_NoDraw },
-  { "terrainlayer",                    "",                     eS_TerrainDetailTextures, 0,             kTerrainLayer2,      0,                eDC_NoDraw },
+  { "terrainlayer",                    "",                     eS_TerrainDetailTextures, 0,             kTerrainLayer2,      0,                eDC_TerrainLayer },
   { "terrainlightpass",                "",                     eS_TerrainLightPass,      0,             EF2_DONTSORTBYDIST,  0,                eDC_NoDraw },
   { "terrainshadowpass",               "",                     eS_TerrainShadowPass,     0,             EF2_DONTSORTBYDIST,  0,                eDC_NoDraw },
   { "terraindetailobjects",            "",                     eS_TerrainDetailObjects,  0,             0,                   0,                eDC_AlphaTestVColor },

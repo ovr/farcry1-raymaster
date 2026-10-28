@@ -377,6 +377,29 @@ void CD3D12Renderer::DrawLeafItem(const SRenderItem &it)
     Set4(dc.vColor, m_WorldColor[0], m_WorldColor[1], m_WorldColor[2], 1);
     if (pTex)
       dc.nSamplers = (dc.nSamplers == XR_SAMPLER_POINT_WRAP || dc.nSamplers == XR_SAMPLER_POINT_CLAMP) ? XR_SAMPLER_POINT_CLAMP : XR_SAMPLER_LINEAR_CLAMP;
+    // With the shader "terrain" (the terrain's detail layers on) a sector gets no detail texture
+    // but its cliff texture where the cliffs are: the engine puts it into the element's custom
+    // texture binds 1 and 2, projected on two planes, with the texture coordinates of each in the
+    // custom data after the sector's (u then v, 4 floats each, w unused), and marks the cliff
+    // vertices of bind 1 with red, those of bind 2 with green in the vertex colour. Colour =
+    // 2 * sector * world colour * lerp(1, 2 * cliff, weight) for each.
+    if (nFormat != VERTEX_FORMAT_P3F && it.pShader && !strcmp(it.pShader->GetName(), "terrain"))
+    {
+      dc.nFlags |= DF_TERRAIN_CLIFF;
+      const float *pCustom = (const float *)pLeaf->m_CustomData;
+      float *pTexGen[4] = { dc.vParams0, dc.vParams1, dc.vParams2, dc.vParams3 };
+      for (int i = 0; i < 2; i++)
+      {
+        CTexture *pCliff = pCustom && pLeaf->m_CustomTexBind[1 + i] > 0 && m_pTextures ? m_pTextures->GetByID(pLeaf->m_CustomTexBind[1 + i]) : nullptr;
+        if (!pCliff)
+          continue;
+        dc.vTexGen1V[i] = 1;
+        (i ? dc.nTex3 : dc.nTex2) = pCliff->GetSRV();
+        for (int k = 0; k < 2; k++)
+          Set4(pTexGen[i * 2 + k], pCustom[4 + i * 8 + k * 4], pCustom[5 + i * 8 + k * 4], pCustom[6 + i * 8 + k * 4], 0);
+      }
+      break;
+    }
     // The sectors also get the detail texture, repeated every r_DetailScale metres:
     // u = y / scale, v = x / scale, colour = 2 * sector * world colour + detail - 0.5.
     CTexture *pDetail = nFormat != VERTEX_FORMAT_P3F ? GetDetailTexture() : nullptr;
@@ -389,6 +412,24 @@ void CD3D12Renderer::DrawLeafItem(const SRenderItem &it)
       Set4(dc.vTexGen1U, 0, fDetail, 0, 0);
       Set4(dc.vTexGen1V, fDetail, 0, 0, 0);
     }
+    break;
+  }
+  case eDC_TerrainLayer:
+  {
+    // A detail layer of the terrain near the camera (world positions, the terrain normal, the
+    // layer's weight in the vertex alpha): the layer's texture u = y / 4, v = x / 4, the weight
+    // faded out between r_DetailDistance and twice that, multiplied in twice (DESTCOLOR,
+    // SRCCOLOR); no depth writes. (Layers with a material of their own, bump mapped, have the
+    // template "terrainlayer" and are not drawn yet.)
+    if (!pTex || pRes || !CV_r_DetailTextures)
+      return;
+    const float fStart = std::max(CV_r_DetailDistance, 0.01f), fEnd = 2 * fStart;
+    dc.nFlags = (dc.nFlags & ~DF_TEXMATRIX) | DF_TEX0 | DF_TEXGEN_WORLD | DF_VCOLOR | DF_DETAIL_LAYER;
+    Set4(dc.vTexGenU, 0, 0.25f, 0, 0);
+    Set4(dc.vTexGenV, 0.25f, 0, 0, 0);
+    Set4(dc.vParams0, fStart, fEnd, 1.0f / (fEnd - fStart), 0);
+    dc.nSamplers = XR_SAMPLER_LINEAR_WRAP;
+    Key.nState = GS_BLSRC_DSTCOL | GS_BLDST_SRCCOL;
     break;
   }
   case eDC_Water:
@@ -483,6 +524,27 @@ void CD3D12Renderer::DumpItem(int nIndex, const SRenderItem &it, int eList)
     fprintf(m_pFrameDump.get(), "\n");
   }
 
+  // Terrain sectors: the element's custom texture binds and the texture coordinates in its custom
+  // data (the sector's, then those of the cliff textures in binds 1 and 2).
+  if (pLeaf && it.eDrawClass == eDC_Terrain && szLB && !strcmp(szLB, "TerrainSector"))
+  {
+    FILE *f = m_pFrameDump.get();
+    fprintf(f, "    texture binds");
+    for (int b : pLeaf->m_CustomTexBind)
+    {
+      const CTexture *pB = b > 0 && m_pTextures ? m_pTextures->GetByID(b) : nullptr;
+      fprintf(f, " %d '%s'", b, pB ? pB->m_Name.c_str() : "");
+    }
+    if (const float *pCustom = (const float *)pLeaf->m_CustomData)
+    {
+      fprintf(f, ", custom data");
+      const int nBinds = pLeaf->m_CustomTexBind[2] > 0 ? 2 : pLeaf->m_CustomTexBind[1] > 0 ? 1 : 0;
+      for (int i = 0; i < 4 + 8 * nBinds; i++)
+        fprintf(f, " %g", pCustom[i]);
+    }
+    fprintf(f, "\n");
+  }
+
   // Water elements: the object's matrix and the first vertices, word by word (float and hex).
   if (pLeaf && pLeaf->m_pBuffer && (it.eDrawClass == eDC_Water || it.eDrawClass == eDC_WaterBottom || it.eDrawClass == eDC_WaterBeach))
   {
@@ -516,7 +578,7 @@ void CD3D12Renderer::DumpDraw(const SDrawConstants &dc, const SPipelineKey &Key,
 {
   static const char *const s_Flags[] = { "TEX0", "TEX1", "VCOLOR", "VCOLOR_X2", "LIGHTING", "ALPHATEST", "TEXGEN_WORLD", "TEXMATRIX", "FOG",
                                          "TEX1_DETAIL", "TEX1_LIGHTMAP", "ALPHA_FROM_TEX", "CUBE0", "TEX0_ALPHA_ONLY", "SCREEN_POS", "ALPHATEST_LESS", "TEXGEN1_WORLD",
-                                         "ALPHA_ONE", "TEX0_ARRAY" };
+                                         "ALPHA_ONE", "TEX0_ARRAY", "DETAIL_LAYER", "TERRAIN_CLIFF" };
   std::string Flags;
   for (size_t i = 0; i < std::size(s_Flags); i++)
     if (dc.nFlags & (1u << i))
@@ -731,41 +793,72 @@ void CD3D12Renderer::DrawSprites()
     return;
   const std::span<const SColorVert> Verts = m_pScene->GetSpriteVerts();
   const std::span<const ushort> Inds = m_pScene->GetSpriteIndices();
-  std::vector<struct_VERTEX_FORMAT_P3F_COL4UB_TEX2F> Converted;
+  std::vector<struct_VERTEX_FORMAT_P3F_COL4UB_TEX2F> BatchVerts;
+  std::vector<ushort> BatchInds;
+  const Matrix44 ViewProj = m_CameraView * m_ProjMatrix;
   m_fDepthMin = 0;
   m_fDepthMax = 1;
   m_bItemScissor = false;
-  for (const SSceneSprite &Sprite : Sprites)
+  // One draw per run of sprites with the same texture and blending (each sprite has an object of
+  // its own; the ambient colour goes into the vertices).
+  auto SameDraw = [](const CCObject *a, const CCObject *b)
+  { return a && b && a->m_NumCM == b->m_NumCM && (a->m_RenderState & GS_BLEND_MASK) == (b->m_RenderState & GS_BLEND_MASK); };
+  for (size_t nRun = 0; nRun < Sprites.size();)
   {
-    if (!Sprite.pObj || Sprite.nVerts <= 0 || Sprite.nIndices <= 0 ||
-        Sprite.nFirstVert + Sprite.nVerts > (int)Verts.size() || Sprite.nFirstIndex + Sprite.nIndices > (int)Inds.size())
-      continue;
-    // The engine's colours are bytes R, G, B, A; the vertex format's B, G, R, A.
-    const Vec3 &Amb = Sprite.pObj->m_AmbColor;
-    const int nAmb[3] = { (int)(std::clamp(Amb.z, 0.0f, 1.0f) * 255 + 0.5f), (int)(std::clamp(Amb.y, 0.0f, 1.0f) * 255 + 0.5f),
-                          (int)(std::clamp(Amb.x, 0.0f, 1.0f) * 255 + 0.5f) };
-    Converted.resize(Sprite.nVerts);
-    for (int i = 0; i < Sprite.nVerts; i++)
+    const CCObject *pObj = Sprites[nRun].pObj;
+    if (!pObj)
     {
-      const SColorVert &v = Verts[Sprite.nFirstVert + i];
-      Converted[i].xyz = v.vert;
-      Converted[i].color.bcolor[0] = (uint8)std::min(v.color.bcolor[2] + nAmb[0], 255);
-      Converted[i].color.bcolor[1] = (uint8)std::min(v.color.bcolor[1] + nAmb[1], 255);
-      Converted[i].color.bcolor[2] = (uint8)std::min(v.color.bcolor[0] + nAmb[2], 255);
-      Converted[i].color.bcolor[3] = v.color.bcolor[3];
-      Converted[i].st[0] = v.dTC[0];
-      Converted[i].st[1] = v.dTC[1];
+      nRun++;
+      continue;
     }
+    BatchVerts.clear();
+    BatchInds.clear();
+    int nCount = 0;
+    size_t nNext = nRun;
+    for (; nNext < Sprites.size() && SameDraw(Sprites[nNext].pObj, pObj); nNext++)
+    {
+      const SSceneSprite &Sprite = Sprites[nNext];
+      if (Sprite.nVerts <= 0 || Sprite.nIndices <= 0 ||
+          Sprite.nFirstVert + Sprite.nVerts > (int)Verts.size() || Sprite.nFirstIndex + Sprite.nIndices > (int)Inds.size())
+        continue;
+      // The engine's colours are bytes R, G, B, A; the vertex format's B, G, R, A.
+      const Vec3 &Amb = Sprite.pObj->m_AmbColor;
+      const int nAmb[3] = { (int)(std::clamp(Amb.z, 0.0f, 1.0f) * 255 + 0.5f), (int)(std::clamp(Amb.y, 0.0f, 1.0f) * 255 + 0.5f),
+                            (int)(std::clamp(Amb.x, 0.0f, 1.0f) * 255 + 0.5f) };
+      // 16 bit indices.
+      if (!BatchVerts.empty() && BatchVerts.size() + Sprite.nVerts > 0xFFFF)
+        break;
+      const size_t nBase = BatchVerts.size();
+      BatchVerts.resize(nBase + Sprite.nVerts);
+      for (int i = 0; i < Sprite.nVerts; i++)
+      {
+        const SColorVert &v = Verts[Sprite.nFirstVert + i];
+        struct_VERTEX_FORMAT_P3F_COL4UB_TEX2F &o = BatchVerts[nBase + i];
+        o.xyz = v.vert;
+        o.color.bcolor[0] = (uint8)std::min(v.color.bcolor[2] + nAmb[0], 255);
+        o.color.bcolor[1] = (uint8)std::min(v.color.bcolor[1] + nAmb[1], 255);
+        o.color.bcolor[2] = (uint8)std::min(v.color.bcolor[0] + nAmb[2], 255);
+        o.color.bcolor[3] = v.color.bcolor[3];
+        o.st[0] = v.dTC[0];
+        o.st[1] = v.dTC[1];
+      }
+      for (int i = 0; i < Sprite.nIndices; i++)
+        BatchInds.push_back((ushort)(nBase + Inds[Sprite.nFirstIndex + i]));
+      nCount++;
+    }
+    nRun = nNext;
+    if (BatchVerts.empty())
+      continue;
+
     SPipelineKey Key = {};
-    const uint32 nBlend = Sprite.pObj->m_RenderState & GS_BLEND_MASK;
+    const uint32 nBlend = pObj->m_RenderState & GS_BLEND_MASK;
     Key.nState = nBlend ? nBlend : (GS_BLSRC_SRCALPHA | GS_BLDST_ONEMINUSSRCALPHA);
     Key.nProgram = eD3D12P_General;
     Key.nCull = R_CULL_NONE;
     SDrawConstants dc = DefaultDrawConstants();
-    const Matrix44 ViewProj = m_CameraView * m_ProjMatrix;
     memcpy(dc.mWorldViewProj, ViewProj.data, sizeof(dc.mWorldViewProj));
     dc.nFlags = DF_VCOLOR;
-    CTexture *pTex = m_pTextures ? m_pTextures->GetByID(Sprite.pObj->m_NumCM) : nullptr;
+    CTexture *pTex = m_pTextures ? m_pTextures->GetByID(pObj->m_NumCM) : nullptr;
     if (pTex && !pTex->IsCube())
     {
       dc.nFlags |= DF_TEX0;
@@ -776,13 +869,14 @@ void CD3D12Renderer::DrawSprites()
       dc.nFlags |= DF_FOG;
     if (m_pFrameDump)
     {
-      const UCol &c = Verts[Sprite.nFirstVert].color;
-      fprintf(m_pFrameDump.get(), "  sprite: %d verts, texture %d, state 0x%x, sort %g, amb (%.2f %.2f %.2f), vertex 0 colour bytes %u %u %u %u\n",
-              Sprite.nVerts, Sprite.pObj->m_NumCM, Sprite.pObj->m_RenderState, Sprite.pObj->m_SortId, Sprite.pObj->m_AmbColor.x,
-              Sprite.pObj->m_AmbColor.y, Sprite.pObj->m_AmbColor.z, c.bcolor[0], c.bcolor[1], c.bcolor[2], c.bcolor[3]);
+      const UCol &c = Verts[Sprites[nNext - 1].nFirstVert].color;
+      const Vec3 &Amb = pObj->m_AmbColor;
+      fprintf(m_pFrameDump.get(), "  sprites: %d (%d verts), texture %d, state 0x%x, sort %g, first amb (%.2f %.2f %.2f), a vertex colour's bytes %u %u %u %u\n",
+              nCount, (int)BatchVerts.size(), pObj->m_NumCM, pObj->m_RenderState, pObj->m_SortId, Amb.x, Amb.y, Amb.z,
+              c.bcolor[0], c.bcolor[1], c.bcolor[2], c.bcolor[3]);
       DumpDraw(dc, Key, pTex);
     }
-    DrawImmediate(Key, dc, D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST, VERTEX_FORMAT_P3F_COL4UB_TEX2F, Converted.data(), Sprite.nVerts,
-      Inds.data() + Sprite.nFirstIndex, Sprite.nIndices);
+    DrawImmediate(Key, dc, D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST, VERTEX_FORMAT_P3F_COL4UB_TEX2F, BatchVerts.data(), (int)BatchVerts.size(),
+      BatchInds.data(), (int)BatchInds.size());
   }
 }

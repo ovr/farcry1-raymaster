@@ -58,6 +58,7 @@ enum EDrawClass
   eDC_Water,              //!< water surface: the ocean ring, water volumes (refraction, reflection, waves)
   eDC_WaterBottom,        //!< the ocean floor ring beyond the terrain
   eDC_WaterBeach,         //!< surf along the shores
+  eDC_TerrainLayer,       //!< a detail layer of the terrain near the camera, multiplied in twice
 };
 
 //! What a shader is.

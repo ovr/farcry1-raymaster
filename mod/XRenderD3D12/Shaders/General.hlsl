@@ -28,10 +28,15 @@
 //	    tex1 with uv1 (any of DF_TEX1, DF_TEX1_DETAIL, DF_TEX1_LIGHTMAP;
 //	      sampler from bits 4-7): DF_TEX1_LIGHTMAP rgb *= 4 * tex1 + vAmbient,
 //	      DF_TEX1_DETAIL rgb = 2 * rgb + tex1 - 0.5, else *= tex1
+//	    DF_TERRAIN_CLIFF (terrain with cliffs): rgb = 2 * rgb * lerp(1, 2 * tex2,
+//	      w.x) * lerp(1, 2 * tex3, w.y), w = vertex colour rg * vTexGen1V.xy, uv
+//	      of tex2 from the world position with vParams0 / 1, of tex3 with 2 / 3
 //	    DF_ALPHATEST: discard when a < fAlphaRef (DF_ALPHATEST_LESS: when a >= fAlphaRef);
 //	      then DF_ALPHA_ONE: a = 1
+//	    DF_DETAIL_LAYER (a terrain detail layer, multiplied in twice): rgb =
+//	      lerp(0.5, tex0, a * the fade by the distance), a = 1
 //	    DF_FOG (with vFogParams.w set): linear fog by the distance to the
-//	      camera, per pixel
+//	      camera, per pixel (towards 0.5 with DF_DETAIL_LAYER)
 //
 //////////////////////////////////////////////////////////////////////
 
@@ -45,6 +50,7 @@ struct SVertexOutput
   float2 vTex1 : TEXCOORD1;
   float3 vWorldPos : TEXCOORD2;
   float3 vNormal : TEXCOORD3;   //!< world space, not normalised
+  float2 vCliff : TEXCOORD4;    //!< DF_TERRAIN_CLIFF: the weights of the two cliff textures
 };
 
 SVertexOutput VSMain(SVertexInput In)
@@ -122,6 +128,7 @@ SVertexOutput VSMain(SVertexInput In)
   }
   Out.vWorldPos = vWorldPos;
   Out.vNormal = vNormal;
+  Out.vCliff = HasFlag(DF_TERRAIN_CLIFF) ? DecodeVertexColor(In.vColor0).rg : 0;
   return Out;
 }
 
@@ -163,6 +170,17 @@ float4 PSMain(SVertexOutput In) : SV_Target
       vColor *= vTex1;
   }
 
+  if (HasFlag(DF_TERRAIN_CLIFF))
+  {
+    float4 vPos = float4(In.vWorldPos, 1);
+    float2 vW = In.vCliff * g_Draw.vTexGen1V.xy;
+    vColor.rgb *= 2;
+    if (vW.x > 0)
+      vColor.rgb *= lerp(1, 2 * SampleTexture(g_Draw.nTex2, XR_SAMPLER_LINEAR_WRAP, float2(dot(vPos, g_Draw.vParams0), dot(vPos, g_Draw.vParams1))).rgb, vW.x);
+    if (vW.y > 0)
+      vColor.rgb *= lerp(1, 2 * SampleTexture(g_Draw.nTex3, XR_SAMPLER_LINEAR_WRAP, float2(dot(vPos, g_Draw.vParams2), dot(vPos, g_Draw.vParams3))).rgb, vW.y);
+  }
+
   if (HasFlag(DF_ALPHATEST))
   {
     if (HasFlag(DF_ALPHATEST_LESS))
@@ -173,11 +191,20 @@ float4 PSMain(SVertexOutput In) : SV_Target
   if (HasFlag(DF_ALPHA_ONE))
     vColor.a = 1;
 
+  float3 vFogColor = g_Frame.vFogColor.rgb;
+  if (HasFlag(DF_DETAIL_LAYER))
+  {
+    float fDist = distance(In.vWorldPos, g_Frame.vCameraPos.xyz);
+    float fWeight = vColor.a * saturate((g_Draw.vParams0.y - fDist) * g_Draw.vParams0.z);
+    vColor = float4(lerp(0.5, vTex.rgb, fWeight), 1);
+    vFogColor = 0.5;
+  }
+
   if (HasFlag(DF_FOG) && g_Frame.vFogParams.w != 0)
   {
     float fDist = distance(In.vWorldPos, g_Frame.vCameraPos.xyz);
     float fFog = saturate((g_Frame.vFogParams.y - fDist) * g_Frame.vFogParams.z);
-    vColor.rgb = lerp(g_Frame.vFogColor.rgb, vColor.rgb, fFog);
+    vColor.rgb = lerp(vFogColor, vColor.rgb, fFog);
   }
 
   return vColor;

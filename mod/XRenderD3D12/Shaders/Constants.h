@@ -56,6 +56,8 @@ typedef float float4x4_t[16];
 #define DF_TEXGEN1_WORLD    0x00010000  //!< uv1 = (dot(world pos, vTexGen1U), dot(world pos, vTexGen1V)) (terrain detail)
 #define DF_ALPHA_ONE        0x00020000  //!< alpha 1 after the alpha test (the pictures of the far vegetation sprites)
 #define DF_TEX0_ARRAY       0x00040000  //!< tex0 is g_TextureArrays[nTex0]: slice floor(u / 2), sampled at (u - 2 * slice, v)
+#define DF_TERRAIN_CLIFF    0x00100000  //!< rgb = 2 * rgb * lerp(1, 2 * tex2, w.x) * lerp(1, 2 * tex3, w.y), w = vertex colour rg * vTexGen1V.xy; uv of tex2 = (dot(world pos, vParams0), dot(.., vParams1)), of tex3 with vParams2 / 3
+#define DF_DETAIL_LAYER     0x00080000  //!< rgb = lerp(0.5, tex0, colour a * saturate((vParams0.y - d) * vParams0.z)), a = 1, fogged towards 0.5 (d: distance to the camera)
 
 #define XR_SAMPLER_LINEAR_WRAP  0
 #define XR_SAMPLER_LINEAR_CLAMP 1
@@ -93,16 +95,16 @@ struct SDrawConstants
   XR_FLOAT4_ARRAY(vLightColor, XR_MAX_DRAW_LIGHTS); //!< rgb: the light's colour
   XR_FLOAT4_ARRAY(vLightAtten, XR_MAX_DRAW_LIGHTS); //!< a point light's attenuation 1 / (x + y d) at the distance d, 0 from z (the range) on
   XR_FLOAT4(vTexGen1U);           //!< DF_TEXGEN1_WORLD
-  XR_FLOAT4(vTexGen1V);
+  XR_FLOAT4(vTexGen1V);           //!< (DF_TERRAIN_CLIFF: xy 1 where tex2 / tex3 is set)
   XR_UINT(nFlags);                //!< DF_*
   XR_UINT(nTex0);                 //!< texture table index
   XR_UINT(nTex1);
   XR_UINT(nSamplers);             //!< bits 0-3 sampler of tex0, bits 4-7 sampler of tex1 (XR_SAMPLER_*)
   XR_FLOAT(fAlphaRef);
   XR_UINT(nLights);               //!< the lights in vLightPos
-  XR_UINT(nTex2);                 //!< more textures for the other programs (Water.hlsl)
+  XR_UINT(nTex2);                 //!< more textures for the other programs (Water.hlsl) and DF_TERRAIN_CLIFF
   XR_UINT(nTex3);
-  XR_FLOAT4(vParams0);            //!< parameters of the other programs (Water.hlsl)
+  XR_FLOAT4(vParams0);            //!< parameters of the other programs (Water.hlsl), DF_DETAIL_LAYER and DF_TERRAIN_CLIFF
   XR_FLOAT4(vParams1);
   XR_FLOAT4(vParams2);
   XR_FLOAT4(vParams3);

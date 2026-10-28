@@ -108,6 +108,7 @@ void CD3D12Renderer::RegisterVariables()
   iConsole->Register("r_TexSkyResolution", &CV_r_TexSkyResolution, 0, VF_DUMPTODISK);
   iConsole->Register("r_DetailTextures", &CV_r_DetailTextures, 1, VF_DUMPTODISK);
   iConsole->Register("r_DetailScale", &CV_r_DetailScale, 8, 0);
+  iConsole->Register("r_DetailDistance", &CV_r_DetailDistance, 4, VF_DUMPTODISK);
   iConsole->CreateVariable("r_DetailDefault", "Textures/Detail/rock", 0);
   iConsole->Register("r_VSync", &CV_r_vsync, 0, VF_DUMPTODISK);
   RegisterOtherVariables();

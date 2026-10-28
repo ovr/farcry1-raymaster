@@ -308,8 +308,10 @@ it as well: it holds local, machine-specific instructions and is not committed (
   field of view, near and far plane, view and projection matrices), then for each item its list, sort
   group, draw class, shader, diffuse texture, leaf buffer, object (position, flags, light map,
   light mask, ambient and colour) and resources (alpha reference, opacity, flags), and for each
-  draw what it got (vertex format, states, shader flags, textures, colour, lights), and each
-  particle sprite (texture, state, sort, ambient colour, the first vertex's colour bytes). With
+  draw what it got (vertex format, states, shader flags, textures, colour, lights), and each draw
+  of particle sprites (a run of sprites with the same texture and blending: their count, texture,
+  state, sort, the first one's ambient colour, a vertex colour's bytes); for a terrain sector, its
+  custom texture binds and custom data. With
   `XRENDERTRACED_EXEC_LEVEL="d3d12_DumpFrame 1"` and `XRENDERTRACED_EXEC_LEVEL_FRAME=<n - 1>` it
   is the frame that `XRENDERTRACED_CAPTURE=<n>` captures of the original.
 - `d3d12_WaterDebug <n>` shows one term of the water's colour instead of the whole: 1 refraction,
@@ -325,3 +327,9 @@ it as well: it holds local, machine-specific instructions and is not committed (
   that `MakeSprite` gets is drawn from its 24 directions, `d3d12_SpriteRes` texels a side (128,
   32 to 256) into a texture array per object; the log says how many were made and how long it
   took.
+- The terrain's detail layers near the camera (very high: `e_detail_texture_quality 1`) are drawn
+  while `r_DetailTextures` is 1 and fade out between `r_DetailDistance` and twice that distance
+  (16 and 32 m in the very high preset); the layers with a material of their own (bump mapped
+  cliffs) are not drawn yet. With the layers on, the sectors (shader "terrain") get no detail
+  texture, only their cliff texture where the engine marks cliffs; without them (shader
+  "terrainwithdefaultdetailtexture") the detail texture everywhere.
