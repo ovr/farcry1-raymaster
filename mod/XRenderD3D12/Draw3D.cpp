@@ -724,7 +724,8 @@ void CD3D12Renderer::DrawSkyItem(const SRenderItem &it)
 void CD3D12Renderer::DrawSprites()
 {
   // Particles: camera facing quads in world space, the object's texture (m_NumCM) and blending
-  // (m_RenderState), depth tested without depth writes.
+  // (m_RenderState), depth tested without depth writes. Colour (the vertex colour + the object's
+  // ambient colour, each channel at most 1) * texture, alpha vertex alpha * texture alpha.
   const std::span<const SSceneSprite> Sprites = m_pScene->GetSprites();
   if (Sprites.empty())
     return;
@@ -739,12 +740,19 @@ void CD3D12Renderer::DrawSprites()
     if (!Sprite.pObj || Sprite.nVerts <= 0 || Sprite.nIndices <= 0 ||
         Sprite.nFirstVert + Sprite.nVerts > (int)Verts.size() || Sprite.nFirstIndex + Sprite.nIndices > (int)Inds.size())
       continue;
+    // The engine's colours are bytes R, G, B, A; the vertex format's B, G, R, A.
+    const Vec3 &Amb = Sprite.pObj->m_AmbColor;
+    const int nAmb[3] = { (int)(std::clamp(Amb.z, 0.0f, 1.0f) * 255 + 0.5f), (int)(std::clamp(Amb.y, 0.0f, 1.0f) * 255 + 0.5f),
+                          (int)(std::clamp(Amb.x, 0.0f, 1.0f) * 255 + 0.5f) };
     Converted.resize(Sprite.nVerts);
     for (int i = 0; i < Sprite.nVerts; i++)
     {
       const SColorVert &v = Verts[Sprite.nFirstVert + i];
       Converted[i].xyz = v.vert;
-      Converted[i].color = v.color;
+      Converted[i].color.bcolor[0] = (uint8)std::min(v.color.bcolor[2] + nAmb[0], 255);
+      Converted[i].color.bcolor[1] = (uint8)std::min(v.color.bcolor[1] + nAmb[1], 255);
+      Converted[i].color.bcolor[2] = (uint8)std::min(v.color.bcolor[0] + nAmb[2], 255);
+      Converted[i].color.bcolor[3] = v.color.bcolor[3];
       Converted[i].st[0] = v.dTC[0];
       Converted[i].st[1] = v.dTC[1];
     }
@@ -757,7 +765,8 @@ void CD3D12Renderer::DrawSprites()
     const Matrix44 ViewProj = m_CameraView * m_ProjMatrix;
     memcpy(dc.mWorldViewProj, ViewProj.data, sizeof(dc.mWorldViewProj));
     dc.nFlags = DF_VCOLOR;
-    if (CTexture *pTex = m_pTextures ? m_pTextures->GetByID(Sprite.pObj->m_NumCM) : nullptr; pTex && !pTex->IsCube())
+    CTexture *pTex = m_pTextures ? m_pTextures->GetByID(Sprite.pObj->m_NumCM) : nullptr;
+    if (pTex && !pTex->IsCube())
     {
       dc.nFlags |= DF_TEX0;
       dc.nTex0 = pTex->GetSRV();
@@ -765,6 +774,14 @@ void CD3D12Renderer::DrawSprites()
     }
     if (m_bFog)
       dc.nFlags |= DF_FOG;
+    if (m_pFrameDump)
+    {
+      const UCol &c = Verts[Sprite.nFirstVert].color;
+      fprintf(m_pFrameDump.get(), "  sprite: %d verts, texture %d, state 0x%x, sort %g, amb (%.2f %.2f %.2f), vertex 0 colour bytes %u %u %u %u\n",
+              Sprite.nVerts, Sprite.pObj->m_NumCM, Sprite.pObj->m_RenderState, Sprite.pObj->m_SortId, Sprite.pObj->m_AmbColor.x,
+              Sprite.pObj->m_AmbColor.y, Sprite.pObj->m_AmbColor.z, c.bcolor[0], c.bcolor[1], c.bcolor[2], c.bcolor[3]);
+      DumpDraw(dc, Key, pTex);
+    }
     DrawImmediate(Key, dc, D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST, VERTEX_FORMAT_P3F_COL4UB_TEX2F, Converted.data(), Sprite.nVerts,
       Inds.data() + Sprite.nFirstIndex, Sprite.nIndices);
   }

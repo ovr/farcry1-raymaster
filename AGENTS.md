@@ -308,7 +308,8 @@ it as well: it holds local, machine-specific instructions and is not committed (
   field of view, near and far plane, view and projection matrices), then for each item its list, sort
   group, draw class, shader, diffuse texture, leaf buffer, object (position, flags, light map,
   light mask, ambient and colour) and resources (alpha reference, opacity, flags), and for each
-  draw what it got (vertex format, states, shader flags, textures, colour, lights). With
+  draw what it got (vertex format, states, shader flags, textures, colour, lights), and each
+  particle sprite (texture, state, sort, ambient colour, the first vertex's colour bytes). With
   `XRENDERTRACED_EXEC_LEVEL="d3d12_DumpFrame 1"` and `XRENDERTRACED_EXEC_LEVEL_FRAME=<n - 1>` it
   is the frame that `XRENDERTRACED_CAPTURE=<n>` captures of the original.
 - `d3d12_WaterDebug <n>` shows one term of the water's colour instead of the whole: 1 refraction,
