@@ -24,6 +24,7 @@
 
 class CD3D12Device;
 class CD3D12Upload;
+class CD3D12Texture;
 class CD3D12Descriptors;
 class CD3D12Pipeline;
 class CTexture;
@@ -540,6 +541,23 @@ public:
   std::vector<const void *> m_ShadowCasterLists;      //!< NoteShadowCasters: the list2<ShadowMapLightSourceInstance> of the frame
   int m_nNextShadowMapID = 0x40000000;                //!< the maps' IDs, apart from the texture IDs
   bool m_bShadowMapPass = false;                      //!< a shadow map is being drawn
+
+  //////////////////////////////////////////////////////////////////////////
+  // PostFx.cpp: the screen effects (CScene::GetScreenFx)
+
+  //! After the main view's 3D scene: the screen effects asked for, over the scene drawn.
+  void DrawScreenEffects();
+  //! The blur targets of the back buffer's size (made when it changes). False: none.
+  bool EnsurePostTargets();
+  //! A pass of the post program into pTarget (one of the blur targets).
+  void DrawPostPass(CD3D12Texture *pTarget, const SDrawConstants &dc);
+  void ReleaseScreenEffects();
+
+  CD3D12Texture *m_pPostBlur[2] = {};       //!< the scene reduced and blurred (the result in [0]), and a scratch
+  CD3D12Texture *m_pPostGhost = nullptr;    //!< the flash bang's afterimage: the blur at the start of the flash
+  int m_nPostWidth = 0, m_nPostHeight = 0;  //!< their size
+  int m_nPostFactor = 1;                    //!< the back buffer's size over theirs
+  bool m_bFlashGhost = false;               //!< m_pPostGhost holds the current flash's afterimage
 
   //////////////////////////////////////////////////////////////////////////
   // State (public: the subsystems' files use it)

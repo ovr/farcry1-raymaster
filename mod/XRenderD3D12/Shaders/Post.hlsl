@@ -1,0 +1,146 @@
+//////////////////////////////////////////////////////////////////////
+//
+//	File: Post.hlsl
+//	Description: The post program: the screen effects of the main view
+//	(PostFx.cpp), drawn over the finished 3D scene.
+//
+//	A triangle over the whole target, POSITION in clip space. The mode is
+//	in nFlags; every mode finds its pixel's uv as SV_Position times
+//	vParams0.xy (1 / the target's size).
+//	  POST_DOWNSAMPLE  the mean of tex0 over the footprint of the pixel:
+//	                   vParams0.z x vParams0.z bilinear taps (1: a copy)
+//	  POST_BLUR        a gaussian of tex0, sigma 2 texels, along vParams1.xy
+//	                   (one texel of tex0 in uv)
+//	  POST_EFFECTS     tex0 the copy of the scene, tex1 its blur, tex2 the
+//	                   flash's afterimage (both of the blur's size):
+//	    POST_NIGHTVISION  the luminance of the scene plus that of its blur
+//	                      (the glow), with grain, from dark cyan to white
+//	    POST_SCREENBLUR   the scene loses sharpness for the luminance of its
+//	                      blur tinted in the colour: vParams1 rgb the colour,
+//	                      w the amount
+//	    POST_FLASHBANG    scene * vParams2.x + afterimage * vParams2.y +
+//	                      vParams2.z (white), plus a spot vParams2.w *
+//	                      exp(-8 r^2), r the distance from vParams3.xy (uv)
+//	                      times vParams3.zw (1 / its radius in uv)
+//	    POST_FADE         times 1 - vParams0.z (to black)
+//	                   vParams0.w: the grain's seed (a new one every frame).
+//	                   The alpha of the scene stays.
+//
+//////////////////////////////////////////////////////////////////////
+
+#include "Common.hlsli"
+
+struct SPostOutput
+{
+  float4 vPos : SV_Position;
+};
+
+SPostOutput VSMain(SVertexInput In)
+{
+  SPostOutput Out;
+  Out.vPos = float4(In.vPos.xy, 0, 1);
+  return Out;
+}
+
+static const float3 LUMINANCE = float3(0.299, 0.587, 0.114);
+
+// Night vision: v = saturate(sharp * L + glow * L(blur) + bias + grain), from dark to bright.
+static const float NV_SHARP = 1.36;
+static const float NV_GLOW = 1.45;
+static const float NV_BIAS = -0.27;
+static const float NV_GRAIN = 0.5;            //!< the grain's range in v
+static const float NV_GRAIN_ROWS = 384;       //!< the grain's cells across the screen's height
+static const float3 NV_DARK = float3(0.08, 0.25, 0.24);
+static const float3 NV_BRIGHT = float3(0.965, 0.953, 0.969);
+
+// Screen blur, amount a, colour C: scene * max(1 - SHARP_LOSS * a, 0) + a * C * (GAIN * L(blur) + BIAS).
+static const float BLUR_SHARP_LOSS = 1.42;
+static const float BLUR_TINT_GAIN = 2.97;
+static const float BLUR_TINT_BIAS = -0.36;
+
+float4 SampleClamp(uint nTex, float2 vUV)
+{
+  return g_Textures[nTex].SampleLevel(g_SamplerLinearClamp, vUV, 0);
+}
+
+//! A value in 0..1 from a cell and a seed (an integer hash).
+float Hash(uint2 vCell, uint nSeed)
+{
+  uint n = vCell.x * 73856093u ^ vCell.y * 19349663u ^ nSeed * 83492791u;
+  n = (n ^ 61u) ^ (n >> 16);
+  n *= 9u;
+  n ^= n >> 4;
+  n *= 0x27d4eb2du;
+  n ^= n >> 15;
+  return n * (1.0 / 4294967296.0);
+}
+
+float4 Downsample(float2 vPixel)
+{
+  float2 vTexel = g_Draw.vParams0.xy;
+  float2 vUV = vPixel * vTexel;
+  int n = max((int)g_Draw.vParams0.z, 1);
+  float4 vSum = 0;
+  for (int y = 0; y < n; y++)
+  {
+    for (int x = 0; x < n; x++)
+      vSum += SampleClamp(g_Draw.nTex0, vUV + ((float2(x, y) + 0.5) / n - 0.5) * vTexel);
+  }
+  return vSum / (n * n);
+}
+
+float4 Blur(float2 vPixel)
+{
+  // exp(-k^2 / 8) for k = 0..4: sigma 2
+  static const float Weights[5] = { 1.0, 0.8825, 0.6065, 0.3247, 0.1353 };
+  float2 vUV = vPixel * g_Draw.vParams0.xy;
+  float2 vStep = g_Draw.vParams1.xy;
+  float4 vSum = SampleClamp(g_Draw.nTex0, vUV) * Weights[0];
+  float fSum = Weights[0];
+  [unroll]
+  for (int k = 1; k < 5; k++)
+  {
+    vSum += (SampleClamp(g_Draw.nTex0, vUV + vStep * k) + SampleClamp(g_Draw.nTex0, vUV - vStep * k)) * Weights[k];
+    fSum += 2 * Weights[k];
+  }
+  return vSum / fSum;
+}
+
+float4 Effects(float2 vPixel)
+{
+  float2 vUV = vPixel * g_Draw.vParams0.xy;
+  float4 vScene = g_Textures[g_Draw.nTex0].Load(int3(vPixel, 0));
+  float3 vBlur = SampleClamp(g_Draw.nTex1, vUV).rgb;
+  float3 c = vScene.rgb;
+  if (HasFlag(POST_NIGHTVISION))
+  {
+    float fCell = max(round(1 / (g_Draw.vParams0.y * NV_GRAIN_ROWS)), 1);
+    float fGrain = Hash((uint2)(vPixel / fCell), (uint)g_Draw.vParams0.w) - 0.5;
+    float v = saturate(NV_SHARP * dot(c, LUMINANCE) + NV_GLOW * dot(vBlur, LUMINANCE) + NV_BIAS + NV_GRAIN * fGrain);
+    c = lerp(NV_DARK, NV_BRIGHT, v);
+  }
+  if (HasFlag(POST_SCREENBLUR))
+  {
+    float fAmount = g_Draw.vParams1.w;
+    c = c * max(1 - BLUR_SHARP_LOSS * fAmount, 0) + fAmount * g_Draw.vParams1.rgb * (BLUR_TINT_GAIN * dot(vBlur, LUMINANCE) + BLUR_TINT_BIAS);
+  }
+  if (HasFlag(POST_FLASHBANG))
+  {
+    float3 vGhost = SampleClamp(g_Draw.nTex2, vUV).rgb;
+    float2 d = (vUV - g_Draw.vParams3.xy) * g_Draw.vParams3.zw;
+    c = c * g_Draw.vParams2.x + vGhost * g_Draw.vParams2.y + g_Draw.vParams2.z + g_Draw.vParams2.w * exp(-8 * dot(d, d));
+  }
+  c = saturate(c);
+  if (HasFlag(POST_FADE))
+    c *= 1 - g_Draw.vParams0.z;
+  return float4(c, vScene.a);
+}
+
+float4 PSMain(SPostOutput In) : SV_Target
+{
+  if (HasFlag(POST_DOWNSAMPLE))
+    return Downsample(In.vPos.xy);
+  if (HasFlag(POST_BLUR))
+    return Blur(In.vPos.xy);
+  return Effects(In.vPos.xy);
+}

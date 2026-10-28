@@ -346,6 +346,7 @@ void CD3D12Renderer::Release()
   ReleaseWaterReflection();
   ReleaseSprites();
   ReleaseShadowMaps();
+  ReleaseScreenEffects();
   m_pDetailTexture = nullptr;   // released with every texture
   m_pDefaultCube = nullptr;
   m_pBeachTexture = nullptr;

@@ -84,6 +84,15 @@ typedef float float4x4_t[16];
 #define DF2_FOG_BLACK       0x00000008  //!< with DF_FOG: fogged towards black (an additive pass)
 #define DF2_FOG_VOLUME      0x00000010  //!< the fog of a fog volume over an object in it: rgb = vColor.rgb, a = FogVolumeAlpha (General.hlsl; vParams0: x the layer's height, y ln 100 / (2 * fog distance), z 1 for the volume's cap, w 1: times the alpha after the alpha test)
 
+// SDrawConstants::nFlags of the post program (Post.hlsl): one mode, with POST_EFFECTS the effects drawn
+#define POST_DOWNSAMPLE     0x00000001  //!< the mean of tex0 over the target's pixel: vParams0.z x vParams0.z bilinear taps
+#define POST_BLUR           0x00000002  //!< a gaussian of tex0 (sigma 2 texels) along vParams1.xy (one texel in uv)
+#define POST_EFFECTS        0x00000004  //!< the screen effects over the scene copy tex0 (Post.hlsl)
+#define POST_NIGHTVISION    0x00000010
+#define POST_SCREENBLUR     0x00000020
+#define POST_FLASHBANG      0x00000040
+#define POST_FADE           0x00000080
+
 #define XR_SAMPLER_LINEAR_WRAP  0
 #define XR_SAMPLER_LINEAR_CLAMP 1
 #define XR_SAMPLER_POINT_WRAP   2

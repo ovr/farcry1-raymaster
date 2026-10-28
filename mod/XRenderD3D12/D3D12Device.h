@@ -85,7 +85,8 @@ public:
   bool CreateOffscreenTargets(int nWidth, int nHeight, ComPtr<ID3D12Resource> &pColor, ComPtr<ID3D12Resource> &pDepth,
                               D3D12_CPU_DESCRIPTOR_HANDLE hRTV, D3D12_CPU_DESCRIPTOR_HANDLE hDSV);
   //! Draws into targets of CreateOffscreenTargets instead of the back buffer, all of them, until
-  //! SetBackBufferTargets (in a frame).
+  //! SetBackBufferTargets (in a frame). hDSV may be empty: a colour target alone (a render target
+  //! of CD3D12Upload::CreateRenderTarget; SPipelineKey::nTarget 1 for R8G8B8A8).
   void SetOffscreenTargets(ID3D12Resource *pColor, D3D12_CPU_DESCRIPTOR_HANDLE hRTV, D3D12_CPU_DESCRIPTOR_HANDLE hDSV, int nWidth, int nHeight);
   bool IsOffscreen() const { return m_pOffscreen != nullptr; }
   //! A shadow map of nSize x nSize: R32_TYPELESS (D3D12_SHADOW_MAP_FORMAT, its DSV written to hDSV,

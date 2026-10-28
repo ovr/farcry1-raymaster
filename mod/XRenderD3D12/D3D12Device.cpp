@@ -388,7 +388,7 @@ void CD3D12Device::SetOffscreenTargets(ID3D12Resource *pColor, D3D12_CPU_DESCRIP
   m_hOffscreenDSV = hDSV;
   m_nOffscreenWidth = nWidth;
   m_nOffscreenHeight = nHeight;
-  m_pCmdList->OMSetRenderTargets(1, &hRTV, FALSE, &hDSV);
+  m_pCmdList->OMSetRenderTargets(1, &hRTV, FALSE, hDSV.ptr ? &hDSV : nullptr);
   const D3D12_VIEWPORT vp = { 0, 0, (float)nWidth, (float)nHeight, 0, 1 };
   const D3D12_RECT rc = { 0, 0, nWidth, nHeight };
   m_pCmdList->RSSetViewports(1, &vp);

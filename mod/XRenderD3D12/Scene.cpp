@@ -502,6 +502,7 @@ void CScene::EndEf3D(int nFlags)
   }
   if (m_nDrawing == 1)
   {
+    g_pRenderer->DrawScreenEffects();
     g_pRenderer->DrawShadowMapDebug();
     g_pRenderer->GpuSection("other");
   }

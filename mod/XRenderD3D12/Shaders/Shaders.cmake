@@ -8,3 +8,7 @@ xrender_d3d12_shader(General_PS General.hlsl ps_6_0 PSMain)
 # Water surfaces (eD3D12P_Water).
 xrender_d3d12_shader(Water_VS Water.hlsl vs_6_0 VSMain)
 xrender_d3d12_shader(Water_PS Water.hlsl ps_6_0 PSMain)
+
+# The screen effects (eD3D12P_Post).
+xrender_d3d12_shader(Post_VS Post.hlsl vs_6_0 VSMain)
+xrender_d3d12_shader(Post_PS Post.hlsl ps_6_0 PSMain)
