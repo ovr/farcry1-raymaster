@@ -178,11 +178,18 @@ namespace
     return it.pShader->GetVertexFormat();
   }
 
-  //! The CheckUpdate flags of an element: characters get nCheckUpdate_Character. No tangent
-  //! stream (VSM_TANGENTS): no draw class of this renderer uses it.
+  //! The CheckUpdate flags of an element: characters get nCheckUpdate_Character; with bump mapping
+  //! on, a material lit per pixel that has a normal map asks for the tangent stream too
+  //! (VSM_TANGENTS; a character's tangents are skinned when the material reports EF_NEEDTANGENTS).
   int CheckUpdateFlagsOf(const SRenderItem &it)
   {
-    return it.pObj->m_pCharInstance ? nCheckUpdate_Character : 0;
+    int nFlags = it.pObj->m_pCharInstance ? nCheckUpdate_Character : 0;
+    const SRenderShaderResources *pRes = it.pRes;
+    auto Named = [pRes](int nSlot) { return pRes->m_Textures[nSlot] && !pRes->m_Textures[nSlot]->m_Name.empty(); };
+    if (pRes && g_pRenderer && g_pRenderer->CV_r_Quality_BumpMapping > 0 && it.pShader->GetProps().bPixelLighting &&
+      (Named(EFTT_NORMALMAP) || Named(EFTT_BUMP)))
+      nFlags |= VSM_TANGENTS;
+    return nFlags;
   }
 }
 

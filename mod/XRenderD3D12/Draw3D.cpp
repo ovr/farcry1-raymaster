@@ -298,16 +298,17 @@ void CD3D12Renderer::DrawLeafItem(const SRenderItem &it)
   const CFColor MatColor = GetMaterialColor(pRes);
   const float fOpacity = GetOpacity(pRes);
   Set4(dc.vAmbient, pObj->m_AmbColor.x, pObj->m_AmbColor.y, pObj->m_AmbColor.z, 1);
-  std::optional<D3D12_VERTEX_BUFFER_VIEW> TexCoord1;
+  std::optional<D3D12_VERTEX_BUFFER_VIEW> TexCoord1, Tangents;
 
   auto Draw = [&]()
   {
     if (m_pFrameDump)
       DumpDraw(dc, Key, pTex);
+    const D3D12_VERTEX_BUFFER_VIEW *pTC1 = TexCoord1 ? &*TexCoord1 : nullptr, *pTangents = Tangents ? &*Tangents : nullptr;
     if (Geom->IsIndexed())
-      DrawGeometry(Key, dc, Geom->Topology, Geom->VB, &Geom->IB, Geom->nNumIndices, Geom->nFirstIndex, Geom->nBaseVertex, TexCoord1 ? &*TexCoord1 : nullptr);
+      DrawGeometry(Key, dc, Geom->Topology, Geom->VB, &Geom->IB, Geom->nNumIndices, Geom->nFirstIndex, Geom->nBaseVertex, pTC1, pTangents);
     else
-      DrawGeometry(Key, dc, Geom->Topology, Geom->VB, nullptr, Geom->nNumVertices, Geom->nFirstVertex, 0, TexCoord1 ? &*TexCoord1 : nullptr);
+      DrawGeometry(Key, dc, Geom->Topology, Geom->VB, nullptr, Geom->nNumVertices, Geom->nFirstVertex, 0, pTC1, pTangents);
   };
   // A shadow map: the depth of the casters.
   if (m_bShadowMapPass)
@@ -341,6 +342,22 @@ void CD3D12Renderer::DrawLeafItem(const SRenderItem &it)
     }
     else if (HasColor(nFormat))
       dc.nFlags |= DF_VCOLOR;
+    // Bump mapping on (r_Quality_BumpMapping): the materials of the bump, model and light diffuse
+    // templates are lit per pixel, with the material's normal map over the leaf buffer's tangent
+    // frames when it has one (also for the dot3 light maps). The normal maps' green runs along
+    // the binormal (the direction of growing v).
+    if (CV_r_Quality_BumpMapping > 0 && pSh->GetProps().bPixelLighting && (dc.nFlags & (DF_LIGHTING | DF_LIGHTMAP_DIR)))
+    {
+      if (dc.nFlags & DF_LIGHTING)
+        dc.nFlags |= DF_PIXEL_LIGHTING;
+      CTexture *pBump = GetNormalMap(it.pRes);
+      if (pBump && (Tangents = Geometry::GetTangentStream(pLB)))
+      {
+        dc.nFlags |= DF_BUMP;
+        dc.nTex3 = pBump->GetSRV();
+        dc.vParams1[1] = 1;
+      }
+    }
     // The sun hidden by the shadow maps of the object's casters.
     if (dc.nFlags & (DF_LIGHTING | DF_TEX1_LIGHTMAP))
       SetupShadowReceiver(dc, pObj);
@@ -464,13 +481,7 @@ void CD3D12Renderer::DrawLeafItem(const SRenderItem &it)
     // to the distance in float 3 of its custom data (156 m).
     if (!pTex || !CV_r_DetailTextures)
       return;
-    CTexture *pBump = nullptr;
-    if (it.pRes && m_pShaders)
-    {
-      pBump = m_pShaders->LoadResourceTexture(it.pRes, EFTT_NORMALMAP);
-      if (!pBump)
-        pBump = m_pShaders->LoadResourceTexture(it.pRes, EFTT_BUMP);
-    }
+    CTexture *pBump = GetNormalMap(it.pRes);
     float fStart = std::max(CV_r_DetailDistance, 0.01f), fEnd = 2 * fStart;
     if (it.pRes && pLeaf->m_CustomData && ((const float *)pLeaf->m_CustomData)[3] > 0)
     {
@@ -490,7 +501,7 @@ void CD3D12Renderer::DrawLeafItem(const SRenderItem &it)
     }
     Set4(dc.vParams0, fStart, fEnd, 1.0f / (fEnd - fStart), 0);
     dc.nSamplers = XR_SAMPLER_LINEAR_WRAP;
-    if (pBump && !pBump->IsCube())
+    if (pBump)
     {
       // Ambient 0.3; the normal maps' green runs against the v row.
       dc.nFlags |= DF_DETAIL_BUMP;
@@ -655,6 +666,14 @@ void CD3D12Renderer::DumpItem(int nIndex, const SRenderItem &it, int eList)
       fprintf(m_pFrameDump.get(), "    texture slots:%s\n", Slots.c_str());
   }
 
+  // The tangent frames of the video copy (bump mapping): how many, of how many vertices.
+  if (pLeaf && pLeaf->m_pBuffer)
+  {
+    const CVertexBuffer *pVB = pLeaf->m_pBuffer->GetVertexContainer()->m_pVertexBuffer;
+    if (pVB && pVB->m_VS[VSF_TANGENTS].m_VData)
+      fprintf(m_pFrameDump.get(), "    tangents: %d of %d vertices\n", pVB->m_VS[VSF_TANGENTS].m_nItems, pVB->m_NumVerts);
+  }
+
   // Terrain sectors: the element's custom texture binds and the texture coordinates in its custom
   // data (the sector's, then those of the cliff textures in binds 1 and 2).
   if (pLeaf && it.eDrawClass == eDC_Terrain && szLB && !strcmp(szLB, "TerrainSector"))
@@ -734,7 +753,7 @@ void CD3D12Renderer::DumpDraw(const SDrawConstants &dc, const SPipelineKey &Key,
   static const char *const s_Flags[] = { "TEX0", "TEX1", "VCOLOR", "VCOLOR_X2", "LIGHTING", "ALPHATEST", "TEXGEN_WORLD", "TEXMATRIX", "FOG",
                                          "TEX1_DETAIL", "TEX1_LIGHTMAP", "ALPHA_FROM_TEX", "CUBE0", "TEX0_ALPHA_ONLY", "SCREEN_POS", "ALPHATEST_LESS", "TEXGEN1_WORLD",
                                          "ALPHA_ONE", "TEX0_ARRAY", "DETAIL_LAYER", "TERRAIN_CLIFF", "DETAIL_BUMP", "DECAL_FADE", "SHADOWS",
-                                         "SHADOW_PASS" };
+                                         "SHADOW_PASS", "SHADOW_DEBUG", "LIGHTMAP_DIR", "VALPHA_ONLY", "CAUSTICS", "BUMP", "PIXEL_LIGHTING" };
   std::string Flags;
   for (size_t i = 0; i < std::size(s_Flags); i++)
     if (dc.nFlags & (1u << i))
@@ -820,8 +839,9 @@ void CD3D12Renderer::SetObjectLights(SDrawConstants &dc, const CCObject *pObj, c
       a1 = std::max(s, 0.0f);
       fRange = a0 > 256 ? 0.0f : (256 - a0) / std::max(a1, 0.01f);
     }
+    // Bump mapped draws light per pixel, falling off linearly to the radius.
     Set4(dc.vLightPos[n], pLight->m_Origin.x, pLight->m_Origin.y, pLight->m_Origin.z, 1);
-    Set4(dc.vLightAtten[n], a0, a1, fRange, 0);
+    Set4(dc.vLightAtten[n], a0, a1, fRange, 1 / R);
     n++;
   }
   dc.nLights = n;
@@ -834,6 +854,17 @@ CTexture *CD3D12Renderer::GetDetailTexture()
   if (!m_pDetailTexture)
     m_pDetailTexture = m_pTextures->LoadTexture("textures/terrain/detail/default", 0, 0, eTT_Base, -1, -1, -1, 0);
   return m_pDetailTexture && m_pDetailTexture->IsTextureLoaded() ? m_pDetailTexture : nullptr;
+}
+
+CTexture *CD3D12Renderer::GetNormalMap(SRenderShaderResources *pRes)
+{
+  if (!pRes || !m_pShaders)
+    return nullptr;
+  auto Usable = [](CTexture *p) { return p && !p->IsCube() && !(p->GetFlags() & FT_NOTFOUND) && p->IsTextureLoaded(); };
+  CTexture *pMap = m_pShaders->LoadResourceTexture(pRes, EFTT_NORMALMAP);
+  if (!Usable(pMap))
+    pMap = m_pShaders->LoadResourceTexture(pRes, EFTT_BUMP);
+  return Usable(pMap) ? pMap : nullptr;
 }
 
 void CD3D12Renderer::DrawSkyItem(const SRenderItem &it)

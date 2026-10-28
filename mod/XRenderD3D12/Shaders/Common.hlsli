@@ -10,9 +10,11 @@
 //	s0..s3 (XR_SAMPLER_*). A texture index comes from the draw constants,
 //	so it is the same for the whole draw.
 //
-//	Vertex input: every program reads all six attributes. The input
+//	Vertex input: every program reads all the attributes. The input
 //	layouts (D3D12Pipeline.cpp) take what a vertex format lacks from the
-//	default stream: normal (0, 0, 1), colours white, texture coordinates 0.
+//	default stream: normal (0, 0, 1), colours white, texture coordinates 0,
+//	the tangent frame (1, 0, 0), (0, 1, 0), (0, 0, 1) when there is no
+//	tangent stream.
 //	POSITION is a float4: formats with x, y, z get w = 1, the
 //	pre-transformed format gives x, y, z, rhw.
 //	Vertex colours are the engine's UCol (a DWORD 0xAARRGGBB), so the bytes
@@ -53,6 +55,9 @@ struct SVertexInput
   float4 vColor1 : COLOR1;      //!< B, G, R, A: DecodeVertexColor
   float2 vTex0 : TEXCOORD0;
   float2 vTex1 : TEXCOORD1;     //!< from the vertex or from the second stream (lightmap coordinates)
+  float3 vTangent : TANGENT;    //!< the tangent frame (SPipTangents) from the tangent stream
+  float3 vBinormal : BINORMAL;
+  float3 vTNormal : TNORMAL;
 };
 
 //! A vertex colour as read (B, G, R, A) to R, G, B, A.

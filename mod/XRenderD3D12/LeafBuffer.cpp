@@ -2347,6 +2347,28 @@ std::optional<D3D12_VERTEX_BUFFER_VIEW> Geometry::GetTexCoordStream(CLeafBuffer 
   return vb;
 }
 
+std::optional<D3D12_VERTEX_BUFFER_VIEW> Geometry::GetTangentStream(CLeafBuffer *pLB)
+{
+  if (!pLB || !GeometryImpl::IsLeafBuffer(pLB))
+    return std::nullopt;
+  CVertexBuffer *pVB = pLB->GetVertexContainer()->m_pVertexBuffer;
+  if (!pVB || pVB->m_NumVerts <= 0)
+    return std::nullopt;
+  SVertexStream &s = pVB->m_VS[VSF_TANGENTS];
+  SGeomStream *pS = StreamOf(s);
+  const uint32 nBytes = (uint32)pVB->m_NumVerts * sizeof(SPipTangents);
+  if (!pS || !s.m_VData || s.m_nItems < pVB->m_NumVerts || pS->nCapacity < nBytes)
+    return std::nullopt;
+  const D3D12_GPU_VIRTUAL_ADDRESS nGPU = pS->GPU.Get(s.m_VData, nBytes);
+  if (!nGPU)
+    return std::nullopt;
+  D3D12_VERTEX_BUFFER_VIEW vb;
+  vb.BufferLocation = nGPU;
+  vb.SizeInBytes = nBytes;
+  vb.StrideInBytes = sizeof(SPipTangents);
+  return vb;
+}
+
 void Geometry::Shutdown()
 {
   CLeafBuffer &Root = CLeafBuffer::m_RootGlobal;

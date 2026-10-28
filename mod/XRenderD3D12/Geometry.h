@@ -85,6 +85,10 @@ namespace Geometry
   //! one coordinate per vertex of the object's own leaf buffer. Empty when it has none.
   std::optional<D3D12_VERTEX_BUFFER_VIEW> GetTexCoordStream(CLeafBuffer *pLMTC);
 
+  //! The tangent frames (SPipTangents, one per vertex) of the video copy of a leaf buffer's vertex
+  //! container, for input slot 3, after its CheckUpdate. Empty when it has none for every vertex.
+  std::optional<D3D12_VERTEX_BUFFER_VIEW> GetTangentStream(CLeafBuffer *pLB);
+
   //! Deletes every leaf buffer that is left (IRenderer::Release; the engine does not delete the
   //! terrain's). Call before CD3D12Upload::Shutdown.
   void Shutdown();

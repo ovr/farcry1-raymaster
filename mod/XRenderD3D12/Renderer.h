@@ -307,11 +307,12 @@ public:
   //! The frame constants of the current camera and settings.
   void MakeFrameConstants(SFrameConstants &fc) const;
   //! One draw: the pipeline state of Key, dc as b1, VB in slot 0 with the default stream in slot 1
-  //! and pTexCoord1 in slot 2, the index buffer when pIB; nCount indices (or vertices) from nFirst.
-  //! Viewport m_Viewport with the depth range m_fDepthMin..m_fDepthMax; scissor from SetScissor or
-  //! m_bItemScissor.
+  //! and pTexCoord1 in slot 2, pTangents in slot 3, the index buffer when pIB; nCount indices (or
+  //! vertices) from nFirst. Viewport m_Viewport with the depth range m_fDepthMin..m_fDepthMax;
+  //! scissor from SetScissor or m_bItemScissor.
   void DrawGeometry(const SPipelineKey &Key, const SDrawConstants &dc, D3D_PRIMITIVE_TOPOLOGY eTopology, const D3D12_VERTEX_BUFFER_VIEW &VB,
-    const D3D12_INDEX_BUFFER_VIEW *pIB, uint32 nCount, uint32 nFirst = 0, int nBaseVertex = 0, const D3D12_VERTEX_BUFFER_VIEW *pTexCoord1 = nullptr);
+    const D3D12_INDEX_BUFFER_VIEW *pIB, uint32 nCount, uint32 nFirst = 0, int nBaseVertex = 0, const D3D12_VERTEX_BUFFER_VIEW *pTexCoord1 = nullptr,
+    const D3D12_VERTEX_BUFFER_VIEW *pTangents = nullptr);
   //! The same with the vertices (and indices) copied into per frame memory. Fans are not supported
   //! by Direct3D 12: the callers make lists.
   void DrawImmediate(const SPipelineKey &Key, const SDrawConstants &dc, D3D_PRIMITIVE_TOPOLOGY eTopology, int nVertexFormat,
@@ -371,6 +372,9 @@ public:
   //! textures/terrain/detail/default, whatever r_DetailDefault and r_DetailTextures say); NULL
   //! without one.
   CTexture *GetDetailTexture();
+  //! The normal map of a material (EFTT_NORMALMAP, else EFTT_BUMP; loaded on first use); NULL
+  //! without one or when its file is missing.
+  CTexture *GetNormalMap(SRenderShaderResources *pRes);
   //! The sky box of a CRESky element drawn with a sky shader (CShaderManager::FindSkyBox).
   void DrawSkyItem(const SRenderItem &it);
   //! The particle sprites of the scene (EF_AddSpriteToScene).

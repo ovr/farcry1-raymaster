@@ -73,6 +73,8 @@ typedef float float4x4_t[16];
 #define DF_VALPHA_ONLY      0x08000000  //!< with DF_VCOLOR: only the vertex colour's alpha counts (rgb white)
 #define DF_LIGHTMAP_DIR     0x04000000  //!< with DF_TEX1_LIGHTMAP, a dot3 light map: the light map times saturate(D.z) * D.a, D = tex2 at uv1 (rgb * 2 - 1: the light's dominant direction in the surface's tangent space, a: its strength)
 #define DF_DETAIL_LAYER     0x00080000  //!< rgb = lerp(0.5, tex0, colour a * saturate((vParams0.y - d) * vParams0.z)), a = 1, fogged towards 0.5 (d: distance to the camera)
+#define DF_PIXEL_LIGHTING   0x40000000  //!< with DF_LIGHTING: lit per pixel (each light's colour clamped to 1, point lights falling off as saturate(1 - d * vLightAtten.w)), with the vertex normal or N' (DF_BUMP)
+#define DF_BUMP             0x20000000  //!< bump mapping: N' = the normal map tex3 at uv0 (rgb * 2 - 1, its green times vParams1.y) in the vertex's tangent frame (TANGENT, BINORMAL, TNORMAL) for DF_PIXEL_LIGHTING; DF_LIGHTMAP_DIR takes saturate(dot(N', D)) for D.z
 
 #define XR_SAMPLER_LINEAR_WRAP  0
 #define XR_SAMPLER_LINEAR_CLAMP 1
@@ -108,7 +110,7 @@ struct SDrawConstants
   XR_FLOAT4(vTexMat1);            //!<               v' = dot(float3(u, v, 1), vTexMat1.xyz)
   XR_FLOAT4_ARRAY(vLightPos, XR_MAX_DRAW_LIGHTS);   //!< DF_LIGHTING, the draw's lights: w 1 a point light at xyz (world), w 2 a directional light from xyz
   XR_FLOAT4_ARRAY(vLightColor, XR_MAX_DRAW_LIGHTS); //!< rgb: the light's colour
-  XR_FLOAT4_ARRAY(vLightAtten, XR_MAX_DRAW_LIGHTS); //!< a point light's attenuation 1 / (x + y d) at the distance d, 0 from z (the range) on
+  XR_FLOAT4_ARRAY(vLightAtten, XR_MAX_DRAW_LIGHTS); //!< a point light's attenuation 1 / (x + y d) at the distance d, 0 from z (the range) on; w 1 / its radius (DF_BUMP)
   XR_FLOAT4(vTexGen1U);           //!< DF_TEXGEN1_WORLD
   XR_FLOAT4(vTexGen1V);           //!< (DF_TERRAIN_CLIFF: xy 1 where tex2 / tex3 is set)
   XR_UINT(nFlags);                //!< DF_*

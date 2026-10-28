@@ -48,6 +48,12 @@
 //	      (SunVisibility, Common.hlsli) v: DF_LIGHTING colour = lerp(the vertex
 //	      light without the sun, with it, v) * texture; DF_TEX1_LIGHTMAP rgb *=
 //	      4 * v * tex1 + vAmbient; DF_SHADOW_PASS rgb = colour * tex0, a = 1 - v
+//	    DF_PIXEL_LIGHTING: DF_LIGHTING is lit here instead of per vertex
+//	      (DrawLighting: the same sum, but the lights' colours clamped to 1 and
+//	      point lights falling off as saturate(1 - d / radius)), with the
+//	      vertex normal or, with DF_BUMP (bump mapping), N' = the normal map
+//	      (tex3 at uv0, its y times vParams1.y) in the vertex's tangent frame;
+//	      the dot3 light map takes N'.D for D.z
 //	    DF_CAUSTICS (the terrain under the ocean, multiplied in twice): rgb =
 //	      0.5 + 0.5 * k * (I - 1), I = min of two layers of the caustics texture
 //	      tex0 drifting apart, sampled where the sun's refracted ray crossed
@@ -72,7 +78,53 @@ struct SVertexOutput
   float3 vNormal : TEXCOORD3;   //!< world space, not normalised
   float2 vCliff : TEXCOORD4;    //!< DF_TERRAIN_CLIFF: the weights of the two cliff textures
   float4 vColorNoSun : TEXCOORD5; //!< DF_SHADOWS with DF_LIGHTING: vColor lit without the sun
+  float3 vTangent : TEXCOORD6;  //!< DF_BUMP: the tangent frame in world space, not normalised
+  float3 vBinormal : TEXCOORD7;
+  float3 vTNormal : TEXCOORD8;
 };
+
+//! The light of the sun, the ambient colour and the draw's lights at world position vPos with the
+//! normalised normal vN, which multiplies the colour (DF_LIGHTING): 2 * (saturate(ambient / 2 +
+//! sun N.L + light 0) + the sum of saturate(light) of the other lights), light = colour * N.L *
+//! attenuation, with the sun; vNoSunLight the same without it. Per vertex a point light attenuates
+//! by 1 / (a0 + a1 d) up to its range; per pixel (bPerPixel, DF_BUMP) by saturate(1 - d / radius),
+//! and each light's colour is clamped to 1.
+float3 DrawLighting(float3 vPos, float3 vN, bool bPerPixel, out float3 vNoSunLight)
+{
+  float3 vLight = 0.5 * g_Draw.vAmbient.rgb + g_Frame.vSunColor.rgb * saturate(dot(vN, g_Frame.vSunDir.xyz));
+  float3 vNoSun = 0.5 * g_Draw.vAmbient.rgb;
+  float3 vOthers = 0;
+  for (uint i = 0; i < min(g_Draw.nLights, XR_MAX_DRAW_LIGHTS); i++)
+  {
+    float4 vLightPos = g_Draw.vLightPos[i];
+    float4 vAtten = g_Draw.vLightAtten[i];
+    float3 vToLight = vLightPos.xyz;
+    float fAtten = 1;
+    if (vLightPos.w == 1)
+    {
+      vToLight = vLightPos.xyz - vPos;
+      float fDist = length(vToLight);
+      if (bPerPixel)
+        fAtten = saturate(1 - fDist * vAtten.w);
+      else
+        fAtten = fDist < vAtten.z ? 1 / (vAtten.x + vAtten.y * fDist) : 0;
+      vToLight /= max(fDist, 1e-4);
+    }
+    float3 vColor = g_Draw.vLightColor[i].rgb;
+    if (bPerPixel)
+      vColor = saturate(vColor);
+    float3 vThis = vColor * saturate(dot(vN, vToLight)) * fAtten;
+    if (i == 0)
+    {
+      vLight += vThis;
+      vNoSun += vThis;
+    }
+    else
+      vOthers += saturate(vThis);
+  }
+  vNoSunLight = 2 * (saturate(vNoSun) + vOthers);
+  return 2 * (saturate(vLight) + vOthers);
+}
 
 SVertexOutput VSMain(SVertexInput In)
 {
@@ -103,36 +155,11 @@ SVertexOutput VSMain(SVertexInput In)
     vColor *= vVertexColor;
   }
   float4 vColorNoSun = vColor;
-  if (HasFlag(DF_LIGHTING))
+  if (HasFlag(DF_LIGHTING) && !HasFlag(DF_PIXEL_LIGHTING))
   {
-    float3 vN = SafeNormalize(vNormal);
-    float3 vLight = 0.5 * g_Draw.vAmbient.rgb + g_Frame.vSunColor.rgb * saturate(dot(vN, g_Frame.vSunDir.xyz));
-    float3 vNoSun = 0.5 * g_Draw.vAmbient.rgb;
-    float3 vOthers = 0;
-    for (uint i = 0; i < min(g_Draw.nLights, XR_MAX_DRAW_LIGHTS); i++)
-    {
-      float4 vLightPos = g_Draw.vLightPos[i];
-      float3 vToLight = vLightPos.xyz;
-      float fAtten = 1;
-      if (vLightPos.w == 1)
-      {
-        vToLight = vLightPos.xyz - vWorldPos;
-        float fDist = length(vToLight);
-        float4 vAtten = g_Draw.vLightAtten[i];
-        fAtten = fDist < vAtten.z ? 1 / (vAtten.x + vAtten.y * fDist) : 0;
-        vToLight /= max(fDist, 1e-4);
-      }
-      float3 vThis = g_Draw.vLightColor[i].rgb * saturate(dot(vN, vToLight)) * fAtten;
-      if (i == 0)
-      {
-        vLight += vThis;
-        vNoSun += vThis;
-      }
-      else
-        vOthers += saturate(vThis);
-    }
-    vColorNoSun.rgb *= 2 * (saturate(vNoSun) + vOthers);
-    vColor.rgb *= 2 * (saturate(vLight) + vOthers);
+    float3 vNoSunLight;
+    vColor.rgb *= DrawLighting(vWorldPos, SafeNormalize(vNormal), false, vNoSunLight);
+    vColorNoSun.rgb *= vNoSunLight;
   }
 
   float2 vTex0 = In.vTex0;
@@ -159,6 +186,9 @@ SVertexOutput VSMain(SVertexInput In)
   Out.vNormal = vNormal;
   Out.vCliff = HasFlag(DF_TERRAIN_CLIFF) ? DecodeVertexColor(In.vColor0).rg : 0;
   Out.vColorNoSun = vColorNoSun;
+  Out.vTangent = mul(float4(In.vTangent, 0), g_Draw.mWorld).xyz;
+  Out.vBinormal = mul(float4(In.vBinormal, 0), g_Draw.mWorld).xyz;
+  Out.vTNormal = mul(float4(In.vTNormal, 0), g_Draw.mWorld).xyz;
   return Out;
 }
 
@@ -181,9 +211,26 @@ float4 PSMain(SVertexOutput In) : SV_Target
   else if (HasFlag(DF_TEX0))
     vTex = SampleTexture(g_Draw.nTex0, nSampler0, In.vTex0);
 
+  // Bump mapping: the normal map in tangent space (vMap) and in world space (vBumpN).
+  float3 vMap = float3(0, 0, 1);
+  float3 vBumpN = 0;
+  if (HasFlag(DF_BUMP))
+  {
+    vMap = SafeNormalize(SampleTexture(g_Draw.nTex3, XR_SAMPLER_LINEAR_WRAP, In.vTex0).rgb * 2 - 1);
+    vMap.y *= g_Draw.vParams1.y;
+    vBumpN = SafeNormalize(vMap.x * In.vTangent + vMap.y * In.vBinormal + vMap.z * In.vTNormal);
+  }
+
   float fSun = HasFlag(DF_SHADOWS) ? SunVisibility(In.vWorldPos, In.vNormal, In.vPos.xy) : 1;
   float4 vVertexColor = In.vColor;
-  if (HasFlag(DF_SHADOWS) && HasFlag(DF_LIGHTING))
+  if (HasFlag(DF_LIGHTING) && HasFlag(DF_PIXEL_LIGHTING))
+  {
+    float3 vNoSunLight;
+    float3 vN = HasFlag(DF_BUMP) ? vBumpN : SafeNormalize(In.vNormal);
+    float3 vLight = DrawLighting(In.vWorldPos, vN, true, vNoSunLight);
+    vVertexColor.rgb *= lerp(vNoSunLight, vLight, fSun);
+  }
+  else if (HasFlag(DF_SHADOWS) && HasFlag(DF_LIGHTING))
     vVertexColor.rgb = lerp(In.vColorNoSun.rgb, In.vColor.rgb, fSun);
 
   float4 vColor;
@@ -205,7 +252,7 @@ float4 PSMain(SVertexOutput In) : SV_Target
       if (HasFlag(DF_LIGHTMAP_DIR))
       {
         float4 vDir = SampleTexture(g_Draw.nTex2, nSampler1, In.vTex1);
-        vLight *= saturate(vDir.z * 2 - 1) * vDir.a;
+        vLight *= saturate(dot(vMap, vDir.xyz * 2 - 1)) * vDir.a;
       }
       vColor.rgb *= 4 * fSun * vLight + g_Draw.vAmbient.rgb;
     }

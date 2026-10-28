@@ -59,9 +59,13 @@ namespace
     uint32 nColor1;
     float vTex0[2];
     float vTex1[2];
+    float vTangent[3];            //!< the tangent frame without a tangent stream
+    float vBinormal[3];
+    float vTNormal[3];
   };
   constexpr UINT DEFAULT_STREAM_SLOT = 1;
   constexpr UINT TEXCOORD1_STREAM_SLOT = 2;   //!< VERTEX_FORMAT_TEX2F
+  constexpr UINT TANGENT_STREAM_SLOT = 3;     //!< SPipTangents
 
   //! Where a vertex format keeps its attributes in slot 0; -1: from the default stream. nPos -1:
   //! the format is not drawn on its own.
@@ -152,12 +156,15 @@ namespace
   static_assert(sizeof(struct_VERTEX_FORMAT_TRP3F_COL4UB_TEX2F) == 28);
   static_assert(sizeof(struct_VERTEX_FORMAT_P3F_N_COL4UB_COL4UB_TEX2F) == 40);
   static_assert(sizeof(SPipTangents) == 36);
-  static_assert(sizeof(SDefaultStream) == 36);
+  static_assert(sizeof(SDefaultStream) == 72);
   static_assert(sizeof(SPipelineKey) == 12, "SPipelineKey is hashed and compared as bytes");
 
-  //! Fills pOut (8 elements at most) with the input layout of a vertex format; 0 when the format is
-  //! not drawn on its own.
-  int BuildInputLayout(int nFormat, bool bTexCoord1Stream, D3D12_INPUT_ELEMENT_DESC *pOut)
+  //! The most elements of an input layout.
+  constexpr int MAX_INPUT_ELEMENTS = 9;
+
+  //! Fills pOut (MAX_INPUT_ELEMENTS at most) with the input layout of a vertex format and the extra
+  //! streams nStreams (PIPELINE_STREAM_*); 0 when the format is not drawn on its own.
+  int BuildInputLayout(int nFormat, uint8 nStreams, D3D12_INPUT_ELEMENT_DESC *pOut)
   {
     if (nFormat <= 0 || nFormat >= VERTEX_FORMAT_NUMS)
       return 0;
@@ -185,10 +192,22 @@ namespace
     AddOr("COLOR", 0, DXGI_FORMAT_R8G8B8A8_UNORM, Layout.nColor0, (int)offsetof(SDefaultStream, nColor0));
     AddOr("COLOR", 1, DXGI_FORMAT_R8G8B8A8_UNORM, Layout.nColor1, (int)offsetof(SDefaultStream, nColor1));
     AddOr("TEXCOORD", 0, DXGI_FORMAT_R32G32_FLOAT, Layout.nTex0, (int)offsetof(SDefaultStream, vTex0));
-    if (bTexCoord1Stream)
+    if (nStreams & PIPELINE_STREAM_TEXCOORD1)
       Add("TEXCOORD", 1, DXGI_FORMAT_R32G32_FLOAT, TEXCOORD1_STREAM_SLOT, 0);
     else
       AddOr("TEXCOORD", 1, DXGI_FORMAT_R32G32_FLOAT, Layout.nTex1, (int)offsetof(SDefaultStream, vTex1));
+    if (nStreams & PIPELINE_STREAM_TANGENTS)
+    {
+      Add("TANGENT", 0, DXGI_FORMAT_R32G32B32_FLOAT, TANGENT_STREAM_SLOT, (int)offsetof(SPipTangents, m_Tangent));
+      Add("BINORMAL", 0, DXGI_FORMAT_R32G32B32_FLOAT, TANGENT_STREAM_SLOT, (int)offsetof(SPipTangents, m_Binormal));
+      Add("TNORMAL", 0, DXGI_FORMAT_R32G32B32_FLOAT, TANGENT_STREAM_SLOT, (int)offsetof(SPipTangents, m_TNormal));
+    }
+    else
+    {
+      Add("TANGENT", 0, DXGI_FORMAT_R32G32B32_FLOAT, DEFAULT_STREAM_SLOT, (int)offsetof(SDefaultStream, vTangent));
+      Add("BINORMAL", 0, DXGI_FORMAT_R32G32B32_FLOAT, DEFAULT_STREAM_SLOT, (int)offsetof(SDefaultStream, vBinormal));
+      Add("TNORMAL", 0, DXGI_FORMAT_R32G32B32_FLOAT, DEFAULT_STREAM_SLOT, (int)offsetof(SDefaultStream, vTNormal));
+    }
     return n;
   }
 
@@ -398,6 +417,9 @@ bool CD3D12Pipeline::CreateDefaultStream()
   Defaults.vNormal[2] = 1.0f;
   Defaults.nColor0 = 0xffffffff;
   Defaults.nColor1 = 0xffffffff;
+  Defaults.vTangent[0] = 1.0f;
+  Defaults.vBinormal[1] = 1.0f;
+  Defaults.vTNormal[2] = 1.0f;
   void *pCPU = nullptr;
   const D3D12_RANGE NoRead = { 0, 0 };
   hr = m_pDefaultStream->Map(0, &NoRead, &pCPU);
@@ -453,8 +475,8 @@ ComPtr<ID3D12PipelineState> CD3D12Pipeline::CreatePSO(const SPipelineKey &Key)
     iLog->LogError("XRenderD3D12: no shader program %d", (int)Key.nProgram);
     return nullptr;
   }
-  D3D12_INPUT_ELEMENT_DESC Elements[8];
-  const int nElements = BuildInputLayout(Key.nVertexFormat, Key.bTexCoord1Stream != 0, Elements);
+  D3D12_INPUT_ELEMENT_DESC Elements[MAX_INPUT_ELEMENTS];
+  const int nElements = BuildInputLayout(Key.nVertexFormat, Key.nStreams, Elements);
   if (!nElements)
     return nullptr;
 
@@ -572,9 +594,9 @@ ComPtr<ID3D12PipelineState> CD3D12Pipeline::CreatePSO(const SPipelineKey &Key)
   if (FAILED(hr))
   {
     iLog->LogError("XRenderD3D12: CreateGraphicsPipelineState failed (0x%08X): program %s, vertex format %d, state 0x%08X, "
-      "cull %d, topology %d, target %d, depth bias %d, texcoord1 stream %d, wireframe %d", (unsigned)hr, Program.szName,
+      "cull %d, topology %d, target %d, depth bias %d, streams %d, wireframe %d", (unsigned)hr, Program.szName,
       (int)Key.nVertexFormat, nState, (int)Key.nCull, nTopology, (int)Key.nTarget, (int)Key.bDepthBias,
-      (int)Key.bTexCoord1Stream, (int)Key.bWireframe);
+      (int)Key.nStreams, (int)Key.bWireframe);
     return nullptr;
   }
   return pPSO;

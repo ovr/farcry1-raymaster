@@ -596,6 +596,14 @@ CShader *CShaderManager::LoadMaterial(const char *szName, const char *szTemplate
 
   SShaderProps Props = pTempl->GetProps();
   Props.nFlags = EF_COMPILEDLAYERS | EF_NEEDNORMALS | EF_NOTFOUND;
+  // The templates with vertex and pixel shaders when bump mapping is on (their names stay then).
+  const std::string Templ = Lower(szTemplate);
+  Props.bPixelLighting = Templ.starts_with("templbump") || Templ.starts_with("templmodel") || Templ.starts_with("templlightdiffuse") ||
+    Templ == "templglasscm";
+  // Their bump mapping needs tangent frames: the tangent stream of a character is filled for the
+  // materials that report EF_NEEDTANGENTS.
+  if (Props.bPixelLighting && g_pRenderer && g_pRenderer->CV_r_Quality_BumpMapping > 0)
+    Props.nFlags |= EF_NEEDTANGENTS;
   CShader *pSH = Create(std::move(ShaderName), EShaderKind::Material, Props, pTempl, nMaskGen);
   m_Materials.emplace(std::move(Key), pSH);
   return pSH;

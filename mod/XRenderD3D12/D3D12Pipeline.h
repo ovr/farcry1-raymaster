@@ -14,15 +14,17 @@
 //	the program, the vertex format and the fixed state below.
 //
 //	Vertex formats: every program reads POSITION, NORMAL, COLOR0, COLOR1,
-//	TEXCOORD0 and TEXCOORD1. What a format lacks comes from input slot 1, a
-//	small buffer bound with stride 0 (normal 0,0,1; colours white; texture
-//	coordinates 0): BindDefaultStream sets it. Slot 0 is the engine's
-//	vertex buffer. Vertex colours (COL4UB) are bytes B, G, R, A in memory.
+//	TEXCOORD0, TEXCOORD1, TANGENT, BINORMAL and TNORMAL. What a format lacks
+//	comes from input slot 1, a small buffer bound with stride 0 (normal
+//	0,0,1; colours white; texture coordinates 0; tangent frame 1,0,0 0,1,0
+//	0,0,1): BindDefaultStream sets it. Slot 0 is the engine's vertex buffer.
+//	Vertex colours (COL4UB) are bytes B, G, R, A in memory.
 //	VERTEX_FORMAT_TRP3F_COL4UB_TEX2F (pre-transformed): x, y in pixels; use
 //	DF_SCREEN_POS. VERTEX_FORMAT_TEX2F and VERTEX_FORMAT_T3F_B3F_N3F are
 //	not drawn (lightmap coordinates and tangents are extra streams).
-//	A second vertex stream can feed TEXCOORD1 (lightmap coordinates):
-//	SPipelineKey::bTexCoord1Stream, slot 2, VERTEX_FORMAT_TEX2F.
+//	Extra vertex streams (SPipelineKey::nStreams): TEXCOORD1 from slot 2
+//	(lightmap coordinates, VERTEX_FORMAT_TEX2F), the tangent frame from
+//	slot 3 (SPipTangents).
 //
 //////////////////////////////////////////////////////////////////////
 
@@ -38,6 +40,10 @@ enum ED3D12Program
   eD3D12P_Num
 };
 
+//! SPipelineKey::nStreams: the extra vertex streams of a draw.
+constexpr uint8 PIPELINE_STREAM_TEXCOORD1 = 1;    //!< TEXCOORD1 from slot 2 (VERTEX_FORMAT_TEX2F)
+constexpr uint8 PIPELINE_STREAM_TANGENTS = 2;     //!< TANGENT, BINORMAL, TNORMAL from slot 3 (SPipTangents)
+
 //! Everything a pipeline state depends on. Zero-initialise, then set the members.
 struct SPipelineKey
 {
@@ -50,7 +56,7 @@ struct SPipelineKey
   uint8 nCull;            //!< R_CULL_NONE, R_CULL_FRONT, R_CULL_BACK (the engine's front faces are counter-clockwise
                           //!< as the viewer sees them; one constant in D3D12Pipeline.cpp)
   uint8 bDepthBias;       //!< polygon offset (decals, EF_PolygonOffset)
-  uint8 bTexCoord1Stream; //!< TEXCOORD1 from slot 2 (VERTEX_FORMAT_TEX2F)
+  uint8 nStreams;         //!< PIPELINE_STREAM_* bits
   uint8 nTarget;          //!< 0 back buffer (D3D12_BACKBUFFER_FORMAT + D3D12_DEPTH_FORMAT), 1 R8G8B8A8 target without depth,
                           //!< 2 a shadow map (D3D12_SHADOW_MAP_FORMAT only; bDepthBias gives the shadow maps' bias)
   uint8 bWireframe;       //!< fill mode wireframe (SetPolygonMode R_WIREFRAME_MODE)

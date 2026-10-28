@@ -105,13 +105,14 @@ void CD3D12Renderer::MakeFrameConstants(SFrameConstants &fc) const
 }
 
 void CD3D12Renderer::DrawGeometry(const SPipelineKey &Key, const SDrawConstants &dc, D3D_PRIMITIVE_TOPOLOGY eTopology, const D3D12_VERTEX_BUFFER_VIEW &VB,
-  const D3D12_INDEX_BUFFER_VIEW *pIB, uint32 nCount, uint32 nFirst, int nBaseVertex, const D3D12_VERTEX_BUFFER_VIEW *pTexCoord1)
+  const D3D12_INDEX_BUFFER_VIEW *pIB, uint32 nCount, uint32 nFirst, int nBaseVertex, const D3D12_VERTEX_BUFFER_VIEW *pTexCoord1,
+  const D3D12_VERTEX_BUFFER_VIEW *pTangents)
 {
   if (!nCount || !m_pPipeline || !m_pUpload || !EnsureFrame())
     return;
   SPipelineKey FullKey = Key;
   FullKey.nTopology = (uint8)GetTopologyType(eTopology);
-  FullKey.bTexCoord1Stream = pTexCoord1 ? 1 : 0;
+  FullKey.nStreams = (pTexCoord1 ? PIPELINE_STREAM_TEXCOORD1 : 0) | (pTangents ? PIPELINE_STREAM_TANGENTS : 0);
   ID3D12PipelineState *pPSO = m_pPipeline->GetPSO(FullKey);
   if (!pPSO)
     return;
@@ -130,6 +131,8 @@ void CD3D12Renderer::DrawGeometry(const SPipelineKey &Key, const SDrawConstants 
   m_pPipeline->BindDefaultStream(pList);
   if (pTexCoord1)
     pList->IASetVertexBuffers(2, 1, pTexCoord1);
+  if (pTangents)
+    pList->IASetVertexBuffers(3, 1, pTangents);
   pList->IASetPrimitiveTopology(eTopology);
 
   // The viewport inside the back buffer (an off screen target: all of it, or m_TargetRect); the

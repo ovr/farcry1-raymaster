@@ -86,6 +86,8 @@ struct SShaderProps
   float fScrollV = 0.0f;                          //!< texture v moves by fScrollV * ITimer::GetCurrTime()
   bool bLightmap = false;                         //!< combines the lightmap of lightmapped objects
   bool bStealth = false;                          //!< colour scaled by the object's "refraction" (GetColorScale)
+  bool bPixelLighting = false;                    //!< a material of a bump, model, light diffuse or glass template: with bump
+                                                  //!< mapping on it is lit per pixel, with its normal map when it has one
 };
 
 //! A shader of this renderer (an engine shader, a template or a material; see above).
