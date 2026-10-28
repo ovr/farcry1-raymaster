@@ -61,6 +61,8 @@ enum
 
 //! Vertices written per draw (XRENDERTRACED_D3D_VERTS, default 8).
 static UINT s_nDumpVertices = 8;
+//! XRENDERTRACED_D3D_VERTS is set: the indexed draws write their vertices too.
+static bool s_bDumpIndexedVertices = false;
 
 typedef HRESULT (STDMETHODCALLTYPE *PFN_DrawPrimitive)(IDirect3DDevice9 *, D3DPRIMITIVETYPE, UINT, UINT);
 typedef HRESULT (STDMETHODCALLTYPE *PFN_DrawIndexedPrimitive)(IDirect3DDevice9 *, D3DPRIMITIVETYPE, INT, UINT, UINT, UINT, UINT);
@@ -654,6 +656,12 @@ static void WriteDraw(IDirect3DDevice9 *pDev, const char *szCall, bool bStreams,
       DumpVertices(pDecl, 0, (const BYTE *)pUPVerts, nUPStride, nDumped);
     else if (!bIndexed && pVB0 && nStride0)
       DumpVertices(pDecl, 0, ShadowData(pVB0, nOffset0 + nStart * nStride0, nDumped * nStride0), nStride0, nDumped);
+    // With XRENDERTRACED_D3D_VERTS set, also the first vertices of the range an indexed draw uses.
+    else if (bIndexed && s_bDumpIndexedVertices && pVB0 && nStride0 && nBoxCount)
+    {
+      const UINT nRange = nBoxCount < s_nDumpVertices ? nBoxCount : s_nDumpVertices;
+      DumpVertices(pDecl, 0, ShadowData(pVB0, nOffset0 + nBoxFirst * nStride0, nRange * nStride0), nStride0, nRange);
+    }
     if (bIndexed && s_nLevel >= 2)
       WriteVertexBox(pDecl, pVB0, nOffset0, nStride0, nBoxFirst, nBoxCount);
     pDecl->Release();
@@ -950,7 +958,10 @@ void D3DDraws_Begin(IRenderer *pRenderer)
   s_nLevel = szEnv[0] - '0';
   char szVerts[16] = "";
   if (GetEnvironmentVariableA("XRENDERTRACED_D3D_VERTS", szVerts, sizeof(szVerts)) && atoi(szVerts) > 0)
+  {
     s_nDumpVertices = (UINT)atoi(szVerts);
+    s_bDumpIndexedVertices = true;
+  }
   IDirect3DDevice9 *pDev = D3DState_GetDevice(pRenderer);
   if (!pDev)
     return;
