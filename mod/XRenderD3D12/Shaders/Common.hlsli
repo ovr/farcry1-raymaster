@@ -38,6 +38,7 @@ SamplerState g_SamplerLinearWrap : register(s0);    // anisotropic
 SamplerState g_SamplerLinearClamp : register(s1);
 SamplerState g_SamplerPointWrap : register(s2);
 SamplerState g_SamplerPointClamp : register(s3);
+SamplerComparisonState g_SamplerShadow : register(s4);
 
 //! Pixel coordinates (DF_SCREEN_POS) are those of Direct3D 9's pre-transformed vertices: the
 //! centre of pixel (i, j) is at (i, j), where Direct3D 12 puts it at (i + 0.5, j + 0.5). So a
@@ -115,6 +116,49 @@ float4 SampleTextureArray(uint nIndex, uint nSampler, float3 vUVW)
   default:
     return g_TextureArrays[nIndex].Sample(g_SamplerLinearWrap, vUVW);
   }
+}
+
+//! How much of the sun reaches world position vPos (normal vNormal, may be zero) through the
+//! draw's shadow maps (DF_SHADOWS): 1 lit, 0 in shadow. Each map is a percentage closer filter of
+//! 16 bilinear comparisons on a rotated disc (vShadowParams.z texels), its shadow fading out
+//! towards the edge of the map's circle; the maps multiply.
+float SunVisibility(float3 vPos, float3 vNormal, float2 vScreenPos)
+{
+  static const float2 Disc[8] =
+  {
+    float2(-0.326, -0.406), float2(-0.840, -0.074), float2(-0.696, 0.457), float2(-0.203, 0.621),
+    float2(0.962, -0.195), float2(0.473, -0.480), float2(0.519, 0.767), float2(0.185, -0.893),
+  };
+  float3 vP = vPos + SafeNormalize(vNormal) * g_Draw.vShadowParams.w;
+  // A rotation of the disc per pixel (interleaved gradient noise) turns banding into fine noise.
+  float fAngle = 6.2831853 * frac(52.9829189 * frac(dot(vScreenPos, float2(0.06711056, 0.00583715))));
+  float2 vRot = float2(cos(fAngle), sin(fAngle));
+  float fLit = 1;
+  uint nMaps = min((uint)g_Draw.vShadowParams.x, XR_MAX_DRAW_SHADOWS);
+  for (uint i = 0; i < nMaps; i++)
+  {
+    float4 v = mul(float4(vP, 1), g_Draw.mShadow[i]);
+    float fEdge = saturate((1 - length(v.xy)) * 6);
+    // In front of the casters: lit; behind them (beyond the map's depth range): as far as they go.
+    if (fEdge <= 0 || v.z <= 0)
+      continue;
+    Texture2D Map = g_Textures[g_Draw.nShadowTex[i]];
+    float2 vSize;
+    Map.GetDimensions(vSize.x, vSize.y);
+    float2 vUV = float2(0.5 + 0.5 * v.x, 0.5 - 0.5 * v.y);
+    float2 vStep = g_Draw.vShadowParams.z / vSize;
+    float fDepth = min(v.z, 1) - g_Draw.vShadowParams.y;
+    float fSum = 0;
+    [unroll]
+    for (uint k = 0; k < 8; k++)
+    {
+      float2 d = float2(Disc[k].x * vRot.x - Disc[k].y * vRot.y, Disc[k].x * vRot.y + Disc[k].y * vRot.x);
+      fSum += Map.SampleCmpLevelZero(g_SamplerShadow, vUV + d * vStep, fDepth);
+      fSum += Map.SampleCmpLevelZero(g_SamplerShadow, vUV + d * vStep * 0.5, fDepth);
+    }
+    fLit *= lerp(1, fSum / 16, fEdge);
+  }
+  return fLit;
 }
 
 //! Samples g_Cubes[nIndex] in direction vDir with sampler nSampler (XR_SAMPLER_*).

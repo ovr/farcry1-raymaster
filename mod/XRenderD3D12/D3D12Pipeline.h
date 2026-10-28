@@ -8,7 +8,7 @@
 //	  0: root CBV b0 (SFrameConstants)
 //	  1: root CBV b1 (SDrawConstants)
 //	  2: descriptor table, the whole texture table (t0 space1 and t0 space2)
-//	  static samplers s0..s3
+//	  static samplers s0..s3, s4 the comparison sampler of the shadow maps
 //	The programs are general ("fixed function") shaders whose features are
 //	switched by SDrawConstants::nFlags, so a pipeline state depends only on
 //	the program, the vertex format and the fixed state below.
@@ -51,7 +51,8 @@ struct SPipelineKey
                           //!< as the viewer sees them; one constant in D3D12Pipeline.cpp)
   uint8 bDepthBias;       //!< polygon offset (decals, EF_PolygonOffset)
   uint8 bTexCoord1Stream; //!< TEXCOORD1 from slot 2 (VERTEX_FORMAT_TEX2F)
-  uint8 nTarget;          //!< 0 back buffer (D3D12_BACKBUFFER_FORMAT + D3D12_DEPTH_FORMAT), 1 R8G8B8A8 target without depth
+  uint8 nTarget;          //!< 0 back buffer (D3D12_BACKBUFFER_FORMAT + D3D12_DEPTH_FORMAT), 1 R8G8B8A8 target without depth,
+                          //!< 2 a shadow map (D3D12_SHADOW_MAP_FORMAT only; bDepthBias gives the shadow maps' bias)
   uint8 bWireframe;       //!< fill mode wireframe (SetPolygonMode R_WIREFRAME_MODE)
 };
 

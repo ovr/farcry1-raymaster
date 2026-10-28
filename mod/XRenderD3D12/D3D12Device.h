@@ -20,6 +20,7 @@ constexpr int D3D12_BACKBUFFERS = 3;     //!< swap chain buffers
 
 constexpr DXGI_FORMAT D3D12_BACKBUFFER_FORMAT = DXGI_FORMAT_B8G8R8A8_UNORM;   //!< with alpha (the HUD masks through it)
 constexpr DXGI_FORMAT D3D12_DEPTH_FORMAT = DXGI_FORMAT_D24_UNORM_S8_UINT;
+constexpr DXGI_FORMAT D3D12_SHADOW_MAP_FORMAT = DXGI_FORMAT_D32_FLOAT;  //!< drawn into; the texture is R32_TYPELESS, read as R32_FLOAT
 
 class CD3D12Device
 {
@@ -87,6 +88,12 @@ public:
   //! SetBackBufferTargets (in a frame).
   void SetOffscreenTargets(ID3D12Resource *pColor, D3D12_CPU_DESCRIPTOR_HANDLE hRTV, D3D12_CPU_DESCRIPTOR_HANDLE hDSV, int nWidth, int nHeight);
   bool IsOffscreen() const { return m_pOffscreen != nullptr; }
+  //! A shadow map of nSize x nSize: R32_TYPELESS (D3D12_SHADOW_MAP_FORMAT, its DSV written to hDSV,
+  //! read as R32_FLOAT), in the state PIXEL_SHADER_RESOURCE while it is not drawn into.
+  bool CreateShadowMap(int nSize, ComPtr<ID3D12Resource> &pDepth, D3D12_CPU_DESCRIPTOR_HANDLE hDSV);
+  //! Draws into a shadow map of CreateShadowMap (depth only, no colour target) until
+  //! SetBackBufferTargets (in a frame).
+  void SetShadowMapTarget(ID3D12Resource *pDepth, D3D12_CPU_DESCRIPTOR_HANDLE hDSV, int nSize);
   //! The size of the targets drawn into.
   int GetTargetWidth() const { return m_pOffscreen ? m_nOffscreenWidth : m_nWidth; }
   int GetTargetHeight() const { return m_pOffscreen ? m_nOffscreenHeight : m_nHeight; }
@@ -120,7 +127,8 @@ private:
   //! Resets the slot's allocator and the list and binds the heap, root signature and targets.
   void OpenCmdList();
   void WaitForFence(uint64 nValue);
-  //! The off screen colour target back to PIXEL_SHADER_RESOURCE; nothing off screen any more.
+  //! The off screen colour target (or shadow map) back to PIXEL_SHADER_RESOURCE; nothing off screen
+  //! any more.
   void EndOffscreen();
 
   ComPtr<IDXGIFactory4> m_pFactory;
@@ -144,7 +152,8 @@ private:
   ComPtr<ID3D12Resource> m_pBackBuffers[D3D12_BACKBUFFERS];
   ComPtr<ID3D12Resource> m_pDepth;
   int m_nBackBuffer = 0;
-  ID3D12Resource *m_pOffscreen = nullptr;           //!< SetOffscreenTargets: the colour target drawn into
+  ID3D12Resource *m_pOffscreen = nullptr;           //!< SetOffscreenTargets: the colour target drawn into (SetShadowMapTarget: the shadow map)
+  bool m_bOffscreenShadowMap = false;               //!< m_pOffscreen is a shadow map
   D3D12_CPU_DESCRIPTOR_HANDLE m_hOffscreenRTV = {}, m_hOffscreenDSV = {};
   int m_nOffscreenWidth = 0, m_nOffscreenHeight = 0;
 

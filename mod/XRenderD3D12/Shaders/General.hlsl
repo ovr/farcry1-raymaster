@@ -41,6 +41,10 @@
 //	      (vParams1.x + saturate(N.L)), clamped to 0..2: N the vertex normal, N'
 //	      the normal map (tex1 at uv0) in its frame (tangent along vTexGenU made
 //	      orthogonal to N, binormal along vTexGenV, the map's y times vParams1.y)
+//	    DF_SHADOWS: the sun's visibility through the draw's shadow maps
+//	      (SunVisibility, Common.hlsli) v: DF_LIGHTING colour = lerp(the vertex
+//	      light without the sun, with it, v) * texture; DF_TEX1_LIGHTMAP rgb *=
+//	      4 * v * tex1 + vAmbient; DF_SHADOW_PASS rgb = colour * tex0, a = 1 - v
 //	    DF_FOG (with vFogParams.w set): linear fog by the distance to the
 //	      camera, per pixel (towards 0.5 with DF_DETAIL_LAYER)
 //
@@ -57,6 +61,7 @@ struct SVertexOutput
   float3 vWorldPos : TEXCOORD2;
   float3 vNormal : TEXCOORD3;   //!< world space, not normalised
   float2 vCliff : TEXCOORD4;    //!< DF_TERRAIN_CLIFF: the weights of the two cliff textures
+  float4 vColorNoSun : TEXCOORD5; //!< DF_SHADOWS with DF_LIGHTING: vColor lit without the sun
 };
 
 SVertexOutput VSMain(SVertexInput In)
@@ -85,10 +90,12 @@ SVertexOutput VSMain(SVertexInput In)
       vVertexColor.rgb *= 2;
     vColor *= vVertexColor;
   }
+  float4 vColorNoSun = vColor;
   if (HasFlag(DF_LIGHTING))
   {
     float3 vN = SafeNormalize(vNormal);
     float3 vLight = 0.5 * g_Draw.vAmbient.rgb + g_Frame.vSunColor.rgb * saturate(dot(vN, g_Frame.vSunDir.xyz));
+    float3 vNoSun = 0.5 * g_Draw.vAmbient.rgb;
     float3 vOthers = 0;
     for (uint i = 0; i < min(g_Draw.nLights, XR_MAX_DRAW_LIGHTS); i++)
     {
@@ -105,10 +112,14 @@ SVertexOutput VSMain(SVertexInput In)
       }
       float3 vThis = g_Draw.vLightColor[i].rgb * saturate(dot(vN, vToLight)) * fAtten;
       if (i == 0)
+      {
         vLight += vThis;
+        vNoSun += vThis;
+      }
       else
         vOthers += saturate(vThis);
     }
+    vColorNoSun.rgb *= 2 * (saturate(vNoSun) + vOthers);
     vColor.rgb *= 2 * (saturate(vLight) + vOthers);
   }
 
@@ -135,6 +146,7 @@ SVertexOutput VSMain(SVertexInput In)
   Out.vWorldPos = vWorldPos;
   Out.vNormal = vNormal;
   Out.vCliff = HasFlag(DF_TERRAIN_CLIFF) ? DecodeVertexColor(In.vColor0).rg : 0;
+  Out.vColorNoSun = vColorNoSun;
   return Out;
 }
 
@@ -157,11 +169,18 @@ float4 PSMain(SVertexOutput In) : SV_Target
   else if (HasFlag(DF_TEX0))
     vTex = SampleTexture(g_Draw.nTex0, nSampler0, In.vTex0);
 
+  float fSun = HasFlag(DF_SHADOWS) ? SunVisibility(In.vWorldPos, In.vNormal, In.vPos.xy) : 1;
+  float4 vVertexColor = In.vColor;
+  if (HasFlag(DF_SHADOWS) && HasFlag(DF_LIGHTING))
+    vVertexColor.rgb = lerp(In.vColorNoSun.rgb, In.vColor.rgb, fSun);
+
   float4 vColor;
   if (HasFlag(DF_TEX0_ALPHA_ONLY))
-    vColor = float4(In.vColor.rgb, In.vColor.a * vTex.a);
+    vColor = float4(vVertexColor.rgb, vVertexColor.a * vTex.a);
   else
-    vColor = In.vColor * vTex;
+    vColor = vVertexColor * vTex;
+  if (HasFlag(DF_SHADOW_PASS))
+    vColor.a = 1 - fSun;
   if (HasFlag(DF_ALPHA_FROM_TEX))
     vColor.a = vTex.a;
 
@@ -169,7 +188,7 @@ float4 PSMain(SVertexOutput In) : SV_Target
   {
     float4 vTex1 = SampleTexture(g_Draw.nTex1, nSampler1, In.vTex1);
     if (HasFlag(DF_TEX1_LIGHTMAP))
-      vColor.rgb *= 4 * vTex1.rgb + g_Draw.vAmbient.rgb;
+      vColor.rgb *= 4 * fSun * vTex1.rgb + g_Draw.vAmbient.rgb;
     else if (HasFlag(DF_TEX1_DETAIL))
       vColor.rgb = 2 * vColor.rgb + vTex1.rgb - 0.5;
     else
@@ -233,5 +252,7 @@ float4 PSMain(SVertexOutput In) : SV_Target
     vColor.rgb = lerp(vFogColor, vColor.rgb, fFog);
   }
 
+  if (HasFlag(DF_SHADOW_DEBUG))
+    vColor = float4(fSun, fSun, fSun, 1);
   return vColor;
 }

@@ -32,6 +32,7 @@ set(XRENDERD3D12_SOURCES
     Draw3D.cpp
     Water.cpp
     FarSprites.cpp
+    Shadows.cpp
     D3D12Device.h
     D3D12Device.cpp
     D3D12Upload.h

@@ -305,6 +305,10 @@ void CScene::AddEf(int nFog, CRendElement *pRE, IShader *pEf, SRenderShaderResou
     pRE->mfPrepare();
   CShader *pSh = ResolveShader(pEf, nTempl);
   const EDrawClass eDC = DrawClassOf(pSh, pRes);
+  // The casters whose shadow maps the frame needs (also of the elements not drawn: the engine
+  // names them with a shadow map element).
+  if (g_pRenderer)
+    g_pRenderer->NoteShadowCasters(pObj);
   if (eDC == eDC_NoDraw)
     return;
 
@@ -407,9 +411,10 @@ void CScene::EndEf3D(int nFlags)
   if (m_nDrawing == 1)
   {
     UpdateScreenFx();
-    // The scenes this one shows (the pictures of new far vegetation sprites, the water
-    // reflection), rendered from here, nested in this one.
+    // The scenes this one shows (the pictures of new far vegetation sprites, the shadow maps, the
+    // water reflection), rendered from here, nested in this one.
     g_pRenderer->BakeSprites();
+    g_pRenderer->UpdateShadowMaps();
     g_pRenderer->UpdateWaterReflection(s.Items);
   }
 
@@ -420,6 +425,8 @@ void CScene::EndEf3D(int nFlags)
     std::vector<SRenderItem> &list = s.Lists[l];
     g_pRenderer->DrawItems(list.data(), (int)list.size(), l);
   }
+  if (m_nDrawing == 1)
+    g_pRenderer->DrawShadowMapDebug();
 
   m_nDrawing--;
   s.ClearItems();

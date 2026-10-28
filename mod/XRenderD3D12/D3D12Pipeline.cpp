@@ -31,6 +31,10 @@ namespace
   //! viewer (LESS_EQUAL test), so the bias is negative.
   constexpr INT DEPTH_BIAS = -16;
   constexpr float SLOPE_SCALED_DEPTH_BIAS = -1.0f;
+  //! The shadow maps' bias: the casters' depths away from the sun, by the slope of the triangle as
+  //! the sun sees it (a constant part is in the receivers' comparison, SDrawConstants::vShadowParams).
+  constexpr INT SHADOW_DEPTH_BIAS = 0;
+  constexpr float SHADOW_SLOPE_SCALED_DEPTH_BIAS = 2.0f;
 
   //! The shader programs by ED3D12Program.
   struct SProgram
@@ -330,16 +334,19 @@ bool CD3D12Pipeline::CreateRootSignature()
   Params[2].DescriptorTable.pDescriptorRanges = Ranges;
   Params[2].ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
 
-  D3D12_STATIC_SAMPLER_DESC Samplers[4];
+  D3D12_STATIC_SAMPLER_DESC Samplers[5];
   Samplers[XR_SAMPLER_LINEAR_WRAP] = StaticSampler(XR_SAMPLER_LINEAR_WRAP, D3D12_FILTER_ANISOTROPIC, D3D12_TEXTURE_ADDRESS_MODE_WRAP);
   Samplers[XR_SAMPLER_LINEAR_CLAMP] = StaticSampler(XR_SAMPLER_LINEAR_CLAMP, D3D12_FILTER_MIN_MAG_MIP_LINEAR, D3D12_TEXTURE_ADDRESS_MODE_CLAMP);
   Samplers[XR_SAMPLER_POINT_WRAP] = StaticSampler(XR_SAMPLER_POINT_WRAP, D3D12_FILTER_MIN_MAG_MIP_POINT, D3D12_TEXTURE_ADDRESS_MODE_WRAP);
   Samplers[XR_SAMPLER_POINT_CLAMP] = StaticSampler(XR_SAMPLER_POINT_CLAMP, D3D12_FILTER_MIN_MAG_MIP_POINT, D3D12_TEXTURE_ADDRESS_MODE_CLAMP);
+  // The shadow maps: a depth comparison, lit beyond the map.
+  Samplers[4] = StaticSampler(4, D3D12_FILTER_COMPARISON_MIN_MAG_LINEAR_MIP_POINT, D3D12_TEXTURE_ADDRESS_MODE_BORDER);
+  Samplers[4].ComparisonFunc = D3D12_COMPARISON_FUNC_LESS_EQUAL;
 
   D3D12_ROOT_SIGNATURE_DESC Desc = {};
   Desc.NumParameters = 3;
   Desc.pParameters = Params;
-  Desc.NumStaticSamplers = 4;
+  Desc.NumStaticSamplers = 5;
   Desc.pStaticSamplers = Samplers;
   Desc.Flags = D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT |
     D3D12_ROOT_SIGNATURE_FLAG_DENY_HULL_SHADER_ROOT_ACCESS |
@@ -452,7 +459,8 @@ ComPtr<ID3D12PipelineState> CD3D12Pipeline::CreatePSO(const SPipelineKey &Key)
     return nullptr;
 
   const SProgram &Program = s_Programs[Key.nProgram];
-  const bool bDepth = Key.nTarget == 0;
+  const bool bDepth = Key.nTarget == 0 || Key.nTarget == 2;
+  const bool bShadowMap = Key.nTarget == 2;
   const uint32 nState = Key.nState;
 
   D3D12_GRAPHICS_PIPELINE_STATE_DESC Desc = {};
@@ -503,7 +511,12 @@ ComPtr<ID3D12PipelineState> CD3D12Pipeline::CreatePSO(const SPipelineKey &Key)
   default:           Raster.CullMode = D3D12_CULL_MODE_NONE; break;
   }
   Raster.FrontCounterClockwise = FRONT_COUNTER_CLOCKWISE;
-  if (Key.bDepthBias && bDepth)
+  if (Key.bDepthBias && bShadowMap)
+  {
+    Raster.DepthBias = SHADOW_DEPTH_BIAS;
+    Raster.SlopeScaledDepthBias = SHADOW_SLOPE_SCALED_DEPTH_BIAS;
+  }
+  else if (Key.bDepthBias && bDepth)
   {
     Raster.DepthBias = DEPTH_BIAS;
     Raster.SlopeScaledDepthBias = SLOPE_SCALED_DEPTH_BIAS;
@@ -546,9 +559,9 @@ ComPtr<ID3D12PipelineState> CD3D12Pipeline::CreatePSO(const SPipelineKey &Key)
   const int nTopology = Key.nTopology;
   Desc.PrimitiveTopologyType = nTopology >= D3D12_PRIMITIVE_TOPOLOGY_TYPE_POINT && nTopology <= D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE ?
     (D3D12_PRIMITIVE_TOPOLOGY_TYPE)nTopology : D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
-  Desc.NumRenderTargets = 1;
-  Desc.RTVFormats[0] = bDepth ? D3D12_BACKBUFFER_FORMAT : DXGI_FORMAT_R8G8B8A8_UNORM;
-  Desc.DSVFormat = bDepth ? D3D12_DEPTH_FORMAT : DXGI_FORMAT_UNKNOWN;
+  Desc.NumRenderTargets = bShadowMap ? 0 : 1;
+  Desc.RTVFormats[0] = bShadowMap ? DXGI_FORMAT_UNKNOWN : bDepth ? D3D12_BACKBUFFER_FORMAT : DXGI_FORMAT_R8G8B8A8_UNORM;
+  Desc.DSVFormat = bShadowMap ? D3D12_SHADOW_MAP_FORMAT : bDepth ? D3D12_DEPTH_FORMAT : DXGI_FORMAT_UNKNOWN;
   Desc.SampleDesc.Count = 1;
   Desc.SampleDesc.Quality = 0;
   Desc.NodeMask = 0;

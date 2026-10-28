@@ -9,7 +9,8 @@
 //	the general program: the diffuse texture lit by the sun
 //	and the object's ambient colour, or by its lightmap; vegetation by its
 //	vertex colours; the terrain with texture coordinates from the world
-//	position; the water by Water.cpp. FOB_NEAREST objects (the first
+//	position; the water by Water.cpp; the shadows by Shadows.cpp (in a
+//	shadow map pass the items are the casters' depth). FOB_NEAREST objects (the first
 //	person weapon) get a projection of their own and the depth range
 //	0..0.1. The particle sprites of the scene are drawn in the blended
 //	list after the water surfaces.
@@ -292,6 +293,23 @@ void CD3D12Renderer::DrawLeafItem(const SRenderItem &it)
   Set4(dc.vAmbient, pObj->m_AmbColor.x, pObj->m_AmbColor.y, pObj->m_AmbColor.z, 1);
   std::optional<D3D12_VERTEX_BUFFER_VIEW> TexCoord1;
 
+  auto Draw = [&]()
+  {
+    if (m_pFrameDump)
+      DumpDraw(dc, Key, pTex);
+    if (Geom->IsIndexed())
+      DrawGeometry(Key, dc, Geom->Topology, Geom->VB, &Geom->IB, Geom->nNumIndices, Geom->nFirstIndex, Geom->nBaseVertex, TexCoord1 ? &*TexCoord1 : nullptr);
+    else
+      DrawGeometry(Key, dc, Geom->Topology, Geom->VB, nullptr, Geom->nNumVertices, Geom->nFirstVertex, 0, TexCoord1 ? &*TexCoord1 : nullptr);
+  };
+  // A shadow map: the depth of the casters.
+  if (m_bShadowMapPass)
+  {
+    if (SetupShadowCasterDraw(Key, dc, it))
+      Draw();
+    return;
+  }
+
   //! Sun and ambient, or the lightmap; vertex colours when there are no normals.
   auto Light = [&]()
   {
@@ -310,6 +328,9 @@ void CD3D12Renderer::DrawLeafItem(const SRenderItem &it)
     }
     else if (HasColor(nFormat))
       dc.nFlags |= DF_VCOLOR;
+    // The sun hidden by the shadow maps of the object's casters.
+    if (dc.nFlags & (DF_LIGHTING | DF_TEX1_LIGHTMAP))
+      SetupShadowReceiver(dc, pObj);
   };
 
   switch (eDC)
@@ -493,6 +514,28 @@ void CD3D12Renderer::DrawLeafItem(const SRenderItem &it)
     Key.bDepthBias = 1;
     break;
   }
+  case eDC_TerrainShadow:
+  {
+    // The shadow of static objects on a terrain sector ("EntityShadowOnTerrain": triangles of the
+    // sector under the casters, over the sector's vertices; the object's m_pShadowCasters lists
+    // the casters): the sector's texture (the one the buffer was given) at the sector's texture
+    // coordinates (u = y * float 2 + float 0, v = x * float 2 + float 1 of the custom data) times
+    // twice the object's colour (the terrain in the shadow), blended over the terrain where the
+    // casters' maps hide the sun; no depth writes, before the detail layers.
+    const float *pCustom = (const float *)pLeaf->m_CustomData;
+    if (!pTex || !pCustom || !SetupShadowReceiver(dc, pObj))
+      return;
+    dc.nFlags = (dc.nFlags & ~DF_TEXMATRIX) | DF_TEXGEN_WORLD | DF_SHADOW_PASS | DF_ALPHATEST;
+    dc.fAlphaRef = 1.0f / 255.0f;
+    Set4(dc.vTexGenU, 0, pCustom[2], 0, pCustom[0]);
+    Set4(dc.vTexGenV, pCustom[2], 0, 0, pCustom[1]);
+    Set4(dc.vColor, 2 * pObj->m_Color.r, 2 * pObj->m_Color.g, 2 * pObj->m_Color.b, 1);
+    dc.nSamplers = XR_SAMPLER_LINEAR_CLAMP;
+    Key.nState = GS_BLSRC_SRCALPHA | GS_BLDST_ONEMINUSSRCALPHA;
+    if (dc.nFlags & DF_SHADOW_DEBUG)
+      dc.nFlags &= ~DF_ALPHATEST;
+    break;
+  }
   case eDC_Water:
     // Not in its own reflection.
     if (m_bReflectionPass || !SetupWaterDraw(Key, dc, it))
@@ -515,16 +558,6 @@ void CD3D12Renderer::DrawLeafItem(const SRenderItem &it)
   // The picture of a far vegetation sprite: where the object is, whatever the texture's alpha.
   if (m_bSpritePass)
     dc.nFlags |= DF_ALPHA_ONE;
-
-  auto Draw = [&]()
-  {
-    if (m_pFrameDump)
-      DumpDraw(dc, Key, pTex);
-    if (Geom->IsIndexed())
-      DrawGeometry(Key, dc, Geom->Topology, Geom->VB, &Geom->IB, Geom->nNumIndices, Geom->nFirstIndex, Geom->nBaseVertex, TexCoord1 ? &*TexCoord1 : nullptr);
-    else
-      DrawGeometry(Key, dc, Geom->Topology, Geom->VB, nullptr, Geom->nNumVertices, Geom->nFirstVertex, 0, TexCoord1 ? &*TexCoord1 : nullptr);
-  };
   Draw();
   // The beach: the second wave.
   if (eDC == eDC_WaterBeach && SetupBeachDraw(Key, dc, 1))
@@ -537,19 +570,21 @@ void CD3D12Renderer::DrawLeafItem(const SRenderItem &it)
 
 void CD3D12Renderer::DumpItem(int nIndex, const SRenderItem &it, int eList)
 {
-  static const char *const s_DrawClasses[] = { "NoDraw", "Opaque", "AlphaTest", "AlphaTestVColor", "VColor", "AlphaBlend", "Additive", "Terrain", "Sky", "Engine", "Water", "WaterBottom", "WaterBeach", "TerrainLayer", "Decal" };
+  static const char *const s_DrawClasses[] = { "NoDraw", "Opaque", "AlphaTest", "AlphaTestVColor", "VColor", "AlphaBlend", "Additive", "Terrain", "Sky", "Engine", "Water", "WaterBottom", "WaterBeach", "TerrainLayer", "Decal",
+                                                "TerrainShadow" };
   const CCObject *pObj = it.pObj;
   const char *szLB = "";
   if (it.pRE->m_Type == eDATA_OcLeaf && static_cast<CREOcLeaf *>(it.pRE)->m_pBuffer)
     szLB = static_cast<CREOcLeaf *>(it.pRE)->m_pBuffer->m_sSource;
   const CTexture *pTex = GetDiffuseTexture(it.pRes);
-  fprintf(m_pFrameDump.get(), "[%d] list %d sort 0x%x %s RE %d shader '%s' tex '%s' lb '%s' pos (%.2f %.2f %.2f) flags 0x%x LM %d LMTC %d mask 0x%x amb (%.2f %.2f %.2f) col (%.2f %.2f %.2f %.2f) res aref %.3f opacity %.2f flags 0x%x\n",
+  fprintf(m_pFrameDump.get(), "[%d] list %d sort 0x%x %s RE %d shader '%s' tex '%s' lb '%s' pos (%.2f %.2f %.2f) flags 0x%x LM %d LMTC %d mask 0x%x amb (%.2f %.2f %.2f) col (%.2f %.2f %.2f %.2f) res aref %.3f opacity %.2f flags 0x%x casters %d\n",
           nIndex, eList, it.nSort, (unsigned)it.eDrawClass < std::size(s_DrawClasses) ? s_DrawClasses[it.eDrawClass] : "?", it.pRE->m_Type,
           it.pShader ? it.pShader->GetName() : "", pTex ? pTex->m_Name.c_str() : "", szLB ? szLB : "",
           pObj->m_Matrix.data[12], pObj->m_Matrix.data[13], pObj->m_Matrix.data[14], pObj->m_ObjFlags, pObj->m_nLMId,
           pObj->m_pLMTCBufferO ? 1 : 0, pObj->m_DynLMMask, pObj->m_AmbColor.x, pObj->m_AmbColor.y, pObj->m_AmbColor.z,
           pObj->m_Color.r, pObj->m_Color.g, pObj->m_Color.b, pObj->m_Color.a, it.pRes ? it.pRes->m_AlphaRef : 0.0f,
-          it.pRes ? it.pRes->m_Opacity : 1.0f, it.pRes ? it.pRes->m_ResFlags : 0);
+          it.pRes ? it.pRes->m_Opacity : 1.0f, it.pRes ? it.pRes->m_ResFlags : 0,
+          pObj->m_pShadowCasters ? reinterpret_cast<const int *>(pObj->m_pShadowCasters)[2] : -1);
 
   // Shader parameters of the object and the resources, the element's custom data.
   auto Params = [](const TArray<SShaderParam> *pParams)
@@ -674,7 +709,8 @@ void CD3D12Renderer::DumpDraw(const SDrawConstants &dc, const SPipelineKey &Key,
 {
   static const char *const s_Flags[] = { "TEX0", "TEX1", "VCOLOR", "VCOLOR_X2", "LIGHTING", "ALPHATEST", "TEXGEN_WORLD", "TEXMATRIX", "FOG",
                                          "TEX1_DETAIL", "TEX1_LIGHTMAP", "ALPHA_FROM_TEX", "CUBE0", "TEX0_ALPHA_ONLY", "SCREEN_POS", "ALPHATEST_LESS", "TEXGEN1_WORLD",
-                                         "ALPHA_ONE", "TEX0_ARRAY", "DETAIL_LAYER", "TERRAIN_CLIFF" };
+                                         "ALPHA_ONE", "TEX0_ARRAY", "DETAIL_LAYER", "TERRAIN_CLIFF", "DETAIL_BUMP", "DECAL_FADE", "SHADOWS",
+                                         "SHADOW_PASS" };
   std::string Flags;
   for (size_t i = 0; i < std::size(s_Flags); i++)
     if (dc.nFlags & (1u << i))
@@ -683,6 +719,8 @@ void CD3D12Renderer::DumpDraw(const SDrawConstants &dc, const SPipelineKey &Key,
   fprintf(f, "    draw: fmt %d state 0x%x cull %d bias %d flags %s tex0 '%s' alpharef %.3f col (%.2f %.2f %.2f %.2f) amb (%.2f %.2f %.2f) lights %u",
           Key.nVertexFormat, Key.nState, Key.nCull, Key.bDepthBias, Flags.c_str(), (dc.nFlags & DF_TEX0) && pTex ? pTex->m_Name.c_str() : "",
           dc.fAlphaRef, dc.vColor[0], dc.vColor[1], dc.vColor[2], dc.vColor[3], dc.vAmbient[0], dc.vAmbient[1], dc.vAmbient[2], dc.nLights);
+  if (dc.nFlags & DF_SHADOWS)
+    fprintf(f, " shadow maps %d", (int)dc.vShadowParams[0]);
   for (uint32 i = 0; i < dc.nLights; i++)
     fprintf(f, " {(%.1f %.1f %.1f %.0f) col (%.2f %.2f %.2f) att (%.3f %.3f %.1f)}", dc.vLightPos[i][0], dc.vLightPos[i][1], dc.vLightPos[i][2],
             dc.vLightPos[i][3], dc.vLightColor[i][0], dc.vLightColor[i][1], dc.vLightColor[i][2], dc.vLightAtten[i][0], dc.vLightAtten[i][1], dc.vLightAtten[i][2]);

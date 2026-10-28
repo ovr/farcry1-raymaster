@@ -471,6 +471,50 @@ public:
   std::vector<SSpriteQuad> m_SpriteQuads;   //!< DrawObjSprites' quads of the call
 
   //////////////////////////////////////////////////////////////////////////
+  // Shadows.cpp: the shadow maps of the static objects
+
+  //! A shadow map of a frustum of the engine (MakeShadowMapFrustum).
+  struct SShadowMap
+  {
+    const void *pFrustum = nullptr;         //!< the frustum it was drawn for
+    ComPtr<ID3D12Resource> pDepth;
+    D3D12_CPU_DESCRIPTOR_HANDLE hDSV = {};
+    int nSRV = -1;                          //!< the texture table index
+    int nSize = 0;
+    float fRadius = 0;                      //!< the radius of its circle in the caster's space
+    Matrix44 LocalToMap;                    //!< the caster's space to the map: x, y -1..1 across the circle, z 0..1 away from the sun
+    bool bEntities = false;                 //!< an entity's map: drawn in every frame its caster is seen
+    int nLastUsedFrame = 0;                 //!< m_nFrames
+    int nDrawnFrame = 0;
+  };
+  //! EF_AddEf: the casters whose shadows fall on an object (CCObject::m_pShadowCasters), for
+  //! UpdateShadowMaps.
+  void NoteShadowCasters(const CCObject *pObj);
+  //! Before the main view is drawn: the maps of the frustums of the casters noted since the last
+  //! time, where they have none.
+  void UpdateShadowMaps();
+  //! The map of a frustum whose caster instance is at vOrigin (an entity's map is drawn there).
+  bool DrawShadowMap(void *pFrustum, const Vec3 &vOrigin);
+  //! In a shadow map pass: the key and constants of a caster's part (its depth, the alpha test
+  //! with its texture's alpha). False: not drawn (blended and other parts).
+  bool SetupShadowCasterDraw(SPipelineKey &Key, SDrawConstants &dc, const SRenderItem &it);
+  //! The maps of the casters of pObj into dc (DF_SHADOWS). False: none is drawn.
+  bool SetupShadowReceiver(SDrawConstants &dc, const CCObject *pObj);
+  //! The map of a frustum, nullptr when it has none.
+  SShadowMap *FindShadowMap(const void *pFrustum);
+  //! The same when the map holds what the frustum shows now (nullptr: it has to be drawn).
+  SShadowMap *FindDrawnShadowMap(const void *pFrustum);
+  void FreeShadowMap(SShadowMap &Map);
+  void ReleaseShadowMaps();
+  //! d3d12_ShadowDebug: the maps of the frame over the main view.
+  void DrawShadowMapDebug();
+
+  std::unordered_map<int, SShadowMap> m_ShadowMaps;   //!< by the ID written into the frustum
+  std::vector<const void *> m_ShadowCasterLists;      //!< NoteShadowCasters: the list2<ShadowMapLightSourceInstance> of the frame
+  int m_nNextShadowMapID = 0x40000000;                //!< the maps' IDs, apart from the texture IDs
+  bool m_bShadowMapPass = false;                      //!< a shadow map is being drawn
+
+  //////////////////////////////////////////////////////////////////////////
   // State (public: the subsystems' files use it)
 
   std::unique_ptr<CD3D12Device> m_pDevice;
@@ -554,6 +598,9 @@ public:
   float CV_d3d12_WaterReflectionScale = 0.5f;   //!< size of the water reflection, a fraction of the screen's
   int CV_d3d12_WaterReflectionFlags = DLD_TERRAIN | DLD_TERRAIN_FULLRES;   //!< what the water reflects (EDrawLowDetailFlags)
   int CV_d3d12_SpriteRes = 128;             //!< size of the far vegetation sprites' textures (made at the level load)
+  int CV_d3d12_Shadows = 1;                 //!< 0: no shadow maps
+  int CV_d3d12_ShadowMapSize = 1024;        //!< size of the shadow maps (0: the engine's, 512)
+  int CV_d3d12_ShadowDebug = 0;             //!< non-zero: the shadow maps of the frame are shown
 };
 
 extern CD3D12Renderer *g_pRenderer;

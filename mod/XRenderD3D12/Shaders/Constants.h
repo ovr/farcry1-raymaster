@@ -10,6 +10,7 @@
 //	  t0, space1: Texture2D   g_Textures[]  (the texture table, D3D12Descriptors.h)
 //	  t0, space2: TextureCube g_Cubes[]     (the same table)
 //	  s0 linear wrap (anisotropic), s1 linear clamp, s2 point wrap, s3 point clamp (static)
+//	  s4 the shadow maps' comparison sampler (LESS_EQUAL, bilinear, white border: lit outside)
 //	Matrices are row major and multiply row vectors (v * M), as Matrix44 of the engine; dxc
 //	compiles with -Zpr, so C++ copies a Matrix44 as it is.
 //
@@ -21,13 +22,17 @@
 #ifdef __cplusplus
 typedef float float4x4_t[16];
 #define XR_FLOAT4X4(name) float name[16]
+#define XR_FLOAT4X4_ARRAY(name, n) float name[n][16]
 #define XR_FLOAT4(name) float name[4]
+#define XR_UINT4(name) uint32 name[4]
 #define XR_FLOAT4_ARRAY(name, n) float name[n][4]
 #define XR_UINT(name) uint32 name
 #define XR_FLOAT(name) float name
 #else
 #define XR_FLOAT4X4(name) float4x4 name
+#define XR_FLOAT4X4_ARRAY(name, n) float4x4 name[n]
 #define XR_FLOAT4(name) float4 name
+#define XR_UINT4(name) uint4 name
 #define XR_FLOAT4_ARRAY(name, n) float4 name[n]
 #define XR_UINT(name) uint name
 #define XR_FLOAT(name) float name
@@ -35,6 +40,8 @@ typedef float float4x4_t[16];
 
 //! The most lights SDrawConstants holds besides the sun.
 #define XR_MAX_DRAW_LIGHTS 16
+//! The most shadow maps a draw samples (DF_SHADOWS).
+#define XR_MAX_DRAW_SHADOWS 4
 
 // SDrawConstants::nFlags
 #define DF_TEX0             0x00000001  //!< sample g_Textures[nTex0] (else white)
@@ -59,6 +66,9 @@ typedef float float4x4_t[16];
 #define DF_TERRAIN_CLIFF    0x00100000  //!< rgb = 2 * rgb * lerp(1, 2 * tex2, w.x) * lerp(1, 2 * tex3, w.y), w = vertex colour rg * vTexGen1V.xy; uv of tex2 = (dot(world pos, vParams0), dot(.., vParams1)), of tex3 with vParams2 / 3
 #define DF_DETAIL_BUMP      0x00200000  //!< with DF_DETAIL_LAYER: tex0 *= clamp(1 + (sun N'.L - sun N.L) / (vParams1.x + saturate(N.L)), 0, 2), N' = the normal map tex1 (uv0) in the frame of N and the texgen rows, its y times vParams1.y
 #define DF_DECAL_FADE       0x00400000  //!< a *= 1 - f(r), r = saturate(2 * |uv0 - 0.5|), f(r) = (r + smoothstep(0, 1, r)) / 2: a decal fading out from its centre to a circle
+#define DF_SHADOWS          0x00800000  //!< the sun is shadowed by the draw's shadow maps (SunVisibility): DF_LIGHTING lerps to the vertex light without the sun, DF_TEX1_LIGHTMAP scales the lightmap by the visibility
+#define DF_SHADOW_PASS      0x01000000  //!< with DF_SHADOWS: rgb = colour * tex0, a = 1 - visibility (a shadow blended over the terrain)
+#define DF_SHADOW_DEBUG     0x02000000  //!< with DF_SHADOWS: the result is the sun's visibility in grey (d3d12_ShadowDebug 2)
 #define DF_DETAIL_LAYER     0x00080000  //!< rgb = lerp(0.5, tex0, colour a * saturate((vParams0.y - d) * vParams0.z)), a = 1, fogged towards 0.5 (d: distance to the camera)
 
 #define XR_SAMPLER_LINEAR_WRAP  0
@@ -115,6 +125,9 @@ struct SDrawConstants
   XR_UINT(nTex6);
   XR_FLOAT(fPad1);
   XR_FLOAT4X4(mParams0);          //!< a matrix of the other programs (Water.hlsl)
+  XR_FLOAT4X4_ARRAY(mShadow, XR_MAX_DRAW_SHADOWS);  //!< DF_SHADOWS: world to a shadow map: x, y -1..1 across its circle, z depth 0..1 (away from the sun)
+  XR_UINT4(nShadowTex);           //!< their depth textures (texture table indices)
+  XR_FLOAT4(vShadowParams);       //!< x the number of maps, y depth bias, z filter radius in texels, w offset along the normal (m)
 };
 
 #endif

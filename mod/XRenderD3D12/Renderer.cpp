@@ -122,6 +122,10 @@ void CD3D12Renderer::RegisterVariables()
                      "What the water reflection shows: DLD_* flags of I3DEngine::DrawLowDetail (4160: the sky and the terrain)");
   iConsole->Register("d3d12_SpriteRes", &CV_d3d12_SpriteRes, 128, VF_DUMPTODISK,
                      "Size of the far vegetation sprites' textures, 32 to 256 (made when a level is loaded)");
+  iConsole->Register("d3d12_Shadows", &CV_d3d12_Shadows, 1, VF_DUMPTODISK, "Shadow maps of the static objects (e_shadow_maps); 0 off");
+  iConsole->Register("d3d12_ShadowMapSize", &CV_d3d12_ShadowMapSize, 1024, VF_DUMPTODISK,
+                     "Size of the shadow maps, 128 to 4096 (0: the engine's); the maps made from then on");
+  iConsole->Register("d3d12_ShadowDebug", &CV_d3d12_ShadowDebug, 0, 0, "1: shows the shadow maps of the frame at the top left (depth in red); 2: the receivers show the sun's visibility in grey");
 }
 
 //////////////////////////////////////////////////////////////////////////
@@ -235,10 +239,11 @@ bool CD3D12Renderer::DeleteContext(WIN_HWND hWnd)
 int CD3D12Renderer::GetFeatures()
 {
   // No RFT_RGBA: vertex colours are B, G, R, A. RFT_OCCLUSIONTEST, or the engine makes no
-  // occlusion test elements.
+  // occlusion test elements; RFT_SHADOWMAP_SELFSHADOW, or objects get no shadow casters (only the
+  // terrain receives shadow maps).
   return RFT_MULTITEXTURE | RFT_BUMP | RFT_HWGAMMA | RFT_COMPRESSTEXTURE | RFT_ALLOWANISOTROPIC | RFT_SUPPORTZBIAS
     | RFT_DETAILTEXTURE | RFT_OCCLUSIONTEST | RFT_HW_RADEON | RFT_HW_VS | RFT_HW_PS20 | RFT_HW_PS30
-    | RFT_DIRECTACCESSTOVIDEOMEMORY;
+    | RFT_DIRECTACCESSTOVIDEOMEMORY | RFT_SHADOWMAP_SELFSHADOW;
 }
 
 int CD3D12Renderer::GetMaxTextureMemory()
@@ -333,6 +338,7 @@ void CD3D12Renderer::Release()
   ReleaseWaterResources();
   ReleaseWaterReflection();
   ReleaseSprites();
+  ReleaseShadowMaps();
   m_pDetailTexture = nullptr;   // released with every texture
   m_pBeachTexture = nullptr;
   m_nWaveTexture = 0;
@@ -907,12 +913,6 @@ void CD3D12Renderer::SetType(char type)
 unsigned int CD3D12Renderer::Make3DSprite(int nTexSize, float fAngleStep, IStatObj * pStatObj)
 {
   return 0;
-}
-
-ShadowMapFrustum * CD3D12Renderer::MakeShadowMapFrustum(ShadowMapFrustum * lof, ShadowMapLightSource * pLs, const Vec3 & obj_pos, list2<IStatObj*> * pStatObjects, int shadow_type)
-{
-  // The engine gets its own frustum back (shadow maps are not drawn yet).
-  return lof;
 }
 
 void CD3D12Renderer::EnableSwapBuffers(bool bEnable)

@@ -369,9 +369,53 @@ static const int nBin64Offset_StatInstGroup_FadeSize = 0x32;   // bool bFadeSize
 //     (0x40, 4x4 floats: looking from the light's position at vObjPos, rows as in D3D with the
 //     translation in the last row), the ID of the depth texture (0x80, int) and 1 into the ints at
 //     0xD0 (-1 before) and 0xD4 (0 before). For the static caster seen, nothing changed in the
-//     frames after that. Not written by the renderer: 0xB0 (-1), 0xB4 (512), 0xC8 (a pointer to an
-//     engine object) and 0xE8 (a pointer to a list2 of pointers).
+//     frames after that. Not written by the renderer: 0xB0 (-1), 0xB4 (512: the map's size in
+//     texels), 0xC8 (a pointer to the caster's IStatObj) and 0xE8 (a pointer to a list2<IStatObj *>
+//     the engine allocates with room for 128 before the call). MakeShadowMapFrustum appends the
+//     objects of pStatObjects to that list: they are what the map shows.
+//   Space: the frustum, vObjPos and the light's position are in the caster's object space without
+//   its scale and rotation. A caster instance at world position P with scale s (the members of
+//   ShadowMapLightSourceInstance) puts a point x of that space at P + s * x: the engine uses one
+//   frustum and one map for every instance of the same object.
+//   Entities that cast a shadow (vehicles, characters, ...) get frustums the engine makes itself,
+//   without MakeShadowMapFrustum: the same members, with the list of 0xE8 NULL, the entity at 0xC0
+//   (IEntityRender *), a list2<IEntityRender *> * of the entities to draw into the map at 0xF0
+//   (seen: the entity itself), 1 at 0xAC, and the space of the entity's position (vObjPos about
+//   0, the instance's position the entity's, scale 1). The entities are drawn as they are now, so
+//   the renderer draws their maps again in every frame. Their field of view covers the entity's
+//   box and can be wider than half the depth range (far - near). IEntityRender::DrawEntity of a
+//   character adds nothing unless SRendParams::dwFObjFlags has FOB_RENDER_INTO_SHADOWMAP.
+//   Static objects get casters (m_pShadowCasters) only when GetFeatures has
+//   RFT_SHADOWMAP_SELFSHADOW; without it only the terrain receives shadow maps.
 //   The receivers seen are "EntityShadowOnTerrain" leaf buffers (shader "terrainshadowpass") added
-//   with AddRE and a CCObject whose m_pShadowCasters lists the casters.
+//   with AddRE and a CCObject whose m_pShadowCasters lists the casters, and static objects drawn
+//   with SRendParams::pShadowMapCasters (CCObject::m_pShadowCasters). The terrain receiver: indices
+//   into its sector's vertices (the sector's leaf buffer is its vertex container), the sector's
+//   texture as its custom texture, the sector's texture coordinates in its custom data (u = y / 64
+//   + float 0, v = x / 64 + float 1, float 2 = 1 / 64), one AddRE per caster object, whose
+//   m_Color holds a shadow colour (rgb about the sky's ambient) and m_SortId the distance; the
+//   object's m_TempVars[0..2] are the frustum's centre in the world (x and y; z on the terrain).
+//   Each frame the engine also adds a CREShadowMapGen element (EF_AddEf, shader "shadowmapgen")
+//   with a CCObject whose m_pShadowCasters lists casters whose maps must be ready; it draws nothing.
+static const int nBin64Offset_ShadowMapFrustum_Proj = 0x00;          // 4x4 floats, written by the renderer
+static const int nBin64Offset_ShadowMapFrustum_View = 0x40;          // 4x4 floats, written by the renderer
+static const int nBin64Offset_ShadowMapFrustum_DepthTexID = 0x80;    // int, written by the renderer
+static const int nBin64Offset_ShadowMapFrustum_LightSource = 0x88;   // ShadowMapLightSource *
+static const int nBin64Offset_ShadowMapFrustum_Fov = 0x94;           // float, degrees
+static const int nBin64Offset_ShadowMapFrustum_Near = 0x98;          // float
+static const int nBin64Offset_ShadowMapFrustum_Far = 0x9C;           // float
+static const int nBin64Offset_ShadowMapFrustum_ObjPos = 0xA0;        // Vec3
+static const int nBin64Offset_ShadowMapFrustum_Size = 0xB4;          // int: texels
+static const int nBin64Offset_ShadowMapFrustum_Entity = 0xC0;        // IEntityRender * (an entity's frustum)
+static const int nBin64Offset_ShadowMapFrustum_Owner = 0xC8;         // IStatObj *
+static const int nBin64Offset_ShadowMapFrustum_Drawn = 0xD0;         // int: -1, 1 once drawn
+static const int nBin64Offset_ShadowMapFrustum_Drawn2 = 0xD4;        // int: 0, 1 once drawn
+static const int nBin64Offset_ShadowMapFrustum_Models = 0xE8;        // list2<IStatObj *> *
+static const int nBin64Offset_ShadowMapFrustum_Entities = 0xF0;      // list2<IEntityRender *> * (an entity's frustum)
+static const int nBin64Offset_ShadowMapLightSource_Pos = 0x00;       // Vec3
+static const int nBin64Offset_ShadowMapLightSource_Frustums = 0x20;  // list2<ShadowMapFrustum> (the list itself)
+static const int nBin64Offset_ShadowMapLightSourceInstance_LightSource = 0x00;  // ShadowMapLightSource *
+static const int nBin64Offset_ShadowMapLightSourceInstance_Pos = 0x08;          // Vec3, world space
+static const int nBin64Offset_ShadowMapLightSourceInstance_Scale = 0x14;        // float
 
 } // namespace RendererStructures
