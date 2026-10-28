@@ -31,11 +31,14 @@
 //	  cubemap = <file>        the cube map, its +x face (default: the first
 //	                          *_posx.dds under textures/)
 //	  gloss = <file>          the gloss map (default: none)
+//	  ambient = <r g b>       the ambient colour (default: 0.25 0.25 0.25)
 //	  light = <r g b>         the light's colour (default: 0.9 0.9 0.9)
 //	  lightpos = <x y z>      the light's position (default: above and left of
 //	                          the camera); the grid is in the plane y = 0
 //	  lightspec = <r g b>     the light's specular colour (default: 0 0 0, as a
 //	                          CDLight is made)
+//	  sun = 1                 the light is the sun (DLF_DIRECTIONAL | DLF_SUN),
+//	                          from the direction of its position
 //	  specular = <r g b>      the materials' specular colour (default: 0.8 0.8 0.8)
 //	  shininess = <n>         the materials' specular power (default: 32)
 //	  exec = <commands>       console commands before the materials are made,
@@ -109,9 +112,11 @@ public:
     m_CubeMap = Scene.Has("cubemap") ? Scene.Get("cubemap") : Host.FindFirstFileDeep("textures/", "*_posx.dds");
     Host.Log("DemoShaders: texture '%s', bump '%s', cube map '%s'", m_Texture.c_str(), m_Bump.c_str(), m_CubeMap.c_str());
     m_Gloss = Scene.Get("gloss");
+    m_Ambient = ColorOf(Scene, "ambient", m_Ambient);
     m_LightColor = ColorOf(Scene, "light", m_LightColor);
     m_LightPos = Scene.GetFloats("lightpos");
     m_LightSpecColor = ColorOf(Scene, "lightspec", m_LightSpecColor);
+    m_bSun = Scene.GetFloat("sun", 0) != 0;
     m_LightMat.Front.m_Specular = ColorOf(Scene, "specular", CFColor(0.8f, 0.8f, 0.8f, 1));
     m_LightMat.Front.m_SpecShininess = Scene.GetFloat("shininess", 32);
 
@@ -157,11 +162,18 @@ public:
     Light.m_Flags = DLF_POINT;
     Light.m_Origin = m_LightPos.size() >= 3 ? Vec3(m_LightPos[0], m_LightPos[1], m_LightPos[2]) : vEye + Vec3(-fHalfX * 0.5f, fDist * 0.2f, fHalfZ * 1.5f);
     Light.m_fRadius = Light.m_fEndRadius = fDist * 10;
+    if (m_bSun)
+    {
+      // The sun: far away in the direction of the light's position from the grid's centre.
+      Light.m_Flags = DLF_DIRECTIONAL | DLF_SUN;
+      Light.m_Origin = GetNormalized(Light.m_Origin) * 10000.0f;
+      Light.m_fRadius = Light.m_fEndRadius = 100000.0f;
+    }
     Light.m_Color = m_LightColor;
     Light.m_SpecColor = m_LightSpecColor;
 
     SRendParams Base;
-    Base.vAmbientColor = Vec3(0.25f, 0.25f, 0.25f);
+    Base.vAmbientColor = Vec3(m_Ambient.r, m_Ambient.g, m_Ambient.b);
     Host.BeginScene(Cam, Base, &Light, 1);
     const float fTurn = DEG2RAD(2.0f * (nFrame - 1));
     Matrix44 Mats[nMaxCells];
@@ -284,9 +296,11 @@ private:
   IStatObj *m_pObj = NULL;
   IFFont *m_pFont = NULL;
   std::string m_Texture, m_Bump, m_CubeMap, m_Gloss;
+  CFColor m_Ambient = CFColor(0.25f, 0.25f, 0.25f, 1);
   CFColor m_LightColor = CFColor(0.9f, 0.9f, 0.9f, 1);
   CFColor m_LightSpecColor = CFColor(0, 0, 0, 1);
   std::vector<float> m_LightPos;
+  bool m_bSun = false;
   //! The lighting of the materials (white, specular 0.8 and shininess 32 by default).
   SLightMaterial m_LightMat;
   std::vector<SCell> m_Cells;
