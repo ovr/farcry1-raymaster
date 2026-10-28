@@ -72,16 +72,13 @@ float Sign(float f)
 constexpr float REFLECTION_MAX_INTERVAL = 0.3f;
 constexpr float REFLECTION_MAX_NEAR = 16.0f;
 
-// The water's optics: absorption per metre (red goes first; weak, as the levels paint the sea floor
-// in the colours of the water above it), the light scattered per metre, the colour of deep water in
-// full light where the level gives none (in the ocean's fog volume), the visibility under water as
-// a share of the fog volume's distance (along the light's path down to the sea floor and back up;
-// fitted to the look of the levels), and how far the waves move the refracted picture (a fraction
-// of the screen).
+// The optics of water without a fog volume: absorption per metre (red goes first; weak, as the
+// levels paint the sea floor in the colours of the water above it), the light scattered per metre,
+// the colour of deep water in full light where the level gives none (in the ocean's fog volume);
+// and how far the waves move the refracted picture (a fraction of the screen).
 constexpr float WATER_ABSORPTION[3] = { 0.030f, 0.024f, 0.005f };
 constexpr float WATER_TURBIDITY = 0.005f;
 constexpr float WATER_SCATTER[3] = { 0.18f, 0.28f, 0.54f };
-constexpr float WATER_VISIBILITY = 2.0f / 3.0f;
 constexpr float WATER_DISPLACEMENT = 0.03f;
 
 // A beach wave runs up the shore in this many seconds (BEACH_WAVES of them at a time); the front of
@@ -556,8 +553,7 @@ bool CD3D12Renderer::SetupWaterDraw(SPipelineKey &Key, SDrawConstants &dc, const
   const float fReflect = std::clamp(GetObjectParam(pObj, "reflectamount", 1.0f), 0.0f, 1.0f);
   const bool bVolume = !IsOcean(it);
   const SFogVolume *pFV = bVolume ? nullptr : m_pScene->GetOceanFogVolume();
-  const float fInvVisibility = pFV && pFV->fMaxFogDist > 0 ? 1 / (pFV->fMaxFogDist * WATER_VISIBILITY) : 0.0f;
-  Set4(dc.vParams0, (fBumpX + fBumpY) * 1.2f, fReflect, (float)CV_d3d12_WaterDebug, fInvVisibility);
+  Set4(dc.vParams0, (fBumpX + fBumpY) * 1.2f, fReflect, (float)CV_d3d12_WaterDebug, std::max(CV_d3d12_WaterSunGlint, 0.0f));
   dc.nTex5 = GetWaveTexture();
 
   // The sky box the scene's sky drew (as it drew it).
@@ -589,10 +585,15 @@ bool CD3D12Renderer::SetupWaterDraw(SPipelineKey &Key, SDrawConstants &dc, const
        WATER_DISPLACEMENT);
 
   // The colour of deep water: the ocean's that of its fog volume (the one with caustics) as the level
-  // gives it, else lit by the world colour, the sun's height and the sky; a water volume (not one of
-  // the terrain's water shaders) lit by what is behind it, as it may be indoors.
+  // gives it, laid over the scene behind by its layer and distance (1 % of the scene left at twice
+  // the distance); else lit by the world colour, the sun's height and the sky; a water volume (not
+  // one of the terrain's water shaders) lit by what is behind it, as it may be indoors.
   if (pFV)
+  {
     Set4(dc.vParams3, pFV->Color.r, pFV->Color.g, pFV->Color.b, 0);
+    dc.vParams2[0] = pFV->fFogLayerZ;
+    dc.vParams2[1] = logf(100.0f) / (2 * std::max(pFV->fMaxFogDist, 1.0f));
+  }
   else
   {
     const float fLight = 0.4f + 0.6f * std::clamp(m_SunDir[2], 0.0f, 1.0f);

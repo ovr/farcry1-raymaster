@@ -9,25 +9,30 @@
 //	    slopes (made by the renderer, Water.cpp);
 //	  - refraction: the copy of the colour buffer, displaced by the normal,
 //	    seen through the water between the surface and the scene behind it
-//	    (the copy of the depth buffer): the light of the scene behind went
+//	    (the copy of the depth buffer). The ocean with a fog volume lays the
+//	    fog volume's colour over the scene behind as the fog volumes of the
+//	    game do (OceanFog): by the depth of the point under the fog layer
+//	    and the camera's height above it, times the point's distance along
+//	    the view axis. Other water: the light of the scene behind went
 //	    down to it through the water and comes up along the view ray, so it
 //	    keeps exp(-extinction * (light path + view path)), the light path
 //	    being its depth under the surface along the refracted sun; the water
 //	    adds its own colour, the light it scatters towards the camera, by
 //	    1 - exp(-extinction * view path) (extinction = absorption +
-//	    turbidity); besides, the scene behind fades out linearly along the
-//	    light's whole path (down to it and back up), gone at the visibility
-//	    under water, where the water shows only its own colour;
+//	    turbidity);
 //	  - reflection: the scene where the colour and depth copies show it
 //	    (a ray marched in screen space), else the ocean's planar reflection
 //	    (the scene seen by the camera mirrored in the water plane), else the
 //	    sky box in the reflected direction (the box as the sky draws it;
 //	    without a sky, none); the scene is looked up along the reflection of
 //	    a calmer normal (half the slopes), so that it ripples rather than
-//	    breaks up. Weighted by a fresnel term (Schlick's: 2 % looking
-//	    straight down, all of it at grazing angles) and the reflection
-//	    amount;
-//	  - the sun's highlight on the waves;
+//	    breaks up. Weighted by a fresnel term (the ocean as the game's
+//	    terrain water: a quarter looking straight down, times twice the
+//	    vertex alpha, which the 3D engine lowers in shallow water near the
+//	    camera; other water Schlick's: 2 %; all of it at grazing angles)
+//	    and the reflection amount;
+//	  - the sun's highlight on the waves (off as in the game; a console
+//	    variable of our own);
 //	  - near the shore (close to the camera) the surface fades into the
 //	    scene behind it, so the water has no hard edge; seen from below,
 //	    the scene above shows through the window of total internal
@@ -37,14 +42,16 @@
 //
 //	SDrawConstants:
 //	  vParams0  x wave slope scale, y reflection amount, z d3d12_WaterDebug,
-//	            w 1 / the visibility under water (0: no limit)
+//	            w the strength of the sun's highlight (d3d12_WaterSunGlint)
 //	  vParams1  x z1 of the sky box sides, y 1 when there is a sky box,
 //	            z the sky box's alpha (blends it towards the fog colour),
 //	            w 1 when there is a planar reflection
-//	  vParams2  rgb extinction per metre, w refraction displacement
-//	  vParams3  rgb the colour of deep water; w 0 as it is, 1 lit by the
-//	            scene behind it (water volumes, which may be indoors), 2 lit
-//	            by the sky
+//	  vParams2  rgb extinction per metre (with a fog volume: x the z of its
+//	            layer, y its density per metre of distance), w refraction
+//	            displacement
+//	  vParams3  rgb the colour of deep water; w 0 that of the ocean's fog
+//	            volume (OceanFog), 1 lit by the scene behind it (water
+//	            volumes, which may be indoors), 2 lit by the sky
 //	  nTex0     colour copy, nTex1 depth copy (R24 of D24S8)
 //	  nTex2..4  the sky box textures: top, _12, _34
 //	  nTex5     the wave slopes (red dH/du, green dH/dv; 128 flat, 32 the RMS)
@@ -104,6 +111,25 @@ float3 WaveNormal(float2 vPos, float fTime, float fScale)
     vSlope += (s.x * d + s.y * e) * Weights[i];
   }
   return normalize(float3(-vSlope * fScale, 1));
+}
+
+//! How much of its colour the ocean's fog volume lays over a point fDepth metres under its layer,
+//! fDistance metres away along the view axis, seen from fHeight metres above the layer: the share
+//! for the depth, which grows from 0 at the layer to all of it 5 m down, faster the nearer the
+//! camera is to the layer (all of it under the layer), times the share for the distance: 1 % left
+//! at twice the fog volume's distance (fDensity = ln 100 / (2 * distance)).
+float OceanFog(float fDepth, float fHeight, float fDistance, float fDensity)
+{
+  if (fDepth <= 0)
+    return 0;
+  float fShare = 1;
+  if (fHeight > 0)
+  {
+    float s = pow(saturate(fHeight / 5), 0.25);
+    float k = 1 - 0.7 * s, p = 1 + 0.4 * s;
+    fShare = saturate((1 - exp(-k * pow(fDepth, p))) / (1 - exp(-k * pow(5.0, p))));
+  }
+  return fShare * (1 - exp(-fDensity * fDistance));
 }
 
 //! The sky box (as the sky draws it) in direction vDir, which points up or level.
@@ -275,26 +301,48 @@ float4 PSMain(SWaterOutput In) : SV_Target
   float3 vColor;
   if (!bBelow)
   {
-    float3 T = exp(-vExtinction * fPath) * saturate(1 - (fPath + fLightPath) * g_Draw.vParams0.w);
-    float3 vRefracted = vScene * T * exp(-vExtinction * fLightPath) + vScatter * (1 - T);
+    float3 vRefracted;
+    if (g_Draw.vParams3.w == 0)
+    {
+      // The fog volume over the scene behind (the point there along the displaced ray).
+      float3 vBehind = vCamera - V * (fDistance * fBehind / max(fSurface, 1e-3));
+      float fLayer = g_Draw.vParams2.x;
+      vRefracted = lerp(vScene, vScatter, OceanFog(fLayer - vBehind.z, vCamera.z - fLayer, fBehind, g_Draw.vParams2.y));
+    }
+    else
+    {
+      float3 T = exp(-vExtinction * fPath);
+      vRefracted = vScene * T * exp(-vExtinction * fLightPath) + vScatter * (1 - T);
+    }
 
-    // The reflection: 2 % straight down, all of it at grazing angles.
-    float NdotV = saturate(dot(N, V));
-    float F = (0.02 + 0.98 * pow(1 - NdotV, 5)) * g_Draw.vParams0.y;
+    // The reflection, all of it at grazing angles: the ocean as the game's terrain water shaders
+    // (a quarter straight down, by the calmer normal; times twice the alpha of the mesh the 3D
+    // engine gives, which fades it out in shallow water near the camera), other water by
+    // Schlick's term (2 %).
+    float3 Ns = normalize(float3(N.xy * 0.5, N.z));
+    float F;
+    if (g_Draw.vParams3.w != 1)
+    {
+      float c = saturate(dot(Ns, V));
+      F = (0.9932 + c * (-0.3742 + c * (-1.1438 + c * 0.7584))) * saturate(In.vColor.a * 2);
+    }
+    else
+      F = 0.02 + 0.98 * pow(1 - saturate(dot(N, V)), 5);
+    F *= g_Draw.vParams0.y;
     float3 R = reflect(-V, N);
-    float3 Rs = reflect(-V, normalize(float3(N.xy * 0.5, N.z)));
+    float3 Rs = reflect(-V, Ns);
     float3 vReflected = g_Draw.vParams1.y != 0 ? SkyBoxColor(R) : vScatter;
     if (g_Draw.vParams1.w != 0)
       vReflected = PlanarReflection(In.vWorldPos, Rs, fDistance * 0.3);
     float4 vSSR = ScreenReflection(In.vWorldPos, Rs, g_Frame.vScreen.xy * vInvSize);
     vReflected = lerp(vReflected, vSSR.rgb, vSSR.w);
 
-    // The sun's highlight, as much of it as the facets reflect (fresnel at the half vector): faint
-    // looking down on the water, glaring towards a low sun.
+    // The sun's highlight (d3d12_WaterSunGlint), as much of it as the facets reflect (fresnel at the
+    // half vector): faint looking down on the water, glaring towards a low sun.
     float3 H = normalize(L + V);
     float fSunF = 0.02 + 0.98 * pow(1 - saturate(dot(V, H)), 5);
     float fSpec = (pow(saturate(dot(N, H)), 700) * 40 + pow(saturate(dot(N, H)), 90) * 1.5) * fSunF;
-    float3 vSun = g_Frame.vSunColor.rgb * fSpec * saturate(L.z * 4);
+    float3 vSun = g_Frame.vSunColor.rgb * fSpec * saturate(L.z * 4) * g_Draw.vParams0.w;
 
     // The shore: the surface fades in over the first 15 cm of water, up to 40 m away; beyond 100 m
     // it covers everything (the coarse distant terrain comes close to the surface in places).

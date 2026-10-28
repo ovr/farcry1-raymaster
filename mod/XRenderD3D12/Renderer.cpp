@@ -118,6 +118,8 @@ void CD3D12Renderer::RegisterVariables()
                      "Water surfaces show one term: 1 refraction, 2 reflection, 3 water thickness (0-2 m: black-white), 4 normal, 5 screen space reflection hits, 6 their colour, 7 the planar reflection, "
                      "8 the scene behind, 9 view path (red, 0-32 m), depth (green, 0-16 m) and fresnel (blue)");
   iConsole->Register("d3d12_Caustics", &CV_d3d12_Caustics, 1, VF_DUMPTODISK, "Caustics on the terrain under the ocean; 0 off");
+  iConsole->Register("d3d12_WaterSunGlint", &CV_d3d12_WaterSunGlint, 0.0f, VF_DUMPTODISK,
+                     "The sun's highlight on water surfaces: its strength (0: none, as the game draws water)");
   iConsole->Register("d3d12_GpuTimes", &CV_d3d12_GpuTimes, 0, 0,
                      "N: every N frames, the average GPU time of the frame's sections (shadow maps, water reflection, opaque, "
                      "water, blended, ...) and the time between frames to the console and XRenderD3D12_gpu.txt; 0 off");
