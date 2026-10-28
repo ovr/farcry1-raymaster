@@ -597,6 +597,24 @@ void CD3D12Renderer::DumpItem(int nIndex, const SRenderItem &it, int eList)
     fprintf(f, "\n");
   }
 
+  // Light mapped elements: the chunk's vertices and indices, the object's light map texture
+  // coordinates (count, those of the chunk's first vertex).
+  if (pLeaf && pLeaf->m_pChunk && pObj->m_pLMTCBufferO)
+  {
+    const CMatInfo *pC = pLeaf->m_pChunk;
+    const CVertexBuffer *pVB = pObj->m_pLMTCBufferO->m_pVertexBuffer;
+    const CLeafBuffer *pVC = pLeaf->m_pBuffer ? pLeaf->m_pBuffer->GetVertexContainer() : nullptr;
+    FILE *f = m_pFrameDump.get();
+    fprintf(f, "    chunk: vertices %d + %d of %d, indices %d + %d; light map coordinates %d", pC->nFirstVertId, pC->nNumVerts,
+            pVC && pVC->m_pSecVertBuffer ? pVC->m_pSecVertBuffer->m_NumVerts : 0, pC->nFirstIndexId, pC->nNumIndices, pVB ? pVB->m_NumVerts : 0);
+    if (pVB && pVB->m_VS[VSF_GENERAL].m_VData && pC->nFirstVertId >= 0 && pC->nFirstVertId < pVB->m_NumVerts)
+    {
+      const float *uv = (const float *)pVB->m_VS[VSF_GENERAL].m_VData + 2 * (size_t)pC->nFirstVertId;
+      fprintf(f, ", first (%g %g)", uv[0], uv[1]);
+    }
+    fprintf(f, "\n");
+  }
+
   // Water elements: the object's matrix and the first vertices, word by word (float and hex).
   if (pLeaf && pLeaf->m_pBuffer && (it.eDrawClass == eDC_Water || it.eDrawClass == eDC_WaterBottom || it.eDrawClass == eDC_WaterBeach))
   {

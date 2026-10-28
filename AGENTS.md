@@ -311,7 +311,9 @@ it as well: it holds local, machine-specific instructions and is not committed (
   other texture slots, `*` when loaded), and for each draw what it got (vertex format, states,
   shader flags, textures, colour, lights), and each draw of particle sprites (a run of sprites with the same texture and blending: their count, texture,
   state, sort, the first one's ambient colour, a vertex colour's bytes); for a terrain sector, its
-  custom texture binds and custom data. With
+  custom texture binds and custom data; for a light mapped element, its chunk's vertex and index
+  ranges and the object's light map texture coordinates (count, those of the chunk's first
+  vertex). With
   `XRENDERTRACED_EXEC_LEVEL="d3d12_DumpFrame 1"` and `XRENDERTRACED_EXEC_LEVEL_FRAME=<n - 1>` it
   is the frame that `XRENDERTRACED_CAPTURE=<n>` captures of the original.
 - `d3d12_WaterDebug <n>` shows one term of the water's colour instead of the whole: 1 refraction,
