@@ -87,6 +87,9 @@
 //	      with DF2_FOG_BLACK, 1 with DF2_MODULATE)
 //	    DF2_HEAT (heat vision): before the fog, the colour through HeatVision
 //	      (Common.hlsli)
+//	  DF2_MATERIAL_LIGHT lights DF_LIGHTING per pixel as the fixed function
+//	  lights a material (MaterialLighting): saturate(ambient + vColor * the
+//	  lights) * texture + the highlights of vSpecular.
 //	  DF2_NO_SUN leaves the sun out of DF_LIGHTING (a light pass of its own).
 //	  DF2_SCOPE_LENS (the glass of a scope) replaces the pixel shader with
 //	  ScopeLens.
@@ -174,6 +177,45 @@ float3 DrawLighting(float3 vPos, float3 vN, bool bPerPixel, out float3 vNoSunLig
   return fScale * (saturate(vLight) + vOthers);
 }
 
+//! The light of a material as the fixed function lights it (DF2_MATERIAL_LIGHT) at vPos with the
+//! normalised normal vN: vDiffuse = saturate(ambient + vColor * the sum of colour * N.L *
+//! attenuation), vSpecular = saturate(vSpecular * the sum of the specular colour * (N.H)^power *
+//! attenuation) where N.L > 0, H halfway between the light and the eye, power vParams3.x; the sun's
+//! terms times its visibility fSun, point lights attenuated as per vertex.
+void MaterialLighting(float3 vPos, float3 vN, float fSun, out float3 vDiffuse, out float3 vSpecular)
+{
+  float3 vToEye = SafeNormalize(g_Frame.vCameraPos.xyz - vPos);
+  float fPower = max(g_Draw.vParams3.x, 1);
+  float3 vLight = 0, vSpec = 0;
+  if (!HasFlag2(DF2_NO_SUN))
+  {
+    float fNL = dot(vN, g_Frame.vSunDir.xyz);
+    vLight += fSun * g_Frame.vSunColor.rgb * saturate(fNL);
+    if (fNL > 0)
+      vSpec += fSun * g_Frame.vSunSpec.rgb * pow(saturate(dot(vN, SafeNormalize(g_Frame.vSunDir.xyz + vToEye))), fPower);
+  }
+  for (uint i = 0; i < min(g_Draw.nLights, XR_MAX_DRAW_LIGHTS); i++)
+  {
+    float4 vLightPos = g_Draw.vLightPos[i];
+    float4 vAtten = g_Draw.vLightAtten[i];
+    float3 vToLight = vLightPos.xyz;
+    float fAtten = 1;
+    if (vLightPos.w == 1)
+    {
+      vToLight = vLightPos.xyz - vPos;
+      float fDist = length(vToLight);
+      fAtten = fDist < vAtten.z ? 1 / (vAtten.x + vAtten.y * fDist) : 0;
+      vToLight /= max(fDist, 1e-4);
+    }
+    float fNL = dot(vN, vToLight);
+    vLight += g_Draw.vLightColor[i].rgb * saturate(fNL) * fAtten;
+    if (fNL > 0)
+      vSpec += g_Draw.vLightSpec[i].rgb * pow(saturate(dot(vN, SafeNormalize(vToLight + vToEye))), fPower) * fAtten;
+  }
+  vDiffuse = saturate(g_Draw.vAmbient.rgb + g_Draw.vColor.rgb * vLight);
+  vSpecular = saturate(g_Draw.vSpecular.rgb * vSpec);
+}
+
 //! How much of a fog volume's colour covers the point vPos of an object in it (DF2_FOG_VOLUME):
 //! the fog lies under the volume's layer (vParams0.x). Seen from inside, every point under the
 //! layer is in it; seen from above, the fog of a point grows from nothing at the layer to all of
@@ -251,7 +293,7 @@ SVertexOutput VSMain(SVertexInput In)
     vColor *= vVertexColor;
   }
   float4 vColorNoSun = vColor;
-  if (HasFlag(DF_LIGHTING) && !HasFlag(DF_PIXEL_LIGHTING))
+  if (HasFlag(DF_LIGHTING) && !HasFlag(DF_PIXEL_LIGHTING) && !HasFlag2(DF2_MATERIAL_LIGHT))
   {
     float3 vNoSunLight, vSunSpec, vOtherSpec;
     vColor.rgb *= DrawLighting(vWorldPos, SafeNormalize(vNormal), false, vNoSunLight, vSunSpec, vOtherSpec);
@@ -339,6 +381,12 @@ float4 PSMain(SVertexOutput In) : SV_Target
     vVertexColor.rgb *= lerp(vNoSunLight, vLight, fSun);
     if (HasFlag(DF_SPECULAR))
       vSpecular = 2 * g_Draw.vSpecular.rgb * (g_Draw.vSpecular.w > 0 ? vTex.a : 1) * (fSun * vSunSpec + vOtherSpec);
+  }
+  else if (HasFlag(DF_LIGHTING) && HasFlag2(DF2_MATERIAL_LIGHT))
+  {
+    float3 vDiffuse;
+    MaterialLighting(In.vWorldPos, HasFlag(DF_BUMP) ? vBumpN : SafeNormalize(In.vNormal), fSun, vDiffuse, vSpecular);
+    vVertexColor.rgb = vDiffuse;
   }
   else if (HasFlag(DF_SHADOWS) && HasFlag(DF_LIGHTING))
     vVertexColor.rgb = lerp(In.vColorNoSun.rgb, In.vColor.rgb, fSun);

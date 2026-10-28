@@ -486,11 +486,13 @@ void CScene::EndEf3D(int nFlags)
   {
     UpdateScreenFx();
     // The scenes this one shows (the pictures of new far vegetation sprites, the shadow maps, the
-    // water reflection), rendered from here, nested in this one.
+    // environment cubes, the water reflection), rendered from here, nested in this one.
     g_pRenderer->GpuSection("sprites");
     g_pRenderer->BakeSprites();
     g_pRenderer->GpuSection("shadow maps");
     g_pRenderer->UpdateShadowMaps();
+    g_pRenderer->GpuSection("environment cubes");
+    g_pRenderer->UpdateEnvCubes(s.Items);
     g_pRenderer->GpuSection("water reflection");
     g_pRenderer->UpdateWaterReflection(s.Items);
   }

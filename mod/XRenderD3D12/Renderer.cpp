@@ -101,6 +101,8 @@ void CD3D12Renderer::RegisterVariables()
   iConsole->Register("r_WaterUpdateFactor", &CV_r_WaterUpdateFactor, 0.01f, VF_DUMPTODISK);
   iConsole->Register("r_WaterUpdateDistance", &CV_r_WaterUpdateDistance, 2.0f, 0);
   iConsole->Register("r_WaterUpdateDeltaAngle", &CV_r_WaterUpdateDeltaAngle, 5.0f, 0);
+  iConsole->Register("r_EnvCMResolution", &CV_r_EnvCMResolution, 2, VF_DUMPTODISK);
+  iConsole->Register("r_EnvCMupdateInterval", &CV_r_EnvCMupdateInterval, 0.1f, VF_DUMPTODISK);
   iConsole->Register("r_DisableSfx", &CV_r_DisableSfx, 0, VF_DUMPTODISK);
   iConsole->Register("r_ResetScreenFx", &CV_r_ResetScreenFx, 0, 0);
   iConsole->Register("r_TexResolution", &CV_r_TexResolution, 0, VF_DUMPTODISK);
@@ -344,6 +346,7 @@ void CD3D12Renderer::Release()
     m_pShaders->Shutdown();
   ReleaseWaterResources();
   ReleaseWaterReflection();
+  ReleaseEnvCubes();
   ReleaseSprites();
   ReleaseShadowMaps();
   ReleaseScreenEffects();

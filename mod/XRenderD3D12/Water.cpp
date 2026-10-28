@@ -306,7 +306,7 @@ bool CD3D12Renderer::SetupCausticsDraw(SPipelineKey &Key, SDrawConstants &dc, co
   // The fog pass of a sector under the ocean (Scene.cpp), in daylight.
   const SFogVolume *pFV = m_pScene->GetFogVolume(it.nFog);
   const float fSun = std::clamp(m_SunDir[2] * 4, 0.0f, 1.0f);
-  if (!CV_d3d12_Caustics || !pFV || !pFV->bCaustics || fSun <= 0 || m_bReflectionPass || m_bSpritePass)
+  if (!CV_d3d12_Caustics || !pFV || !pFV->bCaustics || fSun <= 0 || m_bReflectionPass || m_bEnvCubePass || m_bSpritePass)
     return false;
   const int nTex = GetCausticsTexture();
   if (nTex < 0)

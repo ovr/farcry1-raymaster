@@ -86,6 +86,11 @@ public:
   //! written to hRTV and hDSV.
   bool CreateOffscreenTargets(int nWidth, int nHeight, ComPtr<ID3D12Resource> &pColor, ComPtr<ID3D12Resource> &pDepth,
                               D3D12_CPU_DESCRIPTOR_HANDLE hRTV, D3D12_CPU_DESCRIPTOR_HANDLE hDSV);
+  //! The same for a cube of nSize: pColor an array of the six faces (one RTV per face in hRTV, in
+  //! the order of D3D12_TEXTURECUBE_FACE), pDepth one face's size; drawn a face at a time with
+  //! SetOffscreenTargets.
+  bool CreateCubeTargets(int nSize, ComPtr<ID3D12Resource> &pColor, ComPtr<ID3D12Resource> &pDepth, const D3D12_CPU_DESCRIPTOR_HANDLE hRTV[6],
+                         D3D12_CPU_DESCRIPTOR_HANDLE hDSV);
   //! Draws into targets of CreateOffscreenTargets instead of the back buffer, all of them, until
   //! SetBackBufferTargets (in a frame). hDSV may be empty: a colour target alone (a render target
   //! of CD3D12Upload::CreateRenderTarget; SPipelineKey::nTarget 1 for R8G8B8A8).

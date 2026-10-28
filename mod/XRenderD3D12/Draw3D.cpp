@@ -344,6 +344,9 @@ void CD3D12Renderer::DrawLeafItem(const SRenderItem &it)
   const EDrawClass eDC = it.eDrawClass;
   if (eDC == eDC_NoDraw || eDC == eDC_Engine || eDC == eDC_Sky)
     return;
+  // The objects that show the scene around them are not in its environment cubes.
+  if (m_bEnvCubePass && pSh->GetProps().eEnvMap == EEnvMap::Auto)
+    return;
   // The fog volume pass: the element once more, with the ID of the fog volume it is in, in the
   // sort group eS_FogShader (the object of a static one has FOB_FOGPASS), and the volume's cap
   // ("foglayer"); drawn with r_VolumetricFog. The fog of the ocean's volume over what is under it
@@ -367,7 +370,8 @@ void CD3D12Renderer::DrawLeafItem(const SRenderItem &it)
   Key.nState = GS_DEPTHWRITE;
   Key.nProgram = eD3D12P_General;
   Key.nVertexFormat = (uint8)Geom->nVertexFormat;
-  Key.nCull = CullOf(GetCullMode(pSh, pRes), Det3(World) < 0);
+  // A face of an environment cube is mirrored (EnvCubes.cpp).
+  Key.nCull = CullOf(GetCullMode(pSh, pRes), (Det3(World) < 0) != m_bEnvCubePass);
   // The water reflection sees the land from below the water: both sides, so that where the waves move
   // the reflection over a shore, it shows the land rather than the sky behind it.
   if (m_bReflectionPass)
@@ -394,13 +398,15 @@ void CD3D12Renderer::DrawLeafItem(const SRenderItem &it)
   // unlit: whole (TemplReflCMDecal), signed (- 0.5, TemplReflCMDecalAddSig), a tenth of it
   // (TemplGlassCM, 0.098 for TemplGlassCM_FP). The glass sees the cube through itself (the view
   // vector refracted with the ratio 1.05) and reflected, mixed by F = saturate(0.2 + 2 *
-  // (1 - N.V)^2); not lit.
+  // (1 - N.V)^2); not lit. The auto cube map is the cube of the scene around the object
+  // (EnvCubes.cpp); before it has one, the default cube.
   const SShaderProps &Props = pSh->GetProps();
   if (Props.eEnvMap != EEnvMap::None)
   {
-    if (CTexture *pCube = GetEnvCubeMap(it.pRes))
+    const int nAutoCube = Props.eEnvMap == EEnvMap::Auto ? GetEnvCubeSRV(it) : -1;
+    if (CTexture *pCube = nAutoCube < 0 ? GetEnvCubeMap(it.pRes) : nullptr; pCube || nAutoCube >= 0)
     {
-      if (Props.eEnvMap != EEnvMap::Cube && (dc.nFlags & DF_TEX0))
+      if (Props.eEnvMap != EEnvMap::Cube && Props.eEnvMap != EEnvMap::Auto && (dc.nFlags & DF_TEX0))
       {
         const float k = Props.eEnvMap == EEnvMap::Glass ? 0.1f : Props.eEnvMap == EEnvMap::GlassFixed ? 25.0f / 255.0f : 1.0f;
         dc.nFlags2 |= DF2_ADD_TEX4;
@@ -413,7 +419,7 @@ void CD3D12Renderer::DrawLeafItem(const SRenderItem &it)
         Set4(dc.vParams2, 2, 2, 0.2f, 1.05f);
       }
       dc.nFlags = (dc.nFlags & ~DF_TEX0) | DF_CUBE0;
-      dc.nTex0 = pCube->GetSRV();
+      dc.nTex0 = pCube ? pCube->GetSRV() : nAutoCube;
       dc.nSamplers = XR_SAMPLER_LINEAR_CLAMP;
       pTex = pCube;
     }
@@ -592,6 +598,16 @@ void CD3D12Renderer::DrawLeafItem(const SRenderItem &it)
     Light();
     const CFColor Color = LitColor();
     Set4(dc.vColor, Color.r * pObj->m_Color.r, Color.g * pObj->m_Color.g, Color.b * pObj->m_Color.b, 1);
+    // The auto cube map is lit as the fixed function lights the material: the object's ambient
+    // colour plus the material's colour times the lights, and the highlights of its specular colour.
+    if (Props.eEnvMap == EEnvMap::Auto && (dc.nFlags & DF_LIGHTING))
+    {
+      const SLightMaterial *pMat = it.pRes ? it.pRes->m_LMaterial : nullptr;
+      dc.nFlags2 |= DF2_MATERIAL_LIGHT;
+      Set4(dc.vAmbient, pObj->m_AmbColor.x, pObj->m_AmbColor.y, pObj->m_AmbColor.z, 1);
+      Set4(dc.vSpecular, pMat ? pMat->Front.m_Specular.r : 0, pMat ? pMat->Front.m_Specular.g : 0, pMat ? pMat->Front.m_Specular.b : 0, 0);
+      dc.vParams3[0] = pMat ? pMat->Front.m_SpecShininess : 0;
+    }
     if (eDC == eDC_AlphaTest || GetAlphaRef(pSh, pRes) > 0)
     {
       dc.nFlags |= DF_ALPHATEST;
@@ -828,13 +844,14 @@ void CD3D12Renderer::DrawLeafItem(const SRenderItem &it)
     break;
   }
   case eDC_Water:
-    // Not in its own reflection.
-    if (m_bReflectionPass || !SetupWaterDraw(Key, dc, it))
+    // Not in its own reflection, nor in the environment cubes (it shows the scene copied from the
+    // screen).
+    if (m_bReflectionPass || m_bEnvCubePass || !SetupWaterDraw(Key, dc, it))
       return;
     pTex = nullptr;
     break;
   case eDC_WaterBeach:
-    if (m_bReflectionPass || !SetupBeachDraw(Key, dc, 0))
+    if (m_bReflectionPass || m_bEnvCubePass || !SetupBeachDraw(Key, dc, 0))
       return;
     pTex = m_pBeachTexture;
     break;

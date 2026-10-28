@@ -75,6 +75,9 @@ constexpr STemplateEntry s_Templates[] =
   { "templreflcmdecal",                "",                              eS_Opaque,                kOpaque2,                               0,              eDC_Opaque,           eCULL_Back },
   { "templreflcmdecal_reflamountopacity", "",                           eS_Opaque,                kOpaque2,                               0,              eDC_Opaque,           eCULL_Back },
   { "templreflcmdecaladdsig",          "",                              eS_Opaque,                kOpaque2,                               0,              eDC_Opaque,           eCULL_Back },
+  { "templreflenvcm",                  "",                              eS_Opaque,                kOpaque2,                               0,              eDC_Opaque,           eCULL_Back },
+  { "templbumpreflenvcm",              "templreflenvcm",                eS_Opaque,                kOpaque2,                               0,              eDC_Opaque,           eCULL_Back },
+  { "templglassdispersionenvcm",       "templreflenvcm",                eS_Opaque,                kOpaque2,                               0,              eDC_Opaque,           eCULL_Back },
   { "templtextureshiftt02",            "",                              eS_Opaque,                kOpaque2,                               0,              eDC_Opaque,           eCULL_Back, 0.0f,         0.2f },
   { "templtextureshiftt05",            "",                              eS_Opaque,                kOpaque2,                               0,              eDC_Opaque,           eCULL_Back, 0.0f,         0.5f },
   { "lavavolume",                      "",                              eS_Opaque,                kOpaque2,                               0,              eDC_Opaque,           eCULL_Back },
@@ -157,6 +160,10 @@ constexpr STemplateLighting s_TemplateLighting[] =
   { "templreflcmdecal",                ELighting::Vertex,   EGlow::None, EEnvMap::CubeDecal },
   { "templreflcmdecal_reflamountopacity", ELighting::Vertex, EGlow::None, EEnvMap::CubeDecal },
   { "templreflcmdecaladdsig",          ELighting::Vertex,   EGlow::None, EEnvMap::CubeAddSigned },
+  // The scene around the object (rendered into a cube) times the vertex lighting.
+  { "templreflenvcm",                  ELighting::Vertex,   EGlow::None, EEnvMap::Auto },
+  { "templbumpreflenvcm",              ELighting::Vertex,   EGlow::None, EEnvMap::Auto },
+  { "templglassdispersionenvcm",       ELighting::Vertex,   EGlow::None, EEnvMap::Auto },
   { "templglasscm",                    ELighting::None,     EGlow::None, EEnvMap::Glass },
   { "templglasscm_fp",                 ELighting::None,     EGlow::None, EEnvMap::GlassFixed },
   // No lights: the texture times the object's ambient colour, or the texture alone (also added).

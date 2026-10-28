@@ -474,6 +474,35 @@ public:
   Matrix44 m_ReflectionViewProj;            //!< world to clip of the mirrored camera (without the water clip)
 
   //////////////////////////////////////////////////////////////////////////
+  // EnvCubes.cpp: the cubes of the scene around the objects of TemplReflEnvCM (EEnvMap::Auto)
+
+  //! A cube of the scene seen from a point.
+  struct SEnvCube
+  {
+    ComPtr<ID3D12Resource> pColor, pDepth;
+    D3D12_CPU_DESCRIPTOR_HANDLE hRTV[6] = {}, hDSV = {};
+    int nSRV = -1;                          //!< the texture table index (a TEXTURECUBE view)
+    int nSize = 0;
+    Vec3 vPos = Vec3(0, 0, 0);              //!< where it is seen from
+    int nFaces = 0;                         //!< faces drawn since it was made (6: all)
+    int nNextFace = 0;                      //!< the face redrawn next
+    float fFaceTime = 0;                    //!< ITimer time of the last face drawn
+    int nUsedFrame = -1;                    //!< m_nFrames of the last frame an object used it
+  };
+  //! Before the main view is drawn (Items: its render items): the cubes of its objects with an auto
+  //! cube map, their faces redrawn as r_EnvCMupdateInterval says.
+  void UpdateEnvCubes(std::span<const SRenderItem> Items);
+  //! Face nFace of a cube: the 3D engine renders the scene (DrawLowDetail) from the cube's point.
+  void DrawEnvCubeFace(SEnvCube &Cube, int nFace);
+  //! The texture table index of the cube of an item with an auto cube map, -1 without one.
+  int GetEnvCubeSRV(const SRenderItem &it) const;
+  void FreeEnvCube(SEnvCube &Cube);
+  void ReleaseEnvCubes();
+
+  std::vector<SEnvCube> m_EnvCubes;
+  bool m_bEnvCubePass = false;              //!< a face of a cube is being rendered
+
+  //////////////////////////////////////////////////////////////////////////
   // FarSprites.cpp: the far vegetation sprites (MakeSprite, DrawObjSprites)
 
   //! Before the main view is drawn: the pictures of the objects MakeSprite got since the last time.
@@ -701,6 +730,8 @@ public:
   float CV_r_WaterUpdateFactor = 0.01f;     //!< the water reflection is redrawn after this many seconds per metre to the water, at most 0.3 s,
   float CV_r_WaterUpdateDistance = 2;       //!< or when the camera moved this far,
   float CV_r_WaterUpdateDeltaAngle = 5;     //!< or turned by this many degrees
+  int CV_r_EnvCMResolution = 2;             //!< the environment cubes' faces are 64 << this texels wide (0 to 2)
+  float CV_r_EnvCMupdateInterval = 0.1f;    //!< seconds between two faces of an environment cube
   int CV_r_DisableSfx = 0;
   int CV_r_ResetScreenFx = 0;
   int CV_r_TexResolution = 0;         //!< mip levels dropped from loaded textures

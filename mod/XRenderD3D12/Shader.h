@@ -131,6 +131,7 @@ enum class EEnvMap : uint8
   CubeAddSigned,          //!< cube map * light + texture - 0.5
   Glass,                  //!< the cube map seen through (refracted) and reflected, by a fresnel term, + 0.1 * texture
   GlassFixed,             //!< cube map + 0.098 * texture
+  Auto,                   //!< the scene around the object rendered into a cube (EnvCubes.cpp) * light
 };
 
 //! What a shader is.

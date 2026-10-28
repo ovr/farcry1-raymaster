@@ -402,6 +402,52 @@ bool CD3D12Device::CreateOffscreenTargets(int nWidth, int nHeight, ComPtr<ID3D12
   return true;
 }
 
+bool CD3D12Device::CreateCubeTargets(int nSize, ComPtr<ID3D12Resource> &pColor, ComPtr<ID3D12Resource> &pDepth, const D3D12_CPU_DESCRIPTOR_HANDLE hRTV[6],
+                                     D3D12_CPU_DESCRIPTOR_HANDLE hDSV)
+{
+  if (!m_pDevice || nSize <= 0 || !hDSV.ptr || std::any_of(hRTV, hRTV + 6, [](const D3D12_CPU_DESCRIPTOR_HANDLE &h) { return !h.ptr; }))
+    return false;
+  D3D12_HEAP_PROPERTIES Heap = {};
+  Heap.Type = D3D12_HEAP_TYPE_DEFAULT;
+  D3D12_RESOURCE_DESC Desc = {};
+  Desc.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
+  Desc.Width = nSize;
+  Desc.Height = nSize;
+  Desc.DepthOrArraySize = 6;
+  Desc.MipLevels = 1;
+  Desc.Format = D3D12_BACKBUFFER_FORMAT;
+  Desc.SampleDesc.Count = 1;
+  Desc.Flags = D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET;
+  D3D12_CLEAR_VALUE ColorClear = {};
+  ColorClear.Format = D3D12_BACKBUFFER_FORMAT;
+  if (Failed(m_pDevice->CreateCommittedResource(&Heap, D3D12_HEAP_FLAG_NONE, &Desc, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE,
+    &ColorClear, IID_PPV_ARGS(&pColor)), "CreateCommittedResource (cube colour)"))
+    return false;
+  Desc.DepthOrArraySize = 1;
+  Desc.Format = D3D12_DEPTH_FORMAT;
+  Desc.Flags = D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL;
+  D3D12_CLEAR_VALUE Clear = {};
+  Clear.Format = D3D12_DEPTH_FORMAT;
+  Clear.DepthStencil.Depth = 1.0f;
+  if (Failed(m_pDevice->CreateCommittedResource(&Heap, D3D12_HEAP_FLAG_NONE, &Desc, D3D12_RESOURCE_STATE_DEPTH_WRITE, &Clear, IID_PPV_ARGS(&pDepth)),
+    "CreateCommittedResource (cube depth)"))
+  {
+    pColor.Reset();
+    return false;
+  }
+  for (UINT i = 0; i < 6; i++)
+  {
+    D3D12_RENDER_TARGET_VIEW_DESC View = {};
+    View.Format = D3D12_BACKBUFFER_FORMAT;
+    View.ViewDimension = D3D12_RTV_DIMENSION_TEXTURE2DARRAY;
+    View.Texture2DArray.FirstArraySlice = i;
+    View.Texture2DArray.ArraySize = 1;
+    m_pDevice->CreateRenderTargetView(pColor.Get(), &View, hRTV[i]);
+  }
+  m_pDevice->CreateDepthStencilView(pDepth.Get(), nullptr, hDSV);
+  return true;
+}
+
 void CD3D12Device::SetOffscreenTargets(ID3D12Resource *pColor, D3D12_CPU_DESCRIPTOR_HANDLE hRTV, D3D12_CPU_DESCRIPTOR_HANDLE hDSV, int nWidth, int nHeight)
 {
   if (!m_bInFrame || !pColor)

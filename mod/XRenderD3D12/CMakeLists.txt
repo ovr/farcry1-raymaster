@@ -31,6 +31,7 @@ set(XRENDERD3D12_SOURCES
     Draw.cpp
     Draw3D.cpp
     Water.cpp
+    EnvCubes.cpp
     FarSprites.cpp
     Shadows.cpp
     PostFx.cpp

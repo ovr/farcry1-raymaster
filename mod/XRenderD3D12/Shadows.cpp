@@ -450,7 +450,7 @@ bool CD3D12Renderer::SetupShadowCasterDraw(SPipelineKey &Key, SDrawConstants &dc
 
 bool CD3D12Renderer::SetupShadowReceiver(SDrawConstants &dc, const CCObject *pObj)
 {
-  if (!CV_d3d12_Shadows || !pObj->m_pShadowCasters || m_bShadowMapPass || m_bSpritePass)
+  if (!CV_d3d12_Shadows || !pObj->m_pShadowCasters || m_bShadowMapPass || m_bSpritePass || m_bEnvCubePass)
     return false;
   const SRawList2 &Casters = *reinterpret_cast<const SRawList2 *>(pObj->m_pShadowCasters);
   uint32 n = 0;
