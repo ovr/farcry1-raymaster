@@ -545,18 +545,28 @@ public:
   //////////////////////////////////////////////////////////////////////////
   // PostFx.cpp: the screen effects (CScene::GetScreenFx)
 
+  //! A blur of the scene: the copy of the back buffer reduced by a whole factor, then blurred.
+  struct SPostBlur
+  {
+    CD3D12Texture *pTex[2] = {};  //!< the result in [0], and a scratch
+    int nWidth = 0, nHeight = 0;  //!< their size
+    int nFactor = 1;              //!< the back buffer's size over theirs
+  };
+
   //! After the main view's 3D scene: the screen effects asked for, over the scene drawn.
   void DrawScreenEffects();
-  //! The blur targets of the back buffer's size (made when it changes). False: none.
-  bool EnsurePostTargets();
+  //! The targets of Blur for the back buffer reduced by nFactor (made when it changes). False: none.
+  bool EnsurePostBlur(SPostBlur &Blur, int nFactor);
+  //! The scene into Blur.pTex[0]: reduced, then a gaussian of fSigma of its texels across and down.
+  void DrawPostBlur(SPostBlur &Blur, float fSigma);
   //! A pass of the post program into pTarget (one of the blur targets).
   void DrawPostPass(CD3D12Texture *pTarget, const SDrawConstants &dc);
+  void ReleasePostBlur(SPostBlur &Blur);
   void ReleaseScreenEffects();
 
-  CD3D12Texture *m_pPostBlur[2] = {};       //!< the scene reduced and blurred (the result in [0]), and a scratch
-  CD3D12Texture *m_pPostGhost = nullptr;    //!< the flash bang's afterimage: the blur at the start of the flash
-  int m_nPostWidth = 0, m_nPostHeight = 0;  //!< their size
-  int m_nPostFactor = 1;                    //!< the back buffer's size over theirs
+  SPostBlur m_PostGlow;                     //!< about POST_BLUR_ROWS rows: night vision's glow, the flash's afterimage
+  SPostBlur m_PostSoft;                     //!< the screen blur's (its own radius)
+  CD3D12Texture *m_pPostGhost = nullptr;    //!< the flash bang's afterimage: the glow blur at the start of the flash
   bool m_bFlashGhost = false;               //!< m_pPostGhost holds the current flash's afterimage
 
   //////////////////////////////////////////////////////////////////////////

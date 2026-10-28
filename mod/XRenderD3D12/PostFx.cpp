@@ -14,9 +14,11 @@
 //	    over an afterimage (the blurred scene at the start of the flash) and
 //	    a bright spot at the flash's position (FlashPos, FlashSize: the
 //	    virtual 800 x 600 screen) that shrinks as it fades.
-//	The blur: the copy of the back buffer reduced by a whole factor to
-//	about POST_BLUR_ROWS rows (so that it looks the same at every
-//	resolution), then a gaussian of 2 of its texels across and down.
+//	The blurs: the copy of the back buffer reduced by a whole factor, then a
+//	gaussian across and down. The glow (night vision, the afterimage) is
+//	reduced to about POST_BLUR_ROWS rows and blurred by 2 of its texels, so
+//	it looks the same at every resolution; the screen blur's radius grows
+//	slower than the screen (ScreenBlurSigma).
 //
 //////////////////////////////////////////////////////////////////////
 
@@ -30,8 +32,10 @@
 namespace
 {
 
-//! The rows of the blur targets: the back buffer's height over a whole factor, about this much.
+//! The rows of the glow blur's targets: the back buffer's height over a whole factor, about this much.
 constexpr int POST_BLUR_ROWS = 192;
+//! The glow blur's gaussian, in its texels.
+constexpr float POST_GLOW_SIGMA = 2;
 
 void Set4(float v[4], float x, float y, float z, float w)
 {
@@ -40,6 +44,14 @@ void Set4(float v[4], float x, float y, float z, float w)
 
 //! A triangle over the whole target (clip space).
 const float s_FullScreen[3][3] = { { -1, -1, 0 }, { -1, 3, 0 }, { 3, -1, 0 } };
+
+//! The screen blur's gaussian in pixels of a back buffer nHeight rows high: a part fixed in
+//! pixels and a part of the screen, 5.5 at 768 rows, 10 at 2160.
+float ScreenBlurSigma(int nHeight)
+{
+  const float fScreen = nHeight / 242.0f;
+  return sqrtf(4.49f * 4.49f + fScreen * fScreen);
+}
 
 //! The flash bang's look by t, the part of the flash still to come (1 to 0): the scene's share,
 //! the afterimage's, the white added and the spot's strength. White to t 0.74; the spot is
@@ -86,32 +98,49 @@ void CD3D12Renderer::DrawScreenEffects()
     return;
   const int w = m_pDevice->GetWidth(), h = m_pDevice->GetHeight();
 
-  // The blur of the scene; at the start of a flash, it becomes the afterimage.
+  // The glow blur; at the start of a flash, it becomes the afterimage.
   const bool bCapture = fx.bFlashBang && !m_bFlashGhost;
-  if ((fx.bNightVision || bBlur || bCapture) && EnsurePostTargets())
+  bool bGlow = false, bSoft = false;
+  if ((fx.bNightVision || bCapture) && EnsurePostBlur(m_PostGlow, std::max((h + POST_BLUR_ROWS / 2) / POST_BLUR_ROWS, 1)))
   {
-    SDrawConstants dc = DefaultDrawConstants();
-    dc.nFlags = POST_DOWNSAMPLE;
-    dc.nTex0 = (uint32)m_nSceneColorSRV;
-    Set4(dc.vParams0, 1.0f / m_nPostWidth, 1.0f / m_nPostHeight, (float)((m_nPostFactor + 1) / 2), 0);
-    DrawPostPass(m_pPostBlur[0], dc);
-    dc.nFlags = POST_BLUR;
-    dc.nTex0 = (uint32)m_pPostBlur[0]->m_nSRV;
-    Set4(dc.vParams1, 1.0f / m_nPostWidth, 0, 0, 0);
-    DrawPostPass(m_pPostBlur[1], dc);
-    dc.nTex0 = (uint32)m_pPostBlur[1]->m_nSRV;
-    Set4(dc.vParams1, 0, 1.0f / m_nPostHeight, 0, 0);
-    DrawPostPass(m_pPostBlur[0], dc);
+    DrawPostBlur(m_PostGlow, POST_GLOW_SIGMA);
+    bGlow = true;
     if (bCapture)
     {
-      dc.nFlags = POST_DOWNSAMPLE;
-      dc.nTex0 = (uint32)m_pPostBlur[0]->m_nSRV;
-      dc.vParams0[2] = 1;
-      DrawPostPass(m_pPostGhost, dc);
-      m_bFlashGhost = true;
+      CD3D12Texture *pGlow = m_PostGlow.pTex[0];
+      if (m_pPostGhost && (m_pPostGhost->m_nWidth != pGlow->m_nWidth || m_pPostGhost->m_nHeight != pGlow->m_nHeight))
+      {
+        m_pUpload->ReleaseTexture(m_pPostGhost);
+        m_pPostGhost = nullptr;
+      }
+      if (!m_pPostGhost)
+        m_pPostGhost = m_pUpload->CreateRenderTarget(pGlow->m_nWidth, pGlow->m_nHeight, DXGI_FORMAT_R8G8B8A8_UNORM);
+      if (m_pPostGhost && m_pPostGhost->m_nSRV >= 0)
+      {
+        SDrawConstants dc = DefaultDrawConstants();
+        dc.nFlags = POST_DOWNSAMPLE;
+        dc.nTex0 = (uint32)pGlow->m_nSRV;
+        Set4(dc.vParams0, 1.0f / pGlow->m_nWidth, 1.0f / pGlow->m_nHeight, 1, 0);
+        DrawPostPass(m_pPostGhost, dc);
+        m_bFlashGhost = true;
+      }
     }
-    m_pDevice->SetBackBufferTargets();
   }
+  // The screen blur's own: a factor that leaves about 2 texels of its gaussian.
+  if (bBlur)
+  {
+    const float fSigma = ScreenBlurSigma(h);
+    const int nFactor = std::max((int)lroundf(fSigma / 2), 1);
+    if (EnsurePostBlur(m_PostSoft, nFactor))
+    {
+      // the reduction is a box of nFactor pixels: its variance is part of the gaussian's
+      const float fBox = (nFactor * nFactor - 1) / 12.0f;
+      DrawPostBlur(m_PostSoft, sqrtf(std::max(fSigma * fSigma - fBox, 0.25f)) / nFactor);
+      bSoft = true;
+    }
+  }
+  if (bGlow || bSoft || bCapture)
+    m_pDevice->SetBackBufferTargets();
 
   SPipelineKey Key = {};
   Key.nProgram = eD3D12P_Post;
@@ -120,12 +149,13 @@ void CD3D12Renderer::DrawScreenEffects()
   SDrawConstants dc = DefaultDrawConstants();
   dc.nFlags = POST_EFFECTS;
   dc.nTex0 = (uint32)m_nSceneColorSRV;
-  dc.nTex1 = m_pPostBlur[0] ? (uint32)m_pPostBlur[0]->m_nSRV : (uint32)m_nSceneColorSRV;
+  dc.nTex1 = bGlow ? (uint32)m_PostGlow.pTex[0]->m_nSRV : (uint32)m_nSceneColorSRV;
   dc.nTex2 = m_pPostGhost && m_bFlashGhost ? (uint32)m_pPostGhost->m_nSRV : dc.nTex1;
+  dc.nTex3 = bSoft ? (uint32)m_PostSoft.pTex[0]->m_nSRV : (uint32)m_nSceneColorSRV;
   Set4(dc.vParams0, 1.0f / w, 1.0f / h, bFade ? fx.fFadeAlpha : 0.0f, (float)(m_nFrames & 0xFFFF));
-  if (fx.bNightVision && m_pPostBlur[0])
+  if (fx.bNightVision && bGlow)
     dc.nFlags |= POST_NIGHTVISION;
-  if (bBlur && m_pPostBlur[0])
+  if (bSoft)
   {
     dc.nFlags |= POST_SCREENBLUR;
     Set4(dc.vParams1, fx.fBlurColor[0], fx.fBlurColor[1], fx.fBlurColor[2], std::min(fx.fBlurAmount, 1.0f));
@@ -144,29 +174,55 @@ void CD3D12Renderer::DrawScreenEffects()
   DrawImmediate(Key, dc, D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST, VERTEX_FORMAT_P3F, s_FullScreen, 3);
 }
 
-bool CD3D12Renderer::EnsurePostTargets()
+bool CD3D12Renderer::EnsurePostBlur(SPostBlur &Blur, int nFactor)
 {
   if (!m_pDevice || !m_pUpload)
     return false;
   const int w = m_pDevice->GetWidth(), h = m_pDevice->GetHeight();
-  const int nFactor = std::max((h + POST_BLUR_ROWS / 2) / POST_BLUR_ROWS, 1);
   const int bw = std::max(w / nFactor, 1), bh = std::max(h / nFactor, 1);
-  if (m_pPostBlur[0] && bw == m_nPostWidth && bh == m_nPostHeight)
+  if (Blur.pTex[0] && bw == Blur.nWidth && bh == Blur.nHeight)
     return true;
-  ReleaseScreenEffects();
-  for (CD3D12Texture *&pTex : m_pPostBlur)
+  ReleasePostBlur(Blur);
+  for (CD3D12Texture *&pTex : Blur.pTex)
     pTex = m_pUpload->CreateRenderTarget(bw, bh, DXGI_FORMAT_R8G8B8A8_UNORM);
-  m_pPostGhost = m_pUpload->CreateRenderTarget(bw, bh, DXGI_FORMAT_R8G8B8A8_UNORM);
-  if (!m_pPostBlur[0] || !m_pPostBlur[1] || !m_pPostGhost || m_pPostBlur[0]->m_nSRV < 0 || m_pPostBlur[1]->m_nSRV < 0 ||
-      m_pPostGhost->m_nSRV < 0)
+  if (!Blur.pTex[0] || !Blur.pTex[1] || Blur.pTex[0]->m_nSRV < 0 || Blur.pTex[1]->m_nSRV < 0)
   {
-    ReleaseScreenEffects();
+    ReleasePostBlur(Blur);
     return false;
   }
-  m_nPostWidth = bw;
-  m_nPostHeight = bh;
-  m_nPostFactor = nFactor;
+  Blur.nWidth = bw;
+  Blur.nHeight = bh;
+  Blur.nFactor = nFactor;
   return true;
+}
+
+void CD3D12Renderer::ReleasePostBlur(SPostBlur &Blur)
+{
+  if (m_pUpload)
+  {
+    for (CD3D12Texture *pTex : Blur.pTex)
+    {
+      if (pTex)
+        m_pUpload->ReleaseTexture(pTex);
+    }
+  }
+  Blur = SPostBlur();
+}
+
+void CD3D12Renderer::DrawPostBlur(SPostBlur &Blur, float fSigma)
+{
+  SDrawConstants dc = DefaultDrawConstants();
+  dc.nFlags = POST_DOWNSAMPLE;
+  dc.nTex0 = (uint32)m_nSceneColorSRV;
+  Set4(dc.vParams0, 1.0f / Blur.nWidth, 1.0f / Blur.nHeight, (float)((Blur.nFactor + 1) / 2), 0);
+  DrawPostPass(Blur.pTex[0], dc);
+  dc.nFlags = POST_BLUR;
+  dc.nTex0 = (uint32)Blur.pTex[0]->m_nSRV;
+  Set4(dc.vParams1, 1.0f / Blur.nWidth, 0, fSigma, 0);
+  DrawPostPass(Blur.pTex[1], dc);
+  dc.nTex0 = (uint32)Blur.pTex[1]->m_nSRV;
+  Set4(dc.vParams1, 0, 1.0f / Blur.nHeight, fSigma, 0);
+  DrawPostPass(Blur.pTex[0], dc);
 }
 
 void CD3D12Renderer::DrawPostPass(CD3D12Texture *pTarget, const SDrawConstants &dc)
@@ -182,15 +238,10 @@ void CD3D12Renderer::DrawPostPass(CD3D12Texture *pTarget, const SDrawConstants &
 
 void CD3D12Renderer::ReleaseScreenEffects()
 {
+  ReleasePostBlur(m_PostGlow);
+  ReleasePostBlur(m_PostSoft);
   if (m_pUpload)
-  {
-    for (CD3D12Texture *&pTex : m_pPostBlur)
-      m_pUpload->ReleaseTexture(pTex);
     m_pUpload->ReleaseTexture(m_pPostGhost);
-  }
-  m_pPostBlur[0] = m_pPostBlur[1] = nullptr;
   m_pPostGhost = nullptr;
-  m_nPostWidth = m_nPostHeight = 0;
-  m_nPostFactor = 1;
   m_bFlashGhost = false;
 }

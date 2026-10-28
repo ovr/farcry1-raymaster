@@ -9,14 +9,14 @@
 //	vParams0.xy (1 / the target's size).
 //	  POST_DOWNSAMPLE  the mean of tex0 over the footprint of the pixel:
 //	                   vParams0.z x vParams0.z bilinear taps (1: a copy)
-//	  POST_BLUR        a gaussian of tex0, sigma 2 texels, along vParams1.xy
-//	                   (one texel of tex0 in uv)
-//	  POST_EFFECTS     tex0 the copy of the scene, tex1 its blur, tex2 the
-//	                   flash's afterimage (both of the blur's size):
-//	    POST_NIGHTVISION  the luminance of the scene plus that of its blur
-//	                      (the glow), with grain, from dark cyan to white
-//	    POST_SCREENBLUR   the scene loses sharpness for the luminance of its
-//	                      blur tinted in the colour: vParams1 rgb the colour,
+//	  POST_BLUR        a gaussian of tex0, sigma vParams1.z texels (up to
+//	                   about 2.5), along vParams1.xy (one texel of tex0 in uv)
+//	  POST_EFFECTS     tex0 the copy of the scene, tex1 its glow blur, tex2
+//	                   the flash's afterimage, tex3 the screen blur's blur:
+//	    POST_NIGHTVISION  the luminance of the scene plus that of its glow,
+//	                      with grain, from dark cyan to white
+//	    POST_SCREENBLUR   the scene loses sharpness for the luminance of
+//	                      tex3 tinted in the colour: vParams1 rgb the colour,
 //	                      w the amount
 //	    POST_FLASHBANG    scene * vParams2.x + afterimage * vParams2.y +
 //	                      vParams2.z (white), plus a spot vParams2.w *
@@ -55,9 +55,9 @@ static const float NV_GRAIN = 0.34;           //!< the grain's range
 static const float NV_GRAIN_ROWS = 576;       //!< the grain's cells across the screen's height (smooth noise)
 
 // Screen blur, amount a, colour C: scene * max(1 - SHARP_LOSS * a, 0) + a * C * (GAIN * L(blur) + BIAS).
-static const float BLUR_SHARP_LOSS = 1.42;
-static const float BLUR_TINT_GAIN = 2.97;
-static const float BLUR_TINT_BIAS = -0.36;
+static const float BLUR_SHARP_LOSS = 1.39;
+static const float BLUR_TINT_GAIN = 2.89;
+static const float BLUR_TINT_BIAS = -0.336;
 
 float4 SampleClamp(uint nTex, float2 vUV)
 {
@@ -103,17 +103,17 @@ float4 Downsample(float2 vPixel)
 
 float4 Blur(float2 vPixel)
 {
-  // exp(-k^2 / 8) for k = 0..4: sigma 2
-  static const float Weights[5] = { 1.0, 0.8825, 0.6065, 0.3247, 0.1353 };
   float2 vUV = vPixel * g_Draw.vParams0.xy;
   float2 vStep = g_Draw.vParams1.xy;
-  float4 vSum = SampleClamp(g_Draw.nTex0, vUV) * Weights[0];
-  float fSum = Weights[0];
+  float fK = -0.5 / (g_Draw.vParams1.z * g_Draw.vParams1.z);
+  float4 vSum = SampleClamp(g_Draw.nTex0, vUV);
+  float fSum = 1;
   [unroll]
-  for (int k = 1; k < 5; k++)
+  for (int k = 1; k <= 6; k++)
   {
-    vSum += (SampleClamp(g_Draw.nTex0, vUV + vStep * k) + SampleClamp(g_Draw.nTex0, vUV - vStep * k)) * Weights[k];
-    fSum += 2 * Weights[k];
+    float fWeight = exp(fK * k * k);
+    vSum += (SampleClamp(g_Draw.nTex0, vUV + vStep * k) + SampleClamp(g_Draw.nTex0, vUV - vStep * k)) * fWeight;
+    fSum += 2 * fWeight;
   }
   return vSum / fSum;
 }
@@ -133,7 +133,8 @@ float4 Effects(float2 vPixel)
   if (HasFlag(POST_SCREENBLUR))
   {
     float fAmount = g_Draw.vParams1.w;
-    c = c * max(1 - BLUR_SHARP_LOSS * fAmount, 0) + fAmount * g_Draw.vParams1.rgb * (BLUR_TINT_GAIN * dot(vBlur, LUMINANCE) + BLUR_TINT_BIAS);
+    float fSoft = dot(SampleClamp(g_Draw.nTex3, vUV).rgb, LUMINANCE);
+    c = c * max(1 - BLUR_SHARP_LOSS * fAmount, 0) + fAmount * g_Draw.vParams1.rgb * (BLUR_TINT_GAIN * fSoft + BLUR_TINT_BIAS);
   }
   if (HasFlag(POST_FLASHBANG))
   {

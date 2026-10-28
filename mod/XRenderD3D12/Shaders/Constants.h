@@ -86,7 +86,7 @@ typedef float float4x4_t[16];
 
 // SDrawConstants::nFlags of the post program (Post.hlsl): one mode, with POST_EFFECTS the effects drawn
 #define POST_DOWNSAMPLE     0x00000001  //!< the mean of tex0 over the target's pixel: vParams0.z x vParams0.z bilinear taps
-#define POST_BLUR           0x00000002  //!< a gaussian of tex0 (sigma 2 texels) along vParams1.xy (one texel in uv)
+#define POST_BLUR           0x00000002  //!< a gaussian of tex0 (sigma vParams1.z texels) along vParams1.xy (one texel in uv)
 #define POST_EFFECTS        0x00000004  //!< the screen effects over the scene copy tex0 (Post.hlsl)
 #define POST_NIGHTVISION    0x00000010
 #define POST_SCREENBLUR     0x00000020
