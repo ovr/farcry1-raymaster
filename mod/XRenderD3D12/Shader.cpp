@@ -386,44 +386,6 @@ bool StartsWithWord(std::string_view Line, std::string_view Word)
   return Line.size() == Word.size() || !isalnum((unsigned char)Line[Word.size()]);
 }
 
-//! The "SkyBox = <name>" lines of a shader script, under the name of the "Shader '<name>'" block
-//! they are in (both lower case, '\' as '/'). ';' and "//" start comments.
-void ParseSkyBoxes(std::string_view Text, std::unordered_map<std::string, std::string> &SkyBoxes)
-{
-  std::string Shader;
-  size_t nPos = 0;
-  while (nPos < Text.size())
-  {
-    size_t nEnd = Text.find('\n', nPos);
-    if (nEnd == std::string_view::npos)
-      nEnd = Text.size();
-    std::string_view Line = Text.substr(nPos, nEnd - nPos);
-    nPos = nEnd + 1;
-    Line = Line.substr(0, std::min(Line.find("//"), Line.find(';')));
-    Line = Trim(Line);
-    if (StartsWithWord(Line, "Shader"))
-    {
-      const size_t q1 = Line.find('\'');
-      const size_t q2 = q1 == std::string_view::npos ? q1 : Line.find('\'', q1 + 1);
-      if (q2 != std::string_view::npos)
-        Shader = Lower(std::string(Line.substr(q1 + 1, q2 - q1 - 1)).c_str());
-    }
-    else if (StartsWithWord(Line, "SkyBox") && !Shader.empty())
-    {
-      std::string_view Value = Line.substr(6);
-      const size_t nEq = Value.find('=');
-      if (nEq == std::string_view::npos)
-        continue;
-      Value = Trim(Value.substr(nEq + 1));
-      Value = Value.substr(0, std::min(Value.find_first_of(" \t"), Value.size()));
-      std::string Name = Lower(std::string(Value).c_str());
-      std::replace(Name.begin(), Name.end(), '\\', '/');
-      if (!Name.empty())
-        SkyBoxes[Shader] = std::move(Name);
-    }
-  }
-}
-
 //! The text without its "/* */" comments.
 std::string StripBlockComments(std::string_view Text)
 {
@@ -474,6 +436,150 @@ std::string_view ValueOf(std::string_view Line)
 {
   const size_t nEq = Line.find('=');
   return nEq == std::string_view::npos ? std::string_view() : Trim(Line.substr(nEq + 1));
+}
+
+//! The first word of the value of "Key = value" ('\' as '/').
+std::string FirstWordOf(std::string_view Line)
+{
+  std::string_view Value = ValueOf(Line);
+  std::string Word(Value.substr(0, std::min(Value.find_first_of(" \t"), Value.size())));
+  std::replace(Word.begin(), Word.end(), '\\', '/');
+  return Word;
+}
+
+//! The GS_BLSRC_* (bDst false) or GS_BLDST_* value of a blend factor of a script ("SRC_ALPHA",
+//! "ONE_MINUS_SRC_ALPHA", ..., "GL_" before it or not); 0 if there is none of that name.
+int BlendFactor(std::string_view Name, bool bDst)
+{
+  if (Name.size() > 3 && _strnicmp(Name.data(), "GL_", 3) == 0)
+    Name.remove_prefix(3);
+  struct SFactor
+  {
+    std::string_view Name;
+    int nSrc, nDst;
+  };
+  static const SFactor s_Factors[] =
+  {
+    { "ZERO",                GS_BLSRC_ZERO,             GS_BLDST_ZERO },
+    { "ONE",                 GS_BLSRC_ONE,              GS_BLDST_ONE },
+    { "DST_COLOR",           GS_BLSRC_DSTCOL,           0 },
+    { "ONE_MINUS_DST_COLOR", GS_BLSRC_ONEMINUSDSTCOL,   0 },
+    { "SRC_COLOR",           0,                         GS_BLDST_SRCCOL },
+    { "ONE_MINUS_SRC_COLOR", 0,                         GS_BLDST_ONEMINUSSRCCOL },
+    { "SRC_ALPHA",           GS_BLSRC_SRCALPHA,         GS_BLDST_SRCALPHA },
+    { "ONE_MINUS_SRC_ALPHA", GS_BLSRC_ONEMINUSSRCALPHA, GS_BLDST_ONEMINUSSRCALPHA },
+    { "DST_ALPHA",           GS_BLSRC_DSTALPHA,         GS_BLDST_DSTALPHA },
+    { "ONE_MINUS_DST_ALPHA", GS_BLSRC_ONEMINUSDSTALPHA, GS_BLDST_ONEMINUSDSTALPHA },
+    { "SRC_ALPHA_SATURATE",  GS_BLSRC_ALPHASATURATE,    0 },
+  };
+  for (const SFactor &f : s_Factors)
+  {
+    if (Name.size() == f.Name.size() && _strnicmp(Name.data(), f.Name.data(), Name.size()) == 0)
+      return bDst ? f.nDst : f.nSrc;
+  }
+  return 0;
+}
+
+//! The four components of a TexGen plane ("PlaneS (Comp = 0.25 Comp = 0 Comp = 0 Comp 'time
+//! 0.02')"): a number goes to Plane, the k of 'time k' to Time (the other one 0).
+void ParsePlane(std::string_view Line, float *pPlane, float *pTime)
+{
+  const std::string Low = Lower(std::string(Line).c_str());
+  size_t nPos = 0;
+  for (int n = 0; n < 4 && (nPos = Low.find("comp", nPos)) != std::string::npos; n++)
+  {
+    nPos = Low.find_first_not_of(" \t", nPos + 4);
+    if (nPos == std::string::npos)
+      break;
+    pPlane[n] = pTime[n] = 0;
+    if (Low[nPos] == '=')
+      ParseFloats(std::string_view(Low).substr(nPos + 1), &pPlane[n], 1);
+    else if (Low[nPos] == '\'')
+    {
+      const size_t nEnd = std::min(Low.find('\'', nPos + 1), Low.size());
+      const std::string_view Expr = Trim(std::string_view(Low).substr(nPos + 1, nEnd - nPos - 1));
+      if (StartsWithWord(Expr, "time"))
+        ParseFloats(Expr.substr(4), &pTime[n], 1);
+      nPos = nEnd;
+    }
+  }
+}
+
+//! The sky shaders of a shader script: each "Shader '<name>'" block with a "SkyBox = <name>" line
+//! (both lower case, '\' as '/') under its name, with the layers after the first one ("Layer '0'",
+//! the box) that name a Map other than $None: Map, Blend and the planes of TexGen (PlaneS, PlaneT);
+//! the other keys are not read. ';', "//" and "/* */" start comments.
+void ParseSkies(std::string_view Text, std::unordered_map<std::string, SSkyShader> &Skies)
+{
+  const std::string Clean = StripBlockComments(Text);
+  std::string Shader;
+  SSkyShader Sky;
+  SSkyLayer Layer;
+  int nLayers = 0;          // "Layer" blocks of the shader so far
+  const auto EndLayer = [&]()
+  {
+    if (nLayers > 1 && !Layer.Map.empty())
+      Sky.Layers.push_back(Layer);
+    Layer = SSkyLayer();
+  };
+  const auto EndShader = [&]()
+  {
+    EndLayer();
+    if (!Shader.empty() && !Sky.Box.empty())
+      Skies[Shader] = std::move(Sky);
+    Sky = SSkyShader();
+    nLayers = 0;
+  };
+  size_t nPos = 0;
+  while (nPos < Clean.size())
+  {
+    size_t nEnd = Clean.find('\n', nPos);
+    if (nEnd == std::string::npos)
+      nEnd = Clean.size();
+    std::string_view Line(Clean.data() + nPos, nEnd - nPos);
+    nPos = nEnd + 1;
+    Line = Trim(Line.substr(0, std::min(Line.find("//"), Line.find(';'))));
+    if (StartsWithWord(Line, "Shader"))
+    {
+      EndShader();
+      const size_t q1 = Line.find('\'');
+      const size_t q2 = q1 == std::string_view::npos ? q1 : Line.find('\'', q1 + 1);
+      Shader = q2 == std::string_view::npos ? std::string() : Lower(std::string(Line.substr(q1 + 1, q2 - q1 - 1)).c_str());
+    }
+    else if (StartsWithWord(Line, "SkyBox"))
+      Sky.Box = Lower(FirstWordOf(Line).c_str());
+    else if (StartsWithWord(Line, "Layer"))
+    {
+      EndLayer();
+      nLayers++;
+    }
+    else if (nLayers <= 1)
+      continue;
+    else if (StartsWithWord(Line, "Map"))
+    {
+      std::string Map = FirstWordOf(Line);
+      Layer.Map = _stricmp(Map.c_str(), "$None") ? std::move(Map) : std::string();
+    }
+    else if (StartsWithWord(Line, "Blend"))
+    {
+      const size_t q1 = Line.find('\'');
+      const size_t q2 = q1 == std::string_view::npos ? q1 : Line.find('\'', q1 + 1);
+      if (q2 == std::string_view::npos)
+        continue;
+      const std::string_view Factors = Trim(Line.substr(q1 + 1, q2 - q1 - 1));
+      const size_t nSpace = Factors.find_first_of(" \t");
+      if (nSpace == std::string_view::npos)
+        continue;
+      const int nSrc = BlendFactor(Factors.substr(0, nSpace), false);
+      const int nDst = BlendFactor(Trim(Factors.substr(nSpace)), true);
+      Layer.nBlend = nSrc && nDst ? nSrc | nDst : 0;
+    }
+    else if (StartsWithWord(Line, "PlaneS"))
+      ParsePlane(Line, Layer.PlaneS, Layer.TimeS);
+    else if (StartsWithWord(Line, "PlaneT"))
+      ParsePlane(Line, Layer.PlaneT, Layer.TimeT);
+  }
+  EndShader();
 }
 
 //! The "ClientEffect 'Corona'" blocks of a shader script, under the name of the "Shader '<name>'"
@@ -665,7 +771,7 @@ void CShaderManager::Shutdown()
   m_UserTemplates.clear();
   m_Shaders.clear();
   m_LightMaterials.clear();
-  m_SkyBoxes.clear();
+  m_Skies.clear();
   m_Coronas.clear();
   m_bScriptsRead = false;
   m_pDefault = nullptr;
@@ -699,17 +805,17 @@ void CShaderManager::ReadScripts()
   {
     if (ReadTextFile(pPak, File.c_str(), Text))
     {
-      ParseSkyBoxes(Text, m_SkyBoxes);
+      ParseSkies(Text, m_Skies);
       ParseCoronas(Text, m_Coronas);
     }
   }
 }
 
-const std::string *CShaderManager::FindSkyBox(const char *szShader)
+const SSkyShader *CShaderManager::FindSky(const char *szShader)
 {
   ReadScripts();
-  const auto it = m_SkyBoxes.find(Lower(szShader));
-  return it == m_SkyBoxes.end() ? nullptr : &it->second;
+  const auto it = m_Skies.find(Lower(szShader));
+  return it == m_Skies.end() ? nullptr : &it->second;
 }
 
 const SCorona *CShaderManager::FindCorona(const char *szShader)
@@ -769,7 +875,7 @@ CShader *CShaderManager::LoadShader(const char *szName, EShClass eClass, int nFl
           Props.nLFlags = pE->nLFlags;
           Props.eDrawClass = pE->eClass;
         }
-        else if (FindSkyBox(Name.c_str()))
+        else if (FindSky(Name.c_str()))
         {
           // A sky shader of the scripts (I3DEngine::SetSkyBox): the level's CRESky element is
           // drawn with it as a sky box.

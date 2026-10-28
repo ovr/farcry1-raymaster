@@ -78,6 +78,27 @@ struct SCorona
   std::string Map;                    //!< Map: the texture
 };
 
+//! A layer of a sky shader drawn over its box: a "Layer" block after the first one (the box) of its
+//! script that names a Map (CloudsSky1).
+struct SSkyLayer
+{
+  std::string Map;                    //!< Map: the texture ('\' as '/')
+  //! TexGen 'HW_ObjectLinear': u = PlaneS . (x, y, z, 1), v = PlaneT . (x, y, z, 1) of the position
+  //! around the camera in the sky's axes (DrawSkyItem); a component 'time k' is k *
+  //! ITimer::GetCurrTime() (TimeS, TimeT).
+  float PlaneS[4] = { 1, 0, 0, 0 }, PlaneT[4] = { 0, 1, 0, 0 };
+  float TimeS[4] = {}, TimeT[4] = {};
+  int nBlend = 0;                     //!< Blend 'src dst' as GS_BLSRC_* | GS_BLDST_*; 0 without one
+};
+
+//! A sky shader of the scripts: a "Shader '<name>'" block with a "SkyBox = <name>" line.
+struct SSkyShader
+{
+  //! The base name of its three textures <name>_5 (top), <name>_12 and <name>_34 (sides), lower case.
+  std::string Box;
+  std::vector<SSkyLayer> Layers;
+};
+
 //! How the colour of a lit draw class (opaque, alpha test, alpha blend) is lit.
 enum class ELighting : uint8
 {
@@ -299,11 +320,10 @@ public:
   int GetCount() const { return (int)m_Shaders.size(); }
   //! The template shader for a template name (as a material names it), made on first use.
   CShader *GetTemplate(const char *szName, uint64 nMaskGen);
-  //! The sky box a sky shader's script names ("SkyBox = Skys/Training/Box" in a "Shader
-  //! '01_Training'" block of Shaders/Scripts/CryShaders/*.csl, read on first use): the base name of
-  //! its three textures <name>_5 (top), <name>_12 and <name>_34 (sides), lower case; NULL when the
-  //! shader has none.
-  const std::string *FindSkyBox(const char *szShader);
+  //! The sky box and layers a sky shader's script gives it ("SkyBox = Skys/Training/Box" in a
+  //! "Shader '01_Training'" block of Shaders/Scripts/CryShaders/*.csl, read on first use); NULL when
+  //! the shader has no sky box.
+  const SSkyShader *FindSky(const char *szShader);
   //! The corona a flare shader's script gives it ("ClientEffect 'Corona'" in its "Shader" block of
   //! the same scripts); NULL when the shader has none.
   const SCorona *FindCorona(const char *szShader);
@@ -345,7 +365,7 @@ private:
   //! material's folder); the placeholder of the first try when no file is found.
   CTexture *LoadTextureFile(const char *szName, const char *szPath, const SShaderTexUnit &TU);
   void AddAttenuationTextures(SRenderShaderResources *pRes);
-  //! Reads the sky boxes and the coronas of the shader scripts, once.
+  //! Reads the skies and the coronas of the shader scripts, once.
   void ReadScripts();
 
   std::vector<std::unique_ptr<CShader>> m_Shaders;              //!< indexed by ID
@@ -355,7 +375,7 @@ private:
   std::unordered_map<std::string, int> m_MaterialCounts;        //!< shaders made per material name
   std::unordered_map<int, CShader *> m_UserTemplates;           //!< user template ids
   std::vector<std::unique_ptr<SLightMaterial>> m_LightMaterials; //!< [0] the default one
-  std::unordered_map<std::string, std::string> m_SkyBoxes;      //!< FindSkyBox: sky box by shader name
+  std::unordered_map<std::string, SSkyShader> m_Skies;          //!< FindSky: sky by shader name
   std::unordered_map<std::string, SCorona> m_Coronas;           //!< FindCorona: corona by shader name
   bool m_bScriptsRead = false;
   CShader *m_pDefault = nullptr;

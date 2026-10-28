@@ -389,7 +389,7 @@ public:
   //! The environment cube map of a cube map template: the material's EFTT_CUBEMAP, else the
   //! default cube textures/defaults/defaultcm; nullptr without either.
   CTexture *GetEnvCubeMap(SRenderShaderResources *pRes);
-  //! The sky box of a CRESky element drawn with a sky shader (CShaderManager::FindSkyBox).
+  //! The sky box and layers of a CRESky element drawn with a sky shader (CShaderManager::FindSky).
   void DrawSkyItem(const SRenderItem &it);
   //! The particle sprites of the scene (EF_AddSpriteToScene).
   void DrawSprites();
@@ -407,14 +407,15 @@ public:
   int m_nSceneFlags = 0;                    //!< SHDF_* of the EF_EndEf3D being drawn
   CTexture *m_pDetailTexture = nullptr;     //!< GetDetailTexture (one reference)
   CTexture *m_pDefaultCube = nullptr;       //!< GetEnvCubeMap without a cube of the material (one reference)
-  //! The textures of a sky box: <name>_5 (the top), <name>_12 (the sides x = 32 and y = -32),
-  //! <name>_34 (the sides x = -32 and y = 32); one reference each.
+  //! The textures of a sky shader: its box's <name>_5 (the top), <name>_12 (the sides x = 32 and
+  //! y = -32), <name>_34 (the sides x = -32 and y = 32), and one per layer; one reference each.
   struct SSkyBoxTextures
   {
-    std::string Name;
+    std::string Name;                       //!< the sky shader
     CTexture *pTex[3] = {};
+    std::vector<CTexture *> Layers;         //!< SSkyShader::Layers
   };
-  std::vector<SSkyBoxTextures> m_SkyBoxes;  //!< DrawSkyItem, the sky boxes used so far
+  std::vector<SSkyBoxTextures> m_SkyBoxes;  //!< DrawSkyItem, the sky shaders used so far
   int m_nSceneSkyBox = -1;                  //!< the m_SkyBoxes entry the scene's sky drew, -1 none (the water reflects it)
   float m_fSceneSkyZ1 = 0;                  //!< where its sides end (DrawSkyItem)
   float m_fSceneSkyAlpha = 1;

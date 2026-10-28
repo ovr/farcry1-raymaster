@@ -867,6 +867,18 @@ void CD3D12Renderer::DumpItem(int nIndex, const SRenderItem &it, int eList)
       fprintf(m_pFrameDump.get(), "    texture slots:%s\n", Slots.c_str());
   }
 
+  // The sky: its values, and how many fog layers and portals (areas open to the sky) it has.
+  if (it.pRE->m_Type == eDATA_Sky)
+  {
+    const CRESky *pSky = static_cast<const CRESky *>(it.pRE);
+    int nPortals = 0;
+    for (const auto &Portal : pSky->m_arrvPortalVerts)
+      nPortals += Portal[0].xyz != Portal[1].xyz ? 1 : 0;
+    fprintf(m_pFrameDump.get(), "    sky: water level %.2f stretching %.2f alpha %.2f sphere list %d fog layers %d %d portals %d\n", pSky->m_fTerrainWaterLevel,
+            pSky->m_fSkyBoxStretching, pSky->m_fAlpha, pSky->m_nSphereListId, pSky->m_parrFogLayer ? pSky->m_parrFogLayer->Count() : -1,
+            pSky->m_parrFogLayer2 ? pSky->m_parrFogLayer2->Count() : -1, nPortals);
+  }
+
   // The tangent frames of the video copy (bump mapping): how many, of how many vertices.
   if (pLeaf && pLeaf->m_pBuffer)
   {
@@ -1109,18 +1121,20 @@ void CD3D12Renderer::DrawSkyItem(const SRenderItem &it)
 {
   if (it.eDrawClass != eDC_Sky || !m_pShaders || !m_pTextures)
     return;
-  const std::string *pName = m_pShaders->FindSkyBox(it.pShader->GetName());
-  if (!pName)
+  const SSkyShader *pSkyShader = m_pShaders->FindSky(it.pShader->GetName());
+  if (!pSkyShader)
     return;
-  auto Box = std::find_if(m_SkyBoxes.begin(), m_SkyBoxes.end(), [&](const SSkyBoxTextures &b) { return b.Name == *pName; });
+  auto Box = std::find_if(m_SkyBoxes.begin(), m_SkyBoxes.end(), [&](const SSkyBoxTextures &b) { return b.Name == it.pShader->GetName(); });
   if (Box == m_SkyBoxes.end())
   {
     SSkyBoxTextures New;
-    New.Name = *pName;
+    New.Name = it.pShader->GetName();
     static const char *const s_Suffixes[3] = { "_5", "_12", "_34" };
     for (int i = 0; i < 3; i++)
-      New.pTex[i] = m_pTextures->LoadTexture(("textures/" + *pName + s_Suffixes[i]).c_str(), FT_CLAMP | FT_NOMIPS, 0, eTT_Base, -1, -1, -1, 0);
-    m_SkyBoxes.push_back(New);
+      New.pTex[i] = m_pTextures->LoadTexture(("textures/" + pSkyShader->Box + s_Suffixes[i]).c_str(), FT_CLAMP | FT_NOMIPS, 0, eTT_Base, -1, -1, -1, 0);
+    for (const SSkyLayer &Layer : pSkyShader->Layers)
+      New.Layers.push_back(m_pTextures->LoadTexture(Layer.Map.c_str(), FT_NOMIPS, 0, eTT_Base, -1, -1, -1, 0));
+    m_SkyBoxes.push_back(std::move(New));
     Box = m_SkyBoxes.end() - 1;
   }
   m_nSceneSkyBox = (int)(Box - m_SkyBoxes.begin());
@@ -1207,6 +1221,62 @@ void CD3D12Renderer::DrawSkyItem(const SRenderItem &it)
       { Vec3(s.x1, s.y1, z2), { 0, 0.5f } },
     };
     Draw(s.nTex, Verts, 6);
+  }
+
+  // The layers over the box, in the sky's own axes: the world's turned a quarter about z (x_sky =
+  // -y, y_sky = x; the box's top above has u = (x_sky + 32) / 64, v = (y_sky + 32) / 64 in them). A
+  // dome around the camera, its top at z = 8 over a ring of radius 16 at z = 0 and one of radius 32
+  // at z = -8, in 9 segments of 40 degrees from the y_sky axis towards x_sky; white, opaque up to the
+  // inner ring and transparent at the outer one (the dome goes on to radius 48 at z = -16, all of it
+  // transparent: not drawn). The texture * the vertex colour (not faded by the sky's alpha), u and v
+  // from the layer's planes over the position in the sky's axes; blended as the layer's Blend, no
+  // depth test or writes, no fog.
+  const float t = iTimer ? iTimer->GetCurrTime() : 0.0f;
+  for (size_t l = 0; l < pSkyShader->Layers.size() && l < Box->Layers.size(); l++)
+  {
+    const SSkyLayer &Layer = pSkyShader->Layers[l];
+    CTexture *pTex = Box->Layers[l];
+    if (!pTex || !pTex->IsTextureLoaded() || pTex->IsCube())
+      continue;
+    float PlaneS[4], PlaneT[4];
+    for (int i = 0; i < 4; i++)
+    {
+      PlaneS[i] = Layer.PlaneS[i] + Layer.TimeS[i] * t;
+      PlaneT[i] = Layer.PlaneT[i] + Layer.TimeT[i] * t;
+    }
+    const auto Vertex = [&](float fRadius, float fAngle, float z, uint8 nAlpha)
+    {
+      const Vec3 vSky(fRadius * cosf(fAngle), fRadius * sinf(fAngle), z);
+      struct_VERTEX_FORMAT_P3F_COL4UB_TEX2F v;
+      v.xyz = Vec3(vSky.y, -vSky.x, vSky.z);
+      v.color.dcolor = 0x00ffffff | (uint32)nAlpha << 24;
+      v.st[0] = PlaneS[0] * vSky.x + PlaneS[1] * vSky.y + PlaneS[2] * vSky.z + PlaneS[3];
+      v.st[1] = PlaneT[0] * vSky.x + PlaneT[1] * vSky.y + PlaneT[2] * vSky.z + PlaneT[3];
+      return v;
+    };
+    struct_VERTEX_FORMAT_P3F_COL4UB_TEX2F Top[20], Ring[20];
+    for (int i = 0; i < 10; i++)
+    {
+      const float fAngle = DEG2RAD(90.0f - 40.0f * i);
+      Top[i * 2] = Vertex(0, 0, 8, 255);
+      Top[i * 2 + 1] = Ring[i * 2] = Vertex(16, fAngle, 0, 255);
+      Ring[i * 2 + 1] = Vertex(32, fAngle, -8, 0);
+    }
+    SPipelineKey LayerKey = Key;
+    LayerKey.nState = GS_NODEPTHTEST | Layer.nBlend;
+    SDrawConstants dc = DefaultDrawConstants();
+    memcpy(dc.mWorldViewProj, ViewProj.data, sizeof(dc.mWorldViewProj));
+    dc.nFlags = DF_TEX0 | DF_VCOLOR;
+    dc.nTex0 = pTex->GetSRV();
+    dc.nSamplers = XR_SAMPLER_LINEAR_WRAP;
+    if (m_pFrameDump)
+    {
+      fprintf(m_pFrameDump.get(), "  sky layer %d '%s' u (%g %g %g %g) v (%g %g %g %g) at time %.3f\n", (int)l, Layer.Map.c_str(), PlaneS[0],
+              PlaneS[1], PlaneS[2], PlaneS[3], PlaneT[0], PlaneT[1], PlaneT[2], PlaneT[3], t);
+      DumpDraw(dc, LayerKey, pTex);
+    }
+    DrawImmediate(LayerKey, dc, D3D_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP, VERTEX_FORMAT_P3F_COL4UB_TEX2F, Top, 20);
+    DrawImmediate(LayerKey, dc, D3D_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP, VERTEX_FORMAT_P3F_COL4UB_TEX2F, Ring, 20);
   }
 }
 
