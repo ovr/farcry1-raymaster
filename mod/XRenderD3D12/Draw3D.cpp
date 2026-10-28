@@ -342,7 +342,7 @@ void CD3D12Renderer::DrawLeafItem(const SRenderItem &it)
   const CShader *pSh = it.pShader;
   const SRenderShaderResources *pRes = it.pRes;
   const EDrawClass eDC = it.eDrawClass;
-  if (eDC == eDC_NoDraw || eDC == eDC_Engine || eDC == eDC_Sky)
+  if (eDC == eDC_NoDraw || eDC == eDC_Engine || eDC == eDC_Sky || (eDC == eDC_ShadowOnly && !m_bShadowMapPass))
     return;
   // The objects that show the scene around them are not in its environment cubes.
   if (m_bEnvCubePass && pSh->GetProps().eEnvMap == EEnvMap::Auto)

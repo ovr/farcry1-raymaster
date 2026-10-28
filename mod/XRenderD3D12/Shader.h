@@ -67,6 +67,7 @@ enum EDrawClass
   eDC_Flare,              //!< a flare (its Flare element; the sun's): drawn by the flare pass (Flares.cpp)
   eDC_Modulate,           //!< a decal multiplied into the frame (DESTCOLOR, ZERO): the texture, fading to white with the object
   eDC_TerrainLight,       //!< the terrain under dynamic lights (triangles of a sector near them): their light alone, added
+  eDC_ShadowOnly,         //!< not seen, only in the shadow maps: it casts its shadow (TemplRefrEnvCM)
 };
 
 //! The corona of a flare shader: the "ClientEffect 'Corona'" block of its script.

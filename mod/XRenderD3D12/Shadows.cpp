@@ -426,6 +426,7 @@ bool CD3D12Renderer::SetupShadowCasterDraw(SPipelineKey &Key, SDrawConstants &dc
   {
   case eDC_Opaque:
   case eDC_VColor:
+  case eDC_ShadowOnly:
     fAlphaRef = fRef;
     break;
   case eDC_AlphaTest:

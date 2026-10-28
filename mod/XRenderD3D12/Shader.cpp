@@ -86,6 +86,9 @@ constexpr STemplateEntry s_Templates[] =
   { "templglasscm_fp",                 "",                              eS_Opaque,                kOpaque2,                               0,              eDC_AlphaBlend,       eCULL_Back },
   // Not drawn: a light pass of dynamic lights.
   { "templinvlight",                   "",                              eS_Opaque,                EF2_FOGOVERLAY1 | EF2_DONTSORTBYDIST,   0,              eDC_NoDraw,           eCULL_Back },
+  // Not seen (what is behind shows unchanged), but casts its shadow.
+  { "templrefrenvcm",                  "",                              eS_Opaque,                kOpaque2,                               0,              eDC_ShadowOnly,       eCULL_Back },
+  { "templbumprefrenvcm",              "templrefrenvcm",                eS_Opaque,                kOpaque2,                               0,              eDC_ShadowOnly,       eCULL_Back },
   // Decals over surfaces, after the opaque ones: multiplied in, blended.
   { "templdecalmodulate",              "templdecalmodulate_fp",         eS_Decal,                 EF2_DONTSORTBYDIST,                     0,              eDC_Modulate,         eCULL_Back },
   { "templdecalalphablend",            "",                              eS_Decal,                 EF2_DONTSORTBYDIST,                     0,              eDC_AlphaBlend,       eCULL_Back },
