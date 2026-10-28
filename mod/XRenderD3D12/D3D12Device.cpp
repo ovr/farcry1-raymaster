@@ -94,9 +94,18 @@ bool CD3D12Device::Init(HWND hWnd, int nWidth, int nHeight, bool bDebug)
     return false;
   }
 
-  // The messages are kept for LogDebugMessages; nothing breaks into a debugger.
+  // The messages are kept for LogDebugMessages; nothing breaks into a debugger. Not kept: the
+  // hint that a clear of an off screen target is not to its optimised clear colour (the
+  // reflection's is the scene's clear colour, which changes).
   if (bDebug && SUCCEEDED(m_pDevice.As(&m_pInfoQueue)))
+  {
     m_pInfoQueue->SetMessageCountLimit(4096);
+    D3D12_MESSAGE_ID DenyIDs[] = { D3D12_MESSAGE_ID_CLEARRENDERTARGETVIEW_MISMATCHINGCLEARVALUE };
+    D3D12_INFO_QUEUE_FILTER Filter = {};
+    Filter.DenyList.NumIDs = (UINT)std::size(DenyIDs);
+    Filter.DenyList.pIDList = DenyIDs;
+    m_pInfoQueue->AddStorageFilterEntries(&Filter);
+  }
 
   D3D12_COMMAND_QUEUE_DESC QueueDesc = {};
   QueueDesc.Type = D3D12_COMMAND_LIST_TYPE_DIRECT;
@@ -320,9 +329,12 @@ bool CD3D12Device::CreateOffscreenTargets(int nWidth, int nHeight, ComPtr<ID3D12
   Desc.Format = D3D12_BACKBUFFER_FORMAT;
   Desc.SampleDesc.Count = 1;
   Desc.Flags = D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET;
-  // No optimised clear colour: it is cleared to the scene's clear colour.
-  if (Failed(m_pDevice->CreateCommittedResource(&Heap, D3D12_HEAP_FLAG_NONE, &Desc, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, nullptr,
-    IID_PPV_ARGS(&pColor)), "CreateCommittedResource (off screen colour)"))
+  // Optimised for a clear to 0 (the sprites'; the reflection is cleared to the scene's clear
+  // colour).
+  D3D12_CLEAR_VALUE ColorClear = {};
+  ColorClear.Format = D3D12_BACKBUFFER_FORMAT;
+  if (Failed(m_pDevice->CreateCommittedResource(&Heap, D3D12_HEAP_FLAG_NONE, &Desc, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE,
+    &ColorClear, IID_PPV_ARGS(&pColor)), "CreateCommittedResource (off screen colour)"))
     return false;
   Desc.Format = D3D12_DEPTH_FORMAT;
   Desc.Flags = D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL;
@@ -523,12 +535,19 @@ void CD3D12Device::CopyTargets(ID3D12Resource *pColor, ID3D12Resource *pDepth)
 
 bool CD3D12Device::ReadBackBuffer(uint8 *pDst, int nWidth, int nHeight)
 {
-  if (!m_pDevice || !pDst || nWidth <= 0 || nHeight <= 0)
+  if (!m_pDevice || !m_pSwapChain)
+    return false;
+  // Between frames the buffer drawn last (and presented) is the one before the current one.
+  ID3D12Resource *pBack = m_bInFrame ? GetBackBuffer() : m_pBackBuffers[(m_pSwapChain->GetCurrentBackBufferIndex() + D3D12_BACKBUFFERS - 1) % D3D12_BACKBUFFERS].Get();
+  return ReadBackTexture(pBack, m_bInFrame ? D3D12_RESOURCE_STATE_RENDER_TARGET : D3D12_RESOURCE_STATE_PRESENT, pDst, nWidth, nHeight);
+}
+
+bool CD3D12Device::ReadBackTexture(ID3D12Resource *pTexture, D3D12_RESOURCE_STATES State, uint8 *pDst, int nWidth, int nHeight)
+{
+  if (!m_pDevice || !pTexture || !pDst || nWidth <= 0 || nHeight <= 0)
     return false;
   const bool bInFrame = m_bInFrame;
-  // Between frames the buffer drawn last (and presented) is the one before the current one.
-  ID3D12Resource *pBack = bInFrame ? GetBackBuffer() : m_pBackBuffers[(m_pSwapChain->GetCurrentBackBufferIndex() + D3D12_BACKBUFFERS - 1) % D3D12_BACKBUFFERS].Get();
-  const D3D12_RESOURCE_DESC Desc = pBack->GetDesc();
+  const D3D12_RESOURCE_DESC Desc = pTexture->GetDesc();
   D3D12_PLACED_SUBRESOURCE_FOOTPRINT Footprint;
   UINT64 nTotal = 0;
   m_pDevice->GetCopyableFootprints(&Desc, 0, 1, 0, &Footprint, nullptr, nullptr, &nTotal);
@@ -553,16 +572,15 @@ bool CD3D12Device::ReadBackBuffer(uint8 *pDst, int nWidth, int nHeight)
     WaitForGPU();
     OpenCmdList();
   }
-  const D3D12_RESOURCE_STATES State = bInFrame ? D3D12_RESOURCE_STATE_RENDER_TARGET : D3D12_RESOURCE_STATE_PRESENT;
-  Barrier(m_pCmdList.Get(), pBack, State, D3D12_RESOURCE_STATE_COPY_SOURCE);
+  Barrier(m_pCmdList.Get(), pTexture, State, D3D12_RESOURCE_STATE_COPY_SOURCE);
   D3D12_TEXTURE_COPY_LOCATION Src = {}, Dst = {};
-  Src.pResource = pBack;
+  Src.pResource = pTexture;
   Src.Type = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
   Dst.pResource = pReadback.Get();
   Dst.Type = D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT;
   Dst.PlacedFootprint = Footprint;
   m_pCmdList->CopyTextureRegion(&Dst, 0, 0, 0, &Src, nullptr);
-  Barrier(m_pCmdList.Get(), pBack, D3D12_RESOURCE_STATE_COPY_SOURCE, State);
+  Barrier(m_pCmdList.Get(), pTexture, D3D12_RESOURCE_STATE_COPY_SOURCE, State);
   if (bInFrame)
     FlushFrame();
   else

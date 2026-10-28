@@ -54,6 +54,8 @@ typedef float float4x4_t[16];
 #define DF_SCREEN_POS       0x00004000  //!< POSITION is in pixels (x, y from the top left, z); mViewProj is ignored
 #define DF_ALPHATEST_LESS   0x00008000  //!< with DF_ALPHATEST: clip when alpha >= fAlphaRef instead (GS_ALPHATEST_LESS128)
 #define DF_TEXGEN1_WORLD    0x00010000  //!< uv1 = (dot(world pos, vTexGen1U), dot(world pos, vTexGen1V)) (terrain detail)
+#define DF_ALPHA_ONE        0x00020000  //!< alpha 1 after the alpha test (the pictures of the far vegetation sprites)
+#define DF_TEX0_ARRAY       0x00040000  //!< tex0 is g_TextureArrays[nTex0]: slice floor(u / 2), sampled at (u - 2 * slice, v)
 
 #define XR_SAMPLER_LINEAR_WRAP  0
 #define XR_SAMPLER_LINEAR_CLAMP 1

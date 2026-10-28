@@ -408,7 +408,9 @@ void CScene::EndEf3D(int nFlags)
   if (m_nDrawing == 1)
   {
     UpdateScreenFx();
-    // The scenes this one shows (the water reflection), rendered from here, nested in this one.
+    // The scenes this one shows (the pictures of new far vegetation sprites, the water
+    // reflection), rendered from here, nested in this one.
+    g_pRenderer->BakeSprites();
     g_pRenderer->UpdateWaterReflection(s.Items);
   }
 

@@ -35,14 +35,16 @@ constexpr int TEXTURE_MAX_ID = 32767;
 // Pictures in system memory (ImageLoaders.cpp)
 
 //! A picture as the GPU takes it: nFaces faces (1, or 6 for a cube in the order +X, -X, +Y, -Y,
-//! +Z, -Z), each with nMips levels, tightly packed (face 0 level 0, face 0 level 1, ..., face 1
-//! level 0, ...), rows from the top. Format is DXGI_FORMAT_B8G8R8A8_UNORM or BC1..BC3_UNORM.
+//! +Z, -Z, or the slices of a texture array with bArray), each with nMips levels, tightly packed
+//! (face 0 level 0, face 0 level 1, ..., face 1 level 0, ...), rows from the top. Format is
+//! DXGI_FORMAT_B8G8R8A8_UNORM or BC1..BC3_UNORM.
 struct SImage
 {
   DXGI_FORMAT Format = DXGI_FORMAT_UNKNOWN;
   int nWidth = 0, nHeight = 0;
   int nMips = 0;
   int nFaces = 0;
+  bool bArray = false;                //!< the faces are the slices of a texture array (not a cube)
   int nSrcFlags = 0;                  //!< FT_DXT1 / FT_DXT3 / FT_DXT5 / FT_HASALPHA from the source format
   std::vector<byte> Data;
 
@@ -140,6 +142,7 @@ public:
   bool m_bClamp = false;              //!< clamp addressing (else wrap)
   bool m_bPoint = false;              //!< point filtering (else linear)
   bool m_bCube = false;
+  bool m_bArray = false;              //!< a texture array (g_TextureArrays)
   bool m_bLoaded = false;             //!< IsTextureLoaded
   bool m_bPermanent = false;          //!< the white texture and the placeholder: never removed
   bool m_bRemoved = false;            //!< removed: no GPU texture, no ID, kept until Shutdown
@@ -184,6 +187,10 @@ public:
   //! DownLoadToVideoMemory: a texture from pixels of eSrc (NULL: zeros). nID non-zero: that ID
   //! (the texture with it is replaced). Returns the ID, 0 on failure.
   int CreateFromMemory(const byte *pData, int nWidth, int nHeight, ETEX_Format eSrc, int nMips, bool bRepeat, int nFilter, int nID, const char *szName, int nFlags);
+  //! A texture of the renderer's own from a picture with its levels (an empty Image: an ID without
+  //! a GPU texture yet), linear filtering. nID non-zero: that texture gets the picture. Returns
+  //! the ID, 0 on failure.
+  int CreateFromImage(const SImage &Image, const char *szName, bool bClamp, int nID);
   //! UpdateTextureInVideoMemory: a rectangle of level 0, pixels of eSrc (eTF_Unknown: the
   //! texture's own source format), clipped to the texture.
   void UpdateRect(int nID, const byte *pData, int x, int y, int nWidth, int nHeight, ETEX_Format eSrc);

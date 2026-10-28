@@ -319,6 +319,8 @@ public:
   float m_fDepthMin = 0, m_fDepthMax = 1;   //!< viewport depth range of the next draws
   bool m_bItemScissor = false;              //!< the scissor rectangle of the object being drawn
   RECT m_ItemScissor = {};
+  bool m_bTargetRect = false;               //!< drawing off screen: the viewport is m_TargetRect, not the whole target
+  RECT m_TargetRect = {};
   D3D12_GPU_VIRTUAL_ADDRESS m_nFrameCB = 0; //!< b0, 0 when it has to be made again
   float m_SunDir[3] = { 0, 0, 1 };          //!< towards the sun, world space (frame constants)
   float m_SunColor[3] = { 1, 1, 1 };
@@ -436,6 +438,39 @@ public:
   Matrix44 m_ReflectionViewProj;            //!< world to clip of the mirrored camera (without the water clip)
 
   //////////////////////////////////////////////////////////////////////////
+  // FarSprites.cpp: the far vegetation sprites (MakeSprite, DrawObjSprites)
+
+  //! Before the main view is drawn: the pictures of the objects MakeSprite got since the last time.
+  void BakeSprites();
+  //! Draws the pictures of one object (24 directions) into the off screen target, from tile nFirstTile on.
+  void BakeSpriteObject(IStatObj *pObj, int nFirstTile, int nTilesPerRow, int nTileSize);
+  //! Forgets the objects whose sprite IDs the engine has all removed, with their arrays.
+  void PurgeSprites();
+  void ReleaseSprites();
+
+  static constexpr int SPRITE_ANGLES = 24;  //!< MakeSprite's angles: 90 to 435 degrees in steps of 15
+  //! The sprites of one object (the one MakeSprite got).
+  struct SSpriteSet
+  {
+    int nID[SPRITE_ANGLES] = {};            //!< MakeSprite's texture IDs (no GPU texture), 0 where it was not called
+    CTexture *pTex[SPRITE_ANGLES] = {};     //!< the textures of the IDs (for a check: the engine may remove them)
+    int nArrayID = 0;                       //!< the pictures: a texture array of 24 slices (one reference)
+    CTexture *pArray = nullptr;
+    bool bBaked = false;                    //!< the array holds the pictures
+    Vec3 vBoxMin, vBoxMax;                  //!< the object's box when baked
+    float fRadius = 0;                      //!< the largest horizontal distance of a box corner from the object's z axis
+  };
+  std::unordered_map<IStatObj *, SSpriteSet> m_Sprites;
+  std::vector<IStatObj *> m_SpritesToBake;  //!< MakeSprite got them, not baked yet
+  bool m_bSpritePass = false;               //!< a sprite's picture is being drawn
+  struct SSpriteQuad
+  {
+    int nSRV;                               //!< the texture array's table index
+    struct_VERTEX_FORMAT_P3F_COL4UB_TEX2F v[4];   //!< top left, top right, bottom left, bottom right
+  };
+  std::vector<SSpriteQuad> m_SpriteQuads;   //!< DrawObjSprites' quads of the call
+
+  //////////////////////////////////////////////////////////////////////////
   // State (public: the subsystems' files use it)
 
   std::unique_ptr<CD3D12Device> m_pDevice;
@@ -517,6 +552,7 @@ public:
   int CV_d3d12_WaterDebug = 0;        //!< non-zero: the water shows one term of its colour (Water.hlsl)
   float CV_d3d12_WaterReflectionScale = 0.5f;   //!< size of the water reflection, a fraction of the screen's
   int CV_d3d12_WaterReflectionFlags = DLD_TERRAIN | DLD_TERRAIN_FULLRES;   //!< what the water reflects (EDrawLowDetailFlags)
+  int CV_d3d12_SpriteRes = 128;             //!< size of the far vegetation sprites' textures (made at the level load)
 };
 
 extern CD3D12Renderer *g_pRenderer;

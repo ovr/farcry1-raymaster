@@ -119,6 +119,8 @@ void CD3D12Renderer::RegisterVariables()
                      "Size of the water reflection (r_WaterReflections), a fraction of the screen's");
   iConsole->Register("d3d12_WaterReflectionFlags", &CV_d3d12_WaterReflectionFlags, DLD_TERRAIN | DLD_TERRAIN_FULLRES, VF_DUMPTODISK,
                      "What the water reflection shows: DLD_* flags of I3DEngine::DrawLowDetail (4160: the sky and the terrain)");
+  iConsole->Register("d3d12_SpriteRes", &CV_d3d12_SpriteRes, 128, VF_DUMPTODISK,
+                     "Size of the far vegetation sprites' textures, 32 to 256 (made when a level is loaded)");
 }
 
 //////////////////////////////////////////////////////////////////////////
@@ -329,6 +331,7 @@ void CD3D12Renderer::Release()
     m_pShaders->Shutdown();
   ReleaseWaterResources();
   ReleaseWaterReflection();
+  ReleaseSprites();
   m_pDetailTexture = nullptr;   // released with every texture
   m_pBeachTexture = nullptr;
   m_nWaveTexture = 0;
@@ -367,9 +370,12 @@ void CD3D12Renderer::RefreshResources(int nFlags)
 
 void CD3D12Renderer::PreLoad (void)
 {
-  // A new level registers its own fog volumes.
+  // A new level registers its own fog volumes and makes its own sprites; the objects of a load
+  // that never got drawn may be gone.
   if (m_pScene)
     m_pScene->ResetFogVolumes();
+  m_SpritesToBake.clear();
+  PurgeSprites();
 }
 
 void CD3D12Renderer::PostLoad (void)
@@ -897,12 +903,6 @@ void CD3D12Renderer::SetType(char type)
   m_cType = type;
 }
 
-unsigned int CD3D12Renderer::MakeSprite(float object_scale, int tex_size, float angle, IStatObj * pStatObj, uchar * pTmpBuffer, uint def_tid)
-{
-  // Far vegetation sprites are not drawn yet.
-  return 0;
-}
-
 unsigned int CD3D12Renderer::Make3DSprite(int nTexSize, float fAngleStep, IStatObj * pStatObj)
 {
   return 0;
@@ -912,10 +912,6 @@ ShadowMapFrustum * CD3D12Renderer::MakeShadowMapFrustum(ShadowMapFrustum * lof, 
 {
   // The engine gets its own frustum back (shadow maps are not drawn yet).
   return lof;
-}
-
-void CD3D12Renderer::DrawObjSprites(list2<CStatObjInst*> *pList, float fMaxViewDist, CObjManager *pObjMan)
-{
 }
 
 void CD3D12Renderer::EnableSwapBuffers(bool bEnable)

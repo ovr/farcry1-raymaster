@@ -53,12 +53,13 @@ public:
   DXGI_FORMAT m_Format;
   int m_nWidth, m_nHeight, m_nMips;
   bool m_bCube;                       //!< 6 faces
+  int m_nArraySize;                   //!< slices of a texture array (1: a plain texture or a cube)
   bool m_bRenderTarget;
   int m_nSRV;                         //!< index in the texture table (D3D12Descriptors.h), -1 none
   D3D12_CPU_DESCRIPTOR_HANDLE m_RTV;  //!< render targets only
 
   CD3D12Texture() : m_pResource(NULL), m_Format(DXGI_FORMAT_UNKNOWN), m_nWidth(0), m_nHeight(0), m_nMips(0),
-    m_bCube(false), m_bRenderTarget(false), m_nSRV(-1) { m_RTV.ptr = 0; }
+    m_bCube(false), m_nArraySize(1), m_bRenderTarget(false), m_nSRV(-1) { m_RTV.ptr = 0; }
 };
 
 //! The data of one sub resource for CreateTexture / UpdateTexture: rows from the top, nPitch bytes
@@ -98,7 +99,7 @@ public:
   //! A 2D texture (or a cube with 6 faces), nMips levels, with an SRV in the texture table.
   //! pSubData: [face * nMips + mip] for every face and mip, or NULL (contents undefined); an
   //! entry with pData NULL leaves that sub resource undefined. NULL when the device refuses it.
-  CD3D12Texture *CreateTexture(int nWidth, int nHeight, int nMips, DXGI_FORMAT Format, bool bCube, const SD3D12SubData *pSubData);
+  CD3D12Texture *CreateTexture(int nWidth, int nHeight, int nMips, DXGI_FORMAT Format, bool bCube, const SD3D12SubData *pSubData, int nArraySize = 1);
   //! A render target texture (one mip) with an RTV and an SRV; starts in PIXEL_SHADER_RESOURCE.
   CD3D12Texture *CreateRenderTarget(int nWidth, int nHeight, DXGI_FORMAT Format);
   //! Replaces a rectangle of one sub resource (x, y, nWidth, nHeight in texels; multiples of 4

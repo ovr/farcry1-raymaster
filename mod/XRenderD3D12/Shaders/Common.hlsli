@@ -32,6 +32,7 @@ ConstantBuffer<SDrawConstants> g_Draw : register(b1);
 
 Texture2D g_Textures[] : register(t0, space1);
 TextureCube g_Cubes[] : register(t0, space2);
+Texture2DArray g_TextureArrays[] : register(t0, space3);
 
 SamplerState g_SamplerLinearWrap : register(s0);    // anisotropic
 SamplerState g_SamplerLinearClamp : register(s1);
@@ -97,6 +98,22 @@ float4 SampleTexture(uint nIndex, uint nSampler, float2 vUV)
     return g_Textures[nIndex].Sample(g_SamplerPointClamp, vUV);
   default:
     return g_Textures[nIndex].Sample(g_SamplerLinearWrap, vUV);
+  }
+}
+
+//! Samples slice vUVW.z of g_TextureArrays[nIndex] with sampler nSampler (XR_SAMPLER_*).
+float4 SampleTextureArray(uint nIndex, uint nSampler, float3 vUVW)
+{
+  switch (nSampler)
+  {
+  case XR_SAMPLER_LINEAR_CLAMP:
+    return g_TextureArrays[nIndex].Sample(g_SamplerLinearClamp, vUVW);
+  case XR_SAMPLER_POINT_WRAP:
+    return g_TextureArrays[nIndex].Sample(g_SamplerPointWrap, vUVW);
+  case XR_SAMPLER_POINT_CLAMP:
+    return g_TextureArrays[nIndex].Sample(g_SamplerPointClamp, vUVW);
+  default:
+    return g_TextureArrays[nIndex].Sample(g_SamplerLinearWrap, vUVW);
   }
 }
 

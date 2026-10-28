@@ -106,6 +106,10 @@ public:
   //! between frames) to pDst: nWidth x nHeight pixels of B, G, R, A, rows from the top.
   //! Waits for the GPU.
   bool ReadBackBuffer(uint8 *pDst, int nWidth, int nHeight);
+  //! Copies level 0 of pTexture (2D, 4 bytes a pixel, in State and not drawn into) to pDst: nWidth x
+  //! nHeight pixels, rows from the top. Waits for the GPU; in a frame the frame recorded so far is
+  //! executed (FlushFrame), and the draws go to the back buffer again.
+  bool ReadBackTexture(ID3D12Resource *pTexture, D3D12_RESOURCE_STATES State, uint8 *pDst, int nWidth, int nHeight);
 
   //! The debug layer's messages to the engine's log.
   void LogDebugMessages();

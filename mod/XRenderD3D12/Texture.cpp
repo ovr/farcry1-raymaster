@@ -612,7 +612,8 @@ bool CTextureManager::Upload(CTexture *pTex, const SImage &Image)
 {
   pTex->m_nWidth = pTex->m_nOrigWidth = Image.nWidth;
   pTex->m_nHeight = pTex->m_nOrigHeight = Image.nHeight;
-  pTex->m_bCube = (Image.nFaces == 6);
+  pTex->m_bCube = (Image.nFaces == 6 && !Image.bArray);
+  pTex->m_bArray = Image.bArray;
   CD3D12Upload *pUpload = g_pRenderer ? g_pRenderer->m_pUpload.get() : nullptr;
   if (!pUpload || Image.Data.empty() || Image.nMips < 1)
     return false;
@@ -624,7 +625,8 @@ bool CTextureManager::Upload(CTexture *pTex, const SImage &Image)
       S.pData = Image.Bits(nFace, nMip);
       S.nPitch = Img::RowPitch(Image.Format, Image.MipWidth(nMip));
     }
-  CD3D12Texture *pGPU = pUpload->CreateTexture(Image.nWidth, Image.nHeight, Image.nMips, Image.Format, Image.nFaces == 6, Sub.data());
+  CD3D12Texture *pGPU = pUpload->CreateTexture(Image.nWidth, Image.nHeight, Image.nMips, Image.Format, pTex->m_bCube, Sub.data(),
+                                               Image.bArray ? Image.nFaces : 1);
   if (!pGPU)
     return false;
   if (pTex->m_pGPU)
@@ -886,6 +888,29 @@ int CTextureManager::CreateFromMemory(const byte *pData, int nWidth, int nHeight
   pTex->m_eSrcFormat = eSrc;
   pTex->m_bClamp = !bRepeat;
   pTex->m_bPoint = (nFilter == FILTER_NONE);
+  pTex->m_bLoaded = (pTex->m_pGPU != nullptr);
+  return pTex->m_nID;
+}
+
+int CTextureManager::CreateFromImage(const SImage &Image, const char *szName, bool bClamp, int nID)
+{
+  if (!m_pPlaceholder)
+    Init();
+  CTexture *pTex = nID ? GetByID(nID) : nullptr;
+  if (pTex && pTex->m_bPermanent)
+    pTex = nullptr;
+  if (pTex)
+  {
+    if (szName)
+      pTex->m_Name = szName;
+  }
+  else if (!(pTex = NewTexture(szName ? szName : "$Memory", nID)))
+    return 0;
+  if (!Image.Data.empty())
+    Upload(pTex, Image);
+  pTex->m_nFlags = Image.nSrcFlags | (Image.nMips > 1 ? FT_HASMIPS : 0);
+  pTex->m_bClamp = bClamp;
+  pTex->m_bPoint = false;
   pTex->m_bLoaded = (pTex->m_pGPU != nullptr);
   return pTex->m_nID;
 }

@@ -306,8 +306,8 @@ bool CD3D12Pipeline::CreateRootSignature()
     iLog->LogError("XRenderD3D12: the device has resource binding tier %d; the texture table needs tier 2",
       (int)Options.ResourceBindingTier);
 
-  // Both views of the texture table start at its first slot.
-  D3D12_DESCRIPTOR_RANGE Ranges[2] = {};
+  // All views of the texture table start at its first slot.
+  D3D12_DESCRIPTOR_RANGE Ranges[3] = {};
   Ranges[0].RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_SRV;
   Ranges[0].NumDescriptors = UINT_MAX;          // unbounded
   Ranges[0].BaseShaderRegister = 0;
@@ -315,6 +315,8 @@ bool CD3D12Pipeline::CreateRootSignature()
   Ranges[0].OffsetInDescriptorsFromTableStart = 0;
   Ranges[1] = Ranges[0];
   Ranges[1].RegisterSpace = 2;                  // TextureCube g_Cubes[]
+  Ranges[2] = Ranges[0];
+  Ranges[2].RegisterSpace = 3;                  // Texture2DArray g_TextureArrays[]
 
   D3D12_ROOT_PARAMETER Params[3] = {};
   Params[0].ParameterType = D3D12_ROOT_PARAMETER_TYPE_CBV;      // b0 SFrameConstants
@@ -324,7 +326,7 @@ bool CD3D12Pipeline::CreateRootSignature()
   Params[1].Descriptor.ShaderRegister = 1;
   Params[1].ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
   Params[2].ParameterType = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
-  Params[2].DescriptorTable.NumDescriptorRanges = 2;
+  Params[2].DescriptorTable.NumDescriptorRanges = 3;
   Params[2].DescriptorTable.pDescriptorRanges = Ranges;
   Params[2].ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
 

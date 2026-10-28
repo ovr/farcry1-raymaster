@@ -18,7 +18,8 @@
 //	    uv0: DF_TEXGEN_WORLD (dot(float4(world pos, 1), vTexGenU / V)), then
 //	      DF_TEXMATRIX
 //	  pixel shader
-//	    tex0: DF_CUBE0 (g_Cubes, reflected view vector), else DF_TEX0
+//	    tex0: DF_CUBE0 (g_Cubes, reflected view vector), else DF_TEX0_ARRAY
+//	      (g_TextureArrays, slice floor(u / 2) at (u - 2 * slice, v)), else DF_TEX0
 //	      (g_Textures), else white; sampler from nSamplers bits 0-3
 //	    colour * tex0; DF_TEX0_ALPHA_ONLY: rgb = colour, a = colour a * tex a;
 //	      DF_ALPHA_FROM_TEX: a = tex a
@@ -27,7 +28,8 @@
 //	    tex1 with uv1 (any of DF_TEX1, DF_TEX1_DETAIL, DF_TEX1_LIGHTMAP;
 //	      sampler from bits 4-7): DF_TEX1_LIGHTMAP rgb *= 4 * tex1 + vAmbient,
 //	      DF_TEX1_DETAIL rgb = 2 * rgb + tex1 - 0.5, else *= tex1
-//	    DF_ALPHATEST: discard when a < fAlphaRef (DF_ALPHATEST_LESS: when a >= fAlphaRef)
+//	    DF_ALPHATEST: discard when a < fAlphaRef (DF_ALPHATEST_LESS: when a >= fAlphaRef);
+//	      then DF_ALPHA_ONE: a = 1
 //	    DF_FOG (with vFogParams.w set): linear fog by the distance to the
 //	      camera, per pixel
 //
@@ -134,6 +136,11 @@ float4 PSMain(SVertexOutput In) : SV_Target
     float3 vView = In.vWorldPos - g_Frame.vCameraPos.xyz;
     vTex = SampleCube(g_Draw.nTex0, nSampler0, reflect(vView, SafeNormalize(In.vNormal)));
   }
+  else if (HasFlag(DF_TEX0_ARRAY))
+  {
+    float fSlice = floor(In.vTex0.x * 0.5);
+    vTex = SampleTextureArray(g_Draw.nTex0, nSampler0, float3(In.vTex0.x - 2 * fSlice, In.vTex0.y, fSlice));
+  }
   else if (HasFlag(DF_TEX0))
     vTex = SampleTexture(g_Draw.nTex0, nSampler0, In.vTex0);
 
@@ -163,6 +170,8 @@ float4 PSMain(SVertexOutput In) : SV_Target
     else
       clip(vColor.a - g_Draw.fAlphaRef);
   }
+  if (HasFlag(DF_ALPHA_ONE))
+    vColor.a = 1;
 
   if (HasFlag(DF_FOG) && g_Frame.vFogParams.w != 0)
   {

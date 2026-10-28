@@ -238,7 +238,11 @@ it as well: it holds local, machine-specific instructions and is not committed (
   larger scale). The log writes what was done and the window's DPI and client area after `Init`.
   `XRENDERTRACED_DPI=0` leaves the process as the game starts it.
 - The log is `farcry1_testing1/XRenderD3D9Traced.log`; the engine log is
-  `farcry1_testing1/log.txt`.
+  `farcry1_testing1/log.txt`. `system.cfg` sets `log_Verbosity` and `log_FileVerbosity` to 0, so
+  the engine log gets almost nothing once the game runs; `XRENDERTRACED_EXEC='log_Verbosity 5;
+  log_FileVerbosity 5'` turns it up (the load then takes more frames, so the demo frames differ).
+  In a demo run, the messages from after the level is loaded do not reach `log.txt` (warnings and
+  errors do).
 
 ## Demos
 
@@ -316,3 +320,7 @@ it as well: it holds local, machine-specific instructions and is not committed (
   terrain), `d3d12_WaterReflectionScale` its size as a fraction of the screen (0.5), and
   `r_WaterUpdateFactor`, `r_WaterUpdateDistance`, `r_WaterUpdateDeltaAngle` how often it is redrawn
   (0, 0, 0: every frame).
+- The far vegetation sprites are made when a level is loaded (before its first frame): each object
+  that `MakeSprite` gets is drawn from its 24 directions, `d3d12_SpriteRes` texels a side (128,
+  32 to 256) into a texture array per object; the log says how many were made and how long it
+  took.

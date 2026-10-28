@@ -108,7 +108,7 @@ namespace
       memcpy(pDst + r * nDstPitch, pSrc + r * nSrcPitch, nCopy);
   }
 
-  D3D12_SHADER_RESOURCE_VIEW_DESC TextureSRVDesc(DXGI_FORMAT Format, int nMips, bool bCube)
+  D3D12_SHADER_RESOURCE_VIEW_DESC TextureSRVDesc(DXGI_FORMAT Format, int nMips, bool bCube, int nArraySize = 1)
   {
     D3D12_SHADER_RESOURCE_VIEW_DESC Desc = {};
     Desc.Format = Format;
@@ -118,6 +118,14 @@ namespace
       Desc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURECUBE;
       Desc.TextureCube.MostDetailedMip = 0;
       Desc.TextureCube.MipLevels = (UINT)nMips;
+    }
+    else if (nArraySize > 1)
+    {
+      Desc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2DARRAY;
+      Desc.Texture2DArray.MostDetailedMip = 0;
+      Desc.Texture2DArray.MipLevels = (UINT)nMips;
+      Desc.Texture2DArray.FirstArraySlice = 0;
+      Desc.Texture2DArray.ArraySize = (UINT)nArraySize;
     }
     else
     {
@@ -591,14 +599,15 @@ void CD3D12Upload::UploadSubresources(ID3D12Resource *pResource, const D3D12_RES
   Barrier(pResource, D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES, D3D12_RESOURCE_STATE_COPY_DEST, TEXTURE_STATE);
 }
 
-CD3D12Texture *CD3D12Upload::CreateTexture(int nWidth, int nHeight, int nMips, DXGI_FORMAT Format, bool bCube, const SD3D12SubData *pSubData)
+CD3D12Texture *CD3D12Upload::CreateTexture(int nWidth, int nHeight, int nMips, DXGI_FORMAT Format, bool bCube, const SD3D12SubData *pSubData, int nArraySize)
 {
   if (!m_pDevice || nWidth <= 0 || nHeight <= 0)
     return nullptr;
   // pSubData is laid out with the caller's mip count; more mips than the chain has are left out.
   const int nDataMips = std::max(nMips, 1);
   nMips = std::min(nDataMips, MaxMips(nWidth, nHeight));
-  const int nFaces = bCube ? 6 : 1;
+  nArraySize = bCube ? 1 : std::clamp(nArraySize, 1, D3D12_REQ_TEXTURE2D_ARRAY_AXIS_DIMENSION);
+  const int nFaces = bCube ? 6 : nArraySize;
 
   const D3D12_HEAP_PROPERTIES Heap = HeapProps(D3D12_HEAP_TYPE_DEFAULT);
   const D3D12_RESOURCE_DESC Desc = TextureDesc(nWidth, nHeight, nFaces, nMips, Format, D3D12_RESOURCE_FLAG_NONE);
@@ -607,8 +616,8 @@ CD3D12Texture *CD3D12Upload::CreateTexture(int nWidth, int nHeight, int nMips, D
     pSubData ? D3D12_RESOURCE_STATE_COPY_DEST : TEXTURE_STATE, nullptr, IID_PPV_ARGS(&pResource));
   if (FAILED(hr))
   {
-    iLog->LogError("XRenderD3D12: CreateCommittedResource (texture %dx%d, %d mips, format %d%s) failed (0x%08X)",
-      nWidth, nHeight, nMips, (int)Format, bCube ? ", cube" : "", (unsigned)hr);
+    iLog->LogError("XRenderD3D12: CreateCommittedResource (texture %dx%dx%d, %d mips, format %d%s) failed (0x%08X)",
+      nWidth, nHeight, nFaces, nMips, (int)Format, bCube ? ", cube" : "", (unsigned)hr);
     return nullptr;
   }
   if (pSubData)
@@ -621,8 +630,9 @@ CD3D12Texture *CD3D12Upload::CreateTexture(int nWidth, int nHeight, int nMips, D
   pTex->m_nHeight = nHeight;
   pTex->m_nMips = nMips;
   pTex->m_bCube = bCube;
+  pTex->m_nArraySize = nArraySize;
   pTex->m_bRenderTarget = false;
-  const D3D12_SHADER_RESOURCE_VIEW_DESC SRV = TextureSRVDesc(Format, nMips, bCube);
+  const D3D12_SHADER_RESOURCE_VIEW_DESC SRV = TextureSRVDesc(Format, nMips, bCube, nArraySize);
   pTex->m_nSRV = g_pRenderer->m_pDescriptors->AllocSRV(pTex->m_pResource, &SRV);
   AddVideoMemory(pTex->m_pResource);
   return pTex;

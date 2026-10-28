@@ -132,12 +132,25 @@ void CD3D12Renderer::DrawGeometry(const SPipelineKey &Key, const SDrawConstants 
     pList->IASetVertexBuffers(2, 1, pTexCoord1);
   pList->IASetPrimitiveTopology(eTopology);
 
-  // The viewport inside the back buffer (an off screen target: all of it); the scissor rectangle
-  // inside the viewport (the scissors are the back buffer's).
+  // The viewport inside the back buffer (an off screen target: all of it, or m_TargetRect); the
+  // scissor rectangle inside the viewport (the scissors are the back buffer's).
   const bool bOffscreen = m_pDevice->IsOffscreen();
   const int nBufW = m_pDevice->GetTargetWidth(), nBufH = m_pDevice->GetTargetHeight();
-  const int vx = bOffscreen ? 0 : std::clamp(m_Viewport[0], 0, nBufW), vy = bOffscreen ? 0 : std::clamp(m_Viewport[1], 0, nBufH);
-  const int vw = bOffscreen ? nBufW : std::clamp(m_Viewport[2], 0, nBufW - vx), vh = bOffscreen ? nBufH : std::clamp(m_Viewport[3], 0, nBufH - vy);
+  int vx = std::clamp(m_Viewport[0], 0, nBufW), vy = std::clamp(m_Viewport[1], 0, nBufH);
+  int vw = std::clamp(m_Viewport[2], 0, nBufW - vx), vh = std::clamp(m_Viewport[3], 0, nBufH - vy);
+  if (bOffscreen && m_bTargetRect)
+  {
+    vx = std::clamp((int)m_TargetRect.left, 0, nBufW);
+    vy = std::clamp((int)m_TargetRect.top, 0, nBufH);
+    vw = std::clamp((int)(m_TargetRect.right - m_TargetRect.left), 0, nBufW - vx);
+    vh = std::clamp((int)(m_TargetRect.bottom - m_TargetRect.top), 0, nBufH - vy);
+  }
+  else if (bOffscreen)
+  {
+    vx = vy = 0;
+    vw = nBufW;
+    vh = nBufH;
+  }
   if (vw <= 0 || vh <= 0)
     return;
   const D3D12_VIEWPORT Viewport = { (float)vx, (float)vy, (float)vw, (float)vh, m_fDepthMin, m_fDepthMax };

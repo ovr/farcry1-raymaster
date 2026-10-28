@@ -410,6 +410,9 @@ void CD3D12Renderer::DrawLeafItem(const SRenderItem &it)
   }
   if (m_bFog)
     dc.nFlags |= DF_FOG;
+  // The picture of a far vegetation sprite: where the object is, whatever the texture's alpha.
+  if (m_bSpritePass)
+    dc.nFlags |= DF_ALPHA_ONE;
 
   auto Draw = [&]()
   {
@@ -512,7 +515,8 @@ void CD3D12Renderer::DumpItem(int nIndex, const SRenderItem &it, int eList)
 void CD3D12Renderer::DumpDraw(const SDrawConstants &dc, const SPipelineKey &Key, const CTexture *pTex)
 {
   static const char *const s_Flags[] = { "TEX0", "TEX1", "VCOLOR", "VCOLOR_X2", "LIGHTING", "ALPHATEST", "TEXGEN_WORLD", "TEXMATRIX", "FOG",
-                                         "TEX1_DETAIL", "TEX1_LIGHTMAP", "ALPHA_FROM_TEX", "CUBE0", "TEX0_ALPHA_ONLY", "SCREEN_POS", "ALPHATEST_LESS", "TEXGEN1_WORLD" };
+                                         "TEX1_DETAIL", "TEX1_LIGHTMAP", "ALPHA_FROM_TEX", "CUBE0", "TEX0_ALPHA_ONLY", "SCREEN_POS", "ALPHATEST_LESS", "TEXGEN1_WORLD",
+                                         "ALPHA_ONE", "TEX0_ARRAY" };
   std::string Flags;
   for (size_t i = 0; i < std::size(s_Flags); i++)
     if (dc.nFlags & (1u << i))
