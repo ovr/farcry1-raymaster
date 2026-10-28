@@ -32,7 +32,8 @@ namespace
   }
 
   //! How an item is drawn: the shader's draw class; resources with an opacity below 1 make an
-  //! opaque class alpha blended (as SShaderItem::IsTransparent).
+  //! opaque class alpha blended (as SShaderItem::IsTransparent). The vertex coloured classes
+  //! (vegetation) stay and are blended with their colours (IsBlendedVColor).
   EDrawClass DrawClassOf(CShader *pSh, SRenderShaderResources *pRes)
   {
     EDrawClass eDC = pSh->GetDrawClass();
@@ -42,8 +43,6 @@ namespace
       {
       case eDC_Opaque:
       case eDC_AlphaTest:
-      case eDC_AlphaTestVColor:
-      case eDC_VColor:
         eDC = eDC_AlphaBlend;
         break;
       default:
@@ -107,7 +106,7 @@ namespace
     // alone (the muzzle flash) is drawn among the blended ones, after the weapon.
     if (SortGroup(it.nSort) == eS_Nearest)
       return eRL_Nearest;
-    if (IsBlendedClass(it.eDrawClass))
+    if (IsBlendedClass(it.eDrawClass) || IsBlendedVColor(it.eDrawClass, it.pRes, it.pObj))
       return eRL_Blended;
     if (it.pObj->m_ObjFlags & FOB_NEAREST)
       return eRL_Nearest;

@@ -301,6 +301,11 @@ private:
 //! eDC_AlphaTest) is drawn eDC_AlphaBlend, as SShaderItem::GetSort moves it to eS_Banner.
 //! eDC_NoDraw for a NULL shader.
 EDrawClass GetDrawClass(const CShader *pShader, const SRenderShaderResources *pRes);
+//! Whether an element of a vertex coloured class (eDC_AlphaTestVColor, eDC_VColor: vegetation) is
+//! drawn blended (SRCALPHA, INVSRCALPHA, alpha above 0, no depth writes) instead: its material's
+//! opacity is below 1, or, alpha tested, the object fades in or out (m_Color.a below 1). The class
+//! and its vertex colours (the engine's lighting of the plant) stay.
+bool IsBlendedVColor(EDrawClass eDC, const SRenderShaderResources *pRes, const CCObject *pObj);
 //! The diffuse texture (EFTT_DIFFUSE); for an animated one ("name##01_04(.25).dds") the frame
 //! of ITimer::GetCurrTime(). NULL when the material has none: draw white (an element whose
 //! leaf buffer chunk carries a texture of its own, CLeafBuffer::SetShader, uses that).

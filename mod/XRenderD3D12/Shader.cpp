@@ -871,6 +871,13 @@ EDrawClass GetDrawClass(const CShader *pShader, const SRenderShaderResources *pR
   return eClass;
 }
 
+bool IsBlendedVColor(EDrawClass eDC, const SRenderShaderResources *pRes, const CCObject *pObj)
+{
+  if (eDC != eDC_AlphaTestVColor && eDC != eDC_VColor)
+    return false;
+  return GetOpacity(pRes) < 1.0f || (eDC == eDC_AlphaTestVColor && pObj && pObj->m_Color.a < 1.0f);
+}
+
 CTexture *GetResourceTexture(const SRenderShaderResources *pRes, int nSlot)
 {
   if (!pRes || nSlot < 0 || nSlot >= EFTT_MAX || !pRes->m_Textures[nSlot])

@@ -337,20 +337,22 @@ void CD3D12Renderer::DrawLeafItem(const SRenderItem &it)
   case eDC_AlphaTestVColor:
   case eDC_VColor:
   {
-    // texture * vertex colour * 2 * the object's colour * the world colour.
+    // texture * vertex colour * 2 * the object's colour * the world colour; alpha * the object's
+    // alpha squared * the opacity.
     dc.nFlags |= DF_VCOLOR | DF_VCOLOR_X2;
     const float a = pObj->m_Color.a;
-    Set4(dc.vColor, pObj->m_Color.r * m_WorldColor[0], pObj->m_Color.g * m_WorldColor[1], pObj->m_Color.b * m_WorldColor[2], a * a);
+    Set4(dc.vColor, pObj->m_Color.r * m_WorldColor[0], pObj->m_Color.g * m_WorldColor[1], pObj->m_Color.b * m_WorldColor[2], a * a * fOpacity);
     if (eDC == eDC_AlphaTestVColor)
     {
       dc.nFlags |= DF_ALPHATEST;
       dc.fAlphaRef = GetAlphaRef(pSh, pRes) > 0 ? GetAlphaRef(pSh, pRes) : 128.0f / 255.0f;
-      if (a < 1)
-      {
-        // Grass fading out: blended, no depth writes.
-        Key.nState = GS_BLSRC_SRCALPHA | GS_BLDST_ONEMINUSSRCALPHA;
-        dc.fAlphaRef = 1.0f / 255.0f;
-      }
+    }
+    if (IsBlendedVColor(eDC, pRes, pObj))
+    {
+      // Grass fading in or out, transparent plants: blended, no depth writes.
+      Key.nState = GS_BLSRC_SRCALPHA | GS_BLDST_ONEMINUSSRCALPHA;
+      dc.nFlags |= DF_ALPHATEST;
+      dc.fAlphaRef = 1.0f / 255.0f;
     }
     break;
   }
