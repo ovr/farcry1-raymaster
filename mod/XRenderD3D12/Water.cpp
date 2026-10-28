@@ -12,6 +12,14 @@
 //	reflection. The beach is the foam texture running up the shore in two
 //	waves; the sea floor is opaque, lit by the world colour.
 //
+//	With r_WaterReflections the ocean also reflects the scene mirrored in
+//	its plane: before the main view is drawn, the 3D engine renders the sky
+//	and the terrain (DrawLowDetail) seen by the camera mirrored in the
+//	water plane into a target of its own, as a scene nested in the main
+//	one, redrawn as r_WaterUpdateFactor, r_WaterUpdateDistance and
+//	r_WaterUpdateDeltaAngle say. Its near plane is the water plane, so
+//	nothing under the water shows in it.
+//
 //////////////////////////////////////////////////////////////////////
 
 #include "StdAfx.h"
@@ -46,6 +54,22 @@ float Frac(float f)
 {
   return f - floorf(f);
 }
+
+//! The ocean (one of the terrain's water shaders), not a water volume.
+bool IsOcean(const SRenderItem &it)
+{
+  return it.eDrawClass == eDC_Water && _strnicmp(it.pShader->GetName(), "terrain", 7) == 0;
+}
+
+float Sign(float f)
+{
+  return f > 0 ? 1.0f : f < 0 ? -1.0f : 0.0f;
+}
+
+// The water reflection is redrawn after at most this many seconds (with r_WaterUpdateFactor), and
+// its camera's near plane is at most this far.
+constexpr float REFLECTION_MAX_INTERVAL = 0.3f;
+constexpr float REFLECTION_MAX_NEAR = 16.0f;
 
 // The water's optics: absorption per metre (red goes first), the colour it scatters back in full
 // light, and how far the waves move the refracted picture (a fraction of the screen).
@@ -204,6 +228,163 @@ void CD3D12Renderer::ReleaseWaterResources()
   m_bSceneCopied = false;
 }
 
+void CD3D12Renderer::UpdateWaterReflection(std::span<const SRenderItem> Items)
+{
+  // The main view of the game with the ocean in it (the water volumes have levels of their own),
+  // the camera above the water.
+  I3DEngine *p3D = iSystem ? iSystem->GetI3DEngine() : nullptr;
+  const bool bOcean = CV_r_WaterReflections && (m_nSceneFlags & SHDF_ALLOWHDR) && m_nRecurseLevel <= 1 &&
+                      std::any_of(Items.begin(), Items.end(), IsOcean);
+  if (!bOcean || !p3D || !m_pDevice || !m_pDescriptors || m_bReflectionPass || !EnsureFrame())
+  {
+    m_bReflectionValid = false;
+    return;
+  }
+  const CCamera Camera = m_Camera;
+  const Vec3 vPos = Camera.GetPos();
+  const float fWaterZ = p3D->GetWaterLevel();
+  if (vPos.z <= fWaterZ)
+  {
+    m_bReflectionValid = false;
+    return;
+  }
+
+  // The targets: a fraction of the screen.
+  const float fScale = std::clamp(CV_d3d12_WaterReflectionScale, 0.1f, 1.0f);
+  const int w = std::max((int)(m_pDevice->GetWidth() * fScale), 1), h = std::max((int)(m_pDevice->GetHeight() * fScale), 1);
+  if (!m_pReflectionColor || w != m_nReflectionWidth || h != m_nReflectionHeight)
+  {
+    ReleaseWaterReflection();
+    m_hReflectionRTV = m_pDescriptors->AllocRTV();
+    m_hReflectionDSV = m_pDescriptors->AllocDSV();
+    if (!m_pDevice->CreateOffscreenTargets(w, h, m_pReflectionColor, m_pReflectionDepth, m_hReflectionRTV, m_hReflectionDSV) ||
+        (m_nReflectionSRV = m_pDescriptors->AllocSRV(m_pReflectionColor.Get(), nullptr)) < 0)
+    {
+      ReleaseWaterReflection();
+      return;
+    }
+    m_nReflectionWidth = w;
+    m_nReflectionHeight = h;
+  }
+
+  // Due when the last one is older than r_WaterUpdateFactor seconds per metre to the nearest water
+  // (at most 0.3 s), or the camera has moved more than r_WaterUpdateDistance or turned more than
+  // r_WaterUpdateDeltaAngle degrees since.
+  const float fToWater = p3D->GetDistanceToSectorWithWater();
+  const float fTime = iTimer ? iTimer->GetCurrTime() : 0.0f;
+  const Vec3 vDir = ConvertToRadAngles(Camera.GetAngles());
+  const bool bDue = !m_bReflectionValid || fWaterZ != m_fReflectionWaterZ || fTime < m_fReflectionTime ||
+                    fTime - m_fReflectionTime > std::min(CV_r_WaterUpdateFactor * fToWater, REFLECTION_MAX_INTERVAL) ||
+                    (vPos - m_vReflectionCamPos).GetLength() > CV_r_WaterUpdateDistance ||
+                    vDir.Dot(m_vReflectionCamDir) < cosf(DEG2RAD(CV_r_WaterUpdateDeltaAngle));
+  if (!bDue)
+    return;
+
+  // The frame's camera mirrored in the water plane: below the water by as much as the camera is
+  // above it, the pitch negated, no roll; the near plane at the distance to the water, at most 16 m.
+  CCamera Mirror = Camera;
+  Mirror.SetPos(Vec3(vPos.x, vPos.y, 2 * fWaterZ - vPos.z));
+  const Ang3 vAngles = Camera.GetAngles();
+  Mirror.SetAngle(Vec3(-vAngles.x, 0, vAngles.z));
+  Mirror.SetZMin(std::clamp(fToWater, std::max(Camera.GetZMin(), 0.1f), REFLECTION_MAX_NEAR));
+  Mirror.Update();
+
+  // What the reflection's scene changes.
+  int Viewport[4];
+  memcpy(Viewport, m_Viewport, sizeof(Viewport));
+  const bool bFog = m_bFog;
+  const float fFogStart = m_fFogStart, fFogEnd = m_fFogEnd;
+  float FogColor[4], WorldColor[4];
+  memcpy(FogColor, m_FogColor, sizeof(FogColor));
+  memcpy(WorldColor, m_WorldColor, sizeof(WorldColor));
+  const Vec3 vClearColor = m_vClearColor;
+  const int nState = m_nState, nCullMode = m_nCullMode;
+
+  // The 3D engine renders the scene (a frame of its own, nested in this one) with the mirrored
+  // camera into the targets.
+  m_pDevice->SetOffscreenTargets(m_pReflectionColor.Get(), m_hReflectionRTV, m_hReflectionDSV, w, h);
+  const float Clear[4] = { m_vClearColor.x, m_vClearColor.y, m_vClearColor.z, 0 };
+  m_pDevice->ClearColor(Clear);
+  m_pDevice->ClearDepth(1.0f, 0, true, true);
+  m_bReflectionPass = true;
+  m_fReflectionWaterZ = fWaterZ;
+  SetCamera(Mirror);
+  p3D->SetCamera(Mirror, false);
+  p3D->DrawLowDetail(CV_d3d12_WaterReflectionFlags);
+  m_bReflectionPass = false;
+  m_pDevice->SetBackBufferTargets();
+
+  // The frame as it was.
+  p3D->SetCamera(Camera, false);
+  SetCamera(Camera);
+  memcpy(m_Viewport, Viewport, sizeof(Viewport));
+  m_bFog = bFog;
+  m_fFogStart = fFogStart;
+  m_fFogEnd = fFogEnd;
+  memcpy(m_FogColor, FogColor, sizeof(FogColor));
+  memcpy(m_WorldColor, WorldColor, sizeof(WorldColor));
+  m_vClearColor = vClearColor;
+  m_nState = nState;
+  m_nCullMode = nCullMode;
+  InvalidateFrameConstants();
+
+  m_fReflectionTime = fTime;
+  m_vReflectionCamPos = vPos;
+  m_vReflectionCamDir = vDir;
+  m_bReflectionValid = true;
+}
+
+void CD3D12Renderer::ClipProjectionToWater(Matrix44 &Proj, const Matrix44 &View) const
+{
+  // The water plane in view space, the side above the water positive: the world's z axis turned by
+  // the view (row 2 of the view matrix, which multiplies row vectors), through the point (0, 0, W).
+  const float *v = View.data;
+  const Vec3 n(v[8], v[9], v[10]);
+  const Vec3 p(m_fReflectionWaterZ * v[8] + v[12], m_fReflectionWaterZ * v[9] + v[13], m_fReflectionWaterZ * v[10] + v[14]);
+  const float d = -n.Dot(p);
+  // The camera must be below the water.
+  if (d >= 0)
+    return;
+  // The near plane becomes the water plane (an oblique near plane): the clip space z row is the
+  // plane scaled so that the far plane goes through the corner Q of the far plane farthest on the
+  // plane's positive side (clip (sign x, sign y, 1, 1)), and still encloses the view frustum.
+  float *m = Proj.data;
+  const float q[4] = { Sign(n.x) / m[0], Sign(n.y) / m[5], -1, (1 + m[10]) / m[14] };
+  const float fDot = n.x * q[0] + n.y * q[1] + n.z * q[2] + d * q[3];
+  if (fabsf(fDot) < 1e-8f)
+    return;
+  const float a = 1 / fDot;
+  m[2] = n.x * a;
+  m[6] = n.y * a;
+  m[10] = n.z * a;
+  m[14] = d * a;
+}
+
+void CD3D12Renderer::ReleaseWaterReflection()
+{
+  if (m_pDescriptors)
+  {
+    if (m_nReflectionSRV >= 0)
+      m_pDescriptors->FreeSRV(m_nReflectionSRV);
+    if (m_hReflectionRTV.ptr)
+      m_pDescriptors->FreeRTV(m_hReflectionRTV);
+    if (m_hReflectionDSV.ptr)
+      m_pDescriptors->FreeDSV(m_hReflectionDSV);
+  }
+  m_nReflectionSRV = -1;
+  m_hReflectionRTV = {};
+  m_hReflectionDSV = {};
+  if (m_pDevice)
+  {
+    m_pDevice->DeferredRelease(m_pReflectionColor);
+    m_pDevice->DeferredRelease(m_pReflectionDepth);
+  }
+  m_pReflectionColor.Reset();
+  m_pReflectionDepth.Reset();
+  m_nReflectionWidth = m_nReflectionHeight = 0;
+  m_bReflectionValid = false;
+}
+
 bool CD3D12Renderer::SetupWaterDraw(SPipelineKey &Key, SDrawConstants &dc, const SRenderItem &it)
 {
   if (!m_bSceneCopied && !CopySceneForWater())
@@ -238,10 +419,19 @@ bool CD3D12Renderer::SetupWaterDraw(SPipelineKey &Key, SDrawConstants &dc, const
     }
   }
 
+  // The ocean's planar reflection (UpdateWaterReflection).
+  const bool bVolume = !IsOcean(it);
+  dc.nTex6 = D3D12_SRV_WHITE;
+  if (!bVolume && m_bReflectionValid && m_nReflectionSRV >= 0)
+  {
+    dc.nTex6 = (uint32)m_nReflectionSRV;
+    dc.vParams1[3] = 1;
+    memcpy(dc.mParams0, m_ReflectionViewProj.data, sizeof(dc.mParams0));
+  }
+
   // The water's own colour, lit by the world colour and the sun's height; a water volume (not one of
   // the terrain's water shaders) by what is behind it, as it may be indoors.
   const float fLight = 0.4f + 0.6f * std::clamp(m_SunDir[2], 0.0f, 1.0f);
-  const bool bVolume = _strnicmp(it.pShader->GetName(), "terrain", 7) != 0;
   Set4(dc.vParams2, WATER_ABSORPTION[0], WATER_ABSORPTION[1], WATER_ABSORPTION[2], WATER_DISPLACEMENT);
   Set4(dc.vParams3, WATER_SCATTER[0] * m_WorldColor[0] * fLight, WATER_SCATTER[1] * m_WorldColor[1] * fLight,
        WATER_SCATTER[2] * m_WorldColor[2] * fLight, bVolume ? 1.0f : 0.0f);

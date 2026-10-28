@@ -82,6 +82,8 @@ CD3D12Renderer::CD3D12Renderer()
   m_CameraView = Identity44();
   m_ViewMatrix = Identity44();
   m_ProjMatrix = Identity44();
+  m_SkyProjMatrix = Identity44();
+  m_ReflectionViewProj = Identity44();
 }
 
 CD3D12Renderer::~CD3D12Renderer()
@@ -96,6 +98,9 @@ void CD3D12Renderer::RegisterVariables()
   iConsole->Register("r_Quality_BumpMapping", &CV_r_Quality_BumpMapping, 2, VF_DUMPTODISK | VF_REQUIRE_APP_RESTART);
   iConsole->Register("r_WaterReflections", &CV_r_WaterReflections, 1, VF_DUMPTODISK);
   iConsole->Register("r_WaterRefractions", &CV_r_WaterRefractions, 0, VF_DUMPTODISK);
+  iConsole->Register("r_WaterUpdateFactor", &CV_r_WaterUpdateFactor, 0.01f, VF_DUMPTODISK);
+  iConsole->Register("r_WaterUpdateDistance", &CV_r_WaterUpdateDistance, 2.0f, 0);
+  iConsole->Register("r_WaterUpdateDeltaAngle", &CV_r_WaterUpdateDeltaAngle, 5.0f, 0);
   iConsole->Register("r_DisableSfx", &CV_r_DisableSfx, 0, VF_DUMPTODISK);
   iConsole->Register("r_ResetScreenFx", &CV_r_ResetScreenFx, 0, 0);
   iConsole->Register("r_TexResolution", &CV_r_TexResolution, 0, VF_DUMPTODISK);
@@ -109,7 +114,11 @@ void CD3D12Renderer::RegisterVariables()
   iConsole->Register("d3d12_Debug", &CV_d3d12_debug, 0, VF_DUMPTODISK, "Direct3D 12 debug layer and GPU based validation (read at start-up)");
   iConsole->Register("d3d12_DumpFrame", &CV_d3d12_DumpFrame, 0, 0, "Writes the render items and draws of the next frame to XRenderD3D12_frame.txt");
   iConsole->Register("d3d12_WaterDebug", &CV_d3d12_WaterDebug, 0, 0,
-                     "Water surfaces show one term: 1 refraction, 2 reflection, 3 water thickness (0-2 m: black-white), 4 normal, 5 screen space reflection hits, 6 their colour");
+                     "Water surfaces show one term: 1 refraction, 2 reflection, 3 water thickness (0-2 m: black-white), 4 normal, 5 screen space reflection hits, 6 their colour, 7 the planar reflection");
+  iConsole->Register("d3d12_WaterReflectionScale", &CV_d3d12_WaterReflectionScale, 0.5f, VF_DUMPTODISK,
+                     "Size of the water reflection (r_WaterReflections), a fraction of the screen's");
+  iConsole->Register("d3d12_WaterReflectionFlags", &CV_d3d12_WaterReflectionFlags, DLD_TERRAIN | DLD_TERRAIN_FULLRES, VF_DUMPTODISK,
+                     "What the water reflection shows: DLD_* flags of I3DEngine::DrawLowDetail (4160: the sky and the terrain)");
 }
 
 //////////////////////////////////////////////////////////////////////////
@@ -319,6 +328,7 @@ void CD3D12Renderer::Release()
   if (m_pShaders)
     m_pShaders->Shutdown();
   ReleaseWaterResources();
+  ReleaseWaterReflection();
   m_pDetailTexture = nullptr;   // released with every texture
   m_pBeachTexture = nullptr;
   m_nWaveTexture = 0;
@@ -499,6 +509,13 @@ void CD3D12Renderer::SetCamera(const CCamera &cam)
   m_ViewMatrix = m_CameraView;
   m_nMatrixDepth = 0;
   m_ProjMatrix = MakeProjection(cam);
+  m_SkyProjMatrix = m_ProjMatrix;
+  // The camera of the water reflection (the frame's mirrored in the water plane): nothing under the water.
+  if (m_bReflectionPass)
+  {
+    m_ReflectionViewProj = m_CameraView * m_ProjMatrix;
+    ClipProjectionToWater(m_ProjMatrix, m_CameraView);
+  }
   InvalidateFrameConstants();
 }
 

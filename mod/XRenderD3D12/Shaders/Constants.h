@@ -106,8 +106,9 @@ struct SDrawConstants
   XR_FLOAT4(vParams3);
   XR_UINT(nTex4);
   XR_UINT(nTex5);
+  XR_UINT(nTex6);
   XR_FLOAT(fPad1);
-  XR_FLOAT(fPad2);
+  XR_FLOAT4X4(mParams0);          //!< a matrix of the other programs (Water.hlsl)
 };
 
 #endif

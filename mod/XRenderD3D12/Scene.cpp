@@ -403,10 +403,14 @@ void CScene::EndEf3D(int nFlags)
   }
   SSceneSlot &s = Cur();
   m_nDrawing++;
-  if (m_nDrawing == 1)
-    UpdateScreenFx();
   if (g_pRenderer)
     g_pRenderer->m_nRecurseLevel = std::max(m_nDepth, 1);
+  if (m_nDrawing == 1)
+  {
+    UpdateScreenFx();
+    // The scenes this one shows (the water reflection), rendered from here, nested in this one.
+    g_pRenderer->UpdateWaterReflection(s.Items);
+  }
 
   const int nItems = PrepareItems(s);
   BuildLists(s, nItems, (nFlags & SHDF_SORT) != 0);

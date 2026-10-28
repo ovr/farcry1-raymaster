@@ -52,6 +52,9 @@ void Set4(float v[4], float x, float y, float z, float w)
 
 }
 
+// HLSL packs a matrix of a constant buffer from a 16 byte boundary.
+static_assert(offsetof(SDrawConstants, mParams0) % 16 == 0, "SDrawConstants::mParams0 must match the HLSL layout");
+
 SDrawConstants CD3D12Renderer::DefaultDrawConstants()
 {
   SDrawConstants dc = {};
@@ -129,23 +132,25 @@ void CD3D12Renderer::DrawGeometry(const SPipelineKey &Key, const SDrawConstants 
     pList->IASetVertexBuffers(2, 1, pTexCoord1);
   pList->IASetPrimitiveTopology(eTopology);
 
-  // The viewport inside the back buffer; the scissor rectangle inside the viewport.
-  const int nBufW = m_pDevice->GetWidth(), nBufH = m_pDevice->GetHeight();
-  const int vx = std::clamp(m_Viewport[0], 0, nBufW), vy = std::clamp(m_Viewport[1], 0, nBufH);
-  const int vw = std::clamp(m_Viewport[2], 0, nBufW - vx), vh = std::clamp(m_Viewport[3], 0, nBufH - vy);
+  // The viewport inside the back buffer (an off screen target: all of it); the scissor rectangle
+  // inside the viewport (the scissors are the back buffer's).
+  const bool bOffscreen = m_pDevice->IsOffscreen();
+  const int nBufW = m_pDevice->GetTargetWidth(), nBufH = m_pDevice->GetTargetHeight();
+  const int vx = bOffscreen ? 0 : std::clamp(m_Viewport[0], 0, nBufW), vy = bOffscreen ? 0 : std::clamp(m_Viewport[1], 0, nBufH);
+  const int vw = bOffscreen ? nBufW : std::clamp(m_Viewport[2], 0, nBufW - vx), vh = bOffscreen ? nBufH : std::clamp(m_Viewport[3], 0, nBufH - vy);
   if (vw <= 0 || vh <= 0)
     return;
   const D3D12_VIEWPORT Viewport = { (float)vx, (float)vy, (float)vw, (float)vh, m_fDepthMin, m_fDepthMax };
   pList->RSSetViewports(1, &Viewport);
   RECT Scissor = { vx, vy, vx + vw, vy + vh };
-  if (m_bItemScissor)
+  if (m_bItemScissor && !bOffscreen)
   {
     Scissor.left = std::max(Scissor.left, m_ItemScissor.left);
     Scissor.top = std::max(Scissor.top, m_ItemScissor.top);
     Scissor.right = std::min(Scissor.right, m_ItemScissor.right);
     Scissor.bottom = std::min(Scissor.bottom, m_ItemScissor.bottom);
   }
-  if (m_bScissor)
+  if (m_bScissor && !bOffscreen)
   {
     Scissor.left = std::max<LONG>(Scissor.left, m_Scissor[0]);
     Scissor.top = std::max<LONG>(Scissor.top, m_Scissor[1]);

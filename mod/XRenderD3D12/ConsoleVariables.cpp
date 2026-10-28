@@ -243,9 +243,6 @@ constexpr SFloatVar s_FloatVars[] =
   { "r_pp_Saturation", 1.0f, 0 },
   { "r_pp_SharpenAmount", 1.0f, 0 },
   { "r_Shininess", 15.0f, 0 },
-  { "r_WaterUpdateDeltaAngle", 5.0f, 0 },
-  { "r_WaterUpdateDistance", 2.0f, 0 },
-  { "r_WaterUpdateFactor", 0.01f, VF_DUMPTODISK },
   { "r_WaveScale", 1.0f, 0 },
 };
 

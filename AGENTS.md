@@ -309,4 +309,10 @@ it as well: it holds local, machine-specific instructions and is not committed (
   is the frame that `XRENDERTRACED_CAPTURE=<n>` captures of the original.
 - `d3d12_WaterDebug <n>` shows one term of the water's colour instead of the whole: 1 refraction,
   2 reflection, 3 water thickness (black to white over 0-2 m), 4 normal, 5 where the screen space
-  reflection hits, 6 its colour.
+  reflection hits, 6 its colour, 7 the planar reflection.
+- With `r_WaterReflections 1` the ocean reflects the scene seen by the camera mirrored in the water
+  plane, which the 3D engine renders with `I3DEngine::DrawLowDetail` before the main view;
+  `d3d12_WaterReflectionFlags` are the `EDrawLowDetailFlags` it gets (default 4160: the sky and the
+  terrain), `d3d12_WaterReflectionScale` its size as a fraction of the screen (0.5), and
+  `r_WaterUpdateFactor`, `r_WaterUpdateDistance`, `r_WaterUpdateDeltaAngle` how often it is redrawn
+  (0, 0, 0: every frame).

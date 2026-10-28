@@ -408,6 +408,15 @@ public:
   void ReleaseWaterResources();
   //! The texture index of the wave slopes the water program samples (made on first use).
   int GetWaveTexture();
+  //! Before the main view is drawn (Items: its render items): with r_WaterReflections and an
+  //! ocean surface among the items, the scene mirrored in the water plane into m_pReflectionColor,
+  //! when the last one is out of date (r_WaterUpdate*): the 3D engine renders it with
+  //! DrawLowDetail (the sky, the terrain), seen by the camera mirrored in the water plane.
+  void UpdateWaterReflection(std::span<const SRenderItem> Items);
+  void ReleaseWaterReflection();
+  //! The reflection pass's projection: its near plane replaced by the water plane, so that nothing
+  //! under the water is drawn into the reflection.
+  void ClipProjectionToWater(Matrix44 &Proj, const Matrix44 &View) const;
 
   ComPtr<ID3D12Resource> m_pSceneColorCopy, m_pSceneDepthCopy;
   int m_nSceneColorSRV = -1, m_nSceneDepthSRV = -1;
@@ -415,6 +424,16 @@ public:
   bool m_bSceneCopied = false;              //!< the copies hold the current list's scene
   CTexture *m_pBeachTexture = nullptr;      //!< textures/wave1 (one reference)
   int m_nWaveTexture = 0;                   //!< GetWaveTexture: its ID, 0 not made yet, -1 failed
+  ComPtr<ID3D12Resource> m_pReflectionColor, m_pReflectionDepth;
+  D3D12_CPU_DESCRIPTOR_HANDLE m_hReflectionRTV = {}, m_hReflectionDSV = {};
+  int m_nReflectionSRV = -1;
+  int m_nReflectionWidth = 0, m_nReflectionHeight = 0;
+  bool m_bReflectionPass = false;           //!< the reflection's scene is being rendered
+  bool m_bReflectionValid = false;          //!< m_pReflectionColor holds a reflection for this frame's ocean
+  float m_fReflectionWaterZ = 0;            //!< the water level it mirrors
+  float m_fReflectionTime = 0;              //!< ITimer time it was drawn at
+  Vec3 m_vReflectionCamPos, m_vReflectionCamDir;  //!< the frame's camera it was drawn for
+  Matrix44 m_ReflectionViewProj;            //!< world to clip of the mirrored camera (without the water clip)
 
   //////////////////////////////////////////////////////////////////////////
   // State (public: the subsystems' files use it)
@@ -447,6 +466,7 @@ public:
   Matrix44 m_CameraView;              //!< the view of SetCamera
   Matrix44 m_ViewMatrix;              //!< the current modelview (GetModelViewMatrix): m_CameraView and the matrix stack
   Matrix44 m_ProjMatrix;              //!< GetProjectionMatrix
+  Matrix44 m_SkyProjMatrix;           //!< the sky box's: m_ProjMatrix without the water clip of the reflection pass
   static constexpr int MATRIX_STACK = 32;
   Matrix44 m_MatrixStack[MATRIX_STACK];
   int m_nMatrixDepth = 0;
@@ -482,6 +502,9 @@ public:
   int CV_r_Quality_BumpMapping = 2;
   int CV_r_WaterReflections = 1;
   int CV_r_WaterRefractions = 0;
+  float CV_r_WaterUpdateFactor = 0.01f;     //!< the water reflection is redrawn after this many seconds per metre to the water, at most 0.3 s,
+  float CV_r_WaterUpdateDistance = 2;       //!< or when the camera moved this far,
+  float CV_r_WaterUpdateDeltaAngle = 5;     //!< or turned by this many degrees
   int CV_r_DisableSfx = 0;
   int CV_r_ResetScreenFx = 0;
   int CV_r_TexResolution = 0;         //!< mip levels dropped from loaded textures
@@ -492,6 +515,8 @@ public:
   int CV_d3d12_debug = 0;             //!< debug layer (also XRENDERD3D12_DEBUG=1); only read at Init
   int CV_d3d12_DumpFrame = 0;         //!< non-zero: the next frame's 3D draws go to XRenderD3D12_frame.txt, then 0
   int CV_d3d12_WaterDebug = 0;        //!< non-zero: the water shows one term of its colour (Water.hlsl)
+  float CV_d3d12_WaterReflectionScale = 0.5f;   //!< size of the water reflection, a fraction of the screen's
+  int CV_d3d12_WaterReflectionFlags = DLD_TERRAIN | DLD_TERRAIN_FULLRES;   //!< what the water reflects (EDrawLowDetailFlags)
 };
 
 extern CD3D12Renderer *g_pRenderer;

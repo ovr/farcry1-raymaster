@@ -74,10 +74,24 @@ public:
   ID3D12Resource *GetBackBuffer() const { return m_pBackBuffers[m_nBackBuffer].Get(); }
   D3D12_CPU_DESCRIPTOR_HANDLE GetBackBufferRTV() const;
   D3D12_CPU_DESCRIPTOR_HANDLE GetDSV() const;
-  //! Sets the back buffer and the depth buffer as render targets, the full viewport and scissor.
+  //! Sets the back buffer and the depth buffer as render targets, the full viewport and scissor
+  //! (ends drawing off screen).
   void SetBackBufferTargets();
 
-  //! Clears the back buffer / the depth buffer (in a frame).
+  //! An off screen target of nWidth x nHeight: pColor in the back buffer's format (in the state
+  //! PIXEL_SHADER_RESOURCE while it is not drawn into) and pDepth (D24S8, DEPTH_WRITE), their views
+  //! written to hRTV and hDSV.
+  bool CreateOffscreenTargets(int nWidth, int nHeight, ComPtr<ID3D12Resource> &pColor, ComPtr<ID3D12Resource> &pDepth,
+                              D3D12_CPU_DESCRIPTOR_HANDLE hRTV, D3D12_CPU_DESCRIPTOR_HANDLE hDSV);
+  //! Draws into targets of CreateOffscreenTargets instead of the back buffer, all of them, until
+  //! SetBackBufferTargets (in a frame).
+  void SetOffscreenTargets(ID3D12Resource *pColor, D3D12_CPU_DESCRIPTOR_HANDLE hRTV, D3D12_CPU_DESCRIPTOR_HANDLE hDSV, int nWidth, int nHeight);
+  bool IsOffscreen() const { return m_pOffscreen != nullptr; }
+  //! The size of the targets drawn into.
+  int GetTargetWidth() const { return m_pOffscreen ? m_nOffscreenWidth : m_nWidth; }
+  int GetTargetHeight() const { return m_pOffscreen ? m_nOffscreenHeight : m_nHeight; }
+
+  //! Clears the colour / the depth buffer drawn into (in a frame).
   void ClearColor(const float rgba[4]);
   void ClearDepth(float fDepth, uint8 nStencil, bool bDepth, bool bStencil);
 
@@ -102,6 +116,8 @@ private:
   //! Resets the slot's allocator and the list and binds the heap, root signature and targets.
   void OpenCmdList();
   void WaitForFence(uint64 nValue);
+  //! The off screen colour target back to PIXEL_SHADER_RESOURCE; nothing off screen any more.
+  void EndOffscreen();
 
   ComPtr<IDXGIFactory4> m_pFactory;
   ComPtr<IDXGIAdapter1> m_pAdapter;
@@ -124,6 +140,9 @@ private:
   ComPtr<ID3D12Resource> m_pBackBuffers[D3D12_BACKBUFFERS];
   ComPtr<ID3D12Resource> m_pDepth;
   int m_nBackBuffer = 0;
+  ID3D12Resource *m_pOffscreen = nullptr;           //!< SetOffscreenTargets: the colour target drawn into
+  D3D12_CPU_DESCRIPTOR_HANDLE m_hOffscreenRTV = {}, m_hOffscreenDSV = {};
+  int m_nOffscreenWidth = 0, m_nOffscreenHeight = 0;
 
   int m_nWidth = 0, m_nHeight = 0;
   int m_nFrameSlot = 0;

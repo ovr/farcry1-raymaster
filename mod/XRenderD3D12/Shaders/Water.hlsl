@@ -12,10 +12,12 @@
 //	    (the copy of the depth buffer): transmittance exp(-absorption *
 //	    path), the rest the water's own scattered colour;
 //	  - reflection: the scene where the colour and depth copies show it
-//	    (a ray marched in screen space), else the sky box in the reflected
-//	    direction (the box as the sky draws it; without a sky, none),
-//	    weighted by 1 - 0.8 N.V (much more than the fresnel of real water,
-//	    as the original's water) and the reflection amount;
+//	    (a ray marched in screen space), else the ocean's planar reflection
+//	    (the scene seen by the camera mirrored in the water plane), else the
+//	    sky box in the reflected direction (the box as the sky draws it;
+//	    without a sky, none), weighted by 1 - 0.8 N.V (much more than the
+//	    fresnel of real water, as the original's water) and the reflection
+//	    amount;
 //	  - the sun's highlight on the waves;
 //	  - near the shore (close to the camera) the surface fades into the
 //	    scene behind it, so the water has no hard edge; seen from below,
@@ -27,13 +29,15 @@
 //	SDrawConstants:
 //	  vParams0  x wave slope scale, y reflection amount, z d3d12_WaterDebug
 //	  vParams1  x z1 of the sky box sides, y 1 when there is a sky box,
-//	            z the sky box's alpha (blends it towards the fog colour)
+//	            z the sky box's alpha (blends it towards the fog colour),
+//	            w 1 when there is a planar reflection
 //	  vParams2  rgb absorption per metre, w refraction displacement
 //	  vParams3  rgb the water's scattered colour (lit); w 1: lit by the scene
 //	            behind it instead (water volumes, which may be indoors)
 //	  nTex0     colour copy, nTex1 depth copy (R24 of D24S8)
 //	  nTex2..4  the sky box textures: top, _12, _34
 //	  nTex5     the wave slopes (red dH/du, green dH/dv; 128 flat, 32 the RMS)
+//	  nTex6     the planar reflection, mParams0 its camera's world to clip
 //
 //////////////////////////////////////////////////////////////////////
 
@@ -140,6 +144,16 @@ float2 ClipToUV(float4 vClip, float2 vViewToBuffer)
   return float2(vClip.x / vClip.w * 0.5 + 0.5, 0.5 - vClip.y / vClip.w * 0.5) * vViewToBuffer;
 }
 
+//! The planar reflection in direction R from the surface point P: the point fReach along R as the
+//! mirrored camera sees it (for a flat surface P itself, whatever fReach is: the camera, P and the
+//! reflected ray are on one line).
+float3 PlanarReflection(float3 P, float3 R, float fReach)
+{
+  R.z = max(R.z, 0.01);
+  float4 vClip = mul(float4(P + R * fReach, 1), g_Draw.mParams0);
+  return g_Textures[g_Draw.nTex6].SampleLevel(g_SamplerLinearClamp, ClipToUV(vClip, 1), 0).rgb;
+}
+
 //! The scene in direction R from P where the frame's copies show it: the ray marches in steps
 //! that grow with the distance until it is behind the depth buffer but not far behind (not
 //! passing behind an object), then the crossing is refined. Never hits the sky (the far plane)
@@ -244,6 +258,8 @@ float4 PSMain(SWaterOutput In) : SV_Target
     float F = (1 - 0.8 * NdotV) * g_Draw.vParams0.y;
     float3 R = reflect(-V, N);
     float3 vReflected = g_Draw.vParams1.y != 0 ? SkyBoxColor(R) : vScatter;
+    if (g_Draw.vParams1.w != 0)
+      vReflected = PlanarReflection(In.vWorldPos, R, fDistance * 0.3);
     float4 vSSR = ScreenReflection(In.vWorldPos, R, g_Frame.vScreen.xy * vInvSize);
     vReflected = lerp(vReflected, vSSR.rgb, vSSR.w);
 
@@ -269,6 +285,8 @@ float4 PSMain(SWaterOutput In) : SV_Target
       return float4(vSSR.www, 1);
     if (g_Draw.vParams0.z == 6)
       return float4(vSSR.rgb, 1);
+    if (g_Draw.vParams0.z == 7)
+      return float4(g_Draw.vParams1.w != 0 ? PlanarReflection(In.vWorldPos, R, fDistance * 0.3) : 0, 1);
   }
   else
   {

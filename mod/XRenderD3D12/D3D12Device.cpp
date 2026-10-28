@@ -304,8 +304,71 @@ D3D12_CPU_DESCRIPTOR_HANDLE CD3D12Device::GetDSV() const
   return m_pDSVHeap->GetCPUDescriptorHandleForHeapStart();
 }
 
+bool CD3D12Device::CreateOffscreenTargets(int nWidth, int nHeight, ComPtr<ID3D12Resource> &pColor, ComPtr<ID3D12Resource> &pDepth,
+                                          D3D12_CPU_DESCRIPTOR_HANDLE hRTV, D3D12_CPU_DESCRIPTOR_HANDLE hDSV)
+{
+  if (!m_pDevice || nWidth <= 0 || nHeight <= 0 || !hRTV.ptr || !hDSV.ptr)
+    return false;
+  D3D12_HEAP_PROPERTIES Heap = {};
+  Heap.Type = D3D12_HEAP_TYPE_DEFAULT;
+  D3D12_RESOURCE_DESC Desc = {};
+  Desc.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
+  Desc.Width = nWidth;
+  Desc.Height = nHeight;
+  Desc.DepthOrArraySize = 1;
+  Desc.MipLevels = 1;
+  Desc.Format = D3D12_BACKBUFFER_FORMAT;
+  Desc.SampleDesc.Count = 1;
+  Desc.Flags = D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET;
+  // No optimised clear colour: it is cleared to the scene's clear colour.
+  if (Failed(m_pDevice->CreateCommittedResource(&Heap, D3D12_HEAP_FLAG_NONE, &Desc, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, nullptr,
+    IID_PPV_ARGS(&pColor)), "CreateCommittedResource (off screen colour)"))
+    return false;
+  Desc.Format = D3D12_DEPTH_FORMAT;
+  Desc.Flags = D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL;
+  D3D12_CLEAR_VALUE Clear = {};
+  Clear.Format = D3D12_DEPTH_FORMAT;
+  Clear.DepthStencil.Depth = 1.0f;
+  if (Failed(m_pDevice->CreateCommittedResource(&Heap, D3D12_HEAP_FLAG_NONE, &Desc, D3D12_RESOURCE_STATE_DEPTH_WRITE, &Clear, IID_PPV_ARGS(&pDepth)),
+    "CreateCommittedResource (off screen depth)"))
+  {
+    pColor.Reset();
+    return false;
+  }
+  m_pDevice->CreateRenderTargetView(pColor.Get(), nullptr, hRTV);
+  m_pDevice->CreateDepthStencilView(pDepth.Get(), nullptr, hDSV);
+  return true;
+}
+
+void CD3D12Device::SetOffscreenTargets(ID3D12Resource *pColor, D3D12_CPU_DESCRIPTOR_HANDLE hRTV, D3D12_CPU_DESCRIPTOR_HANDLE hDSV, int nWidth, int nHeight)
+{
+  if (!m_bInFrame || !pColor)
+    return;
+  EndOffscreen();
+  Barrier(m_pCmdList.Get(), pColor, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, D3D12_RESOURCE_STATE_RENDER_TARGET);
+  m_pOffscreen = pColor;
+  m_hOffscreenRTV = hRTV;
+  m_hOffscreenDSV = hDSV;
+  m_nOffscreenWidth = nWidth;
+  m_nOffscreenHeight = nHeight;
+  m_pCmdList->OMSetRenderTargets(1, &hRTV, FALSE, &hDSV);
+  const D3D12_VIEWPORT vp = { 0, 0, (float)nWidth, (float)nHeight, 0, 1 };
+  const D3D12_RECT rc = { 0, 0, nWidth, nHeight };
+  m_pCmdList->RSSetViewports(1, &vp);
+  m_pCmdList->RSSetScissorRects(1, &rc);
+}
+
+void CD3D12Device::EndOffscreen()
+{
+  if (!m_pOffscreen)
+    return;
+  Barrier(m_pCmdList.Get(), m_pOffscreen, D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+  m_pOffscreen = nullptr;
+}
+
 void CD3D12Device::SetBackBufferTargets()
 {
+  EndOffscreen();
   const D3D12_CPU_DESCRIPTOR_HANDLE hRTV = GetBackBufferRTV(), hDSV = GetDSV();
   m_pCmdList->OMSetRenderTargets(1, &hRTV, FALSE, &hDSV);
   const D3D12_VIEWPORT vp = { 0, 0, (float)m_nWidth, (float)m_nHeight, 0, 1 };
@@ -346,6 +409,7 @@ void CD3D12Device::EndFrame(bool bPresent, bool bVSync)
 {
   if (!m_bInFrame)
     return;
+  EndOffscreen();
   Barrier(m_pCmdList.Get(), GetBackBuffer(), D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_PRESENT);
   m_pCmdList->Close();
   if (g_pRenderer->m_pUpload)
@@ -393,14 +457,14 @@ void CD3D12Device::FlushFrame()
 void CD3D12Device::ClearColor(const float rgba[4])
 {
   if (m_bInFrame)
-    m_pCmdList->ClearRenderTargetView(GetBackBufferRTV(), rgba, 0, nullptr);
+    m_pCmdList->ClearRenderTargetView(m_pOffscreen ? m_hOffscreenRTV : GetBackBufferRTV(), rgba, 0, nullptr);
 }
 
 void CD3D12Device::ClearDepth(float fDepth, uint8 nStencil, bool bDepth, bool bStencil)
 {
   const auto Flags = (D3D12_CLEAR_FLAGS)((bDepth ? D3D12_CLEAR_FLAG_DEPTH : 0) | (bStencil ? D3D12_CLEAR_FLAG_STENCIL : 0));
   if (m_bInFrame && Flags)
-    m_pCmdList->ClearDepthStencilView(GetDSV(), Flags, fDepth, nStencil, 0, nullptr);
+    m_pCmdList->ClearDepthStencilView(m_pOffscreen ? m_hOffscreenDSV : GetDSV(), Flags, fDepth, nStencil, 0, nullptr);
 }
 
 bool CD3D12Device::CreateTargetCopies(ComPtr<ID3D12Resource> &pColor, ComPtr<ID3D12Resource> &pDepth)

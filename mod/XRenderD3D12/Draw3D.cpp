@@ -256,6 +256,10 @@ void CD3D12Renderer::DrawLeafItem(const SRenderItem &it)
   Key.nProgram = eD3D12P_General;
   Key.nVertexFormat = (uint8)Geom->nVertexFormat;
   Key.nCull = CullOf(GetCullMode(pSh, pRes), Det3(World) < 0);
+  // The water reflection sees the land from below the water: both sides, so that where the waves move
+  // the reflection over a shore, it shows the land rather than the sky behind it.
+  if (m_bReflectionPass)
+    Key.nCull = R_CULL_NONE;
   Key.bWireframe = m_nPolygonMode == R_WIREFRAME_MODE ? 1 : 0;
   Key.bDepthBias = (it.nSort & ~EFSLIST_MASK) == eS_Decal ? 1 : 0;
 
@@ -388,12 +392,13 @@ void CD3D12Renderer::DrawLeafItem(const SRenderItem &it)
     break;
   }
   case eDC_Water:
-    if (!SetupWaterDraw(Key, dc, it))
+    // Not in its own reflection.
+    if (m_bReflectionPass || !SetupWaterDraw(Key, dc, it))
       return;
     pTex = nullptr;
     break;
   case eDC_WaterBeach:
-    if (!SetupBeachDraw(Key, dc, 0))
+    if (m_bReflectionPass || !SetupBeachDraw(Key, dc, 0))
       return;
     pTex = m_pBeachTexture;
     break;
@@ -662,7 +667,7 @@ void CD3D12Renderer::DrawSkyItem(const SRenderItem &it)
   // blended below alpha 1.
   Matrix44 View = m_CameraView;
   View.data[12] = View.data[13] = View.data[14] = 0;
-  const Matrix44 ViewProj = View * m_ProjMatrix;
+  const Matrix44 ViewProj = View * m_SkyProjMatrix;
   const float fAlpha = std::clamp(pSky->m_fAlpha, 0.0f, 1.0f);
   m_fSceneSkyZ1 = z1;
   m_fSceneSkyAlpha = fAlpha;
