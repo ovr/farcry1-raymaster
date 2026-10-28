@@ -133,12 +133,25 @@ void CD3D12Renderer::ApplyRenderState(SPipelineKey &Key, SDrawConstants &dc, int
       nSampler = (nSampler == XR_SAMPLER_POINT_WRAP || nSampler == XR_SAMPLER_POINT_CLAMP) ? XR_SAMPLER_POINT_CLAMP : XR_SAMPLER_LINEAR_CLAMP;
     dc.nSamplers = nSampler;
   }
-  if (bVertexColor && eCo != eCO_REPLACE && eCo != eCO_DECAL)
+  // The second argument of the colour or the alpha operation (bits 3-5) eCA_Constant: the texture
+  // times the material colour (SetMaterialColor) instead of the vertex colour (the terrain decals).
+  const bool bModulate = eCo == eCO_MODULATE || eCo == eCO_MODULATE2X;
+  const bool bConstColor = bModulate && ((m_ColorOp[2] >> 3) & 7) == eCA_Constant;
+  const bool bConstAlpha = m_ColorOp[1] == eCO_MODULATE && ((m_ColorOp[3] >> 3) & 7) == eCA_Constant;
+  if (bVertexColor && eCo != eCO_REPLACE && eCo != eCO_DECAL && !bConstColor)
   {
     dc.nFlags |= DF_VCOLOR;
     if (eCo == eCO_MODULATE2X)
       dc.nFlags |= DF_VCOLOR_X2;
   }
+  if (bConstColor)
+  {
+    const float s = eCo == eCO_MODULATE2X ? 2.0f : 1.0f;
+    for (int i = 0; i < 3; i++)
+      dc.vColor[i] = s * m_MaterialColor[i];
+  }
+  if (bConstAlpha)
+    dc.vColor[3] = m_MaterialColor[3];
 
   switch ((uint32)m_nState & GS_ALPHATEST_MASK)
   {
