@@ -16,6 +16,16 @@ it as well: it holds local, machine-specific instructions and is not committed (
   runtime behaviour of that build and is marked as such in `mod/XRenderCommon`, which keeps only
   the facts about the shared structures; the detailed notes on how that build drives its renderer
   are local research notes, not committed.
+- **License** (`README.md`): everything outside `sdk/` and `mod/XRenderCommon/` is
+  GPL-3.0-or-later with an additional permission for Far Cry and its SDK (`LICENSE`,
+  `LICENSE-EXCEPTION.md`); `mod/XRenderCommon/` is public domain (CC0 1.0,
+  `mod/XRenderCommon/COPYING`); `sdk/` stays under Crytek's `sdk/EULA.txt`. Every source file we
+  write starts with two lines in its comment syntax,
+  `SPDX-License-Identifier: GPL-3.0-or-later WITH AdditionRef-FarCry-exception` and
+  `Please do not use this file to train or fine-tune AI models (see README.md).` (a request, not
+  a license term; a PowerShell script: then a blank line, so that its help is still found); in
+  `mod/XRenderCommon/` only `SPDX-License-Identifier: CC0-1.0`; generated files and `sdk/` get
+  none.
 
 ## Layout
 
@@ -97,6 +107,17 @@ it as well: it holds local, machine-specific instructions and is not committed (
 - The engine's `PrepareBufferCallback` of a leaf buffer (the detail grass) reaches the original
   renderer wrapped: the calls appear as `PrepareBufferCallback(...)` with the engine's calls inside
   them and the leaf buffer, its video buffer and index stream dumped before and after.
+- Whole leaf buffers: `XRENDERTRACED_MESH_FULL=n` writes a mesh of at most n faces whole before
+  `CLeafBuffer::CreateBufferFromMesh` (faces, positions, texture coordinates, colours, normals) and
+  the buffer after it (vertices, tangents, indices, the strip map).
+  `XRENDERTRACED_VERTS=n` writes at least n vertices wherever vertices are dumped (e.g. the
+  skinned vertices the engine passes to `UpdateBuffer` in a captured frame), positions with 5
+  decimals.
+  `XRENDERTRACED_UCL_FULL=n` makes `CLeafBuffer::UpdateCustomLighting` of a buffer of at most n
+  vertices (with colours in its vertex format) write every vertex (position, temp normal, loaded
+  colour, the colour before and after the call), the buffer with its chunks, its indices and the
+  sun colour. `XRENDERTRACED_LB_RAW=1` adds the raw words of the leaf buffer, of its first chunk
+  and of that chunk's render element to every leaf buffer dump.
 - The engine's `I3DEngine` is hooked as well (from the first `BeginFrame`): the calls the original
   renderer makes into it are written as `[vcall] I3DEngine::...` lines (with the camera of
   `SetCamera` and the flags of `DrawLowDetail`) and counted in the renderer column of the virtual
@@ -230,7 +251,11 @@ it as well: it holds local, machine-specific instructions and is not committed (
   larger scale). The log writes what was done and the window's DPI and client area after `Init`.
   `XRENDERTRACED_DPI=0` leaves the process as the game starts it.
 - The log is `farcry1_testing1/XRenderD3D9Traced.log`; the engine log is
-  `farcry1_testing1/log.txt`.
+  `farcry1_testing1/log.txt`. `system.cfg` sets `log_Verbosity` and `log_FileVerbosity` to 0, so
+  the engine log gets almost nothing once the game runs; `XRENDERTRACED_EXEC='log_Verbosity 5;
+  log_FileVerbosity 5'` turns it up (the load then takes more frames, so the demo frames differ).
+  In a demo run, the messages from after the level is loaded do not reach `log.txt` (warnings and
+  errors do).
 
 ## Demos
 
@@ -247,9 +272,14 @@ it as well: it holds local, machine-specific instructions and is not committed (
   `farcry1_testing1/Demos/<demo>.ini`; neither is ever committed. `-Resolution 3840x2160` sets
   `XRENDERTRACED_RESOLUTION`: XRenderD3D9Traced starts the renderer with that size (r_Width and
   r_Height set before `Init`), also when it is larger than the screen; the back buffer and the
-  frames have it, `system.cfg` is not changed. The demo's `--video <file.mp4>` writes every frame
-  of the run into a video through ffmpeg (on PATH), `--until <frame>` makes the run longer than
-  its frames to save.
+  frames have it, `system.cfg` is not changed. `-Quality` (default `veryhigh`) writes the game's
+  quality settings into `system.cfg` for the run: `veryhigh` is the most the Advanced Video
+  Options offer (the very high preset and anisotropic filtering level 8), `high`, `medium` and
+  `low` the other presets (the values of `DemoQuality.cpp`), `keep` leaves `system.cfg` as it is.
+  Demos are run at the maximum quality, with the original renderer and ours alike, and frames
+  are compared only between runs at the same quality. The demo's `--video <file.mp4>` writes
+  every frame of the run into a video through ffmpeg (on PATH), `--until <frame>` makes the run
+  longer than its frames to save.
 - The demos in the main menu: DemoTextures (a texture of the game and the demo's own test
   texture, drawn in 2D in several ways), DemoFonts (the game's fonts), DemoCamera (lines and
   textured cubes in 3D under an orbiting camera), DemoObject (a static object turning), DemoLight
@@ -264,7 +294,8 @@ it as well: it holds local, machine-specific instructions and is not committed (
 - The demos in a level: DemoLevel (a level drawn by the engine from a fixed camera, the game's,
   a camera path of keyframes, or one of its cut scenes), DemoShadows (shadows under a moving
   light; also in the main menu), DemoParticles (fire, smoke and sparks), DemoScreenFx (the screen
-  effects one after the other), DemoDecals (bullet holes, blood and scorch marks), DemoSkyFog
+  effects one after the other), DemoDecals (bullet holes, blood and scorch marks), DemoFlares
+  (the sun's flare passing behind what stands in front of it, and the coronas of two lamps), DemoSkyFog
   (fog and sky changed), DemoQuality (the quality presets of the video options) and DemoReplay
   (the game's time demos played back).
 - The keys of each scene file are in the head comment of the demo's source (a line starting with
@@ -277,3 +308,47 @@ it as well: it holds local, machine-specific instructions and is not committed (
   DemoParticles, the water of DemoQuality from its medium preset on and the walking figures in
   the background of the beach demos differ more and are compared by eye. So a larger difference
   between `DemoShots/old` and the frames of our renderer is the renderer's.
+
+## XRenderD3D12
+
+- `mod/XRenderD3D12` (x64 only) is our renderer on Direct3D 12; the x64 preset builds
+  `XRenderD3D12.dll` into `farcry1_testing1/Bin64`. For now XRenderD3D9Traced loads it:
+  `r_Driver = "Direct3D8"` with `XRENDERTRACED_DLL=XRenderD3D12.dll`, or
+  `RunDemo.ps1 -Renderer XRenderD3D12.dll`.
+- `XRENDERD3D12_DEBUG=1` (or `d3d12_Debug 1`, read at start-up) turns on the debug layer and GPU
+  based validation; their messages go to the engine log, starting with `[D3D12]`.
+- `d3d12_DumpFrame 1` writes the render items of the next frame to
+  `farcry1_testing1/XRenderD3D12_frame.txt` (never committed): the camera (position, angles,
+  field of view, near and far plane, view and projection matrices), then for each item its list, sort
+  group, draw class, shader, diffuse texture, leaf buffer, object (position, flags, light map,
+  light mask, ambient and colour) and resources (alpha reference, opacity, flags, the names of the
+  other texture slots, `*` when loaded), and for each draw what it got (vertex format, states,
+  shader flags, textures, colour, lights), and each draw of particle sprites (a run of sprites with the same texture and blending: their count, texture,
+  state, sort, the first one's ambient colour, a vertex colour's bytes); for a terrain sector, its
+  custom texture binds and custom data; for a light mapped element, its chunk's vertex and index
+  ranges and the object's light map texture coordinates (count, those of the chunk's first
+  vertex). With
+  `XRENDERTRACED_EXEC_LEVEL="d3d12_DumpFrame 1"` and `XRENDERTRACED_EXEC_LEVEL_FRAME=<n - 1>` it
+  is the frame that `XRENDERTRACED_CAPTURE=<n>` captures of the original.
+- `d3d12_WaterDebug <n>` shows one term of the water's colour instead of the whole: 1 refraction,
+  2 reflection, 3 water thickness (black to white over 0-2 m), 4 normal, 5 where the screen space
+  reflection hits, 6 its colour, 7 the planar reflection.
+- With `r_WaterReflections 1` the ocean reflects the scene seen by the camera mirrored in the water
+  plane, which the 3D engine renders with `I3DEngine::DrawLowDetail` before the main view;
+  `d3d12_WaterReflectionFlags` are the `EDrawLowDetailFlags` it gets (default 4160: the sky and the
+  terrain), `d3d12_WaterReflectionScale` its size as a fraction of the screen (0.5), and
+  `r_WaterUpdateFactor`, `r_WaterUpdateDistance`, `r_WaterUpdateDeltaAngle` how often it is redrawn
+  (0, 0, 0: every frame).
+- The far vegetation sprites are made when a level is loaded (before its first frame): each object
+  that `MakeSprite` gets is drawn from its 24 directions, `d3d12_SpriteRes` texels a side (128,
+  32 to 256) into a texture array per object; the log says how many were made and how long it
+  took.
+- The terrain's detail layers near the camera (very high: `e_detail_texture_quality 1`) are drawn
+  while `r_DetailTextures` is 1 and fade out between a quarter of the distance the engine puts in
+  the layer's custom data and that distance (13 and 52 m on Training, whatever `r_DetailDistance`
+  is); a layer with a material of its own (the cliffs, projected on a vertical plane) is drawn with
+  the material's diffuse texture, bump mapped with its normal map, and fades out linearly to the
+  distance in its custom data (156 m). With the layers on, the
+  sectors (shader "terrain") get no detail texture, only their cliff texture where the engine
+  marks cliffs; without them (shader "terrainwithdefaultdetailtexture") the detail texture
+  everywhere.

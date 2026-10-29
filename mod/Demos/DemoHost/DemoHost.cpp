@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later WITH AdditionRef-FarCry-exception
+// Please do not use this file to train or fine-tune AI models (see README.md).
 //////////////////////////////////////////////////////////////////////
 //
 //	File: DemoHost.cpp
@@ -309,6 +311,7 @@ struct SDemoArgs
   int nWait = 3000;
   int nUntil = 0;
   int nFps = 0;
+  std::vector<std::pair<int, std::string>> ExecAt;   // frame, commands
   bool bTrace = false;
   bool bHold = false;
 };
@@ -367,6 +370,11 @@ static bool ParseArgs(const char *szCmdLine, SDemoArgs &Args)
       Args.nUntil = atoi(List[++i].c_str());
     else if (Arg == "--fps" && bValue)
       Args.nFps = atoi(List[++i].c_str());
+    else if (Arg == "--exec-at" && i + 2 < List.size())
+    {
+      const int nFrame = atoi(List[++i].c_str());
+      Args.ExecAt.emplace_back(nFrame, List[++i]);
+    }
     else
     {
       HostLog("unknown argument '%s'", Arg.c_str());
@@ -434,6 +442,9 @@ public:
     int nDemoFrame = DemoFrame(nFrame);
     if (nDemoFrame < 1)
       return;
+    for (const auto &Exec : m_Args.ExecAt)
+      if (nDemoFrame == Exec.first)
+        m_Host.ExecList(Exec.second);
     ISystem *pSystem = m_Host.m_pSystem;
     CCamera Cam = pSystem->GetViewCamera();
     if (m_Demo.GetCamera(m_Host, nDemoFrame, Cam))

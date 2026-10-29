@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later WITH AdditionRef-FarCry-exception
+// Please do not use this file to train or fine-tune AI models (see README.md).
 //////////////////////////////////////////////////////////////////////
 //
 //	File: LeafBufferHooks.cpp
@@ -11,6 +13,8 @@
 #include "LeafBufferHooks.h"
 #include "VCallHooks.h"
 #include "D3DDraws.h"
+
+#include <vector>
 
 using namespace RetailRenderer;
 
@@ -96,6 +100,90 @@ static void Dump_LeafBufferGeometry(CLeafBuffer *pLB, int nMaxVerts = 4)
   Dump_Indices("sys inds", pLB->m_SecIndices.Num() ? &pLB->m_SecIndices[0] : NULL, pLB->m_SecIndices.Num());
 }
 
+//! XRENDERTRACED_MESH_FULL=n: a mesh of at most n faces is written out whole (faces, positions,
+//! texture coordinates, normals) before CreateBuffer, and the buffer's vertices and indices after.
+static int MeshFullFaces()
+{
+  static int s_nFaces = -1;
+  if (s_nFaces < 0)
+  {
+    const char *sz = getenv("XRENDERTRACED_MESH_FULL");
+    s_nFaces = sz ? atoi(sz) : 0;
+  }
+  return s_nFaces;
+}
+
+static void Dump_UShorts(const char *szName, const ushort *p, int n)
+{
+  for (int i = 0; p && i < n; i += 24)
+  {
+    char szLine[256];
+    int nLen = _snprintf_s(szLine, sizeof(szLine), _TRUNCATE, "      %s[%d]:", szName, i);
+    for (int k = i; k < n && k < i + 24 && nLen > 0; k++)
+      nLen += _snprintf_s(szLine + nLen, sizeof(szLine) - nLen, _TRUNCATE, " %u", p[k]);
+    Trace_Write("%s", szLine);
+  }
+}
+
+static void Dump_MeshFull(const CIndexedMesh *m)
+{
+  Trace_Write("    full mesh: faces %d verts %d coords %d norms %d colors %p", m->m_nFaceCount, m->m_nVertCount, m->m_nCoorCount,
+    m->m_nNormCount, m->m_pColor);
+  for (int i = 0; i < m->m_nFaceCount; i++)
+  {
+    const CObjFace &f = m->m_pFaces[i];
+    Trace_Write("      f%d v %d %d %d t %d %d %d n %d %d %d shader %d flags 0x%x", i, f.v[0], f.v[1], f.v[2], f.t[0], f.t[1], f.t[2],
+      f.n[0], f.n[1], f.n[2], f.shader_id, f.m_dwFlags);
+  }
+  for (int i = 0; i < m->m_nVertCount; i++)
+    Trace_Write("      v%d %.9g %.9g %.9g", i, m->m_pVerts[i].x, m->m_pVerts[i].y, m->m_pVerts[i].z);
+  for (int i = 0; i < m->m_nCoorCount && m->m_pCoors; i++)
+    Trace_Write("      t%d %.9g %.9g", i, m->m_pCoors[i].s, m->m_pCoors[i].t);
+  for (int i = 0; i < m->m_nVertCount && m->m_pColor; i++)
+    Trace_Write("      c%d %u %u %u %u", i, m->m_pColor[i].r, m->m_pColor[i].g, m->m_pColor[i].b, m->m_pColor[i].a);
+  for (int i = 0; i < m->m_nNormCount && m->m_pNorms; i++)
+    Trace_Write("      n%d %.9g %.9g %.9g", i, m->m_pNorms[i].x, m->m_pNorms[i].y, m->m_pNorms[i].z);
+}
+
+static void Dump_BufferFull(CLeafBuffer *pLB)
+{
+  CVertexBuffer *pSys = pLB->m_pSecVertBuffer;
+  if (pSys && pSys->m_VS[VSF_GENERAL].m_VData && pSys->m_vertexformat > 0 && pSys->m_vertexformat < VERTEX_FORMAT_NUMS)
+  {
+    const int nFormat = pSys->m_vertexformat;
+    const SBufInfoTable &Offs = gBufInfoTable[nFormat];
+    const int nStride = m_VertexSize[nFormat];
+    Trace_Write("    full verts: %d, format %s", pLB->m_SecVertCount, Trace_VertexFormatName(nFormat));
+    for (int i = 0; i < pLB->m_SecVertCount; i++)
+    {
+      const uint8 *v = (const uint8 *)pSys->m_VS[VSF_GENERAL].m_VData + (size_t)i * nStride;
+      const float *p = (const float *)v;
+      const float *nm = Offs.OffsNormal ? (const float *)(v + Offs.OffsNormal) : NULL;
+      const float *tc = Offs.OffsTC ? (const float *)(v + Offs.OffsTC) : NULL;
+      const uint32 col = Offs.OffsColor ? *(const uint32 *)(v + Offs.OffsColor) : 0;
+      Trace_Write("      o%d p %.9g %.9g %.9g n %.9g %.9g %.9g tc %.9g %.9g col %08x", i, p[0], p[1], p[2], nm ? nm[0] : 0.f, nm ? nm[1] : 0.f,
+        nm ? nm[2] : 0.f, tc ? tc[0] : 0.f, tc ? tc[1] : 0.f, col);
+    }
+  }
+  if (pSys && pSys->m_VS[VSF_TANGENTS].m_VData)
+  {
+    const SPipTangents *pT = (const SPipTangents *)pSys->m_VS[VSF_TANGENTS].m_VData;
+    for (int i = 0; i < pLB->m_SecVertCount; i++)
+      Trace_Write("      tb%d t %.5f %.5f %.5f b %.5f %.5f %.5f n %.5f %.5f %.5f", i, pT[i].m_Tangent.x, pT[i].m_Tangent.y, pT[i].m_Tangent.z,
+        pT[i].m_Binormal.x, pT[i].m_Binormal.y, pT[i].m_Binormal.z, pT[i].m_TNormal.x, pT[i].m_TNormal.y, pT[i].m_TNormal.z);
+  }
+  Dump_UShorts("inds", pLB->m_SecIndices.Num() ? &pLB->m_SecIndices[0] : NULL, pLB->m_SecIndices.Num());
+  if (pLB->m_pIndicesPreStrip && pLB->m_pIndicesPreStrip->Count())
+    Dump_UShorts("pre", &(*pLB->m_pIndicesPreStrip)[0], pLB->m_pIndicesPreStrip->Count());
+  if (pLB->m_arrVertStripMap)
+  {
+    std::vector<ushort> Map(pLB->m_SecVertCount);
+    for (int i = 0; i < pLB->m_SecVertCount; i++)
+      Map[i] = (ushort)pLB->m_arrVertStripMap[i];
+    Dump_UShorts("map", Map.data(), (int)Map.size());
+  }
+}
+
 //////////////////////////////////////////////////////////////////////////
 // Geometry
 
@@ -103,12 +191,17 @@ void CLeafBufferHooks::CreateBufferFromMesh(CIndexedMesh *pTriData, bool bStripi
 {
   TRACE_CALL("lb %p '%s' mesh %p stripify %d removeNoDraw %d keepRemap %d", LB(), Source(), pTriData, bStripifyAndShareVerts,
     bRemoveNoDrawFaces, bKeepRemapTable);
+  const bool bFull = TRACE_DUMP && pTriData && pTriData->m_nFaceCount <= MeshFullFaces();
   if (TRACE_DUMP)
     Dump_IndexedMesh(pTriData);
+  if (bFull)
+    Dump_MeshFull(pTriData);
   CWatchArg WatchMesh(WT_CIndexedMesh, pTriData);
   LB_ORIG(LBS_CreateBufferFromMesh, void, (CIndexedMesh *, bool, bool, bool))(pTriData, bStripifyAndShareVerts, bRemoveNoDrawFaces, bKeepRemapTable);
   if (TRACE_DUMP)
     Dump_LeafBufferGeometry(LB());
+  if (bFull)
+    Dump_BufferFull(LB());
 }
 
 bool CLeafBufferHooks::CreateBufferFromSource(VertexBufferSource *pSource)
@@ -405,11 +498,67 @@ void CLeafBufferHooks::SetRECustomData(float *pfCustomData, float fFogScale, flo
   LB_ORIG(LBS_SetRECustomData, void, (float *, float, float))(pfCustomData, fFogScale, fAlpha);
 }
 
+//! XRENDERTRACED_UCL_FULL=n: UpdateCustomLighting of a buffer of at most n vertices writes out
+//! every vertex (position, temp normal, loaded colour, colour before and after), the indices and
+//! the sun colour.
+static int UclFullVerts()
+{
+  static int s_nVerts = -1;
+  if (s_nVerts < 0)
+  {
+    const char *sz = getenv("XRENDERTRACED_UCL_FULL");
+    s_nVerts = sz ? atoi(sz) : 0;
+  }
+  return s_nVerts;
+}
+
 void CLeafBufferHooks::UpdateCustomLighting(float fBackSideLevel, Vec3 vStatObjAmbientColor, const Vec3 &vLight, bool bCalcLighting)
 {
   TRACE_CALL("lb %p '%s' backSide %g ambient " TRACE_V3 " light " TRACE_V3 " calc %d", LB(), Source(), fBackSideLevel,
     TRACE_V3_ARGS(vStatObjAmbientColor), TRACE_V3_ARGS(vLight), bCalcLighting);
+  // The first vertices before and after, with the colours and normals the call can start from.
+  CVertexBuffer *pVB = LB()->m_pSecVertBuffer;
+  const void *pVerts = pVB ? pVB->m_VS[VSF_GENERAL].m_VData : NULL;
+  if (TRACE_DUMP && pVerts)
+  {
+    Dump_Vertices("before", pVerts, pVB->m_vertexformat, LB()->m_SecVertCount, 6);
+    for (int i = 0; i < 6 && i < LB()->m_SecVertCount; i++)
+    {
+      const Vec3 *pCol = LB()->m_pLoadedColors ? &LB()->m_pLoadedColors[i] : NULL;
+      const Vec3 *pNorm = LB()->m_TempNormals ? &LB()->m_TempNormals[i] : NULL;
+      Trace_Write("      v%d loaded colour (%.3f %.3f %.3f) temp normal (%.3f %.3f %.3f)", i, pCol ? pCol->x : -1.0f,
+        pCol ? pCol->y : -1.0f, pCol ? pCol->z : -1.0f, pNorm ? pNorm->x : 0.0f, pNorm ? pNorm->y : 0.0f, pNorm ? pNorm->z : 0.0f);
+    }
+  }
+  const int nVerts = LB()->m_SecVertCount;
+  const int nFormat = pVB ? pVB->m_vertexformat : 0;
+  const bool bFull = TRACE_DUMP && pVerts && nVerts <= UclFullVerts() && nFormat > 0 && nFormat < VERTEX_FORMAT_NUMS &&
+    gBufInfoTable[nFormat].OffsColor;
+  std::vector<DWORD> Before;
+  if (bFull)
+    for (int i = 0; i < nVerts; i++)
+      Before.push_back(*(const DWORD *)((const byte *)pVerts + i * m_VertexSize[nFormat] + gBufInfoTable[nFormat].OffsColor));
   LB_ORIG(LBS_UpdateCustomLighting, void, (float, Vec3, const Vec3 &, bool))(fBackSideLevel, vStatObjAmbientColor, vLight, bCalcLighting);
+  if (TRACE_DUMP && pVerts)
+    Dump_Vertices("after", pVerts, pVB->m_vertexformat, LB()->m_SecVertCount, 6);
+  if (bFull)
+  {
+    I3DEngine *p3DEngine = iSystem ? iSystem->GetI3DEngine() : NULL;
+    const Vec3 vSun = p3DEngine ? p3DEngine->GetSunColor() : Vec3(-1, -1, -1);
+    Trace_Write("    full: %d verts, sun colour " TRACE_V3, nVerts, TRACE_V3_ARGS(vSun));
+    Dump_LeafBuffer(LB());
+    for (int i = 0; i < nVerts; i++)
+    {
+      const byte *v = (const byte *)pVerts + i * m_VertexSize[nFormat];
+      const float *pos = (const float *)v;
+      const Vec3 *pCol = LB()->m_pLoadedColors ? &LB()->m_pLoadedColors[i] : NULL;
+      const Vec3 *pNorm = LB()->m_TempNormals ? &LB()->m_TempNormals[i] : NULL;
+      Trace_Write("      u%d p %.4f %.4f %.4f n %.4f %.4f %.4f lc %.1f %.1f %.1f c %08x %08x", i, pos[0], pos[1], pos[2],
+        pNorm ? pNorm->x : 0.0f, pNorm ? pNorm->y : 0.0f, pNorm ? pNorm->z : 0.0f, pCol ? pCol->x : -1.0f,
+        pCol ? pCol->y : -1.0f, pCol ? pCol->z : -1.0f, Before[i], *(const DWORD *)(v + gBufInfoTable[nFormat].OffsColor));
+    }
+    Dump_UShorts("inds", LB()->m_SecIndices.Num() ? &LB()->m_SecIndices[0] : NULL, LB()->m_SecIndices.Num());
+  }
 }
 
 //////////////////////////////////////////////////////////////////////////

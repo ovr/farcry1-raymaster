@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: CC0-1.0
 # XRenderCommon - renderer interface facts beyond the SDK headers that a compatible renderer needs.
 # Header-only; shared by the renderers in mod/.
 

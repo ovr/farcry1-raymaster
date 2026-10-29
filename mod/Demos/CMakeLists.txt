@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-or-later WITH AdditionRef-FarCry-exception
+# Please do not use this file to train or fine-tune AI models (see README.md).
 # Demo programs: small scenes drawn by the game's engine with a chosen renderer, so that the
 # original renderer and ours can be compared frame by frame.
 #
@@ -91,6 +93,7 @@ add_demo(DemoShadows DemoShadows/DemoShadows.cpp)
 add_demo(DemoParticles DemoParticles/DemoParticles.cpp)
 add_demo(DemoScreenFx DemoScreenFx/DemoScreenFx.cpp)
 add_demo(DemoDecals DemoDecals/DemoDecals.cpp)
+add_demo(DemoFlares DemoFlares/DemoFlares.cpp)
 add_demo(DemoSkyFog DemoSkyFog/DemoSkyFog.cpp)
 add_demo(DemoQuality DemoQuality/DemoQuality.cpp)
 add_demo(DemoCharacters DemoCharacters/DemoCharacters.cpp)

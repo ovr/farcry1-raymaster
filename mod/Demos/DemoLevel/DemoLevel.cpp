@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later WITH AdditionRef-FarCry-exception
+// Please do not use this file to train or fine-tune AI models (see README.md).
 //////////////////////////////////////////////////////////////////////
 //
 //	File: DemoLevel.cpp
@@ -20,6 +22,8 @@
 //	                             the level fades in after its start)
 //	  exec = <commands>          console commands once the level is there,
 //	                             separated by ';' or '|' (e.g. cl_display_hud 0)
+//	  sky = <shader>             a sky shader of the shader scripts instead of the
+//	                             level's own (I3DEngine::SetSkyBox, e.g. CloudsSky1)
 //	  camera = x y z ax ay az    a fixed camera (position, angles in degrees; the log
 //	                             has the game's camera when frame 1 starts). The
 //	                             angles as CCamera::SetAngle takes them: ax 0 looks
@@ -113,6 +117,12 @@ public:
     else
       Host.Exec("SkipCutScene");
     Host.ExecList(Host.GetScene().Get("exec"));
+    const std::string Sky = Host.GetScene().Get("sky");
+    if (!Sky.empty())
+    {
+      Host.Get3DEngine()->SetSkyBox(Sky.c_str());
+      Host.Log("DemoLevel: sky shader '%s'", Sky.c_str());
+    }
     m_Camera = Host.GetScene().GetFloats("camera");
     const CCamera &View = Host.GetSystem()->GetViewCamera();
     Host.Log("DemoLevel: the game's camera %g %g %g %g %g %g", View.GetPos().x, View.GetPos().y, View.GetPos().z,

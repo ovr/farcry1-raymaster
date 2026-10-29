@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later WITH AdditionRef-FarCry-exception
+// Please do not use this file to train or fine-tune AI models (see README.md).
 //////////////////////////////////////////////////////////////////////
 //
 //	File: DemoHost.h
@@ -31,6 +33,8 @@
 //	                        (Video.h: ffmpeg, on PATH)
 //	  --fps <n>             frames per second of the video (default 50: one
 //	                        frame of the fixed time step, real time)
+//	  --exec-at <frame> <commands>  console commands at the start of that frame
+//	                        (separated by ';' or '|', e.g. "d3d12_DumpFrame 1"); may repeat
 //	  --trace               keep the tracing of XRenderD3D9Traced on
 //	  --hold                keep the game running after the last frame
 //

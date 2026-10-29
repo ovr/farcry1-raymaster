@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later WITH AdditionRef-FarCry-exception
+// Please do not use this file to train or fine-tune AI models (see README.md).
 //////////////////////////////////////////////////////////////////////
 //
 //	File: RenderTrace.cpp
@@ -726,6 +728,15 @@ void Dump_MatInfo(const CMatInfo *pMI, int nIndex)
     nIndex, pMI->sMaterialName, pMI->sScriptMaterial, pMI->m_Id, pMI->m_nCGFMaterialID, pMI->m_Flags, pMI->nGamePhysMatId,
     pMI->nFirstVertId, pMI->nNumVerts, pMI->nFirstIndexId, pMI->nNumIndices, pSH ? SafeStr(pSH->GetName()) : "(null)",
     pMI->shaderItem.m_pShaderResources, pMI->pRE, pMI->fAlpha);
+  if (pMI->m_dwNumSections || pMI->m_pPrimitiveGroups)
+  {
+    // SPrimitiveGroup is not declared in the SDK: the first words of the first group, raw.
+    const uint32 *pG = (const uint32 *)pMI->m_pPrimitiveGroups;
+    if (pG && Trace_IsReadable(pG, 16))
+      Trace_Write("        sections %u groups %p: %u %u %u %u", pMI->m_dwNumSections, pG, pG[0], pG[1], pG[2], pG[3]);
+    else
+      Trace_Write("        sections %u groups %p", pMI->m_dwNumSections, pG);
+  }
 }
 
 bool Trace_IsMatInfo(IMatInfo *pMtl)
@@ -956,6 +967,10 @@ void Dump_Vertices(const char *szName, const void *pData, int nFormat, int nVert
   const int nStride = m_VertexSize[nFormat];
   const SBufInfoTable &Offs = gBufInfoTable[nFormat];
   Trace_Write("    %s: %d verts, format %s (%d bytes)", szName, nVerts, Trace_VertexFormatName(nFormat), nStride);
+  // XRENDERTRACED_VERTS=N: at least N vertices, positions with 5 decimals.
+  static const int nEnvMax = getenv("XRENDERTRACED_VERTS") ? atoi(getenv("XRENDERTRACED_VERTS")) : 0;
+  if (nEnvMax > nMax)
+    nMax = nEnvMax;
   for (int i = 0; i < nVerts && i < nMax; i++)
   {
     const byte *v = (const byte *)pData + i * nStride;
@@ -966,7 +981,7 @@ void Dump_Vertices(const char *szName, const void *pData, int nFormat, int nVert
     else
     {
       const float *pos = (const float *)v;
-      n += _snprintf(szLine + n, sizeof(szLine) - n, "pos (%.2f %.2f %.2f)", pos[0], pos[1], pos[2]);
+      n += _snprintf(szLine + n, sizeof(szLine) - n, nEnvMax ? "pos (%.5f %.5f %.5f)" : "pos (%.2f %.2f %.2f)", pos[0], pos[1], pos[2]);
       if (Offs.OffsNormal)
       {
         const float *nm = (const float *)(v + Offs.OffsNormal);
@@ -1038,6 +1053,20 @@ void Dump_IndexedMesh(const CIndexedMesh *pMesh)
     Trace_Write("      vert[%d] (%.2f %.2f %.2f)", i, m->m_pVerts[i].x, m->m_pVerts[i].y, m->m_pVerts[i].z);
 }
 
+//! The raw words of an object, four per line (XRENDERTRACED_LB_RAW=1 for the leaf buffers).
+static void Dump_Raw(const char *szName, const void *p, size_t nSize)
+{
+  if (!p || !Trace_IsReadable(p, nSize))
+    return;
+  const uint8 *b = (const uint8 *)p;
+  for (size_t i = 0; i + 8 <= nSize; i += 32)
+  {
+    uint64 q[4] = {};
+    memcpy(q, b + i, std::min<size_t>(32, nSize - i) & ~(size_t)7);
+    Trace_Write("      %s+0x%03x: %016llx %016llx %016llx %016llx", szName, (int)i, q[0], q[1], q[2], q[3]);
+  }
+}
+
 void Dump_LeafBuffer(CLeafBuffer *pLB)
 {
   if (!pLB)
@@ -1049,10 +1078,45 @@ void Dump_LeafBuffer(CLeafBuffer *pLB)
     pLB, SafeStr(pLB->m_sSource), Trace_VertexFormatName(pLB->m_nVertexFormat), pLB->m_SecVertCount, pLB->m_pSecVertBuffer,
     pLB->m_pVertexBuffer, pLB->m_pVertexContainer, pLB->m_SecIndices.Num(), pLB->m_nPrimetiveType, pLB->m_pMats ? pLB->m_pMats->Count() : -1,
     pLB->m_bDynamic, pLB->m_vBoxMin.x, pLB->m_vBoxMin.y, pLB->m_vBoxMin.z, pLB->m_vBoxMax.x, pLB->m_vBoxMax.y, pLB->m_vBoxMax.z);
+  const list2<ushort> *pPre = pLB->m_pIndicesPreStrip;
+  if (pPre || pLB->m_arrVertStripMap || pLB->m_arrVtxMap || pLB->m_TempNormals || pLB->m_TempTexCoords || pLB->m_TempColors ||
+    pLB->m_TempSecColors || pLB->m_pLoadedColors)
+  {
+    char szPre[128] = "";
+    if (pPre && Trace_IsReadable(pPre, sizeof(*pPre)))
+    {
+      const int nPre = pPre->Count();
+      const ushort *pData = nPre > 0 ? &(*const_cast<list2<ushort> *>(pPre))[0] : NULL;
+      int nLen = _snprintf_s(szPre, sizeof(szPre), _TRUNCATE, " (%d:", nPre);
+      for (int i = 0; i < nPre && i < 12 && pData && nLen > 0; i++)
+        nLen += _snprintf_s(szPre + nLen, sizeof(szPre) - nLen, _TRUNCATE, " %u", pData[i]);
+      strcat_s(szPre, ")");
+    }
+    Trace_Write("      preStrip %p%s stripMap %p vtxMap %p tempNormals %p tempTC %p tempColors %p tempSecColors %p loadedColors %p numIndices %d",
+      pPre, szPre, pLB->m_arrVertStripMap, pLB->m_arrVtxMap, pLB->m_TempNormals, pLB->m_TempTexCoords, pLB->m_TempColors,
+      pLB->m_TempSecColors, pLB->m_pLoadedColors, pLB->m_NumIndices);
+    const int nVerts = pLB->m_SecVertCount;
+    if (pLB->m_arrVertStripMap && nVerts >= 4 && Trace_IsReadable(pLB->m_arrVertStripMap, 4 * sizeof(uint)))
+      Trace_Write("      stripMap: %u %u %u %u", pLB->m_arrVertStripMap[0], pLB->m_arrVertStripMap[1], pLB->m_arrVertStripMap[2], pLB->m_arrVertStripMap[3]);
+    if (pLB->m_TempColors && nVerts >= 2 && Trace_IsReadable(pLB->m_TempColors, 2 * sizeof(UCol)))
+      Trace_Write("      tempColors: 0x%08x 0x%08x", pLB->m_TempColors[0].dcolor, pLB->m_TempColors[1].dcolor);
+  }
   if (pLB->m_pMats)
   {
     for (int i = 0; i < pLB->m_pMats->Count() && i < 16; i++)
       Dump_MatInfo(&(*pLB->m_pMats)[i], i);
+  }
+  static const bool s_bRaw = getenv("XRENDERTRACED_LB_RAW") != NULL;
+  if (s_bRaw)
+  {
+    Dump_Raw("lb", pLB, sizeof(CLeafBuffer));
+    if (pLB->m_pMats && pLB->m_pMats->Count() > 0)
+    {
+      const CMatInfo &m = (*pLB->m_pMats)[0];
+      Dump_Raw("mat0", &m, sizeof(CMatInfo));
+      Dump_Raw("re0", m.pRE, sizeof(CREOcLeaf));
+      Dump_RenderResources(m.shaderItem.m_pShaderResources);
+    }
   }
 }
 

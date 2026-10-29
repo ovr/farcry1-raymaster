@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later WITH AdditionRef-FarCry-exception
+// Please do not use this file to train or fine-tune AI models (see README.md).
 //////////////////////////////////////////////////////////////////////
 //
 //	File: DemoScreenFx.cpp
@@ -14,6 +16,7 @@
 //	  1-50     none                                            25
 //	  51-100   NightVision                                     75
 //	  101-150  ScreenBlur, amount 0.5, colour (1, 0.5, 0.25)    125
+//	           (or those of the blur key)
 //	  151-200  FlashBang, time scale 1                          155, 175
 //	  201-250  ScreenFade, time 1 (out, as CXGame does)         210, 235
 //	  251-300  ScreenFade, time -1 (in, as CXClient does)       260, 285
@@ -38,6 +41,7 @@
 //	  target = x y z              the point the camera looks at, instead of angles
 //	  underwater = x y z tx ty tz the camera of the step under water: its position
 //	                              and the point it looks at
+//	  blur = amount r g b         the amount and colour of the ScreenBlur step
 //	  screenshader = <name>       the shader of the screen shader step
 //	  font = <name>               the font of the names (default: Default)
 //
@@ -92,6 +96,9 @@ public:
     }
     SetupCamera(Host);
     m_Underwater = Host.GetScene().GetFloats("underwater");
+    std::vector<float> Blur = Host.GetScene().GetFloats("blur");
+    if (Blur.size() >= 4)
+      std::copy_n(Blur.begin(), 4, m_Blur);
     m_ScreenShader = Host.GetScene().Get("screenshader");
     ICryFont *pCryFont = Host.GetSystem()->GetICryFont();
     m_pFont = pCryFont ? pCryFont->GetFont(Host.GetScene().Get("font", "Default").c_str()) : NULL;
@@ -199,13 +206,17 @@ private:
       p3DEngine->SetScreenFx("NightVision", 1);
       break;
     case eScreenBlur:
-      m_Label = "ScreenBlur: amount 0.5, colour 1 0.5 0.25";
+    {
+      char szLabel[128];
+      snprintf(szLabel, sizeof(szLabel), "ScreenBlur: amount %g, colour %g %g %g", m_Blur[0], m_Blur[1], m_Blur[2], m_Blur[3]);
+      m_Label = szLabel;
       p3DEngine->SetScreenFx("ScreenBlur", 1);
-      SetParam(p3DEngine, "ScreenBlur", "ScreenBlurAmount", 0.5f);
-      SetParam(p3DEngine, "ScreenBlur", "ScreenBlurColorRed", 1);
-      SetParam(p3DEngine, "ScreenBlur", "ScreenBlurColorGreen", 0.5f);
-      SetParam(p3DEngine, "ScreenBlur", "ScreenBlurColorBlue", 0.25f);
+      SetParam(p3DEngine, "ScreenBlur", "ScreenBlurAmount", m_Blur[0]);
+      SetParam(p3DEngine, "ScreenBlur", "ScreenBlurColorRed", m_Blur[1]);
+      SetParam(p3DEngine, "ScreenBlur", "ScreenBlurColorGreen", m_Blur[2]);
+      SetParam(p3DEngine, "ScreenBlur", "ScreenBlurColorBlue", m_Blur[3]);
       break;
+    }
     case eFlashBang:
       m_Label = "FlashBang: time scale 1";
       p3DEngine->SetScreenFx("FlashBang", 1);
@@ -247,6 +258,7 @@ private:
   Vec3 m_vCamPos = Vec3(0, 0, 0);
   Vec3 m_vCamAngles = Vec3(0, 0, 0);
   std::vector<float> m_Underwater;
+  float m_Blur[4] = {0.5f, 1, 0.5f, 0.25f}; //!< amount, colour
   std::string m_ScreenShader;
   std::string m_Label;
   IFFont *m_pFont = NULL;

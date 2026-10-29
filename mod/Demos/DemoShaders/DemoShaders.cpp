@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later WITH AdditionRef-FarCry-exception
+// Please do not use this file to train or fine-tune AI models (see README.md).
 //////////////////////////////////////////////////////////////////////
 //
 //	File: DemoShaders.cpp
@@ -30,6 +32,21 @@
 //	                          textures/)
 //	  cubemap = <file>        the cube map, its +x face (default: the first
 //	                          *_posx.dds under textures/)
+//	  cubeslots = <n> ...     the texture slots given the cube map: 4
+//	                          (EFTT_CUBEMAP, a plain texture name), 10
+//	                          (EFTT_REFLECTION, of type eTT_Cubemap); default
+//	                          both, "none" neither
+//	  gloss = <file>          the gloss map (default: none)
+//	  ambient = <r g b>       the ambient colour (default: 0.25 0.25 0.25)
+//	  light = <r g b>         the light's colour (default: 0.9 0.9 0.9)
+//	  lightpos = <x y z>      the light's position (default: above and left of
+//	                          the camera); the grid is in the plane y = 0
+//	  lightspec = <r g b>     the light's specular colour (default: 0 0 0, as a
+//	                          CDLight is made)
+//	  sun = 1                 the light is the sun (DLF_DIRECTIONAL | DLF_SUN),
+//	                          from the direction of its position
+//	  specular = <r g b>      the materials' specular colour (default: 0.8 0.8 0.8)
+//	  shininess = <n>         the materials' specular power (default: 32)
 //	  exec = <commands>       console commands before the materials are made,
 //	                          separated by ';' or '|'
 //
@@ -99,7 +116,17 @@ public:
     }
     m_Bump = Scene.Has("bump") ? Scene.Get("bump") : Host.FindFirstFileDeep("textures/", "*_ddn.dds");
     m_CubeMap = Scene.Has("cubemap") ? Scene.Get("cubemap") : Host.FindFirstFileDeep("textures/", "*_posx.dds");
+    if (Scene.Has("cubeslots"))
+      m_CubeSlots = Scene.GetFloats("cubeslots");
     Host.Log("DemoShaders: texture '%s', bump '%s', cube map '%s'", m_Texture.c_str(), m_Bump.c_str(), m_CubeMap.c_str());
+    m_Gloss = Scene.Get("gloss");
+    m_Ambient = ColorOf(Scene, "ambient", m_Ambient);
+    m_LightColor = ColorOf(Scene, "light", m_LightColor);
+    m_LightPos = Scene.GetFloats("lightpos");
+    m_LightSpecColor = ColorOf(Scene, "lightspec", m_LightSpecColor);
+    m_bSun = Scene.GetFloat("sun", 0) != 0;
+    m_LightMat.Front.m_Specular = ColorOf(Scene, "specular", CFColor(0.8f, 0.8f, 0.8f, 1));
+    m_LightMat.Front.m_SpecShininess = Scene.GetFloat("shininess", 32);
 
     ICryFont *pCryFont = Host.GetSystem()->GetICryFont();
     m_pFont = pCryFont ? pCryFont->GetFont("Default") : NULL;
@@ -141,12 +168,20 @@ public:
 
     CDLight Light;
     Light.m_Flags = DLF_POINT;
-    Light.m_Origin = vEye + Vec3(-fHalfX * 0.5f, fDist * 0.2f, fHalfZ * 1.5f);
+    Light.m_Origin = m_LightPos.size() >= 3 ? Vec3(m_LightPos[0], m_LightPos[1], m_LightPos[2]) : vEye + Vec3(-fHalfX * 0.5f, fDist * 0.2f, fHalfZ * 1.5f);
     Light.m_fRadius = Light.m_fEndRadius = fDist * 10;
-    Light.m_Color = CFColor(0.9f, 0.9f, 0.9f, 1);
+    if (m_bSun)
+    {
+      // The sun: far away in the direction of the light's position from the grid's centre.
+      Light.m_Flags = DLF_DIRECTIONAL | DLF_SUN;
+      Light.m_Origin = GetNormalized(Light.m_Origin) * 10000.0f;
+      Light.m_fRadius = Light.m_fEndRadius = 100000.0f;
+    }
+    Light.m_Color = m_LightColor;
+    Light.m_SpecColor = m_LightSpecColor;
 
     SRendParams Base;
-    Base.vAmbientColor = Vec3(0.25f, 0.25f, 0.25f);
+    Base.vAmbientColor = Vec3(m_Ambient.r, m_Ambient.g, m_Ambient.b);
     Host.BeginScene(Cam, Base, &Light, 1);
     const float fTurn = DEG2RAD(2.0f * (nFrame - 1));
     Matrix44 Mats[nMaxCells];
@@ -232,17 +267,23 @@ private:
   //! CIndexedMesh__LoadMaterial makes it (MakMatInfoFromMAT_ENTITY.h).
   void MakeMaterial(CDemoHost &Host, SCell &Cell, int nCell)
   {
-    m_LightMat.Front.m_Specular = CFColor(0.8f, 0.8f, 0.8f, 1);
-    m_LightMat.Front.m_SpecShininess = 32;
     SInputShaderResources Res;
     Res.m_LMaterial = &m_LightMat;
     Res.m_Opacity = Cell.fOpacity;
     Res.m_Textures[EFTT_DIFFUSE].m_Name = m_Texture.c_str();
     Res.m_Textures[EFTT_BUMP].m_Name = m_Bump.c_str();
     Res.m_Textures[EFTT_BUMP].m_TU.m_eTexType = (byte)eTT_Bumpmap;
-    Res.m_Textures[EFTT_CUBEMAP].m_Name = m_CubeMap.c_str();
-    Res.m_Textures[EFTT_REFLECTION].m_Name = m_CubeMap.c_str();
-    Res.m_Textures[EFTT_REFLECTION].m_TU.m_eTexType = (byte)eTT_Cubemap;
+    Res.m_Textures[EFTT_GLOSS].m_Name = m_Gloss.c_str();
+    for (size_t i = 0; i < m_CubeSlots.size(); i++)
+    {
+      if (m_CubeSlots[i] == EFTT_CUBEMAP)
+        Res.m_Textures[EFTT_CUBEMAP].m_Name = m_CubeMap.c_str();
+      else if (m_CubeSlots[i] == EFTT_REFLECTION)
+      {
+        Res.m_Textures[EFTT_REFLECTION].m_Name = m_CubeMap.c_str();
+        Res.m_Textures[EFTT_REFLECTION].m_TU.m_eTexType = (byte)eTT_Cubemap;
+      }
+    }
 
     // A material name of its own for each cell: the renderer names the shader after it.
     char szName[32];
@@ -269,10 +310,23 @@ private:
 
   IStatObj *m_pObj = NULL;
   IFFont *m_pFont = NULL;
-  std::string m_Texture, m_Bump, m_CubeMap;
-  //! The lighting of the materials (white, specular 0.8, shininess 32).
+  std::string m_Texture, m_Bump, m_CubeMap, m_Gloss;
+  std::vector<float> m_CubeSlots = { (float)EFTT_CUBEMAP, (float)EFTT_REFLECTION };
+  CFColor m_Ambient = CFColor(0.25f, 0.25f, 0.25f, 1);
+  CFColor m_LightColor = CFColor(0.9f, 0.9f, 0.9f, 1);
+  CFColor m_LightSpecColor = CFColor(0, 0, 0, 1);
+  std::vector<float> m_LightPos;
+  bool m_bSun = false;
+  //! The lighting of the materials (white, specular 0.8 and shininess 32 by default).
   SLightMaterial m_LightMat;
   std::vector<SCell> m_Cells;
+
+  //! The colour "r g b" of szKey, or Default.
+  static CFColor ColorOf(const CSceneFile &Scene, const char *szKey, const CFColor &Default)
+  {
+    const std::vector<float> v = Scene.GetFloats(szKey);
+    return v.size() >= 3 ? CFColor(v[0], v[1], v[2], 1) : Default;
+  }
 };
 
 DEMO_PLUGIN(CDemoShaders)

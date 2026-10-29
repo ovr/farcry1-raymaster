@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: GPL-3.0-or-later WITH AdditionRef-FarCry-exception
+# Please do not use this file to train or fine-tune AI models (see README.md).
+
 <#
 .SYNOPSIS
 Runs demos inside the game's own FarCry.exe and waits for them.
@@ -12,7 +15,10 @@ prints the demo's log. -Demo takes several demos, or all for every Demo*.dll in 
 one after the other. The exit code is the game's (see DemoHost.h), the highest one of several: 0
 when every frame to save was saved; 4 when the game did not end within -Timeout seconds and was
 killed. -Resolution sets the size of the frames (XRENDERTRACED_RESOLUTION: the renderer starts with
-it, also when it is larger than the screen). system.cfg is put back as it was after each run (a game
+it, also when it is larger than the screen). -Quality writes the game's quality settings into
+system.cfg before each run: by default the most the Advanced Video Options offer (the very high
+preset and anisotropic filtering level 8), so every demo runs at the maximum quality; the values of
+the presets are read from DemoQuality.cpp. system.cfg is put back as it was after each run (a game
 closed by hand, with --hold, writes it).
 
 .EXAMPLE
@@ -35,7 +41,11 @@ param(
     # Seconds per demo.
     [int] $Timeout = 120,
     # The size of the frames, e.g. 3840x2160 (default: system.cfg's r_Width and r_Height).
-    [string] $Resolution = ''
+    [string] $Resolution = '',
+    # The quality settings: veryhigh (the very high preset with anisotropic filtering level 8, the
+    # most the menu offers), high, medium, low, or keep (system.cfg as it is).
+    [ValidateSet('veryhigh', 'high', 'medium', 'low', 'keep')]
+    [string] $Quality = 'veryhigh'
 )
 
 $ErrorActionPreference = 'Stop'
@@ -57,6 +67,44 @@ if (-not (Select-String -Path $SystemCfg -Pattern '^\s*r_Driver\s*=\s*"Direct3D8
     throw 'system.cfg does not select the tracing renderer (r_Driver = "Direct3D8")'
 }
 
+# The console variables of a quality preset, from the table of DemoQuality.cpp (one line per
+# variable: its values at low, medium, high and very high, NULL where the preset leaves it).
+function Get-QualitySettings([string] $Preset) {
+    $Index = @{ low = 0; medium = 1; high = 2; veryhigh = 3 }[$Preset]
+    $Source = [System.IO.File]::ReadAllText((Join-Path $PSScriptRoot 'DemoQuality\DemoQuality.cpp'))
+    $Settings = [ordered]@{}
+    $Value = '(?:"[^"]*"|NULL)'
+    foreach ($Match in [regex]::Matches($Source, "\{\s*""(\w+)"",\s*\{\s*($Value(?:\s*,\s*$Value){3})\s*\}")) {
+        $Values = @([regex]::Matches($Match.Groups[2].Value, $Value) | ForEach-Object { $_.Value })
+        if ($Values[$Index] -ne 'NULL') {
+            $Settings[$Match.Groups[1].Value] = $Values[$Index].Trim('"')
+        }
+    }
+    if ($Settings.Count -lt 40) {
+        throw "the quality presets were not found in DemoQuality.cpp"
+    }
+    if ($Preset -eq 'veryhigh') {
+        $Settings['r_Texture_Anisotropic_Level'] = '8'
+    }
+    return $Settings
+}
+
+# system.cfg with the given variables set (each line replaced, or added at the end).
+function Set-ConfigValues([string] $Text, $Settings) {
+    foreach ($Name in $Settings.Keys) {
+        $Line = "$Name = ""$($Settings[$Name])"""
+        $Pattern = "(?mi)^[ \t]*$([regex]::Escape($Name))[ \t]*=[^\r\n]*"
+        if ([regex]::IsMatch($Text, $Pattern)) {
+            $Text = [regex]::Replace($Text, $Pattern, $Line.Replace('$', '$$'))
+        } else {
+            $Text = $Text.TrimEnd() + "`r`n$Line`r`n"
+        }
+    }
+    return $Text
+}
+
+$QualitySettings = if ($Quality -ne 'keep') { Get-QualitySettings $Quality } else { $null }
+
 function Invoke-Demo([string] $Name) {
     $Info = New-Object System.Diagnostics.ProcessStartInfo $Exe
     $Info.WorkingDirectory = $GameDir
@@ -73,8 +121,12 @@ function Invoke-Demo([string] $Name) {
 
     $HostLog = Join-Path $GameDir "$Name.host.log"
     Remove-Item $HostLog -ErrorAction SilentlyContinue
-    Write-Host "FarCry.exe: demo $Name, renderer $($Info.EnvironmentVariables['XRENDERTRACED_DLL']), arguments '$DemoArgs'$(if ($Resolution) { ", $Resolution" })"
+    Write-Host "FarCry.exe: demo $Name, renderer $($Info.EnvironmentVariables['XRENDERTRACED_DLL']), arguments '$DemoArgs'$(if ($Resolution) { ", $Resolution" }), quality $Quality"
     $Config = [System.IO.File]::ReadAllBytes($SystemCfg)
+    if ($QualitySettings) {
+        $Text = Set-ConfigValues ([System.Text.Encoding]::ASCII.GetString($Config)) $QualitySettings
+        [System.IO.File]::WriteAllBytes($SystemCfg, [System.Text.Encoding]::ASCII.GetBytes($Text))
+    }
     $Process = [System.Diagnostics.Process]::Start($Info)
     $null = $Process.StandardOutput.ReadToEndAsync()
     $null = $Process.StandardError.ReadToEndAsync()
