@@ -26,6 +26,8 @@ it as well: it holds local, machine-specific instructions and is not committed (
   a license term; a PowerShell script: then a blank line, so that its help is still found); in
   `mod/XRenderCommon/` only `SPDX-License-Identifier: CC0-1.0`; generated files and `sdk/` get
   none.
+- **Multiplayer is out of scope.** Only the single player game matters: do not test, support or
+  patch multiplayer (its scripts, menus, network code), and do not hold back a fix because of it.
 
 ## Layout
 
@@ -33,6 +35,11 @@ it as well: it holds local, machine-specific instructions and is not committed (
 - `mod/` - our own modules (e.g. `mod/XRenderD3D9Traced`, the tracing renderer proxy,
   `mod/XRenderCommon`, renderer interface knowledge beyond the SDK headers, and `mod/Demos`, the
   demo scenes). New libraries go here, not into `sdk/`.
+- `assets/scripts/` - patches to the game's scripts (unified diffs against `FCData/Scripts.pak`)
+  and `Patch Scripts.cmd`, which applies them to the scripts of a game folder and writes the result
+  to its `FCData/zz_RayMaster.pak`. The engine reads a script from the last pack opened that has it
+  (the packs open in name order) and never a loose file in the game folder. Only the patches are
+  committed, never the game's scripts.
 - `farcry1_testing1/` - the game install for tracing (git-ignored):
   - `Bin32` - retail 1.4 (x86; stops at its CD check, which is not to be bypassed),
   - `Bin64` - the Cumulative Patch x64 build described above.
@@ -52,6 +59,7 @@ it as well: it holds local, machine-specific instructions and is not committed (
   `XRENDERTRACED_EXEC_LEVEL_FRAME` frames (default 100) after each level load. Settings that are
   off in `system.cfg` (e.g. `e_shadow_maps 1; e_stencil_shadows 1`) go in front of the `map`
   command in `XRENDERTRACED_EXEC`; the game is stopped by killing it, so `system.cfg` stays as it is.
+  The commands are split at every `;`, so a script command (`#System:LogAlways(...)`) has none.
 - The x64 build also hooks the vtables of the shaders, textures and render elements of the
   original renderer (`VCallHooks.h`): the summary after the captured frame lists which virtual
   functions the engine calls. A command `screenfx Effect 1`, `screenfx Effect.Param 0.5` or

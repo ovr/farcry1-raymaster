@@ -899,7 +899,10 @@ void CTextureManager::ReleaseTexture(CTexture *pTex, bool bForce)
 {
   if (!pTex || pTex->m_bRemoved)
     return;
-  if (pTex->m_bPermanent)
+  // A texture loaded with FT_NOREMOVE stays until it is released by force, as in the original
+  // renderer: the engine removes the menu's mouse pointer right after the menu has loaded it, and
+  // its ID, made free, became the next texture's (the loading screen's).
+  if (pTex->m_bPermanent || (!bForce && (pTex->m_nFlags & FT_NOREMOVE)))
   {
     if (pTex->m_nRefs > 1)
       pTex->m_nRefs--;

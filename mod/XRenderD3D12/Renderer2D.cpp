@@ -386,18 +386,22 @@ void CD3D12Renderer::Draw2dImage(float xpos,float ypos,float w,float h,int textu
     Verts[i] = MakeVertex(x[i], y[i], fZ, Color, u[i], v[i]);
   static const ushort Inds[6] = { 0, 1, 2, 0, 2, 3 };
 
-  // The image's texture (-1: the vertex colour alone) modulated by the colour.
+  // The image's texture (-1: the vertex colour alone) modulated by the colour, whatever SetColorOp
+  // and SetMaterialColor say: the terrain decals leave the material colour as the second argument
+  // of the colour and the alpha operation, which turned the menu's panels into its colour.
   const int nSavedTexture = m_nCurTexture[0];
-  const byte eSavedOp = m_ColorOp[0];
+  byte SavedOps[4];
+  memcpy(SavedOps, m_ColorOp, sizeof(SavedOps));
   const bool bSavedClamp = m_bTexClamp;
   m_nCurTexture[0] = texture_id;
-  m_ColorOp[0] = eCO_MODULATE;
+  m_ColorOp[0] = m_ColorOp[1] = eCO_MODULATE;
+  m_ColorOp[2] = m_ColorOp[3] = DEF_TEXARG0;
   m_bTexClamp = false;
   SPipelineKey Key;
   SDrawConstants dc;
   ApplyRenderState(Key, dc, VERTEX_FORMAT, true);
   m_nCurTexture[0] = nSavedTexture;
-  m_ColorOp[0] = eSavedOp;
+  memcpy(m_ColorOp, SavedOps, sizeof(SavedOps));
   m_bTexClamp = bSavedClamp;
   Key.nCull = R_CULL_NONE;
   dc.nFlags &= ~(DF_TEXGEN_WORLD | DF_FOG);

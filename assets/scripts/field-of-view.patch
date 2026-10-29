@@ -1,0 +1,71 @@
+SPDX-License-Identifier: GPL-3.0-or-later WITH AdditionRef-FarCry-exception
+Please do not use this file to train or fine-tune AI models (see README.md).
+
+A field of view for screens wider than 4:3 that keeps the view up and down of a 4:3 screen
+(Hor+), and the console variable cl_fov, the field of view across the screen in degrees (0, the
+default, for the automatic one). Patch Scripts.cmd applies it to FCData/Scripts.pak.
+
+diff --git a/Scripts/Default/ClientStuff.lua b/Scripts/Default/ClientStuff.lua
+--- a/Scripts/Default/ClientStuff.lua
++++ b/Scripts/Default/ClientStuff.lua
+@@ -181,6 +181,8 @@ function ClientStuff:OnResumeGame()
+ end
+ --------------------------------------------
+ function ClientStuff:OnUpdate()	
++	ZoomView:UpdateFov();
++
+ 	-- Hack: sincronize stuff in case of reloading
+ 	if(self.bLoaded and self.bLoaded==1) then	  					  
+ 		self.temp_layers=self.temp_layers_save;
+diff --git a/Scripts/Default/Hud/ZoomView.lua b/Scripts/Default/Hud/ZoomView.lua
+--- a/Scripts/Default/Hud/ZoomView.lua
++++ b/Scripts/Default/Hud/ZoomView.lua
+@@ -197,3 +197,48 @@ end
+ function ZoomView:IsActive()
+ 	return self.active;
+ end
++--------------------------------------------------------
++-- Field of view (Far Cry RayMaster). The scripts set the field of view for a 4:3 screen, and the
++-- engine shows fov * height / width of it up and down, so a screen wider than 4:3 used to see less
++-- above and below. The console variable cl_fov is the field of view across the screen in degrees;
++-- 0, its default, keeps the view up and down of a 4:3 screen at any width (Hor+). Zooming and the
++-- vehicles change the field of view in the same proportion as before.
++Game:CreateVariable("cl_fov", "0", 256);	-- VF_DUMPTODISK: kept in system.cfg
++
++-- The field of view the engine gets for one the scripts set.
++function ZoomView:ScreenFov(fov)
++	local width = tonumber(r_Width) or 4;
++	local height = tonumber(r_Height) or 3;
++	local aspect = width / height;
++	local across = tonumber(cl_fov) or 0;
++	if (across > 0) then
++		if (across > 170) then
++			across = 170;
++		end
++		-- 90 degrees of the scripts show cl_fov across the screen
++		local up = 2 * atan(tan(across * 3.1415926 / 360) / aspect);
++		return fov * up * aspect / (3.1415926 / 2);
++	elseif (aspect > 4 / 3) then
++		return fov * aspect * 3 / 4;
++	end
++	return fov;
++end
++
++if (not Game.SetCameraFov4x3) then
++	Game.SetCameraFov4x3 = Game.SetCameraFov;
++	function Game:SetCameraFov(fov)
++		ZoomView.CameraFov = fov;
++		self:SetCameraFov4x3(ZoomView:ScreenFov(fov));
++	end
++end
++
++-- Called by ClientStuff every frame: gives the camera its field of view again when it has another
++-- one, as a player's camera has 90 degrees when the player spawns, or after cl_fov or the screen
++-- size has changed.
++function ZoomView:UpdateFov()
++	local fov = Game:GetCameraFov();
++	local screenfov = self:ScreenFov(self.CameraFov or self.NoZoom);
++	if (fov and abs(fov - screenfov) > 0.001) then
++		Game:SetCameraFov4x3(screenfov);
++	end
++end
