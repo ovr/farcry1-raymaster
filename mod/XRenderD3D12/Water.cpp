@@ -370,53 +370,62 @@ bool CD3D12Renderer::CopySceneForWater()
 {
   if (!m_pDevice || !m_pDescriptors)
     return false;
-  // The copies of the main view's target: the back buffer, or an upscaler's scene.
+  // The copies of the main view's target: the back buffer, or the HDR target or an upscaler's scene.
+  SSceneCopy &Copy = m_SceneCopies[m_pDevice->IsInScene() || m_pDevice->IsInHdr() ? 1 : 0];
   const int w = m_pDevice->GetMainWidth(), h = m_pDevice->GetMainHeight();
-  const DXGI_FORMAT DepthFormat = m_pDevice->GetMainDepthSRVFormat();
-  if (!m_pSceneColorCopy || w != m_nSceneCopyWidth || h != m_nSceneCopyHeight || DepthFormat != m_SceneCopyDepthFormat)
+  const DXGI_FORMAT ColorFormat = m_pDevice->GetMainColorFormat(), DepthFormat = m_pDevice->GetMainDepthSRVFormat();
+  if (!Copy.pColor || w != Copy.nWidth || h != Copy.nHeight || ColorFormat != Copy.ColorFormat || DepthFormat != Copy.DepthFormat)
   {
-    ReleaseWaterResources();
-    if (!m_pDevice->CreateTargetCopies(m_pSceneColorCopy, &m_pSceneDepthCopy))
+    FreeSceneCopy(Copy);
+    if (!m_pDevice->CreateTargetCopies(Copy.pColor, &Copy.pDepth))
       return false;
-    m_nSceneColorSRV = m_pDescriptors->AllocSRV(m_pSceneColorCopy.Get(), nullptr);
+    Copy.nColorSRV = m_pDescriptors->AllocSRV(Copy.pColor.Get(), nullptr);
     D3D12_SHADER_RESOURCE_VIEW_DESC Desc = {};
     Desc.Format = DepthFormat;
     Desc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
     Desc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
     Desc.Texture2D.MipLevels = 1;
-    m_nSceneDepthSRV = m_pDescriptors->AllocSRV(m_pSceneDepthCopy.Get(), &Desc);
-    m_nSceneCopyWidth = w;
-    m_nSceneCopyHeight = h;
-    m_SceneCopyDepthFormat = DepthFormat;
-    if (m_nSceneColorSRV < 0 || m_nSceneDepthSRV < 0)
+    Copy.nDepthSRV = m_pDescriptors->AllocSRV(Copy.pDepth.Get(), &Desc);
+    Copy.nWidth = w;
+    Copy.nHeight = h;
+    Copy.ColorFormat = ColorFormat;
+    Copy.DepthFormat = DepthFormat;
+    if (Copy.nColorSRV < 0 || Copy.nDepthSRV < 0)
     {
-      ReleaseWaterResources();
+      FreeSceneCopy(Copy);
       return false;
     }
   }
-  m_pDevice->CopyTargets(m_pSceneColorCopy.Get(), m_pSceneDepthCopy.Get());
+  m_pDevice->CopyTargets(Copy.pColor.Get(), Copy.pDepth.Get());
+  m_nSceneColorSRV = Copy.nColorSRV;
+  m_nSceneDepthSRV = Copy.nDepthSRV;
   m_bSceneCopied = true;
   return true;
 }
 
-void CD3D12Renderer::ReleaseWaterResources()
+void CD3D12Renderer::FreeSceneCopy(SSceneCopy &Copy)
 {
+  if (m_nSceneColorSRV == Copy.nColorSRV)
+    m_nSceneColorSRV = m_nSceneDepthSRV = -1;
   if (m_pDescriptors)
   {
-    if (m_nSceneColorSRV >= 0)
-      m_pDescriptors->FreeSRV(m_nSceneColorSRV);
-    if (m_nSceneDepthSRV >= 0)
-      m_pDescriptors->FreeSRV(m_nSceneDepthSRV);
+    if (Copy.nColorSRV >= 0)
+      m_pDescriptors->FreeSRV(Copy.nColorSRV);
+    if (Copy.nDepthSRV >= 0)
+      m_pDescriptors->FreeSRV(Copy.nDepthSRV);
   }
-  m_nSceneColorSRV = m_nSceneDepthSRV = -1;
   if (m_pDevice)
   {
-    m_pDevice->DeferredRelease(m_pSceneColorCopy);
-    m_pDevice->DeferredRelease(m_pSceneDepthCopy);
+    m_pDevice->DeferredRelease(Copy.pColor);
+    m_pDevice->DeferredRelease(Copy.pDepth);
   }
-  m_pSceneColorCopy.Reset();
-  m_pSceneDepthCopy.Reset();
-  m_nSceneCopyWidth = m_nSceneCopyHeight = 0;
+  Copy = SSceneCopy();
+}
+
+void CD3D12Renderer::ReleaseWaterResources()
+{
+  for (SSceneCopy &Copy : m_SceneCopies)
+    FreeSceneCopy(Copy);
   m_bSceneCopied = false;
 }
 

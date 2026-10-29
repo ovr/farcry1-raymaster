@@ -232,10 +232,10 @@ void CD3D12Renderer::BeginScene3D()
   InvalidateFrameConstants();
 
   // The main view of the game clears colour and depth before its scene (with an upscaler, its
-  // scene targets).
+  // scene targets; with r_HDRRendering, the HDR target).
   if ((m_nSceneFlags & SHDF_ALLOWHDR) && m_nRecurseLevel <= 1)
   {
-    BeginUpscale();
+    BeginMainScene();
     const float Clear[4] = { m_vClearColor.x, m_vClearColor.y, m_vClearColor.z, 0 };
     m_pDevice->ClearColor(Clear);
     m_pDevice->ClearDepth(1.0f, 0, true, true);

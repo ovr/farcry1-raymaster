@@ -21,3 +21,7 @@ xrender_d3d12_shader(Water_Velocity_PS Water.hlsl ps_6_0 PSMain XR_VELOCITY)
 # The screen effects (eD3D12P_Post).
 xrender_d3d12_shader(Post_VS Post.hlsl vs_6_0 VSMain)
 xrender_d3d12_shader(Post_PS Post.hlsl ps_6_0 PSMain)
+
+# Exposure, bloom and tone mapping of the HDR scene (eD3D12P_Hdr, r_HDRRendering).
+xrender_d3d12_shader(Hdr_VS Hdr.hlsl vs_6_0 VSMain)
+xrender_d3d12_shader(Hdr_PS Hdr.hlsl ps_6_0 PSMain)
