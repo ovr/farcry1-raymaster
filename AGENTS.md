@@ -26,6 +26,8 @@ it as well: it holds local, machine-specific instructions and is not committed (
   a license term; a PowerShell script: then a blank line, so that its help is still found); in
   `mod/XRenderCommon/` only `SPDX-License-Identifier: CC0-1.0`; generated files and `sdk/` get
   none.
+- **Multiplayer is out of scope.** Only the single player game matters: do not test, support or
+  patch multiplayer (its scripts, menus, network code), and do not hold back a fix because of it.
 
 ## Layout
 
