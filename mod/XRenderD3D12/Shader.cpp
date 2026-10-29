@@ -161,7 +161,7 @@ constexpr STemplateLighting s_TemplateLighting[] =
   { "templreflcm",                     ELighting::None,     EGlow::None, EEnvMap::Cube },
   { "templbumpreflcm*",                ELighting::None,     EGlow::None, EEnvMap::Cube },
   { "templreflcmdecal",                ELighting::Vertex,   EGlow::None, EEnvMap::CubeDecal },
-  { "templreflcmdecal_reflamountopacity", ELighting::Vertex, EGlow::None, EEnvMap::CubeDecal },
+  { "templreflcmdecal_reflamountopacity", ELighting::Vertex, EGlow::None, EEnvMap::CubeDecalAmount },
   { "templreflcmdecaladdsig",          ELighting::Vertex,   EGlow::None, EEnvMap::CubeAddSigned },
   // The scene around the object (rendered into a cube) times the vertex lighting.
   { "templreflenvcm",                  ELighting::Vertex,   EGlow::None, EEnvMap::Auto },

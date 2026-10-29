@@ -405,15 +405,27 @@ void CD3D12Renderer::DrawLeafItem(const SRenderItem &it)
   // unlit: whole (TemplReflCMDecal), signed (- 0.5, TemplReflCMDecalAddSig), a tenth of it
   // (TemplGlassCM, 0.098 for TemplGlassCM_FP). The glass sees the cube through itself (the view
   // vector refracted with the ratio 1.05) and reflected, mixed by F = saturate(0.2 + 2 *
-  // (1 - N.V)^2); not lit. The auto cube map is the cube of the scene around the object
-  // (EnvCubes.cpp); before it has one, the default cube.
+  // (1 - N.V)^2); not lit. TemplReflCMDecal_ReflAmountOpacity: the texture plus the cube times
+  // the gloss map (the reflect amount; the whole cube without one), lit together. The auto cube
+  // map is the cube of the scene around the object (EnvCubes.cpp); before it has one, the default
+  // cube.
   const SShaderProps &Props = pSh->GetProps();
   if (Props.eEnvMap != EEnvMap::None)
   {
     const int nAutoCube = Props.eEnvMap == EEnvMap::Auto ? GetEnvCubeSRV(it) : -1;
     if (CTexture *pCube = nAutoCube < 0 ? GetEnvCubeMap(it.pRes) : nullptr; pCube || nAutoCube >= 0)
     {
-      if (Props.eEnvMap != EEnvMap::Cube && Props.eEnvMap != EEnvMap::Auto && (dc.nFlags & DF_TEX0))
+      if (Props.eEnvMap == EEnvMap::CubeDecalAmount)
+      {
+        CTexture *pWhite = m_pTextures ? m_pTextures->GetWhite() : nullptr;
+        CTexture *pAmount = GetGlowMap(it.pRes);
+        const bool bTex = (dc.nFlags & DF_TEX0) != 0;
+        dc.nTex4 = bTex || !pWhite ? dc.nTex0 : pWhite->GetSRV();
+        dc.nTex5 = pAmount ? pAmount->GetSRV() : pWhite ? pWhite->GetSRV() : dc.nTex4;
+        dc.nFlags2 |= DF2_REFL_AMOUNT;
+        Set4(dc.vAddColor, bTex ? 1.0f : 0.0f, bTex ? 1.0f : 0.0f, bTex ? 1.0f : 0.0f, 0);
+      }
+      else if (Props.eEnvMap != EEnvMap::Cube && Props.eEnvMap != EEnvMap::Auto && (dc.nFlags & DF_TEX0))
       {
         const float k = Props.eEnvMap == EEnvMap::Glass ? 0.1f : Props.eEnvMap == EEnvMap::GlassFixed ? 25.0f / 255.0f : 1.0f;
         dc.nFlags2 |= DF2_ADD_TEX4;

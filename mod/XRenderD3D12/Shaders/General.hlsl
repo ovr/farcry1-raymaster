@@ -23,7 +23,8 @@
 //	    tex0: DF_CUBE0 (g_Cubes, the view vector reflected about the normal,
 //	      N' with DF_BUMP; DF2_GLASS: lerp(cube(T), cube(R), F), T the view
 //	      vector refracted with vParams2.w, F = saturate(vParams2.z +
-//	      vParams2.x * (1 - N.V)^vParams2.y)), else DF_TEX0_ARRAY
+//	      vParams2.x * (1 - N.V)^vParams2.y); DF2_REFL_AMOUNT: rgb = cube * tex5
+//	      + tex4 * vAddColor.rgb, both at uv0), else DF_TEX0_ARRAY
 //	      (g_TextureArrays, slice floor(u / 2) at (u - 2 * slice, v)), else DF_TEX0
 //	      (g_Textures), else white; sampler from nSamplers bits 0-3
 //	      (DF2_TERRAIN_LIGHT, the terrain under dynamic lights: rgb as 0.75 *
@@ -361,6 +362,9 @@ float4 PSMain(SVertexOutput In) : SV_Target
       float fFresnel = saturate(g_Draw.vParams2.z + g_Draw.vParams2.x * pow(1 - saturate(-dot(vView, vN)), g_Draw.vParams2.y));
       vTex = lerp(vThrough, vTex, fFresnel);
     }
+    if (HasFlag2(DF2_REFL_AMOUNT))
+      vTex.rgb = vTex.rgb * SampleTexture(g_Draw.nTex5, XR_SAMPLER_LINEAR_WRAP, In.vTex0).rgb +
+        SampleTexture(g_Draw.nTex4, XR_SAMPLER_LINEAR_WRAP, In.vTex0).rgb * g_Draw.vAddColor.rgb;
   }
   else if (HasFlag(DF_TEX0_ARRAY))
   {
