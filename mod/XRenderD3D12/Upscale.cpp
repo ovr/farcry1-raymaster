@@ -132,14 +132,9 @@ bool CD3D12Renderer::UpdateUpscaler()
     m_nUpscaleOutputSRV = m_nUpscaleColorSRV = m_nUpscaleDepthSRV = -1;
     int rw = w, rh = h;
     m_pUpscaler->GetRenderSize(nMode, rw, rh);
-    D3D12_SHADER_RESOURCE_VIEW_DESC DepthDesc = {};
-    DepthDesc.Format = DXGI_FORMAT_R32_FLOAT;
-    DepthDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
-    DepthDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
-    DepthDesc.Texture2D.MipLevels = 1;
     if (!m_pDevice->SetSceneSize(rw, rh) || (m_nUpscaleOutputSRV = m_pDescriptors->AllocSRV(m_pDevice->GetSceneOutput(), nullptr)) < 0 ||
         (m_nUpscaleColorSRV = m_pDescriptors->AllocSRV(m_pDevice->GetSceneColor(), nullptr)) < 0 ||
-        (m_nUpscaleDepthSRV = m_pDescriptors->AllocSRV(m_pDevice->GetSceneDepth(), &DepthDesc)) < 0)
+        (m_nUpscaleDepthSRV = m_pDescriptors->AllocSRV(m_pDevice->GetUpscaleDepth(), nullptr)) < 0)
     {
       iLog->LogError("XRenderD3D12: no scene targets of %d x %d for the upscaler; none", rw, rh);
       ReleaseUpscaler();
@@ -247,7 +242,7 @@ void CD3D12Renderer::UpscaleScene()
   SUpscaleInputs In;
   In.pCmdList = m_pDevice->GetCmdList();
   In.pColor = m_pDevice->GetSceneColor();
-  In.pDepth = m_pDevice->GetSceneDepth();
+  In.pDepth = m_pDevice->GetUpscaleDepth();
   In.pVelocity = m_pDevice->GetSceneVelocity();
   In.pOutput = m_pDevice->GetSceneOutput();
   In.nRenderWidth = m_pDevice->GetSceneWidth();

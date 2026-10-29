@@ -343,11 +343,14 @@ it as well: it holds local, machine-specific instructions and is not committed (
   black, far white, log scale). All of them change at run time, and the frame dump names the
   upscaler, its render size and the frame's jitter.
   - With an upscaler, the main view's scene (`BeginScene3D` to `UpscaleScene` before the screen
-    effects, `Upscale.cpp`) draws into render-size targets: colour, depth (R32) and motion vectors
-    (R16G16, written by the general program's opaque draws). It is jittered and its textures get
-    a mip bias. The screen effects and the 2D stay at the display's size.
-  - Motion comes from the previous frame's camera for static geometry, and from the previous world
-    matrix of a character instance or a permanent object. The weapon (`FOB_NEAREST`) has none.
+    effects, `Upscale.cpp`) draws into render-size targets: colour, a depth buffer, motion vectors
+    (R16G16, written by the general program's opaque draws and the water) and the depth the
+    upscaler gets (R32, the nearest of the depth writes and of the water, which does not write
+    the depth buffer). It is jittered and its textures get a mip bias. The screen effects and the
+    2D stay at the display's size.
+  - Motion comes from the previous frame's camera for static geometry and the water's surface, and
+    from the previous world matrix of a character instance or a permanent object. The weapon
+    (`FOB_NEAREST`) has none.
   - The history is reset after a frame without the main view, a camera jump of more than 5 m, a
     field of view change of more than 10 degrees, and a new mode.
   - The build downloads the upscaler DLL (`third_party/amd-fsr-sdk/README.md`) and copies it, the

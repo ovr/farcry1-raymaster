@@ -146,10 +146,10 @@ bool CD3D12Device::Init(HWND hWnd, int nWidth, int nHeight, bool bDebug)
   m_pFactory->MakeWindowAssociation(hWnd, DXGI_MWA_NO_ALT_ENTER);
 
   D3D12_DESCRIPTOR_HEAP_DESC HeapDesc = {};
-  // The back buffers' views, then the scene targets' (colour, motion vectors; the depth's after
-  // the depth buffer's in the DSV heap).
+  // The back buffers' views, then the scene targets' (colour, motion vectors, the upscaler's
+  // depth; the depth buffer's after the back buffers' in the DSV heap).
   HeapDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_RTV;
-  HeapDesc.NumDescriptors = D3D12_BACKBUFFERS + 2;
+  HeapDesc.NumDescriptors = D3D12_BACKBUFFERS + 3;
   if (Failed(m_pDevice->CreateDescriptorHeap(&HeapDesc, IID_PPV_ARGS(&m_pRTVHeap)), "CreateDescriptorHeap (RTV)"))
     return false;
   m_nRTVSize = m_pDevice->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_RTV);
@@ -537,8 +537,8 @@ void CD3D12Device::SetBackBufferTargets()
   EndOffscreen();
   if (m_bInScene)
   {
-    const D3D12_CPU_DESCRIPTOR_HANDLE hRTV[2] = { SceneRTV(0), SceneRTV(1) }, hDSV = SceneDSV();
-    m_pCmdList->OMSetRenderTargets(2, hRTV, FALSE, &hDSV);
+    const D3D12_CPU_DESCRIPTOR_HANDLE hRTV[3] = { SceneRTV(0), SceneRTV(1), SceneRTV(2) }, hDSV = SceneDSV();
+    m_pCmdList->OMSetRenderTargets(3, hRTV, FALSE, &hDSV);
   }
   else
   {
@@ -613,6 +613,10 @@ bool CD3D12Device::SetSceneSize(int nWidth, int nHeight)
   Desc.Format = Clear.Format = D3D12_VELOCITY_FORMAT;
   bOk = bOk && !Failed(m_pDevice->CreateCommittedResource(&Heap, D3D12_HEAP_FLAG_NONE, &Desc, SCENE_READ, &Clear, IID_PPV_ARGS(&m_pSceneVelocity)),
                        "CreateCommittedResource (scene motion vectors)");
+  Desc.Format = Clear.Format = D3D12_UPSCALE_DEPTH_FORMAT;
+  Clear.Color[0] = 1.0f;
+  bOk = bOk && !Failed(m_pDevice->CreateCommittedResource(&Heap, D3D12_HEAP_FLAG_NONE, &Desc, SCENE_READ, &Clear, IID_PPV_ARGS(&m_pUpscaleDepth)),
+                       "CreateCommittedResource (upscaler depth)");
   Desc.Format = DXGI_FORMAT_R32_TYPELESS;
   Desc.Flags = D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL;
   Clear.Format = D3D12_SCENE_DEPTH_FORMAT;
@@ -632,6 +636,7 @@ bool CD3D12Device::SetSceneSize(int nWidth, int nHeight)
   }
   m_pDevice->CreateRenderTargetView(m_pSceneColor.Get(), nullptr, SceneRTV(0));
   m_pDevice->CreateRenderTargetView(m_pSceneVelocity.Get(), nullptr, SceneRTV(1));
+  m_pDevice->CreateRenderTargetView(m_pUpscaleDepth.Get(), nullptr, SceneRTV(2));
   D3D12_DEPTH_STENCIL_VIEW_DESC View = {};
   View.Format = D3D12_SCENE_DEPTH_FORMAT;
   View.ViewDimension = D3D12_DSV_DIMENSION_TEXTURE2D;
@@ -648,6 +653,7 @@ void CD3D12Device::ReleaseSceneTargets()
   EndScene();
   DeferredRelease(m_pSceneColor);
   DeferredRelease(m_pSceneVelocity);
+  DeferredRelease(m_pUpscaleDepth);
   DeferredRelease(m_pSceneDepth);
   DeferredRelease(m_pSceneOutput);
   m_nSceneWidth = m_nSceneHeight = 0;
@@ -661,6 +667,7 @@ void CD3D12Device::BeginScene()
   EndOffscreen();
   Barrier(m_pCmdList.Get(), m_pSceneColor.Get(), SCENE_READ, D3D12_RESOURCE_STATE_RENDER_TARGET);
   Barrier(m_pCmdList.Get(), m_pSceneVelocity.Get(), SCENE_READ, D3D12_RESOURCE_STATE_RENDER_TARGET);
+  Barrier(m_pCmdList.Get(), m_pUpscaleDepth.Get(), SCENE_READ, D3D12_RESOURCE_STATE_RENDER_TARGET);
   Barrier(m_pCmdList.Get(), m_pSceneDepth.Get(), SCENE_READ, D3D12_RESOURCE_STATE_DEPTH_WRITE);
   m_bInScene = true;
   SetBackBufferTargets();
@@ -676,6 +683,7 @@ void CD3D12Device::EndScene()
   EndOffscreen();
   Barrier(m_pCmdList.Get(), m_pSceneColor.Get(), D3D12_RESOURCE_STATE_RENDER_TARGET, SCENE_READ);
   Barrier(m_pCmdList.Get(), m_pSceneVelocity.Get(), D3D12_RESOURCE_STATE_RENDER_TARGET, SCENE_READ);
+  Barrier(m_pCmdList.Get(), m_pUpscaleDepth.Get(), D3D12_RESOURCE_STATE_RENDER_TARGET, SCENE_READ);
   Barrier(m_pCmdList.Get(), m_pSceneDepth.Get(), D3D12_RESOURCE_STATE_DEPTH_WRITE, SCENE_READ);
   SetBackBufferTargets();
 }
@@ -851,6 +859,11 @@ void CD3D12Device::ClearDepth(float fDepth, uint8 nStencil, bool bDepth, bool bS
   const auto Flags = (D3D12_CLEAR_FLAGS)((bDepth ? D3D12_CLEAR_FLAG_DEPTH : 0) | (bStencil && !bScene ? D3D12_CLEAR_FLAG_STENCIL : 0));
   if (m_bInFrame && Flags)
     m_pCmdList->ClearDepthStencilView(m_pOffscreen ? m_hOffscreenDSV : bScene ? SceneDSV() : GetDSV(), Flags, fDepth, nStencil, 0, nullptr);
+  if (m_bInFrame && bScene && bDepth)
+  {
+    const float Depth[4] = { fDepth, 0, 0, 0 };
+    m_pCmdList->ClearRenderTargetView(SceneRTV(2), Depth, 0, nullptr);
+  }
 }
 
 bool CD3D12Device::CreateTargetCopies(ComPtr<ID3D12Resource> &pColor, ComPtr<ID3D12Resource> *pDepth)

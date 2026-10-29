@@ -896,6 +896,8 @@ void CD3D12Renderer::DrawLeafItem(const SRenderItem &it)
     // Not in its own reflection; in the environment cubes only the ocean (SetupWaterDraw).
     if (m_bReflectionPass || !SetupWaterDraw(Key, dc, it))
       return;
+    // The surface stays where it is, though the ocean's ring follows the camera.
+    SetStaticMotion(dc);
     pTex = nullptr;
     break;
   case eDC_WaterBeach:

@@ -149,7 +149,6 @@ public:
     Desc.commandList = In.pCmdList;
     Desc.color = ffxApiGetResourceDX12(In.pColor, READ);
     Desc.depth = ffxApiGetResourceDX12(In.pDepth, READ);
-    Desc.depth.description.format = FFX_API_SURFACE_FORMAT_R32_FLOAT;   // read as R32_FLOAT (the resource is typeless)
     Desc.motionVectors = ffxApiGetResourceDX12(In.pVelocity, READ);
     Desc.output = ffxApiGetResourceDX12(In.pOutput, FFX_API_RESOURCE_STATE_UNORDERED_ACCESS);
     Desc.jitterOffset = { In.fJitterX, In.fJitterY };

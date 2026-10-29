@@ -33,7 +33,7 @@ struct SUpscaleInputs
 {
   ID3D12GraphicsCommandList *pCmdList = nullptr;
   ID3D12Resource *pColor = nullptr;     //!< the scene at the render size (D3D12_BACKBUFFER_FORMAT, sRGB-ish LDR colours)
-  ID3D12Resource *pDepth = nullptr;     //!< its depth, R32_TYPELESS (0 near, 1 far)
+  ID3D12Resource *pDepth = nullptr;     //!< its depth, R32_FLOAT (0 near, 1 far)
   ID3D12Resource *pVelocity = nullptr;  //!< R16G16_FLOAT: where each pixel was in the frame before minus where it is, in uv
   ID3D12Resource *pOutput = nullptr;    //!< the picture of the display's size (R8G8B8A8_UNORM)
   int nRenderWidth = 0, nRenderHeight = 0;

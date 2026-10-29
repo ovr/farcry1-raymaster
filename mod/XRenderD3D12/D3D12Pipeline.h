@@ -62,8 +62,9 @@ struct SPipelineKey
   uint8 nStreams;         //!< PIPELINE_STREAM_* bits
   uint8 nTarget;          //!< 0 back buffer (D3D12_BACKBUFFER_FORMAT + D3D12_DEPTH_FORMAT), 1 R8G8B8A8 target without depth,
                           //!< 2 a shadow map (D3D12_SHADOW_MAP_FORMAT only; bDepthBias gives the shadow maps' bias),
-                          //!< 3 an upscaler's scene (D3D12_BACKBUFFER_FORMAT + D3D12_VELOCITY_FORMAT + D3D12_SCENE_DEPTH_FORMAT;
-                          //!< DrawGeometry makes 0 into 3 there): the general program's opaque draws write the motion vectors
+                          //!< 3 an upscaler's scene (D3D12_BACKBUFFER_FORMAT + D3D12_VELOCITY_FORMAT + D3D12_UPSCALE_DEPTH_FORMAT
+                          //!< + D3D12_SCENE_DEPTH_FORMAT; DrawGeometry makes 0 into 3 there): the general program's opaque
+                          //!< draws write the motion vectors, its depth writes the upscaler's depth, the water both
   uint8 bWireframe;       //!< fill mode wireframe (SetPolygonMode R_WIREFRAME_MODE)
 };
 

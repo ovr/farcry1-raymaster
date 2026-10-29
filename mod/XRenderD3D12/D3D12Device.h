@@ -27,6 +27,7 @@ constexpr DXGI_FORMAT D3D12_DEPTH_FORMAT = DXGI_FORMAT_D24_UNORM_S8_UINT;
 constexpr DXGI_FORMAT D3D12_SHADOW_MAP_FORMAT = DXGI_FORMAT_D32_FLOAT;  //!< drawn into; the texture is R32_TYPELESS, read as R32_FLOAT
 constexpr DXGI_FORMAT D3D12_SCENE_DEPTH_FORMAT = DXGI_FORMAT_D32_FLOAT; //!< the scene targets' depth (SetSceneSize): R32_TYPELESS, an upscaler reads it as R32_FLOAT
 constexpr DXGI_FORMAT D3D12_VELOCITY_FORMAT = DXGI_FORMAT_R16G16_FLOAT; //!< the scene targets' motion vectors
+constexpr DXGI_FORMAT D3D12_UPSCALE_DEPTH_FORMAT = DXGI_FORMAT_R32_FLOAT; //!< the scene targets' depth for an upscaler (with the water's)
 constexpr DXGI_FORMAT D3D12_UPSCALE_FORMAT = DXGI_FORMAT_R8G8B8A8_UNORM; //!< an upscaler's output (unordered access, which B8G8R8A8 may not have)
 
 class CD3D12Device
@@ -92,21 +93,24 @@ public:
   void Transition(ID3D12Resource *pRes, D3D12_RESOURCE_STATES Before, D3D12_RESOURCE_STATES After);
 
   //! The scene targets of an upscaler: the main view drawn at nWidth x nHeight into a colour target
-  //! (D3D12_BACKBUFFER_FORMAT), the motion vectors (D3D12_VELOCITY_FORMAT) and a depth buffer
-  //! (D3D12_SCENE_DEPTH_FORMAT), and the upscaler's output of the back buffer's size
-  //! (D3D12_UPSCALE_FORMAT). Made again when the size (or the back buffer's) changed; 0 x 0
-  //! releases them. Outside BeginScene .. EndScene the three are in the state PIXEL_SHADER_RESOURCE
-  //! | NON_PIXEL_SHADER_RESOURCE and the output in UNORDERED_ACCESS.
+  //! (D3D12_BACKBUFFER_FORMAT), the motion vectors (D3D12_VELOCITY_FORMAT), the depth for the
+  //! upscaler (D3D12_UPSCALE_DEPTH_FORMAT: the nearest of the depth writes and of the water, which
+  //! does not write the depth buffer) and a depth buffer (D3D12_SCENE_DEPTH_FORMAT), and the
+  //! upscaler's output of the back buffer's size (D3D12_UPSCALE_FORMAT). Made again when the size
+  //! (or the back buffer's) changed; 0 x 0 releases them. Outside BeginScene .. EndScene the four
+  //! are in the state PIXEL_SHADER_RESOURCE | NON_PIXEL_SHADER_RESOURCE and the output in
+  //! UNORDERED_ACCESS.
   bool SetSceneSize(int nWidth, int nHeight);
   int GetSceneWidth() const { return m_nSceneWidth; }
   int GetSceneHeight() const { return m_nSceneHeight; }
   ID3D12Resource *GetSceneColor() const { return m_pSceneColor.Get(); }
   ID3D12Resource *GetSceneDepth() const { return m_pSceneDepth.Get(); }
   ID3D12Resource *GetSceneVelocity() const { return m_pSceneVelocity.Get(); }
+  ID3D12Resource *GetUpscaleDepth() const { return m_pUpscaleDepth.Get(); }
   ID3D12Resource *GetSceneOutput() const { return m_pSceneOutput.Get(); }
   //! From here (in a frame) until EndScene the main view draws into the scene targets:
-  //! SetBackBufferTargets binds the colour and the motion vectors (SPipelineKey::nTarget 3) with
-  //! the scene's depth.
+  //! SetBackBufferTargets binds the colour, the motion vectors and the upscaler's depth
+  //! (SPipelineKey::nTarget 3) with the scene's depth buffer.
   void BeginScene();
   //! The scene targets back to shader resources (for the upscaler); the back buffer bound again.
   void EndScene();
@@ -144,7 +148,8 @@ public:
   int GetTargetWidth() const { return m_pOffscreen ? m_nOffscreenWidth : GetMainWidth(); }
   int GetTargetHeight() const { return m_pOffscreen ? m_nOffscreenHeight : GetMainHeight(); }
 
-  //! Clears the colour / the depth buffer drawn into (in a frame).
+  //! Clears the colour / the depth buffer drawn into (in a frame); the scene's depth buffer with
+  //! the upscaler's depth.
   void ClearColor(const float rgba[4]);
   void ClearDepth(float fDepth, uint8 nStencil, bool bDepth, bool bStencil);
 
@@ -244,7 +249,7 @@ private:
   bool m_bOffscreenShadowMap = false;               //!< m_pOffscreen is a shadow map
   D3D12_CPU_DESCRIPTOR_HANDLE m_hOffscreenRTV = {}, m_hOffscreenDSV = {};
   int m_nOffscreenWidth = 0, m_nOffscreenHeight = 0;
-  ComPtr<ID3D12Resource> m_pSceneColor, m_pSceneVelocity, m_pSceneDepth, m_pSceneOutput;   //!< SetSceneSize
+  ComPtr<ID3D12Resource> m_pSceneColor, m_pSceneVelocity, m_pUpscaleDepth, m_pSceneDepth, m_pSceneOutput;   //!< SetSceneSize
   int m_nSceneWidth = 0, m_nSceneHeight = 0;
   int m_nSceneOutputWidth = 0, m_nSceneOutputHeight = 0;
   bool m_bInScene = false;                          //!< BeginScene .. EndScene

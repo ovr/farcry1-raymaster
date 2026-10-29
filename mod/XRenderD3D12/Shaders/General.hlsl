@@ -103,8 +103,10 @@
 //	  ScopeLens.
 //	The upscaler's jitter (vJitter) moves every clip position. Compiled with
 //	XR_VELOCITY (the draws into an upscaler's scene that write its motion
-//	vectors) the pixel shader also writes the motion vector of the pixel
-//	(MotionVector) from mWorldViewProj and mPrevWorldViewProj to SV_Target1.
+//	vectors or its depth) the pixel shader also writes the motion vector of
+//	the pixel (MotionVector) from mWorldViewProj and mPrevWorldViewProj to
+//	SV_Target1 and its depth to SV_Target2 (the pipeline masks what the draw
+//	does not write).
 //
 //////////////////////////////////////////////////////////////////////
 
@@ -553,6 +555,7 @@ struct SPixelOutput
 {
   float4 vColor : SV_Target0;
   float2 vMotion : SV_Target1;
+  float fDepth : SV_Target2;
 };
 
 SPixelOutput PSMain(SVertexOutput In)
@@ -560,6 +563,7 @@ SPixelOutput PSMain(SVertexOutput In)
   SPixelOutput Out;
   Out.vColor = ShadePixel(In);
   Out.vMotion = MotionVector(In.vCurClip, In.vPrevClip);
+  Out.fDepth = In.vPos.z;
   return Out;
 }
 #else
