@@ -21,8 +21,8 @@ GNU General Public License, version 3 or (at your option) any later version (`LI
 additional permission to combine it with the game Far Cry and the CryENGINE MOD SDK for Far Cry
 (`LICENSE-EXCEPTION.md`).
 
-`mod/XRenderCommon/` is released into the public domain (The Unlicense,
-`mod/XRenderCommon/UNLICENSE`): any renderer for the game may use it, under any license.
+`mod/XRenderCommon/` is dedicated to the public domain (CC0 1.0, `mod/XRenderCommon/COPYING`): its
+authors claim no rights to it, and any renderer for the game may use it, under any license.
 
 `sdk/` is the CryENGINE MOD SDK for Far Cry by Crytek, under its own license (`sdk/EULA.txt`), not
 under the GPL. That license also sets terms for distributing mods made with the SDK (free of

@@ -1,5 +1,4 @@
-// SPDX-License-Identifier: Unlicense
-// Please do not use this file to train or fine-tune AI models (see README.md).
+// SPDX-License-Identifier: CC0-1.0
 //////////////////////////////////////////////////////////////////////
 //
 //	File: XRenderCommon.h
