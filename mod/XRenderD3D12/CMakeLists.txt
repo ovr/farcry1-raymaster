@@ -123,6 +123,51 @@ set_target_properties(XRenderD3D12 PROPERTIES
 target_link_libraries(XRenderD3D12 PRIVATE CryCommon XRenderCommon d3d12 dxgi dxguid windowscodecs)
 target_include_directories(XRenderD3D12 PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}" "${XRENDERD3D12_SHADER_DIR}")
 
+# AMD FSR Upscaling (third_party/amd-fsr-sdk, tag v2.4.0): the headers and the loader are in the
+# repository; the upscaler (57 MB) is downloaded from the same tag, or is the file that
+# XRENDER_FSR_UPSCALER_DLL names. Both go next to XRenderD3D12.dll, which loads them at run time;
+# without them the renderer runs without FSR.
+set(XRENDERD3D12_FSR_DIR "${CMAKE_SOURCE_DIR}/third_party/amd-fsr-sdk")
+set(XRENDERD3D12_FSR_URL "https://raw.githubusercontent.com/GPUOpen-LibrariesAndSDKs/FidelityFX-SDK/v2.4.0/Kits/FidelityFX/signedbin/amd_fidelityfx_upscaler_dx12.dll")
+set(XRENDERD3D12_FSR_SHA256 "aad4fccccb29084a655f9a4f9f613bd22c8c03fb4a0f8840148cc6543b4ccace")
+set(XRENDER_FSR_UPSCALER_DLL "" CACHE FILEPATH
+    "amd_fidelityfx_upscaler_dx12.dll of the AMD FSR SDK v2.4.0 (empty: download it)")
+target_include_directories(XRenderD3D12 PRIVATE "${XRENDERD3D12_FSR_DIR}/Kits/FidelityFX")
+
+if(XRENDER_FSR_UPSCALER_DLL)
+    set(XRENDERD3D12_FSR_UPSCALER "${XRENDER_FSR_UPSCALER_DLL}")
+else()
+    set(XRENDERD3D12_FSR_UPSCALER "${CMAKE_CURRENT_BINARY_DIR}/fsr/amd_fidelityfx_upscaler_dx12.dll")
+endif()
+set(fsr_hash "")
+if(EXISTS "${XRENDERD3D12_FSR_UPSCALER}")
+    file(SHA256 "${XRENDERD3D12_FSR_UPSCALER}" fsr_hash)
+endif()
+if(NOT fsr_hash STREQUAL XRENDERD3D12_FSR_SHA256 AND NOT XRENDER_FSR_UPSCALER_DLL)
+    message(STATUS "Downloading amd_fidelityfx_upscaler_dx12.dll (57 MB) of the AMD FSR SDK v2.4.0")
+    file(DOWNLOAD "${XRENDERD3D12_FSR_URL}" "${XRENDERD3D12_FSR_UPSCALER}.part" STATUS fsr_status TLS_VERIFY ON)
+    list(GET fsr_status 0 fsr_code)
+    set(fsr_hash "")
+    if(fsr_code EQUAL 0)
+        file(SHA256 "${XRENDERD3D12_FSR_UPSCALER}.part" fsr_hash)
+    endif()
+    if(fsr_hash STREQUAL XRENDERD3D12_FSR_SHA256)
+        file(RENAME "${XRENDERD3D12_FSR_UPSCALER}.part" "${XRENDERD3D12_FSR_UPSCALER}")
+    else()
+        file(REMOVE "${XRENDERD3D12_FSR_UPSCALER}.part")
+        message(WARNING "amd_fidelityfx_upscaler_dx12.dll could not be downloaded (${fsr_status}, "
+            "SHA-256 '${fsr_hash}'): XRenderD3D12 is built without it and runs without FSR. "
+            "XRENDER_FSR_UPSCALER_DLL can name a copy of it.")
+    endif()
+elseif(NOT fsr_hash STREQUAL XRENDERD3D12_FSR_SHA256)
+    message(WARNING "${XRENDER_FSR_UPSCALER_DLL} is not the upscaler of the AMD FSR SDK v2.4.0 "
+        "(SHA-256 '${fsr_hash}'); it is used all the same.")
+endif()
+set(XRENDERD3D12_FSR_FILES "${XRENDERD3D12_FSR_DIR}/Kits/FidelityFX/signedbin/amd_fidelityfx_loader_dx12.dll")
+if(fsr_hash)
+    list(APPEND XRENDERD3D12_FSR_FILES "${XRENDERD3D12_FSR_UPSCALER}")
+endif()
+
 target_compile_definitions(XRenderD3D12 PRIVATE
     _USRDLL
     XRENDERD3D12_EXPORTS
@@ -153,7 +198,10 @@ if(XRENDER_OUTPUT_DIR)
             "$<TARGET_FILE:XRenderD3D12>"
             "$<$<NOT:$<CONFIG:Release,MinSizeRel>>:$<TARGET_PDB_FILE:XRenderD3D12>>"
             "${XRENDER_OUTPUT_DIR}"
-        COMMENT "Copying XRenderD3D12.dll to ${XRENDER_OUTPUT_DIR}"
+        COMMAND "${CMAKE_COMMAND}" -E copy_if_different ${XRENDERD3D12_FSR_FILES} "${XRENDER_OUTPUT_DIR}"
+        COMMAND "${CMAKE_COMMAND}" -E copy_if_different "${XRENDERD3D12_FSR_DIR}/docs/license.md"
+            "${XRENDER_OUTPUT_DIR}/amd_fidelityfx_license.md"
+        COMMENT "Copying XRenderD3D12.dll and the AMD FSR DLLs to ${XRENDER_OUTPUT_DIR}"
         COMMAND_EXPAND_LISTS
         VERBATIM
     )

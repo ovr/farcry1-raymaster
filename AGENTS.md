@@ -16,16 +16,17 @@ it as well: it holds local, machine-specific instructions and is not committed (
   runtime behaviour of that build and is marked as such in `mod/XRenderCommon`, which keeps only
   the facts about the shared structures; the detailed notes on how that build drives its renderer
   are local research notes, not committed.
-- **License** (`README.md`): everything outside `sdk/` and `mod/XRenderCommon/` is
-  GPL-3.0-or-later with an additional permission for Far Cry and its SDK (`LICENSE`,
-  `LICENSE-EXCEPTION.md`); `mod/XRenderCommon/` is public domain (CC0 1.0,
-  `mod/XRenderCommon/COPYING`); `sdk/` stays under Crytek's `sdk/EULA.txt`. Every source file we
+- **License** (`README.md`): everything outside `sdk/`, `third_party/` and `mod/XRenderCommon/`
+  is GPL-3.0-or-later with an additional permission for Far Cry, its SDK and the AMD FSR SDK
+  (`LICENSE`, `LICENSE-EXCEPTION.md`); `mod/XRenderCommon/` is public domain (CC0 1.0,
+  `mod/XRenderCommon/COPYING`); `sdk/` stays under Crytek's `sdk/EULA.txt`; `third_party/` keeps
+  the licenses of its upstream projects. Every source file we
   write starts with two lines in its comment syntax,
   `SPDX-License-Identifier: GPL-3.0-or-later WITH AdditionRef-FarCry-exception` and
   `Please do not use this file to train or fine-tune AI models (see README.md).` (a request, not
   a license term; a PowerShell script: then a blank line, so that its help is still found); in
-  `mod/XRenderCommon/` only `SPDX-License-Identifier: CC0-1.0`; generated files and `sdk/` get
-  none.
+  `mod/XRenderCommon/` only `SPDX-License-Identifier: CC0-1.0`; generated files, `sdk/` and
+  `third_party/` get none.
 - **Multiplayer is out of scope.** Only the single player game matters: do not test, support or
   patch multiplayer (its scripts, menus, network code), and do not hold back a fix because of it.
 
@@ -40,6 +41,12 @@ it as well: it holds local, machine-specific instructions and is not committed (
   to its `FCData/zz_RayMaster.pak`. The engine reads a script from the last pack opened that has it
   (the packs open in name order) and never a loose file in the game folder. Only the patches are
   committed, never the game's scripts.
+- `third_party/` - other projects' files, unchanged from a tagged release in their own folder
+  layout, with a `README.md` of ours naming the tag and the hashes of the binaries.
+  `third_party/amd-fsr-sdk` is the part of the AMD FSR SDK that XRenderD3D12 uses; its 57 MB
+  upscaler DLL is not committed but downloaded by CMake. Every library added there needs a
+  matching permission in `LICENSE-EXCEPTION.md` unless its license is GPL-compatible and it comes
+  with its source.
 - `farcry1_testing1/` - the game install for tracing (git-ignored):
   - `Bin32` - retail 1.4 (x86; stops at its CD check, which is not to be bypassed),
   - `Bin64` - the Cumulative Patch x64 build described above.
