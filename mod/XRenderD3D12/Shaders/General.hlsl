@@ -101,6 +101,12 @@
 //	  DF2_NO_SUN leaves the sun out of DF_LIGHTING (a light pass of its own).
 //	  DF2_SCOPE_LENS (the glass of a scope) replaces the pixel shader with
 //	  ScopeLens.
+//	The upscaler's jitter (vJitter) moves every clip position. Compiled with
+//	XR_VELOCITY (the draws into an upscaler's scene that write its motion
+//	vectors or its depth) the pixel shader also writes the motion vector of
+//	the pixel (MotionVector) from mWorldViewProj and mPrevWorldViewProj to
+//	SV_Target1 and its depth to SV_Target2 (the pipeline masks what the draw
+//	does not write).
 //
 //////////////////////////////////////////////////////////////////////
 
@@ -119,6 +125,10 @@ struct SVertexOutput
   float3 vTangent : TEXCOORD6;  //!< DF_BUMP: the tangent frame in world space, not normalised
   float3 vBinormal : TEXCOORD7;
   float3 vTNormal : TEXCOORD8;
+#ifdef XR_VELOCITY
+  float4 vCurClip : TEXCOORD9;  //!< the clip position without the jitter
+  float4 vPrevClip : TEXCOORD10; //!< the same in the frame before
+#endif
 };
 
 //! The light of the sun, the ambient colour and the draw's lights at world position vPos with the
@@ -278,13 +288,22 @@ SVertexOutput VSMain(SVertexInput In)
   {
     Out.vPos = ScreenToClip(In.vPos);
     vWorldPos = In.vPos.xyz;
+#ifdef XR_VELOCITY
+    Out.vCurClip = Out.vPos;
+    Out.vPrevClip = Out.vPos;
+#endif
   }
   else
   {
     float4 vPos = float4(In.vPos.xyz, 1);
     Out.vPos = mul(vPos, g_Draw.mWorldViewProj);
     vWorldPos = mul(vPos, g_Draw.mWorld).xyz;
+#ifdef XR_VELOCITY
+    Out.vCurClip = Out.vPos;
+    Out.vPrevClip = mul(vPos, g_Draw.mPrevWorldViewProj);
+#endif
   }
+  Out.vPos = Jitter(Out.vPos);
   float3 vNormal = mul(float4(In.vNormal, 0), g_Draw.mWorld).xyz;
 
   float4 vColor = g_Draw.vColor;
@@ -335,7 +354,7 @@ SVertexOutput VSMain(SVertexInput In)
   return Out;
 }
 
-float4 PSMain(SVertexOutput In) : SV_Target
+float4 ShadePixel(SVertexOutput In)
 {
   if (HasFlag2(DF2_SCOPE_LENS))
     return ScopeLens(In);
@@ -530,3 +549,26 @@ float4 PSMain(SVertexOutput In) : SV_Target
     vColor = float4(fSun, fSun, fSun, 1);
   return vColor;
 }
+
+#ifdef XR_VELOCITY
+struct SPixelOutput
+{
+  float4 vColor : SV_Target0;
+  float2 vMotion : SV_Target1;
+  float fDepth : SV_Target2;
+};
+
+SPixelOutput PSMain(SVertexOutput In)
+{
+  SPixelOutput Out;
+  Out.vColor = ShadePixel(In);
+  Out.vMotion = MotionVector(In.vCurClip, In.vPrevClip);
+  Out.fDepth = In.vPos.z;
+  return Out;
+}
+#else
+float4 PSMain(SVertexOutput In) : SV_Target
+{
+  return ShadePixel(In);
+}
+#endif

@@ -41,7 +41,12 @@
 //	    volume's fog, other water the scene above through the window of
 //	    total internal reflection;
 //	  - the frame's linear fog (not on the ocean from below).
-//	The result replaces the pixel (no blending).
+//	The result replaces the pixel (no blending). The upscaler's jitter
+//	(vJitter) moves the clip position; compiled with XR_VELOCITY (in an
+//	upscaler's scene) the pixel shader also writes the motion vector of the
+//	surface (MotionVector, from mWorldViewProj and mPrevWorldViewProj) to
+//	SV_Target1 and its depth to SV_Target2: the water does not write the depth
+//	buffer, but it is what the upscaler sees there.
 //
 //	SDrawConstants:
 //	  vParams0  x wave slope scale, y reflection amount, z d3d12_WaterDebug,
@@ -55,7 +60,8 @@
 //	  vParams3  rgb the colour of deep water; w 0 that of the ocean's fog
 //	            volume (OceanFog), 1 lit by the scene behind it (water
 //	            volumes, which may be indoors), 2 lit by the sky
-//	  nTex0     colour copy, nTex1 depth copy (R24 of D24S8)
+//	  nTex0     colour copy, nTex1 depth copy (R24 of D24S8, R32 of an
+//	            upscaler's scene)
 //	  nTex2..4  the sky box textures: top, _12, _34
 //	  nTex5     the wave slopes (red dH/du, green dH/dv; 128 flat, 32 the RMS)
 //	  nTex6     the planar reflection, mParams0 its camera's world to clip
@@ -70,13 +76,21 @@ struct SWaterOutput
   float3 vWorldPos : TEXCOORD0;
   float4 vColor : COLOR0;
   float2 vTex0 : TEXCOORD1;
+#ifdef XR_VELOCITY
+  float4 vCurClip : TEXCOORD2;  //!< the clip position without the jitter
+  float4 vPrevClip : TEXCOORD3; //!< the same in the frame before
+#endif
 };
 
 SWaterOutput VSMain(SVertexInput In)
 {
   SWaterOutput Out;
   float4 vPos = float4(In.vPos.xyz, 1);
-  Out.vPos = mul(vPos, g_Draw.mWorldViewProj);
+  Out.vPos = Jitter(mul(vPos, g_Draw.mWorldViewProj));
+#ifdef XR_VELOCITY
+  Out.vCurClip = mul(vPos, g_Draw.mWorldViewProj);
+  Out.vPrevClip = mul(vPos, g_Draw.mPrevWorldViewProj);
+#endif
   Out.vWorldPos = mul(vPos, g_Draw.mWorld).xyz;
   Out.vColor = DecodeVertexColor(In.vColor0);
   Out.vTex0 = In.vTex0;
@@ -245,7 +259,7 @@ float4 ScreenReflection(float3 P, float3 R, float2 vViewToBuffer)
   return 0;
 }
 
-float4 PSMain(SWaterOutput In) : SV_Target
+float4 ShadeWater(SWaterOutput In)
 {
   float3 vCamera = g_Frame.vCameraPos.xyz;
   float3 vToCamera = vCamera - In.vWorldPos;
@@ -405,3 +419,26 @@ float4 PSMain(SWaterOutput In) : SV_Target
     vColor = lerp(g_Frame.vFogColor.rgb, vColor, SceneFog(In.vWorldPos));
   return float4(vColor, 1);
 }
+
+#ifdef XR_VELOCITY
+struct SPixelOutput
+{
+  float4 vColor : SV_Target0;
+  float2 vMotion : SV_Target1;
+  float fDepth : SV_Target2;
+};
+
+SPixelOutput PSMain(SWaterOutput In)
+{
+  SPixelOutput Out;
+  Out.vColor = ShadeWater(In);
+  Out.vMotion = MotionVector(In.vCurClip, In.vPrevClip);
+  Out.fDepth = In.vPos.z;
+  return Out;
+}
+#else
+float4 PSMain(SWaterOutput In) : SV_Target
+{
+  return ShadeWater(In);
+}
+#endif

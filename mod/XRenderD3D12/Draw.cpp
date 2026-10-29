@@ -83,7 +83,7 @@ Matrix44 CD3D12Renderer::MakeOrtho(float w, float h)
   return m;
 }
 
-void CD3D12Renderer::MakeFrameConstants(SFrameConstants &fc) const
+void CD3D12Renderer::MakeFrameConstants(SFrameConstants &fc, bool bScene) const
 {
   fc = {};
   const Matrix44 ViewProj = m_CameraView * m_ProjMatrix;
@@ -100,8 +100,15 @@ void CD3D12Renderer::MakeFrameConstants(SFrameConstants &fc) const
   Set4(fc.vFogColor, m_FogColor[0], m_FogColor[1], m_FogColor[2], 1);
   const float fRange = m_fFogEnd - m_fFogStart;
   Set4(fc.vFogParams, m_fFogStart, m_fFogEnd, fRange > 0 ? 1.0f / fRange : 0.0f, m_bFog ? 1.0f : 0.0f);
-  const float w = (float)std::max(m_Viewport[2], 1), h = (float)std::max(m_Viewport[3], 1);
+  // In an upscaler's scene: its pixels, the jitter of the frame (FSR's pixels to clip space) and
+  // the mip bias for the frames it gathers.
+  float sx = 1, sy = 1;
+  if (bScene)
+    GetSceneScale(sx, sy);
+  const float w = (float)std::max(m_Viewport[2], 1) * sx, h = (float)std::max(m_Viewport[3], 1) * sy;
   Set4(fc.vScreen, w, h, 1 / w, 1 / h);
+  Set4(fc.vJitter, bScene ? 2 * m_UpscaleJitter[0] / w : 0.0f, bScene ? -2 * m_UpscaleJitter[1] / h : 0.0f, sx, sy);
+  fc.vMipBias[0] = bScene ? log2f(std::max(sx, 1e-3f)) - 1 : 0.0f;
   Set4(fc.vTime, iTimer ? iTimer->GetCurrTime() : 0.0f, 0, 0, 0);
   Set4(fc.vWorldColor, m_WorldColor[0], m_WorldColor[1], m_WorldColor[2], m_WorldColor[3]);
   Set4(fc.vDepthParams, m_ProjMatrix.data[10], m_ProjMatrix.data[14], 0, 0);
@@ -113,31 +120,46 @@ void CD3D12Renderer::DrawGeometry(const SPipelineKey &Key, const SDrawConstants 
 {
   if (!nCount || !m_pPipeline || !m_pUpload || !EnsureFrame())
     return;
+  const bool bOffscreen = m_pDevice->IsOffscreen();
+  const bool bScene = m_pDevice->IsSceneBound();
   SPipelineKey FullKey = Key;
   FullKey.nTopology = (uint8)GetTopologyType(eTopology);
   FullKey.nStreams = (pTexCoord1 ? PIPELINE_STREAM_TEXCOORD1 : 0) | (pTangents ? PIPELINE_STREAM_TANGENTS : 0);
+  if (bScene && FullKey.nTarget == 0)
+    FullKey.nTarget = 3;
   ID3D12PipelineState *pPSO = m_pPipeline->GetPSO(FullKey);
   if (!pPSO)
     return;
 
-  if (!m_nFrameCB)
+  if (!m_nFrameCB || m_bFrameCBScene != bScene)
   {
     SFrameConstants fc;
-    MakeFrameConstants(fc);
+    MakeFrameConstants(fc, bScene);
     m_nFrameCB = UploadConstants(*m_pUpload, fc);
+    m_bFrameCBScene = bScene;
   }
   // Heat vision: the main view's scene through HeatVision (Common.hlsli), not the passes multiplied
   // in or the fog volumes; an additive draw other than a light pass is hot (fire, muzzle flashes).
   const SDrawConstants *pDC = &dc;
-  SDrawConstants HeatDC;
+  SDrawConstants LocalDC;
   if (m_bHeatPass && (Key.nProgram == eD3D12P_General || Key.nProgram == eD3D12P_Water) &&
       !(dc.nFlags & (DF_DETAIL_LAYER | DF_CAUSTICS | DF_SHADOW_PASS | DF_SCREEN_POS)) && !(dc.nFlags2 & DF2_FOG_VOLUME))
   {
     const bool bAdditive = (Key.nState & GS_BLDST_MASK) == GS_BLDST_ONE;
-    HeatDC = dc;
-    HeatDC.nFlags2 |= DF2_HEAT;
-    Set4(HeatDC.vHeat, bAdditive && !(dc.nFlags2 & DF2_NO_SUN) ? 1.0f : m_fDrawHeat, bAdditive ? 1.0f : 0.0f, 0, 0);
-    pDC = &HeatDC;
+    LocalDC = dc;
+    LocalDC.nFlags2 |= DF2_HEAT;
+    Set4(LocalDC.vHeat, bAdditive && !(dc.nFlags2 & DF2_NO_SUN) ? 1.0f : m_fDrawHeat, bAdditive ? 1.0f : 0.0f, 0, 0);
+    pDC = &LocalDC;
+  }
+  // The motion vectors of a draw that gave none: still on the screen.
+  if (bScene && std::all_of(std::begin(pDC->mPrevWorldViewProj), std::end(pDC->mPrevWorldViewProj), [](float f) { return f == 0; }))
+  {
+    if (pDC != &LocalDC)
+    {
+      LocalDC = dc;
+      pDC = &LocalDC;
+    }
+    memcpy(LocalDC.mPrevWorldViewProj, LocalDC.mWorldViewProj, sizeof(LocalDC.mPrevWorldViewProj));
   }
   ID3D12GraphicsCommandList *pList = m_pDevice->GetCmdList();
   pList->SetPipelineState(pPSO);
@@ -152,11 +174,17 @@ void CD3D12Renderer::DrawGeometry(const SPipelineKey &Key, const SDrawConstants 
   pList->IASetPrimitiveTopology(eTopology);
 
   // The viewport inside the back buffer (an off screen target: all of it, or m_TargetRect); the
-  // scissor rectangle inside the viewport (the scissors are the back buffer's).
-  const bool bOffscreen = m_pDevice->IsOffscreen();
+  // scissor rectangle inside the viewport (the scissors are the back buffer's). In an upscaler's
+  // scene both are scaled from the back buffer's pixels to the scene's.
   const int nBufW = m_pDevice->GetTargetWidth(), nBufH = m_pDevice->GetTargetHeight();
-  int vx = std::clamp(m_Viewport[0], 0, nBufW), vy = std::clamp(m_Viewport[1], 0, nBufH);
-  int vw = std::clamp(m_Viewport[2], 0, nBufW - vx), vh = std::clamp(m_Viewport[3], 0, nBufH - vy);
+  float sx = 1, sy = 1;
+  if (bScene)
+    GetSceneScale(sx, sy);
+  const auto X = [sx](int x) { return sx == 1 ? x : (int)lroundf(x * sx); };
+  const auto Y = [sy](int y) { return sy == 1 ? y : (int)lroundf(y * sy); };
+  const int x0 = X(m_Viewport[0]), y0 = Y(m_Viewport[1]);
+  int vx = std::clamp(x0, 0, nBufW), vy = std::clamp(y0, 0, nBufH);
+  int vw = std::clamp(X(m_Viewport[0] + m_Viewport[2]) - x0, 0, nBufW - vx), vh = std::clamp(Y(m_Viewport[1] + m_Viewport[3]) - y0, 0, nBufH - vy);
   if (bOffscreen && m_bTargetRect)
   {
     vx = std::clamp((int)m_TargetRect.left, 0, nBufW);
@@ -177,17 +205,17 @@ void CD3D12Renderer::DrawGeometry(const SPipelineKey &Key, const SDrawConstants 
   RECT Scissor = { vx, vy, vx + vw, vy + vh };
   if (m_bItemScissor && !bOffscreen)
   {
-    Scissor.left = std::max(Scissor.left, m_ItemScissor.left);
-    Scissor.top = std::max(Scissor.top, m_ItemScissor.top);
-    Scissor.right = std::min(Scissor.right, m_ItemScissor.right);
-    Scissor.bottom = std::min(Scissor.bottom, m_ItemScissor.bottom);
+    Scissor.left = std::max<LONG>(Scissor.left, X(m_ItemScissor.left));
+    Scissor.top = std::max<LONG>(Scissor.top, Y(m_ItemScissor.top));
+    Scissor.right = std::min<LONG>(Scissor.right, X(m_ItemScissor.right));
+    Scissor.bottom = std::min<LONG>(Scissor.bottom, Y(m_ItemScissor.bottom));
   }
   if (m_bScissor && !bOffscreen)
   {
-    Scissor.left = std::max<LONG>(Scissor.left, m_Scissor[0]);
-    Scissor.top = std::max<LONG>(Scissor.top, m_Scissor[1]);
-    Scissor.right = std::min<LONG>(Scissor.right, m_Scissor[0] + m_Scissor[2]);
-    Scissor.bottom = std::min<LONG>(Scissor.bottom, m_Scissor[1] + m_Scissor[3]);
+    Scissor.left = std::max<LONG>(Scissor.left, X(m_Scissor[0]));
+    Scissor.top = std::max<LONG>(Scissor.top, Y(m_Scissor[1]));
+    Scissor.right = std::min<LONG>(Scissor.right, X(m_Scissor[0] + m_Scissor[2]));
+    Scissor.bottom = std::min<LONG>(Scissor.bottom, Y(m_Scissor[1] + m_Scissor[3]));
   }
   if (Scissor.right <= Scissor.left || Scissor.bottom <= Scissor.top)
     return;

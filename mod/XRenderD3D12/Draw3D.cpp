@@ -231,9 +231,11 @@ void CD3D12Renderer::BeginScene3D()
   m_nSceneSkyBox = -1;
   InvalidateFrameConstants();
 
-  // The main view of the game clears colour and depth before its scene.
+  // The main view of the game clears colour and depth before its scene (with an upscaler, its
+  // scene targets).
   if ((m_nSceneFlags & SHDF_ALLOWHDR) && m_nRecurseLevel <= 1)
   {
+    BeginUpscale();
     const float Clear[4] = { m_vClearColor.x, m_vClearColor.y, m_vClearColor.z, 0 };
     m_pDevice->ClearColor(Clear);
     m_pDevice->ClearDepth(1.0f, 0, true, true);
@@ -393,6 +395,7 @@ void CD3D12Renderer::DrawLeafItem(const SRenderItem &it)
   SDrawConstants dc = DefaultDrawConstants();
   memcpy(dc.mWorld, World.data, sizeof(dc.mWorld));
   memcpy(dc.mWorldViewProj, WorldViewProj.data, sizeof(dc.mWorldViewProj));
+  SetObjectMotion(dc, pObj, World, bNearest);
 
   // The diffuse texture; without one the texture the leaf buffer was given (terrain, grass).
   CTexture *pTex = GetDiffuseTexture(pRes);
@@ -893,6 +896,8 @@ void CD3D12Renderer::DrawLeafItem(const SRenderItem &it)
     // Not in its own reflection; in the environment cubes only the ocean (SetupWaterDraw).
     if (m_bReflectionPass || !SetupWaterDraw(Key, dc, it))
       return;
+    // The surface stays where it is, though the ocean's ring follows the camera.
+    SetStaticMotion(dc);
     pTex = nullptr;
     break;
   case eDC_WaterBeach:
@@ -1365,6 +1370,8 @@ void CD3D12Renderer::DrawSkyItem(const SRenderItem &it)
       return;
     SDrawConstants dc = DefaultDrawConstants();
     memcpy(dc.mWorldViewProj, ViewProj.data, sizeof(dc.mWorldViewProj));
+    if (m_bUpscaling)
+      memcpy(dc.mPrevWorldViewProj, m_PrevSkyViewProj.data, sizeof(dc.mPrevWorldViewProj));
     dc.nFlags = DF_TEX0;
     dc.nTex0 = pTex->GetSRV();
     dc.nSamplers = XR_SAMPLER_LINEAR_CLAMP;
@@ -1438,6 +1445,8 @@ void CD3D12Renderer::DrawSkyItem(const SRenderItem &it)
     LayerKey.nState = GS_NODEPTHTEST | Layer.nBlend;
     SDrawConstants dc = DefaultDrawConstants();
     memcpy(dc.mWorldViewProj, ViewProj.data, sizeof(dc.mWorldViewProj));
+    if (m_bUpscaling)
+      memcpy(dc.mPrevWorldViewProj, m_PrevSkyViewProj.data, sizeof(dc.mPrevWorldViewProj));
     dc.nFlags = DF_TEX0 | DF_VCOLOR;
     dc.nTex0 = pTex->GetSRV();
     dc.nSamplers = XR_SAMPLER_LINEAR_WRAP;
@@ -1526,6 +1535,7 @@ void CD3D12Renderer::DrawSprites()
     Key.nCull = R_CULL_NONE;
     SDrawConstants dc = DefaultDrawConstants();
     memcpy(dc.mWorldViewProj, ViewProj.data, sizeof(dc.mWorldViewProj));
+    SetStaticMotion(dc);
     dc.nFlags = DF_VCOLOR;
     CTexture *pTex = m_pTextures ? m_pTextures->GetByID(pObj->m_NumCM) : nullptr;
     if (pTex && !pTex->IsCube())

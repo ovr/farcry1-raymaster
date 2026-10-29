@@ -319,9 +319,18 @@ void CScene::RemovePermanent(CCObject *pObj)
   slot.bUsed = false;
   // A removed object can be handed out again (a light's corona): it starts anew.
   if (g_pRenderer)
+  {
     g_pRenderer->ForgetFlare(pObj);
+    g_pRenderer->ForgetObjectMotion(pObj);
+  }
   pObj->Init();
   pObj->m_Id = (short)nId;
+}
+
+bool CScene::IsPermanent(const CCObject *pObj) const
+{
+  const int nId = pObj ? pObj->m_Id : -1;
+  return nId >= 0 && nId < (int)m_Permanent.size() && m_Permanent[nId].pObj.get() == pObj && m_Permanent[nId].bUsed;
 }
 
 bool CScene::IsRemovedPermanent(const CCObject *pObj) const

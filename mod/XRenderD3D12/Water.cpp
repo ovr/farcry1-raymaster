@@ -370,21 +370,24 @@ bool CD3D12Renderer::CopySceneForWater()
 {
   if (!m_pDevice || !m_pDescriptors)
     return false;
-  const int w = m_pDevice->GetWidth(), h = m_pDevice->GetHeight();
-  if (!m_pSceneColorCopy || w != m_nSceneCopyWidth || h != m_nSceneCopyHeight)
+  // The copies of the main view's target: the back buffer, or an upscaler's scene.
+  const int w = m_pDevice->GetMainWidth(), h = m_pDevice->GetMainHeight();
+  const DXGI_FORMAT DepthFormat = m_pDevice->GetMainDepthSRVFormat();
+  if (!m_pSceneColorCopy || w != m_nSceneCopyWidth || h != m_nSceneCopyHeight || DepthFormat != m_SceneCopyDepthFormat)
   {
     ReleaseWaterResources();
     if (!m_pDevice->CreateTargetCopies(m_pSceneColorCopy, &m_pSceneDepthCopy))
       return false;
     m_nSceneColorSRV = m_pDescriptors->AllocSRV(m_pSceneColorCopy.Get(), nullptr);
     D3D12_SHADER_RESOURCE_VIEW_DESC Desc = {};
-    Desc.Format = DXGI_FORMAT_R24_UNORM_X8_TYPELESS;
+    Desc.Format = DepthFormat;
     Desc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
     Desc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
     Desc.Texture2D.MipLevels = 1;
     m_nSceneDepthSRV = m_pDescriptors->AllocSRV(m_pSceneDepthCopy.Get(), &Desc);
     m_nSceneCopyWidth = w;
     m_nSceneCopyHeight = h;
+    m_SceneCopyDepthFormat = DepthFormat;
     if (m_nSceneColorSRV < 0 || m_nSceneDepthSRV < 0)
     {
       ReleaseWaterResources();

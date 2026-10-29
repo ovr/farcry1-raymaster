@@ -107,6 +107,7 @@ typedef float float4x4_t[16];
 #define POST_FADE           0x00000080
 #define POST_SUN_PATCH      0x00000100  //!< 1 where the depth copy tex0 is the far plane, around the sun (SunPatch, Post.hlsl)
 #define POST_SUN_MASK       0x00000200  //!< the sun's mask: the patch tex0 blurred towards its middle (SunMask, Post.hlsl)
+#define POST_DEPTH_VIEW     0x00000400  //!< the depth tex0 as grey: the distance from vParams1.x (near, black) to vParams1.y (far, white), log scale
 
 #define XR_SAMPLER_LINEAR_WRAP  0
 #define XR_SAMPLER_LINEAR_CLAMP 1
@@ -128,6 +129,8 @@ struct SFrameConstants
   XR_FLOAT4(vWorldColor);         //!< EF_SetWorldColor
   XR_FLOAT4(vDepthParams);        //!< the projection's m22 (x) and m32 (y): distance along the view axis = y / (depth + x)
   XR_FLOAT4(vSunSpec);            //!< rgb: the sun's specular colour (DF_SPECULAR)
+  XR_FLOAT4(vJitter);             //!< the upscaler's (Upscaler.h): xy its jitter in clip space (xy += vJitter.xy * w), zw the target's pixels per pixel of the engine (DF_SCREEN_POS); 0, 0, 1, 1 without one
+  XR_FLOAT4(vMipBias);            //!< x: the mip bias of the materials' textures (log2(render / display size) - 1 while upscaling, else 0)
 };
 
 //! b1: per draw.
@@ -170,6 +173,7 @@ struct SDrawConstants
   XR_FLOAT4(vSpecular);           //!< DF_SPECULAR: rgb the material's specular colour, w 1: times the texture's alpha (gloss)
   XR_FLOAT4(vAddColor);           //!< DF2_ADD_TEX4: rgb the factor of tex4, w added
   XR_FLOAT4(vHeat);               //!< DF2_HEAT: x the heat 0 (cold) to 1 (hot), y 1 for an additive draw
+  XR_FLOAT4X4(mPrevWorldViewProj);  //!< the motion vectors of an upscaler: object to clip in the frame before (all 0: as mWorldViewProj, still on the screen)
 };
 
 #endif

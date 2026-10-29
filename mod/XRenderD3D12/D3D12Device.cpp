@@ -29,6 +29,9 @@ void Barrier(ID3D12GraphicsCommandList *pList, ID3D12Resource *pRes, D3D12_RESOU
   pList->ResourceBarrier(1, &b);
 }
 
+//! The scene targets outside BeginScene .. EndScene: read by an upscaler's compute or pixel shaders.
+constexpr D3D12_RESOURCE_STATES SCENE_READ = D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE | D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE;
+
 //! Logs a failed call; true if hr failed.
 bool Failed(HRESULT hr, const char *szWhat)
 {
@@ -143,13 +146,15 @@ bool CD3D12Device::Init(HWND hWnd, int nWidth, int nHeight, bool bDebug)
   m_pFactory->MakeWindowAssociation(hWnd, DXGI_MWA_NO_ALT_ENTER);
 
   D3D12_DESCRIPTOR_HEAP_DESC HeapDesc = {};
+  // The back buffers' views, then the scene targets' (colour, motion vectors, the upscaler's
+  // depth; the depth buffer's after the back buffers' in the DSV heap).
   HeapDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_RTV;
-  HeapDesc.NumDescriptors = D3D12_BACKBUFFERS;
+  HeapDesc.NumDescriptors = D3D12_BACKBUFFERS + 3;
   if (Failed(m_pDevice->CreateDescriptorHeap(&HeapDesc, IID_PPV_ARGS(&m_pRTVHeap)), "CreateDescriptorHeap (RTV)"))
     return false;
   m_nRTVSize = m_pDevice->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_RTV);
   HeapDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_DSV;
-  HeapDesc.NumDescriptors = 1;
+  HeapDesc.NumDescriptors = 2;
   if (Failed(m_pDevice->CreateDescriptorHeap(&HeapDesc, IID_PPV_ARGS(&m_pDSVHeap)), "CreateDescriptorHeap (DSV)"))
     return false;
 
@@ -255,6 +260,7 @@ void CD3D12Device::Shutdown()
 {
   if (m_pQueue && m_pFence)
     WaitForGPU();
+  ReleaseSceneTargets();
   m_Deferred.clear();
   ReleaseSwapChainBuffers();
   m_pCmdList.Reset();
@@ -295,6 +301,7 @@ bool CD3D12Device::Resize(int nWidth, int nHeight)
   if (bInFrame)
     EndFrame(false, false);
   WaitForGPU();
+  ReleaseSceneTargets();
   ReleaseSwapChainBuffers();
   if (Failed(m_pSwapChain->ResizeBuffers(D3D12_BACKBUFFERS, nWidth, nHeight, D3D12_BACKBUFFER_FORMAT,
     m_bTearing ? DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING : 0), "IDXGISwapChain::ResizeBuffers"))
@@ -528,12 +535,164 @@ void CD3D12Device::EndOffscreen()
 void CD3D12Device::SetBackBufferTargets()
 {
   EndOffscreen();
-  const D3D12_CPU_DESCRIPTOR_HANDLE hRTV = GetBackBufferRTV(), hDSV = GetDSV();
-  m_pCmdList->OMSetRenderTargets(1, &hRTV, FALSE, &hDSV);
-  const D3D12_VIEWPORT vp = { 0, 0, (float)m_nWidth, (float)m_nHeight, 0, 1 };
-  const D3D12_RECT rc = { 0, 0, m_nWidth, m_nHeight };
+  if (m_bInScene)
+  {
+    const D3D12_CPU_DESCRIPTOR_HANDLE hRTV[3] = { SceneRTV(0), SceneRTV(1), SceneRTV(2) }, hDSV = SceneDSV();
+    m_pCmdList->OMSetRenderTargets(3, hRTV, FALSE, &hDSV);
+  }
+  else
+  {
+    const D3D12_CPU_DESCRIPTOR_HANDLE hRTV = GetBackBufferRTV(), hDSV = GetDSV();
+    m_pCmdList->OMSetRenderTargets(1, &hRTV, FALSE, &hDSV);
+  }
+  const int w = GetMainWidth(), h = GetMainHeight();
+  const D3D12_VIEWPORT vp = { 0, 0, (float)w, (float)h, 0, 1 };
+  const D3D12_RECT rc = { 0, 0, w, h };
   m_pCmdList->RSSetViewports(1, &vp);
   m_pCmdList->RSSetScissorRects(1, &rc);
+}
+
+void CD3D12Device::BindRootSignature()
+{
+  if (!m_bInFrame || !g_pRenderer->m_pDescriptors || !g_pRenderer->m_pPipeline)
+    return;
+  ID3D12DescriptorHeap *pHeap = g_pRenderer->m_pDescriptors->GetHeap();
+  m_pCmdList->SetDescriptorHeaps(1, &pHeap);
+  m_pCmdList->SetGraphicsRootSignature(g_pRenderer->m_pPipeline->GetRootSignature());
+  m_pCmdList->SetGraphicsRootDescriptorTable(2, g_pRenderer->m_pDescriptors->GetTableStart());
+}
+
+void CD3D12Device::Transition(ID3D12Resource *pRes, D3D12_RESOURCE_STATES Before, D3D12_RESOURCE_STATES After)
+{
+  if (m_bInFrame && pRes)
+    Barrier(m_pCmdList.Get(), pRes, Before, After);
+}
+
+D3D12_CPU_DESCRIPTOR_HANDLE CD3D12Device::SceneRTV(int n) const
+{
+  D3D12_CPU_DESCRIPTOR_HANDLE h = m_pRTVHeap->GetCPUDescriptorHandleForHeapStart();
+  h.ptr += (D3D12_BACKBUFFERS + n) * m_nRTVSize;
+  return h;
+}
+
+D3D12_CPU_DESCRIPTOR_HANDLE CD3D12Device::SceneDSV() const
+{
+  D3D12_CPU_DESCRIPTOR_HANDLE h = m_pDSVHeap->GetCPUDescriptorHandleForHeapStart();
+  h.ptr += m_pDevice->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_DSV);
+  return h;
+}
+
+bool CD3D12Device::SetSceneSize(int nWidth, int nHeight)
+{
+  if (nWidth <= 0 || nHeight <= 0)
+  {
+    ReleaseSceneTargets();
+    return true;
+  }
+  if (m_pSceneColor && nWidth == m_nSceneWidth && nHeight == m_nSceneHeight && m_nSceneOutputWidth == m_nWidth &&
+      m_nSceneOutputHeight == m_nHeight)
+    return true;
+  ReleaseSceneTargets();
+  if (!m_pDevice)
+    return false;
+  D3D12_HEAP_PROPERTIES Heap = {};
+  Heap.Type = D3D12_HEAP_TYPE_DEFAULT;
+  D3D12_RESOURCE_DESC Desc = {};
+  Desc.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
+  Desc.Width = nWidth;
+  Desc.Height = nHeight;
+  Desc.DepthOrArraySize = 1;
+  Desc.MipLevels = 1;
+  Desc.SampleDesc.Count = 1;
+  D3D12_CLEAR_VALUE Clear = {};
+  bool bOk = true;
+  Desc.Format = Clear.Format = D3D12_BACKBUFFER_FORMAT;
+  Desc.Flags = D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET;
+  bOk = bOk && !Failed(m_pDevice->CreateCommittedResource(&Heap, D3D12_HEAP_FLAG_NONE, &Desc, SCENE_READ, &Clear, IID_PPV_ARGS(&m_pSceneColor)),
+                       "CreateCommittedResource (scene colour)");
+  Desc.Format = Clear.Format = D3D12_VELOCITY_FORMAT;
+  bOk = bOk && !Failed(m_pDevice->CreateCommittedResource(&Heap, D3D12_HEAP_FLAG_NONE, &Desc, SCENE_READ, &Clear, IID_PPV_ARGS(&m_pSceneVelocity)),
+                       "CreateCommittedResource (scene motion vectors)");
+  Desc.Format = Clear.Format = D3D12_UPSCALE_DEPTH_FORMAT;
+  Clear.Color[0] = 1.0f;
+  bOk = bOk && !Failed(m_pDevice->CreateCommittedResource(&Heap, D3D12_HEAP_FLAG_NONE, &Desc, SCENE_READ, &Clear, IID_PPV_ARGS(&m_pUpscaleDepth)),
+                       "CreateCommittedResource (upscaler depth)");
+  Desc.Format = DXGI_FORMAT_R32_TYPELESS;
+  Desc.Flags = D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL;
+  Clear.Format = D3D12_SCENE_DEPTH_FORMAT;
+  Clear.DepthStencil.Depth = 1.0f;
+  bOk = bOk && !Failed(m_pDevice->CreateCommittedResource(&Heap, D3D12_HEAP_FLAG_NONE, &Desc, SCENE_READ, &Clear, IID_PPV_ARGS(&m_pSceneDepth)),
+                       "CreateCommittedResource (scene depth)");
+  Desc.Width = m_nWidth;
+  Desc.Height = m_nHeight;
+  Desc.Format = D3D12_UPSCALE_FORMAT;
+  Desc.Flags = D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS;
+  bOk = bOk && !Failed(m_pDevice->CreateCommittedResource(&Heap, D3D12_HEAP_FLAG_NONE, &Desc, D3D12_RESOURCE_STATE_UNORDERED_ACCESS, nullptr,
+                                                          IID_PPV_ARGS(&m_pSceneOutput)), "CreateCommittedResource (upscaler output)");
+  if (!bOk)
+  {
+    ReleaseSceneTargets();
+    return false;
+  }
+  m_pDevice->CreateRenderTargetView(m_pSceneColor.Get(), nullptr, SceneRTV(0));
+  m_pDevice->CreateRenderTargetView(m_pSceneVelocity.Get(), nullptr, SceneRTV(1));
+  m_pDevice->CreateRenderTargetView(m_pUpscaleDepth.Get(), nullptr, SceneRTV(2));
+  D3D12_DEPTH_STENCIL_VIEW_DESC View = {};
+  View.Format = D3D12_SCENE_DEPTH_FORMAT;
+  View.ViewDimension = D3D12_DSV_DIMENSION_TEXTURE2D;
+  m_pDevice->CreateDepthStencilView(m_pSceneDepth.Get(), &View, SceneDSV());
+  m_nSceneWidth = nWidth;
+  m_nSceneHeight = nHeight;
+  m_nSceneOutputWidth = m_nWidth;
+  m_nSceneOutputHeight = m_nHeight;
+  return true;
+}
+
+void CD3D12Device::ReleaseSceneTargets()
+{
+  EndScene();
+  DeferredRelease(m_pSceneColor);
+  DeferredRelease(m_pSceneVelocity);
+  DeferredRelease(m_pUpscaleDepth);
+  DeferredRelease(m_pSceneDepth);
+  DeferredRelease(m_pSceneOutput);
+  m_nSceneWidth = m_nSceneHeight = 0;
+  m_nSceneOutputWidth = m_nSceneOutputHeight = 0;
+}
+
+void CD3D12Device::BeginScene()
+{
+  if (!m_bInFrame || m_bInScene || !m_pSceneColor)
+    return;
+  EndOffscreen();
+  Barrier(m_pCmdList.Get(), m_pSceneColor.Get(), SCENE_READ, D3D12_RESOURCE_STATE_RENDER_TARGET);
+  Barrier(m_pCmdList.Get(), m_pSceneVelocity.Get(), SCENE_READ, D3D12_RESOURCE_STATE_RENDER_TARGET);
+  Barrier(m_pCmdList.Get(), m_pUpscaleDepth.Get(), SCENE_READ, D3D12_RESOURCE_STATE_RENDER_TARGET);
+  Barrier(m_pCmdList.Get(), m_pSceneDepth.Get(), SCENE_READ, D3D12_RESOURCE_STATE_DEPTH_WRITE);
+  m_bInScene = true;
+  SetBackBufferTargets();
+}
+
+void CD3D12Device::EndScene()
+{
+  if (!m_bInScene)
+    return;
+  m_bInScene = false;
+  if (!m_bInFrame)
+    return;
+  EndOffscreen();
+  Barrier(m_pCmdList.Get(), m_pSceneColor.Get(), D3D12_RESOURCE_STATE_RENDER_TARGET, SCENE_READ);
+  Barrier(m_pCmdList.Get(), m_pSceneVelocity.Get(), D3D12_RESOURCE_STATE_RENDER_TARGET, SCENE_READ);
+  Barrier(m_pCmdList.Get(), m_pUpscaleDepth.Get(), D3D12_RESOURCE_STATE_RENDER_TARGET, SCENE_READ);
+  Barrier(m_pCmdList.Get(), m_pSceneDepth.Get(), D3D12_RESOURCE_STATE_DEPTH_WRITE, SCENE_READ);
+  SetBackBufferTargets();
+}
+
+void CD3D12Device::ClearVelocity()
+{
+  static const float Zero[4] = {};
+  if (m_bInFrame && m_bInScene)
+    m_pCmdList->ClearRenderTargetView(SceneRTV(1), Zero, 0, nullptr);
 }
 
 void CD3D12Device::OpenCmdList()
@@ -557,13 +716,7 @@ void CD3D12Device::BeginFrame()
   OpenCmdList();
   GpuSection("other");
   Barrier(m_pCmdList.Get(), GetBackBuffer(), D3D12_RESOURCE_STATE_PRESENT, D3D12_RESOURCE_STATE_RENDER_TARGET);
-  if (g_pRenderer->m_pDescriptors && g_pRenderer->m_pPipeline)
-  {
-    ID3D12DescriptorHeap *pHeap = g_pRenderer->m_pDescriptors->GetHeap();
-    m_pCmdList->SetDescriptorHeaps(1, &pHeap);
-    m_pCmdList->SetGraphicsRootSignature(g_pRenderer->m_pPipeline->GetRootSignature());
-    m_pCmdList->SetGraphicsRootDescriptorTable(2, g_pRenderer->m_pDescriptors->GetTableStart());
-  }
+  BindRootSignature();
   SetBackBufferTargets();
 }
 
@@ -571,6 +724,7 @@ void CD3D12Device::EndFrame(bool bPresent, bool bVSync)
 {
   if (!m_bInFrame)
     return;
+  EndScene();
   EndOffscreen();
   // The timestamp that ends the frame's last section; all of them to the readback buffer.
   if (const int n = m_nGpuMarks[m_nFrameSlot]; n > 0)
@@ -620,13 +774,7 @@ void CD3D12Device::FlushFrame()
   m_pQueue->ExecuteCommandLists(1, &pList);
   WaitForFence(Signal());
   OpenCmdList();
-  if (g_pRenderer->m_pDescriptors && g_pRenderer->m_pPipeline)
-  {
-    ID3D12DescriptorHeap *pHeap = g_pRenderer->m_pDescriptors->GetHeap();
-    m_pCmdList->SetDescriptorHeaps(1, &pHeap);
-    m_pCmdList->SetGraphicsRootSignature(g_pRenderer->m_pPipeline->GetRootSignature());
-    m_pCmdList->SetGraphicsRootDescriptorTable(2, g_pRenderer->m_pDescriptors->GetTableStart());
-  }
+  BindRootSignature();
   SetBackBufferTargets();
 }
 
@@ -701,14 +849,21 @@ void CD3D12Device::ReadOcclusionResults()
 void CD3D12Device::ClearColor(const float rgba[4])
 {
   if (m_bInFrame && !m_bOffscreenShadowMap)
-    m_pCmdList->ClearRenderTargetView(m_pOffscreen ? m_hOffscreenRTV : GetBackBufferRTV(), rgba, 0, nullptr);
+    m_pCmdList->ClearRenderTargetView(m_pOffscreen ? m_hOffscreenRTV : m_bInScene ? SceneRTV(0) : GetBackBufferRTV(), rgba, 0, nullptr);
 }
 
 void CD3D12Device::ClearDepth(float fDepth, uint8 nStencil, bool bDepth, bool bStencil)
 {
-  const auto Flags = (D3D12_CLEAR_FLAGS)((bDepth ? D3D12_CLEAR_FLAG_DEPTH : 0) | (bStencil ? D3D12_CLEAR_FLAG_STENCIL : 0));
+  // The scene's depth buffer has no stencil.
+  const bool bScene = IsSceneBound();
+  const auto Flags = (D3D12_CLEAR_FLAGS)((bDepth ? D3D12_CLEAR_FLAG_DEPTH : 0) | (bStencil && !bScene ? D3D12_CLEAR_FLAG_STENCIL : 0));
   if (m_bInFrame && Flags)
-    m_pCmdList->ClearDepthStencilView(m_pOffscreen ? m_hOffscreenDSV : GetDSV(), Flags, fDepth, nStencil, 0, nullptr);
+    m_pCmdList->ClearDepthStencilView(m_pOffscreen ? m_hOffscreenDSV : bScene ? SceneDSV() : GetDSV(), Flags, fDepth, nStencil, 0, nullptr);
+  if (m_bInFrame && bScene && bDepth)
+  {
+    const float Depth[4] = { fDepth, 0, 0, 0 };
+    m_pCmdList->ClearRenderTargetView(SceneRTV(2), Depth, 0, nullptr);
+  }
 }
 
 bool CD3D12Device::CreateTargetCopies(ComPtr<ID3D12Resource> &pColor, ComPtr<ID3D12Resource> *pDepth)
@@ -719,8 +874,8 @@ bool CD3D12Device::CreateTargetCopies(ComPtr<ID3D12Resource> &pColor, ComPtr<ID3
   Heap.Type = D3D12_HEAP_TYPE_DEFAULT;
   D3D12_RESOURCE_DESC Desc = {};
   Desc.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
-  Desc.Width = m_nWidth;
-  Desc.Height = m_nHeight;
+  Desc.Width = GetMainWidth();
+  Desc.Height = GetMainHeight();
   Desc.DepthOrArraySize = 1;
   Desc.MipLevels = 1;
   Desc.Format = D3D12_BACKBUFFER_FORMAT;
@@ -731,7 +886,7 @@ bool CD3D12Device::CreateTargetCopies(ComPtr<ID3D12Resource> &pColor, ComPtr<ID3
   if (!pDepth)
     return true;
   // The depth copy: the same format family and layout as the depth buffer, read through an SRV.
-  Desc.Format = DXGI_FORMAT_R24G8_TYPELESS;
+  Desc.Format = m_bInScene ? DXGI_FORMAT_R32_TYPELESS : DXGI_FORMAT_R24G8_TYPELESS;
   Desc.Flags = D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL;
   if (Failed(m_pDevice->CreateCommittedResource(&Heap, D3D12_HEAP_FLAG_NONE, &Desc, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, nullptr,
     IID_PPV_ARGS(&*pDepth)), "CreateCommittedResource (depth copy)"))
@@ -746,6 +901,16 @@ void CD3D12Device::CopyTargets(ID3D12Resource *pColor, ID3D12Resource *pDepth)
 {
   if (!m_bInFrame || !pColor)
     return;
+  ID3D12Resource *pMainColor = m_bInScene ? m_pSceneColor.Get() : GetBackBuffer();
+  ID3D12Resource *pMainDepth = m_bInScene ? m_pSceneDepth.Get() : m_pDepth.Get();
+  const auto Matches = [](ID3D12Resource *pCopy, ID3D12Resource *pSource, DXGI_FORMAT Format)
+  {
+    const D3D12_RESOURCE_DESC a = pCopy->GetDesc(), b = pSource->GetDesc();
+    return a.Width == b.Width && a.Height == b.Height && a.Format == Format;
+  };
+  if (!Matches(pColor, pMainColor, D3D12_BACKBUFFER_FORMAT) ||
+      (pDepth && !Matches(pDepth, pMainDepth, m_bInScene ? DXGI_FORMAT_R32_TYPELESS : DXGI_FORMAT_R24G8_TYPELESS)))
+    return;
   D3D12_RESOURCE_BARRIER b[4] = {};
   const auto Set = [](D3D12_RESOURCE_BARRIER &r, ID3D12Resource *pRes, D3D12_RESOURCE_STATES Before, D3D12_RESOURCE_STATES After)
   {
@@ -755,15 +920,15 @@ void CD3D12Device::CopyTargets(ID3D12Resource *pColor, ID3D12Resource *pDepth)
     r.Transition.StateBefore = Before;
     r.Transition.StateAfter = After;
   };
-  Set(b[0], GetBackBuffer(), D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_COPY_SOURCE);
+  Set(b[0], pMainColor, D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_COPY_SOURCE);
   Set(b[1], pColor, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, D3D12_RESOURCE_STATE_COPY_DEST);
-  Set(b[2], m_pDepth.Get(), D3D12_RESOURCE_STATE_DEPTH_WRITE, D3D12_RESOURCE_STATE_COPY_SOURCE);
+  Set(b[2], pMainDepth, D3D12_RESOURCE_STATE_DEPTH_WRITE, D3D12_RESOURCE_STATE_COPY_SOURCE);
   Set(b[3], pDepth, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, D3D12_RESOURCE_STATE_COPY_DEST);
   const UINT nBarriers = pDepth ? 4 : 2;
   m_pCmdList->ResourceBarrier(nBarriers, b);
-  m_pCmdList->CopyResource(pColor, GetBackBuffer());
+  m_pCmdList->CopyResource(pColor, pMainColor);
   if (pDepth)
-    m_pCmdList->CopyResource(pDepth, m_pDepth.Get());
+    m_pCmdList->CopyResource(pDepth, pMainDepth);
   for (auto &r : b)
     std::swap(r.Transition.StateBefore, r.Transition.StateAfter);
   m_pCmdList->ResourceBarrier(nBarriers, b);

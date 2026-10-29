@@ -137,6 +137,13 @@ void CD3D12Renderer::RegisterVariables()
   iConsole->Register("d3d12_ShadowMapSize", &CV_d3d12_ShadowMapSize, 1024, VF_DUMPTODISK,
                      "Size of the shadow maps, 128 to 4096 (0: the engine's); the maps made from then on");
   iConsole->Register("d3d12_ShadowDebug", &CV_d3d12_ShadowDebug, 0, 0, "1: shows the shadow maps of the frame at the top left (depth in red); 2: the receivers show the sun's visibility in grey");
+  iConsole->CreateVariable("d3d12_Upscaler", "none", VF_DUMPTODISK,
+                           "The upscaler of the 3D scene: none, or fsr (AMD FSR Upscaling); with d3d12_UpscaleMode 0 anti-aliasing only");
+  iConsole->Register("d3d12_UpscaleMode", &CV_d3d12_UpscaleMode, 0, VF_DUMPTODISK,
+                     "The upscaler's render size: 0 Native AA (the display's: anti-aliasing only), 1 Quality (1/1.5), 2 Balanced (1/1.7), "
+                     "3 Performance (1/2), 4 Ultra Performance (1/3)");
+  iConsole->Register("d3d12_UpscaleSharpness", &CV_d3d12_UpscaleSharpness, 0.5f, VF_DUMPTODISK, "The upscaler's sharpening, 0 (none) to 1");
+  iConsole->Register("d3d12_UpscaleDebug", &CV_d3d12_UpscaleDebug, 0, 0, "1: the upscaler's debug view; 2: the depth it gets (near black, far white)");
 }
 
 //////////////////////////////////////////////////////////////////////////
@@ -353,6 +360,7 @@ void CD3D12Renderer::Release()
   ReleaseShadowMaps();
   ReleaseScreenEffects();
   ReleaseFlares();
+  ReleaseUpscaler();
   m_pDetailTexture = nullptr;   // released with every texture
   m_pDefaultCube = nullptr;
   m_pBeachTexture = m_pBeachWetTexture = m_pBeachBumpTexture = nullptr;
@@ -460,6 +468,7 @@ void CD3D12Renderer::Update (void)
   if (!m_pDevice)
     return;
   EnsureFrame();
+  UpscaleScene();               // a main view whose EF_EndEf3D did not end (none expected)
   DrawQueuedBoxes();
   // Shown only when swapping is on: the hidden frames of a level load are drawn but never seen.
   m_pDevice->EndFrame(m_bSwapBuffers, m_bVSync || CV_r_vsync != 0);
@@ -607,6 +616,8 @@ void CD3D12Renderer::SetCamera(const CCamera &cam)
     m_ReflectionViewProj = m_CameraView * m_ProjMatrix;
     ClipProjectionToWater(m_ProjMatrix, m_CameraView);
   }
+  if (m_bUpscaling)
+    UpdateReprojection();
   InvalidateFrameConstants();
 }
 

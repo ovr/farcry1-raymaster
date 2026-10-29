@@ -1,2 +1,5 @@
 # cmd reads its batch files with CRLF line endings
 *.cmd text eol=crlf
+# vendored binaries, never converted
+*.dll binary
+*.lib binary

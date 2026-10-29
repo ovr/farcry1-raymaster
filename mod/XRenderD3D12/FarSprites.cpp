@@ -656,6 +656,7 @@ void CD3D12Renderer::DrawObjSprites(list2<CStatObjInst*> *pList, float fMaxViewD
   SDrawConstants dc = DefaultDrawConstants();
   const Matrix44 ViewProj = m_CameraView * m_ProjMatrix;
   memcpy(dc.mWorldViewProj, ViewProj.data, sizeof(dc.mWorldViewProj));
+  SetStaticMotion(dc);
   dc.nFlags = DF_TEX0_ARRAY | DF_VCOLOR | DF_VCOLOR_X2 | DF_ALPHATEST | (m_bFog ? DF_FOG : 0);
   dc.fAlphaRef = SPRITE_ALPHA_REF;
   dc.vColor[0] = m_WorldColor[0];

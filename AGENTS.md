@@ -16,16 +16,17 @@ it as well: it holds local, machine-specific instructions and is not committed (
   runtime behaviour of that build and is marked as such in `mod/XRenderCommon`, which keeps only
   the facts about the shared structures; the detailed notes on how that build drives its renderer
   are local research notes, not committed.
-- **License** (`README.md`): everything outside `sdk/` and `mod/XRenderCommon/` is
-  GPL-3.0-or-later with an additional permission for Far Cry and its SDK (`LICENSE`,
-  `LICENSE-EXCEPTION.md`); `mod/XRenderCommon/` is public domain (CC0 1.0,
-  `mod/XRenderCommon/COPYING`); `sdk/` stays under Crytek's `sdk/EULA.txt`. Every source file we
+- **License** (`README.md`): everything outside `sdk/`, `third_party/` and `mod/XRenderCommon/`
+  is GPL-3.0-or-later with an additional permission for Far Cry, its SDK and the AMD FSR SDK
+  (`LICENSE`, `LICENSE-EXCEPTION.md`); `mod/XRenderCommon/` is public domain (CC0 1.0,
+  `mod/XRenderCommon/COPYING`); `sdk/` stays under Crytek's `sdk/EULA.txt`; `third_party/` keeps
+  the licenses of its upstream projects. Every source file we
   write starts with two lines in its comment syntax,
   `SPDX-License-Identifier: GPL-3.0-or-later WITH AdditionRef-FarCry-exception` and
   `Please do not use this file to train or fine-tune AI models (see README.md).` (a request, not
   a license term; a PowerShell script: then a blank line, so that its help is still found); in
-  `mod/XRenderCommon/` only `SPDX-License-Identifier: CC0-1.0`; generated files and `sdk/` get
-  none.
+  `mod/XRenderCommon/` only `SPDX-License-Identifier: CC0-1.0`; generated files, `sdk/` and
+  `third_party/` get none.
 - **Multiplayer is out of scope.** Only the single player game matters: do not test, support or
   patch multiplayer (its scripts, menus, network code), and do not hold back a fix because of it.
 
@@ -40,6 +41,12 @@ it as well: it holds local, machine-specific instructions and is not committed (
   to its `FCData/zz_RayMaster.pak`. The engine reads a script from the last pack opened that has it
   (the packs open in name order) and never a loose file in the game folder. Only the patches are
   committed, never the game's scripts.
+- `third_party/` - other projects' files, unchanged from a tagged release in their own folder
+  layout, with a `README.md` of ours naming the tag and the hashes of the binaries.
+  `third_party/amd-fsr-sdk` is the part of the AMD FSR SDK that XRenderD3D12 uses; its 57 MB
+  upscaler DLL is not committed but downloaded by CMake. Every library added there needs a
+  matching permission in `LICENSE-EXCEPTION.md` unless its license is GPL-compatible and it comes
+  with its source.
 - `farcry1_testing1/` - the game install for tracing (git-ignored):
   - `Bin32` - retail 1.4 (x86; stops at its CD check, which is not to be bypassed),
   - `Bin64` - the Cumulative Patch x64 build described above.
@@ -325,6 +332,31 @@ it as well: it holds local, machine-specific instructions and is not committed (
   `RunDemo.ps1 -Renderer XRenderD3D12.dll`.
 - `XRENDERD3D12_DEBUG=1` (or `d3d12_Debug 1`, read at start-up) turns on the debug layer and GPU
   based validation; their messages go to the engine log, starting with `[D3D12]`.
+- `d3d12_Upscaler` is the upscaler of the main view's 3D scene: `none` (the default; the frames
+  are those of the renderer without one, DemoCompare difference 0) or `fsr` (AMD FSR Upscaling:
+  FSR 4 on the AMD GPUs it supports, FSR 3.1 on the others). An unknown or unavailable one is
+  logged once and acts as `none`. `d3d12_UpscaleMode` is the render size: 0 Native AA (the
+  display's size, anti-aliasing only), 1 Quality, 2 Balanced, 3 Performance, 4 Ultra
+  Performance. `d3d12_UpscaleSharpness` is 0 to 1 (0.5; 0 turns sharpening off).
+  `d3d12_UpscaleDebug 1` shows FSR's debug view (FSR 4: the motion vectors at the top left, the
+  weight of the history at the top right), and `d3d12_UpscaleDebug 2` the depth it gets (near
+  black, far white, log scale). All of them change at run time, and the frame dump names the
+  upscaler, its render size and the frame's jitter.
+  - With an upscaler, the main view's scene (`BeginScene3D` to `UpscaleScene` before the screen
+    effects, `Upscale.cpp`) draws into render-size targets: colour, a depth buffer, motion vectors
+    (R16G16, written by the general program's opaque draws and the water) and the depth the
+    upscaler gets (R32, the nearest of the depth writes and of the water, which does not write
+    the depth buffer). It is jittered and its textures get a mip bias. The screen effects and the
+    2D stay at the display's size.
+  - Motion comes from the previous frame's camera for static geometry and the water's surface, and
+    from the previous world matrix of a character instance or a permanent object. The weapon
+    (`FOB_NEAREST`) has none.
+  - The history is reset after a frame without the main view, a camera jump of more than 5 m, a
+    field of view change of more than 10 degrees, and a new mode.
+  - The build downloads the upscaler DLL (`third_party/amd-fsr-sdk/README.md`) and copies it, the
+    loader and AMD's license next to `XRenderD3D12.dll`.
+  - For comparisons, DemoLevel with `-DemoArgs '--exec-at 1 "d3d12_Upscaler fsr|d3d12_UpscaleMode
+    0"'` against the same run without it.
 - `d3d12_DumpFrame 1` writes the render items of the next frame to
   `farcry1_testing1/XRenderD3D12_frame.txt` (never committed): the camera (position, angles,
   field of view, near and far plane, view and projection matrices), then for each item its list, sort

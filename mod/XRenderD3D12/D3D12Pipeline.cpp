@@ -17,8 +17,12 @@
 // The programs, compiled by dxc at build time (Shaders/Shaders.cmake).
 #include "General_VS.h"
 #include "General_PS.h"
+#include "General_Velocity_VS.h"
+#include "General_Velocity_PS.h"
 #include "Water_VS.h"
 #include "Water_PS.h"
+#include "Water_Velocity_VS.h"
+#include "Water_Velocity_PS.h"
 #include "Post_VS.h"
 #include "Post_PS.h"
 
@@ -486,14 +490,36 @@ ComPtr<ID3D12PipelineState> CD3D12Pipeline::CreatePSO(const SPipelineKey &Key)
     return nullptr;
 
   const SProgram &Program = s_Programs[Key.nProgram];
-  const bool bDepth = Key.nTarget == 0 || Key.nTarget == 2;
+  const bool bScene = Key.nTarget == 3;
+  const bool bDepth = Key.nTarget == 0 || Key.nTarget == 2 || bScene;
   const bool bShadowMap = Key.nTarget == 2;
   const uint32 nState = Key.nState;
+  // In an upscaler's scene the general program's opaque draws write the motion vectors, and the
+  // ones that write the depth buffer the upscaler's depth too; the blended ones leave those of
+  // what is behind them. The water writes both: it replaces the pixel, but not in the depth
+  // buffer (what is under it and drawn after it shows through).
+  const bool bGeneral = Key.nProgram == eD3D12P_General, bWater = Key.nProgram == eD3D12P_Water;
+  const bool bVelocity = bScene && ((bGeneral && !(nState & (GS_BLSRC_MASK | GS_BLDST_MASK)) &&
+                                     !(nState & (GS_NOCOLMASK | GS_COLMASKONLYALPHA))) || bWater);
+  const bool bUpscaleDepth = bScene && !(nState & GS_NODEPTHTEST) && ((bGeneral && (nState & GS_DEPTHWRITE)) || bWater);
 
   D3D12_GRAPHICS_PIPELINE_STATE_DESC Desc = {};
   Desc.pRootSignature = m_pRootSignature.Get();
-  Desc.VS = { Program.pVS, Program.nVS };
-  Desc.PS = { Program.pPS, Program.nPS };
+  if ((bVelocity || bUpscaleDepth) && bWater)
+  {
+    Desc.VS = { g_Water_Velocity_VS, sizeof(g_Water_Velocity_VS) };
+    Desc.PS = { g_Water_Velocity_PS, sizeof(g_Water_Velocity_PS) };
+  }
+  else if (bVelocity || bUpscaleDepth)
+  {
+    Desc.VS = { g_General_Velocity_VS, sizeof(g_General_Velocity_VS) };
+    Desc.PS = { g_General_Velocity_PS, sizeof(g_General_Velocity_PS) };
+  }
+  else
+  {
+    Desc.VS = { Program.pVS, Program.nVS };
+    Desc.PS = { Program.pPS, Program.nPS };
+  }
 
   // Blending: off when neither factor is set.
   D3D12_RENDER_TARGET_BLEND_DESC &Blend = Desc.BlendState.RenderTarget[0];
@@ -527,6 +553,26 @@ ComPtr<ID3D12PipelineState> CD3D12Pipeline::CreatePSO(const SPipelineKey &Key)
     Blend.RenderTargetWriteMask = D3D12_COLOR_WRITE_ENABLE_RED | D3D12_COLOR_WRITE_ENABLE_GREEN | D3D12_COLOR_WRITE_ENABLE_BLUE;
   else
     Blend.RenderTargetWriteMask = D3D12_COLOR_WRITE_ENABLE_ALL;
+  if (bScene)
+  {
+    Desc.BlendState.IndependentBlendEnable = TRUE;
+    D3D12_RENDER_TARGET_BLEND_DESC &Motion = Desc.BlendState.RenderTarget[1];
+    Motion.BlendEnable = FALSE;
+    Motion.LogicOpEnable = FALSE;
+    Motion.SrcBlend = Motion.SrcBlendAlpha = D3D12_BLEND_ONE;
+    Motion.DestBlend = Motion.DestBlendAlpha = D3D12_BLEND_ZERO;
+    Motion.BlendOp = Motion.BlendOpAlpha = D3D12_BLEND_OP_ADD;
+    Motion.LogicOp = D3D12_LOGIC_OP_NOOP;
+    Motion.RenderTargetWriteMask = bVelocity ? D3D12_COLOR_WRITE_ENABLE_RED | D3D12_COLOR_WRITE_ENABLE_GREEN : 0;
+    // The upscaler's depth: the nearest of what was written.
+    D3D12_RENDER_TARGET_BLEND_DESC &Nearest = Desc.BlendState.RenderTarget[2];
+    Nearest = Motion;
+    Nearest.BlendEnable = TRUE;
+    Nearest.SrcBlend = Nearest.SrcBlendAlpha = D3D12_BLEND_ONE;
+    Nearest.DestBlend = Nearest.DestBlendAlpha = D3D12_BLEND_ONE;
+    Nearest.BlendOp = Nearest.BlendOpAlpha = D3D12_BLEND_OP_MIN;
+    Nearest.RenderTargetWriteMask = bUpscaleDepth ? D3D12_COLOR_WRITE_ENABLE_RED : 0;
+  }
   Desc.SampleMask = UINT_MAX;
 
   D3D12_RASTERIZER_DESC &Raster = Desc.RasterizerState;
@@ -586,9 +632,11 @@ ComPtr<ID3D12PipelineState> CD3D12Pipeline::CreatePSO(const SPipelineKey &Key)
   const int nTopology = Key.nTopology;
   Desc.PrimitiveTopologyType = nTopology >= D3D12_PRIMITIVE_TOPOLOGY_TYPE_POINT && nTopology <= D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE ?
     (D3D12_PRIMITIVE_TOPOLOGY_TYPE)nTopology : D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
-  Desc.NumRenderTargets = bShadowMap ? 0 : 1;
+  Desc.NumRenderTargets = bShadowMap ? 0 : bScene ? 3 : 1;
   Desc.RTVFormats[0] = bShadowMap ? DXGI_FORMAT_UNKNOWN : bDepth ? D3D12_BACKBUFFER_FORMAT : DXGI_FORMAT_R8G8B8A8_UNORM;
-  Desc.DSVFormat = bShadowMap ? D3D12_SHADOW_MAP_FORMAT : bDepth ? D3D12_DEPTH_FORMAT : DXGI_FORMAT_UNKNOWN;
+  Desc.RTVFormats[1] = bScene ? D3D12_VELOCITY_FORMAT : DXGI_FORMAT_UNKNOWN;
+  Desc.RTVFormats[2] = bScene ? D3D12_UPSCALE_DEPTH_FORMAT : DXGI_FORMAT_UNKNOWN;
+  Desc.DSVFormat = bShadowMap ? D3D12_SHADOW_MAP_FORMAT : bScene ? D3D12_SCENE_DEPTH_FORMAT : bDepth ? D3D12_DEPTH_FORMAT : DXGI_FORMAT_UNKNOWN;
   Desc.SampleDesc.Count = 1;
   Desc.SampleDesc.Quality = 0;
   Desc.NodeMask = 0;

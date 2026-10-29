@@ -200,6 +200,14 @@ Matrix44 CD3D12Renderer::GetImmediateViewProj() const
   return m_ViewMatrix * m_ProjMatrix;
 }
 
+void CD3D12Renderer::SetImmediateTransform(SDrawConstants &dc) const
+{
+  const Matrix44 ViewProj = GetImmediateViewProj();
+  memcpy(dc.mWorldViewProj, ViewProj.data, sizeof(dc.mWorldViewProj));
+  if (!m_b2DMode)
+    SetStaticMotion(dc);
+}
+
 void CD3D12Renderer::SetState(int State)
 {
   m_nState = State;
@@ -437,7 +445,7 @@ void CD3D12Renderer::DrawDynVB(int nOffs, int Pool, int nVerts)
   if (!m_bFontState)
   {
     ApplyRenderState(Key, dc, VERTEX_FORMAT, true);
-    SetMatrix(dc.mWorldViewProj, GetImmediateViewProj());
+    SetImmediateTransform(dc);
     DrawImmediate(Key, dc, D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST, VERTEX_FORMAT, pVerts, nVerts);
     return;
   }
@@ -471,7 +479,7 @@ void CD3D12Renderer::DrawDynVB(struct_VERTEX_FORMAT_P3F_COL4UB_TEX2F *pBuf, usho
   SPipelineKey Key;
   SDrawConstants dc;
   ApplyRenderState(Key, dc, VERTEX_FORMAT, true);
-  SetMatrix(dc.mWorldViewProj, GetImmediateViewProj());
+  SetImmediateTransform(dc);
   const int nCount = pInds && nInds > 0 ? nInds : nVerts;
   const ushort *pIndices = pInds && nInds > 0 ? pInds : nullptr;
   switch (nPrimType)
@@ -499,7 +507,7 @@ void CD3D12Renderer::DrawTriStrip(CVertexBuffer *src, int vert_num)
   SPipelineKey Key;
   SDrawConstants dc;
   ApplyRenderState(Key, dc, src->m_vertexformat, true);
-  SetMatrix(dc.mWorldViewProj, GetImmediateViewProj());
+  SetImmediateTransform(dc);
   DrawImmediate(Key, dc, D3D_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP, src->m_vertexformat, src->m_VS[VSF_GENERAL].m_VData, vert_num);
 }
 
@@ -694,7 +702,7 @@ void CD3D12Renderer::DrawLineColor(const Vec3 & vPos1, const CFColor & vColor1, 
   ApplyRenderState(Key, dc, VERTEX_FORMAT, true);
   dc.nFlags &= ~(DF_TEX0 | DF_TEXGEN_WORLD | DF_TEXMATRIX);
   Key.nCull = R_CULL_NONE;
-  SetMatrix(dc.mWorldViewProj, GetImmediateViewProj());
+  SetImmediateTransform(dc);
   DrawImmediate(Key, dc, D3D_PRIMITIVE_TOPOLOGY_LINELIST, VERTEX_FORMAT, Verts, 2);
 }
 
@@ -815,7 +823,7 @@ void CD3D12Renderer::DrawBall(const Vec3 & pos, float radius)
   SDrawConstants dc;
   ApplyRenderState(Key, dc, VERTEX_FORMAT, false);
   Key.nCull = R_CULL_BACK;
-  SetMatrix(dc.mWorldViewProj, GetImmediateViewProj());
+  SetImmediateTransform(dc);
   DrawImmediate(Key, dc, D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST, VERTEX_FORMAT, Verts.data(), (int)Verts.size(), Inds.data(), (int)Inds.size());
 }
 
@@ -867,7 +875,7 @@ void CD3D12Renderer::DrawQuad(const Vec3 &right, const Vec3 &up, const Vec3 &ori
   SDrawConstants dc;
   ApplyRenderState(Key, dc, VERTEX_FORMAT, true);
   Key.nCull = R_CULL_NONE;
-  SetMatrix(dc.mWorldViewProj, GetImmediateViewProj());
+  SetImmediateTransform(dc);
   DrawImmediate(Key, dc, D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST, VERTEX_FORMAT, Verts, 4, Inds, 6);
 }
 

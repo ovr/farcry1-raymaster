@@ -193,6 +193,9 @@ void CD3D12Renderer::DrawFlares(std::span<const SRenderItem> Items)
   const Vec3 vRight(v[0], v[4], v[8]), vUp(v[1], v[5], v[9]);
   const Vec3 vCamPos = m_Camera.GetPos();
   const float vx = (float)m_Viewport[0], vy = (float)m_Viewport[1], vw = (float)std::max(m_Viewport[2], 1), vh = (float)std::max(m_Viewport[3], 1);
+  float fScaleX, fScaleY;
+  GetSceneScale(fScaleX, fScaleY);
+  const float fSampleScale = fScaleX * fScaleY;
   m_fDepthMin = 0;
   m_fDepthMax = 1;
   m_bItemScissor = false;
@@ -273,7 +276,8 @@ void CD3D12Renderer::DrawFlares(std::span<const SRenderItem> Items)
       const int a = Ring[k], b = Ring[(k + 1) % 4];
       fArea += px[a] * py[b] - px[b] * py[a];
     }
-    fArea = fabsf(fArea) * 0.5f;
+    // In the pixels the samples are counted in (an upscaler's scene is smaller).
+    fArea = fabsf(fArea) * 0.5f * fSampleScale;
     const int nQuery = m_pDevice->BeginOcclusion();
     if (nQuery < 0)
       break;
@@ -566,15 +570,18 @@ bool CD3D12Renderer::DrawSunMask(float sx, float sy)
     m_pSunMask = m_pUpload->CreateRenderTarget(SUN_MASK_SIZE, SUN_MASK_SIZE, DXGI_FORMAT_R8G8B8A8_UNORM);
   if (!m_pSunPatch || !m_pSunMask || m_pSunPatch->m_nSRV < 0 || m_pSunMask->m_nSRV < 0)
     return false;
-  // The depth of the scene so far (the copy the blended list's water made, when there is one).
+  // The depth of the scene so far (the copy the blended list's water made, when there is one), in
+  // its pixels (an upscaler's scene is smaller than the back buffer).
   if (!m_bSceneCopied && !CopySceneForWater())
     return false;
-  const int w = m_pDevice->GetWidth(), h = m_pDevice->GetHeight();
+  float fScaleX, fScaleY;
+  GetSceneScale(fScaleX, fScaleY);
+  const int w = m_pDevice->GetMainWidth(), h = m_pDevice->GetMainHeight();
   SDrawConstants dc = DefaultDrawConstants();
   dc.nFlags = POST_SUN_PATCH;
   dc.nTex0 = (uint32)m_nSceneDepthSRV;
-  dc.vParams1[0] = sx;
-  dc.vParams1[1] = sy;
+  dc.vParams1[0] = sx * fScaleX;
+  dc.vParams1[1] = sy * fScaleY;
   dc.vParams1[2] = h / SUN_MASK_ROWS;
   dc.vParams1[3] = (float)w;
   dc.vParams2[0] = (float)h;
