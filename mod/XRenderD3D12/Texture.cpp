@@ -128,6 +128,40 @@ namespace
     Image = std::move(Out);
   }
 
+  //! A height map loaded as a bump map, B8G8R8A8: level 0 becomes a normal map with the height
+  //! (the mean of r, g and b) in alpha; the slopes are 4 times the height's forward differences
+  //! (along x the mean of rows y and y + 1), wrapping at the edges, n = normalize(-sx, -sy, 1).
+  //! The levels below are made again from it.
+  void HeightToNormalMap(SImage &Image)
+  {
+    const int w = Image.nWidth, h = Image.nHeight;
+    const byte *pSrc = Image.Bits(0, 0);
+    std::vector<int> Heights((size_t)w * h);
+    for (size_t i = 0; i < Heights.size(); i++)
+      Heights[i] = (pSrc[i * 4] + pSrc[i * 4 + 1] + pSrc[i * 4 + 2]) / 3;
+    auto At = [&](int x, int y) { return Heights[(size_t)(y % h) * w + x % w] / 255.0f; };
+    auto Encode = [](float v) { return (byte)std::clamp(std::lround(v * 127.5f + 127.5f), 0L, 255L); };
+
+    SImage Out;
+    Out.Allocate(DXGI_FORMAT_B8G8R8A8_UNORM, w, h, 1, 1);
+    Out.nSrcFlags = FT_HASALPHA;
+    byte *pDst = Out.Bits(0, 0);
+    for (int y = 0; y < h; y++)
+      for (int x = 0; x < w; x++)
+      {
+        const float sx = 4 * 0.5f * ((At(x + 1, y) - At(x, y)) + (At(x + 1, y + 1) - At(x, y + 1)));
+        const float sy = 4 * (At(x, y + 1) - At(x, y));
+        const float fInvLen = 1 / sqrtf(sx * sx + sy * sy + 1);
+        byte *p = pDst + ((size_t)y * w + x) * 4;
+        p[0] = Encode(fInvLen);
+        p[1] = Encode(-sy * fInvLen);
+        p[2] = Encode(-sx * fInvLen);
+        p[3] = (byte)Heights[(size_t)y * w + x];
+      }
+    Img::GenerateMips(Out);
+    Image = std::move(Out);
+  }
+
   //! Drops the nDrop largest levels (r_TexResolution and friends): the smallest level kept is at
   //! least 4 x 4 for block compressed formats, and one level always stays.
   void DropLevels(SImage &Image, int nDrop)
@@ -748,7 +782,11 @@ CTexture *CTextureManager::Load(const char *szName, const char *szTexturePath, u
   if (!Dir.empty() && Dir.back() != '/')
     Dir += '/';
   const bool bCube = (eTT == eTT_Cubemap) || (nFlags2 & FT2_FORCECUBEMAP);
-  const std::string Suffix = bCube ? g_CubeKey : "";
+  // A bump map whose name is no normal map's (*_ddn*, *.ddn*) is a height map, made a normal map;
+  // a compressed one is not loaded.
+  const bool bHeightBump = eTT == eTT_Bumpmap && !bCube && Base.find("_ddn") == std::string::npos &&
+    Base.find(".ddn") == std::string::npos;
+  const std::string Suffix = bCube ? g_CubeKey : bHeightBump ? "#height" : "";
   const std::string Key = Base + Suffix;
   // A name searched in a material's folder as well: its answer depends on the folder.
   const std::string DirKey = Dir.empty() ? std::string() : Dir + "|" + Key;
@@ -785,6 +823,14 @@ CTexture *CTextureManager::Load(const char *szName, const char *szTexturePath, u
         Res.bOpened ? Res.Base.c_str() : "");
     return nullptr;
   }
+  if (bHeightBump && (Img::IsBC(Image.Format) || Image.nFaces != 1))
+  {
+    if (bRememberMiss)
+      m_Missing.insert(MissKey);
+    if (iLog && m_Warned.insert(MissKey).second)
+      iLog->LogWarning("Texture '%s': a compressed height map is no bump map (%s)", szName, Res.Base.c_str());
+    return nullptr;
+  }
 
   // The file may be loaded already under another name.
   const std::string FoundKey = Res.Base + (Res.bSingle ? "#single" : "") + Suffix;
@@ -796,6 +842,8 @@ CTexture *CTextureManager::Load(const char *szName, const char *szTexturePath, u
   }
   else
   {
+    if (bHeightBump)
+      HeightToNormalMap(Image);
     if (nFlags & FT_NOMIPS)
       KeepLevels(Image, 1);
     else if (!Img::IsBC(Image.Format) && Image.nMips == 1)
