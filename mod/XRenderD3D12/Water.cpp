@@ -82,11 +82,11 @@ constexpr float WATER_TURBIDITY = 0.005f;
 constexpr float WATER_SCATTER[3] = { 0.18f, 0.28f, 0.54f };
 constexpr float WATER_DISPLACEMENT = 0.03f;
 
-// A beach wave runs up the shore in this many seconds (BEACH_WAVES of them at a time); the front of
-// the foam texture is at this v; the foam is white, this many times the world colour's mean (about
-// as bright as the sand, so that it shows over the water).
-constexpr float BEACH_WAVE_PERIOD = 7.0f;
-constexpr float BEACH_WAVE_FRONT = 0.85f;
+// A beach wave runs up the shore and back in this many seconds (BEACH_WAVES of them at a time), the
+// second this many seconds behind the first; the foam is white, this many times the world colour's
+// mean (about as bright as the sand, so that it shows over the water).
+constexpr float BEACH_WAVE_PERIOD = 10.0f;
+constexpr float BEACH_WAVE_LAG = 4.0f;
 constexpr float BEACH_FOAM_BRIGHTNESS = 1.05f;
 
 constexpr int WAVE_TEXTURE_SIZE = 256;
@@ -633,36 +633,52 @@ bool CD3D12Renderer::SetupWaterDraw(SPipelineKey &Key, SDrawConstants &dc, const
   return true;
 }
 
-bool CD3D12Renderer::SetupBeachDraw(SPipelineKey &Key, SDrawConstants &dc, int nWave)
+bool CD3D12Renderer::SetupBeachDraw(SPipelineKey &Key, SDrawConstants &dc, int nPass)
 {
   if (!m_pTextures)
     return false;
   if (!m_pBeachTexture)
     m_pBeachTexture = m_pTextures->LoadTexture("textures/wave1", FT_CLAMP, 0, eTT_Base, -1, -1, -1, 0);
-  if (!m_pBeachTexture || !m_pBeachTexture->IsTextureLoaded() || m_pBeachTexture->IsCube())
+  if (!m_pBeachWetTexture)
+    m_pBeachWetTexture = m_pTextures->LoadTexture("textures/water2", 0, 0, eTT_Base, -1, -1, -1, 0);
+  CTexture *pTex = nPass < BEACH_WAVES ? m_pBeachTexture : m_pBeachWetTexture;
+  if (!pTex || !pTex->IsTextureLoaded() || pTex->IsCube())
     return false;
 
-  // The mesh runs from the sea (v 0) to the land (v 1) and fades out at both edges (vertex alpha;
-  // its rgb, darker in places, is not used: foam is white). The front of the foam moves from the
-  // sea to the land, appears quickly and fades out slowly on its way; each wave is a fraction of a
-  // period behind the one before, every other one mirrored along the shore.
+  // The mesh runs from the sea (v 0) to the land (v 1) and fades out at both edges (vertex alpha).
   Key.nProgram = eD3D12P_General;
   Key.nState = GS_BLSRC_SRCALPHA | GS_BLDST_ONEMINUSSRCALPHA;
   Key.nCull = R_CULL_NONE;
+  dc.nTex0 = pTex->GetSRV();
   const float fTime = iTimer ? iTimer->GetCurrTime() : 0.0f;
-  const float fPhase = Frac(fTime / BEACH_WAVE_PERIOD + (float)nWave / BEACH_WAVES);
+  if (nPass == BEACH_WAVES)
+  {
+    // The wet sand: a faint grey noise in the vertex colour, three times across the strip, drifting
+    // up the beach; it darkens the strip by about 2 levels.
+    dc.nFlags = DF_TEX0 | DF_VCOLOR | DF_TEXMATRIX;
+    dc.nSamplers = XR_SAMPLER_LINEAR_WRAP;
+    Set4(dc.vTexMat0, 1.25f, 0, 0, 0);
+    Set4(dc.vTexMat1, 0, 3, Frac(0.2f * fTime), 0);
+    Set4(dc.vColor, 1, 1, 1, 0.6f);
+    return true;
+  }
+
+  // The foam (white: the mesh's rgb, darker in places, is not used) runs up the beach and back and
+  // sways along the shore: the texture squeezed towards the sea, least when the front is highest.
+  // The second wave is behind the first, the third the first's opposite.
+  const float fAngle = 2 * gf_PI * Frac((fTime + (nPass == 1 ? BEACH_WAVE_LAG : 0.0f)) / BEACH_WAVE_PERIOD);
+  float fSway = 0.25f * sinf(fAngle), fSqueeze = 2 + 0.9f * cosf(fAngle - 0.2f * gf_PI);
+  if (nPass == 2)
+  {
+    fSway = -fSway;
+    fSqueeze = 4 - fSqueeze;
+  }
   dc.nFlags = DF_TEX0 | DF_VCOLOR | DF_VALPHA_ONLY | DF_TEXMATRIX;
-  dc.nTex0 = m_pBeachTexture->GetSRV();
   dc.nSamplers = XR_SAMPLER_LINEAR_CLAMP;
-  if (nWave & 1)
-    Set4(dc.vTexMat0, -1, 0, 1, 0);
-  else
-    Set4(dc.vTexMat0, 1, 0, 0, 0);
-  Set4(dc.vTexMat1, 0, 1, BEACH_WAVE_FRONT - fPhase, 0);
-  const auto SmoothStep = [](float a, float b, float x) { const float t = std::clamp((x - a) / (b - a), 0.0f, 1.0f); return t * t * (3 - 2 * t); };
-  const float fFade = SmoothStep(0.0f, 0.12f, fPhase) * (1 - SmoothStep(0.4f, 1.0f, fPhase));
+  Set4(dc.vTexMat0, 1, 0, fSway, 0);
+  Set4(dc.vTexMat1, 0, fSqueeze, 0, 0);
   const float b = BEACH_FOAM_BRIGHTNESS * (m_WorldColor[0] + m_WorldColor[1] + m_WorldColor[2]) / 3;
-  Set4(dc.vColor, b, b, b, fFade);
+  Set4(dc.vColor, b, b, b, 1);
   return true;
 }
 

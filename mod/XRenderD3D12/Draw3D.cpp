@@ -934,8 +934,8 @@ void CD3D12Renderer::DrawLeafItem(const SRenderItem &it)
     dc.nFlags |= DF_ALPHA_ONE;
   if (bFirstPass)
     Draw();
-  // The beach: the other waves.
-  for (int nWave = 1; eDC == eDC_WaterBeach && nWave < BEACH_WAVES && SetupBeachDraw(Key, dc, nWave); nWave++)
+  // The beach: the other waves and the wet sand.
+  for (int nPass = 1; eDC == eDC_WaterBeach && nPass <= BEACH_WAVES && SetupBeachDraw(Key, dc, nPass); nPass++)
   {
     if (m_bFog)
       dc.nFlags |= DF_FOG;

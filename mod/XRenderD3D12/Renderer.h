@@ -428,9 +428,10 @@ public:
   //! scene drawn so far (made before the first surface of the list). False: not drawn.
   bool SetupWaterDraw(SPipelineKey &Key, SDrawConstants &dc, const SRenderItem &it);
   //! The waves of foam on the beach drawn at a time.
-  static constexpr int BEACH_WAVES = 4;
-  //! The foam on the beach (eDC_WaterBeach), wave nWave (0 to BEACH_WAVES - 1). False: not drawn.
-  bool SetupBeachDraw(SPipelineKey &Key, SDrawConstants &dc, int nWave);
+  static constexpr int BEACH_WAVES = 3;
+  //! The beach (eDC_WaterBeach): pass nPass, a wave of foam (0 to BEACH_WAVES - 1) or the wet sand
+  //! under them (BEACH_WAVES). False: not drawn.
+  bool SetupBeachDraw(SPipelineKey &Key, SDrawConstants &dc, int nPass);
   //! The sea floor under the ocean (eDC_WaterBottom) with the element's texture pTex (may be NULL).
   void SetupWaterBottomDraw(SPipelineKey &Key, SDrawConstants &dc, CTexture *pTex);
   //! Copies the back buffer and the depth buffer as drawn so far (m_bSceneCopied).
@@ -459,6 +460,7 @@ public:
   int m_nSceneCopyWidth = 0, m_nSceneCopyHeight = 0;
   bool m_bSceneCopied = false;              //!< the copies hold the current list's scene
   CTexture *m_pBeachTexture = nullptr;      //!< textures/wave1 (one reference)
+  CTexture *m_pBeachWetTexture = nullptr;   //!< textures/water2 (one reference)
   int m_nWaveTexture = 0;                   //!< GetWaveTexture: its ID, 0 not made yet, -1 failed
   int m_nCausticsTexture = 0;               //!< GetCausticsTexture: its ID, 0 not made yet, -1 failed
   float m_fCausticsMinMean = 1;             //!< the mean of the smaller of two texels of it (its mean 1)
