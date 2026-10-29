@@ -19,10 +19,14 @@
 #include "General_PS.h"
 #include "General_Velocity_VS.h"
 #include "General_Velocity_PS.h"
+#include "General_Hdr_PS.h"
+#include "General_Hdr_Velocity_PS.h"
 #include "Water_VS.h"
 #include "Water_PS.h"
 #include "Water_Velocity_VS.h"
 #include "Water_Velocity_PS.h"
+#include "Water_Hdr_PS.h"
+#include "Water_Hdr_Velocity_PS.h"
 #include "Post_VS.h"
 #include "Post_PS.h"
 #include "Hdr_VS.h"
@@ -508,20 +512,28 @@ ComPtr<ID3D12PipelineState> CD3D12Pipeline::CreatePSO(const SPipelineKey &Key)
 
   D3D12_GRAPHICS_PIPELINE_STATE_DESC Desc = {};
   Desc.pRootSignature = m_pRootSignature.Get();
+  // Into D3D12_HDR_FORMAT the pixel shaders with the HDR targets' steps (XR_HDR, Shaders.cmake).
+  const bool bHdr = Key.nColorFormat == PIPELINE_COLOR_HDR;
   if ((bVelocity || bUpscaleDepth) && bWater)
   {
     Desc.VS = { g_Water_Velocity_VS, sizeof(g_Water_Velocity_VS) };
-    Desc.PS = { g_Water_Velocity_PS, sizeof(g_Water_Velocity_PS) };
+    Desc.PS = bHdr ? D3D12_SHADER_BYTECODE{ g_Water_Hdr_Velocity_PS, sizeof(g_Water_Hdr_Velocity_PS) }
+                   : D3D12_SHADER_BYTECODE{ g_Water_Velocity_PS, sizeof(g_Water_Velocity_PS) };
   }
   else if (bVelocity || bUpscaleDepth)
   {
     Desc.VS = { g_General_Velocity_VS, sizeof(g_General_Velocity_VS) };
-    Desc.PS = { g_General_Velocity_PS, sizeof(g_General_Velocity_PS) };
+    Desc.PS = bHdr ? D3D12_SHADER_BYTECODE{ g_General_Hdr_Velocity_PS, sizeof(g_General_Hdr_Velocity_PS) }
+                   : D3D12_SHADER_BYTECODE{ g_General_Velocity_PS, sizeof(g_General_Velocity_PS) };
   }
   else
   {
     Desc.VS = { Program.pVS, Program.nVS };
     Desc.PS = { Program.pPS, Program.nPS };
+    if (bHdr && bGeneral)
+      Desc.PS = { g_General_Hdr_PS, sizeof(g_General_Hdr_PS) };
+    else if (bHdr && bWater)
+      Desc.PS = { g_Water_Hdr_PS, sizeof(g_Water_Hdr_PS) };
   }
 
   // Blending: off when neither factor is set.

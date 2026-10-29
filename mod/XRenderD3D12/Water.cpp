@@ -23,7 +23,8 @@
 //	water plane into a target of its own, as a scene nested in the main
 //	one, redrawn as r_WaterUpdateFactor, r_WaterUpdateDistance and
 //	r_WaterUpdateDeltaAngle say. Its near plane is the water plane, so
-//	nothing under the water shows in it.
+//	nothing under the water shows in it. With r_HDRRendering the target is
+//	in D3D12_HDR_FORMAT, as the main scene.
 //
 //////////////////////////////////////////////////////////////////////
 
@@ -450,15 +451,17 @@ void CD3D12Renderer::UpdateWaterReflection(std::span<const SRenderItem> Items)
     return;
   }
 
-  // The targets: a fraction of the screen.
+  // The targets: a fraction of the screen, in the main scene's format (HDR with r_HDRRendering;
+  // drawn before BeginMainScene).
   const float fScale = std::clamp(CV_d3d12_WaterReflectionScale, 0.1f, 1.0f);
   const int w = std::max((int)(m_pDevice->GetWidth() * fScale), 1), h = std::max((int)(m_pDevice->GetHeight() * fScale), 1);
-  if (!m_pReflectionColor || w != m_nReflectionWidth || h != m_nReflectionHeight)
+  const DXGI_FORMAT Format = IsHdrOn() ? D3D12_HDR_FORMAT : D3D12_BACKBUFFER_FORMAT;
+  if (!m_pReflectionColor || w != m_nReflectionWidth || h != m_nReflectionHeight || m_pReflectionColor->GetDesc().Format != Format)
   {
     ReleaseWaterReflection();
     m_hReflectionRTV = m_pDescriptors->AllocRTV();
     m_hReflectionDSV = m_pDescriptors->AllocDSV();
-    if (!m_pDevice->CreateOffscreenTargets(w, h, m_pReflectionColor, m_pReflectionDepth, m_hReflectionRTV, m_hReflectionDSV) ||
+    if (!m_pDevice->CreateOffscreenTargets(w, h, m_pReflectionColor, m_pReflectionDepth, m_hReflectionRTV, m_hReflectionDSV, Format) ||
         (m_nReflectionSRV = m_pDescriptors->AllocSRV(m_pReflectionColor.Get(), nullptr)) < 0)
     {
       ReleaseWaterReflection();
@@ -503,6 +506,8 @@ void CD3D12Renderer::UpdateWaterReflection(std::span<const SRenderItem> Items)
 
   // The 3D engine renders the scene (a frame of its own, nested in this one) with the mirrored
   // camera into the targets.
+  if (m_pFrameDump)
+    fprintf(m_pFrameDump.get(), "water reflection: %d x %d%s, water level %.2f\n", w, h, Format == D3D12_HDR_FORMAT ? " (HDR)" : "", fWaterZ);
   m_pDevice->SetOffscreenTargets(m_pReflectionColor.Get(), m_hReflectionRTV, m_hReflectionDSV, w, h);
   const float Clear[4] = { m_vClearColor.x, m_vClearColor.y, m_vClearColor.z, 0 };
   m_pDevice->ClearColor(Clear);

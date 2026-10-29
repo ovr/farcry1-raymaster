@@ -94,6 +94,42 @@ float3 SafeNormalize(float3 v)
   return fLen2 > 1e-12 ? v * rsqrt(fLen2) : float3(0, 0, 0);
 }
 
+//! The light of a colour of the game with r_HDRRendering (Hdr.hlsl, Hdr.cpp): c^2.2 up to 1, the
+//! display's range, and above it on along the curve's tangent at 1, 1 + 2.2 (c - 1). The game adds
+//! and scales its colours in gamma space, so what goes above 1 there (additive sprites over each
+//! other, its 2x and 4x light) is light added up, not a brighter display value: with c^2.2 ten
+//! sprites of 1 over each other would be a light of 158, not 21, and the bloom of a fire a ball.
+static const float HDR_GAMMA = 2.2;
+float HdrDecode(float c)
+{
+  return c > 1 ? 1 + HDR_GAMMA * (c - 1) : pow(max(c, 0), HDR_GAMMA);
+}
+
+//! Its inverse: the colour of a light.
+float HdrEncode(float fLight)
+{
+  return fLight > 1 ? 1 + (fLight - 1) / HDR_GAMMA : pow(max(fLight, 0), 1 / HDR_GAMMA);
+}
+
+//! The sky with r_HDRRendering (DF2_SKY_GLOW, the water's reflected sky box; Hdr.cpp): the factor
+//! of the sky's colour in the direction vDir from the camera that makes its light g_Frame.vHdr.x
+//! times brighter towards the sun, falling off with the cosine of the angle to the sun to the power
+//! SKY_GLOW_POWER (half way at 12 degrees). The colours are the game's (gamma encoded) and the
+//! sky's below white, so the factor of the light is taken to the power 1 / 2.2 (HdrDecode below
+//! 1). 1 when vHdr.x is 1, and in the programs for the other targets (without XR_HDR).
+static const float SKY_GLOW_POWER = 32;
+float SkyGlow(float3 vDir)
+{
+#ifdef XR_HDR
+  if (g_Frame.vHdr.x == 1)
+    return 1;
+  float a = pow(saturate(dot(SafeNormalize(vDir), g_Frame.vSunDir.xyz)), SKY_GLOW_POWER);
+  return pow(max(1 + (g_Frame.vHdr.x - 1) * a, 0), 1 / 2.2);
+#else
+  return 1;
+#endif
+}
+
 //! The depth of a point at vPos along the view axis. The fog goes by it, as Direct3D 9's fog
 //! without range fog: the fog's distances are set for that, and by the distance to the camera the
 //! sides of a wide view lie in the fog a quarter to a half deeper.

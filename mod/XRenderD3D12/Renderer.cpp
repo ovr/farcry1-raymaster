@@ -161,6 +161,23 @@ void CD3D12Renderer::RegisterVariables()
   iConsole->Register("d3d12_BloomThreshold", &CV_d3d12_BloomThreshold, 1.0f, VF_DUMPTODISK,
                      "The light above which the bloom starts (exposed, linear: 1 is the display's white)");
   iConsole->Register("d3d12_HDRDebug", &CV_d3d12_HDRDebug, 0, 0, "With r_HDRRendering: 1 the luminance in EV bands from middle grey (green), 2 the bloom alone");
+  // Brighter than the game draws them in HDR (Hdr.cpp): factors of the light, 1 the game's.
+  iConsole->Register("d3d12_HDRSun", &CV_d3d12_HDRSun, 8.0f, VF_DUMPTODISK, "With r_HDRRendering, the light of the sun's flare in its core times this (1: the game's)");
+  iConsole->Register("d3d12_HDRSky", &CV_d3d12_HDRSky, 2.0f, VF_DUMPTODISK,
+                     "With r_HDRRendering, the light of the sky towards the sun times up to this (1: the game's)");
+  iConsole->Register("d3d12_HDRGlow", &CV_d3d12_HDRGlow, 3.0f, VF_DUMPTODISK,
+                     "With r_HDRRendering, the light of what glows (in their cores: fire and the other additive particles, muzzle flashes and the other additive "
+                     "materials, the coronas and flares of the lights, the glow maps of lamps and screens) times this (1: the game's)");
+  // The colour grading of the HDR pipeline's resolve (ColorGrading.cpp).
+  iConsole->Register("d3d12_Saturation", &CV_d3d12_Saturation, 1.0f, VF_DUMPTODISK, "With r_HDRRendering, the saturation, 0 (grey) to 4 (1: none)");
+  iConsole->Register("d3d12_Contrast", &CV_d3d12_Contrast, 1.0f, VF_DUMPTODISK, "With r_HDRRendering, the contrast around middle grey, 0.25 to 4 (1: none)");
+  iConsole->Register("d3d12_Temperature", &CV_d3d12_Temperature, 0.0f, VF_DUMPTODISK,
+                     "With r_HDRRendering, the white balance: -1 (cooler) to 1 (warmer), up to 100 mired from 6504 K (0: none)");
+  iConsole->Register("d3d12_Tint", &CV_d3d12_Tint, 0.0f, VF_DUMPTODISK, "With r_HDRRendering, the tint: -1 (green) to 1 (magenta) (0: none)");
+  iConsole->CreateVariable("d3d12_ColorLut", "", VF_DUMPTODISK,
+                           "With r_HDRRendering, a 3D LUT of display colours (a .cube file, as DaVinci Resolve or Photoshop write it; a path in the "
+                           "game's folder or its paks) the picture goes through; empty: none");
+  iConsole->Register("d3d12_ColorLutAmount", &CV_d3d12_ColorLutAmount, 1.0f, VF_DUMPTODISK, "With r_HDRRendering, how much of d3d12_ColorLut, 0 to 1");
 }
 
 //////////////////////////////////////////////////////////////////////////

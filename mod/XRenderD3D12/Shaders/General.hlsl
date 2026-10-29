@@ -50,6 +50,15 @@
 //	      inside the decal's square), f(r) = (r + smoothstep(0, 1, r)) / 2
 //	    DF2_GLOW_FALLOFF (procedural flares): rgb *= saturate(1 - u)^vParams0.x,
 //	      u of uv0 0 on the glow's inner edge, 1 on its outer edge
+//	    DF2_SKY_GLOW (the sky with r_HDRRendering; this and DF2_HDR_CORE only with
+//	      XR_HDR, the programs for D3D12_HDR_FORMAT): rgb *= SkyGlow (Common.hlsli)
+//	      in the direction of the world position (the sky's are around the camera)
+//	    DF2_HDR_CORE (a light added with r_HDRRendering): rgb *= HdrEncode(1 +
+//	      (vHdrCore.x - 1) * m^HDR_CORE_POWER), the factor that makes white's
+//	      light that much brighter (Common.hlsli), m the light's shape: the
+//	      largest channel of tex0 (times its alpha with vHdrCore.y), times the
+//	      fall-off of DF2_GLOW_FALLOFF. Its core goes above white, its soft edge
+//	      stays as the game's, whatever its colour and fade
 //	    DF_ALPHATEST: discard when a < fAlphaRef (DF_ALPHATEST_LESS: when a >= fAlphaRef);
 //	      then DF_ALPHA_ONE: a = 1
 //	    DF_DETAIL_LAYER (a terrain detail layer, multiplied in twice): rgb =
@@ -354,6 +363,9 @@ SVertexOutput VSMain(SVertexInput In)
   return Out;
 }
 
+//! DF2_HDR_CORE: how fast the light's factor falls off from its core to its edge.
+static const float HDR_CORE_POWER = 4;
+
 float4 ShadePixel(SVertexOutput In)
 {
   if (HasFlag2(DF2_SCOPE_LENS))
@@ -484,6 +496,17 @@ float4 ShadePixel(SVertexOutput In)
   }
   if (HasFlag2(DF2_GLOW_FALLOFF))
     vColor.rgb *= pow(saturate(1 - In.vTex0.x), g_Draw.vParams0.x);
+#ifdef XR_HDR
+  if (HasFlag2(DF2_SKY_GLOW))
+    vColor.rgb *= SkyGlow(In.vWorldPos);
+  if (HasFlag2(DF2_HDR_CORE))
+  {
+    float m = max(vTex.r, max(vTex.g, vTex.b)) * (g_Draw.vHdrCore.y > 0 ? vTex.a : 1);
+    if (HasFlag2(DF2_GLOW_FALLOFF))
+      m *= pow(saturate(1 - In.vTex0.x), g_Draw.vParams0.x);
+    vColor.rgb *= HdrEncode(max(1 + (g_Draw.vHdrCore.x - 1) * pow(saturate(m), HDR_CORE_POWER), 0));
+  }
+#endif
 
   if (HasFlag(DF_ALPHATEST))
   {

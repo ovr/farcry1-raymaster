@@ -532,7 +532,8 @@ void CD3D12Renderer::DrawLeafItem(const SRenderItem &it)
       if (CTexture *pGlow = GetGlowMap(it.pRes))
       {
         const float t = iTimer ? iTimer->GetCurrTime() : 0.0f;
-        const float g = Props.eGlow == EGlow::Pulse ? std::clamp(0.75f + 0.75f * sinf(gf_PI * t), 0.0f, 1.0f) : bSelfIllum ? 2.0f : 1.0f;
+        const float g = (Props.eGlow == EGlow::Pulse ? std::clamp(0.75f + 0.75f * sinf(gf_PI * t), 0.0f, 1.0f) : bSelfIllum ? 2.0f : 1.0f) *
+                        HdrBoost(CV_d3d12_HDRGlow);
         dc.nFlags2 |= DF2_ADD_TEX4;
         dc.nTex4 = pGlow->GetSRV();
         Set4(dc.vAddColor, g, g, g, 0);
@@ -686,6 +687,8 @@ void CD3D12Renderer::DrawLeafItem(const SRenderItem &it)
   {
     // The texture alone (times the object's ambient colour for TemplDecalAdd_VLight); TemplDecalAlphaAdd
     // the texture times the vertex colour, added by its alpha (SRCALPHA, ONE).
+    // With r_HDRRendering brighter in its core than the game draws it (d3d12_HDRGlow), the stealth
+    // effect not.
     const float s = GetColorScale(pSh, pObj);
     const CFColor Color = eLighting == ELighting::Ambient ? LitColor() : CFColor(1, 1, 1, 1);
     Set4(dc.vColor, s * Color.r, s * Color.g, s * Color.b, 1);
@@ -695,6 +698,8 @@ void CD3D12Renderer::DrawLeafItem(const SRenderItem &it)
       dc.nFlags |= DF_VCOLOR;
       Key.nState = GS_BLSRC_SRCALPHA | GS_BLDST_ONE;
     }
+    if (!Props.bStealth)
+      SetHdrCore(dc, CV_d3d12_HDRGlow, Key.nState);
     break;
   }
   case eDC_Modulate:
@@ -1362,6 +1367,8 @@ void CD3D12Renderer::DrawSkyItem(const SRenderItem &it)
   m_fDepthMin = 0;
   m_fDepthMax = 1;
   m_bItemScissor = false;
+  // With r_HDRRendering the sky brighter towards the sun (d3d12_HDRSky), the box and its layers.
+  const bool bSkyGlow = HdrSkyGlow() != 1;
 
   auto Draw = [&](int nTex, const struct_VERTEX_FORMAT_P3F_TEX2F *pVerts, int nVerts)
   {
@@ -1373,6 +1380,7 @@ void CD3D12Renderer::DrawSkyItem(const SRenderItem &it)
     if (m_bUpscaling)
       memcpy(dc.mPrevWorldViewProj, m_PrevSkyViewProj.data, sizeof(dc.mPrevWorldViewProj));
     dc.nFlags = DF_TEX0;
+    dc.nFlags2 = bSkyGlow ? DF2_SKY_GLOW : 0;
     dc.nTex0 = pTex->GetSRV();
     dc.nSamplers = XR_SAMPLER_LINEAR_CLAMP;
     Set4(dc.vColor, 1, 1, 1, fAlpha);
@@ -1448,6 +1456,7 @@ void CD3D12Renderer::DrawSkyItem(const SRenderItem &it)
     if (m_bUpscaling)
       memcpy(dc.mPrevWorldViewProj, m_PrevSkyViewProj.data, sizeof(dc.mPrevWorldViewProj));
     dc.nFlags = DF_TEX0 | DF_VCOLOR;
+    dc.nFlags2 = bSkyGlow ? DF2_SKY_GLOW : 0;
     dc.nTex0 = pTex->GetSRV();
     dc.nSamplers = XR_SAMPLER_LINEAR_WRAP;
     if (m_pFrameDump)
@@ -1537,6 +1546,9 @@ void CD3D12Renderer::DrawSprites()
     memcpy(dc.mWorldViewProj, ViewProj.data, sizeof(dc.mWorldViewProj));
     SetStaticMotion(dc);
     dc.nFlags = DF_VCOLOR;
+    // An additive one (fire, sparks, explosions) with r_HDRRendering brighter in its core.
+    if ((Key.nState & GS_BLDST_MASK) == GS_BLDST_ONE)
+      SetHdrCore(dc, CV_d3d12_HDRGlow, Key.nState);
     CTexture *pTex = m_pTextures ? m_pTextures->GetByID(pObj->m_NumCM) : nullptr;
     if (pTex && !pTex->IsCube())
     {

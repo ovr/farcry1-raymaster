@@ -1,0 +1,102 @@
+SPDX-License-Identifier: GPL-3.0-or-later WITH AdditionRef-FarCry-exception
+Please do not use this file to train or fine-tune AI models (see README.md).
+
+An HDR entry in Advanced Video Options, where the game hides its own: a list of None, Soft, ACES
+and AgX that sets r_HDRRendering and d3d12_ToneMap, the tone map of the HDR pipeline of
+XRenderD3D12 (greyed out with another renderer). Patch Scripts.cmd applies it to
+FCData/Scripts.pak.
+
+diff --git a/Scripts/MenuScreens/Options/VideoAdv.lua b/Scripts/MenuScreens/Options/VideoAdv.lua
+--- a/Scripts/MenuScreens/Options/VideoAdv.lua
++++ b/Scripts/MenuScreens/Options/VideoAdv.lua
+@@ -395,6 +395,32 @@
+ 			},
+ 		},
+ 
++		-- HDR (Far Cry RayMaster), where the game hides its own: the HDR pipeline of XRenderD3D12
++		-- and its tone map (code below CreateScreenFromTable).
++		widget_RMHdr_Text =
++		{
++			skin = UI.skins.Label,
++			left = 490, top = 375,
++			width = 150,
++
++			text = "HDR",
++		},
++
++		widget_RMHdr =
++		{
++			skin = UI.skins.ComboBox,
++			left = 650, top = 375,
++			width = 120,
++
++			tabstop = 10,
++
++			user =
++			{
++				Initialize = nil,
++				UpdateAssignedGlobals = nil,
++			},
++		},
++
+ 		-- definition of "Lighting Quality" combo box
+ 	--	widget_HDR_Text =
+ 	--	{
+@@ -563,6 +589,57 @@
+ -- and create screen from table
+ UI:CreateScreenFromTable( "VideoAdvOptions", UI.PageOptionsVideoAdv.GUI );
+ 
++-- HDR (Far Cry RayMaster): the list sets r_HDRRendering and, while it is on, d3d12_ToneMap, the
++-- tone map of XRenderD3D12's HDR pipeline: None (no HDR), Soft (the soft shoulder: the game's
++-- picture, with what is brighter than white rolled off smoothly), ACES, AgX. The renderer reads
++-- them every frame, so they need no restart, and the presets of the page leave them as they are.
++-- With another renderer (no d3d12_ToneMap) the list is greyed out.
++UI.PageOptionsVideoAdv.GUI.widget_RMHdr.user.Initialize = function()
++	local widget = UI.PageOptionsVideoAdv.GUI.widget_RMHdr;
++	widget:Clear();
++	widget:AddItem( Localize( "None" ) );
++	widget:AddItem( "Soft" );
++	widget:AddItem( "ACES" );
++	widget:AddItem( "AgX" );
++
++	local hdr = tonumber( getglobal( "r_HDRRendering" ) ) or 0;
++	local tonemap = tonumber( getglobal( "d3d12_ToneMap" ) );
++	local index = 1;
++	if( hdr ~= 0 and tonemap ) then
++		-- tone maps 1 to 3; 0 (a clamp, set from the console) is shown as the soft shoulder
++		index = tonemap + 1;
++		if( index < 2 or index > 4 ) then
++			index = 2;
++		end
++	end
++	widget:SelectIndex( index );
++	widget.user.shownIndex = index;
++
++	if( tonemap ) then
++		UI:EnableWidget( widget );
++	else
++		UI:DisableWidget( widget );
++	end
++end
++
++UI.PageOptionsVideoAdv.GUI.widget_RMHdr.user.UpdateAssignedGlobals = function()
++	local widget = UI.PageOptionsVideoAdv.GUI.widget_RMHdr;
++	local index = widget:GetSelectionIndex();
++	-- unchanged: the console's settings stay as they are
++	if( not getglobal( "d3d12_ToneMap" ) or index == widget.user.shownIndex ) then
++		return;
++	end
++	if( index == 1 ) then
++		UI.PageOptionsVideoAdv.user:SetGlobal( "r_HDRRendering", 0 );
++	else
++		UI.PageOptionsVideoAdv.user:SetGlobal( "r_HDRRendering", 1 );
++		UI.PageOptionsVideoAdv.user:SetGlobal( "d3d12_ToneMap", index - 1 );
++	end
++	if( UI.PageOptionsVideoAdv.user.setglobalTestOnly == 0 ) then
++		widget.user.shownIndex = index;
++	end
++end
++
+ -- helper function for auto detect
+ function UI.PageOptionsVideoAdv.GUI:DumpMachineStats()
+ 	local cpuQuality = System:GetCPUQuality();

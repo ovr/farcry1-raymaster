@@ -322,7 +322,10 @@ it as well: it holds local, machine-specific instructions and is not committed (
   `--tolerance 1`) and of overlapping decals (DemoDecals: `--tolerance 6`); the fire and smoke of
   DemoParticles, the water of DemoQuality from its medium preset on and the walking figures in
   the background of the beach demos differ more and are compared by eye. So a larger difference
-  between `DemoShots/old` and the frames of our renderer is the renderer's.
+  between `DemoShots/old` and the frames of our renderer is the renderer's. Two builds of the
+  renderer can also differ in what the game animates, the same in every run of each build: the
+  seagulls over the water of DemoLevelAA (a wing a few pixels apart in frame 100), even when the
+  shaders are the same instruction for instruction.
 
 ## XRenderD3D12
 
@@ -365,9 +368,18 @@ it as well: it holds local, machine-specific instructions and is not committed (
     screen effects) draws into R16G16B16A16_FLOAT: an HDR target of the back buffer's size with
     the back buffer's depth buffer, or with an upscaler its scene colour. The materials keep the
     game's maths (gamma space), only nothing is clamped at 1 any more. The water's and the screen
-    effects' copies of the scene are kept apart (`m_SceneCopies`).
+    effects' copies of the scene are kept apart (`m_SceneCopies`). The water's reflection and the
+    environment cubes are drawn in that format too (they come before `BeginMainScene`, so they go
+    by `IsHdrOn`), so what they reflect keeps its light above white. The draws into that format
+    get pixel shaders of their own (`XR_HDR` in `Shaders/Shaders.cmake`, by
+    `SPipelineKey::nColorFormat`) with the steps below that only HDR has, so the general and water
+    programs of the other targets stay those without HDR instruction for instruction.
+  - The light of a colour is `pow(colour, 2.2)` up to 1 and linear above, `1 + 2.2 (colour - 1)`
+    (`HdrDecode` in `Shaders/Common.hlsli`): the game adds its colours in gamma space, and what it
+    adds up above white (additive sprites over each other) is light added up. With the power
+    above 1 too, the bloom of a fire is a ball.
   - Then, at the scene's size: a meter (the centre-weighted mean log2 luminance of the light,
-    `pow(colour, 2.2)`, reduced to 1 x 1), the adaptation of the exposure towards it (a 1 x 1
+    reduced to 1 x 1), the adaptation of the exposure towards it (a 1 x 1
     R32 EV, twice as fast towards a brighter scene; it starts at the meter's after a frame
     without the main view), the bloom (a soft-threshold prefilter against single bright pixels,
     6 levels from half the size down with 13 taps, back up with a 3 x 3 tent) and the resolve
@@ -386,6 +398,25 @@ it as well: it holds local, machine-specific instructions and is not committed (
     starts from.
     `d3d12_HDRDebug 1` shows the luminance in bands of 1 EV around middle grey (green), `2` the
     bloom alone. The frame dump gets the settings, the meter's mean and the adapted EV.
+  - What the game draws as light sources is brighter in the HDR targets (`IsHdrTarget`: not in
+    heat vision), each a factor of white's light, 1 the game's: `d3d12_HDRSun` (8) the sun's
+    flare, `d3d12_HDRSky` (2) the sky towards the sun (`DF2_SKY_GLOW`, falling off with the
+    cosine of the angle to the sun to the power 32), `d3d12_HDRGlow` (3) what glows. The flares,
+    coronas, procedural flares, additive particles and additive materials (not the stealth
+    effect) get it in their cores (`DF2_HDR_CORE`: by the fourth power of their texture's
+    brightness, so their soft edges stay the game's); the glow maps, which light a surface, all
+    over.
+  - Colour grading after the tone map, baked into a 32 x 32 x 32 table when a setting changes
+    (`ColorGrading.cpp`, a strip of 1024 x 32): `d3d12_Temperature` (-1 cooler to 1 warmer, up
+    to 100 mired from 6504 K, a Bradford adaptation) and `d3d12_Tint` (-1 green to 1 magenta),
+    `d3d12_Contrast` (around middle grey), `d3d12_Saturation`, then `d3d12_ColorLut`, a 3D
+    `.cube` file through the game's file system (a path in the game folder or its packs; an
+    error goes to the log once per file name, seen with `log_Verbosity` 1 or more, and the frame
+    dump gives the size read, 0 for none), mixed in by `d3d12_ColorLutAmount`. Neutral settings
+    use no table (the frames are those without it).
+  - The game's menu gets an entry from `assets/scripts/hdr-options.patch`: HDR in Advanced Video
+    Options, None / Soft / ACES / AgX for `r_HDRRendering` 0 or 1 with `d3d12_ToneMap` 1 to 3
+    (greyed out without `d3d12_ToneMap`, that is with another renderer).
 - `d3d12_DumpFrame 1` writes the render items of the next frame to
   `farcry1_testing1/XRenderD3D12_frame.txt` (never committed): the camera (position, angles,
   field of view, near and far plane, view and projection matrices), then for each item its list, sort

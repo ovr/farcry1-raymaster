@@ -17,7 +17,9 @@
 //	64 << r_EnvCMResolution texels wide and in world axes, laid out as the
 //	D3D cube faces: seen from inside, a face's picture is mirrored, so the
 //	culling is turned round. The objects with such a template are not drawn
-//	into the cubes (an object does not see itself).
+//	into the cubes (an object does not see itself). With r_HDRRendering the
+//	faces are in D3D12_HDR_FORMAT, as the main scene, so that what is
+//	brighter than white stays so in the reflection.
 //
 //////////////////////////////////////////////////////////////////////
 
@@ -81,6 +83,8 @@ void CD3D12Renderer::UpdateEnvCubes(std::span<const SRenderItem> Items)
       !p3D || !m_pDevice || !m_pDescriptors || std::none_of(Items.begin(), Items.end(), UsesEnvCube) || !EnsureFrame())
     return;
   const int nSize = 64 << std::clamp(CV_r_EnvCMResolution, 0, 2);
+  // In the main scene's format: HDR with r_HDRRendering (a cube of the other one is made anew).
+  const DXGI_FORMAT Format = IsHdrOn() ? D3D12_HDR_FORMAT : D3D12_BACKBUFFER_FORMAT;
 
   // The cubes of the frame, one per object or group of objects close together: the nearest cube
   // of an earlier frame follows the object, else it gets a new one (or the one unused the longest).
@@ -117,7 +121,7 @@ void CD3D12Renderer::UpdateEnvCubes(std::span<const SRenderItem> Items)
       FreeEnvCube(m_EnvCubes[nCube]);
     }
     SEnvCube &c = m_EnvCubes[nCube];
-    if (c.pColor && c.nSize != nSize)
+    if (c.pColor && (c.nSize != nSize || c.Format != Format))
       FreeEnvCube(c);
     if (!c.pColor)
     {
@@ -125,16 +129,17 @@ void CD3D12Renderer::UpdateEnvCubes(std::span<const SRenderItem> Items)
         h = m_pDescriptors->AllocRTV();
       c.hDSV = m_pDescriptors->AllocDSV();
       D3D12_SHADER_RESOURCE_VIEW_DESC Desc = {};
-      Desc.Format = D3D12_BACKBUFFER_FORMAT;
+      Desc.Format = Format;
       Desc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURECUBE;
       Desc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
       Desc.TextureCube.MipLevels = 1;
-      if (!m_pDevice->CreateCubeTargets(nSize, c.pColor, c.pDepth, c.hRTV, c.hDSV) || (c.nSRV = m_pDescriptors->AllocSRV(c.pColor.Get(), &Desc)) < 0)
+      if (!m_pDevice->CreateCubeTargets(nSize, c.pColor, c.pDepth, c.hRTV, c.hDSV, Format) || (c.nSRV = m_pDescriptors->AllocSRV(c.pColor.Get(), &Desc)) < 0)
       {
         FreeEnvCube(c);
         continue;
       }
       c.nSize = nSize;
+      c.Format = Format;
     }
     c.vPos = vPos;
     c.nUsedFrame = m_nFrames;
@@ -185,8 +190,9 @@ void CD3D12Renderer::UpdateEnvCubes(std::span<const SRenderItem> Items)
   for (const auto &[nCube, nFace] : Faces)
   {
     if (m_pFrameDump)
-      fprintf(m_pFrameDump.get(), "environment cube %d (%d): face %d from (%.2f %.2f %.2f)\n", nCube, m_EnvCubes[nCube].nSize, nFace,
-              m_EnvCubes[nCube].vPos.x, m_EnvCubes[nCube].vPos.y, m_EnvCubes[nCube].vPos.z);
+      fprintf(m_pFrameDump.get(), "environment cube %d (%d%s): face %d from (%.2f %.2f %.2f)\n", nCube, m_EnvCubes[nCube].nSize,
+              m_EnvCubes[nCube].Format == D3D12_HDR_FORMAT ? ", HDR" : "", nFace, m_EnvCubes[nCube].vPos.x, m_EnvCubes[nCube].vPos.y,
+              m_EnvCubes[nCube].vPos.z);
     DrawEnvCubeFace(m_EnvCubes[nCube], nFace);
   }
   m_pDevice->SetBackBufferTargets();

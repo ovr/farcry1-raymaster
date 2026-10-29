@@ -354,7 +354,7 @@ float4 ShadeWater(SWaterOutput In)
     F *= g_Draw.vParams0.y;
     float3 R = reflect(-V, N);
     float3 Rs = reflect(-V, Ns);
-    float3 vReflected = g_Draw.vParams1.y != 0 ? SkyBoxColor(R) : vScatter;
+    float3 vReflected = g_Draw.vParams1.y != 0 ? SkyBoxColor(R) * SkyGlow(R) : vScatter;
     if (g_Draw.vParams1.w != 0)
       vReflected = PlanarReflection(In.vWorldPos, Rs, fDistance * 0.3);
     float4 vSSR = ScreenReflection(In.vWorldPos, Rs, g_Frame.vScreen.xy * vInvSize);

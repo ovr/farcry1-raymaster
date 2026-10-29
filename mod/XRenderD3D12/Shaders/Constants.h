@@ -95,6 +95,8 @@ typedef float float4x4_t[16];
 #define DF2_REFL_AMOUNT     0x00001000  //!< with DF_CUBE0: tex0 rgb = cube * tex5 at uv0 (the reflect amount) + tex4 at uv0 * vAddColor.rgb (the texture), lit as tex0
 #define DF2_ALPHA_GLOW      0x00002000  //!< rgb += tex0 rgb * tex0 a after the light and the light map: the texture's alpha is a glow mask, unlit
 #define DF2_BUMP_OFFSET     0x00004000  //!< with DF_TEX0: tex0 looked up at uv0 + (tex3 at uv1 rg * 2 - 1) * vParams0.x, the texture wobbled by a normal map (the beach foam)
+#define DF2_SKY_GLOW        0x00008000  //!< the sky with r_HDRRendering: rgb *= SkyGlow (Common.hlsli) in the direction of the world position
+#define DF2_HDR_CORE        0x00010000  //!< a light added with r_HDRRendering: rgb *= HdrEncode(1 + (vHdrCore.x - 1) * m^4) (Common.hlsli), m its shape 0..1 (tex0's largest channel, times tex0 a with vHdrCore.y, times DF2_GLOW_FALLOFF): brighter in its core, its soft edge as the game's
 
 // SDrawConstants::nFlags of the post program (Post.hlsl): one mode, with POST_EFFECTS the effects drawn
 #define POST_DOWNSAMPLE     0x00000001  //!< the mean of tex0 over the target's pixel: vParams0.z x vParams0.z bilinear taps
@@ -117,6 +119,7 @@ typedef float float4x4_t[16];
 #define HDR_BLOOM_PREFILTER 0x00000010  //!< with HDR_BLOOM_DOWN: from the scene, exposed, the fireflies tamed, above the threshold
 #define HDR_BLOOM_UP        0x00000020  //!< the smaller level tex0 through a 3x3 tent, added to the target
 #define HDR_RESOLVE         0x00000040  //!< the scene tex0 exposed, with the bloom tex1, tone mapped to the display
+#define HDR_COLOR_LUT_SIZE  32          //!< the colour grading's table (ColorGrading.cpp): points along each axis
 
 #define XR_SAMPLER_LINEAR_WRAP  0
 #define XR_SAMPLER_LINEAR_CLAMP 1
@@ -140,6 +143,7 @@ struct SFrameConstants
   XR_FLOAT4(vSunSpec);            //!< rgb: the sun's specular colour (DF_SPECULAR)
   XR_FLOAT4(vJitter);             //!< the upscaler's (Upscaler.h): xy its jitter in clip space (xy += vJitter.xy * w), zw the target's pixels per pixel of the engine (DF_SCREEN_POS); 0, 0, 1, 1 without one
   XR_FLOAT4(vMipBias);            //!< x: the mip bias of the materials' textures (log2(render / display size) - 1 while upscaling, else 0)
+  XR_FLOAT4(vHdr);                //!< x: the light of the sky towards the sun times this (SkyGlow; 1: as the game's, always outside HDR targets)
 };
 
 //! b1: per draw.
@@ -183,6 +187,7 @@ struct SDrawConstants
   XR_FLOAT4(vAddColor);           //!< DF2_ADD_TEX4: rgb the factor of tex4, w added
   XR_FLOAT4(vHeat);               //!< DF2_HEAT: x the heat 0 (cold) to 1 (hot), y 1 for an additive draw
   XR_FLOAT4X4(mPrevWorldViewProj);  //!< the motion vectors of an upscaler: object to clip in the frame before (all 0: as mWorldViewProj, still on the screen)
+  XR_FLOAT4(vHdrCore);            //!< DF2_HDR_CORE: x the factor of the light in its core, y 1: the shape times tex0 a (a SRCALPHA blend)
 };
 
 #endif
