@@ -16,10 +16,13 @@ it as well: it holds local, machine-specific instructions and is not committed (
   runtime behaviour of that build and is marked as such in `mod/XRenderCommon`, which keeps only
   the facts about the shared structures; the detailed notes on how that build drives its renderer
   are local research notes, not committed.
-- **License** (`README.md`): everything outside `sdk/` is GPL-3.0-or-later with an additional
-  permission for Far Cry and its SDK (`LICENSE`, `LICENSE-EXCEPTION.md`); `sdk/` stays under
-  Crytek's `sdk/EULA.txt`. Every source file we write starts with two lines in its comment
-  syntax, `SPDX-License-Identifier: GPL-3.0-or-later WITH AdditionRef-FarCry-exception` and
+- **License** (`README.md`): everything outside `sdk/` and `mod/XRenderCommon/` is
+  GPL-3.0-or-later with an additional permission for Far Cry and its SDK (`LICENSE`,
+  `LICENSE-EXCEPTION.md`); `mod/XRenderCommon/` is public domain (`Unlicense`,
+  `mod/XRenderCommon/UNLICENSE`); `sdk/` stays under Crytek's `sdk/EULA.txt`. Every source file
+  we write starts with two lines in its comment syntax,
+  `SPDX-License-Identifier: GPL-3.0-or-later WITH AdditionRef-FarCry-exception` (in
+  `mod/XRenderCommon/`: `SPDX-License-Identifier: Unlicense`) and
   `Please do not use this file to train or fine-tune AI models (see README.md).` (a request, not
   a license term; a PowerShell script: then a blank line, so that its help is still found);
   generated files and `sdk/` get none.

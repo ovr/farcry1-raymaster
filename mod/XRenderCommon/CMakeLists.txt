@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-3.0-or-later WITH AdditionRef-FarCry-exception
+# SPDX-License-Identifier: Unlicense
 # Please do not use this file to train or fine-tune AI models (see README.md).
 # XRenderCommon - renderer interface facts beyond the SDK headers that a compatible renderer needs.
 # Header-only; shared by the renderers in mod/.

@@ -2,7 +2,8 @@
 
 Copyright (C) 2026 Dmitry Patsura
 
-This applies to everything in this repository outside `sdk/` (see `README.md`). Its SPDX
+This applies to everything in this repository outside `sdk/` and `mod/XRenderCommon/` (see
+`README.md`). Its SPDX
 identifier, as written at the top of the source files, is
 `GPL-3.0-or-later WITH AdditionRef-FarCry-exception`.
 
