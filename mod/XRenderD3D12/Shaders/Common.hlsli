@@ -83,14 +83,19 @@ float3 SafeNormalize(float3 v)
   return fLen2 > 1e-12 ? v * rsqrt(fLen2) : float3(0, 0, 0);
 }
 
+//! The depth of a point at vPos along the view axis. The fog goes by it, as Direct3D 9's fog
+//! without range fog: the fog's distances are set for that, and by the distance to the camera the
+//! sides of a wide view lie in the fog a quarter to a half deeper.
+float ViewDepth(float3 vPos)
+{
+  return abs(mul(float4(vPos, 1), g_Frame.mView).z);
+}
+
 //! How much of a point at vPos the scene's fog (vFogParams) leaves: 1 before its start, 0 after its
-//! end, linear between over the point's depth along the view axis, as Direct3D 9's fog without
-//! range fog: the fog's distances are set for that, and by the distance to the camera the sides of
-//! a wide view lie in the fog a quarter to a half deeper.
+//! end, linear between over the point's ViewDepth.
 float SceneFog(float3 vPos)
 {
-  float fDepth = abs(mul(float4(vPos, 1), g_Frame.mView).z);
-  return saturate((g_Frame.vFogParams.y - fDepth) * g_Frame.vFogParams.z);
+  return saturate((g_Frame.vFogParams.y - ViewDepth(vPos)) * g_Frame.vFogParams.z);
 }
 
 //! Heat vision (DF2_HEAT): a cold surface shows the luminance L of its colour in a light blue

@@ -225,9 +225,9 @@ void MaterialLighting(float3 vPos, float3 vN, float fSun, out float3 vDiffuse, o
 //! the fog lies under the volume's layer (vParams0.x). Seen from inside, every point under the
 //! layer is in it; seen from above, the fog of a point grows from nothing at the layer to all of
 //! it 5 m down, the faster the nearer the camera is to the layer (the view crosses less of the
-//! fog the steeper it looks down into it). Times the fog of the distance, 1 - exp(-d * vParams0.y),
-//! 99 % at twice the volume's fog distance. The volume's cap (vParams0.z), the layer seen from
-//! below, has the fog of the distance from inside and none from above.
+//! fog the steeper it looks down into it). Times the fog of the depth d along the view axis
+//! (ViewDepth), 1 - exp(-d * vParams0.y), 99 % at twice the volume's fog distance. The volume's cap
+//! (vParams0.z), the layer seen from below, has the fog of the depth from inside and none from above.
 float FogVolumeAlpha(float3 vPos)
 {
   float fCamera = g_Frame.vCameraPos.z - g_Draw.vParams0.x;
@@ -241,7 +241,7 @@ float FogVolumeAlpha(float3 vPos)
     fGate = 1;
   else
     fGate = 1 - pow(1 - saturate(fDepth / 5), lerp(3, 1.6, saturate(fCamera / 5)));
-  return fGate * (1 - exp(-distance(vPos, g_Frame.vCameraPos.xyz) * g_Draw.vParams0.y));
+  return fGate * (1 - exp(-ViewDepth(vPos) * g_Draw.vParams0.y));
 }
 
 //! The glass of a scope (DF2_SCOPE_LENS): the copy of the scene (tex0) around the middle of the
