@@ -40,6 +40,7 @@ enum ED3D12Program
   eD3D12P_General = 0,    //!< Shaders/General.hlsl: everything the DF_* flags describe
   eD3D12P_Water,          //!< Shaders/Water.hlsl: water surfaces (refraction, reflection, waves)
   eD3D12P_Post,           //!< Shaders/Post.hlsl: the screen effects (POST_* flags)
+  eD3D12P_Hdr,            //!< Shaders/Hdr.hlsl: exposure, bloom and tone mapping of the HDR scene (HDR_* flags)
   eD3D12P_Num
 };
 
@@ -66,7 +67,14 @@ struct SPipelineKey
                           //!< + D3D12_SCENE_DEPTH_FORMAT; DrawGeometry makes 0 into 3 there): the general program's opaque
                           //!< draws write the motion vectors, its depth writes the upscaler's depth, the water both
   uint8 bWireframe;       //!< fill mode wireframe (SetPolygonMode R_WIREFRAME_MODE)
+  uint8 nColorFormat;     //!< the format of colour target 0: PIPELINE_COLOR_* (DrawGeometry sets it for the main view's target)
+  uint8 nPad[3];          //!< 0: no padding bytes in the key
 };
+
+//! SPipelineKey::nColorFormat.
+constexpr uint8 PIPELINE_COLOR_DEFAULT = 0;       //!< nTarget 0 and 3: D3D12_BACKBUFFER_FORMAT, 1: R8G8B8A8_UNORM
+constexpr uint8 PIPELINE_COLOR_HDR = 1;           //!< D3D12_HDR_FORMAT
+constexpr uint8 PIPELINE_COLOR_R32F = 2;          //!< R32_FLOAT
 
 class CD3D12Pipeline
 {

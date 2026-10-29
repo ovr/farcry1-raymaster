@@ -78,6 +78,15 @@ bool HasFlag2(uint nFlags2)
   return (g_Draw.nFlags2 & nFlags2) != 0;
 }
 
+//! A colour as the scene's target takes it: no negative light, the alpha 0 to 1. A UNORM target
+//! clamps so before blending; an HDR one (D3D12_HDR_FORMAT) keeps light above 1, but a negative
+//! value (e.g. a detail texture's 2 * rgb + tex1 - 0.5) or an alpha out of range must not reach
+//! the blends after it.
+float4 SceneOutput(float4 vColor)
+{
+  return float4(max(vColor.rgb, 0), saturate(vColor.a));
+}
+
 //! A normalised vector, (0, 0, 0) for a zero vector.
 float3 SafeNormalize(float3 v)
 {

@@ -7,7 +7,8 @@
 //	and flags as the original renderer registers them. Modules look renderer
 //	variables up by name (IConsole::GetCVar) and do not all check for NULL
 //	(r_VolumetricFog with a screen effect), so every one exists, even when
-//	this renderer does not read it.
+//	this renderer does not read it. The few it reads are looked up by name
+//	too (IsVolumetricFogOn, IsScopeLensOn, IsHdrOn).
 //
 //////////////////////////////////////////////////////////////////////
 
@@ -284,4 +285,11 @@ bool CD3D12Renderer::IsScopeLensOn()
   if (!m_pScopeLens && iConsole)
     m_pScopeLens = iConsole->GetCVar("r_ScopeLens_fx");
   return m_pScopeLens && m_pScopeLens->GetIVal() != 0;
+}
+
+bool CD3D12Renderer::IsHdrOn()
+{
+  if (!m_pHdrRendering && iConsole)
+    m_pHdrRendering = iConsole->GetCVar("r_HDRRendering");
+  return m_pHdrRendering && m_pHdrRendering->GetIVal() != 0;
 }

@@ -561,7 +561,7 @@ struct SPixelOutput
 SPixelOutput PSMain(SVertexOutput In)
 {
   SPixelOutput Out;
-  Out.vColor = ShadePixel(In);
+  Out.vColor = SceneOutput(ShadePixel(In));
   Out.vMotion = MotionVector(In.vCurClip, In.vPrevClip);
   Out.fDepth = In.vPos.z;
   return Out;
@@ -569,6 +569,6 @@ SPixelOutput PSMain(SVertexOutput In)
 #else
 float4 PSMain(SVertexOutput In) : SV_Target
 {
-  return ShadePixel(In);
+  return SceneOutput(ShadePixel(In));
 }
 #endif

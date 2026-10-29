@@ -357,6 +357,35 @@ it as well: it holds local, machine-specific instructions and is not committed (
     loader and AMD's license next to `XRenderD3D12.dll`.
   - For comparisons, DemoLevel with `-DemoArgs '--exec-at 1 "d3d12_Upscaler fsr|d3d12_UpscaleMode
     0"'` against the same run without it.
+- The game's own `r_HDRRendering` (0 by default) turns on the HDR pipeline of the main view
+  (`Hdr.cpp`, `Shaders/Hdr.hlsl`); it is read every frame. With it 0 the frames are those of the
+  renderer without it (DemoCompare difference 0). The game's other `r_HDR*` variables are not
+  read.
+  - The main view's 3D scene (`BeginMainScene` in `BeginScene3D` to `EndMainScene` before the
+    screen effects) draws into R16G16B16A16_FLOAT: an HDR target of the back buffer's size with
+    the back buffer's depth buffer, or with an upscaler its scene colour. The materials keep the
+    game's maths (gamma space), only nothing is clamped at 1 any more. The water's and the screen
+    effects' copies of the scene are kept apart (`m_SceneCopies`).
+  - Then, at the scene's size: a meter (the centre-weighted mean log2 luminance of the light,
+    `pow(colour, 2.2)`, reduced to 1 x 1), the adaptation of the exposure towards it (a 1 x 1
+    R32 EV, twice as fast towards a brighter scene; it starts at the meter's after a frame
+    without the main view), the bloom (a soft-threshold prefilter against single bright pixels,
+    6 levels from half the size down with 13 taps, back up with a 3 x 3 tent) and the resolve
+    (the exposed light plus the bloom, tone mapped, gamma encoded) into the back buffer. With an
+    upscaler the resolve goes into an LDR target of the render size, which the upscaler gets as
+    it would the scene. The screen effects and the 2D stay LDR on the back buffer. In heat
+    vision the scene is only clamped (its colours are a palette), and the exposure is held.
+  - `d3d12_ToneMap`: 0 clamp, 1 soft shoulder (the default: the game's picture up to
+    `d3d12_ToneMapKnee`, then each channel rolls off smoothly to 1 where the original clips it,
+    so the sun still goes white and bright fire yellow), 2 ACES (fitted), 3 AgX.
+    `d3d12_Exposure` is a compensation in EV; `d3d12_AutoExposure 0` makes the exposure
+    2^`d3d12_Exposure`; `d3d12_ExposureMin` / `d3d12_ExposureMax` limit the automatic one (EV,
+    0 is the game's daylight; by default 0 and 1.5: the game's sky and daylight are made for the
+    display, so only dark views get brighter) and `d3d12_ExposureSpeed` is its rate per second.
+    `d3d12_Bloom` is the bloom's strength (0 off), `d3d12_BloomThreshold` the exposed light it
+    starts from.
+    `d3d12_HDRDebug 1` shows the luminance in bands of 1 EV around middle grey (green), `2` the
+    bloom alone. The frame dump gets the settings, the meter's mean and the adapted EV.
 - `d3d12_DumpFrame 1` writes the render items of the next frame to
   `farcry1_testing1/XRenderD3D12_frame.txt` (never committed): the camera (position, angles,
   field of view, near and far plane, view and projection matrices), then for each item its list, sort

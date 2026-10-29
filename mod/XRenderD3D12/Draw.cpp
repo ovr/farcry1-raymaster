@@ -127,6 +127,9 @@ void CD3D12Renderer::DrawGeometry(const SPipelineKey &Key, const SDrawConstants 
   FullKey.nStreams = (pTexCoord1 ? PIPELINE_STREAM_TEXCOORD1 : 0) | (pTangents ? PIPELINE_STREAM_TANGENTS : 0);
   if (bScene && FullKey.nTarget == 0)
     FullKey.nTarget = 3;
+  // The main view's target in its format: the HDR target, an upscaler's HDR scene.
+  if (!bOffscreen && (FullKey.nTarget == 0 || FullKey.nTarget == 3) && m_pDevice->GetMainColorFormat() == D3D12_HDR_FORMAT)
+    FullKey.nColorFormat = PIPELINE_COLOR_HDR;
   ID3D12PipelineState *pPSO = m_pPipeline->GetPSO(FullKey);
   if (!pPSO)
     return;

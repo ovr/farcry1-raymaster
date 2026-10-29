@@ -144,6 +144,23 @@ void CD3D12Renderer::RegisterVariables()
                      "3 Performance (1/2), 4 Ultra Performance (1/3)");
   iConsole->Register("d3d12_UpscaleSharpness", &CV_d3d12_UpscaleSharpness, 0.5f, VF_DUMPTODISK, "The upscaler's sharpening, 0 (none) to 1");
   iConsole->Register("d3d12_UpscaleDebug", &CV_d3d12_UpscaleDebug, 0, 0, "1: the upscaler's debug view; 2: the depth it gets (near black, far white)");
+  // The HDR pipeline (r_HDRRendering, Hdr.cpp).
+  iConsole->Register("d3d12_ToneMap", &CV_d3d12_ToneMap, 1, VF_DUMPTODISK,
+                     "With r_HDRRendering, the tone map: 0 clamp, 1 soft shoulder (the game's look up to d3d12_ToneMapKnee, then each channel rolls off to 1), 2 ACES fitted, 3 AgX");
+  iConsole->Register("d3d12_ToneMapKnee", &CV_d3d12_ToneMapKnee, 0.85f, VF_DUMPTODISK,
+                     "Where the soft shoulder of d3d12_ToneMap 1 starts: a display value, 0 to 0.99");
+  iConsole->Register("d3d12_Exposure", &CV_d3d12_Exposure, 0.0f, VF_DUMPTODISK, "With r_HDRRendering, the exposure's compensation in EV (0: none)");
+  iConsole->Register("d3d12_AutoExposure", &CV_d3d12_AutoExposure, 1, VF_DUMPTODISK,
+                     "With r_HDRRendering, the exposure adapts to the scene (between d3d12_ExposureMin and Max); 0: d3d12_Exposure alone");
+  iConsole->Register("d3d12_ExposureMin", &CV_d3d12_ExposureMin, 0.0f, VF_DUMPTODISK,
+                     "The least EV of the automatic exposure (0, the default: the game's daylight; below it bright views get darker)");
+  iConsole->Register("d3d12_ExposureMax", &CV_d3d12_ExposureMax, 1.5f, VF_DUMPTODISK, "The most EV of the automatic exposure (dark scenes made brighter)");
+  iConsole->Register("d3d12_ExposureSpeed", &CV_d3d12_ExposureSpeed, 1.5f, VF_DUMPTODISK,
+                     "The automatic exposure's rate of adaptation per second (twice that towards a brighter scene)");
+  iConsole->Register("d3d12_Bloom", &CV_d3d12_Bloom, 0.5f, VF_DUMPTODISK, "With r_HDRRendering, the strength of the bloom (0: none)");
+  iConsole->Register("d3d12_BloomThreshold", &CV_d3d12_BloomThreshold, 1.0f, VF_DUMPTODISK,
+                     "The light above which the bloom starts (exposed, linear: 1 is the display's white)");
+  iConsole->Register("d3d12_HDRDebug", &CV_d3d12_HDRDebug, 0, 0, "With r_HDRRendering: 1 the luminance in EV bands from middle grey (green), 2 the bloom alone");
 }
 
 //////////////////////////////////////////////////////////////////////////
@@ -361,6 +378,7 @@ void CD3D12Renderer::Release()
   ReleaseScreenEffects();
   ReleaseFlares();
   ReleaseUpscaler();
+  ReleaseHdr();
   m_pDetailTexture = nullptr;   // released with every texture
   m_pDefaultCube = nullptr;
   m_pBeachTexture = m_pBeachWetTexture = m_pBeachBumpTexture = nullptr;
@@ -468,7 +486,7 @@ void CD3D12Renderer::Update (void)
   if (!m_pDevice)
     return;
   EnsureFrame();
-  UpscaleScene();               // a main view whose EF_EndEf3D did not end (none expected)
+  EndMainScene();               // a main view whose EF_EndEf3D did not end (none expected)
   DrawQueuedBoxes();
   // Shown only when swapping is on: the hidden frames of a level load are drawn but never seen.
   m_pDevice->EndFrame(m_bSwapBuffers, m_bVSync || CV_r_vsync != 0);

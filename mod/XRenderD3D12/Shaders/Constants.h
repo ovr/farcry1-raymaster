@@ -109,6 +109,15 @@ typedef float float4x4_t[16];
 #define POST_SUN_MASK       0x00000200  //!< the sun's mask: the patch tex0 blurred towards its middle (SunMask, Post.hlsl)
 #define POST_DEPTH_VIEW     0x00000400  //!< the depth tex0 as grey: the distance from vParams1.x (near, black) to vParams1.y (far, white), log scale
 
+// SDrawConstants::nFlags of the HDR program (Hdr.hlsl, Hdr.cpp): one mode
+#define HDR_LUMINANCE       0x00000001  //!< the meter's first level: (w * log2 L, w) of the scene tex0 over the target's texel, w the centre weight
+#define HDR_REDUCE          0x00000002  //!< the mean of tex0 over the target's texel: vParams0.z x vParams0.z bilinear taps
+#define HDR_ADAPT           0x00000004  //!< the exposure (EV) towards the meter's (tex0, 1 x 1) from the one before (tex1)
+#define HDR_BLOOM_DOWN      0x00000008  //!< the bloom's next level: 13 taps of tex0
+#define HDR_BLOOM_PREFILTER 0x00000010  //!< with HDR_BLOOM_DOWN: from the scene, exposed, the fireflies tamed, above the threshold
+#define HDR_BLOOM_UP        0x00000020  //!< the smaller level tex0 through a 3x3 tent, added to the target
+#define HDR_RESOLVE         0x00000040  //!< the scene tex0 exposed, with the bloom tex1, tone mapped to the display
+
 #define XR_SAMPLER_LINEAR_WRAP  0
 #define XR_SAMPLER_LINEAR_CLAMP 1
 #define XR_SAMPLER_POINT_WRAP   2

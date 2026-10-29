@@ -22,6 +22,7 @@
 #include "Renderer.h"
 #include "D3D12Device.h"
 #include "D3D12Descriptors.h"
+#include "D3D12Upload.h"
 #include "Scene.h"
 
 namespace
@@ -119,9 +120,9 @@ bool CD3D12Renderer::UpdateUpscaler()
   if (!m_pUpscaler)
     return false;
 
-  // The scene targets of the mode.
+  // The scene targets of the mode, their colour HDR or not.
   const int nMode = std::clamp(CV_d3d12_UpscaleMode, 0, eUM_Num - 1);
-  if (nMode != m_nUpscaleMode)
+  if (nMode != m_nUpscaleMode || m_bHdrScene != m_bUpscaleHdr)
   {
     if (m_nUpscaleOutputSRV >= 0)
       m_pDescriptors->FreeSRV(m_nUpscaleOutputSRV);
@@ -132,7 +133,7 @@ bool CD3D12Renderer::UpdateUpscaler()
     m_nUpscaleOutputSRV = m_nUpscaleColorSRV = m_nUpscaleDepthSRV = -1;
     int rw = w, rh = h;
     m_pUpscaler->GetRenderSize(nMode, rw, rh);
-    if (!m_pDevice->SetSceneSize(rw, rh) || (m_nUpscaleOutputSRV = m_pDescriptors->AllocSRV(m_pDevice->GetSceneOutput(), nullptr)) < 0 ||
+    if (!m_pDevice->SetSceneSize(rw, rh, m_bHdrScene ? D3D12_HDR_FORMAT : D3D12_BACKBUFFER_FORMAT) || (m_nUpscaleOutputSRV = m_pDescriptors->AllocSRV(m_pDevice->GetSceneOutput(), nullptr)) < 0 ||
         (m_nUpscaleColorSRV = m_pDescriptors->AllocSRV(m_pDevice->GetSceneColor(), nullptr)) < 0 ||
         (m_nUpscaleDepthSRV = m_pDescriptors->AllocSRV(m_pDevice->GetUpscaleDepth(), nullptr)) < 0)
     {
@@ -140,9 +141,12 @@ bool CD3D12Renderer::UpdateUpscaler()
       ReleaseUpscaler();
       return false;
     }
+    // A new mode starts without history; the same with the colour HDR or not keeps it (the upscaler gets LDR colours both ways).
+    if (nMode != m_nUpscaleMode)
+      m_bUpscaleReset = true;
     m_nUpscaleMode = nMode;
-    m_bUpscaleReset = true;
-    iLog->Log("XRenderD3D12: %s, %s: %d x %d to %d x %d", m_pUpscaler->GetName(), s_ModeNames[nMode], rw, rh, w, h);
+    m_bUpscaleHdr = m_bHdrScene;
+    iLog->Log("XRenderD3D12: %s, %s: %d x %d to %d x %d%s", m_pUpscaler->GetName(), s_ModeNames[nMode], rw, rh, w, h, m_bHdrScene ? ", HDR" : "");
   }
   return true;
 }
@@ -163,9 +167,10 @@ void CD3D12Renderer::ReleaseUpscaler()
   }
   m_nUpscaleOutputSRV = m_nUpscaleColorSRV = m_nUpscaleDepthSRV = -1;
   if (m_pDevice)
-    m_pDevice->SetSceneSize(0, 0);
+    m_pDevice->SetSceneSize(0, 0, D3D12_BACKBUFFER_FORMAT);
   m_pUpscaler.reset();
   m_nUpscaleMode = -1;
+  m_bUpscaleHdr = false;
   m_bUpscaling = false;
   m_bUpscaleReset = true;
   m_ObjectMotion.clear();
@@ -236,12 +241,25 @@ void CD3D12Renderer::UpscaleScene()
     return;
   m_bUpscaling = false;
   InvalidateFrameConstants();
-  GpuSection("upscale");
   m_pDevice->EndScene();
+
+  // An HDR scene is tone mapped at its size first: the upscaler gets the LDR colours it is made for.
+  CD3D12Texture *pLdr = nullptr;
+  if (m_bHdrScene)
+  {
+    GpuSection("hdr");
+    pLdr = ResolveHdr(m_nUpscaleColorSRV, m_pDevice->GetSceneWidth(), m_pDevice->GetSceneHeight(), true);
+    InvalidateFrameConstants();
+  }
+  GpuSection("upscale");
+  // The upscaler reads it in a compute shader.
+  if (pLdr)
+    m_pDevice->Transition(pLdr->m_pResource, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE,
+                          D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE | D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
 
   SUpscaleInputs In;
   In.pCmdList = m_pDevice->GetCmdList();
-  In.pColor = m_pDevice->GetSceneColor();
+  In.pColor = pLdr ? pLdr->m_pResource : m_pDevice->GetSceneColor();
   In.pDepth = m_pDevice->GetUpscaleDepth();
   In.pVelocity = m_pDevice->GetSceneVelocity();
   In.pOutput = m_pDevice->GetSceneOutput();
@@ -260,6 +278,9 @@ void CD3D12Renderer::UpscaleScene()
   In.bDebugView = CV_d3d12_UpscaleDebug == 1;
   const bool bUpscaled = m_pUpscaler->Dispatch(In);
   m_pDevice->BindRootSignature();
+  if (pLdr)
+    m_pDevice->Transition(pLdr->m_pResource, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE | D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE,
+                          D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
 
   // Its picture over the whole back buffer (else the scene stretched; with d3d12_UpscaleDebug 2
   // the depth it got), then the depth buffer cleared for what is drawn in 3D after the scene.
@@ -279,7 +300,7 @@ void CD3D12Renderer::UpscaleScene()
   Key.nCull = R_CULL_NONE;
   SDrawConstants dc = DefaultDrawConstants();
   dc.nFlags = POST_BLEND;
-  dc.nTex0 = (uint32)(bUpscaled ? m_nUpscaleOutputSRV : m_nUpscaleColorSRV);
+  dc.nTex0 = (uint32)(bUpscaled ? m_nUpscaleOutputSRV : pLdr ? pLdr->m_nSRV : m_nUpscaleColorSRV);
   Set4(dc.vParams0, 1.0f / w, 1.0f / h, 0, 0);
   Set4(dc.vParams1, 1, 1, 1, 1);
   if (CV_d3d12_UpscaleDebug == 2)

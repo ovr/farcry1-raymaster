@@ -29,6 +29,7 @@ constexpr DXGI_FORMAT D3D12_SCENE_DEPTH_FORMAT = DXGI_FORMAT_D32_FLOAT; //!< the
 constexpr DXGI_FORMAT D3D12_VELOCITY_FORMAT = DXGI_FORMAT_R16G16_FLOAT; //!< the scene targets' motion vectors
 constexpr DXGI_FORMAT D3D12_UPSCALE_DEPTH_FORMAT = DXGI_FORMAT_R32_FLOAT; //!< the scene targets' depth for an upscaler (with the water's)
 constexpr DXGI_FORMAT D3D12_UPSCALE_FORMAT = DXGI_FORMAT_R8G8B8A8_UNORM; //!< an upscaler's output (unordered access, which B8G8R8A8 may not have)
+constexpr DXGI_FORMAT D3D12_HDR_FORMAT = DXGI_FORMAT_R16G16B16A16_FLOAT;  //!< the main view's colour with r_HDRRendering (Hdr.cpp)
 
 class CD3D12Device
 {
@@ -93,14 +94,14 @@ public:
   void Transition(ID3D12Resource *pRes, D3D12_RESOURCE_STATES Before, D3D12_RESOURCE_STATES After);
 
   //! The scene targets of an upscaler: the main view drawn at nWidth x nHeight into a colour target
-  //! (D3D12_BACKBUFFER_FORMAT), the motion vectors (D3D12_VELOCITY_FORMAT), the depth for the
-  //! upscaler (D3D12_UPSCALE_DEPTH_FORMAT: the nearest of the depth writes and of the water, which
-  //! does not write the depth buffer) and a depth buffer (D3D12_SCENE_DEPTH_FORMAT), and the
-  //! upscaler's output of the back buffer's size (D3D12_UPSCALE_FORMAT). Made again when the size
-  //! (or the back buffer's) changed; 0 x 0 releases them. Outside BeginScene .. EndScene the four
-  //! are in the state PIXEL_SHADER_RESOURCE | NON_PIXEL_SHADER_RESOURCE and the output in
-  //! UNORDERED_ACCESS.
-  bool SetSceneSize(int nWidth, int nHeight);
+  //! (ColorFormat: D3D12_BACKBUFFER_FORMAT, or D3D12_HDR_FORMAT), the motion vectors
+  //! (D3D12_VELOCITY_FORMAT), the depth for the upscaler (D3D12_UPSCALE_DEPTH_FORMAT: the nearest
+  //! of the depth writes and of the water, which does not write the depth buffer) and a depth
+  //! buffer (D3D12_SCENE_DEPTH_FORMAT), and the upscaler's output of the back buffer's size
+  //! (D3D12_UPSCALE_FORMAT). Made again when the size (or the back buffer's) or the format
+  //! changed; 0 x 0 releases them. Outside BeginScene .. EndScene the four are in the state
+  //! PIXEL_SHADER_RESOURCE | NON_PIXEL_SHADER_RESOURCE and the output in UNORDERED_ACCESS.
+  bool SetSceneSize(int nWidth, int nHeight, DXGI_FORMAT ColorFormat);
   int GetSceneWidth() const { return m_nSceneWidth; }
   int GetSceneHeight() const { return m_nSceneHeight; }
   ID3D12Resource *GetSceneColor() const { return m_pSceneColor.Get(); }
@@ -122,6 +123,22 @@ public:
   //! The size of the main view's target: the scene targets' in the scene, else the back buffer's.
   int GetMainWidth() const { return m_bInScene ? m_nSceneWidth : m_nWidth; }
   int GetMainHeight() const { return m_bInScene ? m_nSceneHeight : m_nHeight; }
+
+  //! The HDR target of the main view without an upscaler: a colour target of the back buffer's
+  //! size (D3D12_HDR_FORMAT) drawn with the back buffer's depth buffer. bOn makes it (again when
+  //! the back buffer's size changed), false releases it. Outside BeginHdr .. EndHdr it is in the
+  //! state PIXEL_SHADER_RESOURCE | NON_PIXEL_SHADER_RESOURCE.
+  bool SetHdrTarget(bool bOn);
+  ID3D12Resource *GetHdrColor() const { return m_pHdrColor.Get(); }
+  //! From here (in a frame) until EndHdr the main view draws into the HDR target instead of the
+  //! back buffer (SetBackBufferTargets binds it with the back buffer's depth buffer).
+  void BeginHdr();
+  //! The HDR target back to a shader resource; the back buffer bound again.
+  void EndHdr();
+  bool IsInHdr() const { return m_bInHdr; }
+  //! The colour format of the main view's target: the scene's colour in the scene, the HDR
+  //! target's in BeginHdr .. EndHdr, else the back buffer's.
+  DXGI_FORMAT GetMainColorFormat() const { return m_bInScene ? m_SceneColorFormat : m_bInHdr ? D3D12_HDR_FORMAT : D3D12_BACKBUFFER_FORMAT; }
 
   //! An off screen target of nWidth x nHeight: pColor in the back buffer's format (in the state
   //! PIXEL_SHADER_RESOURCE while it is not drawn into) and pDepth (D24S8, DEPTH_WRITE), their views
@@ -154,13 +171,14 @@ public:
   void ClearDepth(float fDepth, uint8 nStencil, bool bDepth, bool bStencil);
 
   //! Textures of the main view's target (GetMainWidth x GetMainHeight) for CopyTargets: pColor in
-  //! the back buffer's format, pDepth in the depth buffer's family (read as GetMainDepthSRVFormat);
-  //! both in PIXEL_SHADER_RESOURCE state. Without pDepth only the colour copy is made.
+  //! its format (GetMainColorFormat), pDepth in the depth buffer's family (read as
+  //! GetMainDepthSRVFormat); both in PIXEL_SHADER_RESOURCE state. Without pDepth only the colour
+  //! copy is made.
   bool CreateTargetCopies(ComPtr<ID3D12Resource> &pColor, ComPtr<ID3D12Resource> *pDepth);
   //! How a depth copy of CreateTargetCopies is read: R24_UNORM_X8_TYPELESS (the back buffer's
   //! D24S8), R32_FLOAT in the scene.
   DXGI_FORMAT GetMainDepthSRVFormat() const { return m_bInScene ? DXGI_FORMAT_R32_FLOAT : DXGI_FORMAT_R24_UNORM_X8_TYPELESS; }
-  //! Copies the main view's target (the back buffer or the scene's colour) and its depth buffer
+  //! Copies the main view's target (the back buffer, the HDR target or the scene's colour) and its depth buffer
   //! (when pDepth is given) as drawn so far in this frame into the textures of CreateTargetCopies
   //! (PIXEL_SHADER_RESOURCE before and after); nothing when their size or format is another.
   void CopyTargets(ID3D12Resource *pColor, ID3D12Resource *pDepth);
@@ -214,7 +232,8 @@ private:
   bool CreateSwapChainBuffers();
   void ReleaseSwapChainBuffers();
   void ReleaseSceneTargets();
-  //! The scene targets' views: n 0 the colour, 1 the motion vectors.
+  //! The scene targets' views: n 0 the colour, 1 the motion vectors, 2 the upscaler's depth; 3 the
+  //! HDR target's.
   D3D12_CPU_DESCRIPTOR_HANDLE SceneRTV(int n) const;
   D3D12_CPU_DESCRIPTOR_HANDLE SceneDSV() const;
   //! Resets the slot's allocator and the list and binds the heap, root signature and targets.
@@ -252,7 +271,10 @@ private:
   ComPtr<ID3D12Resource> m_pSceneColor, m_pSceneVelocity, m_pUpscaleDepth, m_pSceneDepth, m_pSceneOutput;   //!< SetSceneSize
   int m_nSceneWidth = 0, m_nSceneHeight = 0;
   int m_nSceneOutputWidth = 0, m_nSceneOutputHeight = 0;
+  DXGI_FORMAT m_SceneColorFormat = D3D12_BACKBUFFER_FORMAT;
   bool m_bInScene = false;                          //!< BeginScene .. EndScene
+  ComPtr<ID3D12Resource> m_pHdrColor;               //!< SetHdrTarget
+  bool m_bInHdr = false;                            //!< BeginHdr .. EndHdr
 
   int m_nWidth = 0, m_nHeight = 0;
   int m_nFrameSlot = 0;

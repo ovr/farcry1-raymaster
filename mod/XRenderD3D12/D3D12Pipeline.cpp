@@ -25,6 +25,8 @@
 #include "Water_Velocity_PS.h"
 #include "Post_VS.h"
 #include "Post_PS.h"
+#include "Hdr_VS.h"
+#include "Hdr_PS.h"
 
 using Microsoft::WRL::ComPtr;
 
@@ -58,6 +60,7 @@ namespace
     { "General", g_General_VS, sizeof(g_General_VS), g_General_PS, sizeof(g_General_PS) },
     { "Water", g_Water_VS, sizeof(g_Water_VS), g_Water_PS, sizeof(g_Water_PS) },
     { "Post", g_Post_VS, sizeof(g_Post_VS), g_Post_PS, sizeof(g_Post_PS) },
+    { "Hdr", g_Hdr_VS, sizeof(g_Hdr_VS), g_Hdr_PS, sizeof(g_Hdr_PS) },
   };
 
   //! Input slot 1: what a vertex format lacks, read with stride 0 by every vertex.
@@ -166,7 +169,7 @@ namespace
   static_assert(sizeof(struct_VERTEX_FORMAT_P3F_N_COL4UB_COL4UB_TEX2F) == 40);
   static_assert(sizeof(SPipTangents) == 36);
   static_assert(sizeof(SDefaultStream) == 72);
-  static_assert(sizeof(SPipelineKey) == 12, "SPipelineKey is hashed and compared as bytes");
+  static_assert(sizeof(SPipelineKey) == 16, "SPipelineKey is hashed and compared as bytes");
 
   //! The most elements of an input layout.
   constexpr int MAX_INPUT_ELEMENTS = 9;
@@ -633,7 +636,8 @@ ComPtr<ID3D12PipelineState> CD3D12Pipeline::CreatePSO(const SPipelineKey &Key)
   Desc.PrimitiveTopologyType = nTopology >= D3D12_PRIMITIVE_TOPOLOGY_TYPE_POINT && nTopology <= D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE ?
     (D3D12_PRIMITIVE_TOPOLOGY_TYPE)nTopology : D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
   Desc.NumRenderTargets = bShadowMap ? 0 : bScene ? 3 : 1;
-  Desc.RTVFormats[0] = bShadowMap ? DXGI_FORMAT_UNKNOWN : bDepth ? D3D12_BACKBUFFER_FORMAT : DXGI_FORMAT_R8G8B8A8_UNORM;
+  Desc.RTVFormats[0] = bShadowMap ? DXGI_FORMAT_UNKNOWN : Key.nColorFormat == PIPELINE_COLOR_HDR ? D3D12_HDR_FORMAT :
+                       Key.nColorFormat == PIPELINE_COLOR_R32F ? DXGI_FORMAT_R32_FLOAT : bDepth ? D3D12_BACKBUFFER_FORMAT : DXGI_FORMAT_R8G8B8A8_UNORM;
   Desc.RTVFormats[1] = bScene ? D3D12_VELOCITY_FORMAT : DXGI_FORMAT_UNKNOWN;
   Desc.RTVFormats[2] = bScene ? D3D12_UPSCALE_DEPTH_FORMAT : DXGI_FORMAT_UNKNOWN;
   Desc.DSVFormat = bShadowMap ? D3D12_SHADOW_MAP_FORMAT : bScene ? D3D12_SCENE_DEPTH_FORMAT : bDepth ? D3D12_DEPTH_FORMAT : DXGI_FORMAT_UNKNOWN;
@@ -647,9 +651,9 @@ ComPtr<ID3D12PipelineState> CD3D12Pipeline::CreatePSO(const SPipelineKey &Key)
   if (FAILED(hr))
   {
     iLog->LogError("XRenderD3D12: CreateGraphicsPipelineState failed (0x%08X): program %s, vertex format %d, state 0x%08X, "
-      "cull %d, topology %d, target %d, depth bias %d, streams %d, wireframe %d", (unsigned)hr, Program.szName,
+      "cull %d, topology %d, target %d, depth bias %d, streams %d, wireframe %d, colour format %d", (unsigned)hr, Program.szName,
       (int)Key.nVertexFormat, nState, (int)Key.nCull, nTopology, (int)Key.nTarget, (int)Key.bDepthBias,
-      (int)Key.nStreams, (int)Key.bWireframe);
+      (int)Key.nStreams, (int)Key.bWireframe, (int)Key.nColorFormat);
     return nullptr;
   }
   return pPSO;

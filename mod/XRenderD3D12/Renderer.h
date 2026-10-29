@@ -52,6 +52,8 @@ public:
   bool IsVolumetricFogOn();
   //! r_ScopeLens_fx (one of them): the glass of the scopes is drawn.
   bool IsScopeLensOn();
+  //! r_HDRRendering (one of them) not 0: the main view is drawn through the HDR pipeline (Hdr.cpp).
+  bool IsHdrOn();
 
   //////////////////////////////////////////////////////////////////////////
   // Renderer.cpp
@@ -465,6 +467,7 @@ public:
   std::string m_UpscalerName;               //!< the d3d12_Upscaler m_pUpscaler was made for (or not)
   int m_nUpscalerWidth = 0, m_nUpscalerHeight = 0;   //!< the back buffer's size it was made for
   int m_nUpscaleMode = -1;                  //!< EUpscaleMode of the scene targets, -1 none
+  bool m_bUpscaleHdr = false;               //!< their colour is D3D12_HDR_FORMAT
   int m_nUpscaleOutputSRV = -1;             //!< the upscaler's output in the texture table
   int m_nUpscaleColorSRV = -1;              //!< the scene's colour (shown stretched when the upscale fails)
   int m_nUpscaleDepthSRV = -1;              //!< the scene's depth as R32_FLOAT (d3d12_UpscaleDebug 2)
@@ -503,7 +506,7 @@ public:
   bool SetupBeachDraw(SPipelineKey &Key, SDrawConstants &dc, int nPass);
   //! The sea floor under the ocean (eDC_WaterBottom) with the element's texture pTex (may be NULL).
   void SetupWaterBottomDraw(SPipelineKey &Key, SDrawConstants &dc, CTexture *pTex);
-  //! Copies the back buffer and the depth buffer as drawn so far (m_bSceneCopied).
+  //! Copies the main view's target and its depth buffer as drawn so far (m_bSceneCopied).
   bool CopySceneForWater();
   void ReleaseWaterResources();
   //! The texture index of the wave slopes the water program samples (made on first use).
@@ -524,10 +527,20 @@ public:
   //! under the water is drawn into the reflection.
   void ClipProjectionToWater(Matrix44 &Proj, const Matrix44 &View) const;
 
-  ComPtr<ID3D12Resource> m_pSceneColorCopy, m_pSceneDepthCopy;
-  int m_nSceneColorSRV = -1, m_nSceneDepthSRV = -1;
-  int m_nSceneCopyWidth = 0, m_nSceneCopyHeight = 0;
-  DXGI_FORMAT m_SceneCopyDepthFormat = DXGI_FORMAT_UNKNOWN;   //!< how the depth copy is read (CD3D12Device::GetMainDepthSRVFormat)
+  //! A copy of the main view's target and of its depth buffer (CopySceneForWater).
+  struct SSceneCopy
+  {
+    ComPtr<ID3D12Resource> pColor, pDepth;
+    int nColorSRV = -1, nDepthSRV = -1;
+    int nWidth = 0, nHeight = 0;
+    DXGI_FORMAT ColorFormat = DXGI_FORMAT_UNKNOWN;
+    DXGI_FORMAT DepthFormat = DXGI_FORMAT_UNKNOWN;    //!< how the depth copy is read (CD3D12Device::GetMainDepthSRVFormat)
+  };
+  void FreeSceneCopy(SSceneCopy &Copy);
+  //! [0] of the back buffer (the screen effects), [1] of the HDR target or an upscaler's scene (the
+  //! water, in the scene): apart, so that a frame with both does not make them again.
+  SSceneCopy m_SceneCopies[2];
+  int m_nSceneColorSRV = -1, m_nSceneDepthSRV = -1;   //!< the texture table indices of the copy made last
   bool m_bSceneCopied = false;              //!< the copies hold the current list's scene
   CTexture *m_pBeachTexture = nullptr;      //!< textures/wave1 (one reference)
   CTexture *m_pBeachWetTexture = nullptr;   //!< textures/water2 (one reference)
@@ -651,6 +664,50 @@ public:
   std::vector<const void *> m_ShadowCasterLists;      //!< NoteShadowCasters: the list2<ShadowMapLightSourceInstance> of the frame
   int m_nNextShadowMapID = 0x40000000;                //!< the maps' IDs, apart from the texture IDs
   bool m_bShadowMapPass = false;                      //!< a shadow map is being drawn
+
+  //////////////////////////////////////////////////////////////////////////
+  // Hdr.cpp: the HDR pipeline of the main view (r_HDRRendering)
+
+  //! The targets of the HDR passes, for the scene's size.
+  struct SHdrState
+  {
+    std::vector<CD3D12Texture *> Meter;     //!< the meter's levels, the last 1 x 1 (the sum of the log2 luminance, the weight)
+    CD3D12Texture *pExposure[2] = {};       //!< 1 x 1 R32_FLOAT, the adapted EV: this frame's and the frame before's
+    int nExposure = 0;                      //!< pExposure's current one
+    std::vector<CD3D12Texture *> Bloom;     //!< the bloom's levels, the first half the scene's size
+    CD3D12Texture *pLdr = nullptr;          //!< the tone mapped scene for an upscaler (R8G8B8A8)
+    int nWidth = 0, nHeight = 0;            //!< the scene's size they are for
+    bool bAdapted = false;                  //!< pExposure[nExposure] holds an adapted EV
+    int nResolvedFrame = -1;                //!< m_nFrames of the last resolve
+    ComPtr<ID3D12Resource> pHdrColor;       //!< the device's HDR target nHdrColorSRV is of (kept: a new one is never at its address)
+    int nHdrColorSRV = -1;
+  };
+
+  //! At the start of the main view's 3D scene (BeginScene3D): its targets bound, HDR (with
+  //! r_HDRRendering) or not, with an upscaler or not (BeginUpscale).
+  void BeginMainScene();
+  //! After its EF_EndEf3D, before the screen effects: the scene tone mapped (HDR) and upscaled
+  //! (UpscaleScene) into the back buffer, which is bound again.
+  void EndMainScene();
+  //! The HDR passes over the scene (nSceneSRV, nWidth x nHeight): the meter, the adaptation, the
+  //! bloom and the resolve, into the back buffer, or with bToTexture into m_Hdr.pLdr, which it
+  //! returns (nullptr: the back buffer, or no targets).
+  CD3D12Texture *ResolveHdr(int nSceneSRV, int nWidth, int nHeight, bool bToTexture);
+  //! The resolve's pass over the whole back buffer.
+  void DrawHdrToBackBuffer(const SDrawConstants &dc);
+  //! A pass of the HDR program into pTarget, with the blend of nState.
+  void DrawHdrPass(CD3D12Texture *pTarget, const SDrawConstants &dc, uint32 nState = 0);
+  //! m_Hdr's targets for a scene of nWidth x nHeight (and pLdr with bLdr), made when it changes. False: none.
+  bool EnsureHdrTargets(int nWidth, int nHeight, bool bLdr);
+  void ReleaseHdrTargets();
+  //! The device's HDR target and its texture table entry.
+  void ReleaseHdrColor();
+  void ReleaseHdr();
+  //! The frame dump's lines: the settings, the meter and the EV read back.
+  void DumpHdr();
+
+  SHdrState m_Hdr;
+  bool m_bHdrScene = false;                 //!< BeginMainScene .. EndMainScene: the main scene draws in D3D12_HDR_FORMAT
 
   //////////////////////////////////////////////////////////////////////////
   // PostFx.cpp: the screen effects (CScene::GetScreenFx)
@@ -820,6 +877,7 @@ public:
   int CV_d3d12_DumpFrame = 0;         //!< non-zero: the next frame's 3D draws go to XRenderD3D12_frame.txt, then 0
   ICVar *m_pVolumetricFog = nullptr;  //!< r_VolumetricFog, looked up on first use
   ICVar *m_pScopeLens = nullptr;      //!< r_ScopeLens_fx, looked up on first use
+  ICVar *m_pHdrRendering = nullptr;   //!< r_HDRRendering, looked up on first use
   int CV_d3d12_WaterDebug = 0;        //!< non-zero: the water shows one term of its colour (Water.hlsl)
   int CV_d3d12_Caustics = 1;          //!< 0: no caustics under the ocean
   float CV_d3d12_WaterSunGlint = 0;   //!< strength of the sun's highlight on water (0: none)
@@ -833,6 +891,16 @@ public:
   int CV_d3d12_UpscaleMode = 0;             //!< EUpscaleMode of the upscaler (d3d12_Upscaler, a string)
   float CV_d3d12_UpscaleSharpness = 0.5f;   //!< the upscaler's sharpening, 0 (none) to 1
   int CV_d3d12_UpscaleDebug = 0;            //!< non-zero: the upscaler's debug view
+  int CV_d3d12_ToneMap = 1;                 //!< the HDR pipeline's tone map: 0 clamp, 1 soft shoulder, 2 ACES fitted, 3 AgX
+  float CV_d3d12_ToneMapKnee = 0.85f;       //!< where the soft shoulder starts (a display value)
+  float CV_d3d12_Exposure = 0;              //!< the exposure's compensation, EV
+  int CV_d3d12_AutoExposure = 1;            //!< 0: the exposure is 2^d3d12_Exposure alone
+  float CV_d3d12_ExposureMin = 0;           //!< the automatic exposure's range, EV
+  float CV_d3d12_ExposureMax = 1.5f;
+  float CV_d3d12_ExposureSpeed = 1.5f;      //!< its adaptation rate per second (twice that towards a brighter scene)
+  float CV_d3d12_Bloom = 0.5f;              //!< the bloom's strength (0: none)
+  float CV_d3d12_BloomThreshold = 1;        //!< the light above which it blooms (exposed, linear)
+  int CV_d3d12_HDRDebug = 0;                //!< 1: the luminance in EV bands, 2: the bloom alone
 };
 
 extern CD3D12Renderer *g_pRenderer;
