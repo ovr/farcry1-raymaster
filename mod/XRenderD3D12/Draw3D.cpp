@@ -888,9 +888,8 @@ void CD3D12Renderer::DrawLeafItem(const SRenderItem &it)
     break;
   }
   case eDC_Water:
-    // Not in its own reflection, nor in the environment cubes (it shows the scene copied from the
-    // screen).
-    if (m_bReflectionPass || m_bEnvCubePass || !SetupWaterDraw(Key, dc, it))
+    // Not in its own reflection; in the environment cubes only the ocean (SetupWaterDraw).
+    if (m_bReflectionPass || !SetupWaterDraw(Key, dc, it))
       return;
     pTex = nullptr;
     break;

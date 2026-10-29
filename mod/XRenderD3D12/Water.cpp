@@ -574,14 +574,16 @@ void CD3D12Renderer::ReleaseWaterReflection()
 
 bool CD3D12Renderer::SetupWaterDraw(SPipelineKey &Key, SDrawConstants &dc, const SRenderItem &it)
 {
-  if (!m_bSceneCopied && !CopySceneForWater())
+  // In an environment cube only the ocean, with no copy of the face: the scene behind it at the far
+  // plane, so that it is deep water (its fog volume's colour) reflecting the sky.
+  if (m_bEnvCubePass ? !IsOcean(it) : !m_bSceneCopied && !CopySceneForWater())
     return false;
   Key.nProgram = eD3D12P_Water;
   Key.nState = 0;               // depth tested, no depth writes, replaces the pixel
   Key.nCull = R_CULL_NONE;      // seen from above and below
   dc.nFlags = 0;
-  dc.nTex0 = (uint32)m_nSceneColorSRV;
-  dc.nTex1 = (uint32)m_nSceneDepthSRV;
+  dc.nTex0 = m_bEnvCubePass ? D3D12_SRV_WHITE : (uint32)m_nSceneColorSRV;
+  dc.nTex1 = m_bEnvCubePass ? D3D12_SRV_WHITE : (uint32)m_nSceneDepthSRV;
 
   // Waves as steep as the bump amounts of the object; how much of the sky it reflects.
   const CCObject *pObj = it.pObj;
@@ -608,9 +610,9 @@ bool CD3D12Renderer::SetupWaterDraw(SPipelineKey &Key, SDrawConstants &dc, const
     }
   }
 
-  // The ocean's planar reflection (UpdateWaterReflection).
+  // The ocean's planar reflection (UpdateWaterReflection), seen by the frame's camera.
   dc.nTex6 = D3D12_SRV_WHITE;
-  if (!bVolume && m_bReflectionValid && m_nReflectionSRV >= 0)
+  if (!bVolume && !m_bEnvCubePass && m_bReflectionValid && m_nReflectionSRV >= 0)
   {
     dc.nTex6 = (uint32)m_nReflectionSRV;
     dc.vParams1[3] = 1;
