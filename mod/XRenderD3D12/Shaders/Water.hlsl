@@ -390,7 +390,8 @@ float4 PSMain(SWaterOutput In) : SV_Target
 
   if (HasFlag2(DF2_HEAT))
     vColor = HeatVision(vColor, 1);
-  if (g_Frame.vFogParams.w != 0)
+  // The scene's fog, not on the ocean seen from below: that view stays in the fog of its volume.
+  if (g_Frame.vFogParams.w != 0 && !(bBelow && g_Draw.vParams3.w == 0))
     vColor = lerp(g_Frame.vFogColor.rgb, vColor, SceneFog(In.vWorldPos));
   return float4(vColor, 1);
 }
