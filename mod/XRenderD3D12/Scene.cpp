@@ -359,11 +359,13 @@ void CScene::AddEf(int nFog, CRendElement *pRE, IShader *pEf, SRenderShaderResou
   CShader *pSh = ResolveShader(pEf, nTempl);
   EDrawClass eDC = DrawClassOf(pSh, pRes);
   // The fog pass of a terrain sector (FOB_FOGPASS, the ID of the fog volume it is in): under the
-  // ocean, whose volume has caustics, the caustics; the other fog passes are not drawn.
+  // ocean, whose volume has caustics, the caustics; in the other volumes (a swamp's fog) the
+  // volume's fog, as over the objects in them.
   if (eDC == eDC_Terrain && pObj && (pObj->m_ObjFlags & FOB_FOGPASS))
   {
     const SFogVolume *pFV = GetFogVolume(nFog);
-    eDC = pFV && pFV->bCaustics ? eDC_Caustics : eDC_NoDraw;
+    if (pFV && pFV->bCaustics)
+      eDC = eDC_Caustics;
   }
   // The casters whose shadow maps the frame needs (also of the elements not drawn: the engine
   // names them with a shadow map element).

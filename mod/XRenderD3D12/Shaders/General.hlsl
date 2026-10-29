@@ -87,8 +87,8 @@
 //	    DF2_FOG_VOLUME (a fog volume over an object in it): the volume's colour
 //	      (vColor.rgb), alpha FogVolumeAlpha (times the alpha with vParams0.w);
 //	      nothing below applies
-//	    DF_FOG (with vFogParams.w set): linear fog by the distance to the
-//	      camera, per pixel (towards 0.5 with DF_DETAIL_LAYER, DF_CAUSTICS, 0
+//	    DF_FOG (with vFogParams.w set): linear fog by the depth along the
+//	      view axis (SceneFog), per pixel (towards 0.5 with DF_DETAIL_LAYER, DF_CAUSTICS, 0
 //	      with DF2_FOG_BLACK, 1 with DF2_MODULATE)
 //	    DF2_HEAT (heat vision): before the fog, the colour through HeatVision
 //	      (Common.hlsli)
@@ -518,9 +518,7 @@ float4 PSMain(SVertexOutput In) : SV_Target
 
   if (HasFlag(DF_FOG) && g_Frame.vFogParams.w != 0)
   {
-    float fDist = distance(In.vWorldPos, g_Frame.vCameraPos.xyz);
-    float fFog = saturate((g_Frame.vFogParams.y - fDist) * g_Frame.vFogParams.z);
-    vColor.rgb = lerp(vFogColor, vColor.rgb, fFog);
+    vColor.rgb = lerp(vFogColor, vColor.rgb, SceneFog(In.vWorldPos));
   }
 
   if (HasFlag(DF_SHADOW_DEBUG))
