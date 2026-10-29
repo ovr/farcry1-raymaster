@@ -515,10 +515,12 @@ void CD3D12Renderer::DrawLeafItem(const SRenderItem &it)
 
   //! Sun and ambient, or the lightmap; vertex colours when there are no normals. The templates
   //! without lights get their colour from LitColor alone; the glow templates add their gloss map,
-  //! unlit.
+  //! the alpha glow ones their texture times its alpha, unlit.
   auto Light = [&]()
   {
-    if (Props.eGlow != EGlow::None && !bLightPass)
+    if (Props.eGlow == EGlow::Alpha && !bLightPass)
+      dc.nFlags2 |= DF2_ALPHA_GLOW;
+    else if (Props.eGlow != EGlow::None && !bLightPass)
     {
       if (CTexture *pGlow = GetGlowMap(it.pRes))
       {

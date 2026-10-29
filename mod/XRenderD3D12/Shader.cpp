@@ -154,6 +154,9 @@ constexpr STemplateLighting s_TemplateLighting[] =
   { "templdecalglow",                  ELighting::Vertex,   EGlow::Glow },
   { "templdecalglowselfillum",         ELighting::Vertex,   EGlow::SelfIllum },
   { "templdecalglowselfillumanimated", ELighting::Vertex,   EGlow::Pulse },
+  // Lit by 2 (also by their light map), the texture's alpha its glow (plants blended by it).
+  { "templbumpdiffuse_alphaglow",      ELighting::Overbright, EGlow::Alpha },
+  { "templlightdiffuse_alphaglow",     ELighting::Overbright, EGlow::Alpha },
   { "templtextureshiftt02",            ELighting::Vertex },
   { "templtextureshiftt05",            ELighting::Vertex },
   // The cube map alone (its material's ambient is white: the light saturates), the cube map lit
@@ -270,6 +273,16 @@ std::string Hex(uint64 n)
   return sz;
 }
 
+//! The lighting, glow and cube map of the template a material names (s_TemplateLighting; the
+//! templates of one shader light each their own way).
+void SetTemplateLighting(SShaderProps &Props, std::string_view Name)
+{
+  const STemplateLighting *pL = FindEntry(s_TemplateLighting, Name);
+  Props.eLighting = pL ? pL->eLighting : ELighting::Overbright;
+  Props.eGlow = pL ? pL->eGlow : EGlow::None;
+  Props.eEnvMap = pL ? pL->eEnvMap : EEnvMap::None;
+}
+
 //! A template name resolved through s_Templates.
 struct SResolvedTemplate
 {
@@ -318,12 +331,7 @@ SResolvedTemplate ResolveTemplate(const std::string &Name, uint64 nMaskGen)
   }
   if (pE->bNotFound)
     R.Props.nFlags |= EF_NOTFOUND;
-  if (const STemplateLighting *pL = FindEntry(s_TemplateLighting, Name))
-  {
-    R.Props.eLighting = pL->eLighting;
-    R.Props.eGlow = pL->eGlow;
-    R.Props.eEnvMap = pL->eEnvMap;
-  }
+  SetTemplateLighting(R.Props, Name);
   return R;
 }
 
@@ -961,7 +969,13 @@ CShader *CShaderManager::LoadMaterial(const char *szName, const char *szTemplate
   // name keep their own lighting (all those of a level's material library are "MaterialContainer").
   const bool bPixelLighting = Templ.starts_with("templbump") || Templ.starts_with("templmodel") || Templ.starts_with("templlightdiffuse");
   const bool bBump = bPixelLighting && g_pRenderer && g_pRenderer->CV_r_Quality_BumpMapping > 0;
-  std::string Key = Name + '\n' + (bBump ? Templ : std::string(pTempl->GetName()));
+  // The lighting of the template as named, not of the shader it shares with other templates (those
+  // that light otherwise make shaders of their own too).
+  const SShaderProps &Shared = pTempl->GetProps();
+  SShaderProps Props = Shared;
+  SetTemplateLighting(Props, Templ);
+  const bool bOwnLighting = Props.eLighting != Shared.eLighting || Props.eGlow != Shared.eGlow || Props.eEnvMap != Shared.eEnvMap;
+  std::string Key = Name + '\n' + (bBump || bOwnLighting ? Templ : std::string(pTempl->GetName()));
   if (auto it = m_Materials.find(Key); it != m_Materials.end())
     return it->second;
 
@@ -970,7 +984,6 @@ CShader *CShaderManager::LoadMaterial(const char *szName, const char *szTemplate
   std::string ShaderName = nMade ? Name + '_' + std::to_string(nMade) : Name;
   nMade++;
 
-  SShaderProps Props = pTempl->GetProps();
   Props.nFlags = EF_COMPILEDLAYERS | EF_NEEDNORMALS | EF_NOTFOUND;
   Props.Template = std::move(Templ);
   Props.bPixelLighting = bPixelLighting;

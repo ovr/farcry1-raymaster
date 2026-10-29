@@ -114,13 +114,15 @@ enum class ELighting : uint8
   VColor,                 //!< texture * the vertex colour (white without one), no lights
 };
 
-//! The material's gloss map (EFTT_GLOSS) added, unlit: the glowing parts of the glow templates.
+//! The material's gloss map (EFTT_GLOSS) added, unlit: the glowing parts of the glow templates;
+//! for the alpha glow ones the texture times its alpha.
 enum class EGlow : uint8
 {
   None,
   Glow,                   //!< + gloss map
   Pulse,                  //!< + gloss map * saturate(0.75 + 0.75 * sin(pi * t))
   SelfIllum,              //!< bump mapping on: the texture unlit + 2 * gloss map; off: + gloss map
+  Alpha,                  //!< + texture * its alpha: the texture's alpha is the glow mask (no gloss map)
 };
 
 //! The environment cube map (CD3D12Renderer::GetEnvCubeMap) in place of the material's texture,

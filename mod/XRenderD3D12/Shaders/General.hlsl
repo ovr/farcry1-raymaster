@@ -38,6 +38,8 @@
 //	      (DF_LIGHTMAP_DIR, a dot3 light map: tex1 * saturate(D.z) * D.a, D =
 //	      tex2 at uv1, rgb * 2 - 1), DF_TEX1_DETAIL rgb = 2 * rgb + tex1 - 0.5,
 //	      else *= tex1
+//	    DF2_ALPHA_GLOW: rgb += tex0 rgb * tex0 a (the texture's alpha its
+//	      glow, unlit)
 //	    DF_TERRAIN_CLIFF (terrain with cliffs): rgb = 2 * rgb * lerp(1, 2 * tex2,
 //	      w.x) * lerp(1, 2 * tex3, w.y), w = vertex colour rg * vTexGen1V.xy, uv
 //	      of tex2 from the world position with vParams0 / 1, of tex3 with 2 / 3
@@ -437,6 +439,8 @@ float4 PSMain(SVertexOutput In) : SV_Target
     else
       vColor *= vTex1;
   }
+  if (HasFlag2(DF2_ALPHA_GLOW))
+    vColor.rgb += vTex.rgb * vTex.a;
 
   if (HasFlag(DF_TERRAIN_CLIFF))
   {
