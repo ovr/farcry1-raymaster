@@ -205,6 +205,8 @@ public:
   void RemovePermanent(CCObject *pObj);
   //! True for a permanent object of the pool that RemovePermanent freed.
   bool IsRemovedPermanent(const CCObject *pObj) const;
+  //! True for a permanent object of the pool in use.
+  bool IsPermanent(const CCObject *pObj) const;
   //! The identity object of items added without one (not handed to the engine).
   CCObject *GetDefaultObject() { return m_pDefaultObject.get(); }
   //! CCObject::AddWaves: two new waves of CCObject::m_Waves (indices from 1 every frame).

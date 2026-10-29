@@ -124,47 +124,69 @@ float3 HeatVision(float3 vColor, float fFacing)
 }
 
 //! A position in pixels of the viewport (x, y from the top left, z depth, w rhw) to a clip
-//! position. vScreen holds the viewport size. With rhw the clip position keeps 1 / rhw as w, so
-//! that the attributes are interpolated with perspective, as for Direct3D 9's pre-transformed
-//! vertices.
+//! position. vScreen holds the viewport size, in the pixels of the target (vJitter.zw of them per
+//! pixel of the engine: an upscaler's scene is smaller). With rhw the clip position keeps 1 / rhw
+//! as w, so that the attributes are interpolated with perspective, as for Direct3D 9's
+//! pre-transformed vertices.
 float4 ScreenToClip(float4 vPos)
 {
   float2 vNDC;
-  vNDC.x = (vPos.x + XR_SCREEN_PIXEL_OFFSET) * 2 * g_Frame.vScreen.z - 1;
-  vNDC.y = 1 - (vPos.y + XR_SCREEN_PIXEL_OFFSET) * 2 * g_Frame.vScreen.w;
+  vNDC.x = (vPos.x + XR_SCREEN_PIXEL_OFFSET) * g_Frame.vJitter.z * 2 * g_Frame.vScreen.z - 1;
+  vNDC.y = 1 - (vPos.y + XR_SCREEN_PIXEL_OFFSET) * g_Frame.vJitter.w * 2 * g_Frame.vScreen.w;
   float fW = vPos.w > 0 ? 1 / vPos.w : 1;
   return float4(vNDC * fW, vPos.z * fW, fW);
 }
 
-//! Samples g_Textures[nIndex] with sampler nSampler (XR_SAMPLER_*).
+//! The upscaler's jitter (vJitter.xy) on a clip position.
+float4 Jitter(float4 vClip)
+{
+  vClip.xy += g_Frame.vJitter.xy * vClip.w;
+  return vClip;
+}
+
+//! The motion vector of a pixel from its clip positions without the jitter in this frame (vCur) and
+//! the frame before (vPrev): where it was minus where it is, in uv (y down); 0 where it was behind
+//! the camera.
+float2 MotionVector(float4 vCur, float4 vPrev)
+{
+  if (vPrev.w <= 1e-5 || vCur.w <= 1e-5)
+    return 0;
+  return (vPrev.xy / vPrev.w - vCur.xy / vCur.w) * float2(0.5, -0.5);
+}
+
+//! Samples g_Textures[nIndex] with sampler nSampler (XR_SAMPLER_*), the mip level biased by
+//! vMipBias.x (sharper while an upscaler gathers the frames).
 float4 SampleTexture(uint nIndex, uint nSampler, float2 vUV)
 {
+  float fBias = g_Frame.vMipBias.x;
   switch (nSampler)
   {
   case XR_SAMPLER_LINEAR_CLAMP:
-    return g_Textures[nIndex].Sample(g_SamplerLinearClamp, vUV);
+    return g_Textures[nIndex].SampleBias(g_SamplerLinearClamp, vUV, fBias);
   case XR_SAMPLER_POINT_WRAP:
-    return g_Textures[nIndex].Sample(g_SamplerPointWrap, vUV);
+    return g_Textures[nIndex].SampleBias(g_SamplerPointWrap, vUV, fBias);
   case XR_SAMPLER_POINT_CLAMP:
-    return g_Textures[nIndex].Sample(g_SamplerPointClamp, vUV);
+    return g_Textures[nIndex].SampleBias(g_SamplerPointClamp, vUV, fBias);
   default:
-    return g_Textures[nIndex].Sample(g_SamplerLinearWrap, vUV);
+    return g_Textures[nIndex].SampleBias(g_SamplerLinearWrap, vUV, fBias);
   }
 }
 
-//! Samples slice vUVW.z of g_TextureArrays[nIndex] with sampler nSampler (XR_SAMPLER_*).
+//! Samples slice vUVW.z of g_TextureArrays[nIndex] with sampler nSampler (XR_SAMPLER_*), biased as
+//! SampleTexture.
 float4 SampleTextureArray(uint nIndex, uint nSampler, float3 vUVW)
 {
+  float fBias = g_Frame.vMipBias.x;
   switch (nSampler)
   {
   case XR_SAMPLER_LINEAR_CLAMP:
-    return g_TextureArrays[nIndex].Sample(g_SamplerLinearClamp, vUVW);
+    return g_TextureArrays[nIndex].SampleBias(g_SamplerLinearClamp, vUVW, fBias);
   case XR_SAMPLER_POINT_WRAP:
-    return g_TextureArrays[nIndex].Sample(g_SamplerPointWrap, vUVW);
+    return g_TextureArrays[nIndex].SampleBias(g_SamplerPointWrap, vUVW, fBias);
   case XR_SAMPLER_POINT_CLAMP:
-    return g_TextureArrays[nIndex].Sample(g_SamplerPointClamp, vUVW);
+    return g_TextureArrays[nIndex].SampleBias(g_SamplerPointClamp, vUVW, fBias);
   default:
-    return g_TextureArrays[nIndex].Sample(g_SamplerLinearWrap, vUVW);
+    return g_TextureArrays[nIndex].SampleBias(g_SamplerLinearWrap, vUVW, fBias);
   }
 }
 

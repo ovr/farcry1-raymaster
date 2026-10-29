@@ -332,6 +332,26 @@ it as well: it holds local, machine-specific instructions and is not committed (
   `RunDemo.ps1 -Renderer XRenderD3D12.dll`.
 - `XRENDERD3D12_DEBUG=1` (or `d3d12_Debug 1`, read at start-up) turns on the debug layer and GPU
   based validation; their messages go to the engine log, starting with `[D3D12]`.
+- `d3d12_Upscaler` is the upscaler of the main view's 3D scene: `none` (the default; the frames
+  are those of the renderer without one, DemoCompare difference 0) or `fsr` (AMD FSR Upscaling:
+  FSR 4 on the AMD GPUs it supports, FSR 3.1 on the others). An unknown or unavailable one is
+  logged once and acts as `none`. `d3d12_UpscaleMode` is the render size: 0 Native AA (the
+  display's size, anti-aliasing only), 1 Quality, 2 Balanced, 3 Performance, 4 Ultra
+  Performance. `d3d12_UpscaleSharpness` is 0 to 1 (0.5; 0 turns sharpening off), and
+  `d3d12_UpscaleDebug 1` shows FSR's debug view. All of them change at run time, and the frame
+  dump names the upscaler, its render size and the frame's jitter.
+  - With an upscaler, the main view's scene (`BeginScene3D` to `UpscaleScene` before the screen
+    effects, `Upscale.cpp`) draws into render-size targets: colour, depth (R32) and motion vectors
+    (R16G16, written by the general program's opaque draws). It is jittered and its textures get
+    a mip bias. The screen effects and the 2D stay at the display's size.
+  - Motion comes from the previous frame's camera for static geometry, and from the previous world
+    matrix of a character instance or a permanent object. The weapon (`FOB_NEAREST`) has none.
+  - The history is reset after a frame without the main view, a camera jump of more than 5 m, a
+    field of view change of more than 10 degrees, and a new mode.
+  - The build downloads the upscaler DLL (`third_party/amd-fsr-sdk/README.md`) and copies it, the
+    loader and AMD's license next to `XRenderD3D12.dll`.
+  - For comparisons, DemoLevel with `-DemoArgs '--exec-at 1 "d3d12_Upscaler fsr|d3d12_UpscaleMode
+    0"'` against the same run without it.
 - `d3d12_DumpFrame 1` writes the render items of the next frame to
   `farcry1_testing1/XRenderD3D12_frame.txt` (never committed): the camera (position, angles,
   field of view, near and far plane, view and projection matrices), then for each item its list, sort

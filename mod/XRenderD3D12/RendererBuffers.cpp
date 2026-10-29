@@ -39,7 +39,7 @@ void CD3D12Renderer::DrawBuffer(CVertexBuffer *src, SVertexStream *indicies, int
   SPipelineKey Key;
   SDrawConstants dc;
   ApplyRenderState(Key, dc, sd->nVertexFormat, true);
-  memcpy(dc.mWorldViewProj, GetImmediateViewProj().data, 16 * sizeof(float));
+  SetImmediateTransform(dc);
   if (sd->IsIndexed())
     DrawGeometry(Key, dc, sd->Topology, sd->VB, &sd->IB, sd->nNumIndices, sd->nFirstIndex, sd->nBaseVertex);
   else

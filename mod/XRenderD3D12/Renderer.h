@@ -14,6 +14,7 @@
 //	  RendererBuffers.cpp   - vertex, index and leaf buffers
 //	  Scene.cpp             - render objects, render elements, lights, EF_StartEf .. EF_EndEf3D
 //	  Draw3D.cpp            - drawing the render items of EF_EndEf3D (no IRenderer methods)
+//	  Upscale.cpp           - the upscaler of the main view (no IRenderer methods)
 //	The state of a subsystem lives in its own class (m_pTextures, m_pShaders, m_pScene, ...).
 //	All calls come from one thread.
 //
@@ -22,6 +23,7 @@
 #pragma once
 
 #include "D3D12Pipeline.h"
+#include "Upscaler.h"
 #include "Shaders/Constants.h"
 
 class CD3D12Device;
@@ -312,12 +314,14 @@ public:
   //! b0 of the following draws is made again from the camera, sun, fog and screen (after SetCamera,
   //! a new sun, ...).
   void InvalidateFrameConstants() { m_nFrameCB = 0; }
-  //! The frame constants of the current camera and settings.
-  void MakeFrameConstants(SFrameConstants &fc) const;
+  //! The frame constants of the current camera and settings; bScene: for the draws into an
+  //! upscaler's scene (its size, jitter and mip bias).
+  void MakeFrameConstants(SFrameConstants &fc, bool bScene) const;
   //! One draw: the pipeline state of Key, dc as b1, VB in slot 0 with the default stream in slot 1
   //! and pTexCoord1 in slot 2, pTangents in slot 3, the index buffer when pIB; nCount indices (or
   //! vertices) from nFirst. Viewport m_Viewport with the depth range m_fDepthMin..m_fDepthMax;
-  //! scissor from SetScissor or m_bItemScissor.
+  //! scissor from SetScissor or m_bItemScissor (in an upscaler's scene both scaled to its size,
+  //! and the key's target 0 made 3).
   void DrawGeometry(const SPipelineKey &Key, const SDrawConstants &dc, D3D_PRIMITIVE_TOPOLOGY eTopology, const D3D12_VERTEX_BUFFER_VIEW &VB,
     const D3D12_INDEX_BUFFER_VIEW *pIB, uint32 nCount, uint32 nFirst = 0, int nBaseVertex = 0, const D3D12_VERTEX_BUFFER_VIEW *pTexCoord1 = nullptr,
     const D3D12_VERTEX_BUFFER_VIEW *pTangents = nullptr);
@@ -336,6 +340,7 @@ public:
   bool m_bTargetRect = false;               //!< drawing off screen: the viewport is m_TargetRect, not the whole target
   RECT m_TargetRect = {};
   D3D12_GPU_VIRTUAL_ADDRESS m_nFrameCB = 0; //!< b0, 0 when it has to be made again
+  bool m_bFrameCBScene = false;             //!< m_nFrameCB was made for an upscaler's scene
   float m_SunDir[3] = { 0, 0, 1 };          //!< towards the sun, world space (frame constants)
   float m_SunColor[3] = { 1, 1, 1 };
   float m_SunSpec[3] = { 0, 0, 0 };          //!< the sun's specular colour
@@ -348,6 +353,9 @@ public:
   void ApplyRenderState(SPipelineKey &Key, SDrawConstants &dc, int nVertexFormat, bool bVertexColor);
   //! The transform of immediate draws: the 2D mode's orthographic projection, else the camera.
   Matrix44 GetImmediateViewProj() const;
+  //! mWorldViewProj of an immediate draw (GetImmediateViewProj), and its motion vectors (static in
+  //! the world, none in the 2D mode).
+  void SetImmediateTransform(SDrawConstants &dc) const;
 
   //! Draw3dBBox: drawn by Update just before Present, with the camera and viewport of that moment.
   void DrawQueuedBoxes();
@@ -424,6 +432,64 @@ public:
   Matrix44 m_NearestProj;                   //!< FOB_NEAREST objects
 
   //////////////////////////////////////////////////////////////////////////
+  // Upscale.cpp: the upscaler of the main view (d3d12_Upscaler, Upscaler.h)
+
+  //! At the start of the main view's 3D scene (BeginScene3D): with an upscaler, its scene targets
+  //! bound, the frame's jitter and the camera of the frame before for the motion vectors.
+  void BeginUpscale();
+  //! After the main view's 3D scene (EF_EndEf3D), before the screen effects: its picture upscaled
+  //! into the back buffer, which is bound again (its depth buffer cleared).
+  void UpscaleScene();
+  //! The upscaler of d3d12_Upscaler for the back buffer's size with the scene targets of
+  //! d3d12_UpscaleMode, made when they changed; false: none.
+  bool UpdateUpscaler();
+  void ReleaseUpscaler();
+  //! The scene's pixels per pixel of the back buffer while the main view draws into the scene
+  //! targets, else 1.
+  void GetSceneScale(float &sx, float &sy) const;
+  //! The view of the frame without its translation times the sky's projection (DrawSkyItem).
+  Matrix44 GetSkyViewProj() const;
+  //! m_Reproject from the current camera and the frame before's.
+  void UpdateReprojection();
+  //! mPrevWorldViewProj of a draw whose vertices stay where they are in the world: its
+  //! mWorldViewProj with the camera of the frame before (while upscaling).
+  void SetStaticMotion(SDrawConstants &dc) const;
+  //! The same for an object at World: where it was in the frame before when it has an identity
+  //! that lasts (a character, a permanent object), else as static; the first person objects
+  //! (bNearest) move with the camera, so not on the screen.
+  void SetObjectMotion(SDrawConstants &dc, const CCObject *pObj, const Matrix44 &World, bool bNearest);
+  //! CCObject::RemovePermanent: the matrices kept of pObj go.
+  void ForgetObjectMotion(const CCObject *pObj);
+
+  std::unique_ptr<IUpscaler> m_pUpscaler;
+  std::string m_UpscalerName;               //!< the d3d12_Upscaler m_pUpscaler was made for (or not)
+  int m_nUpscalerWidth = 0, m_nUpscalerHeight = 0;   //!< the back buffer's size it was made for
+  int m_nUpscaleMode = -1;                  //!< EUpscaleMode of the scene targets, -1 none
+  int m_nUpscaleOutputSRV = -1;             //!< the upscaler's output in the texture table
+  int m_nUpscaleColorSRV = -1;              //!< the scene's colour (shown stretched when the upscale fails)
+  bool m_bUpscaling = false;                //!< BeginUpscale .. UpscaleScene
+  bool m_bUpscaleReset = true;              //!< the next upscale starts without history (a new upscaler or mode)
+  bool m_bUpscaleHistoryReset = false;      //!< this frame's starts without history
+  int m_nUpscaleFrames = 0;                 //!< the frames upscaled (the jitter's index)
+  int m_nUpscaledFrame = -1;                //!< m_nFrames of the last one
+  float m_UpscaleJitter[2] = {};            //!< this frame's jitter, render pixels
+  Matrix44 m_PrevViewProj;                  //!< the main view's camera in the frame upscaled before
+  Matrix44 m_PrevSkyViewProj;               //!< its sky's (GetSkyViewProj)
+  Vec3 m_vPrevCameraPos = Vec3(0, 0, 0);
+  float m_fPrevFovY = 0;                    //!< the vertical field of view then
+  Matrix44 m_Reproject;                     //!< a clip position of this frame's camera to the frame before's
+  //! The world matrices of an object with an identity that lasts, by m_pCharInstance or the
+  //! permanent CCObject.
+  struct SObjectMotion
+  {
+    Matrix44 Prev, Cur;                     //!< in the frame nFrame and the one before
+    int nFrame = -1;                        //!< m_nFrames of Cur
+    bool bPrev = false;                     //!< Prev is of the frame upscaled before
+  };
+  std::unordered_map<const void *, SObjectMotion> m_ObjectMotion;
+  ICVar *m_pUpscalerVar = nullptr;          //!< d3d12_Upscaler
+
+  //////////////////////////////////////////////////////////////////////////
   // Water.cpp
 
   //! Key and constants of a water surface (eDC_Water): the water program over the copy of the
@@ -460,6 +526,7 @@ public:
   ComPtr<ID3D12Resource> m_pSceneColorCopy, m_pSceneDepthCopy;
   int m_nSceneColorSRV = -1, m_nSceneDepthSRV = -1;
   int m_nSceneCopyWidth = 0, m_nSceneCopyHeight = 0;
+  DXGI_FORMAT m_SceneCopyDepthFormat = DXGI_FORMAT_UNKNOWN;   //!< how the depth copy is read (CD3D12Device::GetMainDepthSRVFormat)
   bool m_bSceneCopied = false;              //!< the copies hold the current list's scene
   CTexture *m_pBeachTexture = nullptr;      //!< textures/wave1 (one reference)
   CTexture *m_pBeachWetTexture = nullptr;   //!< textures/water2 (one reference)
@@ -762,6 +829,9 @@ public:
   int CV_d3d12_Shadows = 1;                 //!< 0: no shadow maps
   int CV_d3d12_ShadowMapSize = 1024;        //!< size of the shadow maps (0: the engine's, 512)
   int CV_d3d12_ShadowDebug = 0;             //!< non-zero: the shadow maps of the frame are shown
+  int CV_d3d12_UpscaleMode = 0;             //!< EUpscaleMode of the upscaler (d3d12_Upscaler, a string)
+  float CV_d3d12_UpscaleSharpness = 0.5f;   //!< the upscaler's sharpening, 0 (none) to 1
+  int CV_d3d12_UpscaleDebug = 0;            //!< non-zero: the upscaler's debug view
 };
 
 extern CD3D12Renderer *g_pRenderer;

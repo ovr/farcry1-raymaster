@@ -2,7 +2,12 @@
 
 Mods for Far Cry, built with the CryENGINE MOD SDK for Far Cry:
 
-- `mod/XRenderD3D12` - a Direct3D 12 renderer for the x64 game.
+- `mod/XRenderD3D12` - a Direct3D 12 renderer for the x64 game. It can draw the 3D scene with
+  AMD FSR Upscaling, set from the console:
+  - `d3d12_Upscaler fsr` turns it on (`none`, the default, turns it off).
+  - `d3d12_UpscaleMode` picks the mode: 0 Native AA (anti-aliasing at the display's resolution),
+    1 Quality, 2 Balanced, 3 Performance or 4 Ultra Performance.
+  - `d3d12_UpscaleSharpness` sets the sharpening, 0 to 1.
 - `mod/XRenderD3D9Traced` - a renderer proxy that traces the calls between the engine and its
   renderer.
 - `mod/XRenderCommon` - what the renderers share about the renderer interface beyond the SDK

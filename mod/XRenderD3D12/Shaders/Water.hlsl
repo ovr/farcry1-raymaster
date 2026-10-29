@@ -55,7 +55,8 @@
 //	  vParams3  rgb the colour of deep water; w 0 that of the ocean's fog
 //	            volume (OceanFog), 1 lit by the scene behind it (water
 //	            volumes, which may be indoors), 2 lit by the sky
-//	  nTex0     colour copy, nTex1 depth copy (R24 of D24S8)
+//	  nTex0     colour copy, nTex1 depth copy (R24 of D24S8, R32 of an
+//	            upscaler's scene)
 //	  nTex2..4  the sky box textures: top, _12, _34
 //	  nTex5     the wave slopes (red dH/du, green dH/dv; 128 flat, 32 the RMS)
 //	  nTex6     the planar reflection, mParams0 its camera's world to clip
@@ -76,7 +77,7 @@ SWaterOutput VSMain(SVertexInput In)
 {
   SWaterOutput Out;
   float4 vPos = float4(In.vPos.xyz, 1);
-  Out.vPos = mul(vPos, g_Draw.mWorldViewProj);
+  Out.vPos = Jitter(mul(vPos, g_Draw.mWorldViewProj));
   Out.vWorldPos = mul(vPos, g_Draw.mWorld).xyz;
   Out.vColor = DecodeVertexColor(In.vColor0);
   Out.vTex0 = In.vTex0;

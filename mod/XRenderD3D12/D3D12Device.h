@@ -25,6 +25,9 @@ constexpr int D3D12_BACKBUFFERS = 3;     //!< swap chain buffers
 constexpr DXGI_FORMAT D3D12_BACKBUFFER_FORMAT = DXGI_FORMAT_B8G8R8A8_UNORM;   //!< with alpha (the HUD masks through it)
 constexpr DXGI_FORMAT D3D12_DEPTH_FORMAT = DXGI_FORMAT_D24_UNORM_S8_UINT;
 constexpr DXGI_FORMAT D3D12_SHADOW_MAP_FORMAT = DXGI_FORMAT_D32_FLOAT;  //!< drawn into; the texture is R32_TYPELESS, read as R32_FLOAT
+constexpr DXGI_FORMAT D3D12_SCENE_DEPTH_FORMAT = DXGI_FORMAT_D32_FLOAT; //!< the scene targets' depth (SetSceneSize): R32_TYPELESS, an upscaler reads it as R32_FLOAT
+constexpr DXGI_FORMAT D3D12_VELOCITY_FORMAT = DXGI_FORMAT_R16G16_FLOAT; //!< the scene targets' motion vectors
+constexpr DXGI_FORMAT D3D12_UPSCALE_FORMAT = DXGI_FORMAT_R8G8B8A8_UNORM; //!< an upscaler's output (unordered access, which B8G8R8A8 may not have)
 
 class CD3D12Device
 {
@@ -80,8 +83,41 @@ public:
   D3D12_CPU_DESCRIPTOR_HANDLE GetBackBufferRTV() const;
   D3D12_CPU_DESCRIPTOR_HANDLE GetDSV() const;
   //! Sets the back buffer and the depth buffer as render targets, the full viewport and scissor
-  //! (ends drawing off screen).
+  //! (ends drawing off screen); between BeginScene and EndScene the scene targets instead.
   void SetBackBufferTargets();
+  //! Binds the descriptor heap, the root signature and the texture table (after a pass that set
+  //! its own, as an upscaler's).
+  void BindRootSignature();
+  //! A transition barrier of all of pRes.
+  void Transition(ID3D12Resource *pRes, D3D12_RESOURCE_STATES Before, D3D12_RESOURCE_STATES After);
+
+  //! The scene targets of an upscaler: the main view drawn at nWidth x nHeight into a colour target
+  //! (D3D12_BACKBUFFER_FORMAT), the motion vectors (D3D12_VELOCITY_FORMAT) and a depth buffer
+  //! (D3D12_SCENE_DEPTH_FORMAT), and the upscaler's output of the back buffer's size
+  //! (D3D12_UPSCALE_FORMAT). Made again when the size (or the back buffer's) changed; 0 x 0
+  //! releases them. Outside BeginScene .. EndScene the three are in the state PIXEL_SHADER_RESOURCE
+  //! | NON_PIXEL_SHADER_RESOURCE and the output in UNORDERED_ACCESS.
+  bool SetSceneSize(int nWidth, int nHeight);
+  int GetSceneWidth() const { return m_nSceneWidth; }
+  int GetSceneHeight() const { return m_nSceneHeight; }
+  ID3D12Resource *GetSceneColor() const { return m_pSceneColor.Get(); }
+  ID3D12Resource *GetSceneDepth() const { return m_pSceneDepth.Get(); }
+  ID3D12Resource *GetSceneVelocity() const { return m_pSceneVelocity.Get(); }
+  ID3D12Resource *GetSceneOutput() const { return m_pSceneOutput.Get(); }
+  //! From here (in a frame) until EndScene the main view draws into the scene targets:
+  //! SetBackBufferTargets binds the colour and the motion vectors (SPipelineKey::nTarget 3) with
+  //! the scene's depth.
+  void BeginScene();
+  //! The scene targets back to shader resources (for the upscaler); the back buffer bound again.
+  void EndScene();
+  bool IsInScene() const { return m_bInScene; }
+  //! The scene targets are drawn into (in the scene, not off screen).
+  bool IsSceneBound() const { return m_bInScene && !m_pOffscreen; }
+  //! Clears the motion vectors to 0 (in the scene).
+  void ClearVelocity();
+  //! The size of the main view's target: the scene targets' in the scene, else the back buffer's.
+  int GetMainWidth() const { return m_bInScene ? m_nSceneWidth : m_nWidth; }
+  int GetMainHeight() const { return m_bInScene ? m_nSceneHeight : m_nHeight; }
 
   //! An off screen target of nWidth x nHeight: pColor in the back buffer's format (in the state
   //! PIXEL_SHADER_RESOURCE while it is not drawn into) and pDepth (D24S8, DEPTH_WRITE), their views
@@ -105,19 +141,23 @@ public:
   //! SetBackBufferTargets (in a frame).
   void SetShadowMapTarget(ID3D12Resource *pDepth, D3D12_CPU_DESCRIPTOR_HANDLE hDSV, int nSize);
   //! The size of the targets drawn into.
-  int GetTargetWidth() const { return m_pOffscreen ? m_nOffscreenWidth : m_nWidth; }
-  int GetTargetHeight() const { return m_pOffscreen ? m_nOffscreenHeight : m_nHeight; }
+  int GetTargetWidth() const { return m_pOffscreen ? m_nOffscreenWidth : GetMainWidth(); }
+  int GetTargetHeight() const { return m_pOffscreen ? m_nOffscreenHeight : GetMainHeight(); }
 
   //! Clears the colour / the depth buffer drawn into (in a frame).
   void ClearColor(const float rgba[4]);
   void ClearDepth(float fDepth, uint8 nStencil, bool bDepth, bool bStencil);
 
-  //! Textures of the back buffer's size for CopyTargets: pColor in the back buffer's format, pDepth
-  //! R24G8_TYPELESS (read as R24_UNORM_X8_TYPELESS); both in PIXEL_SHADER_RESOURCE state. Without
-  //! pDepth only the colour copy is made.
+  //! Textures of the main view's target (GetMainWidth x GetMainHeight) for CopyTargets: pColor in
+  //! the back buffer's format, pDepth in the depth buffer's family (read as GetMainDepthSRVFormat);
+  //! both in PIXEL_SHADER_RESOURCE state. Without pDepth only the colour copy is made.
   bool CreateTargetCopies(ComPtr<ID3D12Resource> &pColor, ComPtr<ID3D12Resource> *pDepth);
-  //! Copies the back buffer and the depth buffer (when pDepth is given) as drawn so far in this
-  //! frame into the textures of CreateTargetCopies (PIXEL_SHADER_RESOURCE before and after).
+  //! How a depth copy of CreateTargetCopies is read: R24_UNORM_X8_TYPELESS (the back buffer's
+  //! D24S8), R32_FLOAT in the scene.
+  DXGI_FORMAT GetMainDepthSRVFormat() const { return m_bInScene ? DXGI_FORMAT_R32_FLOAT : DXGI_FORMAT_R24_UNORM_X8_TYPELESS; }
+  //! Copies the main view's target (the back buffer or the scene's colour) and its depth buffer
+  //! (when pDepth is given) as drawn so far in this frame into the textures of CreateTargetCopies
+  //! (PIXEL_SHADER_RESOURCE before and after); nothing when their size or format is another.
   void CopyTargets(ID3D12Resource *pColor, ID3D12Resource *pDepth);
 
   //! Copies the current back buffer (as drawn so far in this frame, or the last presented one
@@ -168,6 +208,10 @@ private:
 
   bool CreateSwapChainBuffers();
   void ReleaseSwapChainBuffers();
+  void ReleaseSceneTargets();
+  //! The scene targets' views: n 0 the colour, 1 the motion vectors.
+  D3D12_CPU_DESCRIPTOR_HANDLE SceneRTV(int n) const;
+  D3D12_CPU_DESCRIPTOR_HANDLE SceneDSV() const;
   //! Resets the slot's allocator and the list and binds the heap, root signature and targets.
   void OpenCmdList();
   void WaitForFence(uint64 nValue);
@@ -200,6 +244,10 @@ private:
   bool m_bOffscreenShadowMap = false;               //!< m_pOffscreen is a shadow map
   D3D12_CPU_DESCRIPTOR_HANDLE m_hOffscreenRTV = {}, m_hOffscreenDSV = {};
   int m_nOffscreenWidth = 0, m_nOffscreenHeight = 0;
+  ComPtr<ID3D12Resource> m_pSceneColor, m_pSceneVelocity, m_pSceneDepth, m_pSceneOutput;   //!< SetSceneSize
+  int m_nSceneWidth = 0, m_nSceneHeight = 0;
+  int m_nSceneOutputWidth = 0, m_nSceneOutputHeight = 0;
+  bool m_bInScene = false;                          //!< BeginScene .. EndScene
 
   int m_nWidth = 0, m_nHeight = 0;
   int m_nFrameSlot = 0;

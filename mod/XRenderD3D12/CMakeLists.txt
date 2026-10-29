@@ -60,6 +60,9 @@ set(XRENDERD3D12_SOURCES
     RenderObjects.cpp
     Scene.h
     Scene.cpp
+    Upscaler.h
+    Upscale.cpp
+    UpscalerFsr.cpp
 )
 source_group("Source Files" FILES ${XRENDERD3D12_SOURCES})
 
