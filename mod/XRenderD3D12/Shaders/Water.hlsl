@@ -367,6 +367,10 @@ float4 PSMain(SWaterOutput In) : SV_Target
       return float4(vScene0, 1);
     if (g_Draw.vParams0.z == 9)
       return float4(saturate(fPath / 32), saturate(fDepthBelow / 16), F, 1);
+    if (g_Draw.vParams0.z == 10)
+      return float4(In.vColor.rgb, 1);
+    if (g_Draw.vParams0.z == 11)
+      return float4(In.vColor.aaa, 1);
   }
   else
   {
