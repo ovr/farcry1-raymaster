@@ -25,10 +25,7 @@ under the GPL. That license also sets terms for distributing mods made with the 
 charge, by electronic means only, with the license attached); read it before you distribute a
 build.
 
-## A request about AI training
+## AI training
 
 Please do not use the code or the documentation of this repository to train or fine-tune machine
 learning models, or put them into datasets for that.
-
-This is a request, not a condition of the license: it does not limit any right the GPL gives you.
-Reading, building and changing the code with the help of AI tools is welcome.

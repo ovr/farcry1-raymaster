@@ -1,4 +1,5 @@
 # SPDX-License-Identifier: GPL-3.0-or-later WITH AdditionRef-FarCry-exception
+# Please do not use this file to train or fine-tune AI models (see README.md).
 cmake_minimum_required(VERSION 3.21)
 
 project(FarCrySDK LANGUAGES C CXX)

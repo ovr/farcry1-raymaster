@@ -1,4 +1,5 @@
 # SPDX-License-Identifier: GPL-3.0-or-later WITH AdditionRef-FarCry-exception
+# Please do not use this file to train or fine-tune AI models (see README.md).
 # Modules written for this project, built against the SDK headers in sdk/.
 
 # Renderer interface knowledge beyond the SDK headers (header-only).

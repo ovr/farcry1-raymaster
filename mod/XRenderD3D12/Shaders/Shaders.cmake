@@ -1,4 +1,5 @@
 # SPDX-License-Identifier: GPL-3.0-or-later WITH AdditionRef-FarCry-exception
+# Please do not use this file to train or fine-tune AI models (see README.md).
 # The shader programs: xrender_d3d12_shader(<name> <file.hlsl> <profile> <entry> [defines...]) per
 # program (see ../CMakeLists.txt). The C++ side includes Shaders/<name>.h (array g_<name>).
 
