@@ -6,8 +6,8 @@
 //	scene when it is finished, before the 2D of the frame (the HUD stays as
 //	it is). The post program (Shaders/Post.hlsl) does the work:
 //	  - ScreenFade: the scene darkened by the fade's alpha.
-//	  - ScreenBlur: the scene loses sharpness for the luminance of its blur
-//	    tinted in the effect's colour, by the effect's amount.
+//	  - ScreenBlur: the scene towards the square of the luminance of its blur
+//	    times twice the effect's colour, by the effect's amount.
 //	  - NightVision: the luminance of the scene and the glow of its blur,
 //	    with grain, from dark cyan to white.
 //	  - FlashBang: white fading with the part of the flash still to come

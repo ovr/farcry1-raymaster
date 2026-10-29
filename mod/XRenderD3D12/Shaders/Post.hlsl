@@ -17,9 +17,10 @@
 //	                   the flash's afterimage, tex3 the screen blur's blur:
 //	    POST_NIGHTVISION  the luminance of the scene plus that of its glow,
 //	                      with grain, from dark cyan to white
-//	    POST_SCREENBLUR   the scene loses sharpness for the luminance of
-//	                      tex3 tinted in the colour: vParams1 rgb the colour,
-//	                      w the amount
+//	    POST_SCREENBLUR   the scene towards the square of twice the colour
+//	                      times the luminance of tex3 (C², not C: a strong
+//	                      colour wins over a weak one), by the amount, clamped
+//	                      only after that: vParams1 rgb the colour, w the amount
 //	    POST_FLASHBANG    scene * vParams2.x + afterimage * vParams2.y +
 //	                      vParams2.z (white), plus a spot vParams2.w *
 //	                      exp(-8 r^2), r the distance from vParams3.xy (uv)
@@ -63,11 +64,6 @@ static const float3 NV_DARK = float3(0.087, 0.224, 0.211);
 static const float3 NV_SLOPE = float3(0.778, 0.726, 0.755);
 static const float NV_GRAIN = 0.34;           //!< the grain's range
 static const float NV_GRAIN_ROWS = 576;       //!< the grain's cells across the screen's height (smooth noise)
-
-// Screen blur, amount a, colour C: scene * max(1 - SHARP_LOSS * a, 0) + a * C * (GAIN * L(blur) + BIAS).
-static const float BLUR_SHARP_LOSS = 1.39;
-static const float BLUR_TINT_GAIN = 2.89;
-static const float BLUR_TINT_BIAS = -0.336;
 
 float4 SampleClamp(uint nTex, float2 vUV)
 {
@@ -142,9 +138,8 @@ float4 Effects(float2 vPixel)
   }
   if (HasFlag(POST_SCREENBLUR))
   {
-    float fAmount = g_Draw.vParams1.w;
-    float fSoft = dot(SampleClamp(g_Draw.nTex3, vUV).rgb, LUMINANCE);
-    c = c * max(1 - BLUR_SHARP_LOSS * fAmount, 0) + fAmount * g_Draw.vParams1.rgb * (BLUR_TINT_GAIN * fSoft + BLUR_TINT_BIAS);
+    float3 vTint = 2 * g_Draw.vParams1.rgb * dot(SampleClamp(g_Draw.nTex3, vUV).rgb, LUMINANCE);
+    c = lerp(c, vTint * vTint, g_Draw.vParams1.w);
   }
   if (HasFlag(POST_FLASHBANG))
   {
