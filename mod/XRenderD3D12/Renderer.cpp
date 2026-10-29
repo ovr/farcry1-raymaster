@@ -143,7 +143,7 @@ void CD3D12Renderer::RegisterVariables()
                      "The upscaler's render size: 0 Native AA (the display's: anti-aliasing only), 1 Quality (1/1.5), 2 Balanced (1/1.7), "
                      "3 Performance (1/2), 4 Ultra Performance (1/3)");
   iConsole->Register("d3d12_UpscaleSharpness", &CV_d3d12_UpscaleSharpness, 0.5f, VF_DUMPTODISK, "The upscaler's sharpening, 0 (none) to 1");
-  iConsole->Register("d3d12_UpscaleDebug", &CV_d3d12_UpscaleDebug, 0, 0, "1: the upscaler's debug view");
+  iConsole->Register("d3d12_UpscaleDebug", &CV_d3d12_UpscaleDebug, 0, 0, "1: the upscaler's debug view; 2: the depth it gets (near black, far white)");
 }
 
 //////////////////////////////////////////////////////////////////////////

@@ -38,6 +38,9 @@
 //	                   SUN_MASK_STEPS squares of the patch tex0 smaller and
 //	                   smaller around the middle, SUN_MASK_STEP times the patch
 //	                   where the square covers the texel; in every channel
+//	  POST_DEPTH_VIEW  the depth tex0 (0 near to 1 far) as grey: the distance
+//	                   in log scale, black at vParams1.x (near), white at
+//	                   vParams1.y (far) (d3d12_UpscaleDebug 2)
 //
 //////////////////////////////////////////////////////////////////////
 
@@ -185,8 +188,18 @@ float4 SunMask(float2 vPixel)
   return saturate(m);
 }
 
+float4 DepthView(float2 vPixel)
+{
+  float fNear = g_Draw.vParams1.x, fFar = g_Draw.vParams1.y;
+  float d = g_Textures[g_Draw.nTex0].SampleLevel(g_SamplerPointClamp, vPixel * g_Draw.vParams0.xy, 0).r;
+  float fDist = fNear * fFar / max(fFar - d * (fFar - fNear), 1e-6);
+  return float4((float3)saturate(log2(fDist / fNear) / log2(fFar / fNear)), 1);
+}
+
 float4 PSMain(SPostOutput In) : SV_Target
 {
+  if (HasFlag(POST_DEPTH_VIEW))
+    return DepthView(In.vPos.xy);
   if (HasFlag(POST_SUN_PATCH))
     return SunPatch(In.vPos.xy);
   if (HasFlag(POST_SUN_MASK))

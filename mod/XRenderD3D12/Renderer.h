@@ -467,6 +467,7 @@ public:
   int m_nUpscaleMode = -1;                  //!< EUpscaleMode of the scene targets, -1 none
   int m_nUpscaleOutputSRV = -1;             //!< the upscaler's output in the texture table
   int m_nUpscaleColorSRV = -1;              //!< the scene's colour (shown stretched when the upscale fails)
+  int m_nUpscaleDepthSRV = -1;              //!< the scene's depth as R32_FLOAT (d3d12_UpscaleDebug 2)
   bool m_bUpscaling = false;                //!< BeginUpscale .. UpscaleScene
   bool m_bUpscaleReset = true;              //!< the next upscale starts without history (a new upscaler or mode)
   bool m_bUpscaleHistoryReset = false;      //!< this frame's starts without history

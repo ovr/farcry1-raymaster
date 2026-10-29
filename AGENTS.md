@@ -337,9 +337,11 @@ it as well: it holds local, machine-specific instructions and is not committed (
   FSR 4 on the AMD GPUs it supports, FSR 3.1 on the others). An unknown or unavailable one is
   logged once and acts as `none`. `d3d12_UpscaleMode` is the render size: 0 Native AA (the
   display's size, anti-aliasing only), 1 Quality, 2 Balanced, 3 Performance, 4 Ultra
-  Performance. `d3d12_UpscaleSharpness` is 0 to 1 (0.5; 0 turns sharpening off), and
-  `d3d12_UpscaleDebug 1` shows FSR's debug view. All of them change at run time, and the frame
-  dump names the upscaler, its render size and the frame's jitter.
+  Performance. `d3d12_UpscaleSharpness` is 0 to 1 (0.5; 0 turns sharpening off).
+  `d3d12_UpscaleDebug 1` shows FSR's debug view (FSR 4: the motion vectors at the top left, the
+  weight of the history at the top right), and `d3d12_UpscaleDebug 2` the depth it gets (near
+  black, far white, log scale). All of them change at run time, and the frame dump names the
+  upscaler, its render size and the frame's jitter.
   - With an upscaler, the main view's scene (`BeginScene3D` to `UpscaleScene` before the screen
     effects, `Upscale.cpp`) draws into render-size targets: colour, depth (R32) and motion vectors
     (R16G16, written by the general program's opaque draws). It is jittered and its textures get

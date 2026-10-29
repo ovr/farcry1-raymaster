@@ -127,11 +127,19 @@ bool CD3D12Renderer::UpdateUpscaler()
       m_pDescriptors->FreeSRV(m_nUpscaleOutputSRV);
     if (m_nUpscaleColorSRV >= 0)
       m_pDescriptors->FreeSRV(m_nUpscaleColorSRV);
-    m_nUpscaleOutputSRV = m_nUpscaleColorSRV = -1;
+    if (m_nUpscaleDepthSRV >= 0)
+      m_pDescriptors->FreeSRV(m_nUpscaleDepthSRV);
+    m_nUpscaleOutputSRV = m_nUpscaleColorSRV = m_nUpscaleDepthSRV = -1;
     int rw = w, rh = h;
     m_pUpscaler->GetRenderSize(nMode, rw, rh);
+    D3D12_SHADER_RESOURCE_VIEW_DESC DepthDesc = {};
+    DepthDesc.Format = DXGI_FORMAT_R32_FLOAT;
+    DepthDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
+    DepthDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+    DepthDesc.Texture2D.MipLevels = 1;
     if (!m_pDevice->SetSceneSize(rw, rh) || (m_nUpscaleOutputSRV = m_pDescriptors->AllocSRV(m_pDevice->GetSceneOutput(), nullptr)) < 0 ||
-        (m_nUpscaleColorSRV = m_pDescriptors->AllocSRV(m_pDevice->GetSceneColor(), nullptr)) < 0)
+        (m_nUpscaleColorSRV = m_pDescriptors->AllocSRV(m_pDevice->GetSceneColor(), nullptr)) < 0 ||
+        (m_nUpscaleDepthSRV = m_pDescriptors->AllocSRV(m_pDevice->GetSceneDepth(), &DepthDesc)) < 0)
     {
       iLog->LogError("XRenderD3D12: no scene targets of %d x %d for the upscaler; none", rw, rh);
       ReleaseUpscaler();
@@ -155,8 +163,10 @@ void CD3D12Renderer::ReleaseUpscaler()
       m_pDescriptors->FreeSRV(m_nUpscaleOutputSRV);
     if (m_nUpscaleColorSRV >= 0)
       m_pDescriptors->FreeSRV(m_nUpscaleColorSRV);
+    if (m_nUpscaleDepthSRV >= 0)
+      m_pDescriptors->FreeSRV(m_nUpscaleDepthSRV);
   }
-  m_nUpscaleOutputSRV = m_nUpscaleColorSRV = -1;
+  m_nUpscaleOutputSRV = m_nUpscaleColorSRV = m_nUpscaleDepthSRV = -1;
   if (m_pDevice)
     m_pDevice->SetSceneSize(0, 0);
   m_pUpscaler.reset();
@@ -252,12 +262,12 @@ void CD3D12Renderer::UpscaleScene()
   In.fFrameMs = iTimer ? std::clamp(iTimer->GetFrameTime() * 1000.0f, 0.1f, 1000.0f) : 16.7f;
   In.fSharpness = std::clamp(CV_d3d12_UpscaleSharpness, 0.0f, 1.0f);
   In.bReset = m_bUpscaleHistoryReset;
-  In.bDebugView = CV_d3d12_UpscaleDebug != 0;
+  In.bDebugView = CV_d3d12_UpscaleDebug == 1;
   const bool bUpscaled = m_pUpscaler->Dispatch(In);
   m_pDevice->BindRootSignature();
 
-  // Its picture over the whole back buffer (else the scene stretched), then the depth buffer
-  // cleared for what is drawn in 3D after the scene.
+  // Its picture over the whole back buffer (else the scene stretched; with d3d12_UpscaleDebug 2
+  // the depth it got), then the depth buffer cleared for what is drawn in 3D after the scene.
   const int w = m_pDevice->GetWidth(), h = m_pDevice->GetHeight();
   int Viewport[4];
   memcpy(Viewport, m_Viewport, sizeof(Viewport));
@@ -277,6 +287,12 @@ void CD3D12Renderer::UpscaleScene()
   dc.nTex0 = (uint32)(bUpscaled ? m_nUpscaleOutputSRV : m_nUpscaleColorSRV);
   Set4(dc.vParams0, 1.0f / w, 1.0f / h, 0, 0);
   Set4(dc.vParams1, 1, 1, 1, 1);
+  if (CV_d3d12_UpscaleDebug == 2)
+  {
+    dc.nFlags = POST_DEPTH_VIEW;
+    dc.nTex0 = (uint32)m_nUpscaleDepthSRV;
+    Set4(dc.vParams1, In.fNear, In.fFar, 0, 0);
+  }
   DrawImmediate(Key, dc, D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST, VERTEX_FORMAT_P3F, s_FullScreen, 3);
   if (bUpscaled)
     m_pDevice->Transition(In.pOutput, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
