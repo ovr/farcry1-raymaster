@@ -35,10 +35,10 @@
 //	    variable of our own);
 //	  - near the shore (close to the camera) the surface fades into the
 //	    scene behind it, so the water has no hard edge; seen from below,
-//	    the ocean shows the scene above in its fog volume's fog, other
-//	    water the scene above through the window of total internal
-//	    reflection;
-//	  - the frame's linear fog.
+//	    the ocean shows the scene above bent by large swells, in its fog
+//	    volume's fog, other water the scene above through the window of
+//	    total internal reflection;
+//	  - the frame's linear fog (not on the ocean from below).
 //	The result replaces the pixel (no blending).
 //
 //	SDrawConstants:
@@ -265,8 +265,14 @@ float4 PSMain(SWaterOutput In) : SV_Target
   float fThick0 = max(fBehind0 - fSurface, 0);
 
   // Displaced by the waves, less in shallow water and with distance; a displaced sample in front
-  // of the surface (the shore, an object) keeps the undisplaced one.
-  float2 vOffset = N.xy * g_Draw.vParams2.w * saturate(fThick0 * 0.5) / (1 + fSurface * 0.05);
+  // of the surface (the shore, an object) keeps the undisplaced one. The ocean from below bends the
+  // world above far more, in large smooth swells: by the same waves four times as large.
+  float2 vOffset;
+  if (bBelow && g_Draw.vParams3.w == 0)
+    vOffset = WaveNormal(In.vWorldPos.xy * 0.25, g_Frame.vTime.x * 0.25, g_Draw.vParams0.x).xy * 1.5 * saturate(fThick0 * 0.5) /
+              (1 + fSurface * 0.1);
+  else
+    vOffset = N.xy * g_Draw.vParams2.w * saturate(fThick0 * 0.5) / (1 + fSurface * 0.05);
   float2 vUV = vUV0 + vOffset;
   float fBehind = LinearDepth(g_Textures[g_Draw.nTex1].SampleLevel(g_SamplerPointClamp, vUV, 0).r);
   if (fBehind < fSurface)
@@ -379,6 +385,8 @@ float4 PSMain(SWaterOutput In) : SV_Target
     // without a window of total internal reflection), a third of it the water's colour the surface
     // reflects back down, in the fog of its volume.
     vColor = lerp(vScene, vScatter, 1 - 0.65 * (1 - FogInsideVolume(fSurface, g_Draw.vParams2.y)));
+    if (g_Draw.vParams0.z == 8)
+      return float4(vScene, 1);
   }
   else
   {
