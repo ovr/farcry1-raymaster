@@ -26,7 +26,8 @@
 //	      vParams2.x * (1 - N.V)^vParams2.y); DF2_REFL_AMOUNT: rgb = cube * tex5
 //	      + tex4 * vAddColor.rgb, both at uv0), else DF_TEX0_ARRAY
 //	      (g_TextureArrays, slice floor(u / 2) at (u - 2 * slice, v)), else DF_TEX0
-//	      (g_Textures), else white; sampler from nSamplers bits 0-3
+//	      (g_Textures; DF2_BUMP_OFFSET at uv0 + (tex3 at uv1 rg * 2 - 1) *
+//	      vParams0.x), else white; sampler from nSamplers bits 0-3
 //	      (DF2_TERRAIN_LIGHT, the terrain under dynamic lights: rgb as 0.75 *
 //	      rgb + 0.25)
 //	    colour * tex0; DF_TEX0_ALPHA_ONLY: rgb = colour, a = colour a * tex a;
@@ -371,7 +372,12 @@ float4 PSMain(SVertexOutput In) : SV_Target
     vTex = SampleTextureArray(g_Draw.nTex0, nSampler0, float3(In.vTex0.x - 2 * fSlice, In.vTex0.y, fSlice));
   }
   else if (HasFlag(DF_TEX0))
-    vTex = SampleTexture(g_Draw.nTex0, nSampler0, In.vTex0);
+  {
+    float2 vUV0 = In.vTex0;
+    if (HasFlag2(DF2_BUMP_OFFSET))
+      vUV0 += (SampleTexture(g_Draw.nTex3, XR_SAMPLER_LINEAR_WRAP, In.vTex1).rg * 2 - 1) * g_Draw.vParams0.x;
+    vTex = SampleTexture(g_Draw.nTex0, nSampler0, vUV0);
+  }
   if (HasFlag2(DF2_TERRAIN_LIGHT))
     vTex.rgb = 0.75 * vTex.rgb + 0.25;
 

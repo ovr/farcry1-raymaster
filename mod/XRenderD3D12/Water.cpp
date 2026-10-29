@@ -11,8 +11,9 @@
 //	one, the back buffer and the depth buffer are copied; the water program
 //	(Shaders/Water.hlsl) reads the copies for the refraction and the depth
 //	of the water behind the surface, and the scene's sky box for the
-//	reflection. The beach is the foam texture running up the shore in two
-//	waves; the sea floor is opaque, lit by the world colour.
+//	reflection. The beach is the foam texture running up the shore in three
+//	waves, wobbled by a noise, over the wet sand; the sea floor is opaque,
+//	lit by the world colour.
 //
 //	With r_WaterReflections the ocean also reflects the scene mirrored in
 //	its plane: before the main view is drawn, the 3D engine renders the sky
@@ -85,9 +86,14 @@ constexpr float WATER_DISPLACEMENT = 0.03f;
 // A beach wave runs up the shore and back in this many seconds (BEACH_WAVES of them at a time), the
 // second this many seconds behind the first; the foam is white, this many times the world colour's
 // mean (about as bright as the sand, so that it shows over the water).
+// The foam wobbles: its texture moved by the slopes of a noise normal map this many metres across
+// times this (a few hundredths of the texture, the front's teeth made uneven), the noise swaying back
+// and forth by a quarter of its size with the wave.
 constexpr float BEACH_WAVE_PERIOD = 10.0f;
 constexpr float BEACH_WAVE_LAG = 4.0f;
 constexpr float BEACH_FOAM_BRIGHTNESS = 1.05f;
+constexpr float BEACH_BUMP_SIZE = 16.0f;
+constexpr float BEACH_BUMP_OFFSET = 0.5f;
 
 constexpr int WAVE_TEXTURE_SIZE = 256;
 
@@ -641,6 +647,8 @@ bool CD3D12Renderer::SetupBeachDraw(SPipelineKey &Key, SDrawConstants &dc, int n
     m_pBeachTexture = m_pTextures->LoadTexture("textures/wave1", FT_CLAMP, 0, eTT_Base, -1, -1, -1, 0);
   if (!m_pBeachWetTexture)
     m_pBeachWetTexture = m_pTextures->LoadTexture("textures/water2", 0, 0, eTT_Base, -1, -1, -1, 0);
+  if (!m_pBeachBumpTexture)
+    m_pBeachBumpTexture = m_pTextures->LoadTexture("textures/fire_noise", 0, 0, eTT_Bumpmap, -1, -1, -1, 0);
   CTexture *pTex = nPass < BEACH_WAVES ? m_pBeachTexture : m_pBeachWetTexture;
   if (!pTex || !pTex->IsTextureLoaded() || pTex->IsCube())
     return false;
@@ -656,6 +664,7 @@ bool CD3D12Renderer::SetupBeachDraw(SPipelineKey &Key, SDrawConstants &dc, int n
     // The wet sand: a faint grey noise in the vertex colour, three times across the strip, drifting
     // up the beach; it darkens the strip by about 2 levels.
     dc.nFlags = DF_TEX0 | DF_VCOLOR | DF_TEXMATRIX;
+    dc.nFlags2 &= ~DF2_BUMP_OFFSET;
     dc.nSamplers = XR_SAMPLER_LINEAR_WRAP;
     Set4(dc.vTexMat0, 1.25f, 0, 0, 0);
     Set4(dc.vTexMat1, 0, 3, Frac(0.2f * fTime), 0);
@@ -663,9 +672,10 @@ bool CD3D12Renderer::SetupBeachDraw(SPipelineKey &Key, SDrawConstants &dc, int n
     return true;
   }
 
-  // The foam (white: the mesh's rgb, darker in places, is not used) runs up the beach and back and
-  // sways along the shore: the texture squeezed towards the sea, least when the front is highest.
-  // The second wave is behind the first, the third the first's opposite.
+  // The foam (white: the mesh's rgb, darker in places, is not used) runs up the beach and back: the
+  // texture squeezed towards the sea, least when the front is highest. u stays as it is: it runs 0 to
+  // 1 and back between the cross sections, and the texture is clamped. The noise that wobbles it
+  // sways with the wave. The second wave is behind the first, the third the first's opposite.
   const float fAngle = 2 * gf_PI * Frac((fTime + (nPass == 1 ? BEACH_WAVE_LAG : 0.0f)) / BEACH_WAVE_PERIOD);
   float fSway = 0.25f * sinf(fAngle), fSqueeze = 2 + 0.9f * cosf(fAngle - 0.2f * gf_PI);
   if (nPass == 2)
@@ -675,8 +685,17 @@ bool CD3D12Renderer::SetupBeachDraw(SPipelineKey &Key, SDrawConstants &dc, int n
   }
   dc.nFlags = DF_TEX0 | DF_VCOLOR | DF_VALPHA_ONLY | DF_TEXMATRIX;
   dc.nSamplers = XR_SAMPLER_LINEAR_CLAMP;
-  Set4(dc.vTexMat0, 1, 0, fSway, 0);
+  Set4(dc.vTexMat0, 1, 0, 0, 0);
   Set4(dc.vTexMat1, 0, fSqueeze, 0, 0);
+  if (m_pBeachBumpTexture && m_pBeachBumpTexture->IsTextureLoaded() && !m_pBeachBumpTexture->IsCube())
+  {
+    dc.nFlags |= DF_TEXGEN1_WORLD;
+    dc.nFlags2 |= DF2_BUMP_OFFSET;
+    dc.nTex3 = m_pBeachBumpTexture->GetSRV();
+    Set4(dc.vTexGen1U, 1 / BEACH_BUMP_SIZE, 0, 0, fSway);
+    Set4(dc.vTexGen1V, 0, 1 / BEACH_BUMP_SIZE, 0, 0);
+    dc.vParams0[0] = BEACH_BUMP_OFFSET;
+  }
   const float b = BEACH_FOAM_BRIGHTNESS * (m_WorldColor[0] + m_WorldColor[1] + m_WorldColor[2]) / 3;
   Set4(dc.vColor, b, b, b, 1);
   return true;

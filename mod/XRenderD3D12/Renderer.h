@@ -461,6 +461,7 @@ public:
   bool m_bSceneCopied = false;              //!< the copies hold the current list's scene
   CTexture *m_pBeachTexture = nullptr;      //!< textures/wave1 (one reference)
   CTexture *m_pBeachWetTexture = nullptr;   //!< textures/water2 (one reference)
+  CTexture *m_pBeachBumpTexture = nullptr;  //!< textures/fire_noise as a normal map (one reference)
   int m_nWaveTexture = 0;                   //!< GetWaveTexture: its ID, 0 not made yet, -1 failed
   int m_nCausticsTexture = 0;               //!< GetCausticsTexture: its ID, 0 not made yet, -1 failed
   float m_fCausticsMinMean = 1;             //!< the mean of the smaller of two texels of it (its mean 1)

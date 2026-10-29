@@ -92,6 +92,7 @@ typedef float float4x4_t[16];
 #define DF2_GLOW_FALLOFF    0x00000800  //!< rgb *= saturate(1 - uv0.x)^vParams0.x: a glow fading out from its inner edge (u 0) to its outer edge (u 1)
 #define DF2_REFL_AMOUNT     0x00001000  //!< with DF_CUBE0: tex0 rgb = cube * tex5 at uv0 (the reflect amount) + tex4 at uv0 * vAddColor.rgb (the texture), lit as tex0
 #define DF2_ALPHA_GLOW      0x00002000  //!< rgb += tex0 rgb * tex0 a after the light and the light map: the texture's alpha is a glow mask, unlit
+#define DF2_BUMP_OFFSET     0x00004000  //!< with DF_TEX0: tex0 looked up at uv0 + (tex3 at uv1 rg * 2 - 1) * vParams0.x, the texture wobbled by a normal map (the beach foam)
 
 // SDrawConstants::nFlags of the post program (Post.hlsl): one mode, with POST_EFFECTS the effects drawn
 #define POST_DOWNSAMPLE     0x00000001  //!< the mean of tex0 over the target's pixel: vParams0.z x vParams0.z bilinear taps
@@ -151,7 +152,7 @@ struct SDrawConstants
   XR_UINT(nLights);               //!< the lights in vLightPos
   XR_UINT(nTex2);                 //!< more textures for the other programs (Water.hlsl) and DF_TERRAIN_CLIFF
   XR_UINT(nTex3);
-  XR_FLOAT4(vParams0);            //!< parameters of the other programs (Water.hlsl), DF_DETAIL_LAYER, DF_TERRAIN_CLIFF and DF2_GLASS
+  XR_FLOAT4(vParams0);            //!< parameters of the other programs (Water.hlsl), DF_DETAIL_LAYER, DF_TERRAIN_CLIFF, DF2_GLASS and DF2_BUMP_OFFSET
   XR_FLOAT4(vParams1);
   XR_FLOAT4(vParams2);
   XR_FLOAT4(vParams3);
