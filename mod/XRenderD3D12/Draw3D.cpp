@@ -350,11 +350,13 @@ void CD3D12Renderer::DrawLeafItem(const SRenderItem &it)
   // The fog volume pass: the element once more, with the ID of the fog volume it is in, in the
   // sort group eS_FogShader (the object of a static one has FOB_FOGPASS), and the volume's cap
   // ("foglayer"); drawn with r_VolumetricFog. The fog of the ocean's volume over what is under it
-  // is the water's (Water.cpp), but for the caustics of its sectors.
-  const bool bFogPass = eDC == eDC_FogLayer ||
+  // is the water's (Water.cpp) while the camera is above the water, but for the caustics of its
+  // sectors; under the water it is the volume's own, as in the other volumes.
+  const bool bFogPass = eDC == eDC_FogLayer || it.bFogPass ||
                         (eDC != eDC_Caustics && ((it.nSort & ~EFSLIST_MASK) == eS_FogShader || (pObj->m_ObjFlags & FOB_FOGPASS)));
   const SFogVolume *pFogVolume = bFogPass ? m_pScene->GetFogVolume(it.nFog) : nullptr;
-  if (bFogPass && (!pFogVolume || pFogVolume->bCaustics || !IsVolumetricFogOn() || m_bShadowMapPass || m_bSpritePass))
+  if (bFogPass && (!pFogVolume || (pFogVolume->bCaustics && (m_bReflectionPass || m_Camera.GetPos().z >= pFogVolume->fFogLayerZ)) ||
+                   !IsVolumetricFogOn() || m_bShadowMapPass || m_bSpritePass))
     return;
 
   // Transform, depth range and scissor.
@@ -488,7 +490,7 @@ void CD3D12Renderer::DrawLeafItem(const SRenderItem &it)
 
   // A fog volume over the object (FogVolumeAlpha, General.hlsl) where its first pass is: blended
   // objects where they are seen, by their alpha; alpha tested ones where the test passes. The cap
-  // from both sides.
+  // and the sea floor beyond the terrain from both sides.
   if (pFogVolume)
   {
     const bool bCap = eDC == eDC_FogLayer;
@@ -507,7 +509,7 @@ void CD3D12Renderer::DrawLeafItem(const SRenderItem &it)
     Set4(dc.vParams0, pFogVolume->fFogLayerZ, logf(100) / (2 * std::max(pFogVolume->fMaxFogDist, 0.01f)), bCap ? 1.0f : 0.0f,
          bBlended ? 1.0f : 0.0f);
     Key.nState = GS_BLSRC_SRCALPHA | GS_BLDST_ONEMINUSSRCALPHA | (bBlended || bCap ? 0 : GS_DEPTHFUNC_EQUAL);
-    if (bCap)
+    if (bCap || eDC == eDC_WaterBottom)
       Key.nCull = R_CULL_NONE;
     Draw();
     return;

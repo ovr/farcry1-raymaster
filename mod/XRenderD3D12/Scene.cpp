@@ -80,7 +80,7 @@ namespace
   //! passes (FOB_LIGHTPASS), its fog volume pass (eS_FogShader, FOB_FOGPASS).
   uint64 PassOrder(const SRenderItem &it)
   {
-    if ((it.nSort & ~EFSLIST_MASK) == eS_FogShader || (it.pObj->m_ObjFlags & FOB_FOGPASS))
+    if (it.bFogPass || (it.nSort & ~EFSLIST_MASK) == eS_FogShader || (it.pObj->m_ObjFlags & FOB_FOGPASS))
       return 2;
     return (it.pObj->m_ObjFlags & FOB_LIGHTPASS) ? 1 : 0;
   }
@@ -133,31 +133,35 @@ namespace
     return (uint64)(0xFFFFFFFFu - DistanceBits(fDist));
   }
 
-  //! The highest point of an element's leaf buffer box in the world; FLT_MAX without one.
-  float TopZ(const SRenderItem &it)
+  //! The lowest and the highest point of an element's leaf buffer box in the world; -FLT_MAX and
+  //! FLT_MAX without one.
+  std::pair<float, float> ZRange(const SRenderItem &it)
   {
+    const std::pair<float, float> None = { -FLT_MAX, FLT_MAX };
     if (it.pRE->m_Type != eDATA_OcLeaf)
-      return FLT_MAX;
+      return None;
     CREOcLeaf *pLeaf = static_cast<CREOcLeaf *>(it.pRE);
     if (!pLeaf->m_pBuffer)
-      return FLT_MAX;
+      return None;
     const CLeafBuffer *pVC = pLeaf->m_pBuffer->GetVertexContainer();
     const Vec3 &a = pVC->m_vBoxMin, &b = pVC->m_vBoxMax;
     if (!(a.x <= b.x && a.y <= b.y && a.z <= b.z))
-      return FLT_MAX;
+      return None;
     const float *m = it.pObj->m_Matrix.data;
-    float fTop = -FLT_MAX;
+    float fBottom = FLT_MAX, fTop = -FLT_MAX;
     for (int i = 0; i < 8; i++)
     {
       const float x = (i & 1) ? b.x : a.x, y = (i & 2) ? b.y : a.y, z = (i & 4) ? b.z : a.z;
-      fTop = std::max(fTop, x * m[2] + y * m[6] + z * m[10] + m[14]);
+      const float fZ = x * m[2] + y * m[6] + z * m[10] + m[14];
+      fBottom = std::min(fBottom, fZ);
+      fTop = std::max(fTop, fZ);
     }
-    return fTop;
+    return { fBottom, fTop };
   }
 
   //! fWaterZ: the ocean's level, under which blended objects (water plants faded by the engine)
-  //! count as under water.
-  uint64 MakeSortKey(const SRenderItem &it, float fWaterZ)
+  //! count as under water; bUnderWater: the camera is under it.
+  uint64 MakeSortKey(const SRenderItem &it, float fWaterZ, bool bUnderWater)
   {
     const uint64 nPass = (uint64)PassRank(it.nSort);
     const uint64 nGroup = (uint64)SortGroup(it.nSort);
@@ -169,13 +173,15 @@ namespace
         // Over the scene: flares, screen quads, screen effects, then by sort group.
         return (1ull << 63) | ((uint64)nRank << 56) | (nGroup << 48);
       }
-      // Blended objects wholly under the ocean first, far to near: the water shows them through
-      // the scene it copies (refracted, in its fog, under its reflection). Then the water surfaces
-      // (they show what the scene left behind them) by sort group (the ocean and water volumes
-      // before the beach), then the rest far to near.
+      // Blended objects wholly on the far side of the ocean's surface (under it, or with the camera
+      // under the water above it) first, far to near: the water shows them through the scene it
+      // copies (refracted, in its fog, under its reflection). Then the water surfaces (they show
+      // what the scene left behind them) by sort group (the ocean and water volumes before the
+      // beach), then the rest far to near.
       if (IsWaterClass(it.eDrawClass))
         return (1ull << 61) | (nGroup << 32) | FarFirstBits(it.fDistance);
-      if (it.eDrawClass != eDC_Additive && it.eDrawClass != eDC_ProcFlare && TopZ(it) < fWaterZ)
+      const auto [fBottom, fTop] = ZRange(it);
+      if (it.eDrawClass != eDC_Additive && it.eDrawClass != eDC_ProcFlare && (bUnderWater ? fBottom > fWaterZ : fTop < fWaterZ))
         return (FarFirstBits(it.fDistance) << 2) | PassOrder(it);
       return (1ull << 62) | (FarFirstBits(it.fDistance) << 30) | PassOrder(it);
     }
@@ -187,11 +193,13 @@ namespace
     // In a sort group the caustics come after the terrain and the opaque objects (over what they
     // left of the terrain), the terrain's shadows after them (they replace the shadowed terrain),
     // the light passes of the objects lit in passes and of the terrain after everything they add
-    // to, the decals multiplied in (they write no depth) after the lit surfaces under them.
+    // to, the decals multiplied in (they write no depth) after the lit surfaces under them, the fog
+    // volume passes over all of it.
     const uint64 nRank = it.eDrawClass == eDC_Caustics                                              ? 1
                          : it.eDrawClass == eDC_TerrainShadow                                       ? 2
                          : (it.pObj->m_ObjFlags & FOB_LIGHTPASS) || it.eDrawClass == eDC_TerrainLight ? 3
                          : it.eDrawClass == eDC_Modulate                                            ? 4
+                         : PassOrder(it) == 2                                                       ? 5
                                                                                                     : 0;
     const uint64 nShader = (uint64)(it.pShader->GetID() & 0xFFFFF);
     const uint64 nRes = it.pRes ? (uint64)(uint32)it.pRes->m_Id : 0;
@@ -359,13 +367,18 @@ void CScene::AddEf(int nFog, CRendElement *pRE, IShader *pEf, SRenderShaderResou
   CShader *pSh = ResolveShader(pEf, nTempl);
   EDrawClass eDC = DrawClassOf(pSh, pRes);
   // The fog pass of a terrain sector (FOB_FOGPASS, the ID of the fog volume it is in): under the
-  // ocean, whose volume has caustics, the caustics; in the other volumes (a swamp's fog) the
-  // volume's fog, as over the objects in them.
+  // ocean, whose volume has caustics, the caustics, and with the camera under the ocean's layer the
+  // volume's fog over them as well (seen from above, the water lays it on); in the other volumes (a
+  // swamp's fog) the volume's fog, as over the objects in them.
+  bool bOceanFog = false;
   if (eDC == eDC_Terrain && pObj && (pObj->m_ObjFlags & FOB_FOGPASS))
   {
     const SFogVolume *pFV = GetFogVolume(nFog);
     if (pFV && pFV->bCaustics)
+    {
       eDC = eDC_Caustics;
+      bOceanFog = g_pRenderer && g_pRenderer->GetCamera().GetPos().z < pFV->fFogLayerZ;
+    }
   }
   // The casters whose shadow maps the frame needs (also of the elements not drawn: the engine
   // names them with a shadow map element).
@@ -406,6 +419,31 @@ void CScene::AddEf(int nFog, CRendElement *pRE, IShader *pEf, SRenderShaderResou
   it.nOrder = (int)s.Items.size();
   s.Items.push_back(it);
   m_nFrameItems++;
+  if (bOceanFog)
+  {
+    it.eDrawClass = eDC_Terrain;
+    it.eList = ChooseList(it);
+    it.nOrder = (int)s.Items.size();
+    s.Items.push_back(it);
+    m_nFrameItems++;
+    return;
+  }
+  // The objects in the ocean (its plants, rocks, the floor beyond the terrain) come once, with the
+  // ocean's fog ID and no fog pass of their own: with the camera under the ocean's layer, the
+  // volume's fog over them as well.
+  const bool bGeometry = eDC == eDC_Opaque || eDC == eDC_AlphaTest || eDC == eDC_AlphaTestVColor || eDC == eDC_VColor ||
+                         eDC == eDC_AlphaBlend || eDC == eDC_WaterBottom;
+  if (bGeometry && pRE->m_Type == eDATA_OcLeaf && PassOrder(it) == 0)
+  {
+    const SFogVolume *pFV = GetFogVolume(nFog);
+    if (pFV && pFV->bCaustics && g_pRenderer && g_pRenderer->GetCamera().GetPos().z < pFV->fFogLayerZ)
+    {
+      it.bFogPass = true;
+      it.nOrder = (int)s.Items.size();
+      s.Items.push_back(it);
+      m_nFrameItems++;
+    }
+  }
 }
 
 int CScene::PrepareItems(SSceneSlot &Slot)
@@ -456,6 +494,7 @@ void CScene::BuildLists(SSceneSlot &Slot, int nItems, bool bSort)
       nTerrainSort = Slot.Items[i].nSort;
   I3DEngine *p3DEngine = iSystem ? iSystem->GetI3DEngine() : nullptr;
   const float fWaterZ = p3DEngine ? p3DEngine->GetWaterLevel() : -FLT_MAX;
+  const bool bUnderWater = g_pRenderer && g_pRenderer->GetCamera().GetPos().z < fWaterZ;
   for (int i = 0; i < nItems; i++)
   {
     SRenderItem &it = Slot.Items[i];
@@ -466,7 +505,7 @@ void CScene::BuildLists(SSceneSlot &Slot, int nItems, bool bSort)
       it.nSort = nTerrainSort;
       it.eList = ChooseList(it);
     }
-    it.nSortKey = MakeSortKey(it, fWaterZ);
+    it.nSortKey = MakeSortKey(it, fWaterZ, bUnderWater);
     Slot.Lists[it.eList].push_back(it);
   }
   if (!bSort)

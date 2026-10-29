@@ -91,6 +91,14 @@ float ViewDepth(float3 vPos)
   return abs(mul(float4(vPos, 1), g_Frame.mView).z);
 }
 
+//! How much of its colour a fog volume the camera is in lays over a point fDepth along the view
+//! axis away (fDensity = ln 100 / (2 * the volume's fog distance)): a tenth at the camera, growing
+//! evenly to all of it at 0.65 times the fog distance.
+float FogInsideVolume(float fDepth, float fDensity)
+{
+  return saturate(0.1 + 0.9 * fDepth * fDensity * (2 / (0.65 * 4.60517)));
+}
+
 //! How much of a point at vPos the scene's fog (vFogParams) leaves: 1 before its start, 0 after its
 //! end, linear between over the point's ViewDepth.
 float SceneFog(float3 vPos)

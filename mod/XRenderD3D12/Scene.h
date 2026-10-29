@@ -63,6 +63,7 @@ struct SRenderItem
   ERenderList eList = eRL_Opaque;           //!< the list the item is drawn in
   float fDistance = 0;                      //!< from the camera (CRendElement::mfDistanceToCameraSquared), set in EF_EndEf3D
   int nOrder = 0;                           //!< position in the scene (EF_AddEf order)
+  bool bFogPass = false;                    //!< the fog volume pass the renderer adds itself (see CScene::AddEf)
 };
 
 //! A particle sprite of EF_AddSpriteToScene (camera facing quads in world space).

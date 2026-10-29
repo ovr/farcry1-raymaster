@@ -35,7 +35,8 @@
 //	    variable of our own);
 //	  - near the shore (close to the camera) the surface fades into the
 //	    scene behind it, so the water has no hard edge; seen from below,
-//	    the scene above shows through the window of total internal
+//	    the ocean shows the scene above in its fog volume's fog, other
+//	    water the scene above through the window of total internal
 //	    reflection;
 //	  - the frame's linear fog.
 //	The result replaces the pixel (no blending).
@@ -372,10 +373,17 @@ float4 PSMain(SWaterOutput In) : SV_Target
     if (g_Draw.vParams0.z == 11)
       return float4(In.vColor.aaa, 1);
   }
+  else if (g_Draw.vParams3.w == 0)
+  {
+    // The ocean from below: the scene above through the waves (as the game's ocean shows it,
+    // without a window of total internal reflection), a third of it the water's colour the surface
+    // reflects back down, in the fog of its volume.
+    vColor = lerp(vScene, vScatter, 1 - 0.65 * (1 - FogInsideVolume(fSurface, g_Draw.vParams2.y)));
+  }
   else
   {
-    // From below: the scene above inside the window (critical angle of water, cos 0.66), the
-    // water's colour outside it.
+    // Other water from below: the scene above inside the window (critical angle of water, cos
+    // 0.66), the water's colour outside it.
     float fWindow = saturate((dot(N, V) - 0.66) * 8);
     vColor = lerp(vScatter, vScene, fWindow);
   }

@@ -222,25 +222,22 @@ void MaterialLighting(float3 vPos, float3 vN, float fSun, out float3 vDiffuse, o
 }
 
 //! How much of a fog volume's colour covers the point vPos of an object in it (DF2_FOG_VOLUME):
-//! the fog lies under the volume's layer (vParams0.x). Seen from inside, every point under the
-//! layer is in it; seen from above, the fog of a point grows from nothing at the layer to all of
-//! it 5 m down, the faster the nearer the camera is to the layer (the view crosses less of the
-//! fog the steeper it looks down into it). Times the fog of the depth d along the view axis
-//! (ViewDepth), 1 - exp(-d * vParams0.y), 99 % at twice the volume's fog distance. The volume's cap
-//! (vParams0.z), the layer seen from below, has the fog of the depth from inside and none from above.
+//! the fog lies under the volume's layer (vParams0.x). Seen from above, the fog of a point grows
+//! from nothing at the layer to all of it 5 m down, the faster the nearer the camera is to the
+//! layer (the view crosses less of the fog the steeper it looks down into it), times the fog of
+//! the depth d along the view axis (ViewDepth), 1 - exp(-d * vParams0.y), 99 % at twice the
+//! volume's fog distance. Seen from inside, every point under the layer is in it, with the fog of
+//! its depth (FogInsideVolume). The volume's cap (vParams0.z), the layer seen from below, has the
+//! fog of the depth from inside and none from above.
 float FogVolumeAlpha(float3 vPos)
 {
   float fCamera = g_Frame.vCameraPos.z - g_Draw.vParams0.x;
   float fDepth = g_Draw.vParams0.x - vPos.z;
-  float fGate;
-  if (g_Draw.vParams0.z > 0)
-    fGate = fCamera <= 0 ? 1 : 0;
-  else if (fDepth <= 0)
-    fGate = 0;
-  else if (fCamera <= 0)
-    fGate = 1;
-  else
-    fGate = 1 - pow(1 - saturate(fDepth / 5), lerp(3, 1.6, saturate(fCamera / 5)));
+  if (fCamera <= 0)
+    return (g_Draw.vParams0.z > 0 || fDepth > 0) ? FogInsideVolume(ViewDepth(vPos), g_Draw.vParams0.y) : 0;
+  if (g_Draw.vParams0.z > 0 || fDepth <= 0)
+    return 0;
+  float fGate = 1 - pow(1 - saturate(fDepth / 5), lerp(3, 1.6, saturate(fCamera / 5)));
   return fGate * (1 - exp(-ViewDepth(vPos) * g_Draw.vParams0.y));
 }
 
