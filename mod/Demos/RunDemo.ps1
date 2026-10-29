@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-or-later WITH AdditionRef-FarCry-exception
+
 <#
 .SYNOPSIS
 Runs demos inside the game's own FarCry.exe and waits for them.

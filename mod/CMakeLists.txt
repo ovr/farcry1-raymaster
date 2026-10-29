@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-or-later WITH AdditionRef-FarCry-exception
 # Modules written for this project, built against the SDK headers in sdk/.
 
 # Renderer interface knowledge beyond the SDK headers (header-only).

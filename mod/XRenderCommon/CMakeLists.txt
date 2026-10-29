@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-or-later WITH AdditionRef-FarCry-exception
 # XRenderCommon - renderer interface facts beyond the SDK headers that a compatible renderer needs.
 # Header-only; shared by the renderers in mod/.
 

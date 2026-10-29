@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later WITH AdditionRef-FarCry-exception
 //////////////////////////////////////////////////////////////////////
 //
 //	File: XRenderCommon.h

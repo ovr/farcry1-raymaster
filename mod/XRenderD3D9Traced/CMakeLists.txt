@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-or-later WITH AdditionRef-FarCry-exception
 # XRenderD3D9Traced - tracing proxy of the retail Far Cry 1.4 Direct3D 9 renderer.
 #
 # The DLL loads the original XRenderD3D9.dll, forwards every IRenderer call to it and writes the

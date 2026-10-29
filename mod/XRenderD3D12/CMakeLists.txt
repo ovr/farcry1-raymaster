@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-or-later WITH AdditionRef-FarCry-exception
 # XRenderD3D12 - a basic Direct3D 12 renderer for the 64-bit engine.
 #
 # A renderer DLL of its own (PackageRenderConstructor), built against the SDK headers. Until the

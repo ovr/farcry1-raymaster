@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-or-later WITH AdditionRef-FarCry-exception
 # Demo programs: small scenes drawn by the game's engine with a chosen renderer, so that the
 # original renderer and ours can be compared frame by frame.
 #
