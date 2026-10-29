@@ -300,8 +300,25 @@ public:
 
   //! Opens the device's frame if the engine draws outside BeginFrame / Update; false without a device.
   bool EnsureFrame();
-  //! The engine's r_Width / r_Height changed: new window and back buffer size (checked in Update).
+  //! The engine's r_Width / r_Height / r_Fullscreen changed: new window, display mode and back
+  //! buffer size (checked in Update).
   void CheckResolutionChange();
+  //! Our window windowed (outer size nWidth x nHeight, where it was before full screen) or full
+  //! screen (ShowFullScreen).
+  void SetWindowMode(bool bFullScreen, int nWidth, int nHeight);
+  //! Full screen: the display mode nWidth x nHeight (SetDisplayMode), and the window over the monitor.
+  void ShowFullScreen(int nWidth, int nHeight);
+  //! The window's display to the mode nWidth x nHeight (32 bits, the highest refresh rate of that
+  //! size) as the original's full screen does; the desktop's own mode when it is that size. False
+  //! when the display has no such mode: it keeps its own and the back buffer is stretched over it.
+  bool SetDisplayMode(int nWidth, int nHeight);
+  //! The display's mode back to the desktop's, if SetDisplayMode changed it.
+  void RestoreDisplayMode();
+  //! WM_ACTIVATEAPP: full screen, losing the focus (Alt+Tab) minimises the window with the
+  //! desktop's mode back; getting it again shows it full screen.
+  void OnActivateApp(bool bActive);
+  //! Our window procedure in front of FarCry.exe's (m_pfnGameWndProc): WM_ACTIVATEAPP.
+  static LRESULT CALLBACK WindowProc(HWND hWnd, UINT nMsg, WPARAM wParam, LPARAM lParam);
   //! d3d12_GpuTimes: from here on the GPU time counts for szSection (static storage), in the main
   //! view only (a nested scene counts for the section that renders it).
   void GpuSection(const char *szSection);
@@ -847,6 +864,10 @@ public:
   int m_nColorBits = 32, m_nDepthBits = 24, m_nStencilBits = 8;
   bool m_bFullScreen = false;
   int m_nCVarWidth = 0, m_nCVarHeight = 0;  //!< r_Width / r_Height last applied
+  RECT m_rcWindowed = {};             //!< the window's outer rect when full screen began (empty: started full screen)
+  char m_szDisplayDevice[CCHDEVICENAME] = {};  //!< the display whose mode SetDisplayMode changed (empty: none)
+  bool m_bAppActive = true;           //!< WM_ACTIVATEAPP: the game has the focus
+  WNDPROC m_pfnGameWndProc = nullptr; //!< the window procedure before ours (FarCry.exe's)
   char m_cType = R_DX9_RENDERER;      //!< SetType
   bool m_bSwapBuffers = true;         //!< EnableSwapBuffers
   bool m_bVSync = false;

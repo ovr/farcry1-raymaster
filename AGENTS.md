@@ -335,6 +335,16 @@ it as well: it holds local, machine-specific instructions and is not committed (
   `RunDemo.ps1 -Renderer XRenderD3D12.dll`.
 - `XRENDERD3D12_DEBUG=1` (or `d3d12_Debug 1`, read at start-up) turns on the debug layer and GPU
   based validation; their messages go to the engine log, starting with `[D3D12]`.
+- The window: the video options set `r_Width`, `r_Height` and `r_Fullscreen` while the game runs
+  and ask for no restart, so the renderer applies them after the frame they change in
+  (`CheckResolutionChange`). Windowed, the window's outer size is `r_Width` x `r_Height` and the
+  back buffer gets its client area. Full screen is a borderless topmost window over the monitor,
+  which gets the display mode `r_Width` x `r_Height` (32 bits, the highest refresh rate of that
+  size), as the original's exclusive full screen switched the monitor; without such a mode the
+  monitor keeps its own and the picture is stretched over it. Losing the focus (Alt+Tab)
+  minimises the window and puts the desktop's mode back; leaving full screen and quitting do too.
+  Loaded directly (as `XRenderD3D9.dll`, `r_Driver = "Direct3D9"`), the renderer makes the
+  process per monitor DPI aware itself, as XRenderD3D9Traced does.
 - `d3d12_Upscaler` is the upscaler of the main view's 3D scene: `none` (the default; the frames
   are those of the renderer without one, DemoCompare difference 0) or `fsr` (AMD FSR Upscaling:
   FSR 4 on the AMD GPUs it supports, FSR 3.1 on the others). An unknown or unavailable one is

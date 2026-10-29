@@ -43,6 +43,22 @@ int GetCVarInt(const char *szName, int nDefault)
   return pVar ? pVar->GetIVal() : nDefault;
 }
 
+//! The styles of our own window: windowed (with a frame) and full screen (borderless).
+constexpr DWORD nWindowedStyle = WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX | WS_VISIBLE;
+constexpr DWORD nFullScreenStyle = WS_POPUP | WS_VISIBLE;
+
+//! FarCry.exe declares no DPI awareness, so at a display scale above 100 % Windows would give the
+//! window logical sizes and stretch it as a bitmap. Per monitor aware (v2), as XRenderD3D9Traced
+//! makes the process before it loads a renderer (then this fails and changes nothing); looked up
+//! at run time as there (Windows 10 1703). True when this call made the process aware.
+bool MakeDpiAware()
+{
+  typedef BOOL (WINAPI *PFN_SetProcessDpiAwarenessContext)(HANDLE);
+  HMODULE hUser32 = GetModuleHandleA("user32.dll");
+  const auto pfnSet = hUser32 ? (PFN_SetProcessDpiAwarenessContext)GetProcAddress(hUser32, "SetProcessDpiAwarenessContext") : nullptr;
+  return pfnSet && pfnSet((HANDLE)-4);  // DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2
+}
+
 Matrix44 Identity44()
 {
   Matrix44 m;
@@ -204,6 +220,8 @@ WIN_HWND CD3D12Renderer::Init(int x,int y,int width,int height,unsigned int cbpp
   }
   else
   {
+    if (MakeDpiAware())
+      iLog->Log("XRenderD3D12: the process is per monitor DPI aware");
     // FarCry.exe registers the class (RetailRenderer.h, "Initialization"); without it (another host)
     // a class of our own.
     const char *szClass = RetailRenderer::szWindowClass;
@@ -216,30 +234,19 @@ WIN_HWND CD3D12Renderer::Init(int x,int y,int width,int height,unsigned int cbpp
       wc.lpszClassName = szClass;
       RegisterClassA(&wc);
     }
-    DWORD nStyle, nExStyle = 0;
-    int nX = x, nY = y, nW = m_nWidth, nH = m_nHeight;
-    if (fullscreen)
-    {
-      // Borderless over the whole monitor; the back buffer keeps the requested size.
-      nStyle = WS_POPUP | WS_VISIBLE;
-      nExStyle = WS_EX_TOPMOST;
-      nX = 0;
-      nY = 0;
-      nW = GetSystemMetrics(SM_CXSCREEN);
-      nH = GetSystemMetrics(SM_CYSCREEN);
-    }
-    else
-    {
-      // The window's outer size is the requested size, as the engine expects.
-      nStyle = WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX | WS_VISIBLE;
-    }
-    m_hWnd = CreateWindowExA(nExStyle, szClass, "Far Cry", nStyle, nX, nY, nW, nH, nullptr, nullptr, (HINSTANCE)hinst, nullptr);
+    // Windowed, the window's outer size is the requested size, as the engine expects; full screen,
+    // borderless over the monitor, which ShowFullScreen gives the display mode of that size.
+    m_hWnd = CreateWindowExA(fullscreen ? WS_EX_TOPMOST : 0, szClass, "Far Cry", fullscreen ? nFullScreenStyle : nWindowedStyle,
+      fullscreen ? 0 : x, fullscreen ? 0 : y, m_nWidth, m_nHeight, nullptr, nullptr, (HINSTANCE)hinst, nullptr);
     if (!m_hWnd)
     {
       iLog->LogError("XRenderD3D12: can't create the window (error %u)", (unsigned)GetLastError());
       return 0;
     }
     m_bOwnWindow = true;
+    m_pfnGameWndProc = (WNDPROC)SetWindowLongPtrA(m_hWnd, GWLP_WNDPROC, (LONG_PTR)&CD3D12Renderer::WindowProc);
+    if (fullscreen)
+      ShowFullScreen(m_nWidth, m_nHeight);
     ShowWindow(m_hWnd, SW_SHOWNORMAL);
     UpdateWindow(m_hWnd);
     SetForegroundWindow(m_hWnd);
@@ -350,17 +357,20 @@ bool CD3D12Renderer::ChangeResolution(int nNewWidth, int nNewHeight, int nNewCol
 
 void CD3D12Renderer::CheckResolutionChange()
 {
-  // The engine calls nothing when r_Width or r_Height change: the window gets the new outer
-  // size and the back buffer the client size, and
+  // The engine calls nothing when r_Width, r_Height or r_Fullscreen change (the video options
+  // set them while the game runs): windowed, the window gets the new outer size and the back
+  // buffer the client size; full screen, the display mode and the back buffer get that size.
   // FarCry.exe then sets the viewport with ChangeViewport.
   const int nW = GetCVarInt("r_Width", m_nCVarWidth), nH = GetCVarInt("r_Height", m_nCVarHeight);
-  if ((nW == m_nCVarWidth && nH == m_nCVarHeight) || nW <= 0 || nH <= 0 || !m_pDevice)
+  const bool bFullScreen = m_bOwnWindow ? GetCVarInt("r_Fullscreen", m_bFullScreen) != 0 : m_bFullScreen;
+  if ((nW == m_nCVarWidth && nH == m_nCVarHeight && bFullScreen == m_bFullScreen) || nW <= 0 || nH <= 0 || !m_pDevice)
     return;
   m_nCVarWidth = nW;
   m_nCVarHeight = nH;
+  if (m_bOwnWindow)
+    SetWindowMode(bFullScreen, nW, nH);
   if (m_bOwnWindow && !m_bFullScreen)
   {
-    SetWindowPos(m_hWnd, nullptr, 0, 0, nW, nH, SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
     RECT rc;
     GetClientRect(m_hWnd, &rc);
     m_nWidth = std::max<int>(rc.right - rc.left, 1);
@@ -375,6 +385,131 @@ void CD3D12Renderer::CheckResolutionChange()
   m_Viewport[0] = m_Viewport[1] = 0;
   m_Viewport[2] = m_nWidth;
   m_Viewport[3] = m_nHeight;
+}
+
+void CD3D12Renderer::SetWindowMode(bool bFullScreen, int nWidth, int nHeight)
+{
+  if (bFullScreen)
+  {
+    if (!m_bFullScreen)
+      GetWindowRect(m_hWnd, &m_rcWindowed);
+    m_bFullScreen = true;
+    SetWindowLongPtrA(m_hWnd, GWL_STYLE, nFullScreenStyle);
+    SetWindowLongPtrA(m_hWnd, GWL_EXSTYLE, WS_EX_TOPMOST);
+    // Without the focus (minimised) the mode and the place come with it (OnActivateApp).
+    if (m_bAppActive)
+      ShowFullScreen(nWidth, nHeight);
+    return;
+  }
+  RestoreDisplayMode();
+  m_bFullScreen = false;
+  SetWindowLongPtrA(m_hWnd, GWL_STYLE, nWindowedStyle);
+  SetWindowLongPtrA(m_hWnd, GWL_EXSTYLE, 0);
+  // Where the window was before full screen; started full screen, the middle of the monitor.
+  int nX = m_rcWindowed.left, nY = m_rcWindowed.top;
+  if (IsRectEmpty(&m_rcWindowed))
+  {
+    MONITORINFO mi = {};
+    mi.cbSize = sizeof(mi);
+    GetMonitorInfoA(MonitorFromWindow(m_hWnd, MONITOR_DEFAULTTOPRIMARY), &mi);
+    nX = std::max<int>(mi.rcWork.left, (mi.rcWork.left + mi.rcWork.right - nWidth) / 2);
+    nY = std::max<int>(mi.rcWork.top, (mi.rcWork.top + mi.rcWork.bottom - nHeight) / 2);
+  }
+  if (IsIconic(m_hWnd))
+    ShowWindow(m_hWnd, SW_RESTORE);
+  SetWindowPos(m_hWnd, HWND_NOTOPMOST, nX, nY, nWidth, nHeight, SWP_FRAMECHANGED | SWP_SHOWWINDOW);
+}
+
+void CD3D12Renderer::ShowFullScreen(int nWidth, int nHeight)
+{
+  SetDisplayMode(nWidth, nHeight);
+  MONITORINFO mi = {};
+  mi.cbSize = sizeof(mi);
+  GetMonitorInfoA(MonitorFromWindow(m_hWnd, MONITOR_DEFAULTTOPRIMARY), &mi);
+  SetWindowPos(m_hWnd, HWND_TOPMOST, mi.rcMonitor.left, mi.rcMonitor.top, mi.rcMonitor.right - mi.rcMonitor.left,
+    mi.rcMonitor.bottom - mi.rcMonitor.top, SWP_FRAMECHANGED | SWP_SHOWWINDOW);
+}
+
+bool CD3D12Renderer::SetDisplayMode(int nWidth, int nHeight)
+{
+  MONITORINFOEXA mi = {};
+  mi.cbSize = sizeof(mi);
+  if (!GetMonitorInfoA(MonitorFromWindow(m_hWnd, MONITOR_DEFAULTTOPRIMARY), &mi))
+    return false;
+  if (m_szDisplayDevice[0] && strcmp(m_szDisplayDevice, mi.szDevice) != 0)
+    RestoreDisplayMode();
+  // The desktop's own mode: nothing to change.
+  DEVMODEA dm = {};
+  dm.dmSize = sizeof(dm);
+  if (EnumDisplaySettingsA(mi.szDevice, ENUM_REGISTRY_SETTINGS, &dm) && (int)dm.dmPelsWidth == nWidth && (int)dm.dmPelsHeight == nHeight)
+  {
+    RestoreDisplayMode();
+    return true;
+  }
+  DEVMODEA Best = {};
+  for (DWORD i = 0; EnumDisplaySettingsA(mi.szDevice, i, &dm); i++)
+  {
+    if ((int)dm.dmPelsWidth == nWidth && (int)dm.dmPelsHeight == nHeight && dm.dmBitsPerPel == 32
+      && !(dm.dmDisplayFlags & DM_INTERLACED) && dm.dmDisplayFrequency > Best.dmDisplayFrequency)
+      Best = dm;
+  }
+  if (!Best.dmSize)
+  {
+    iLog->LogWarning("XRenderD3D12: the display has no mode %d x %d; the picture is stretched over its own", nWidth, nHeight);
+    RestoreDisplayMode();
+    return false;
+  }
+  Best.dmFields = DM_PELSWIDTH | DM_PELSHEIGHT | DM_BITSPERPEL | DM_DISPLAYFREQUENCY;
+  const LONG nResult = ChangeDisplaySettingsExA(mi.szDevice, &Best, nullptr, CDS_FULLSCREEN, nullptr);
+  if (nResult != DISP_CHANGE_SUCCESSFUL)
+  {
+    iLog->LogWarning("XRenderD3D12: the display mode %d x %d failed (%d); the picture is stretched over the display's own", nWidth, nHeight, (int)nResult);
+    RestoreDisplayMode();
+    return false;
+  }
+  strcpy_s(m_szDisplayDevice, mi.szDevice);
+  iLog->Log("XRenderD3D12: display mode %d x %d, %u Hz", nWidth, nHeight, (unsigned)Best.dmDisplayFrequency);
+  return true;
+}
+
+void CD3D12Renderer::RestoreDisplayMode()
+{
+  if (!m_szDisplayDevice[0])
+    return;
+  ChangeDisplaySettingsExA(m_szDisplayDevice, nullptr, nullptr, 0, nullptr);
+  m_szDisplayDevice[0] = 0;
+}
+
+void CD3D12Renderer::OnActivateApp(bool bActive)
+{
+  if (bActive == m_bAppActive)
+    return;
+  m_bAppActive = bActive;
+  if (!m_bFullScreen)
+    return;
+  if (bActive)
+  {
+    if (IsIconic(m_hWnd))
+      ShowWindow(m_hWnd, SW_RESTORE);
+    ShowFullScreen(m_nCVarWidth, m_nCVarHeight);
+  }
+  else
+  {
+    // As the original's full screen: the desktop's mode back, and the window out of the way (it
+    // is topmost).
+    RestoreDisplayMode();
+    ShowWindow(m_hWnd, SW_SHOWMINNOACTIVE);
+  }
+}
+
+LRESULT CALLBACK CD3D12Renderer::WindowProc(HWND hWnd, UINT nMsg, WPARAM wParam, LPARAM lParam)
+{
+  CD3D12Renderer *pRenderer = g_pRenderer;
+  if (!pRenderer || pRenderer->m_hWnd != hWnd || !pRenderer->m_pfnGameWndProc)
+    return DefWindowProcA(hWnd, nMsg, wParam, lParam);
+  if (nMsg == WM_ACTIVATEAPP)
+    pRenderer->OnActivateApp(wParam != 0);
+  return CallWindowProcA(pRenderer->m_pfnGameWndProc, hWnd, nMsg, wParam, lParam);
 }
 
 void CD3D12Renderer::Release()
@@ -421,7 +556,12 @@ void CD3D12Renderer::Release()
   m_pDescriptors.reset();
   m_pDevice.reset();
   if (m_bOwnWindow && m_hWnd)
+  {
+    RestoreDisplayMode();
+    if (m_pfnGameWndProc)
+      SetWindowLongPtrA(m_hWnd, GWLP_WNDPROC, (LONG_PTR)m_pfnGameWndProc);
     DestroyWindow(m_hWnd);
+  }
   m_hWnd = nullptr;
   delete this;
 }
