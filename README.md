@@ -8,6 +8,12 @@ Mods for Far Cry, built with the CryENGINE MOD SDK for Far Cry:
 - `mod/XRenderCommon` - what the renderers share about the renderer interface beyond the SDK
   headers.
 - `mod/Demos` - demo scenes that run inside the game, and their runner.
+- `assets/scripts` - patches to the game's scripts, and `Patch Scripts.cmd`, which applies them to
+  the scripts of an installed game (`Patch Scripts.cmd <game folder>`, written to
+  `FCData\zz_RayMaster.pak`; deleting that file gives back the original scripts):
+  - `field-of-view.patch` - a field of view for screens wider than 4:3 that keeps the view up and
+    down of a 4:3 screen (Hor+), and the console variable `cl_fov`, the field of view across the
+    screen in degrees (0, the default, for the automatic one).
 
 How to build and run them: `AGENTS.md`.
 
