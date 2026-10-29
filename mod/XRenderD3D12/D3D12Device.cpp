@@ -375,7 +375,7 @@ D3D12_CPU_DESCRIPTOR_HANDLE CD3D12Device::GetDSV() const
 }
 
 bool CD3D12Device::CreateOffscreenTargets(int nWidth, int nHeight, ComPtr<ID3D12Resource> &pColor, ComPtr<ID3D12Resource> &pDepth,
-                                          D3D12_CPU_DESCRIPTOR_HANDLE hRTV, D3D12_CPU_DESCRIPTOR_HANDLE hDSV)
+                                          D3D12_CPU_DESCRIPTOR_HANDLE hRTV, D3D12_CPU_DESCRIPTOR_HANDLE hDSV, DXGI_FORMAT Format)
 {
   if (!m_pDevice || nWidth <= 0 || nHeight <= 0 || !hRTV.ptr || !hDSV.ptr)
     return false;
@@ -387,13 +387,13 @@ bool CD3D12Device::CreateOffscreenTargets(int nWidth, int nHeight, ComPtr<ID3D12
   Desc.Height = nHeight;
   Desc.DepthOrArraySize = 1;
   Desc.MipLevels = 1;
-  Desc.Format = D3D12_BACKBUFFER_FORMAT;
+  Desc.Format = Format;
   Desc.SampleDesc.Count = 1;
   Desc.Flags = D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET;
   // Optimised for a clear to 0 (the sprites'; the reflection is cleared to the scene's clear
   // colour).
   D3D12_CLEAR_VALUE ColorClear = {};
-  ColorClear.Format = D3D12_BACKBUFFER_FORMAT;
+  ColorClear.Format = Format;
   if (Failed(m_pDevice->CreateCommittedResource(&Heap, D3D12_HEAP_FLAG_NONE, &Desc, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE,
     &ColorClear, IID_PPV_ARGS(&pColor)), "CreateCommittedResource (off screen colour)"))
     return false;
@@ -414,7 +414,7 @@ bool CD3D12Device::CreateOffscreenTargets(int nWidth, int nHeight, ComPtr<ID3D12
 }
 
 bool CD3D12Device::CreateCubeTargets(int nSize, ComPtr<ID3D12Resource> &pColor, ComPtr<ID3D12Resource> &pDepth, const D3D12_CPU_DESCRIPTOR_HANDLE hRTV[6],
-                                     D3D12_CPU_DESCRIPTOR_HANDLE hDSV)
+                                     D3D12_CPU_DESCRIPTOR_HANDLE hDSV, DXGI_FORMAT Format)
 {
   if (!m_pDevice || nSize <= 0 || !hDSV.ptr || std::any_of(hRTV, hRTV + 6, [](const D3D12_CPU_DESCRIPTOR_HANDLE &h) { return !h.ptr; }))
     return false;
@@ -426,11 +426,11 @@ bool CD3D12Device::CreateCubeTargets(int nSize, ComPtr<ID3D12Resource> &pColor, 
   Desc.Height = nSize;
   Desc.DepthOrArraySize = 6;
   Desc.MipLevels = 1;
-  Desc.Format = D3D12_BACKBUFFER_FORMAT;
+  Desc.Format = Format;
   Desc.SampleDesc.Count = 1;
   Desc.Flags = D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET;
   D3D12_CLEAR_VALUE ColorClear = {};
-  ColorClear.Format = D3D12_BACKBUFFER_FORMAT;
+  ColorClear.Format = Format;
   if (Failed(m_pDevice->CreateCommittedResource(&Heap, D3D12_HEAP_FLAG_NONE, &Desc, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE,
     &ColorClear, IID_PPV_ARGS(&pColor)), "CreateCommittedResource (cube colour)"))
     return false;
@@ -449,7 +449,7 @@ bool CD3D12Device::CreateCubeTargets(int nSize, ComPtr<ID3D12Resource> &pColor, 
   for (UINT i = 0; i < 6; i++)
   {
     D3D12_RENDER_TARGET_VIEW_DESC View = {};
-    View.Format = D3D12_BACKBUFFER_FORMAT;
+    View.Format = Format;
     View.ViewDimension = D3D12_RTV_DIMENSION_TEXTURE2DARRAY;
     View.Texture2DArray.FirstArraySlice = i;
     View.Texture2DArray.ArraySize = 1;
@@ -470,6 +470,7 @@ void CD3D12Device::SetOffscreenTargets(ID3D12Resource *pColor, D3D12_CPU_DESCRIP
   m_hOffscreenDSV = hDSV;
   m_nOffscreenWidth = nWidth;
   m_nOffscreenHeight = nHeight;
+  m_OffscreenFormat = pColor->GetDesc().Format;
   m_pCmdList->OMSetRenderTargets(1, &hRTV, FALSE, hDSV.ptr ? &hDSV : nullptr);
   const D3D12_VIEWPORT vp = { 0, 0, (float)nWidth, (float)nHeight, 0, 1 };
   const D3D12_RECT rc = { 0, 0, nWidth, nHeight };
@@ -513,6 +514,7 @@ void CD3D12Device::SetShadowMapTarget(ID3D12Resource *pDepth, D3D12_CPU_DESCRIPT
   Barrier(m_pCmdList.Get(), pDepth, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, D3D12_RESOURCE_STATE_DEPTH_WRITE);
   m_pOffscreen = pDepth;
   m_bOffscreenShadowMap = true;
+  m_OffscreenFormat = DXGI_FORMAT_UNKNOWN;
   m_hOffscreenRTV = {};
   m_hOffscreenDSV = hDSV;
   m_nOffscreenWidth = nSize;

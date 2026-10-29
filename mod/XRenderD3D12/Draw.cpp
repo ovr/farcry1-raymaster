@@ -112,6 +112,7 @@ void CD3D12Renderer::MakeFrameConstants(SFrameConstants &fc, bool bScene) const
   Set4(fc.vTime, iTimer ? iTimer->GetCurrTime() : 0.0f, 0, 0, 0);
   Set4(fc.vWorldColor, m_WorldColor[0], m_WorldColor[1], m_WorldColor[2], m_WorldColor[3]);
   Set4(fc.vDepthParams, m_ProjMatrix.data[10], m_ProjMatrix.data[14], 0, 0);
+  Set4(fc.vHdr, HdrSkyGlow(), 0, 0, 0);
 }
 
 void CD3D12Renderer::DrawGeometry(const SPipelineKey &Key, const SDrawConstants &dc, D3D_PRIMITIVE_TOPOLOGY eTopology, const D3D12_VERTEX_BUFFER_VIEW &VB,
@@ -127,19 +128,22 @@ void CD3D12Renderer::DrawGeometry(const SPipelineKey &Key, const SDrawConstants 
   FullKey.nStreams = (pTexCoord1 ? PIPELINE_STREAM_TEXCOORD1 : 0) | (pTangents ? PIPELINE_STREAM_TANGENTS : 0);
   if (bScene && FullKey.nTarget == 0)
     FullKey.nTarget = 3;
-  // The main view's target in its format: the HDR target, an upscaler's HDR scene.
-  if (!bOffscreen && (FullKey.nTarget == 0 || FullKey.nTarget == 3) && m_pDevice->GetMainColorFormat() == D3D12_HDR_FORMAT)
+  // The target in its format: the HDR target, an upscaler's HDR scene, the water's reflection and
+  // the environment cubes with r_HDRRendering.
+  if ((FullKey.nTarget == 0 || FullKey.nTarget == 3) && m_pDevice->GetTargetColorFormat() == D3D12_HDR_FORMAT)
     FullKey.nColorFormat = PIPELINE_COLOR_HDR;
   ID3D12PipelineState *pPSO = m_pPipeline->GetPSO(FullKey);
   if (!pPSO)
     return;
 
-  if (!m_nFrameCB || m_bFrameCBScene != bScene)
+  const bool bHdrTarget = FullKey.nColorFormat == PIPELINE_COLOR_HDR;
+  if (!m_nFrameCB || m_bFrameCBScene != bScene || m_bFrameCBHdr != bHdrTarget)
   {
     SFrameConstants fc;
     MakeFrameConstants(fc, bScene);
     m_nFrameCB = UploadConstants(*m_pUpload, fc);
     m_bFrameCBScene = bScene;
+    m_bFrameCBHdr = bHdrTarget;
   }
   // Heat vision: the main view's scene through HeatVision (Common.hlsli), not the passes multiplied
   // in or the fog volumes; an additive draw other than a light pass is hot (fire, muzzle flashes).

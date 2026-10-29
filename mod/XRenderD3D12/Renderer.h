@@ -343,6 +343,7 @@ public:
   RECT m_TargetRect = {};
   D3D12_GPU_VIRTUAL_ADDRESS m_nFrameCB = 0; //!< b0, 0 when it has to be made again
   bool m_bFrameCBScene = false;             //!< m_nFrameCB was made for an upscaler's scene
+  bool m_bFrameCBHdr = false;               //!< m_nFrameCB was made for a target of D3D12_HDR_FORMAT
   float m_SunDir[3] = { 0, 0, 1 };          //!< towards the sun, world space (frame constants)
   float m_SunColor[3] = { 1, 1, 1 };
   float m_SunSpec[3] = { 0, 0, 0 };          //!< the sun's specular colour
@@ -569,6 +570,7 @@ public:
     D3D12_CPU_DESCRIPTOR_HANDLE hRTV[6] = {}, hDSV = {};
     int nSRV = -1;                          //!< the texture table index (a TEXTURECUBE view)
     int nSize = 0;
+    DXGI_FORMAT Format = DXGI_FORMAT_UNKNOWN; //!< of the faces: D3D12_BACKBUFFER_FORMAT, or D3D12_HDR_FORMAT with r_HDRRendering
     Vec3 vPos = Vec3(0, 0, 0);              //!< where it is seen from
     int nFaces = 0;                         //!< faces drawn since it was made (6: all)
     int nNextFace = 0;                      //!< the face redrawn next
@@ -705,9 +707,49 @@ public:
   void ReleaseHdr();
   //! The frame dump's lines: the settings, the meter and the EV read back.
   void DumpHdr();
+  //! With r_HDRRendering, drawing into a target of D3D12_HDR_FORMAT (the main scene, the water's
+  //! reflection, the environment cubes) outside heat vision.
+  bool IsHdrTarget() const;
+  //! There: the factor of a colour that makes white's light fLight times brighter (HdrEncode in
+  //! Shaders/Common.hlsli, as the resolve decodes it); else 1. For what the HDR pipeline draws
+  //! brighter than the game: the glow maps (d3d12_HDRGlow).
+  float HdrBoost(float fLight) const;
+  //! There: a light added (a flare, a corona, an additive sprite or surface, drawn
+  //! with the blend nState) fLight times brighter in its core (DF2_HDR_CORE), its soft edge as the
+  //! game's: the sun (d3d12_HDRSun), what glows (d3d12_HDRGlow). Else nothing.
+  void SetHdrCore(SDrawConstants &dc, float fLight, uint32 nState) const;
+  //! There: the light of the sky towards the sun times d3d12_HDRSky (DF2_SKY_GLOW,
+  //! SFrameConstants::vHdr), with a sun in the scene; else 1.
+  float HdrSkyGlow() const;
 
   SHdrState m_Hdr;
   bool m_bHdrScene = false;                 //!< BeginMainScene .. EndMainScene: the main scene draws in D3D12_HDR_FORMAT
+
+  //////////////////////////////////////////////////////////////////////////
+  // ColorGrading.cpp: the colour grading of the HDR pipeline's resolve
+
+  //! The table of the graded display colours and the settings it was made with.
+  struct SColorGrading
+  {
+    CD3D12Texture *pLut = nullptr;          //!< HDR_COLOR_LUT_SIZE^2 x HDR_COLOR_LUT_SIZE, R16G16B16A16_UNORM; nullptr: none (neutral)
+    bool bMade = false;                     //!< pLut is of the settings below
+    float fSaturation = 1, fContrast = 1, fTemperature = 0, fTint = 0, fLutAmount = 1;
+    std::string LutFile;                    //!< d3d12_ColorLut
+    std::string LoadedFile;                 //!< the .cube file Cube was read from (an error leaves Cube empty)
+    int nCubeSize = 0;                      //!< its LUT_3D_SIZE, 0: none
+    std::vector<float> Cube;                //!< its rows, r g b, red changing fastest
+    float CubeMin[3] = { 0, 0, 0 }, CubeMax[3] = { 1, 1, 1 };   //!< its domain
+  };
+
+  //! The table for the current settings, made when they changed (ColorGrading.cpp): its texture
+  //! table index, -1 when every setting is neutral (or it could not be made).
+  int UpdateColorGrading();
+  //! Reads the .cube file szPath into m_Grading.Cube; false with Error.
+  bool LoadColorCube(const char *szPath, std::string &Error);
+  void ReleaseColorGrading();
+
+  SColorGrading m_Grading;
+  ICVar *m_pColorLutVar = nullptr;          //!< d3d12_ColorLut
 
   //////////////////////////////////////////////////////////////////////////
   // PostFx.cpp: the screen effects (CScene::GetScreenFx)
@@ -901,6 +943,14 @@ public:
   float CV_d3d12_Bloom = 0.5f;              //!< the bloom's strength (0: none)
   float CV_d3d12_BloomThreshold = 1;        //!< the light above which it blooms (exposed, linear)
   int CV_d3d12_HDRDebug = 0;                //!< 1: the luminance in EV bands, 2: the bloom alone
+  float CV_d3d12_HDRSun = 8;                //!< the light of the sun's flare in HDR, times the game's
+  float CV_d3d12_HDRSky = 2;                //!< the light of the sky towards the sun in HDR, times the game's
+  float CV_d3d12_HDRGlow = 3;               //!< the light of what glows in HDR, times the game's
+  float CV_d3d12_Saturation = 1;            //!< the colour grading (ColorGrading.cpp): 1, 1, 0, 0 neutral
+  float CV_d3d12_Contrast = 1;
+  float CV_d3d12_Temperature = 0;
+  float CV_d3d12_Tint = 0;
+  float CV_d3d12_ColorLutAmount = 1;        //!< how much of the .cube file d3d12_ColorLut (a string) is mixed in
 };
 
 extern CD3D12Renderer *g_pRenderer;

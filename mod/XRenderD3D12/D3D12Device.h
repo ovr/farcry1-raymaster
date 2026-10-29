@@ -140,21 +140,23 @@ public:
   //! target's in BeginHdr .. EndHdr, else the back buffer's.
   DXGI_FORMAT GetMainColorFormat() const { return m_bInScene ? m_SceneColorFormat : m_bInHdr ? D3D12_HDR_FORMAT : D3D12_BACKBUFFER_FORMAT; }
 
-  //! An off screen target of nWidth x nHeight: pColor in the back buffer's format (in the state
-  //! PIXEL_SHADER_RESOURCE while it is not drawn into) and pDepth (D24S8, DEPTH_WRITE), their views
-  //! written to hRTV and hDSV.
+  //! An off screen target of nWidth x nHeight: pColor in Format (the back buffer's, or
+  //! D3D12_HDR_FORMAT; in the state PIXEL_SHADER_RESOURCE while it is not drawn into) and pDepth
+  //! (D24S8, DEPTH_WRITE), their views written to hRTV and hDSV.
   bool CreateOffscreenTargets(int nWidth, int nHeight, ComPtr<ID3D12Resource> &pColor, ComPtr<ID3D12Resource> &pDepth,
-                              D3D12_CPU_DESCRIPTOR_HANDLE hRTV, D3D12_CPU_DESCRIPTOR_HANDLE hDSV);
+                              D3D12_CPU_DESCRIPTOR_HANDLE hRTV, D3D12_CPU_DESCRIPTOR_HANDLE hDSV, DXGI_FORMAT Format = D3D12_BACKBUFFER_FORMAT);
   //! The same for a cube of nSize: pColor an array of the six faces (one RTV per face in hRTV, in
   //! the order of D3D12_TEXTURECUBE_FACE), pDepth one face's size; drawn a face at a time with
   //! SetOffscreenTargets.
   bool CreateCubeTargets(int nSize, ComPtr<ID3D12Resource> &pColor, ComPtr<ID3D12Resource> &pDepth, const D3D12_CPU_DESCRIPTOR_HANDLE hRTV[6],
-                         D3D12_CPU_DESCRIPTOR_HANDLE hDSV);
+                         D3D12_CPU_DESCRIPTOR_HANDLE hDSV, DXGI_FORMAT Format = D3D12_BACKBUFFER_FORMAT);
   //! Draws into targets of CreateOffscreenTargets instead of the back buffer, all of them, until
   //! SetBackBufferTargets (in a frame). hDSV may be empty: a colour target alone (a render target
   //! of CD3D12Upload::CreateRenderTarget; SPipelineKey::nTarget 1 for R8G8B8A8).
   void SetOffscreenTargets(ID3D12Resource *pColor, D3D12_CPU_DESCRIPTOR_HANDLE hRTV, D3D12_CPU_DESCRIPTOR_HANDLE hDSV, int nWidth, int nHeight);
   bool IsOffscreen() const { return m_pOffscreen != nullptr; }
+  //! The colour format of the target drawn into: the off screen target's, else the main view's.
+  DXGI_FORMAT GetTargetColorFormat() const { return m_pOffscreen ? m_OffscreenFormat : GetMainColorFormat(); }
   //! A shadow map of nSize x nSize: R32_TYPELESS (D3D12_SHADOW_MAP_FORMAT, its DSV written to hDSV,
   //! read as R32_FLOAT), in the state PIXEL_SHADER_RESOURCE while it is not drawn into.
   bool CreateShadowMap(int nSize, ComPtr<ID3D12Resource> &pDepth, D3D12_CPU_DESCRIPTOR_HANDLE hDSV);
@@ -268,6 +270,7 @@ private:
   bool m_bOffscreenShadowMap = false;               //!< m_pOffscreen is a shadow map
   D3D12_CPU_DESCRIPTOR_HANDLE m_hOffscreenRTV = {}, m_hOffscreenDSV = {};
   int m_nOffscreenWidth = 0, m_nOffscreenHeight = 0;
+  DXGI_FORMAT m_OffscreenFormat = DXGI_FORMAT_UNKNOWN;
   ComPtr<ID3D12Resource> m_pSceneColor, m_pSceneVelocity, m_pUpscaleDepth, m_pSceneDepth, m_pSceneOutput;   //!< SetSceneSize
   int m_nSceneWidth = 0, m_nSceneHeight = 0;
   int m_nSceneOutputWidth = 0, m_nSceneOutputHeight = 0;

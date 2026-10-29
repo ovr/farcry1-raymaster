@@ -21,12 +21,24 @@
 //	    at half the size, BLOOM_LEVELS levels down (13 taps), then back up
 //	    (a 3 x 3 tent), each added to the one above;
 //	  - the resolve: the light exposed (plus d3d12_Exposure), with the
-//	    bloom, tone mapped (d3d12_ToneMap) into the back buffer, or for an
-//	    upscaler into an LDR target of the scene's size, which it upscales
-//	    as it would the scene (its flags unchanged).
+//	    bloom, tone mapped (d3d12_ToneMap), colour graded (ColorGrading.cpp)
+//	    into the back buffer, or for an upscaler into an LDR target of the
+//	    scene's size, which it upscales as it would the scene (its flags
+//	    unchanged).
 //	The screen effects and the 2D come after it on the back buffer, as
 //	without HDR. Heat vision's colours are a palette, not light: while it
 //	is on the scene is only clamped (the exposure held).
+//
+//	What the game draws as light sources is brighter in the HDR targets
+//	(IsHdrTarget: the main scene, and with it the water's reflection and
+//	the environment cubes): the sun's flare (d3d12_HDRSun), the sky towards
+//	the sun (d3d12_HDRSky, DF2_SKY_GLOW), and what glows (d3d12_HDRGlow):
+//	the additive particles and materials (fire, muzzle flashes), the
+//	coronas and procedural flares of the lights, the glow maps of lamps and
+//	screens. Each is a factor of the light; 1 is the game's. The flares,
+//	particles and additive materials get it in their cores (DF2_HDR_CORE:
+//	where their texture is white), so that they keep their soft edges; the
+//	glow maps, which light a surface, all over (HdrBoost).
 //
 //////////////////////////////////////////////////////////////////////
 
@@ -36,6 +48,7 @@
 #include "D3D12Upload.h"
 #include "D3D12Descriptors.h"
 #include "D3D12Pipeline.h"
+#include "Scene.h"
 
 namespace
 {
@@ -205,15 +218,18 @@ CD3D12Texture *CD3D12Renderer::ResolveHdr(int nSceneSRV, int nWidth, int nHeight
     }
   }
 
-  // The resolve; the bloom's first level holds the sum of all of them.
+  // The resolve; the bloom's first level holds the sum of all of them. The colour grading's table
+  // (none in heat vision).
+  const int nLutSRV = bHeat ? -1 : UpdateColorGrading();
   SDrawConstants dc = DefaultDrawConstants();
   dc.nFlags = HDR_RESOLVE;
   dc.nTex0 = (uint32)nSceneSRV;
   dc.nTex1 = fBloom > 0 ? (uint32)m_Hdr.Bloom[0]->m_nSRV : D3D12_SRV_WHITE;
   dc.nTex2 = (uint32)nExposureSRV;
+  dc.nTex3 = nLutSRV >= 0 ? (uint32)nLutSRV : D3D12_SRV_WHITE;
   Set4(dc.vParams0, 1.0f / nWidth, 1.0f / nHeight, 0, 0);
   Set4(dc.vParams1, fComp, bAdapted ? 1.0f : 0.0f, fBloom / m_Hdr.Bloom.size(), (float)std::clamp(CV_d3d12_ToneMap, 0, 3));
-  Set4(dc.vParams2, CV_d3d12_ToneMapKnee, bHeat ? 1.0f : 0.0f, (float)CV_d3d12_HDRDebug, 0);
+  Set4(dc.vParams2, CV_d3d12_ToneMapKnee, bHeat ? 1.0f : 0.0f, (float)CV_d3d12_HDRDebug, nLutSRV >= 0 ? 1.0f : 0.0f);
   if (bToTexture)
   {
     DrawHdrPass(m_Hdr.pLdr, dc);
@@ -344,6 +360,7 @@ void CD3D12Renderer::ReleaseHdr()
 {
   ReleaseHdrTargets();
   ReleaseHdrColor();
+  ReleaseColorGrading();
 }
 
 void CD3D12Renderer::DumpHdr()
@@ -353,6 +370,9 @@ void CD3D12Renderer::DumpHdr()
           m_Hdr.nWidth, m_Hdr.nHeight, s_ToneMapNames[nToneMap], CV_d3d12_ToneMapKnee, CV_d3d12_Exposure, CV_d3d12_AutoExposure,
           CV_d3d12_ExposureMin, CV_d3d12_ExposureMax, CV_d3d12_ExposureSpeed, CV_d3d12_Bloom, CV_d3d12_BloomThreshold,
           m_bHeatVision ? ", heat vision: clamped" : "");
+  fprintf(m_pFrameDump.get(), "hdr: brighter than the game: sun %g, sky %g, glow %g; colour grading %s: saturation %g, contrast %g, temperature %g, tint %g, "
+          "lut \"%s\" (%d, amount %g)\n", CV_d3d12_HDRSun, CV_d3d12_HDRSky, CV_d3d12_HDRGlow, m_Grading.pLut ? "on" : "off", m_Grading.fSaturation,
+          m_Grading.fContrast, m_Grading.fTemperature, m_Grading.fTint, m_Grading.LutFile.c_str(), m_Grading.nCubeSize, m_Grading.fLutAmount);
   // The meter's mean and the adapted EV, read back (this frame is executed so far).
   if (!m_Hdr.bAdapted || m_Hdr.Meter.empty())
     return;
@@ -365,4 +385,32 @@ void CD3D12Renderer::DumpHdr()
     const float fMeanLog = fWeight > 0 ? HalfToFloat(Meter[0]) / fWeight : 0.0f;
     fprintf(m_pFrameDump.get(), "hdr: meter mean log2 luminance %.3f (target %+.3f EV), adapted %+.3f EV\n", fMeanLog, EXPOSURE_KEY_LOG2 - fMeanLog, fEV);
   }
+}
+
+bool CD3D12Renderer::IsHdrTarget() const
+{
+  return !m_bHeatVision && m_pDevice && m_pDevice->GetTargetColorFormat() == D3D12_HDR_FORMAT;
+}
+
+float CD3D12Renderer::HdrBoost(float fLight) const
+{
+  if (!IsHdrTarget())
+    return 1.0f;
+  // HdrEncode (Common.hlsli)
+  return fLight > 1 ? 1 + (fLight - 1) / 2.2f : powf(std::max(fLight, 0.0f), 1.0f / 2.2f);
+}
+
+void CD3D12Renderer::SetHdrCore(SDrawConstants &dc, float fLight, uint32 nState) const
+{
+  if (fLight == 1 || !IsHdrTarget())
+    return;
+  dc.nFlags2 |= DF2_HDR_CORE;
+  Set4(dc.vHdrCore, std::max(fLight, 0.0f), (nState & GS_BLSRC_MASK) == GS_BLSRC_SRCALPHA ? 1.0f : 0.0f, 0, 0);
+}
+
+float CD3D12Renderer::HdrSkyGlow() const
+{
+  if (!IsHdrTarget() || !m_pScene || !m_pScene->GetSun())
+    return 1.0f;
+  return std::max(CV_d3d12_HDRSky, 0.0f);
 }

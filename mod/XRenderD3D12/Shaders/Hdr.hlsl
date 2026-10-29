@@ -9,7 +9,9 @@
 //
 //	The scene's colours are the game's own (gamma encoded, as the original
 //	draws them) without the clamp at 1; light is Decode(colour) = colour ^
-//	2.2, and the display's colour Encode(light) = light ^ (1 / 2.2). The
+//	2.2 up to 1 and linear above (HdrDecode, Common.hlsli: what the game
+//	adds up above white is light added up), the display's colour
+//	Encode(light) its inverse. The
 //	exposure is in EV (log2 of the factor of the light); its 1 x 1 target
 //	holds the adapted part, the compensation is added at each use.
 //
@@ -42,8 +44,9 @@
 //	                  mapped by vParams1.w (0 clamp, 1 soft shoulder from the
 //	                  knee vParams2.x, 2 ACES fitted, 3 AgX); vParams2.y 1: the
 //	                  scene clamped alone (heat vision); vParams2.z the debug
-//	                  view (1 the luminance in EV bands, 2 the bloom alone).
-//	                  The alpha is the scene's.
+//	                  view (1 the luminance in EV bands, 2 the bloom alone);
+//	                  vParams2.w 1: then through the colour grading's table
+//	                  tex3 (ColorGrading.cpp). The alpha is the scene's.
 //
 //////////////////////////////////////////////////////////////////////
 
@@ -62,7 +65,6 @@ SHdrOutput VSMain(SVertexInput In)
 }
 
 static const float3 LUMINANCE = float3(0.2126, 0.7152, 0.0722);   //!< of linear light (Rec. 709)
-static const float GAMMA = 2.2;
 static const float HALF_MAX = 65000;
 
 float4 SampleClamp(uint nTex, float2 vUV)
@@ -70,16 +72,17 @@ float4 SampleClamp(uint nTex, float2 vUV)
   return g_Textures[nTex].SampleLevel(g_SamplerLinearClamp, vUV, 0);
 }
 
-//! A colour of the scene as light: never negative, never more than a half float holds, 0 for NaN.
+//! A colour of the scene as light (HdrDecode, Common.hlsli): never negative, never more than a
+//! half float holds, 0 for NaN.
 float3 Decode(float3 c)
 {
   c = min(max(c, 0), HALF_MAX);
-  return pow(c, GAMMA);
+  return float3(HdrDecode(c.r), HdrDecode(c.g), HdrDecode(c.b));
 }
 
 float3 Encode(float3 vLight)
 {
-  return pow(max(vLight, 0), 1 / GAMMA);
+  return float3(HdrEncode(vLight.r), HdrEncode(vLight.g), HdrEncode(vLight.b));
 }
 
 //! The factor of the light: 2^(the compensation + the adapted EV in the 1 x 1 target nTex).
@@ -279,6 +282,20 @@ float3 EvBands(float L)
   return BANDS[(int)clamp(round(log2(max(L, 1e-6) / 0.18)), -5, 5) + 5];
 }
 
+//! The colour grading's table (ColorGrading.cpp) at the display colour c: HDR_COLOR_LUT_SIZE slices
+//! of blue side by side, red across each and green down; the two slices around c's blue, each
+//! looked up bilinearly, blended.
+float3 ColorLut(uint nTex, float3 c)
+{
+  static const float N = HDR_COLOR_LUT_SIZE;
+  c = saturate(c) * (N - 1);
+  float b0 = min(floor(c.b), N - 2);
+  float2 vUV = (c.rg + 0.5) / float2(N * N, N);
+  float3 v0 = SampleClamp(nTex, vUV + float2(b0 / N, 0)).rgb;
+  float3 v1 = SampleClamp(nTex, vUV + float2((b0 + 1) / N, 0)).rgb;
+  return lerp(v0, v1, c.b - b0);
+}
+
 float4 Resolve(float2 vPixel)
 {
   float4 vScene = g_Textures[g_Draw.nTex0].Load(int3(vPixel, 0));
@@ -295,7 +312,10 @@ float4 Resolve(float2 vPixel)
     vLight = vBloom;
   else
     vLight += vBloom;
-  return float4(ToneMap(vLight, (int)g_Draw.vParams1.w, g_Draw.vParams2.x), fAlpha);
+  float3 c = ToneMap(vLight, (int)g_Draw.vParams1.w, g_Draw.vParams2.x);
+  if (g_Draw.vParams2.w > 0 && nDebug == 0)
+    c = ColorLut(g_Draw.nTex3, c);
+  return float4(c, fAlpha);
 }
 
 float4 PSMain(SHdrOutput In) : SV_Target
