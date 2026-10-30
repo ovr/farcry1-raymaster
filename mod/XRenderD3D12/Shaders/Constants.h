@@ -44,6 +44,8 @@ typedef float float4x4_t[16];
 #define XR_MAX_DRAW_LIGHTS 16
 //! The most shadow maps a draw samples (DF_SHADOWS).
 #define XR_MAX_DRAW_SHADOWS 4
+//! The most cascades of the sun's shadow (DF2_SUN_CASCADES).
+#define XR_MAX_CASCADES 4
 
 // SDrawConstants::nFlags
 #define DF_TEX0             0x00000001  //!< sample g_Textures[nTex0] (else white)
@@ -100,6 +102,10 @@ typedef float float4x4_t[16];
 #define DF2_VERTEX_LIGHTS   0x00020000  //!< with DF_PIXEL_LIGHTING: the lights as the vertex lighting takes them, per pixel: colours not clamped, a point light's attenuation 1 / (vLightAtten.x + vLightAtten.y d) up to vLightAtten.z (d3d12_PixelLighting)
 #define DF2_SMOOTH_FALLOFF  0x00040000  //!< with DF2_VERTEX_LIGHTS: a point light falls off as 2 (1 - smoothstep(0, 0.9, d * vLightAtten.w)) instead (static objects: the falloff the per vertex attenuation is fitted to)
 #define DF2_LIGHTMAP_LIGHTS 0x00080000  //!< with DF_TEX1_LIGHTMAP (no DF_LIGHTING): the draw's lights without the sun (per pixel, DF2_VERTEX_LIGHTS) in place of the ambient under the light map (d3d12_PixelLighting)
+#define DF2_SUN_CASCADES    0x00100000  //!< the sun's visibility from the cascades (SunCascades, Common.hlsli) where they reach, the shadow maps' (DF_SHADOWS) beyond; with DF_SHADOW_PASS the shadow maps' fade out where the cascades reach
+#define DF2_CASCADES_LIVE   0x00200000  //!< with DF2_SUN_CASCADES: the cascades of the live casters only (light maps, the terrain)
+#define DF2_SHADOW_TINT     0x00400000  //!< with DF2_SUN_CASCADES: rgb *= lerp(vShadowTint, 1, the visibility) (the terrain)
+#define DF2_CASCADE_CASTER  0x00800000  //!< a caster of the live cascades: drawn only where it is not behind the full set's map g_TextureArrays[nTex4] slice vParams3.x by more than vParams3.y (depth)
 
 // SDrawConstants::nFlags of the post program (Post.hlsl): one mode, with POST_EFFECTS the effects drawn
 #define POST_DOWNSAMPLE     0x00000001  //!< the mean of tex0 over the target's pixel: vParams0.z x vParams0.z bilinear taps
@@ -148,6 +154,13 @@ struct SFrameConstants
   XR_FLOAT4(vJitter);             //!< the upscaler's (Upscaler.h): xy its jitter in clip space (xy += vJitter.xy * w), zw the target's pixels per pixel of the engine (DF_SCREEN_POS); 0, 0, 1, 1 without one
   XR_FLOAT4(vMipBias);            //!< x: the mip bias of the materials' textures (log2(render / display size) - 1 while upscaling, else 0)
   XR_FLOAT4(vHdr);                //!< x: the light of the sky towards the sun times this (SkyGlow; 1: as the game's, always outside HDR targets)
+  XR_FLOAT4X4_ARRAY(mCascade, XR_MAX_CASCADES);  //!< world to the sun's cascade i (DF2_SUN_CASCADES): x, y -1..1 across its map, z depth 0..1 away from the sun
+  XR_FLOAT4(vCascadeEnd);         //!< the view depth (ViewDepth) where each cascade ends
+  XR_FLOAT4(vCascadeTexel);       //!< the size of a texel of each in the world (m)
+  XR_FLOAT4(vCascadeDepth);       //!< 1 / the depth range of each (m): metres along the sun's direction to the map's depth
+  XR_FLOAT4(vCascadeParams);      //!< x the number of cascades (0: none), y the filter's radius (m), z the part of a cascade blended into the next one, w the depth bias (m)
+  XR_UINT4(nCascadeTex);          //!< x the full set's maps, y the live set's (texture table indices of the arrays)
+  XR_FLOAT4(vShadowTint);         //!< rgb: the terrain in the shadow of a live caster (DF2_SHADOW_TINT); w d3d12_ShadowDebug
 };
 
 //! b1: per draw.

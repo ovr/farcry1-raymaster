@@ -313,6 +313,97 @@ float SunVisibility(float3 vPos, float3 vNormal, float2 vScreenPos)
   return fLit;
 }
 
+//! The sun's cascades (DF2_SUN_CASCADES, Cascades.cpp): how much of the sun reaches world position
+//! vPos (normal vNormal, may be zero) through cascade i of the full set's maps, or of the live set's
+//! (bLive). A percentage closer filter of 16 bilinear comparisons on a rotated disc of
+//! vCascadeParams.y metres (at least a texel and a half), the point moved off the surface along its
+//! normal by a texel and a half, the comparison nearer to the sun by vCascadeParams.w metres and a
+//! texel.
+float CascadeSample(uint i, float3 vPos, float3 vNormal, float2 vScreenPos, bool bLive)
+{
+  static const float2 Disc[8] =
+  {
+    float2(-0.326, -0.406), float2(-0.840, -0.074), float2(-0.696, 0.457), float2(-0.203, 0.621),
+    float2(0.962, -0.195), float2(0.473, -0.480), float2(0.519, 0.767), float2(0.185, -0.893),
+  };
+  float fTexel = g_Frame.vCascadeTexel[i];
+  float3 vP = vPos + SafeNormalize(vNormal) * (1.5 * fTexel);
+  float4 v = mul(float4(vP, 1), g_Frame.mCascade[i]);
+  float2 vUV = float2(0.5 + 0.5 * v.x, 0.5 - 0.5 * v.y);
+  float fDepth = v.z - (g_Frame.vCascadeParams.w + fTexel) * g_Frame.vCascadeDepth[i];
+  Texture2DArray Maps = g_TextureArrays[bLive ? g_Frame.nCascadeTex.y : g_Frame.nCascadeTex.x];
+  float3 vSize;
+  Maps.GetDimensions(vSize.x, vSize.y, vSize.z);
+  float fRadius = max(g_Frame.vCascadeParams.y, 1.5 * fTexel) / (fTexel * vSize.x);
+  float fAngle = 6.2831853 * frac(52.9829189 * frac(dot(vScreenPos, float2(0.06711056, 0.00583715))));
+  float2 vRot = float2(cos(fAngle), sin(fAngle));
+  float fSum = 0;
+  [unroll]
+  for (uint k = 0; k < 16; k++)
+  {
+    float2 d = float2(Disc[k / 2].x * vRot.x - Disc[k / 2].y * vRot.y, Disc[k / 2].x * vRot.y + Disc[k / 2].y * vRot.x);
+    fSum += Maps.SampleCmpLevelZero(g_SamplerShadow, float3(vUV + d * fRadius * ((k & 1) ? 0.5 : 1), i), fDepth);
+  }
+  return fSum / 16;
+}
+
+//! The cascade of the view depth fDepth (of n), and in t how far it is into the part of the cascade
+//! that is blended into the next one (vCascadeParams.z of it): 0 before it, 1 at the cascade's end.
+uint CascadeOf(float fDepth, uint n, out float t)
+{
+  uint i = 0;
+  [unroll]
+  for (uint k = 1; k < XR_MAX_CASCADES; k++)
+  {
+    if (k < n && fDepth > g_Frame.vCascadeEnd[k - 1])
+      i = k;
+  }
+  float fStart = i > 0 ? g_Frame.vCascadeEnd[i - 1] : 0;
+  float fBand = max((g_Frame.vCascadeEnd[i] - fStart) * g_Frame.vCascadeParams.z, 1e-4);
+  t = saturate((fDepth - g_Frame.vCascadeEnd[i] + fBand) / fBand);
+  return i;
+}
+
+//! The sun's visibility at world position vPos (normal vNormal) from the cascades where they reach
+//! (DF2_SUN_CASCADES; the live set with DF2_CASCADES_LIVE), each blended into the next one over its
+//! last part and the last one into fMaps, the draw's shadow maps' visibility, which counts beyond
+//! them. With DF_SHADOW_PASS (the shadow maps' shadow blended over the terrain) 1 where the cascades
+//! reach: the terrain has its shadows from them in its own pass there.
+float SunCascades(float3 vPos, float3 vNormal, float2 vScreenPos, float fMaps)
+{
+  uint n = min((uint)g_Frame.vCascadeParams.x, XR_MAX_CASCADES);
+  float fDepth = ViewDepth(vPos);
+  if (n == 0 || fDepth >= g_Frame.vCascadeEnd[n - 1])
+    return fMaps;
+  float t;
+  uint i = CascadeOf(fDepth, n, t);
+  bool bLive = HasFlag2(DF2_CASCADES_LIVE);
+  bool bPass = HasFlag(DF_SHADOW_PASS);
+  float v = bPass ? 1 : CascadeSample(i, vPos, vNormal, vScreenPos, bLive);
+  if (t > 0)
+    v = lerp(v, i + 1 < n ? (bPass ? 1 : CascadeSample(i + 1, vPos, vNormal, vScreenPos, bLive)) : fMaps, t);
+  return v;
+}
+
+//! d3d12_ShadowDebug (vShadowTint.w) 3: the cascade of a point (red, green, blue, yellow), darker
+//! in the shadow of the full set; 4: the shadow of the full set in red, of the live set in green;
+//! over the point's colour vColor.
+float3 CascadeDebug(float3 vPos, float3 vNormal, float2 vScreenPos, float3 vColor)
+{
+  static const float3 Colors[4] = { float3(1, 0.3, 0.3), float3(0.3, 1, 0.3), float3(0.3, 0.3, 1), float3(1, 1, 0.3) };
+  uint n = min((uint)g_Frame.vCascadeParams.x, XR_MAX_CASCADES);
+  float fDepth = ViewDepth(vPos);
+  if (n == 0 || fDepth >= g_Frame.vCascadeEnd[n - 1])
+    return vColor;
+  float t;
+  uint i = CascadeOf(fDepth, n, t);
+  float fFull = CascadeSample(i, vPos, vNormal, vScreenPos, false);
+  float fGrey = 0.25 + 0.75 * dot(saturate(vColor), float3(0.299, 0.587, 0.114));
+  if (g_Frame.vShadowTint.w >= 4)
+    return float3(1 - fFull, 1 - CascadeSample(i, vPos, vNormal, vScreenPos, true), 0) * 0.8 + fGrey * 0.2;
+  return Colors[i] * fGrey * (0.3 + 0.7 * fFull);
+}
+
 //! Samples g_Cubes[nIndex] in direction vDir with sampler nSampler (XR_SAMPLER_*).
 float4 SampleCube(uint nIndex, uint nSampler, float3 vDir)
 {

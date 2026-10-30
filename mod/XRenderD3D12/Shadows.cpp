@@ -151,7 +151,7 @@ ShadowMapFrustum * CD3D12Renderer::MakeShadowMapFrustum(ShadowMapFrustum * lof, 
 
 void CD3D12Renderer::NoteShadowCasters(const CCObject *pObj)
 {
-  if (pObj && pObj->m_pShadowCasters && CV_d3d12_Shadows && !m_bShadowMapPass)
+  if (pObj && pObj->m_pShadowCasters && CV_d3d12_Shadows && !m_bShadowMapPass && !m_bCascadePass)
     m_ShadowCasterLists.push_back(pObj->m_pShadowCasters);
 }
 
@@ -173,8 +173,10 @@ CD3D12Renderer::SShadowMap *CD3D12Renderer::FindDrawnShadowMap(const void *pFrus
 
 void CD3D12Renderer::UpdateShadowMaps()
 {
-  std::vector<const void *> Lists;
-  Lists.swap(m_ShadowCasterLists);
+  // The frame's lists stay for the live cascades (Cascades.cpp).
+  m_FrameCasterLists.clear();
+  m_FrameCasterLists.swap(m_ShadowCasterLists);
+  const std::vector<const void *> &Lists = m_FrameCasterLists;
   if (!CV_d3d12_Shadows || m_bShadowMapPass || m_bSpritePass || m_bReflectionPass || !m_pDevice || !m_pDescriptors || !m_pScene ||
       !EnsureFrame())
     return;
@@ -359,38 +361,7 @@ bool CD3D12Renderer::DrawShadowMap(void *pFrustum, const Vec3 &vOrigin)
   m_bShadowMapPass = true;
   InvalidateFrameConstants();
   EF_StartEf();
-  for (int i = 0; pModels && i < pModels->nCount; i++)
-  {
-    IStatObj *pObj = reinterpret_cast<IStatObj *const *>(pModels->pElements)[i];
-    CLeafBuffer *pLB = pObj ? pObj->GetLeafBuffer() : nullptr;
-    if (!pLB)
-      continue;
-    CCObject *pOb = m_pScene->GetTempObject();
-    pOb->m_Matrix.SetIdentity();
-    pOb->m_Color = CFColor(1, 1, 1, 1);
-    pOb->m_AmbColor = Vec3(1, 1, 1);
-    pLB->AddRenderElements(pOb, 0, -1, 0, 0, nullptr);
-  }
-  for (int i = 0; pEntities && i < pEntities->nCount; i++)
-  {
-    IEntityRender *pEnt = reinterpret_cast<IEntityRender *const *>(pEntities->pElements)[i];
-    if (!pEnt)
-      continue;
-    // As the main view draws it (its level of detail at its distance from the camera); characters
-    // draw nothing without FOB_RENDER_INTO_SHADOWMAP, and the objects' matrices turn them only
-    // with FOB_TRANS_MASK (a vehicle, the things a character holds).
-    SRendParams Params;
-    Params.vPos = pEnt->GetPos();
-    Params.vAngles = pEnt->GetAngles();
-    Params.fScale = pEnt->GetScale();
-    Params.fDistance = (Params.vPos - m_Camera.GetPos()).GetLength();
-    Params.fSQDistance = Params.fDistance * Params.fDistance;
-    Params.dwFObjFlags = FOB_RENDER_INTO_SHADOWMAP | FOB_TRANS_MASK;
-    if (m_pFrameDump)
-      fprintf(m_pFrameDump.get(), "  entity at (%.2f %.2f %.2f) angles (%.1f %.1f %.1f) scale %g\n", Params.vPos.x, Params.vPos.y, Params.vPos.z, Params.vAngles.x,
-              Params.vAngles.y, Params.vAngles.z, Params.fScale);
-    pEnt->DrawEntity(Params);
-  }
+  AddFrustumCasters(pFrustum, nullptr, 1);
   EF_EndEf3D(0);
   m_bShadowMapPass = false;
 
@@ -419,6 +390,91 @@ bool CD3D12Renderer::DrawShadowMap(void *pFrustum, const Vec3 &vOrigin)
   return true;
 }
 
+int CD3D12Renderer::AddFrustumCasters(const void *pFrustum, const Vec3 *pPos, float fScale)
+{
+  const SRawList2 *pModels = FrustumModels(pFrustum);
+  const SRawList2 *pEntities = pModels ? nullptr : FrustumEntities(pFrustum);
+  int n = 0;
+  for (int i = 0; pModels && i < pModels->nCount; i++)
+  {
+    IStatObj *pObj = reinterpret_cast<IStatObj *const *>(pModels->pElements)[i];
+    CLeafBuffer *pLB = pObj ? pObj->GetLeafBuffer() : nullptr;
+    if (!pLB)
+      continue;
+    CCObject *pOb = m_pScene->GetTempObject();
+    pOb->m_Matrix.SetIdentity();
+    if (pPos)
+    {
+      // The whole matrix, not its translation alone (GetWorldMatrix).
+      pOb->m_ObjFlags |= FOB_TRANS_SCALE | FOB_TRANS_TRANSLATE;
+      pOb->m_Matrix.data[0] = pOb->m_Matrix.data[5] = pOb->m_Matrix.data[10] = fScale;
+      pOb->m_Matrix.data[12] = pPos->x;
+      pOb->m_Matrix.data[13] = pPos->y;
+      pOb->m_Matrix.data[14] = pPos->z;
+    }
+    pOb->m_Color = CFColor(1, 1, 1, 1);
+    pOb->m_AmbColor = Vec3(1, 1, 1);
+    pLB->AddRenderElements(pOb, 0, -1, 0, 0, nullptr);
+    n++;
+  }
+  for (int i = 0; pEntities && i < pEntities->nCount; i++)
+  {
+    IEntityRender *pEnt = reinterpret_cast<IEntityRender *const *>(pEntities->pElements)[i];
+    if (!pEnt)
+      continue;
+    // As the main view draws it (its level of detail at its distance from the camera); characters
+    // draw nothing without FOB_RENDER_INTO_SHADOWMAP, and the objects' matrices turn them only
+    // with FOB_TRANS_MASK (a vehicle, the things a character holds).
+    SRendParams Params;
+    Params.vPos = pEnt->GetPos();
+    Params.vAngles = pEnt->GetAngles();
+    Params.fScale = pEnt->GetScale();
+    Params.fDistance = (Params.vPos - m_Camera.GetPos()).GetLength();
+    Params.fSQDistance = Params.fDistance * Params.fDistance;
+    Params.dwFObjFlags = FOB_RENDER_INTO_SHADOWMAP | FOB_TRANS_MASK;
+    if (m_pFrameDump)
+      fprintf(m_pFrameDump.get(), "  entity at (%.2f %.2f %.2f) angles (%.1f %.1f %.1f) scale %g\n", Params.vPos.x, Params.vPos.y, Params.vPos.z, Params.vAngles.x,
+              Params.vAngles.y, Params.vAngles.z, Params.fScale);
+    pEnt->DrawEntity(Params);
+    n++;
+  }
+  return n;
+}
+
+int CD3D12Renderer::AddLiveCasters()
+{
+  // Each frustum of the casters named in the frame once: a static object's at each instance that
+  // casts (its position and scale), an entity's as it is.
+  std::vector<std::pair<const void *, Vec3>> Added;
+  int n = 0;
+  for (const void *pList : m_FrameCasterLists)
+  {
+    const SRawList2 &Casters = *static_cast<const SRawList2 *>(pList);
+    for (int i = 0; i < Casters.nCount; i++)
+    {
+      const byte *pInst = Casters.pElements + (size_t)i * nBin64Size_ShadowMapLightSourceInstance;
+      const void *pLs = At<void *>(pInst, nBin64Offset_ShadowMapLightSourceInstance_LightSource);
+      if (!pLs)
+        continue;
+      float s = At<float>(pInst, nBin64Offset_ShadowMapLightSourceInstance_Scale);
+      if (!(s > 0))
+        s = 1;
+      const SRawList2 &Fr = Frustums(pLs);
+      for (int f = 0; f < Fr.nCount; f++)
+      {
+        const void *pFrustum = Fr.pElements + (size_t)f * nBin64Size_ShadowMapFrustum;
+        const bool bModels = FrustumModels(pFrustum) != nullptr;
+        const Vec3 vPos = bModels ? At<Vec3>(pInst, nBin64Offset_ShadowMapLightSourceInstance_Pos) : Vec3(0, 0, 0);
+        if (std::find(Added.begin(), Added.end(), std::make_pair(pFrustum, vPos)) != Added.end())
+          continue;
+        Added.emplace_back(pFrustum, vPos);
+        n += AddFrustumCasters(pFrustum, bModels ? &vPos : nullptr, s);
+      }
+    }
+  }
+  return n;
+}
+
 bool CD3D12Renderer::SetupShadowCasterDraw(SPipelineKey &Key, SDrawConstants &dc, const SRenderItem &it)
 {
   // Opaque and alpha tested parts; the alpha test with the texture's alpha only.
@@ -437,17 +493,24 @@ bool CD3D12Renderer::SetupShadowCasterDraw(SPipelineKey &Key, SDrawConstants &dc
   case eDC_AlphaTestVColor:
     fAlphaRef = fRef > 0 ? fRef : 128.0f / 255.0f;
     break;
+  case eDC_Terrain:
+    // Into the sun's cascades the terrain casts too (the shadow of a hill on a character).
+    if (!m_bCascadePass)
+      return false;
+    break;
   default:
     return false;
   }
   Key.nTarget = 2;
   Key.nState = GS_DEPTHWRITE;
   Key.nCull = R_CULL_NONE;
-  Key.bDepthBias = 1;
+  Key.bDepthBias = m_bCascadePass ? 2 : 1;
   Key.bWireframe = 0;
   const uint32 nTexFlags = dc.nFlags & (DF_TEX0 | DF_TEXMATRIX);
   dc.nFlags = fAlphaRef > 0 && (nTexFlags & DF_TEX0) ? nTexFlags | DF_ALPHATEST | DF_ALPHA_FROM_TEX : 0;
   dc.fAlphaRef = fAlphaRef;
+  if (m_bCascadePass)
+    SetupCascadeCaster(dc);
   return true;
 }
 
@@ -540,6 +603,7 @@ void CD3D12Renderer::DrawShadowMapDebug()
       fprintf(m_pFrameDump.get(), "debug square %d: SRV %d entities %d radius %g\n", n, Map.nSRV, Map.bEntities ? 1 : 0, Map.fRadius);
     n++;
   }
+  DrawCascadeDebug(1);
 }
 
 void CD3D12Renderer::FreeShadowMap(SShadowMap &Map)
@@ -564,4 +628,5 @@ void CD3D12Renderer::ReleaseShadowMaps()
     FreeShadowMap(Map);
   m_ShadowMaps.clear();
   m_ShadowCasterLists.clear();
+  m_FrameCasterLists.clear();
 }

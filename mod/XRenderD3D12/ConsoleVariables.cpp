@@ -287,6 +287,13 @@ bool CD3D12Renderer::IsScopeLensOn()
   return m_pScopeLens && m_pScopeLens->GetIVal() != 0;
 }
 
+bool CD3D12Renderer::IsShadowMapsOn()
+{
+  if (!m_pShadowMapsVar && iConsole)
+    m_pShadowMapsVar = iConsole->GetCVar("e_shadow_maps");
+  return m_pShadowMapsVar && m_pShadowMapsVar->GetIVal() != 0;
+}
+
 bool CD3D12Renderer::IsHdrOn()
 {
   if (!m_pHdrRendering && iConsole)

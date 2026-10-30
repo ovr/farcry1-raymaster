@@ -668,6 +668,12 @@ public:
   void UpdateShadowMaps();
   //! The map of a frustum whose caster instance is at vOrigin (an entity's map is drawn there).
   bool DrawShadowMap(void *pFrustum, const Vec3 &vOrigin);
+  //! Adds to the scene being started what a frustum shows: its static objects at a caster instance
+  //! at *pPos scaled by fScale (pPos nullptr: in the caster's space, for the frustum's own map), or
+  //! its entities as they are. The number of objects and entities added.
+  int AddFrustumCasters(const void *pFrustum, const Vec3 *pPos, float fScale);
+  //! The same for every frustum of the casters noted in the frame (m_FrameCasterLists), once each.
+  int AddLiveCasters();
   //! In a shadow map pass: the key and constants of a caster's part (its depth, the alpha test
   //! with its texture's alpha). False: not drawn (blended and other parts).
   bool SetupShadowCasterDraw(SPipelineKey &Key, SDrawConstants &dc, const SRenderItem &it);
@@ -684,8 +690,71 @@ public:
 
   std::unordered_map<int, SShadowMap> m_ShadowMaps;   //!< by the ID written into the frustum
   std::vector<const void *> m_ShadowCasterLists;      //!< NoteShadowCasters: the list2<ShadowMapLightSourceInstance> of the frame
+  std::vector<const void *> m_FrameCasterLists;       //!< the same, taken by UpdateShadowMaps for the rest of the frame
   int m_nNextShadowMapID = 0x40000000;                //!< the maps' IDs, apart from the texture IDs
   bool m_bShadowMapPass = false;                      //!< a shadow map is being drawn
+
+  //////////////////////////////////////////////////////////////////////////
+  // Cascades.cpp: the sun's cascaded shadow maps (d3d12_ShadowCascades)
+
+  //! One cascade of the frame.
+  struct SCascade
+  {
+    Matrix44 WorldToMap;      //!< world to its slice: x, y -1..1 across it, z 0..1 away from the sun
+    float fEnd = 0;           //!< the view depth where it ends
+    float fCenter[2] = {};    //!< the middle of its square along the sun's x and y axes
+    float fHalfSize = 0;      //!< half the width of its square (m)
+    float fTexel = 0;         //!< the width of a texel (m)
+    float fZMin = 0, fZMax = 0; //!< its range along the sun's z axis (towards the sun): depth 1 at fZMin, 0 at fZMax
+    int nCasters[2] = {};     //!< parts drawn into the full and the live slice
+  };
+  //! A set of cascades' maps: a texture array of a slice per cascade.
+  struct SCascadeMaps
+  {
+    ComPtr<ID3D12Resource> pDepth;
+    D3D12_CPU_DESCRIPTOR_HANDLE hDSV[XR_MAX_CASCADES] = {};
+    int nSRV = -1;            //!< the texture table index (a TEXTURE2DARRAY view)
+  };
+  //! Before the main view is drawn, its items prepared (MainItems): with d3d12_ShadowCascades and
+  //! e_shadow_maps in a view with the sun, the cascades of the frame and their casters.
+  void UpdateSunCascades(std::span<const SRenderItem> MainItems);
+  //! The cascades of the main view: the split, the squares, the matrices. False: none.
+  bool SetupCascades(int nCascades);
+  //! The maps of both sets in the size of d3d12_ShadowCascadeSize.
+  bool EnsureCascadeMaps();
+  //! Draws the casting parts of Items into every slice of the set m_nCascadeSet that their bounds
+  //! reach. With pDrawn: the parts drawn into the set so far (PartKey), the ones in it left out,
+  //! the others added.
+  void DrawCascadeItems(std::span<const SRenderItem> Items, std::unordered_set<uint64> *pDrawn);
+  //! The nested scene of a casters' pass (CScene::EndEf3D with m_bCascadePass): its items into the
+  //! cascades' slices of the set being drawn.
+  void DrawCascadeCasters(std::span<const SRenderItem> Items);
+  //! SetupShadowCasterDraw in a cascade's slice: a caster of the live set only where it is not
+  //! behind the full set's map.
+  void SetupCascadeCaster(SDrawConstants &dc) const;
+  //! The flags of a receiver of the cascades for a draw of the main view (0 elsewhere or without
+  //! them): DF2_SUN_CASCADES, with bLive DF2_CASCADES_LIVE.
+  uint32 CascadeReceiverFlags(bool bLive) const;
+  //! MakeFrameConstants: the cascades' constants where the receivers get them (else left 0).
+  void SetCascadeConstants(SFrameConstants &fc) const;
+  //! d3d12_ShadowDebug 1: the slices of the frame below the shadow maps.
+  void DrawCascadeDebug(int nRow);
+  void ReleaseCascades();
+  //! e_shadow_maps (of the 3D engine) not 0: the game's shadows are on.
+  bool IsShadowMapsOn();
+
+  SCascadeMaps m_CascadeMaps[2];                      //!< the full set, the live set
+  int m_nCascadeSize = 0;                             //!< the size of their slices
+  SCascade m_Cascades[XR_MAX_CASCADES];
+  int m_nCascades = 0;                                //!< the cascades of the frame (0: none; the frame constants)
+  Vec3 m_vCascadeAxes[3] = { Vec3(1, 0, 0), Vec3(0, 1, 0), Vec3(0, 0, 1) };   //!< the sun's frame: x, y across the maps, z towards the sun
+  float m_ShadowTint[3] = { 0.5f, 0.5f, 0.5f };       //!< the terrain in the shadow (the engine's terrain shadows' colour, the last seen)
+  bool m_bCascadePass = false;                        //!< the casters of the cascades are being drawn
+  int m_nCascadeSet = 0;                              //!< the set being drawn: 0 the full set, 1 the live set
+  int m_nCascadeSlice = 0;                            //!< the slice being drawn
+  int m_nCascadeFrame = -1;                           //!< m_nFrames of the cascades (m_nCascades), when drawn
+  std::unordered_set<uint64> m_CascadeDrawn;          //!< the parts drawn into the full set (DrawCascadeItems)
+  ICVar *m_pShadowMapsVar = nullptr;                  //!< e_shadow_maps, looked up on first use
 
   //////////////////////////////////////////////////////////////////////////
   // Hdr.cpp: the HDR pipeline of the main view (r_HDRRendering)
@@ -1000,6 +1069,10 @@ public:
   int CV_d3d12_ShadowMapSize = 1024;        //!< size of the shadow maps (0: the engine's, 512)
   int CV_d3d12_ShadowDebug = 0;             //!< non-zero: the shadow maps of the frame are shown
   int CV_d3d12_PixelLighting = 1;           //!< 1: every lit material is lit per pixel, the light mapped ones by the dynamic lights too (DrawLeafItem)
+  int CV_d3d12_ShadowCascades = 4;          //!< the sun's cascaded shadow maps: how many (0: none)
+  float CV_d3d12_ShadowDistance = 120;      //!< how far they reach from the camera (m)
+  int CV_d3d12_ShadowCascadeSize = 2048;    //!< the size of their maps
+  float CV_d3d12_ShadowSoftness = 0.05f;    //!< the radius of their filter (m)
   int CV_d3d12_UpscaleMode = 0;             //!< EUpscaleMode of the upscaler (d3d12_Upscaler, a string)
   float CV_d3d12_UpscaleSharpness = 0.5f;   //!< the upscaler's sharpening, 0 (none) to 1
   int CV_d3d12_UpscaleDebug = 0;            //!< non-zero: the upscaler's debug view

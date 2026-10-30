@@ -546,11 +546,22 @@ void CScene::EndEf3D(int nFlags)
   }
 
   const int nItems = PrepareItems(s);
-  BuildLists(s, nItems, (nFlags & SHDF_SORT) != 0);
-  for (int l = 0; l < eRL_Num; l++)
+  // The sun's cascades, after the main view's items are prepared: they cast too.
+  if (m_nDrawing == 1)
   {
-    std::vector<SRenderItem> &list = s.Lists[l];
-    g_pRenderer->DrawItems(list.data(), (int)list.size(), l);
+    g_pRenderer->GpuSection("sun shadows");
+    g_pRenderer->UpdateSunCascades({ s.Items.data(), (size_t)nItems });
+  }
+  if (g_pRenderer->m_bCascadePass)
+    g_pRenderer->DrawCascadeCasters({ s.Items.data(), (size_t)nItems });
+  else
+  {
+    BuildLists(s, nItems, (nFlags & SHDF_SORT) != 0);
+    for (int l = 0; l < eRL_Num; l++)
+    {
+      std::vector<SRenderItem> &list = s.Lists[l];
+      g_pRenderer->DrawItems(list.data(), (int)list.size(), l);
+    }
   }
   if (m_nDrawing == 1)
   {

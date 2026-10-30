@@ -613,9 +613,13 @@ void CD3D12Renderer::DrawLeafItem(const SRenderItem &it)
       dc.nFlags |= DF_PIXEL_LIGHTING;
       dc.nFlags2 |= DF2_VERTEX_LIGHTS | (pObj->m_pCharInstance ? 0 : DF2_SMOOTH_FALLOFF);
     }
-    // The sun hidden by the shadow maps of the object's casters.
+    // The sun hidden by the shadow maps of the object's casters; by the sun's cascades where they
+    // reach (a light map by the live casters only: it has the shadows of the rest).
     if (dc.nFlags & (DF_LIGHTING | DF_TEX1_LIGHTMAP))
+    {
       SetupShadowReceiver(dc, pObj);
+      dc.nFlags2 |= CascadeReceiverFlags(!(dc.nFlags & DF_LIGHTING));
+    }
   };
 
   //! What the texture is multiplied by besides the light: the material's colour (white under a
@@ -761,6 +765,10 @@ void CD3D12Renderer::DrawLeafItem(const SRenderItem &it)
     Set4(dc.vColor, m_WorldColor[0], m_WorldColor[1], m_WorldColor[2], 1);
     if (pTex)
       dc.nSamplers = (dc.nSamplers == XR_SAMPLER_POINT_WRAP || dc.nSamplers == XR_SAMPLER_POINT_CLAMP) ? XR_SAMPLER_POINT_CLAMP : XR_SAMPLER_LINEAR_CLAMP;
+    // The sun's cascades: the shadows of the live casters (its texture has the others'), in the
+    // colour of the engine's shadows on the terrain, which fade out where the cascades reach.
+    if (const uint32 nCascades = CascadeReceiverFlags(true))
+      dc.nFlags2 |= nCascades | DF2_SHADOW_TINT;
     // With the shader "terrain" (the terrain's detail layers on) a sector gets no detail texture
     // but its cliff texture where the cliffs are: the engine puts it into the element's custom
     // texture binds 1 and 2, projected on two planes, with the texture coordinates of each in the
@@ -886,6 +894,7 @@ void CD3D12Renderer::DrawLeafItem(const SRenderItem &it)
     dc.nFlags = (dc.nFlags & ~DF_TEXMATRIX) | DF_TEXGEN_WORLD | DF_SHADOW_PASS | DF_ALPHATEST;
     dc.fAlphaRef = 1.0f / 255.0f;
     dc.vShadowParams[1] = 1;
+    dc.nFlags2 |= CascadeReceiverFlags(false);
     Set4(dc.vTexGenU, 0, pCustom[2], 0, pCustom[0]);
     Set4(dc.vTexGenV, pCustom[2], 0, 0, pCustom[1]);
     Set4(dc.vColor, 2 * m_WorldColor[0] * pObj->m_Color.r, 2 * m_WorldColor[1] * pObj->m_Color.g, 2 * m_WorldColor[2] * pObj->m_Color.b, 1);
@@ -953,7 +962,7 @@ void CD3D12Renderer::DrawLeafItem(const SRenderItem &it)
     if (!(dc.nFlags & DF_LIGHTING) || !dc.nLights)
       return;
     dc.nFlags &= ~(DF_SHADOWS | DF_SHADOW_DEBUG);
-    dc.nFlags2 |= DF2_NO_SUN | DF2_FOG_BLACK;
+    dc.nFlags2 = (dc.nFlags2 & ~(DF2_SUN_CASCADES | DF2_CASCADES_LIVE)) | DF2_NO_SUN | DF2_FOG_BLACK;
     Set4(dc.vAmbient, 0, 0, 0, dc.vAmbient[3]);
     const bool bBlended = (Key.nState & GS_BLEND_MASK) != 0;
     Key.nState = bBlended ? GS_BLSRC_SRCALPHA | GS_BLDST_ONE : GS_BLSRC_ONE | GS_BLDST_ONE | GS_DEPTHFUNC_EQUAL;

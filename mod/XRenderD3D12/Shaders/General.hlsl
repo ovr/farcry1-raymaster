@@ -71,6 +71,13 @@
 //	      (SunVisibility, Common.hlsli) v: DF_LIGHTING colour = lerp(the vertex
 //	      light without the sun, with it, v) * texture; DF_TEX1_LIGHTMAP rgb *=
 //	      4 * v * tex1 + vAmbient; DF_SHADOW_PASS rgb = colour * tex0, a = 1 - v
+//	    DF2_SUN_CASCADES: v from the sun's cascades where they reach
+//	      (SunCascades, Common.hlsli; the live casters' with DF2_CASCADES_LIVE),
+//	      the shadow maps' beyond them; DF2_SHADOW_TINT (the terrain): rgb *=
+//	      lerp(vShadowTint, 1, v) after the terrain's cliff textures. Only in
+//	      the pixel shaders with XR_CASCADES (Shaders.cmake), which the draws
+//	      with DF2_SUN_CASCADES or DF2_CASCADE_CASTER get: the others' code is
+//	      the same as without the cascades
 //	    DF_PIXEL_LIGHTING: DF_LIGHTING is lit here instead of per vertex
 //	      (DrawLighting: the same sum, but the lights' colours clamped to 1 and
 //	      point lights falling off as saturate(1 - d / radius); on the terrain
@@ -382,6 +389,11 @@ float4 ShadePixel(SVertexOutput In)
 {
   if (HasFlag2(DF2_SCOPE_LENS))
     return ScopeLens(In);
+#ifdef XR_CASCADES
+  // A caster of the live cascades: not where the full set has something nearer to the sun.
+  if (HasFlag2(DF2_CASCADE_CASTER))
+    clip(g_TextureArrays[g_Draw.nTex4].Load(int4(In.vPos.xy, g_Draw.vParams3.x, 0)).r + g_Draw.vParams3.y - In.vPos.z);
+#endif
   uint nSampler0 = g_Draw.nSamplers & 15;
   uint nSampler1 = (g_Draw.nSamplers >> 4) & 15;
 
@@ -427,6 +439,10 @@ float4 ShadePixel(SVertexOutput In)
     vTex.rgb = 0.75 * vTex.rgb + 0.25;
 
   float fSun = HasFlag(DF_SHADOWS) ? SunVisibility(In.vWorldPos, In.vNormal, In.vPos.xy) : 1;
+#ifdef XR_CASCADES
+  if (HasFlag2(DF2_SUN_CASCADES))
+    fSun = SunCascades(In.vWorldPos, In.vNormal, In.vPos.xy, fSun);
+#endif
   float4 vVertexColor = In.vColor;
   float3 vSpecular = 0;
   if (HasFlag(DF_LIGHTING) && HasFlag(DF_PIXEL_LIGHTING))
@@ -507,6 +523,10 @@ float4 ShadePixel(SVertexOutput In)
     if (vW.y > 0)
       vColor.rgb *= lerp(1, 2 * SampleTexture(g_Draw.nTex3, XR_SAMPLER_LINEAR_WRAP, float2(dot(vPos, g_Draw.vParams2), dot(vPos, g_Draw.vParams3))).rgb, vW.y);
   }
+#ifdef XR_CASCADES
+  if (HasFlag2(DF2_SHADOW_TINT))
+    vColor.rgb *= lerp(g_Frame.vShadowTint.rgb, 1, fSun);
+#endif
 
   if (HasFlag(DF_DECAL_FADE))
   {
@@ -589,6 +609,10 @@ float4 ShadePixel(SVertexOutput In)
 
   if (HasFlag(DF_SHADOW_DEBUG))
     vColor = float4(fSun, fSun, fSun, 1);
+#ifdef XR_CASCADES
+  if (HasFlag2(DF2_SUN_CASCADES) && g_Frame.vShadowTint.w >= 3 && !HasFlag(DF_SHADOW_PASS))
+    vColor.rgb = CascadeDebug(In.vWorldPos, In.vNormal, In.vPos.xy, vColor.rgb);
+#endif
   return vColor;
 }
 
