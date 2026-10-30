@@ -81,6 +81,7 @@ constexpr uint8 PIPELINE_COLOR_HDR = 1;           //!< D3D12_HDR_FORMAT (and D3D
 constexpr uint8 PIPELINE_COLOR_R32F = 2;          //!< R32_FLOAT
 constexpr uint8 PIPELINE_COLOR_RGBA8 = 3;         //!< R8G8B8A8_UNORM
 constexpr uint8 PIPELINE_COLOR_HDR10 = 4;         //!< D3D12_HDR10_FORMAT
+constexpr uint8 PIPELINE_COLOR_BGRA8 = 5;         //!< D3D12_BACKBUFFER_FORMAT (for nTarget 1)
 
 class CD3D12Pipeline
 {

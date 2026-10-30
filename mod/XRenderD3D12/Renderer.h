@@ -542,7 +542,7 @@ public:
   //! ocean surface among the items, the scene mirrored in the water plane into m_pReflectionColor,
   //! when the last one is out of date (r_WaterUpdate*): the 3D engine renders it with
   //! DrawLowDetail (d3d12_WaterReflectionFlags: the sky, the terrain, the static objects, the far
-  //! sprites), seen by the camera mirrored in the water plane.
+  //! sprites), seen by the camera mirrored in the water plane; then its mip levels.
   void UpdateWaterReflection(std::span<const SRenderItem> Items);
   void ReleaseWaterReflection();
   //! The reflection pass's projection: its near plane replaced by the water plane, so that nothing
@@ -570,9 +570,13 @@ public:
   int m_nWaveTexture = 0;                   //!< GetWaveTexture: its ID, 0 not made yet, -1 failed
   int m_nCausticsTexture = 0;               //!< GetCausticsTexture: its ID, 0 not made yet, -1 failed
   float m_fCausticsMinMean = 1;             //!< the mean of the smaller of two texels of it (its mean 1)
+  static constexpr int REFLECTION_MIPS = 8;  //!< the most mip levels of m_pReflectionColor
   ComPtr<ID3D12Resource> m_pReflectionColor, m_pReflectionDepth;
   D3D12_CPU_DESCRIPTOR_HANDLE m_hReflectionRTV = {}, m_hReflectionDSV = {};
-  int m_nReflectionSRV = -1;
+  D3D12_CPU_DESCRIPTOR_HANDLE m_hReflectionMipRTV[REFLECTION_MIPS - 1] = {};   //!< the RTVs of levels 1 on
+  int m_nReflectionMipSRV[REFLECTION_MIPS - 1] = { -1, -1, -1, -1, -1, -1, -1 }; //!< the SRVs of levels 0, 1, ... alone (the next is made from each)
+  int m_nReflectionSRV = -1;                //!< all its levels
+  int m_nReflectionMips = 0;
   int m_nReflectionWidth = 0, m_nReflectionHeight = 0;
   bool m_bReflectionPass = false;           //!< the reflection's scene is being rendered
   bool m_bReflectionValid = false;          //!< m_pReflectionColor holds a reflection for this frame's ocean
@@ -1064,6 +1068,7 @@ public:
   float CV_d3d12_WaterSunGlint = 0;   //!< strength of the sun's highlight on water (0: none)
   int CV_d3d12_GpuTimes = 0;          //!< N: the GPU time of the frame's sections to the log every N frames
   float CV_d3d12_WaterReflectionScale = 0.5f;   //!< size of the water reflection, a fraction of the screen's
+  float CV_d3d12_WaterReflectionBlur = 0.1f; //!< how much the ripple finer than a pixel blurs the water's reflection (0: none)
   int CV_d3d12_WaterReflectionFlags = DLD_TERRAIN | DLD_TERRAIN_FULLRES | DLD_STATIC_OBJECTS | DLD_FAR_SPRITES;   //!< what the water reflects (EDrawLowDetailFlags)
   int CV_d3d12_SpriteRes = 128;             //!< size of the far vegetation sprites' textures (made at the level load)
   int CV_d3d12_Shadows = 1;                 //!< 0: no shadow maps

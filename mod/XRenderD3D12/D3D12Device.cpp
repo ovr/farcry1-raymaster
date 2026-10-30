@@ -18,12 +18,13 @@
 namespace
 {
 
-void Barrier(ID3D12GraphicsCommandList *pList, ID3D12Resource *pRes, D3D12_RESOURCE_STATES Before, D3D12_RESOURCE_STATES After)
+void Barrier(ID3D12GraphicsCommandList *pList, ID3D12Resource *pRes, D3D12_RESOURCE_STATES Before, D3D12_RESOURCE_STATES After,
+             UINT nSubresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES)
 {
   D3D12_RESOURCE_BARRIER b = {};
   b.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
   b.Transition.pResource = pRes;
-  b.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
+  b.Transition.Subresource = nSubresource;
   b.Transition.StateBefore = Before;
   b.Transition.StateAfter = After;
   pList->ResourceBarrier(1, &b);
@@ -389,9 +390,10 @@ D3D12_CPU_DESCRIPTOR_HANDLE CD3D12Device::GetDSV() const
 }
 
 bool CD3D12Device::CreateOffscreenTargets(int nWidth, int nHeight, ComPtr<ID3D12Resource> &pColor, ComPtr<ID3D12Resource> &pDepth,
-                                          D3D12_CPU_DESCRIPTOR_HANDLE hRTV, D3D12_CPU_DESCRIPTOR_HANDLE hDSV, DXGI_FORMAT Format)
+                                          D3D12_CPU_DESCRIPTOR_HANDLE hRTV, D3D12_CPU_DESCRIPTOR_HANDLE hDSV, DXGI_FORMAT Format, int nMips,
+                                          const D3D12_CPU_DESCRIPTOR_HANDLE *phMipRTV)
 {
-  if (!m_pDevice || nWidth <= 0 || nHeight <= 0 || !hRTV.ptr || !hDSV.ptr)
+  if (!m_pDevice || nWidth <= 0 || nHeight <= 0 || !hRTV.ptr || !hDSV.ptr || nMips < 1 || (nMips > 1 && !phMipRTV))
     return false;
   D3D12_HEAP_PROPERTIES Heap = {};
   Heap.Type = D3D12_HEAP_TYPE_DEFAULT;
@@ -400,7 +402,7 @@ bool CD3D12Device::CreateOffscreenTargets(int nWidth, int nHeight, ComPtr<ID3D12
   Desc.Width = nWidth;
   Desc.Height = nHeight;
   Desc.DepthOrArraySize = 1;
-  Desc.MipLevels = 1;
+  Desc.MipLevels = (UINT16)nMips;
   Desc.Format = Format;
   Desc.SampleDesc.Count = 1;
   Desc.Flags = D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET;
@@ -411,6 +413,7 @@ bool CD3D12Device::CreateOffscreenTargets(int nWidth, int nHeight, ComPtr<ID3D12
   if (Failed(m_pDevice->CreateCommittedResource(&Heap, D3D12_HEAP_FLAG_NONE, &Desc, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE,
     &ColorClear, IID_PPV_ARGS(&pColor)), "CreateCommittedResource (off screen colour)"))
     return false;
+  Desc.MipLevels = 1;
   Desc.Format = D3D12_DEPTH_FORMAT;
   Desc.Flags = D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL;
   D3D12_CLEAR_VALUE Clear = {};
@@ -423,6 +426,14 @@ bool CD3D12Device::CreateOffscreenTargets(int nWidth, int nHeight, ComPtr<ID3D12
     return false;
   }
   m_pDevice->CreateRenderTargetView(pColor.Get(), nullptr, hRTV);
+  for (int i = 1; i < nMips; i++)
+  {
+    D3D12_RENDER_TARGET_VIEW_DESC View = {};
+    View.Format = Format;
+    View.ViewDimension = D3D12_RTV_DIMENSION_TEXTURE2D;
+    View.Texture2D.MipSlice = (UINT)i;
+    m_pDevice->CreateRenderTargetView(pColor.Get(), &View, phMipRTV[i - 1]);
+  }
   m_pDevice->CreateDepthStencilView(pDepth.Get(), nullptr, hDSV);
   return true;
 }
@@ -473,13 +484,15 @@ bool CD3D12Device::CreateCubeTargets(int nSize, ComPtr<ID3D12Resource> &pColor, 
   return true;
 }
 
-void CD3D12Device::SetOffscreenTargets(ID3D12Resource *pColor, D3D12_CPU_DESCRIPTOR_HANDLE hRTV, D3D12_CPU_DESCRIPTOR_HANDLE hDSV, int nWidth, int nHeight)
+void CD3D12Device::SetOffscreenTargets(ID3D12Resource *pColor, D3D12_CPU_DESCRIPTOR_HANDLE hRTV, D3D12_CPU_DESCRIPTOR_HANDLE hDSV, int nWidth, int nHeight,
+                                       UINT nSubresource)
 {
   if (!m_bInFrame || !pColor)
     return;
   EndOffscreen();
-  Barrier(m_pCmdList.Get(), pColor, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, D3D12_RESOURCE_STATE_RENDER_TARGET);
+  Barrier(m_pCmdList.Get(), pColor, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, D3D12_RESOURCE_STATE_RENDER_TARGET, nSubresource);
   m_pOffscreen = pColor;
+  m_nOffscreenSubresource = nSubresource;
   m_hOffscreenRTV = hRTV;
   m_hOffscreenDSV = hDSV;
   m_nOffscreenWidth = nWidth;
@@ -565,6 +578,7 @@ void CD3D12Device::SetShadowMapTarget(ID3D12Resource *pDepth, D3D12_CPU_DESCRIPT
     Barrier(m_pCmdList.Get(), pDepth, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, D3D12_RESOURCE_STATE_DEPTH_WRITE);
   }
   m_pOffscreen = pDepth;
+  m_nOffscreenSubresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
   m_bOffscreenShadowMap = true;
   m_OffscreenFormat = DXGI_FORMAT_UNKNOWN;
   m_hOffscreenRTV = {};
@@ -583,7 +597,7 @@ void CD3D12Device::EndOffscreen()
   if (!m_pOffscreen)
     return;
   Barrier(m_pCmdList.Get(), m_pOffscreen, m_bOffscreenShadowMap ? D3D12_RESOURCE_STATE_DEPTH_WRITE : D3D12_RESOURCE_STATE_RENDER_TARGET,
-    D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+    D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, m_nOffscreenSubresource);
   m_pOffscreen = nullptr;
   m_bOffscreenShadowMap = false;
 }

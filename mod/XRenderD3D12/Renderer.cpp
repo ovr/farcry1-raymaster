@@ -136,7 +136,8 @@ void CD3D12Renderer::RegisterVariables()
   iConsole->Register("d3d12_DumpFrame", &CV_d3d12_DumpFrame, 0, 0, "Writes the render items and draws of the next frame to XRenderD3D12_frame.txt");
   iConsole->Register("d3d12_WaterDebug", &CV_d3d12_WaterDebug, 0, 0,
                      "Water surfaces show one term: 1 refraction, 2 reflection, 3 water thickness (0-2 m: black-white), 4 normal, 5 screen space reflection hits, 6 their colour, 7 the planar reflection, "
-                     "8 the scene behind, 9 view path (red, 0-32 m), depth (green, 0-16 m) and fresnel (blue), 10 the vertex colour, 11 its alpha");
+                     "8 the scene behind, 9 view path (red, 0-32 m), depth (green, 0-16 m) and fresnel (blue), 10 the vertex colour, 11 its alpha, "
+                     "12 the RMS of the wave slopes finer than a pixel (white: 0.1)");
   iConsole->Register("d3d12_Caustics", &CV_d3d12_Caustics, 1, VF_DUMPTODISK, "Caustics on the terrain under the ocean; 0 off");
   iConsole->Register("d3d12_WaterSunGlint", &CV_d3d12_WaterSunGlint, 0.0f, VF_DUMPTODISK,
                      "The sun's highlight on water surfaces: its strength (0: none, as the game draws water)");
@@ -145,6 +146,9 @@ void CD3D12Renderer::RegisterVariables()
                      "water, blended, ...) and the time between frames to the console and XRenderD3D12_gpu.txt; 0 off");
   iConsole->Register("d3d12_WaterReflectionScale", &CV_d3d12_WaterReflectionScale, 0.5f, VF_DUMPTODISK,
                      "Size of the water reflection (r_WaterReflections), a fraction of the screen's");
+  iConsole->Register("d3d12_WaterReflectionBlur", &CV_d3d12_WaterReflectionBlur, 0.1f, 0,
+                     "How much the ripple finer than a pixel blurs the ocean's reflection, most of all up and down, far away "
+                     "(a factor of the slopes' variance it hides; 0: a mirror, as the original renderer)");
   // Not saved: system.cfg kept the old default (4160), which would hide the new one.
   iConsole->Register("d3d12_WaterReflectionFlags", &CV_d3d12_WaterReflectionFlags,
                      DLD_TERRAIN | DLD_TERRAIN_FULLRES | DLD_STATIC_OBJECTS | DLD_FAR_SPRITES, 0,

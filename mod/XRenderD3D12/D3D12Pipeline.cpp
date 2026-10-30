@@ -677,6 +677,7 @@ ComPtr<ID3D12PipelineState> CD3D12Pipeline::CreatePSO(const SPipelineKey &Key)
   case PIPELINE_COLOR_R32F:  Desc.RTVFormats[0] = DXGI_FORMAT_R32_FLOAT; break;
   case PIPELINE_COLOR_RGBA8: Desc.RTVFormats[0] = DXGI_FORMAT_R8G8B8A8_UNORM; break;
   case PIPELINE_COLOR_HDR10: Desc.RTVFormats[0] = D3D12_HDR10_FORMAT; break;
+  case PIPELINE_COLOR_BGRA8: Desc.RTVFormats[0] = D3D12_BACKBUFFER_FORMAT; break;
   default:                   Desc.RTVFormats[0] = bDepth || bHighlight ? D3D12_BACKBUFFER_FORMAT : DXGI_FORMAT_R8G8B8A8_UNORM; break;
   }
   if (bShadowMap)

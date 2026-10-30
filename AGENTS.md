@@ -529,7 +529,9 @@ it as well: it holds local, machine-specific instructions and is not committed (
   is the frame that `XRENDERTRACED_CAPTURE=<n>` captures of the original.
 - `d3d12_WaterDebug <n>` shows one term of the water's colour instead of the whole: 1 refraction,
   2 reflection, 3 water thickness (black to white over 0-2 m), 4 normal, 5 where the screen space
-  reflection hits, 6 its colour, 7 the planar reflection.
+  reflection hits, 6 its colour, 7 the planar reflection (blurred as the water uses it), 12 the
+  RMS of the wave slopes finer than a pixel (white: 0.1; the finest of the three wave layers is
+  already lost close to the camera, so it is grey over most of the sea).
 - With `r_WaterReflections 1` the ocean reflects the scene seen by the camera mirrored in the water
   plane, which the 3D engine renders with `I3DEngine::DrawLowDetail` before the main view;
   `d3d12_WaterReflectionFlags` are the `EDrawLowDetailFlags` it gets (default 4184: the sky, the
@@ -540,7 +542,15 @@ it as well: it holds local, machine-specific instructions and is not committed (
   `d3d12_WaterDebug 1` the frames otherwise stay those of 4160). `d3d12_WaterReflectionScale` is
   its size as a fraction of the screen (0.5), and
   `r_WaterUpdateFactor`, `r_WaterUpdateDistance`, `r_WaterUpdateDeltaAngle` how often it is redrawn
-  (0, 0, 0: every frame).
+  (0, 0, 0: every frame). Its target has mip levels (up to 8, made after each redraw, about
+  0.03 ms at 2560 x 1440), from which the water blurs it where the ripple gets finer than a pixel:
+  the wave texture's alpha holds the squared slope, and its mean less the square of the mean slope
+  is the variance the mip levels smoothed out of the normal. That turns the reflected rays up and
+  down most (vertical streaks towards the horizon); the screen space reflection gives way to the
+  blurred one where the blur is wider than 4 to 8 pixels. `d3d12_WaterReflectionBlur` scales that
+  variance (0.1; 0.25 matches the halved slopes of the calmer normal the reflection is looked up
+  along, but already washes the reflections of the bay in PierWalk out; 0 gives exactly the frames
+  of the mirror before it; not saved).
 - The far vegetation sprites are made when a level is loaded (before its first frame): each object
   that `MakeSprite` gets is drawn from its 24 directions, `d3d12_SpriteRes` texels a side (128,
   32 to 256) into a texture array per object; the log says how many were made and how long it
