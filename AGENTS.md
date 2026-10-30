@@ -292,7 +292,8 @@ it as well: it holds local, machine-specific instructions and is not committed (
 - `mod/Demos/RunDemo.ps1 <demo>[,<demo>...]|all [-Renderer old|<dll>] [-DemoArgs '...']` starts
   `farcry1_testing1/Bin64/FarCry.exe` with these variables and `XRENDERTRACED_DLL`, waits until the
   demo ends the game (it kills it, as a trace run is ended) and prints `<demo>.host.log`; the exit
-  code is 0 when every frame to save was saved. The frames go to
+  code is 0 when every frame to save was saved. `-GameArgs '<args>'` passes arguments to FarCry.exe,
+  e.g. `-DEVMODE` (the game's dev mode, which the game's own time demo playback needs). The frames go to
   `farcry1_testing1/DemoShots/<label>` (`old` for the original renderer), the scene files are
   `farcry1_testing1/Demos/<demo>.ini`; neither is ever committed. `-Resolution 3840x2160` sets
   `XRENDERTRACED_RESOLUTION`: XRenderD3D9Traced starts the renderer with that size (r_Width and
@@ -326,8 +327,13 @@ it as well: it holds local, machine-specific instructions and is not committed (
   effects one after the other), DemoDecals (bullet holes, blood and scorch marks), DemoFlares
   (the sun's flare passing behind what stands in front of it, and the coronas of two lamps), DemoSkyFog
   (fog and sky changed), DemoQuality (the quality presets of the video options), DemoReplay
-  (the game's time demos played back) and DemoSurfaces (objects of different materials, glass
-  among them, on a beach and in its shallow water under a moving light, handed to the engine's
+  (the game's time demos played back: `Levels/<level>/<level>.tmd` of Training, Volcano, Research
+  and Regulator; with `-GameArgs -DEVMODE` the game's recorder plays them, `runs` times, and with
+  `info = 1` the demo's log gets the frame rates of each run from `Levels/<level>/<level>.log`
+  (`--until 100000` keeps the run going to the recording's end after the last frame to save);
+  a path through the whole level to compare a change in many places) and DemoSurfaces (objects
+  of different materials, glass among them, on a beach and in its shallow water under a moving
+  light, handed to the engine's
   scene through `I3DEngine::SetRenderCallback`: the engine calls it for the main view only, not
   for the water's reflection).
 - The keys of each scene file are in the head comment of the demo's source (a line starting with

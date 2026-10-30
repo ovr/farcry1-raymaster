@@ -23,7 +23,18 @@
 //	          Demos\<name>.tmd in the same format. It marks the game's files
 //	          it made (in the header's reserved bytes) and never records
 //	          over another one.
-//	  play    starts the game's playback before frame 1. When the game's
+//	  play    starts the game's playback before frame 1. The game plays in
+//	          its dev mode only: FarCry.exe started with -DEVMODE
+//	          (RunDemo.ps1 -GameArgs -DEVMODE). It plays the recording runs
+//	          times (demo_num_runs), not paused by Scroll Lock, its numbers
+//	          on the screen with info = 1 only (demo_noinfo); the run ends
+//	          after the last one (a run that saves its last frame before
+//	          needs --until past it, e.g. --until 100000, else it ends
+//	          with that frame). With info = 1 the recorder writes the
+//	          numbers of each run (play time, average, lowest and highest
+//	          frame rate, triangles) into the game's log and into
+//	          Levels\<level>\<name>.log, and at its end the demo copies the
+//	          lines this run added there into its log. When the game's
 //	          file has no frames or the game is not in its dev mode, the
 //	          demo plays the recording itself: before frame n it puts the
 //	          player at the position and angles of record n - 1, as the SDK's
@@ -53,6 +64,9 @@
 //	  turn = <units>          mouse move to the right per frame while
 //	                          recording (default 3)
 //	  playback = game|demo    who plays it back (default game, see above)
+//	  runs = <n>              how often the game plays it (default 1)
+//	  info = 1                the recorder's numbers on the screen and in the
+//	                          logs (default 0)
 //
 //////////////////////////////////////////////////////////////////////
 
@@ -272,13 +286,18 @@ public:
 
   virtual bool IsFinished(CDemoHost &Host, int nFrame)
   {
-    return m_bRecord ? m_bRecorded : m_bOwnPlayback && nFrame >= (int)m_Playback.size();
+    if (m_bRecord)
+      return m_bRecorded;
+    // The game's last run ends with the frame of its last record: one frame more for its numbers.
+    return m_bOwnPlayback ? nFrame >= (int)m_Playback.size() : m_nGameFrames > 0 && nFrame > m_nGameFrames;
   }
 
   virtual void Shutdown(CDemoHost &Host)
   {
     if (m_bRecording)
       StopRecording(Host);
+    if (m_nGameFrames > 0 && m_bInfo)
+      LogResults(Host);
   }
 
 private:
@@ -339,10 +358,32 @@ private:
     if (bGame && !m_GameFrames.empty() && m_bDevMode)
     {
       m_Playback = m_GameFrames;
+      // The recorder's settings: runs - 1 more runs after the first, no pause, the game goes on after it.
+      const int nRuns = max(Host.GetScene().GetInt("runs", 1), 1);
+      m_bInfo = Host.GetScene().GetInt("info", 0) != 0;
+      char szCommand[64];
+      _snprintf(szCommand, sizeof(szCommand) - 1, "demo_num_runs %d", nRuns - 1);
+      szCommand[sizeof(szCommand) - 1] = 0;
+      Host.Exec(szCommand);
+      Host.Exec(m_bInfo ? "demo_noinfo 0" : "demo_noinfo 1");
+      Host.Exec("demo_scroll_pause 0");
+      Host.Exec("demo_quit 0");
+      // Its numbers are added to the .log next to the recording.
+      m_LogFile = m_GameFile.substr(0, m_GameFile.size() - 4) + ".log";
+      FILE *pLog = fopen(m_LogFile.c_str(), "rb");
+      m_nLogStart = 0;
+      if (pLog)
+      {
+        fseek(pLog, 0, SEEK_END);
+        m_nLogStart = ftell(pLog);
+        fclose(pLog);
+      }
       std::string Script = "Game:StartDemoPlay(\"" + m_Name + "\")";
       if (!RunScript(Host, Script.c_str()))
         Host.Log("DemoReplay: Game:StartDemoPlay failed");
-      Host.Log("DemoReplay: the game plays %d frames", (int)m_Playback.size());
+      m_nGameFrames = nRuns * (int)m_Playback.size();
+      Host.Log("DemoReplay: the game plays %d frames %d time%s (%d frames)", (int)m_Playback.size(), nRuns, nRuns > 1 ? "s" : "",
+        m_nGameFrames);
       return true;
     }
     if (bGame)
@@ -354,6 +395,28 @@ private:
       m_GameFrames.empty() ? m_OwnFile.c_str() : m_GameFile.c_str());
     PlacePlayer(Host, m_Playback[0]);
     return true;
+  }
+
+  //! The lines the game's recorder added to its .log in this run.
+  void LogResults(CDemoHost &Host)
+  {
+    FILE *pLog = fopen(m_LogFile.c_str(), "rb");
+    if (!pLog)
+    {
+      Host.Log("DemoReplay: no %s", m_LogFile.c_str());
+      return;
+    }
+    fseek(pLog, m_nLogStart, SEEK_SET);
+    char szLine[512];
+    while (fgets(szLine, sizeof(szLine), pLog))
+    {
+      size_t n = strlen(szLine);
+      while (n && (szLine[n - 1] == '\n' || szLine[n - 1] == '\r'))
+        szLine[--n] = 0;
+      if (n)
+        Host.Log("DemoReplay: %s: %s", m_LogFile.c_str(), szLine);
+    }
+    fclose(pLog);
   }
 
   void AddOwnFrame(CDemoHost &Host)
@@ -447,6 +510,11 @@ private:
   //! The frames played back, by the game or by the demo.
   std::vector<STimeDemoFrame> m_Playback;
   bool m_bOwnPlayback = false;
+  //! The game's playback: its frames in all its runs (0: not the game's), its numbers wanted, their file and where this run's start.
+  int m_nGameFrames = 0;
+  bool m_bInfo = false;
+  std::string m_LogFile;
+  long m_nLogStart = 0;
 };
 
 DEMO_PLUGIN(CDemoReplay)
