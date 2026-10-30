@@ -67,6 +67,13 @@ set(XRENDERD3D12_SOURCES
     Upscaler.h
     Upscale.cpp
     UpscalerFsr.cpp
+    D3D12Compute.h
+    D3D12Compute.cpp
+    AmbientOcclusion.h
+    AmbientOcclusion.cpp
+    AOXeGtao.cpp
+    AOCacao.cpp
+    Cacao/base/UserMarkers.h
 )
 source_group("Source Files" FILES ${XRENDERD3D12_SOURCES})
 
@@ -87,6 +94,8 @@ find_program(XRENDERD3D12_DXC dxc
 
 set(XRENDERD3D12_SHADER_DIR "${CMAKE_CURRENT_BINARY_DIR}/Shaders")
 set(XRENDERD3D12_SHADER_HEADERS "")
+# The third_party shader sources that ours include: Intel XeGTAO (third_party/xegtao).
+set(XRENDERD3D12_XEGTAO_DIR "${CMAKE_SOURCE_DIR}/third_party/xegtao/Source/Rendering/Shaders")
 
 #! xrender_d3d12_shader(<name> <file.hlsl> <profile> <entry> [defines...]): compiles one program
 #! into Shaders/<name>.h (array g_<name>). Matrices are row major (-Zpr), as the engine's Matrix44.
@@ -96,12 +105,13 @@ function(xrender_d3d12_shader name file profile entry)
         list(APPEND defines "-D" "${d}")
     endforeach()
     set(out "${XRENDERD3D12_SHADER_DIR}/${name}.h")
-    file(GLOB includes "${CMAKE_CURRENT_SOURCE_DIR}/Shaders/*.hlsli" "${CMAKE_CURRENT_SOURCE_DIR}/Shaders/*.h")
+    file(GLOB includes "${CMAKE_CURRENT_SOURCE_DIR}/Shaders/*.hlsli" "${CMAKE_CURRENT_SOURCE_DIR}/Shaders/*.h"
+        "${XRENDERD3D12_XEGTAO_DIR}/*.hlsli" "${XRENDERD3D12_XEGTAO_DIR}/*.h")
     add_custom_command(
         OUTPUT "${out}"
         COMMAND "${CMAKE_COMMAND}" -E make_directory "${XRENDERD3D12_SHADER_DIR}"
         COMMAND "${XRENDERD3D12_DXC}" -nologo -T ${profile} -E ${entry} -Zpr -O3 -Qstrip_reflect
-                -I "${CMAKE_CURRENT_SOURCE_DIR}/Shaders" ${defines}
+                -I "${CMAKE_CURRENT_SOURCE_DIR}/Shaders" -I "${XRENDERD3D12_XEGTAO_DIR}" ${defines}
                 -Vn "g_${name}" -Fh "${out}" "${CMAKE_CURRENT_SOURCE_DIR}/Shaders/${file}"
         MAIN_DEPENDENCY "${CMAKE_CURRENT_SOURCE_DIR}/Shaders/${file}"
         DEPENDS ${includes}
@@ -112,13 +122,59 @@ function(xrender_d3d12_shader name file profile entry)
 endfunction()
 
 include(Shaders/Shaders.cmake)
+
+# AMD FidelityFX CACAO (third_party/fidelityfx-cacao, tag v1.2): its Direct3D 12 host is built as it
+# is, its shaders as its build_shaders_dxil.bat compiles them (cs_6_2, column major) into the
+# PrecompiledShadersDXIL/CACAO<pass>.h headers (array CS<pass>DXIL) that the host includes.
+set(XRENDERD3D12_CACAO_DIR "${CMAKE_SOURCE_DIR}/third_party/fidelityfx-cacao/ffx-cacao")
+set(XRENDERD3D12_CACAO_SHADER_DIR "${CMAKE_CURRENT_BINARY_DIR}/cacao")
+set(XRENDERD3D12_CACAO_PASSES
+    ClearLoadCounter
+    PrepareDownsampledDepths PrepareNativeDepths PrepareDownsampledDepthsAndMips PrepareNativeDepthsAndMips
+    PrepareDownsampledNormals PrepareNativeNormals PrepareDownsampledNormalsFromInputNormals
+    PrepareNativeNormalsFromInputNormals PrepareDownsampledDepthsHalf PrepareNativeDepthsHalf
+    GenerateQ0 GenerateQ1 GenerateQ2 GenerateQ3 GenerateQ3Base
+    GenerateImportanceMap PostprocessImportanceMapA PostprocessImportanceMapB
+    EdgeSensitiveBlur1 EdgeSensitiveBlur2 EdgeSensitiveBlur3 EdgeSensitiveBlur4
+    EdgeSensitiveBlur5 EdgeSensitiveBlur6 EdgeSensitiveBlur7 EdgeSensitiveBlur8
+    Apply NonSmartApply NonSmartHalfApply
+    UpscaleBilateral5x5NonSmart UpscaleBilateral5x5Smart UpscaleBilateral5x5Half
+)
+set(XRENDERD3D12_CACAO_HEADERS "")
+foreach(pass ${XRENDERD3D12_CACAO_PASSES})
+    set(out "${XRENDERD3D12_CACAO_SHADER_DIR}/PrecompiledShadersDXIL/CACAO${pass}.h")
+    add_custom_command(
+        OUTPUT "${out}"
+        COMMAND "${CMAKE_COMMAND}" -E make_directory "${XRENDERD3D12_CACAO_SHADER_DIR}/PrecompiledShadersDXIL"
+        COMMAND "${XRENDERD3D12_DXC}" -nologo -T cs_6_2 -E FFX_CACAO_${pass} -Vn CS${pass}DXIL -Fh "${out}"
+                "${XRENDERD3D12_CACAO_DIR}/src/ffx_cacao.hlsl"
+        DEPENDS "${XRENDERD3D12_CACAO_DIR}/src/ffx_cacao.hlsl" "${XRENDERD3D12_CACAO_DIR}/src/ffx_cacao_bindings.hlsl"
+                "${XRENDERD3D12_CACAO_DIR}/src/ffx_cacao_defines.h"
+        COMMENT "dxc ffx_cacao.hlsl FFX_CACAO_${pass} -> CACAO${pass}.h"
+        VERBATIM
+    )
+    list(APPEND XRENDERD3D12_CACAO_HEADERS "${out}")
+endforeach()
+# The host: with FFX_CACAO_ENABLE_D3D12, d3dx12.h (third_party/directx-headers) and an empty stub for
+# the Cauldron markers it includes (Cacao/base/UserMarkers.h); without the renderer's precompiled
+# header.
+set(XRENDERD3D12_CACAO_SOURCES "${XRENDERD3D12_CACAO_DIR}/src/ffx_cacao.cpp" "${XRENDERD3D12_CACAO_DIR}/src/ffx_cacao_impl.cpp")
+set_source_files_properties(${XRENDERD3D12_CACAO_SOURCES} PROPERTIES
+    SKIP_PRECOMPILE_HEADERS ON
+    INCLUDE_DIRECTORIES "${CMAKE_SOURCE_DIR}/third_party/directx-headers/include/directx;${CMAKE_CURRENT_SOURCE_DIR}/Cacao;${XRENDERD3D12_CACAO_SHADER_DIR}"
+)
+set_source_files_properties(${XRENDERD3D12_CACAO_SOURCES} PROPERTIES COMPILE_DEFINITIONS FFX_CACAO_ENABLE_D3D12)
+source_group("Third Party\\FidelityFX CACAO" FILES ${XRENDERD3D12_CACAO_SOURCES})
+source_group("Shaders\\Generated\\CACAO" FILES ${XRENDERD3D12_CACAO_HEADERS})
+
 file(GLOB XRENDERD3D12_HLSL "${CMAKE_CURRENT_SOURCE_DIR}/Shaders/*.hlsl" "${CMAKE_CURRENT_SOURCE_DIR}/Shaders/*.hlsli"
     "${CMAKE_CURRENT_SOURCE_DIR}/Shaders/*.h" "${CMAKE_CURRENT_SOURCE_DIR}/Shaders/*.cmake")
 set_source_files_properties(${XRENDERD3D12_HLSL} PROPERTIES HEADER_FILE_ONLY ON)
 source_group("Shaders" FILES ${XRENDERD3D12_HLSL})
 source_group("Shaders\\Generated" FILES ${XRENDERD3D12_SHADER_HEADERS})
 
-add_library(XRenderD3D12 SHARED ${XRENDERD3D12_SOURCES} ${XRENDERD3D12_HLSL} ${XRENDERD3D12_SHADER_HEADERS})
+add_library(XRenderD3D12 SHARED ${XRENDERD3D12_SOURCES} ${XRENDERD3D12_HLSL} ${XRENDERD3D12_SHADER_HEADERS}
+    ${XRENDERD3D12_CACAO_SOURCES} ${XRENDERD3D12_CACAO_HEADERS})
 set_target_properties(XRenderD3D12 PROPERTIES
     FOLDER "Renderer"
     # Objects and arrays cross the renderer boundary in both directions, so the renderer uses
@@ -128,7 +184,8 @@ set_target_properties(XRenderD3D12 PROPERTIES
 )
 
 target_link_libraries(XRenderD3D12 PRIVATE CryCommon XRenderCommon d3d12 dxgi dxguid windowscodecs)
-target_include_directories(XRenderD3D12 PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}" "${XRENDERD3D12_SHADER_DIR}")
+target_include_directories(XRenderD3D12 PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}" "${XRENDERD3D12_SHADER_DIR}" "${XRENDERD3D12_XEGTAO_DIR}"
+    "${XRENDERD3D12_CACAO_DIR}/inc")
 
 # AMD FSR Upscaling (third_party/amd-fsr-sdk, tag v2.4.0): the headers and the loader are in the
 # repository; the upscaler (57 MB) is downloaded from the same tag, or is the file that

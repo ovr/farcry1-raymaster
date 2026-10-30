@@ -23,8 +23,10 @@ namespace
   constexpr int RTV_COUNT = 256;      //!< render targets alive at once
   constexpr int DSV_COUNT = 256;
   constexpr int FIRST_FREE_SLOT = 2;  //!< after D3D12_SRV_WHITE and D3D12_SRV_NULL_CUBE
+  constexpr int FIRST_TABLE_SLOT = D3D12_MAX_TEXTURES - D3D12_TABLE_SLOTS;  //!< AllocRange's slots from here
 
   static_assert(D3D12_SRV_WHITE < FIRST_FREE_SLOT && D3D12_SRV_NULL_CUBE < FIRST_FREE_SLOT);
+  static_assert(FIRST_FREE_SLOT < FIRST_TABLE_SLOT);
 }
 
 CD3D12Descriptors::CD3D12Descriptors() = default;
@@ -58,9 +60,10 @@ bool CD3D12Descriptors::Init(ID3D12Device *pDevice)
   for (int i = 0; i < D3D12_MAX_TEXTURES; i++)
     WriteNullSRV(i, i == D3D12_SRV_NULL_CUBE);
 
-  m_FreeSlots.reserve(D3D12_MAX_TEXTURES);
-  for (int i = D3D12_MAX_TEXTURES - 1; i >= FIRST_FREE_SLOT; i--)
+  m_FreeSlots.reserve(FIRST_TABLE_SLOT);
+  for (int i = FIRST_TABLE_SLOT - 1; i >= FIRST_FREE_SLOT; i--)
     m_FreeSlots.push_back(i);
+  m_FreeRanges.assign(1, { FIRST_TABLE_SLOT, D3D12_TABLE_SLOTS, 0 });
 
   if (!InitCPUHeap(m_RTV, D3D12_DESCRIPTOR_HEAP_TYPE_RTV, RTV_COUNT) ||
       !InitCPUHeap(m_DSV, D3D12_DESCRIPTOR_HEAP_TYPE_DSV, DSV_COUNT))
@@ -74,6 +77,9 @@ void CD3D12Descriptors::Shutdown()
   m_FreeSlots.clear();
   m_Freed.clear();
   m_bFullLogged = false;
+  m_FreeRanges.clear();
+  m_FreedRanges.clear();
+  m_bRangesFullLogged = false;
   m_RTV = SCPUHeap();
   m_DSV = SCPUHeap();
   m_pDevice = nullptr;
@@ -160,10 +166,54 @@ void CD3D12Descriptors::WriteSRV(int nSlot, ID3D12Resource *pResource, const D3D
 
 void CD3D12Descriptors::FreeSRV(int nSlot)
 {
-  // The reserved slots belong to the table itself.
-  if (!m_pHeap || nSlot < FIRST_FREE_SLOT || nSlot >= D3D12_MAX_TEXTURES)
+  // The reserved slots belong to the table itself, the table slots to FreeRange.
+  if (!m_pHeap || nSlot < FIRST_FREE_SLOT || nSlot >= FIRST_TABLE_SLOT)
     return;
   m_Freed.push_back({ nSlot, g_pRenderer->m_pDevice->GetFrameFence() });
+}
+
+int CD3D12Descriptors::AllocRange(int nCount)
+{
+  if (!m_pHeap || nCount <= 0)
+    return -1;
+  // The first run long enough.
+  for (size_t i = 0; i < m_FreeRanges.size(); i++)
+  {
+    SRange &r = m_FreeRanges[i];
+    if (r.nCount < nCount)
+      continue;
+    const int nFirst = r.nFirst;
+    r.nFirst += nCount;
+    r.nCount -= nCount;
+    if (r.nCount == 0)
+      m_FreeRanges.erase(m_FreeRanges.begin() + i);
+    return nFirst;
+  }
+  if (!m_bRangesFullLogged)
+    iLog->LogError("XRenderD3D12: no %d free descriptor table slots left (%d in all)", nCount, D3D12_TABLE_SLOTS);
+  m_bRangesFullLogged = true;
+  return -1;
+}
+
+void CD3D12Descriptors::FreeRange(int nFirst, int nCount)
+{
+  if (!m_pHeap || nFirst < FIRST_TABLE_SLOT || nCount <= 0 || nFirst + nCount > D3D12_MAX_TEXTURES)
+    return;
+  m_FreedRanges.push_back({ nFirst, nCount, g_pRenderer->m_pDevice->GetFrameFence() });
+}
+
+void CD3D12Descriptors::WriteUAV(int nSlot, ID3D12Resource *pResource, const D3D12_UNORDERED_ACCESS_VIEW_DESC *pDesc)
+{
+  if (!m_pHeap || nSlot < FIRST_TABLE_SLOT || nSlot >= D3D12_MAX_TEXTURES || (!pResource && !pDesc))
+    return;
+  m_pDevice->CreateUnorderedAccessView(pResource, nullptr, pDesc, GetSlotCPU(nSlot));
+}
+
+D3D12_GPU_DESCRIPTOR_HANDLE CD3D12Descriptors::GetGPU(int nSlot) const
+{
+  D3D12_GPU_DESCRIPTOR_HANDLE h = m_GPUStart;
+  h.ptr += (UINT64)nSlot * m_nIncrement;
+  return h;
 }
 
 void CD3D12Descriptors::CollectGarbage(uint64 nCompletedFence)
@@ -181,6 +231,35 @@ void CD3D12Descriptors::CollectGarbage(uint64 nCompletedFence)
       m_Freed[nKept++] = Freed;
   }
   m_Freed.resize(nKept);
+
+  // The runs: null SRVs again (the texture table's ranges cover them too), back in order, merged
+  // with their neighbours.
+  nKept = 0;
+  for (size_t i = 0; i < m_FreedRanges.size(); i++)
+  {
+    const SRange Freed = m_FreedRanges[i];
+    if (Freed.nFence > nCompletedFence)
+    {
+      m_FreedRanges[nKept++] = Freed;
+      continue;
+    }
+    for (int s = Freed.nFirst; s < Freed.nFirst + Freed.nCount; s++)
+      WriteNullSRV(s, false);
+    auto it = std::lower_bound(m_FreeRanges.begin(), m_FreeRanges.end(), Freed.nFirst,
+                               [](const SRange &r, int nFirst) { return r.nFirst < nFirst; });
+    it = m_FreeRanges.insert(it, { Freed.nFirst, Freed.nCount, 0 });
+    if (it + 1 != m_FreeRanges.end() && it->nFirst + it->nCount == (it + 1)->nFirst)
+    {
+      it->nCount += (it + 1)->nCount;
+      m_FreeRanges.erase(it + 1);
+    }
+    if (it != m_FreeRanges.begin() && (it - 1)->nFirst + (it - 1)->nCount == it->nFirst)
+    {
+      (it - 1)->nCount += it->nCount;
+      m_FreeRanges.erase(it);
+    }
+  }
+  m_FreedRanges.resize(nKept);
 }
 
 D3D12_CPU_DESCRIPTOR_HANDLE CD3D12Descriptors::AllocCPU(SCPUHeap &Heap, const char *szWhat)

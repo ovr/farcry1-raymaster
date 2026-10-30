@@ -207,4 +207,13 @@ struct SDrawConstants
   XR_FLOAT4(vHdrCore);            //!< DF2_HDR_CORE: x the factor of the light in its core, y 1: the shape times tex0 a (a SRCALPHA blend)
 };
 
+//! b0 of the ambient occlusion's resolve (AoResolve.hlsl, AmbientOcclusion.cpp).
+struct SAoResolveConstants
+{
+  XR_FLOAT4(vSize);               //!< x width, y height (pixels), z 1 / width, w 1 / height
+  XR_FLOAT4(vDepthParams);        //!< as SFrameConstants'
+  XR_FLOAT4(vFogParams);          //!< as SFrameConstants'
+  XR_FLOAT4(vParams);             //!< x the exponent of the visibility (d3d12_AOStrength / 2.2: the scene's colours are the game's, not linear)
+};
+
 #endif

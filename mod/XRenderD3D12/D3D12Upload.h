@@ -104,6 +104,10 @@ public:
   CD3D12Texture *CreateTexture(int nWidth, int nHeight, int nMips, DXGI_FORMAT Format, bool bCube, const SD3D12SubData *pSubData, int nArraySize = 1);
   //! A render target texture (one mip) with an RTV and an SRV; starts in PIXEL_SHADER_RESOURCE.
   CD3D12Texture *CreateRenderTarget(int nWidth, int nHeight, DXGI_FORMAT Format);
+  //! A texture that compute passes write (ALLOW_UNORDERED_ACCESS), nMips levels, without views (the
+  //! pass writes them into its descriptor tables, so Format may be typeless); starts in
+  //! UNORDERED_ACCESS. szName names it for the debug layer.
+  CD3D12Texture *CreateComputeTarget(int nWidth, int nHeight, int nMips, DXGI_FORMAT Format, const wchar_t *szName);
   //! Replaces a rectangle of one sub resource (x, y, nWidth, nHeight in texels; multiples of 4
   //! for BC formats).
   void UpdateTexture(CD3D12Texture *pTex, int nFace, int nMip, int x, int y, int nWidth, int nHeight, const SD3D12SubData &Data);

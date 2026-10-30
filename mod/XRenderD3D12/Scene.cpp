@@ -561,12 +561,16 @@ void CScene::EndEf3D(int nFlags)
     {
       std::vector<SRenderItem> &list = s.Lists[l];
       g_pRenderer->DrawItems(list.data(), (int)list.size(), l);
+      // The main view's ambient occlusion over what the opaque list drew.
+      if (l == eRL_Opaque)
+        g_pRenderer->DrawAmbientOcclusion();
     }
   }
   if (m_nDrawing == 1)
   {
     g_pRenderer->EndMainScene();
     g_pRenderer->DrawScreenEffects();
+    g_pRenderer->DrawAODebug();
     g_pRenderer->DrawShadowMapDebug();
     g_pRenderer->GpuSection("other");
   }

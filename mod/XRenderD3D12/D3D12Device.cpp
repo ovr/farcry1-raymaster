@@ -242,7 +242,8 @@ bool CD3D12Device::CreateSwapChainBuffers()
   Desc.Height = m_nHeight;
   Desc.DepthOrArraySize = 1;
   Desc.MipLevels = 1;
-  Desc.Format = D3D12_DEPTH_FORMAT;
+  // Typeless, so that it can also be read (ambient occlusion); drawn into as D3D12_DEPTH_FORMAT.
+  Desc.Format = DXGI_FORMAT_R24G8_TYPELESS;
   Desc.SampleDesc.Count = 1;
   Desc.Flags = D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL;
   D3D12_CLEAR_VALUE Clear = {};
@@ -251,7 +252,10 @@ bool CD3D12Device::CreateSwapChainBuffers()
   if (Failed(m_pDevice->CreateCommittedResource(&Heap, D3D12_HEAP_FLAG_NONE, &Desc, D3D12_RESOURCE_STATE_DEPTH_WRITE, &Clear, IID_PPV_ARGS(&m_pDepth)),
     "CreateCommittedResource (depth)"))
     return false;
-  m_pDevice->CreateDepthStencilView(m_pDepth.Get(), nullptr, m_pDSVHeap->GetCPUDescriptorHandleForHeapStart());
+  D3D12_DEPTH_STENCIL_VIEW_DESC View = {};
+  View.Format = D3D12_DEPTH_FORMAT;
+  View.ViewDimension = D3D12_DSV_DIMENSION_TEXTURE2D;
+  m_pDevice->CreateDepthStencilView(m_pDepth.Get(), &View, m_pDSVHeap->GetCPUDescriptorHandleForHeapStart());
   m_nBackBuffer = m_pSwapChain->GetCurrentBackBufferIndex();
   return !m_bLayer || CreateLayer();
 }
@@ -641,6 +645,16 @@ void CD3D12Device::Transition(ID3D12Resource *pRes, D3D12_RESOURCE_STATES Before
 {
   if (m_bInFrame && pRes)
     Barrier(m_pCmdList.Get(), pRes, Before, After);
+}
+
+void CD3D12Device::UavBarrier(ID3D12Resource *pRes)
+{
+  if (!m_bInFrame || !pRes)
+    return;
+  D3D12_RESOURCE_BARRIER b = {};
+  b.Type = D3D12_RESOURCE_BARRIER_TYPE_UAV;
+  b.UAV.pResource = pRes;
+  m_pCmdList->ResourceBarrier(1, &b);
 }
 
 D3D12_CPU_DESCRIPTOR_HANDLE CD3D12Device::SceneRTV(int n) const
@@ -1302,7 +1316,7 @@ void CD3D12Device::CopyTargets(ID3D12Resource *pColor, ID3D12Resource *pDepth)
   if (!m_bInFrame || !pColor)
     return;
   ID3D12Resource *pMainColor = m_bInScene ? m_pSceneColor.Get() : m_bInHdr ? m_pHdrColor.Get() : GetBackBuffer();
-  ID3D12Resource *pMainDepth = m_bInScene ? m_pSceneDepth.Get() : m_pDepth.Get();
+  ID3D12Resource *pMainDepth = GetMainDepth();
   const auto Matches = [](ID3D12Resource *pCopy, ID3D12Resource *pSource, DXGI_FORMAT Format)
   {
     const D3D12_RESOURCE_DESC a = pCopy->GetDesc(), b = pSource->GetDesc();

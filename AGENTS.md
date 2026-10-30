@@ -516,6 +516,25 @@ it as well: it holds local, machine-specific instructions and is not committed (
   (DemoCompare difference 0 for the former). The cascades' code is in pixel shaders of its own
   (`XR_CASCADES`, for the draws with their flags): in the general one, with dxc's code for the old
   paths unchanged, the GPU's compiler still changed a few pixels by a level.
+- `d3d12_AO` is the screen space ambient occlusion of the main view: `none` (the default; the
+  frames are those of the renderer without it, DemoCompare difference 0), `gtao` (Intel XeGTAO
+  1.30, `AOXeGtao.cpp` with `Shaders/XeGtao.hlsl` on our compute passes, `D3D12Compute.h`) or
+  `cacao` (AMD FidelityFX CACAO 1.2 through its own Direct3D 12 host, `AOCacao.cpp`, with a
+  descriptor heap and root signatures of its own; the build compiles its shaders with our dxc). An
+  unknown one is logged once and acts as `none`. After the opaque list (`AmbientOcclusion.cpp`),
+  before the weapon and the water (which then refracts the occluded bottom), the backend computes
+  the visibility from the depth buffer (the back buffer's depth is `R24G8_TYPELESS` for that; both
+  make the normals from the depth), `Shaders/AoResolve.hlsl` turns it into a factor (1 for the
+  sky, faded out with the fog: `lerp(1, visibility ^ (strength / 2.2), fog)`), and a blend of
+  `DESTCOLOR, ZERO` multiplies the scene drawn so far by it (colour only; the alpha keeps the HUD's
+  masks). Not in reflections, the sprites, shadow and cube passes, nor with the heat vision.
+  `d3d12_AOQuality` 0 to 3 (2: XeGTAO Low to Ultra, CACAO LOW to HIGHEST), `d3d12_AORadius` (1 m),
+  `d3d12_AOStrength` (1, the exponent of the visibility), `d3d12_AODenoise` (2: XeGTAO's denoise
+  passes 0 to 3, CACAO's blur passes 1 to 8); with an upscaler XeGTAO's noise and CACAO's kernel
+  change from frame to frame for it to gather. All are read every frame. `d3d12_AODebug 1` shows
+  the factor in grey over the whole frame. The frame dump has an `ao:` line and the GPU times an
+  `ao` section. For comparisons, DemoLevel with `--scene Demos\DemoLevelPierWalk.ini` and
+  `-DemoArgs '--exec-at 1 "d3d12_AO gtao"'` (or `cacao`) against the same run without it.
 - `d3d12_DumpFrame 1` writes the render items of the next frame to
   `farcry1_testing1/XRenderD3D12_frame.txt` (never committed): the camera (position, angles,
   field of view, near and far plane, view and projection matrices), then for each item its list, sort

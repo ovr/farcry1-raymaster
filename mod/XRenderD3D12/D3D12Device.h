@@ -143,6 +143,8 @@ public:
   void BindRootSignature();
   //! A transition barrier of all of pRes.
   void Transition(ID3D12Resource *pRes, D3D12_RESOURCE_STATES Before, D3D12_RESOURCE_STATES After);
+  //! A UAV barrier of pRes: the unordered access writes before it are done for the accesses after it.
+  void UavBarrier(ID3D12Resource *pRes);
 
   //! The scene targets of an upscaler: the main view drawn at nWidth x nHeight into a colour target
   //! (ColorFormat: D3D12_BACKBUFFER_FORMAT, or D3D12_HDR_FORMAT), the motion vectors
@@ -240,6 +242,9 @@ public:
   //! How a depth copy of CreateTargetCopies is read: R24_UNORM_X8_TYPELESS (the back buffer's
   //! D24S8), R32_FLOAT in the scene.
   DXGI_FORMAT GetMainDepthSRVFormat() const { return m_bInScene ? DXGI_FORMAT_R32_FLOAT : DXGI_FORMAT_R24_UNORM_X8_TYPELESS; }
+  //! The main view's depth buffer: the scene's in the scene, else the back buffer's (R24G8_TYPELESS, its
+  //! DSV D3D12_DEPTH_FORMAT), read through an SRV of GetMainDepthSRVFormat. DEPTH_WRITE while drawn into.
+  ID3D12Resource *GetMainDepth() const { return m_bInScene ? m_pSceneDepth.Get() : m_pDepth.Get(); }
   //! Copies the main view's target (the back buffer, the HDR target or the scene's colour) and its depth buffer
   //! (when pDepth is given) as drawn so far in this frame into the textures of CreateTargetCopies
   //! (PIXEL_SHADER_RESOURCE before and after); nothing when their size or format is another.

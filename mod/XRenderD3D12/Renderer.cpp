@@ -15,6 +15,7 @@
 #include "D3D12Upload.h"
 #include "D3D12Descriptors.h"
 #include "D3D12Pipeline.h"
+#include "D3D12Compute.h"
 #include "Texture.h"
 #include "Shader.h"
 #include "Scene.h"
@@ -181,6 +182,17 @@ void CD3D12Renderer::RegisterVariables()
                      "3 Performance (1/2), 4 Ultra Performance (1/3)");
   iConsole->Register("d3d12_UpscaleSharpness", &CV_d3d12_UpscaleSharpness, 0.5f, VF_DUMPTODISK, "The upscaler's sharpening, 0 (none) to 1");
   iConsole->Register("d3d12_UpscaleDebug", &CV_d3d12_UpscaleDebug, 0, 0, "1: the upscaler's debug view; 2: the depth it gets (near black, far white)");
+  // The ambient occlusion (AmbientOcclusion.cpp).
+  iConsole->CreateVariable("d3d12_AO", "none", VF_DUMPTODISK,
+                           "Screen space ambient occlusion of the 3D scene: none, gtao (Intel XeGTAO) or cacao (AMD FidelityFX CACAO)");
+  iConsole->Register("d3d12_AOQuality", &CV_d3d12_AOQuality, 2, VF_DUMPTODISK,
+                     "The ambient occlusion's quality, 0 (low) to 3 (XeGTAO ultra, CACAO highest)");
+  iConsole->Register("d3d12_AORadius", &CV_d3d12_AORadius, 1.0f, VF_DUMPTODISK, "The ambient occlusion's radius (m): how far a surface occludes");
+  iConsole->Register("d3d12_AOStrength", &CV_d3d12_AOStrength, 1.0f, VF_DUMPTODISK,
+                     "The ambient occlusion's strength: the exponent of the visibility (1 as the backend computes it, 0 none)");
+  iConsole->Register("d3d12_AODenoise", &CV_d3d12_AODenoise, 2, VF_DUMPTODISK,
+                     "The ambient occlusion's denoising: XeGTAO 0 (none) to 3 passes, CACAO 1 to 8 blur passes");
+  iConsole->Register("d3d12_AODebug", &CV_d3d12_AODebug, 0, 0, "1: the ambient occlusion's factor in grey over the whole picture");
   // The HDR pipeline (r_HDRRendering, Hdr.cpp).
   iConsole->Register("d3d12_ToneMap", &CV_d3d12_ToneMap, 1, VF_DUMPTODISK,
                      "With r_HDRRendering, the tone map: 0 clamp, 1 soft shoulder (the game's look up to d3d12_ToneMapKnee, then each channel rolls off to 1), 2 ACES fitted, 3 AgX");
@@ -290,6 +302,7 @@ WIN_HWND CD3D12Renderer::Init(int x,int y,int width,int height,unsigned int cbpp
   m_pDescriptors = std::make_unique<CD3D12Descriptors>();
   m_pUpload = std::make_unique<CD3D12Upload>();
   m_pPipeline = std::make_unique<CD3D12Pipeline>();
+  m_pCompute = std::make_unique<CD3D12Compute>();
   m_pTextures = std::make_unique<CTextureManager>();
   m_pShaders = std::make_unique<CShaderManager>();
   m_pScene = std::make_unique<CScene>();
@@ -297,6 +310,7 @@ WIN_HWND CD3D12Renderer::Init(int x,int y,int width,int height,unsigned int cbpp
     || !m_pDescriptors->Init(m_pDevice->GetDevice())
     || !m_pUpload->Init(m_pDevice->GetDevice(), nFrameRingSize)
     || !m_pPipeline->Init(m_pDevice->GetDevice())
+    || !m_pCompute->Init(m_pDevice->GetDevice())
     || !m_pTextures->Init()
     || !m_pShaders->Init()
     || !m_pScene->Init())
@@ -562,6 +576,7 @@ void CD3D12Renderer::Release()
   ReleaseCascades();
   ReleaseScreenEffects();
   ReleaseFlares();
+  ReleaseAO();
   ReleaseUpscaler();
   ReleaseHdr();
   ReleaseHdrOutput();
@@ -574,6 +589,8 @@ void CD3D12Renderer::Release()
   m_nSceneSkyBox = -1;
   if (m_pTextures)
     m_pTextures->Shutdown();
+  if (m_pCompute)
+    m_pCompute->Shutdown();
   if (m_pPipeline)
     m_pPipeline->Shutdown();
   if (m_pUpload)
@@ -585,6 +602,7 @@ void CD3D12Renderer::Release()
   m_pScene.reset();
   m_pShaders.reset();
   m_pTextures.reset();
+  m_pCompute.reset();
   m_pPipeline.reset();
   m_pUpload.reset();
   m_pDescriptors.reset();
