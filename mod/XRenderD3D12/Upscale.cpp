@@ -309,7 +309,19 @@ void CD3D12Renderer::UpscaleScene()
     dc.nTex0 = (uint32)m_nUpscaleDepthSRV;
     Set4(dc.vParams1, In.fNear, In.fFar, 0, 0);
   }
+  // With the highlight layer (HdrOutput.cpp) it gets the resolve's ratio, upscaled bilinearly (none
+  // for the depth view).
+  const bool bHighlight = m_pDevice->HasLayer();
+  if (bHighlight)
+  {
+    dc.nTex1 = pLdr && m_Hdr.pRatio && CV_d3d12_UpscaleDebug != 2 ? (uint32)m_Hdr.pRatio->m_nSRV : D3D12_SRV_WHITE;
+    Set4(dc.vParams2, std::clamp(CV_d3d12_ToneMapKnee, 0.0f, 0.99f), 0, 0, 0);
+    Key.nTarget = 4;
+    m_pDevice->BindHighlight(true);
+  }
   DrawImmediate(Key, dc, D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST, VERTEX_FORMAT_P3F, s_FullScreen, 3);
+  if (bHighlight)
+    m_pDevice->BindHighlight(false);
   if (bUpscaled)
     m_pDevice->Transition(In.pOutput, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
   m_pDevice->ClearDepth(1.0f, 0, true, true);

@@ -47,6 +47,19 @@
 //	                  view (1 the luminance in EV bands, 2 the bloom alone);
 //	                  vParams2.w 1: then through the colour grading's table
 //	                  tex3 (ColorGrading.cpp). The alpha is the scene's.
+//	                  PSHighlight also writes the highlight layer (Common.hlsli,
+//	                  HdrOutput.cpp): the tone map continued above the knee up
+//	                  to the display's peak (HighlightRatio), vParams3.x the
+//	                  peak's display value HdrEncode(peak / paper white), y
+//	                  peak / paper white
+//	  HDR_OUTPUT      tex0 the frame (the 8-bit back buffer), tex1 the
+//	                  highlight layer: the frame's light times the layer's
+//	                  ratio where its fingerprint matches, times paper white
+//	                  (vParams0.x nits), at most the peak (vParams0.y nits),
+//	                  for the swap chain: vParams0.z 1 HDR10 (PQ, Rec. 2020),
+//	                  2 scRGB (linear Rec. 709, 1 = 80 nits). vParams0.w the
+//	                  debug view (d3d12_HDROutputDebug: 1 the mask, 2 the test
+//	                  patches), vParams1.xy 1 / the frame's size
 //
 //////////////////////////////////////////////////////////////////////
 
@@ -296,8 +309,33 @@ float3 ColorLut(uint nTex, float3 c)
   return lerp(v0, v1, c.b - b0);
 }
 
-float4 Resolve(float2 vPixel)
+//! The highlight layer's ratio (Common.hlsli, HdrOutput.cpp): the tone map continued above the
+//! knee up to the display's peak, as light, over the light of its SDR value s, per channel. Below
+//! the knee k it is 1. Above it, t, how far the SDR curve went into its shoulder, goes on along a
+//! shoulder of the same shape that ends at the peak's display value P = vParams3.x instead of 1:
+//! k + (P - k) (1 - e^(-t / (P - k))), smooth at the knee. For the soft shoulder t is its own
+//! (the encoded light above the knee); ACES and AgX keep their curve up to the knee, and t is
+//! what puts a soft shoulder where they got to, -(1 - k) ln(1 - (s - k) / (1 - k)). The clamp
+//! clips at the peak instead of at white.
+float3 HighlightRatio(float3 vLight, float3 s, int nMode, float k)
 {
+  float3 h;
+  if (nMode == 0)
+    h = Encode(min(vLight, g_Draw.vParams3.y));
+  else
+  {
+    k = clamp(k, 0, 0.99);
+    float fRange = 1 - k, fHead = max(g_Draw.vParams3.x - k, 1e-4);
+    float3 t = nMode == 1 ? max(Encode(vLight) - k, 0) : -fRange * log(max(1 - saturate((s - k) / fRange), 1e-7));
+    h = lerp(k + fHead * (1 - exp(-t / fHead)), s, step(s, k));
+  }
+  return max(Decode(h) / max(Decode(s), 1e-6), 1);
+}
+
+//! vRatio: the highlight layer's ratio (1 for the clamped scene and the debug views).
+float4 Resolve(float2 vPixel, out float3 vRatio)
+{
+  vRatio = 1;
   float4 vScene = g_Textures[g_Draw.nTex0].Load(int3(vPixel, 0));
   float fAlpha = saturate(vScene.a);
   if (g_Draw.vParams2.y > 0)
@@ -313,13 +351,86 @@ float4 Resolve(float2 vPixel)
   else
     vLight += vBloom;
   float3 c = ToneMap(vLight, (int)g_Draw.vParams1.w, g_Draw.vParams2.x);
+  if (nDebug == 0)
+    vRatio = HighlightRatio(vLight, c, (int)g_Draw.vParams1.w, g_Draw.vParams2.x);
   if (g_Draw.vParams2.w > 0 && nDebug == 0)
     c = ColorLut(g_Draw.nTex3, c);
   return float4(c, fAlpha);
 }
 
+//////////////////////////////////////////////////////////////////////////
+// The output pass (HdrOutput.cpp)
+
+static const float3x3 REC709_TO_REC2020 = { 0.6274040, 0.3292820, 0.0433136, 0.0690970, 0.9195400, 0.0113612, 0.0163916, 0.0880132, 0.8955950 };
+
+//! SMPTE ST 2084 (PQ) of a light in nits.
+float3 Pq(float3 vNits)
+{
+  float3 y = pow(saturate(vNits / 10000), 0.1593017578125);
+  return pow((0.8359375 + 18.8515625 * y) / (1 + 18.6875 * y), 78.84375);
+}
+
+//! d3d12_HDROutputDebug 2: four patches across the middle of the screen, at paper white, twice and
+//! four times that and at the peak (light in paper whites, fPeak the peak's); vLight elsewhere.
+float3 TestPatches(float2 vUV, float3 vLight, float fPeak)
+{
+  if (vUV.y < 0.4 || vUV.y > 0.6 || vUV.x < 0.1 || vUV.x > 0.9)
+    return vLight;
+  float x = (vUV.x - 0.1) / 0.2;
+  if (frac(x) < 0.1 || frac(x) > 0.9)
+    return 0;
+  static const float LEVELS[3] = { 1, 2, 4 };
+  int n = min((int)x, 3);
+  return n == 3 ? fPeak : LEVELS[n];
+}
+
+float4 Output(float2 vPixel)
+{
+  float3 f = g_Textures[g_Draw.nTex0].Load(int3(vPixel, 0)).rgb;
+  float4 vLayer = g_Textures[g_Draw.nTex1].Load(int3(vPixel, 0));
+  bool bScene = abs(HighlightFingerprint(f) - vLayer.a) <= HIGHLIGHT_TOLERANCE;
+  float3 vRatio = bScene ? max(vLayer.rgb, 1) : 1;
+  float fPaper = g_Draw.vParams0.x, fPeak = g_Draw.vParams0.y;
+  float3 vLight = Decode(f);
+  int nDebug = (int)g_Draw.vParams0.w;
+  if (nDebug == 1)
+  {
+    // The scene's highlights from yellow (a little) to red (the peak), the rest grey, blue where
+    // something was drawn over the scene.
+    float L = Luminance(vLight);
+    float r = Max3(vRatio);
+    if (!bScene && vLayer.a >= 0)
+      vLight = float3(0.25, 0.4, 1) * (0.1 + L);
+    else if (r > 1.001)
+      vLight = lerp(float3(1, 0.9, 0.1), float3(1, 0.05, 0), saturate(log2(r) / max(log2(fPeak / fPaper), 0.1)));
+    else
+      vLight = L;
+    vRatio = 1;
+  }
+  else if (nDebug == 2)
+  {
+    vLight = TestPatches(vPixel * g_Draw.vParams1.xy, vLight * vRatio, fPeak / fPaper);
+    vRatio = 1;
+  }
+  float3 vNits = min(vLight * vRatio * fPaper, fPeak);
+  if (g_Draw.vParams0.z == 1)
+    return float4(Pq(mul(REC709_TO_REC2020, vNits)), 1);
+  return float4(vNits / 80, 1);
+}
+
+SHighlightOutput PSHighlight(SHdrOutput In)
+{
+  SHighlightOutput Out;
+  float3 vRatio;
+  Out.vColor = Resolve(In.vPos.xy, vRatio);
+  Out.vHighlight = float4(vRatio, HighlightFingerprint(Out.vColor.rgb));
+  return Out;
+}
+
 float4 PSMain(SHdrOutput In) : SV_Target
 {
+  if (HasFlag(HDR_OUTPUT))
+    return Output(In.vPos.xy);
   if (HasFlag(HDR_LUMINANCE))
     return MeterLuminance(In.vPos.xy);
   if (HasFlag(HDR_REDUCE))
@@ -330,5 +441,6 @@ float4 PSMain(SHdrOutput In) : SV_Target
     return BloomDown(In.vPos.xy);
   if (HasFlag(HDR_BLOOM_UP))
     return BloomUp(In.vPos.xy);
-  return Resolve(In.vPos.xy);
+  float3 vRatio;
+  return Resolve(In.vPos.xy, vRatio);
 }

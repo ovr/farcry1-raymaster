@@ -119,6 +119,7 @@ typedef float float4x4_t[16];
 #define HDR_BLOOM_PREFILTER 0x00000010  //!< with HDR_BLOOM_DOWN: from the scene, exposed, the fireflies tamed, above the threshold
 #define HDR_BLOOM_UP        0x00000020  //!< the smaller level tex0 through a 3x3 tent, added to the target
 #define HDR_RESOLVE         0x00000040  //!< the scene tex0 exposed, with the bloom tex1, tone mapped to the display
+#define HDR_OUTPUT          0x00000080  //!< the frame tex0 with the highlight layer tex1 for an HDR swap chain (HdrOutput.cpp)
 #define HDR_COLOR_LUT_SIZE  32          //!< the colour grading's table (ColorGrading.cpp): points along each axis
 
 #define XR_SAMPLER_LINEAR_WRAP  0

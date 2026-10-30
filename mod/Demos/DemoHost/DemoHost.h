@@ -33,6 +33,17 @@
 //	                        (Video.h: ffmpeg, on PATH)
 //	  --fps <n>             frames per second of the video (default 50: one
 //	                        frame of the fixed time step, real time)
+//	  --video-hdr <file.mp4>  also writes every frame of the run into an HDR10
+//	                        video (HEVC Main 10, PQ, Rec. 2020, with the
+//	                        metadata), as XRenderD3D12's HDR output shows it
+//	                        (d3d12_HDROutput; its XRenderD3D12_ReadFrameHdr10,
+//	                        looked up in the renderer XRENDERTRACED_DLL names);
+//	                        whatever the display and d3d12_HDROutput. Paper
+//	                        white and the peak are d3d12_HDRPaperWhite and
+//	                        d3d12_HDRPeak, else the display's in HDR mode,
+//	                        else 203 and 1000 nits. The highlights need
+//	                        r_HDRRendering; without it the frames are SDR
+//	                        at paper white
 //	  --exec-at <frame> <commands>  console commands at the start of that frame
 //	                        (separated by ';' or '|', e.g. "d3d12_DumpFrame 1"); may repeat
 //	  --trace               keep the tracing of XRenderD3D9Traced on

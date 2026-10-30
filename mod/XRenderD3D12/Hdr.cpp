@@ -75,7 +75,8 @@ constexpr float BLOOM_KNEE = 0.5f;
 
 const char *const s_ToneMapNames[] = { "clamp", "soft shoulder", "ACES fitted", "AgX" };
 
-//! A half float (IEEE 754 binary16) as a float.
+}
+
 float HalfToFloat(uint16 h)
 {
   const int nSign = h >> 15, nExp = (h >> 10) & 31, nMantissa = h & 1023;
@@ -87,8 +88,6 @@ float HalfToFloat(uint16 h)
   else
     f = ldexpf((float)(nMantissa | 1024), nExp - 25);
   return nSign ? -f : f;
-}
-
 }
 
 void CD3D12Renderer::BeginMainScene()
@@ -230,9 +229,10 @@ CD3D12Texture *CD3D12Renderer::ResolveHdr(int nSceneSRV, int nWidth, int nHeight
   Set4(dc.vParams0, 1.0f / nWidth, 1.0f / nHeight, 0, 0);
   Set4(dc.vParams1, fComp, bAdapted ? 1.0f : 0.0f, fBloom / m_Hdr.Bloom.size(), (float)std::clamp(CV_d3d12_ToneMap, 0, 3));
   Set4(dc.vParams2, CV_d3d12_ToneMapKnee, bHeat ? 1.0f : 0.0f, (float)CV_d3d12_HDRDebug, nLutSRV >= 0 ? 1.0f : 0.0f);
+  SetHighlightConstants(dc);
   if (bToTexture)
   {
-    DrawHdrPass(m_Hdr.pLdr, dc);
+    DrawHdrPass(m_Hdr.pLdr, dc, 0, m_pDevice->HasLayer() ? m_Hdr.pRatio : nullptr);
     m_pDevice->SetBackBufferTargets();
     return m_Hdr.pLdr;
   }
@@ -242,8 +242,20 @@ CD3D12Texture *CD3D12Renderer::ResolveHdr(int nSceneSRV, int nWidth, int nHeight
 
 void CD3D12Renderer::DrawHdrToBackBuffer(const SDrawConstants &dc)
 {
-  // Over the whole back buffer, whatever the engine's viewport and scissors.
   m_pDevice->SetBackBufferTargets();
+  if (!m_pDevice->HasLayer())
+  {
+    DrawHdrFullScreen(dc, 0, PIPELINE_COLOR_DEFAULT);
+    return;
+  }
+  m_pDevice->BindHighlight(true);
+  DrawHdrFullScreen(dc, 4, PIPELINE_COLOR_DEFAULT);
+  m_pDevice->BindHighlight(false);
+}
+
+void CD3D12Renderer::DrawHdrFullScreen(const SDrawConstants &dc, uint8 nTarget, uint8 nColorFormat)
+{
+  // Over the whole back buffer, whatever the engine's viewport and scissors.
   int Viewport[4];
   memcpy(Viewport, m_Viewport, sizeof(Viewport));
   const bool bScissor = m_bScissor;
@@ -255,12 +267,14 @@ void CD3D12Renderer::DrawHdrToBackBuffer(const SDrawConstants &dc)
   Key.nProgram = eD3D12P_Hdr;
   Key.nState = GS_NODEPTHTEST;
   Key.nCull = R_CULL_NONE;
+  Key.nTarget = nTarget;
+  Key.nColorFormat = nColorFormat;
   DrawImmediate(Key, dc, D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST, VERTEX_FORMAT_P3F, s_FullScreen, 3);
   memcpy(m_Viewport, Viewport, sizeof(Viewport));
   m_bScissor = bScissor;
 }
 
-void CD3D12Renderer::DrawHdrPass(CD3D12Texture *pTarget, const SDrawConstants &dc, uint32 nState)
+void CD3D12Renderer::DrawHdrPass(CD3D12Texture *pTarget, const SDrawConstants &dc, uint32 nState, CD3D12Texture *pRatio)
 {
   m_pDevice->SetOffscreenTargets(pTarget->m_pResource, pTarget->m_RTV, {}, pTarget->m_nWidth, pTarget->m_nHeight);
   SPipelineKey Key = {};
@@ -269,8 +283,20 @@ void CD3D12Renderer::DrawHdrPass(CD3D12Texture *pTarget, const SDrawConstants &d
   Key.nCull = R_CULL_NONE;
   Key.nTarget = 1;
   Key.nColorFormat = pTarget->m_Format == D3D12_HDR_FORMAT ? PIPELINE_COLOR_HDR :
-                     pTarget->m_Format == DXGI_FORMAT_R32_FLOAT ? PIPELINE_COLOR_R32F : PIPELINE_COLOR_DEFAULT;
+                     pTarget->m_Format == DXGI_FORMAT_R32_FLOAT ? PIPELINE_COLOR_R32F :
+                     pTarget->m_Format == D3D12_HDR10_FORMAT ? PIPELINE_COLOR_HDR10 : PIPELINE_COLOR_DEFAULT;
+  if (pRatio)
+  {
+    // Both targets; the device knows of the first one only.
+    m_pDevice->Transition(pRatio->m_pResource, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, D3D12_RESOURCE_STATE_RENDER_TARGET);
+    const D3D12_CPU_DESCRIPTOR_HANDLE hRTV[2] = { pTarget->m_RTV, pRatio->m_RTV };
+    m_pDevice->GetCmdList()->OMSetRenderTargets(2, hRTV, FALSE, nullptr);
+    Key.nTarget = 4;
+    Key.nColorFormat = pTarget->m_Format == DXGI_FORMAT_R8G8B8A8_UNORM ? PIPELINE_COLOR_RGBA8 : PIPELINE_COLOR_DEFAULT;
+  }
   DrawImmediate(Key, dc, D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST, VERTEX_FORMAT_P3F, s_FullScreen, 3);
+  if (pRatio)
+    m_pDevice->Transition(pRatio->m_pResource, D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
 }
 
 bool CD3D12Renderer::EnsureHdrTargets(int nWidth, int nHeight, bool bLdr)
@@ -323,6 +349,16 @@ bool CD3D12Renderer::EnsureHdrTargets(int nWidth, int nHeight, bool bLdr)
       return false;
     }
   }
+  // The highlight layer's ratio at the scene's size (HdrOutput.cpp); without it the layer gets none.
+  if (bLdr && m_pDevice->HasLayer() && !m_Hdr.pRatio)
+  {
+    m_Hdr.pRatio = m_pUpload->CreateRenderTarget(nWidth, nHeight, D3D12_HIGHLIGHT_FORMAT);
+    if (m_Hdr.pRatio && m_Hdr.pRatio->m_nSRV < 0)
+    {
+      m_pUpload->ReleaseTexture(m_Hdr.pRatio);
+      m_Hdr.pRatio = nullptr;
+    }
+  }
   return true;
 }
 
@@ -337,11 +373,13 @@ void CD3D12Renderer::ReleaseHdrTargets()
     for (CD3D12Texture *pTex : m_Hdr.pExposure)
       m_pUpload->ReleaseTexture(pTex);
     m_pUpload->ReleaseTexture(m_Hdr.pLdr);
+    m_pUpload->ReleaseTexture(m_Hdr.pRatio);
   }
   m_Hdr.Meter.clear();
   m_Hdr.Bloom.clear();
   m_Hdr.pExposure[0] = m_Hdr.pExposure[1] = nullptr;
   m_Hdr.pLdr = nullptr;
+  m_Hdr.pRatio = nullptr;
   m_Hdr.nWidth = m_Hdr.nHeight = 0;
   m_Hdr.bAdapted = false;
 }
@@ -376,7 +414,7 @@ void CD3D12Renderer::DumpHdr()
   // The meter's mean and the adapted EV, read back (this frame is executed so far).
   if (!m_Hdr.bAdapted || m_Hdr.Meter.empty())
     return;
-  uint16 Meter[2] = {};
+  uint16 Meter[4] = {};
   float fEV = 0;
   if (m_pDevice->ReadBackTexture(m_Hdr.Meter.back()->m_pResource, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, (uint8 *)Meter, 1, 1) &&
       m_pDevice->ReadBackTexture(m_Hdr.pExposure[m_Hdr.nExposure]->m_pResource, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, (uint8 *)&fEV, 1, 1))

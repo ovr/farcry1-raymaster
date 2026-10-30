@@ -212,3 +212,17 @@ float4 PSMain(SPostOutput In) : SV_Target
     return g_Textures[g_Draw.nTex0].SampleLevel(g_SamplerPointClamp, In.vPos.xy * g_Draw.vParams0.xy, 0) * g_Draw.vParams1;
   return Effects(In.vPos.xy);
 }
+
+//! The upscaler's picture over the back buffer (POST_BLEND, Upscale.cpp) writing the highlight
+//! layer too (Common.hlsli, HdrOutput.cpp): tex1 the layer's ratio of the light at the scene's
+//! size, bilinear, but 1 in the channels at or below the tone map's knee vParams2.x, where the
+//! resolve's ratio is 1 (the ratio of a highlight does not spill over the dark pixels next to it).
+SHighlightOutput PSHighlight(SPostOutput In)
+{
+  SHighlightOutput Out;
+  Out.vColor = PSMain(In);
+  float3 vRatio = g_Textures[g_Draw.nTex1].SampleLevel(g_SamplerLinearClamp, In.vPos.xy * g_Draw.vParams0.xy, 0).rgb;
+  vRatio = lerp(float3(1, 1, 1), max(vRatio, 1), step(g_Draw.vParams2.x, Out.vColor.rgb));
+  Out.vHighlight = float4(vRatio, HighlightFingerprint(Out.vColor.rgb));
+  return Out;
+}

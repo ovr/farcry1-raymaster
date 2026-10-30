@@ -7,7 +7,9 @@
 //
 //	The frames go as raw B, G, R, A pixels through a pipe into ffmpeg
 //	(which has to be on PATH), and it encodes them as H.264 into an MP4
-//	file; its messages go to <file>.log (removed when empty).
+//	file; its messages go to <file>.log (removed when empty). HDR10 frames
+//	(R10G10B10A2: PQ, Rec. 2020) become HEVC Main 10 with the HDR10
+//	metadata.
 //
 //////////////////////////////////////////////////////////////////////
 
@@ -18,9 +20,11 @@ class CVideo
 public:
   ~CVideo() { Close(); }
 
-  //! Starts ffmpeg for frames of nWidth x nHeight pixels, nFps frames per second.
-  bool Open(const char *szFile, int nWidth, int nHeight, int nFps);
-  //! Writes one frame of the size given to Open: B, G, R, A pixels, rows from the top.
+  //! Starts ffmpeg for frames of nWidth x nHeight pixels, nFps frames per second. fHdrPeak > 0: the
+  //! frames are HDR10 (R10G10B10A2 in 32 bits, red in the low bits), the content's peak fHdrPeak
+  //! and its frame average fHdrFrameAverage in nits (the metadata).
+  bool Open(const char *szFile, int nWidth, int nHeight, int nFps, float fHdrPeak = 0, float fHdrFrameAverage = 0);
+  //! Writes one frame of the size given to Open: B, G, R, A pixels (or HDR10's), rows from the top.
   bool Write(const unsigned char *pPixels);
   //! Ends the file: waits until ffmpeg has written it (two minutes at most). Its exit code, -1 if it
   //! did not end; 0 when nothing was open.

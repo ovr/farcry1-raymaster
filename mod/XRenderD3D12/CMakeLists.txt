@@ -39,6 +39,7 @@ set(XRENDERD3D12_SOURCES
     PostFx.cpp
     Hdr.cpp
     ColorGrading.cpp
+    HdrOutput.cpp
     Flares.cpp
     D3D12Device.h
     D3D12Device.cpp

@@ -184,6 +184,17 @@ void CD3D12Renderer::RegisterVariables()
   iConsole->Register("d3d12_HDRGlow", &CV_d3d12_HDRGlow, 3.0f, VF_DUMPTODISK,
                      "With r_HDRRendering, the light of what glows (in their cores: fire and the other additive particles, muzzle flashes and the other additive "
                      "materials, the coronas and flares of the lights, the glow maps of lamps and screens) times this (1: the game's)");
+  // The HDR output to the display (HdrOutput.cpp).
+  iConsole->Register("d3d12_HDROutput", &CV_d3d12_HDROutput, 0, VF_DUMPTODISK,
+                     "With r_HDRRendering on a display in HDR mode (Windows: Use HDR), the output: 0 SDR, 1 HDR10, 2 scRGB. The scene's highlights "
+                     "go up to the display's peak, the rest of the picture, the HUD and the menu stay at paper white as SDR content");
+  iConsole->Register("d3d12_HDRPaperWhite", &CV_d3d12_HDRPaperWhite, 0.0f, VF_DUMPTODISK,
+                     "With d3d12_HDROutput, the light of the frame's white in nits (0: Windows' SDR content brightness of the display)");
+  iConsole->Register("d3d12_HDRPeak", &CV_d3d12_HDRPeak, 0.0f, VF_DUMPTODISK,
+                     "With d3d12_HDROutput, the most light in nits, where the highlights end (0: the display's peak)");
+  iConsole->Register("d3d12_HDROutputDebug", &CV_d3d12_HDROutputDebug, 0, 0,
+                     "With d3d12_HDROutput: 1 the highlights (yellow to red at the peak; blue: drawn over the scene), 2 patches at paper white, "
+                     "twice and four times that and at the peak");
   // The colour grading of the HDR pipeline's resolve (ColorGrading.cpp).
   iConsole->Register("d3d12_Saturation", &CV_d3d12_Saturation, 1.0f, VF_DUMPTODISK, "With r_HDRRendering, the saturation, 0 (grey) to 4 (1: none)");
   iConsole->Register("d3d12_Contrast", &CV_d3d12_Contrast, 1.0f, VF_DUMPTODISK, "With r_HDRRendering, the contrast around middle grey, 0.25 to 4 (1: none)");
@@ -531,6 +542,7 @@ void CD3D12Renderer::Release()
   ReleaseFlares();
   ReleaseUpscaler();
   ReleaseHdr();
+  ReleaseHdrOutput();
   m_pDetailTexture = nullptr;   // released with every texture
   m_pDefaultCube = nullptr;
   m_pBeachTexture = m_pBeachWetTexture = m_pBeachBumpTexture = nullptr;
@@ -645,7 +657,10 @@ void CD3D12Renderer::Update (void)
   EnsureFrame();
   EndMainScene();               // a main view whose EF_EndEf3D did not end (none expected)
   DrawQueuedBoxes();
+  DumpHdrOutput();
   // Shown only when swapping is on: the hidden frames of a level load are drawn but never seen.
+  if (m_bSwapBuffers)
+    DrawHdrOutput();
   m_pDevice->EndFrame(m_bSwapBuffers, m_bVSync || CV_r_vsync != 0);
   ReportGpuTimes();
   if (m_pFrameDump)
@@ -657,6 +672,7 @@ void CD3D12Renderer::Update (void)
   m_nFrameID++;
   m_nFrames++;
   CheckResolutionChange();
+  UpdateHdrOutput();
 }
 
 void CD3D12Renderer::GpuSection(const char *szSection)
