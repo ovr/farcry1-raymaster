@@ -325,8 +325,11 @@ it as well: it holds local, machine-specific instructions and is not committed (
   light; also in the main menu), DemoParticles (fire, smoke and sparks), DemoScreenFx (the screen
   effects one after the other), DemoDecals (bullet holes, blood and scorch marks), DemoFlares
   (the sun's flare passing behind what stands in front of it, and the coronas of two lamps), DemoSkyFog
-  (fog and sky changed), DemoQuality (the quality presets of the video options) and DemoReplay
-  (the game's time demos played back).
+  (fog and sky changed), DemoQuality (the quality presets of the video options), DemoReplay
+  (the game's time demos played back) and DemoSurfaces (objects of different materials, glass
+  among them, on a beach and in its shallow water under a moving light, handed to the engine's
+  scene through `I3DEngine::SetRenderCallback`: the engine calls it for the main view only, not
+  for the water's reflection).
 - The keys of each scene file are in the head comment of the demo's source (a line starting with
   `#` or `;` is a comment; `exec` keys take console commands separated by `;` or `|`); `--scene`
   picks another scene file, e.g. a second one for DemoLevel.

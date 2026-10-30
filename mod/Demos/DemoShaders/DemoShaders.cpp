@@ -52,42 +52,12 @@
 //
 //////////////////////////////////////////////////////////////////////
 
-#include "DemoHost.h"
+#include "DemoMaterials.h"
 #include <IFont.h>
 
 static const char s_szDefaultShaders[] =
   "TemplLightDiffuse, TemplBumpDiffuse, TemplBumpSpec_HP, TemplReflCM, TemplGlassCM 0.5, TemplDecalAdd";
 static const int nMaxCells = 9;
-//! Sub materials of each material, for the chunk ids 1 to nSubMaterials.
-static const int nSubMaterials = 16;
-
-//! The items of a list separated by cDelim, without the spaces around them; empty ones are left out.
-static std::vector<std::string> SplitList(const std::string &List, char cDelim)
-{
-  std::vector<std::string> Items;
-  for (size_t nBegin = 0; nBegin <= List.size();)
-  {
-    size_t nEnd = List.find(cDelim, nBegin);
-    if (nEnd == std::string::npos)
-      nEnd = List.size();
-    std::string Item = List.substr(nBegin, nEnd - nBegin);
-    Item.erase(0, Item.find_first_not_of(" \t"));
-    Item.erase(Item.find_last_not_of(" \t") + 1);
-    if (!Item.empty())
-      Items.push_back(Item);
-    nBegin = nEnd + 1;
-  }
-  return Items;
-}
-
-//! Whether szText is part of Name, in any case.
-static bool HasText(const std::string &Name, const char *szText)
-{
-  std::string Lower = Name;
-  for (size_t i = 0; i < Lower.size(); i++)
-    Lower[i] = (char)tolower((unsigned char)Lower[i]);
-  return Lower.find(szText) != std::string::npos;
-}
 
 class CDemoShaders : public CDemo
 {
@@ -104,28 +74,15 @@ public:
     if (!m_pObj)
       return false;
 
-    m_Texture = Scene.Get("texture");
-    if (m_Texture.empty())
-    {
-      std::vector<std::string> Names = Host.FindFiles("textures/", "*.dds");
-      for (size_t i = 0; i < Names.size() && m_Texture.empty(); i++)
-      {
-        if (!HasText(Names[i], "bump") && !HasText(Names[i], "_ddn"))
-          m_Texture = Names[i];
-      }
-    }
-    m_Bump = Scene.Has("bump") ? Scene.Get("bump") : Host.FindFirstFileDeep("textures/", "*_ddn.dds");
-    m_CubeMap = Scene.Has("cubemap") ? Scene.Get("cubemap") : Host.FindFirstFileDeep("textures/", "*_posx.dds");
-    if (Scene.Has("cubeslots"))
-      m_CubeSlots = Scene.GetFloats("cubeslots");
-    Host.Log("DemoShaders: texture '%s', bump '%s', cube map '%s'", m_Texture.c_str(), m_Bump.c_str(), m_CubeMap.c_str());
-    m_Gloss = Scene.Get("gloss");
-    m_Ambient = ColorOf(Scene, "ambient", m_Ambient);
-    m_LightColor = ColorOf(Scene, "light", m_LightColor);
+    m_Textures.FromScene(Host);
+    Host.Log("DemoShaders: texture '%s', bump '%s', cube map '%s'", m_Textures.Texture.c_str(), m_Textures.Bump.c_str(),
+      m_Textures.CubeMap.c_str());
+    m_Ambient = SceneColor(Scene, "ambient", m_Ambient);
+    m_LightColor = SceneColor(Scene, "light", m_LightColor);
     m_LightPos = Scene.GetFloats("lightpos");
-    m_LightSpecColor = ColorOf(Scene, "lightspec", m_LightSpecColor);
+    m_LightSpecColor = SceneColor(Scene, "lightspec", m_LightSpecColor);
     m_bSun = Scene.GetFloat("sun", 0) != 0;
-    m_LightMat.Front.m_Specular = ColorOf(Scene, "specular", CFColor(0.8f, 0.8f, 0.8f, 1));
+    m_LightMat.Front.m_Specular = SceneColor(Scene, "specular", CFColor(0.8f, 0.8f, 0.8f, 1));
     m_LightMat.Front.m_SpecShininess = Scene.GetFloat("shininess", 32);
 
     ICryFont *pCryFont = Host.GetSystem()->GetICryFont();
@@ -204,7 +161,7 @@ public:
       SRendParams Params(Base);
       Params.pMatrix = &Mat;
       Params.dwFObjFlags = FOB_TRANS_MASK;
-      Params.pMaterial = m_Cells[i].pMat;
+      Params.pMaterial = m_Cells[i].Mat.pMat;
       Params.fDistance = GetLength(vPos - vEye);
       m_pObj->Render(Params, Vec3(0, 0, 0), 0);
     }
@@ -239,15 +196,7 @@ public:
   virtual void Shutdown(CDemoHost &Host)
   {
     for (size_t i = 0; i < m_Cells.size(); i++)
-    {
-      if (m_Cells[i].pMat)
-      {
-        m_Cells[i].pMat->RemoveAllSubMtls();
-        Host.Get3DEngine()->DeleteMatInfo(m_Cells[i].pMat);
-      }
-      if (m_Cells[i].pSubMat)
-        Host.Get3DEngine()->DeleteMatInfo(m_Cells[i].pSubMat);
-    }
+      m_Cells[i].Mat.Release(Host);
     m_Cells.clear();
     if (m_pObj)
       Host.Get3DEngine()->ReleaseObject(m_pObj);
@@ -259,59 +208,26 @@ private:
   {
     std::string Template;
     float fOpacity = 1.0f;
-    IMatInfo *pMat = NULL;
-    IMatInfo *pSubMat = NULL;
+    SDemoMaterial Mat;
   };
 
-  //! The material of cell nCell: a shader item of the cell's template with the demo's textures, as
-  //! CIndexedMesh__LoadMaterial makes it (MakMatInfoFromMAT_ENTITY.h).
+  //! The material of cell nCell (DemoMaterials.h), with a name of its own: the renderer names the
+  //! shader after it.
   void MakeMaterial(CDemoHost &Host, SCell &Cell, int nCell)
   {
-    SInputShaderResources Res;
-    Res.m_LMaterial = &m_LightMat;
-    Res.m_Opacity = Cell.fOpacity;
-    Res.m_Textures[EFTT_DIFFUSE].m_Name = m_Texture.c_str();
-    Res.m_Textures[EFTT_BUMP].m_Name = m_Bump.c_str();
-    Res.m_Textures[EFTT_BUMP].m_TU.m_eTexType = (byte)eTT_Bumpmap;
-    Res.m_Textures[EFTT_GLOSS].m_Name = m_Gloss.c_str();
-    for (size_t i = 0; i < m_CubeSlots.size(); i++)
-    {
-      if (m_CubeSlots[i] == EFTT_CUBEMAP)
-        Res.m_Textures[EFTT_CUBEMAP].m_Name = m_CubeMap.c_str();
-      else if (m_CubeSlots[i] == EFTT_REFLECTION)
-      {
-        Res.m_Textures[EFTT_REFLECTION].m_Name = m_CubeMap.c_str();
-        Res.m_Textures[EFTT_REFLECTION].m_TU.m_eTexType = (byte)eTT_Cubemap;
-      }
-    }
-
-    // A material name of its own for each cell: the renderer names the shader after it.
     char szName[32];
     _snprintf(szName, sizeof(szName) - 1, "DemoShaders%d", nCell);
     szName[sizeof(szName) - 1] = 0;
-    SShaderItem Item = Host.GetRenderer()->EF_LoadShaderItem(szName, eSH_World, true, Cell.Template.c_str(), 0, &Res);
+    SShaderItem Item = Cell.Mat.Make(Host, szName, Cell.Template.c_str(), Cell.fOpacity, m_Textures, m_LightMat);
     IShader *pTemplate = Item.m_pShader ? Item.m_pShader->GetTemplate(-1) : NULL;
     Host.Log("DemoShaders: cell %d '%s' opacity %g: shader '%s', template '%s', sort %d, flags2 0x%x", nCell,
       Cell.Template.c_str(), Cell.fOpacity, Item.m_pShader ? Item.m_pShader->GetName() : "-",
       pTemplate ? pTemplate->GetName() : "-", pTemplate ? (int)pTemplate->GetSort() : -1, pTemplate ? pTemplate->GetFlags2() : 0);
-    if (!Item.m_pShader)
-      return;
-
-    I3DEngine *p3DEngine = Host.Get3DEngine();
-    Cell.pMat = p3DEngine->CreateMatInfo();
-    Cell.pSubMat = p3DEngine->CreateMatInfo();
-    if (!Cell.pMat || !Cell.pSubMat)
-      return;
-    Cell.pMat->SetShaderItem(Item);
-    Cell.pSubMat->SetShaderItem(Item);
-    for (int i = 0; i < nSubMaterials; i++)
-      Cell.pMat->AddSubMtl(Cell.pSubMat);
   }
 
   IStatObj *m_pObj = NULL;
   IFFont *m_pFont = NULL;
-  std::string m_Texture, m_Bump, m_CubeMap, m_Gloss;
-  std::vector<float> m_CubeSlots = { (float)EFTT_CUBEMAP, (float)EFTT_REFLECTION };
+  SDemoTextures m_Textures;
   CFColor m_Ambient = CFColor(0.25f, 0.25f, 0.25f, 1);
   CFColor m_LightColor = CFColor(0.9f, 0.9f, 0.9f, 1);
   CFColor m_LightSpecColor = CFColor(0, 0, 0, 1);
@@ -320,13 +236,6 @@ private:
   //! The lighting of the materials (white, specular 0.8 and shininess 32 by default).
   SLightMaterial m_LightMat;
   std::vector<SCell> m_Cells;
-
-  //! The colour "r g b" of szKey, or Default.
-  static CFColor ColorOf(const CSceneFile &Scene, const char *szKey, const CFColor &Default)
-  {
-    const std::vector<float> v = Scene.GetFloats(szKey);
-    return v.size() >= 3 ? CFColor(v[0], v[1], v[2], 1) : Default;
-  }
 };
 
 DEMO_PLUGIN(CDemoShaders)
