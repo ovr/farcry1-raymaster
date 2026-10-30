@@ -563,6 +563,9 @@ private:
     if (!m_Host.m_Scene.Load(m_Args.Scene.c_str()))
       HostLog("no scene file %s: the demo uses its defaults", m_Args.Scene.c_str());
     MakeDirs(m_Args.Out.c_str());
+    for (const auto &Exec : m_Args.ExecAt)
+      if (Exec.first == 0)
+        m_Host.ExecList(Exec.second);
     if (!m_Demo.Init(m_Host))
     {
       HostLog("%s: Init failed", m_Demo.GetName());

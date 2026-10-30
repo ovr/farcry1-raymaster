@@ -45,7 +45,8 @@
 //	                        r_HDRRendering; without it the frames are SDR
 //	                        at paper white
 //	  --exec-at <frame> <commands>  console commands at the start of that frame
-//	                        (separated by ';' or '|', e.g. "d3d12_DumpFrame 1"); may repeat
+//	                        (separated by ';' or '|', e.g. "d3d12_DumpFrame 1"); may repeat.
+//	                        Frame 0: when the demo starts, before its Init (a level load)
 //	  --trace               keep the tracing of XRenderD3D9Traced on
 //	  --hold                keep the game running after the last frame
 //

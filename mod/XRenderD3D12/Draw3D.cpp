@@ -164,7 +164,9 @@ void GetLightSphere(const Matrix44 &World, CLeafBuffer *pLB, Vec3 &vCenter, floa
 //! 1 / (a0 + a1 d) up to its range. Characters get (0.01, 5.07756 / R) up to 50.416 R. Static
 //! objects get a line through the falloff f(x) = 2 (1 - 3 v^2 + 2 v^3), v = min(x / (0.9 R), 1),
 //! at the nearest and the farthest point of the object's sphere (GetLightSphere), up to where it
-//! reaches 1/256. Bump mapped draws light per pixel, falling off linearly to the radius.
+//! reaches 1/256. Bump mapped draws light per pixel, falling off linearly to the radius; the others
+//! per pixel with d3d12_PixelLighting take these values (DF2_VERTEX_LIGHTS), static objects the
+//! falloff f itself (DF2_SMOOTH_FALLOFF).
 void SetPointLight(SDrawConstants &dc, uint32 n, const CDLight *pLight, const CCObject *pObj, const Vec3 &vCenter, float r)
 {
   const float R = std::max(pLight->m_fRadius, 0.01f);
@@ -567,6 +569,16 @@ void CD3D12Renderer::DrawLeafItem(const SRenderItem &it)
     }
     else if (HasColor(nFormat))
       dc.nFlags |= DF_VCOLOR;
+    // d3d12_PixelLighting: an object with a light map gets the dynamic lights of its mask that the
+    // light map does not have (no sun, no DLF_LM light; not one lit in passes, whose light passes
+    // bring them), per pixel as the vertex lighting takes them and in place of the ambient under the
+    // light map, as the original adds its vertex lighting there (DF2_LIGHTMAP_LIGHTS).
+    if (CV_d3d12_PixelLighting && TexCoord1 && !(pObj->m_ObjFlags & FOB_ZPASS) && Props.eEnvMap != EEnvMap::Auto && HasNormal(nFormat))
+    {
+      const uint32 nFlags2 = dc.nFlags2;
+      SetObjectLights(dc, pObj, World, pLB);
+      dc.nFlags2 = nFlags2 | (dc.nLights ? DF2_LIGHTMAP_LIGHTS | DF2_VERTEX_LIGHTS | DF2_SMOOTH_FALLOFF : 0);
+    }
     // Bump mapping on (r_Quality_BumpMapping): the materials of the bump, model and light diffuse
     // templates are lit per pixel, with the material's normal map over the leaf buffer's tangent
     // frames when it has one (also for the dot3 light maps). The normal maps' green runs along
@@ -592,6 +604,14 @@ void CD3D12Renderer::DrawLeafItem(const SRenderItem &it)
         dc.nTex3 = pBump->GetSRV();
         dc.vParams1[1] = 1;
       }
+    }
+    // d3d12_PixelLighting: the other lit materials per pixel too, with the lights as their vertex
+    // lighting has them (static objects falling off by the curve their attenuation is fitted to);
+    // the auto cube map keeps the fixed function's lighting (DF2_MATERIAL_LIGHT, below).
+    if (CV_d3d12_PixelLighting && (dc.nFlags & DF_LIGHTING) && !(dc.nFlags & DF_PIXEL_LIGHTING) && Props.eEnvMap != EEnvMap::Auto)
+    {
+      dc.nFlags |= DF_PIXEL_LIGHTING;
+      dc.nFlags2 |= DF2_VERTEX_LIGHTS | (pObj->m_pCharInstance ? 0 : DF2_SMOOTH_FALLOFF);
     }
     // The sun hidden by the shadow maps of the object's casters.
     if (dc.nFlags & (DF_LIGHTING | DF_TEX1_LIGHTMAP))
@@ -959,7 +979,8 @@ void CD3D12Renderer::DrawLeafItem(const SRenderItem &it)
   // light alone (no ambient, sun or light map) times twice the cube at the point's lookup vector
   // (the light's m_TextureMatrix), alpha times the cube's, fogged towards black. The light: per
   // pixel as the object's other lights where bump mapping lights it per pixel (with its normal
-  // map and specular), else per vertex as a point light of its radius, clamped to 1. The terrain
+  // map and specular), else per vertex as a point light of its radius, clamped to 1 (per pixel
+  // with d3d12_PixelLighting, the light as per vertex). The terrain
   // under the light (eDC_TerrainLight): 0.75 * texture + 0.25 lit per pixel, falling off linearly to
   // the radius, added.
   const bool bTerrain = eDC == eDC_TerrainLight;
@@ -968,8 +989,11 @@ void CD3D12Renderer::DrawLeafItem(const SRenderItem &it)
   const std::span<CDLight *const> Lights = m_pScene->GetLights();
   const bool bBlended = (Key.nState & GS_BLEND_MASK) != 0 && !bTerrain;
   const bool bPixel = bTerrain || (CV_r_Quality_BumpMapping > 0 && Props.bPixelLighting && eLighting != ELighting::None);
+  // d3d12_PixelLighting: the others per pixel too, the light as per vertex.
+  const bool bVertexLights = !bPixel && CV_d3d12_PixelLighting;
   const uint32 nKeep = bTerrain ? DF_TEXGEN_WORLD : DF_TEXMATRIX | DF_ALPHATEST | DF_ALPHATEST_LESS | (bPixel ? DF_BUMP | DF_SPECULAR : 0);
-  const uint32 nFlags = (dc.nFlags & nKeep) | DF_LIGHTING | (bPixel ? DF_PIXEL_LIGHTING : 0) | (m_bFog ? DF_FOG : 0);
+  const uint32 nFlags = (dc.nFlags & nKeep) | DF_LIGHTING | (bPixel || bVertexLights ? DF_PIXEL_LIGHTING : 0) | (m_bFog ? DF_FOG : 0);
+  const uint32 nFlags2 = bVertexLights ? DF2_VERTEX_LIGHTS | (pObj->m_pCharInstance ? 0 : DF2_SMOOTH_FALLOFF) : 0;
   Vec3 vCenter;
   float r;
   GetLightSphere(World, pLB, vCenter, r);
@@ -984,7 +1008,7 @@ void CD3D12Renderer::DrawLeafItem(const SRenderItem &it)
     if (!pCube || !pCube->IsCube() || !pCube->IsTextureLoaded())
       continue;
     dc.nFlags = nFlags;
-    dc.nFlags2 = DF2_NO_SUN | DF2_PROJECTOR | DF2_FOG_BLACK | (bTerrain ? DF2_TERRAIN_LIGHT : 0);
+    dc.nFlags2 = DF2_NO_SUN | DF2_PROJECTOR | DF2_FOG_BLACK | (bTerrain ? DF2_TERRAIN_LIGHT : 0) | nFlags2;
     if (pDiffuse)
     {
       dc.nFlags |= DF_TEX0;
@@ -1198,6 +1222,14 @@ void CD3D12Renderer::DumpDraw(const SDrawConstants &dc, const SPipelineKey &Key,
     Flags += (Flags.empty() ? "" : "|") + std::string("PROJECTOR");
   if (dc.nFlags2 & DF2_TERRAIN_LIGHT)
     Flags += (Flags.empty() ? "" : "|") + std::string("TERRAIN_LIGHT");
+  if (dc.nFlags2 & DF2_NO_SUN)
+    Flags += (Flags.empty() ? "" : "|") + std::string("NO_SUN");
+  if (dc.nFlags2 & DF2_VERTEX_LIGHTS)
+    Flags += (Flags.empty() ? "" : "|") + std::string("VERTEX_LIGHTS");
+  if (dc.nFlags2 & DF2_SMOOTH_FALLOFF)
+    Flags += (Flags.empty() ? "" : "|") + std::string("SMOOTH_FALLOFF");
+  if (dc.nFlags2 & DF2_LIGHTMAP_LIGHTS)
+    Flags += (Flags.empty() ? "" : "|") + std::string("LIGHTMAP_LIGHTS");
   fprintf(f, "    draw: fmt %d state 0x%x cull %d bias %d flags %s tex0 '%s' alpharef %.3f col (%.2f %.2f %.2f %.2f) amb (%.2f %.2f %.2f) x%g lights %u",
           Key.nVertexFormat, Key.nState, Key.nCull, Key.bDepthBias, Flags.c_str(), (dc.nFlags & DF_TEX0) && pTex ? pTex->m_Name.c_str() : "",
           dc.fAlphaRef, dc.vColor[0], dc.vColor[1], dc.vColor[2], dc.vColor[3], dc.vAmbient[0], dc.vAmbient[1], dc.vAmbient[2], dc.vAmbient[3], dc.nLights);

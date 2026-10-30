@@ -75,7 +75,9 @@
 //	      (DrawLighting: the same sum, but the lights' colours clamped to 1 and
 //	      point lights falling off as saturate(1 - d / radius); on the terrain
 //	      (DF2_TERRAIN_LIGHT) but for a projector as saturate(1 - (d /
-//	      radius)^2)), with the
+//	      radius)^2); DF2_VERTEX_LIGHTS: the lights as per vertex,
+//	      DF2_SMOOTH_FALLOFF falling off as 2 (1 - smoothstep(0, 0.9, d /
+//	      radius))), with the
 //	      vertex normal or, with DF_BUMP (bump mapping), N' = the normal map
 //	      (tex3 at uv0, its y times vParams1.y) in the vertex's tangent frame;
 //	      the dot3 light map takes N'.D for D.z
@@ -108,6 +110,10 @@
 //	  lights a material (MaterialLighting): saturate(ambient + vColor * the
 //	  lights) * texture + the highlights of vSpecular.
 //	  DF2_NO_SUN leaves the sun out of DF_LIGHTING (a light pass of its own).
+//	  DF2_LIGHTMAP_LIGHTS (with DF_TEX1_LIGHTMAP, without DF_LIGHTING): the
+//	  draw's lights without the sun (DrawLighting per pixel with
+//	  DF2_VERTEX_LIGHTS, the normal as for DF_PIXEL_LIGHTING) take vAmbient's
+//	  place under the light map: rgb *= 4 * v * tex1 + those lights.
 //	  DF2_SCOPE_LENS (the glass of a scope) replaces the pixel shader with
 //	  ScopeLens.
 //	The upscaler's jitter (vJitter) moves every clip position. Compiled with
@@ -146,7 +152,9 @@ struct SVertexOutput
 //! attenuation, s = vAmbient.w (2: a texture modulated by 2, 1: modulated), with the sun;
 //! vNoSunLight the same without it. Per vertex a point light attenuates by 1 / (a0 + a1 d) up to
 //! its range; per pixel (bPerPixel, DF_BUMP) by saturate(1 - d / radius), and each light's colour
-//! is clamped to 1.
+//! is clamped to 1; per pixel with DF2_VERTEX_LIGHTS as per vertex, with DF2_SMOOTH_FALLOFF by
+//! 2 (1 - smoothstep(0, 0.9, d / radius)), the falloff the per vertex attenuation of a static
+//! object is fitted to.
 //! The specular power of a light: saturate(R.V)^32, R = L reflected about N, 0 where N.L <= 0.
 float Specular(float3 vN, float3 vToLight, float3 vToEye)
 {
@@ -164,6 +172,8 @@ float3 DrawLighting(float3 vPos, float3 vN, bool bPerPixel, out float3 vNoSunLig
   float3 vNoSun = g_Draw.vAmbient.rgb / fScale;
   float3 vOthers = 0;
   bool bSpecular = bPerPixel && HasFlag(DF_SPECULAR);
+  // The per pixel lights of the bump templates; DF2_VERTEX_LIGHTS: those of the vertex lighting.
+  bool bClamp = bPerPixel && !HasFlag2(DF2_VERTEX_LIGHTS);
   float3 vToEye = SafeNormalize(g_Frame.vCameraPos.xyz - vPos);
   vSunSpec = bSpecular && bSun ? saturate(g_Frame.vSunSpec.rgb) * Specular(vN, g_Frame.vSunDir.xyz, vToEye) : 0;
   vOtherSpec = 0;
@@ -177,17 +187,19 @@ float3 DrawLighting(float3 vPos, float3 vN, bool bPerPixel, out float3 vNoSunLig
     {
       vToLight = vLightPos.xyz - vPos;
       float fDist = length(vToLight);
-      if (bPerPixel)
+      if (bClamp)
       {
         float x = fDist * vAtten.w;
         fAtten = saturate(1 - (HasFlag2(DF2_TERRAIN_LIGHT) && !HasFlag2(DF2_PROJECTOR) ? x * x : x));
       }
+      else if (bPerPixel && HasFlag2(DF2_SMOOTH_FALLOFF))
+        fAtten = 2 * (1 - smoothstep(0, 0.9, fDist * vAtten.w));
       else
         fAtten = fDist < vAtten.z ? 1 / (vAtten.x + vAtten.y * fDist) : 0;
       vToLight /= max(fDist, 1e-4);
     }
     float3 vColor = g_Draw.vLightColor[i].rgb;
-    if (bPerPixel)
+    if (bClamp)
       vColor = saturate(vColor);
     float3 vThis = vColor * saturate(dot(vN, vToLight)) * fAtten;
     if (bSpecular)
@@ -468,7 +480,14 @@ float4 ShadePixel(SVertexOutput In)
         float4 vDir = SampleTexture(g_Draw.nTex2, nSampler1, In.vTex1);
         vLight *= saturate(dot(vMap, vDir.xyz * 2 - 1)) * vDir.a;
       }
-      vColor.rgb *= 4 * fSun * vLight + g_Draw.vAmbient.rgb;
+      if (HasFlag2(DF2_LIGHTMAP_LIGHTS))
+      {
+        float3 vNoSunLight, vSunSpec, vOtherSpec;
+        DrawLighting(In.vWorldPos, HasFlag(DF_BUMP) ? vBumpN : SafeNormalize(In.vNormal), true, vNoSunLight, vSunSpec, vOtherSpec);
+        vColor.rgb *= 4 * fSun * vLight + vNoSunLight;
+      }
+      else
+        vColor.rgb *= 4 * fSun * vLight + g_Draw.vAmbient.rgb;
     }
     else if (HasFlag(DF_TEX1_DETAIL))
       vColor.rgb = 2 * vColor.rgb + vTex1.rgb - 0.5;
