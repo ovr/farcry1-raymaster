@@ -532,8 +532,13 @@ it as well: it holds local, machine-specific instructions and is not committed (
   reflection hits, 6 its colour, 7 the planar reflection.
 - With `r_WaterReflections 1` the ocean reflects the scene seen by the camera mirrored in the water
   plane, which the 3D engine renders with `I3DEngine::DrawLowDetail` before the main view;
-  `d3d12_WaterReflectionFlags` are the `EDrawLowDetailFlags` it gets (default 4160: the sky and the
-  terrain), `d3d12_WaterReflectionScale` its size as a fraction of the screen (0.5), and
+  `d3d12_WaterReflectionFlags` are the `EDrawLowDetailFlags` it gets (default 4184: the sky, the
+  terrain, the static objects, among them the pier and the huts, and the far sprites; 4160, the
+  sky and the terrain, is what the original renderer passes; not saved in `system.cfg`, which kept
+  4160 before). The entities (+ 2048) are left out: drawn for the mirrored camera, they change
+  what the main view draws after it (the fish of Training swim with other poses; with the water at
+  `d3d12_WaterDebug 1` the frames otherwise stay those of 4160). `d3d12_WaterReflectionScale` is
+  its size as a fraction of the screen (0.5), and
   `r_WaterUpdateFactor`, `r_WaterUpdateDistance`, `r_WaterUpdateDeltaAngle` how often it is redrawn
   (0, 0, 0: every frame).
 - The far vegetation sprites are made when a level is loaded (before its first frame): each object

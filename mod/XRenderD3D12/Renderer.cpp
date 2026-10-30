@@ -145,8 +145,12 @@ void CD3D12Renderer::RegisterVariables()
                      "water, blended, ...) and the time between frames to the console and XRenderD3D12_gpu.txt; 0 off");
   iConsole->Register("d3d12_WaterReflectionScale", &CV_d3d12_WaterReflectionScale, 0.5f, VF_DUMPTODISK,
                      "Size of the water reflection (r_WaterReflections), a fraction of the screen's");
-  iConsole->Register("d3d12_WaterReflectionFlags", &CV_d3d12_WaterReflectionFlags, DLD_TERRAIN | DLD_TERRAIN_FULLRES, VF_DUMPTODISK,
-                     "What the water reflection shows: DLD_* flags of I3DEngine::DrawLowDetail (4160: the sky and the terrain)");
+  // Not saved: system.cfg kept the old default (4160), which would hide the new one.
+  iConsole->Register("d3d12_WaterReflectionFlags", &CV_d3d12_WaterReflectionFlags,
+                     DLD_TERRAIN | DLD_TERRAIN_FULLRES | DLD_STATIC_OBJECTS | DLD_FAR_SPRITES, 0,
+                     "What the water reflection shows: DLD_* flags of I3DEngine::DrawLowDetail (4184: the sky, the terrain, the static objects "
+                     "and the far sprites; 4160: the sky and the terrain, as the original renderer; + 2048 the entities, which changes "
+                     "the animation of what the main view then draws)");
   iConsole->Register("d3d12_SpriteRes", &CV_d3d12_SpriteRes, 128, VF_DUMPTODISK,
                      "Size of the far vegetation sprites' textures, 32 to 256 (made when a level is loaded)");
   iConsole->Register("d3d12_Shadows", &CV_d3d12_Shadows, 1, VF_DUMPTODISK, "Shadow maps of the static objects (e_shadow_maps); 0 off");
