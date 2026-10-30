@@ -509,6 +509,19 @@ int CD3D12Pipeline::GetVertexSize(int nVertexFormat)
   return s_VertexSizes[nVertexFormat];
 }
 
+bool CD3D12Pipeline::GetVertexAttributes(int nVertexFormat, int &nNormal, int &nColor0, int &nTex0, int &nTex1)
+{
+  nNormal = nColor0 = nTex0 = nTex1 = -1;
+  if (nVertexFormat <= 0 || nVertexFormat >= VERTEX_FORMAT_NUMS || s_Layouts[nVertexFormat].nPos < 0)
+    return false;
+  const SFormatLayout &Layout = s_Layouts[nVertexFormat];
+  nNormal = Layout.nNormal;
+  nColor0 = Layout.nColor0;
+  nTex0 = Layout.nTex0;
+  nTex1 = Layout.nTex1;
+  return true;
+}
+
 ID3D12PipelineState *CD3D12Pipeline::GetPSO(const SPipelineKey &Key)
 {
   if (!m_pRootSignature)

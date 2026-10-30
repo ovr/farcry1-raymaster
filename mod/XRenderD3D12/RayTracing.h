@@ -27,8 +27,14 @@
 //	  per draw, the instance's transform its mWorld, its mask and
 //	  InstanceContributionToHitGroupIndex its kind (Shaders/RayConstants.h),
 //	  culling off.
-//	- Binding: root SRV ROOT_RAY_SCENE (D3D12Pipeline.h), for the programs
-//	  with rays, from GetTLAS in the same frame.
+//	- Instances: an SRayInstance per instance of the TLAS (its InstanceID),
+//	  in per frame memory: the raw views of its vertices, indices and second
+//	  stream (CD3D12Upload::GetRawSRV) and the part of its draw's constants
+//	  the hits are shaded with (Shaders/RayShade.hlsli). A draw whose
+//	  buffers have no view is shaded grey.
+//	- Binding: root SRVs ROOT_RAY_SCENE and ROOT_RAY_INSTANCES
+//	  (D3D12Pipeline.h), for the programs with rays, from GetTLAS and
+//	  GetInstances in the same frame.
 //
 //////////////////////////////////////////////////////////////////////
 
@@ -40,6 +46,7 @@
 #include <unordered_map>
 #include <vector>
 #include "D3D12Device.h"
+#include "Shaders/RayConstants.h"
 
 struct SPipelineKey;
 struct SDrawConstants;
@@ -65,12 +72,14 @@ public:
   bool IsCapturing() const { return m_bCapturing; }
   //! A draw of DrawGeometry while capturing; it picks those for the scene.
   void CaptureDraw(const SPipelineKey &Key, const SDrawConstants &dc, D3D_PRIMITIVE_TOPOLOGY eTopology, const D3D12_VERTEX_BUFFER_VIEW &VB,
-    const D3D12_INDEX_BUFFER_VIEW *pIB, uint32 nCount, uint32 nFirst, int nBaseVertex);
+    const D3D12_INDEX_BUFFER_VIEW *pIB, uint32 nCount, uint32 nFirst, int nBaseVertex, const D3D12_VERTEX_BUFFER_VIEW *pTexCoord1);
   //! Records the builds of the missing BLAS and of the TLAS of the captured draws into the frame's
   //! command list; pDump: a line about them (d3d12_DumpFrame).
   void Build(FILE *pDump);
   //! The TLAS built in this frame, 0 when there is none.
   D3D12_GPU_VIRTUAL_ADDRESS GetTLAS() const;
+  //! Its instances (SRayInstance, by InstanceID), with GetTLAS.
+  D3D12_GPU_VIRTUAL_ADDRESS GetInstances() const { return m_nInstances; }
   //! The camera of the capture (Build's frame).
   const Matrix44 &GetViewProj() const { return m_ViewProj; }
   const Vec3 &GetCamera() const { return m_vCamera; }
@@ -118,6 +127,7 @@ private:
     uint8 nKind;                    //!< XR_RAY_*
     SBlasKey Key;                   //!< XR_RAY_STATIC
     D3D12_GPU_VIRTUAL_ADDRESS nBlas;
+    SRayInstance Inst;
   };
   //! A buffer of a frame slot that grows (RAYTRACING_ACCELERATION_STRUCTURE or UNORDERED_ACCESS).
   struct SSlotBuffer
@@ -130,6 +140,9 @@ private:
     SSlotBuffer Scratch, Blas, Tlas;
   };
 
+  //! The instance's data of a draw (its geometry Tri, its first vertex in the draw's buffers).
+  static void FillInstance(SRayInstance &Inst, const SPipelineKey &Key, const SDrawConstants &dc, const D3D12_RAYTRACING_GEOMETRY_TRIANGLES_DESC &Tri,
+    const D3D12_VERTEX_BUFFER_VIEW &TexCoord1, uint32 nFirstVertex, uint8 nKind);
   //! A buffer of nSize bytes with unordered access in the default heap; NULL when refused (logged).
   Microsoft::WRL::ComPtr<ID3D12Resource> CreateBuffer(uint64 nSize, D3D12_RESOURCE_STATES State, const wchar_t *szName);
   //! At least nSize bytes in Buf (a new buffer, the old one released when the GPU is done with it).
@@ -149,6 +162,7 @@ private:
   int m_nFrame = 0;                 //!< counts BeginCapture
   uint64 m_nBuiltFence = 0;         //!< the frame fence of the last Build (GetTLAS)
   int m_nBuiltSlot = 0;
+  D3D12_GPU_VIRTUAL_ADDRESS m_nInstances = 0;   //!< the last Build's SRayInstance array
   std::vector<SDraw> m_Draws;
   int m_nSkippedTransform = 0;      //!< draws left out by their transforms in this capture
 

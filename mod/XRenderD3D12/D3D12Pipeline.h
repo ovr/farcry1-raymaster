@@ -114,6 +114,10 @@ public:
   //! Size in bytes of a vertex of the format (m_VertexSize of VertexFormats.h, also for the
   //! formats gBufInfoTable leaves out).
   static int GetVertexSize(int nVertexFormat);
+  //! Where a vertex of the format keeps its normal, first colour and texture coordinates 0 and 1
+  //! (bytes from its start), -1 for those it lacks (the default stream's then); false for a format
+  //! not drawn on its own.
+  static bool GetVertexAttributes(int nVertexFormat, int &nNormal, int &nColor0, int &nTex0, int &nTex1);
 
 private:
   struct SKeyHash

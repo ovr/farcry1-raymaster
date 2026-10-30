@@ -144,7 +144,7 @@ void CD3D12RayScene::BeginCapture(const Matrix44 &ViewProj, const Vec3 &vCamera)
 }
 
 void CD3D12RayScene::CaptureDraw(const SPipelineKey &Key, const SDrawConstants &dc, D3D_PRIMITIVE_TOPOLOGY eTopology, const D3D12_VERTEX_BUFFER_VIEW &VB,
-  const D3D12_INDEX_BUFFER_VIEW *pIB, uint32 nCount, uint32 nFirst, int nBaseVertex)
+  const D3D12_INDEX_BUFFER_VIEW *pIB, uint32 nCount, uint32 nFirst, int nBaseVertex, const D3D12_VERTEX_BUFFER_VIEW *pTexCoord1)
 {
   // The opaque surfaces: the general program writing the depth, not blended, not a pass over others.
   if (Key.nProgram != eD3D12P_General || eTopology != D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST || Key.bWireframe || Key.nTarget != 0)
@@ -213,7 +213,7 @@ void CD3D12RayScene::CaptureDraw(const SPipelineKey &Key, const SDrawConstants &
   }
 
   // Static: the vertices and the indices in static buffers, whole.
-  const CD3D12Upload &Upload = *g_pRenderer->m_pUpload;
+  CD3D12Upload &Upload = *g_pRenderer->m_pUpload;
   const CD3D12Buffer *pVBuf = Upload.FindBuffer(Tri.VertexBuffer.StartAddress);
   const CD3D12Buffer *pIBuf = pIB ? Upload.FindBuffer(Tri.IndexBuffer) : nullptr;
   bool bStatic = pVBuf && (!pIB || pIBuf);
@@ -236,6 +236,7 @@ void CD3D12RayScene::CaptureDraw(const SPipelineKey &Key, const SDrawConstants &
     d.Key.nFlags = (uint32)d.Geom.Flags;
   }
   d.nKind = (uint8)((bStatic ? XR_RAY_STATIC : XR_RAY_DYNAMIC) | (bAlphaTest ? XR_RAY_ALPHATEST : 0));
+  FillInstance(d.Inst, Key, dc, Tri, pTexCoord1 ? *pTexCoord1 : D3D12_VERTEX_BUFFER_VIEW{}, pIB ? (uint32)nBaseVertex : nFirst, d.nKind);
   // The instance's transform: object to world for column vectors, mWorld's for row vectors transposed.
   for (int r = 0; r < 3; r++)
   {
@@ -243,6 +244,58 @@ void CD3D12RayScene::CaptureDraw(const SPipelineKey &Key, const SDrawConstants &
       d.Transform[r][c] = w[c * 4 + r];
   }
   m_Draws.push_back(d);
+}
+
+void CD3D12RayScene::FillInstance(SRayInstance &Inst, const SPipelineKey &Key, const SDrawConstants &dc, const D3D12_RAYTRACING_GEOMETRY_TRIANGLES_DESC &Tri,
+  const D3D12_VERTEX_BUFFER_VIEW &TexCoord1, uint32 nFirstVertex, uint8 nKind)
+{
+  CD3D12Upload &Upload = *g_pRenderer->m_pUpload;
+  Inst = {};
+  uint64 nOffset = 0;
+  const int nVB = Upload.GetRawSRV(Tri.VertexBuffer.StartAddress, nOffset);
+  Inst.nGeom[0] = nVB >= 0 ? (uint32)nVB : XR_RAY_NONE;
+  Inst.nGeom[1] = (uint32)nOffset;
+  Inst.nGeom[2] = XR_RAY_NONE;
+  if (Tri.IndexFormat != DXGI_FORMAT_UNKNOWN)
+  {
+    const int nIB = Upload.GetRawSRV(Tri.IndexBuffer, nOffset);
+    // Without its indices nothing of it can be read.
+    if (nIB < 0)
+      Inst.nGeom[0] = XR_RAY_NONE;
+    Inst.nGeom[2] = (uint32)nIB;
+    Inst.nGeom[3] = (uint32)nOffset;
+  }
+  Inst.nLayout[0] = (uint32)Tri.VertexBuffer.StrideInBytes | (Tri.IndexFormat == DXGI_FORMAT_R32_UINT ? XR_RAY_INDEX32 : 0);
+  int nNormal, nColor0, nTex0, nTex1;
+  CD3D12Pipeline::GetVertexAttributes(Key.nVertexFormat, nNormal, nColor0, nTex0, nTex1);
+  const auto Byte = [](int n) { return n >= 0 && n < 255 ? (uint32)n : 0xffu; };
+  Inst.nLayout[1] = Byte(nNormal) | Byte(nColor0) << 8 | Byte(nTex0) << 16 | Byte(nTex1) << 24;
+  Inst.nLayout[2] = XR_RAY_NONE;
+  // The second stream (lightmap coordinates): its vertices as the first stream's.
+  if (TexCoord1.BufferLocation && TexCoord1.StrideInBytes == 8)
+  {
+    const int nTC = Upload.GetRawSRV(TexCoord1.BufferLocation + (uint64)nFirstVertex * 8, nOffset);
+    if (nTC >= 0)
+    {
+      Inst.nLayout[2] = (uint32)nTC;
+      Inst.nLayout[3] = (uint32)nOffset;
+    }
+  }
+  Inst.nMaterial[0] = dc.nFlags;
+  Inst.nMaterial[1] = dc.nFlags2;
+  Inst.nMaterial[2] = dc.nTex0;
+  Inst.nMaterial[3] = dc.nTex1;
+  Inst.nMaterial2[0] = dc.nSamplers;
+  memcpy(&Inst.nMaterial2[1], &dc.fAlphaRef, sizeof(float));
+  Inst.nMaterial2[2] = dc.nTex4;
+  Inst.nMaterial2[3] = nKind;
+  memcpy(Inst.vColor, dc.vColor, sizeof(Inst.vColor));
+  memcpy(Inst.vAmbient, dc.vAmbient, sizeof(Inst.vAmbient));
+  memcpy(Inst.vTexGenU, dc.vTexGenU, sizeof(Inst.vTexGenU));
+  memcpy(Inst.vTexGenV, dc.vTexGenV, sizeof(Inst.vTexGenV));
+  memcpy(Inst.vTexMat0, dc.vTexMat0, sizeof(Inst.vTexMat0));
+  memcpy(Inst.vTexMat1, dc.vTexMat1, sizeof(Inst.vTexMat1));
+  memcpy(Inst.vAddColor, dc.vAddColor, sizeof(Inst.vAddColor));
 }
 
 //////////////////////////////////////////////////////////////////////////
@@ -422,6 +475,7 @@ void CD3D12RayScene::Build(FILE *pDump)
 {
   m_bCapturing = false;
   m_nBuiltFence = 0;
+  m_nInstances = 0;
   CD3D12Device &Device = *g_pRenderer->m_pDevice;
   if (!m_pDevice5 || !Device.IsInFrame())
     return;
@@ -564,6 +618,8 @@ void CD3D12RayScene::Build(FILE *pDump)
   const SD3D12FrameAlloc InstanceMem = g_pRenderer->m_pUpload->AllocFrame(nInstances * (uint32)sizeof(D3D12_RAYTRACING_INSTANCE_DESC),
     D3D12_RAYTRACING_INSTANCE_DESCS_BYTE_ALIGNMENT);
   D3D12_RAYTRACING_INSTANCE_DESC *pInstances = (D3D12_RAYTRACING_INSTANCE_DESC *)InstanceMem.pCPU;
+  const SD3D12FrameAlloc RayInstanceMem = g_pRenderer->m_pUpload->AllocFrame(std::max(nInstances, 1u) * (uint32)sizeof(SRayInstance), 256);
+  SRayInstance *pRayInstances = (SRayInstance *)RayInstanceMem.pCPU;
   UINT nInstance = 0;
   for (const SDraw &d : m_Draws)
   {
@@ -576,6 +632,7 @@ void CD3D12RayScene::Build(FILE *pDump)
     Instance.InstanceContributionToHitGroupIndex = d.nKind;
     Instance.Flags = D3D12_RAYTRACING_INSTANCE_FLAG_TRIANGLE_CULL_DISABLE;
     Instance.AccelerationStructure = d.nBlas;
+    pRayInstances[nInstance] = d.Inst;
     pInstances[nInstance++] = Instance;
   }
   TopInputs.NumDescs = nInstance;
@@ -588,6 +645,7 @@ void CD3D12RayScene::Build(FILE *pDump)
   pList->ResourceBarrier(1, &Barrier);
   m_nBuiltFence = Device.GetFrameFence();
   m_nBuiltSlot = nSlot;
+  m_nInstances = RayInstanceMem.nGPU;
 
   Evict((uint64)std::max(g_pRenderer->CV_d3d12_RTMemory, 16) << 20);
   if (pDump)
@@ -659,7 +717,7 @@ void CD3D12Renderer::DrawRayDebug()
   memcpy(dc.mParams0, ClipToWorld.data, sizeof(dc.mParams0));
   Set4(dc.vParams0, 1.0f / w, 1.0f / h, (float)CV_d3d12_RTDebug, std::max(CV_d3d12_RTDistance, 1.0f));
   const Vec3 &vCamera = m_pRayScene->GetCamera();
-  const uint32 nMask = (uint32)CV_d3d12_RTMask & 0xff;
+  const uint32 nMask = ((uint32)CV_d3d12_RTMask & 0xff) | (CV_d3d12_RTShadows ? 0x100u : 0u);
   Set4(dc.vParams1, vCamera.x, vCamera.y, vCamera.z, 0);
   memcpy(&dc.vParams1[3], &nMask, sizeof(nMask));
   DrawImmediate(Key, dc, D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST, VERTEX_FORMAT_P3F, s_FullScreen, 3);

@@ -184,6 +184,7 @@ void CD3D12Upload::Shutdown()
   m_nCurBlock = -1;
   m_nCurOffset = 0;
   m_Buffers.clear();
+  m_nRawSRVs = 0;
   m_pDevice = nullptr;
 }
 
@@ -230,10 +231,13 @@ void CD3D12Upload::BeginFrame(int nSlot)
     // The slot's last frame needed more than its ring: one ring for all of it (with some room).
     // The GPU has finished that frame, so the old blocks can go at once.
     const uint64 nSize = AlignUp(std::max(Slot.Ring.nSize, Slot.nUsed + Slot.nUsed / 4), BLOCK_ALIGN);
+    for (SUploadBlock &Block : Slot.Extra)
+      FreeRawSRV(Block.nRawSRV);
     Slot.Extra.clear();
     SUploadBlock Ring;
     if (CreateUploadBlock(nSize, Ring, L"XRenderD3D12 frame memory"))
     {
+      FreeRawSRV(Slot.Ring.nRawSRV);
       Slot.Ring = std::move(Ring);
       iLog->Log("XRenderD3D12: frame memory of slot %d grown to %llu KB", nSlot, (unsigned long long)(nSize / 1024));
     }
@@ -498,7 +502,8 @@ CD3D12Buffer *CD3D12Upload::CreateBuffer(const void *pData, uint32 nSize)
   if (!m_pDevice)
     return nullptr;
   const D3D12_HEAP_PROPERTIES Heap = HeapProps(D3D12_HEAP_TYPE_DEFAULT);
-  const D3D12_RESOURCE_DESC Desc = BufferDesc(std::max<uint64>(nSize, 16));
+  // Whole words: a raw view (GetRawSRV) reaches the last bytes.
+  const D3D12_RESOURCE_DESC Desc = BufferDesc(AlignUp(std::max<uint64>(nSize, 16), 4));
   ComPtr<ID3D12Resource> pResource;
   // Buffers start in COMMON whatever the initial state says.
   HRESULT hr = m_pDevice->CreateCommittedResource(&Heap, D3D12_HEAP_FLAG_NONE, &Desc, D3D12_RESOURCE_STATE_COMMON,
@@ -551,6 +556,7 @@ void CD3D12Upload::ReleaseBuffer(CD3D12Buffer *pBuf)
 {
   if (!pBuf)
     return;
+  FreeRawSRV(pBuf->m_nRawSRV);
   if (pBuf->m_pResource)
   {
     SubVideoMemory(pBuf->m_pResource);
@@ -570,6 +576,70 @@ const CD3D12Buffer *CD3D12Upload::FindBuffer(D3D12_GPU_VIRTUAL_ADDRESS nGPU) con
   --it;
   const CD3D12Buffer *pBuf = it->second;
   return nGPU - pBuf->m_nGPU < pBuf->m_nSize ? pBuf : nullptr;
+}
+
+int CD3D12Upload::CreateRawSRV(ID3D12Resource *pResource, uint64 nSize)
+{
+  if (m_nRawSRVs >= MAX_RAW_SRVS || !g_pRenderer->m_pDescriptors)
+    return -1;
+  D3D12_SHADER_RESOURCE_VIEW_DESC Desc = {};
+  Desc.Format = DXGI_FORMAT_R32_TYPELESS;
+  Desc.ViewDimension = D3D12_SRV_DIMENSION_BUFFER;
+  Desc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+  Desc.Buffer.NumElements = (UINT)(nSize / 4);
+  Desc.Buffer.Flags = D3D12_BUFFER_SRV_FLAG_RAW;
+  const int nSlot = g_pRenderer->m_pDescriptors->AllocSRV(pResource, &Desc);
+  if (nSlot >= 0)
+    m_nRawSRVs++;
+  return nSlot;
+}
+
+void CD3D12Upload::FreeRawSRV(int &nSlot)
+{
+  if (nSlot < 0)
+    return;
+  if (g_pRenderer->m_pDescriptors)
+    g_pRenderer->m_pDescriptors->FreeSRV(nSlot);
+  m_nRawSRVs--;
+  nSlot = -1;
+}
+
+int CD3D12Upload::GetRawSRV(D3D12_GPU_VIRTUAL_ADDRESS nGPU, uint64 &nOffset)
+{
+  nOffset = 0;
+  if (!nGPU)
+    return -1;
+  auto it = m_Buffers.upper_bound(nGPU);
+  if (it != m_Buffers.begin())
+  {
+    CD3D12Buffer *pBuf = std::prev(it)->second;
+    if (nGPU - pBuf->m_nGPU < pBuf->m_nSize && pBuf->m_pResource)
+    {
+      if (pBuf->m_nRawSRV < 0)
+        pBuf->m_nRawSRV = CreateRawSRV(pBuf->m_pResource, pBuf->m_pResource->GetDesc().Width);
+      nOffset = nGPU - pBuf->m_nGPU;
+      return pBuf->m_nRawSRV;
+    }
+  }
+  // This frame's memory: its ring or a block added to it.
+  SFrameSlot &Slot = m_Slots[m_nSlot];
+  auto FromBlock = [&](SUploadBlock &Block) -> bool
+  {
+    if (!Block.pResource || nGPU < Block.nGPU || nGPU - Block.nGPU >= Block.nSize)
+      return false;
+    if (Block.nRawSRV < 0)
+      Block.nRawSRV = CreateRawSRV(Block.pResource.Get(), Block.nSize);
+    nOffset = nGPU - Block.nGPU;
+    return true;
+  };
+  if (FromBlock(Slot.Ring))
+    return Slot.Ring.nRawSRV;
+  for (SUploadBlock &Block : Slot.Extra)
+  {
+    if (FromBlock(Block))
+      return Block.nRawSRV;
+  }
+  return -1;
 }
 
 //////////////////////////////////////////////////////////////////////////

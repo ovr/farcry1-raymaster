@@ -203,12 +203,16 @@ void CD3D12Renderer::RegisterVariables()
   // The scene for rays (RayTracing.cpp), on a device with DXR 1.1.
   iConsole->Register("d3d12_RTDebug", &CV_d3d12_RTDebug, 0, 0,
                      "The scene for rays seen from the camera, one ray per pixel over the whole picture: 1 its instances in colours, "
-                     "3 the distance to the hit (blue near, red far), 5 the kind of BLAS (static green, of the frame red, alpha tested lighter)");
+                     "2 the hits shaded on the right half (the picture on the left), 3 the distance to the hit (blue near, red far), "
+                     "4 the mip level of the hit's texture (blue 0, red 8), 5 the kind of BLAS (static green, of the frame red, alpha tested "
+                     "lighter), 6 the alpha tests along the ray, 7 the hits shaded over the whole picture");
   iConsole->Register("d3d12_RTDistance", &CV_d3d12_RTDistance, 150.0f, VF_DUMPTODISK, "The rays' length (m)");
   iConsole->Register("d3d12_RTMemory", &CV_d3d12_RTMemory, 384, VF_DUMPTODISK,
                      "The memory of the static geometry's acceleration structures (MB) beyond which the least recently used go");
   iConsole->Register("d3d12_RTMask", &CV_d3d12_RTMask, 31, 0,
                      "The kinds of geometry the rays see, bits: 1 static, 2 alpha tested, 4 changing every frame");
+  iConsole->Register("d3d12_RTShadows", &CV_d3d12_RTShadows, 1, VF_DUMPTODISK,
+                     "1: the sun's shadow at the hits of the rays, by a ray towards the sun (the surfaces the sun's shadow falls on)");
   // The HDR pipeline (r_HDRRendering, Hdr.cpp).
   iConsole->Register("d3d12_ToneMap", &CV_d3d12_ToneMap, 1, VF_DUMPTODISK,
                      "With r_HDRRendering, the tone map: 0 clamp, 1 soft shoulder (the game's look up to d3d12_ToneMapKnee, then each channel rolls off to 1), 2 ACES fitted, 3 AgX");

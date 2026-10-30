@@ -1155,6 +1155,7 @@ public:
   float CV_d3d12_RTDistance = 150;          //!< the rays' length (m)
   int CV_d3d12_RTMemory = 384;              //!< the static BLAS' memory (MB) beyond which the least recently used go
   int CV_d3d12_RTMask = 31;                 //!< the kinds of instances the rays see (XR_RAY_* bits)
+  int CV_d3d12_RTShadows = 1;               //!< the sun's shadow at the hits (a ray towards it, RayShade.hlsli)
   int CV_d3d12_ToneMap = 1;                 //!< the HDR pipeline's tone map: 0 clamp, 1 soft shoulder, 2 ACES fitted, 3 AgX
   float CV_d3d12_ToneMapKnee = 0.85f;       //!< where the soft shoulder starts (a display value)
   float CV_d3d12_Exposure = 0;              //!< the exposure's compensation, EV
