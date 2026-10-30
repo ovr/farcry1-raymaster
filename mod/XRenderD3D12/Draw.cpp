@@ -109,6 +109,7 @@ void CD3D12Renderer::MakeFrameConstants(SFrameConstants &fc, bool bScene) const
   Set4(fc.vScreen, w, h, 1 / w, 1 / h);
   Set4(fc.vJitter, bScene ? 2 * m_UpscaleJitter[0] / w : 0.0f, bScene ? -2 * m_UpscaleJitter[1] / h : 0.0f, sx, sy);
   fc.vMipBias[0] = bScene ? log2f(std::max(sx, 1e-3f)) - 1 : 0.0f;
+  memcpy(&fc.vMipBias[1], m_AOBakedShare, sizeof(m_AOBakedShare));
   Set4(fc.vTime, iTimer ? iTimer->GetCurrTime() : 0.0f, 0, 0, 0);
   Set4(fc.vWorldColor, m_WorldColor[0], m_WorldColor[1], m_WorldColor[2], m_WorldColor[3]);
   Set4(fc.vDepthParams, m_ProjMatrix.data[10], m_ProjMatrix.data[14], 0, 0);
@@ -135,6 +136,8 @@ void CD3D12Renderer::DrawGeometry(const SPipelineKey &Key, const SDrawConstants 
     FullKey.nColorFormat = PIPELINE_COLOR_HDR;
   // The sun's cascades in the general program's pixel shader that has them.
   FullKey.bCascades = Key.nProgram == eD3D12P_General && (dc.nFlags2 & (DF2_SUN_CASCADES | DF2_CASCADE_CASTER)) ? 1 : 0;
+  // The ambient occlusion's target bound to the main view (AmbientOcclusion.cpp).
+  FullKey.bAmbient = (FullKey.nTarget == 0 || FullKey.nTarget == 3) && m_pDevice->IsAmbientBound() ? 1 : 0;
   ID3D12PipelineState *pPSO = m_pPipeline->GetPSO(FullKey);
   if (!pPSO)
     return;

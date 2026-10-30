@@ -19,6 +19,16 @@ xrender_d3d12_shader(General_Cascades_PS General.hlsl ps_6_0 PSMain XR_CASCADES)
 xrender_d3d12_shader(General_Cascades_Velocity_PS General.hlsl ps_6_0 PSMain XR_CASCADES XR_VELOCITY)
 xrender_d3d12_shader(General_Cascades_Hdr_PS General.hlsl ps_6_0 PSMain XR_CASCADES XR_HDR)
 xrender_d3d12_shader(General_Cascades_Hdr_Velocity_PS General.hlsl ps_6_0 PSMain XR_CASCADES XR_VELOCITY XR_HDR)
+# All of them writing the ambient light's part of the colour too (XR_AMBIENT, SV_Target3), for the draws while
+# the ambient occlusion's target is bound (SPipelineKey::bAmbient); with the same vertex shaders.
+xrender_d3d12_shader(General_Ambient_PS General.hlsl ps_6_0 PSMain XR_AMBIENT)
+xrender_d3d12_shader(General_Ambient_Velocity_PS General.hlsl ps_6_0 PSMain XR_AMBIENT XR_VELOCITY)
+xrender_d3d12_shader(General_Ambient_Hdr_PS General.hlsl ps_6_0 PSMain XR_AMBIENT XR_HDR)
+xrender_d3d12_shader(General_Ambient_Hdr_Velocity_PS General.hlsl ps_6_0 PSMain XR_AMBIENT XR_VELOCITY XR_HDR)
+xrender_d3d12_shader(General_Ambient_Cascades_PS General.hlsl ps_6_0 PSMain XR_AMBIENT XR_CASCADES)
+xrender_d3d12_shader(General_Ambient_Cascades_Velocity_PS General.hlsl ps_6_0 PSMain XR_AMBIENT XR_CASCADES XR_VELOCITY)
+xrender_d3d12_shader(General_Ambient_Cascades_Hdr_PS General.hlsl ps_6_0 PSMain XR_AMBIENT XR_CASCADES XR_HDR)
+xrender_d3d12_shader(General_Ambient_Cascades_Hdr_Velocity_PS General.hlsl ps_6_0 PSMain XR_AMBIENT XR_CASCADES XR_VELOCITY XR_HDR)
 
 # Water surfaces (eD3D12P_Water).
 xrender_d3d12_shader(Water_VS Water.hlsl vs_6_0 VSMain)

@@ -7,8 +7,10 @@
 //	(d3d12_AO). After the opaque list a backend computes from the depth
 //	buffer how much of the hemisphere above each pixel is open (the
 //	visibility); AmbientOcclusion.cpp makes it the factor the scene drawn
-//	so far is multiplied by. Intel XeGTAO is AOXeGtao.cpp, AMD FidelityFX
-//	CACAO AOCacao.cpp. Both make the normals from the depth themselves.
+//	so far is multiplied by, or (d3d12_AOApply 1) the part of the ambient
+//	light it takes from the scene. Intel XeGTAO is AOXeGtao.cpp, AMD
+//	FidelityFX CACAO AOCacao.cpp. Both make the normals from the depth
+//	themselves.
 //
 //////////////////////////////////////////////////////////////////////
 

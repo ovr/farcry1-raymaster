@@ -560,8 +560,11 @@ void CScene::EndEf3D(int nFlags)
     for (int l = 0; l < eRL_Num; l++)
     {
       std::vector<SRenderItem> &list = s.Lists[l];
+      // The main view's ambient occlusion over what the opaque list drew (its ambient light with
+      // d3d12_AOApply 1).
+      if (l == eRL_Opaque)
+        g_pRenderer->BeginAOTarget(s.Items.data(), nItems);
       g_pRenderer->DrawItems(list.data(), (int)list.size(), l);
-      // The main view's ambient occlusion over what the opaque list drew.
       if (l == eRL_Opaque)
         g_pRenderer->DrawAmbientOcclusion();
     }

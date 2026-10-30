@@ -973,6 +973,18 @@ void CD3D12Renderer::DrawLeafItem(const SRenderItem &it)
   // The picture of a far vegetation sprite: where the object is, whatever the texture's alpha.
   if (m_bSpritePass)
     dc.nFlags |= DF_ALPHA_ONE;
+  // While the ambient occlusion's target is bound (General.hlsl, XR_AMBIENT): the ambient light's
+  // part of a colour the shader cannot tell from its lighting, the light baked into the terrain and
+  // the vegetation; all of it for the templates lit by the ambient colour alone and the terrain's
+  // shadow.
+  if (!bLightPass && m_pDevice->IsAmbientBound())
+  {
+    if (eDC == eDC_Terrain || eDC == eDC_VColor || eDC == eDC_AlphaTestVColor)
+      dc.nFlags2 |= DF2_AO_BAKED;
+    else if (eDC == eDC_TerrainShadow || ((eDC == eDC_Opaque || eDC == eDC_AlphaTest || eDC == eDC_AlphaBlend) &&
+                                          (eLighting == ELighting::Ambient || eLighting == ELighting::Ambient2)))
+      dc.nFlags2 |= DF2_AO_ALL;
+  }
   if (bFirstPass)
     Draw();
   // The beach: the other waves and the wet sand.
@@ -1240,6 +1252,10 @@ void CD3D12Renderer::DumpDraw(const SDrawConstants &dc, const SPipelineKey &Key,
     Flags += (Flags.empty() ? "" : "|") + std::string("SMOOTH_FALLOFF");
   if (dc.nFlags2 & DF2_LIGHTMAP_LIGHTS)
     Flags += (Flags.empty() ? "" : "|") + std::string("LIGHTMAP_LIGHTS");
+  if (dc.nFlags2 & DF2_AO_BAKED)
+    Flags += (Flags.empty() ? "" : "|") + std::string("AO_BAKED");
+  if (dc.nFlags2 & DF2_AO_ALL)
+    Flags += (Flags.empty() ? "" : "|") + std::string("AO_ALL");
   fprintf(f, "    draw: fmt %d state 0x%x cull %d bias %d flags %s tex0 '%s' alpharef %.3f col (%.2f %.2f %.2f %.2f) amb (%.2f %.2f %.2f) x%g lights %u",
           Key.nVertexFormat, Key.nState, Key.nCull, Key.bDepthBias, Flags.c_str(), (dc.nFlags & DF_TEX0) && pTex ? pTex->m_Name.c_str() : "",
           dc.fAlphaRef, dc.vColor[0], dc.vColor[1], dc.vColor[2], dc.vColor[3], dc.vAmbient[0], dc.vAmbient[1], dc.vAmbient[2], dc.vAmbient[3], dc.nLights);

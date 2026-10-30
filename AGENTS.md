@@ -528,13 +528,32 @@ it as well: it holds local, machine-specific instructions and is not committed (
   sky, faded out with the fog: `lerp(1, visibility ^ (strength / 2.2), fog)`), and a blend of
   `DESTCOLOR, ZERO` multiplies the scene drawn so far by it (colour only; the alpha keeps the HUD's
   masks). Not in reflections, the sprites, shadow and cube passes, nor with the heat vision.
+  That is `d3d12_AOApply 0` (the frames of the build before it, DemoCompare difference 0); 1 (the
+  default) darkens the ambient light alone, not the sun's and the lamps' direct light. The opaque
+  list then draws with a target of the main view's size (`R11G11B10_FLOAT`, cleared to 0) bound as
+  the fourth (`CD3D12Device::BindAmbient`, `SPipelineKey::bAmbient`; without an upscaler after two
+  null targets), where the general program's pixel shaders with `XR_AMBIENT` (`General.hlsl`, their
+  own programs: dxc's code of the others is unchanged) write how much of the colour is the ambient
+  light's: per pixel the lights' sums with the ambient colour less those without it, under a light
+  map the colour times the ambient colour; for the terrain and the vegetation, whose light is baked
+  into them, the colour times the share the shadow leaves (`DF2_AO_BAKED`: the colour of the
+  engine's shadows on the terrain in this frame, else `d3d12_AOBakedShare`, 0.5); all of it for
+  the templates lit by the ambient colour alone and the terrain's shadow (`DF2_AO_ALL`); fogged.
+  It blends as the colour, so the lamps' passes add none and the detail layers scale it. The
+  resolve makes the light taken, `(1 - visibility ^ strength) * ambient` (`R16G16B16A16_FLOAT`,
+  the strength not divided by 2.2: the game adds its light in gamma space), and a blend of `ONE,
+  ONE` with `REV_SUBTRACT` (`SPipelineKey::nBlendOp`) takes it from the scene. A light map's light
+  counts as direct, so in the light-mapped interiors it darkens little; the target costs some
+  0.03 ms of the opaque list at 2560 x 1440.
   `d3d12_AOQuality` 0 to 3 (2: XeGTAO Low to Ultra, CACAO LOW to HIGHEST), `d3d12_AORadius` (1 m),
   `d3d12_AOStrength` (1, the exponent of the visibility), `d3d12_AODenoise` (2: XeGTAO's denoise
   passes 0 to 3, CACAO's blur passes 1 to 8); with an upscaler XeGTAO's noise and CACAO's kernel
   change from frame to frame for it to gather. All are read every frame. `d3d12_AODebug 1` shows
-  the factor in grey over the whole frame. The frame dump has an `ao:` line and the GPU times an
-  `ao` section. For comparisons, DemoLevel with `--scene Demos\DemoLevelPierWalk.ini` and
-  `-DemoArgs '--exec-at 1 "d3d12_AO gtao"'` (or `cacao`) against the same run without it.
+  the factor in grey over the whole frame (with `d3d12_AOApply 1` the visibility to the power of
+  the strength, without the fog), 2 the ambient light, 3 the light taken. The frame dump has an
+  `ao:` line (with the baked share) and the GPU times an `ao` section. For comparisons, DemoLevel
+  with `--scene Demos\DemoLevelPierWalk.ini` and `-DemoArgs '--exec-at 1 "d3d12_AO gtao"'` (or
+  `cacao`, and `d3d12_AOApply 0` for the old way) against the same run without it.
   The game's menu gets it from `assets/scripts/video-ambient-occlusion.patch`: Ambient Occlusion,
   None / GTAO / CACAO in Advanced Video Options, in the row of the Basic Video Options button
   (which moves to the bar of Apply), greyed out without `d3d12_AO`.

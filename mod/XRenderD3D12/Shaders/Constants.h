@@ -106,6 +106,10 @@ typedef float float4x4_t[16];
 #define DF2_CASCADES_LIVE   0x00200000  //!< with DF2_SUN_CASCADES: the cascades of the live casters only (light maps, the terrain)
 #define DF2_SHADOW_TINT     0x00400000  //!< with DF2_SUN_CASCADES: rgb *= lerp(vShadowTint, 1, the visibility) (the terrain)
 #define DF2_CASCADE_CASTER  0x00800000  //!< a caster of the live cascades: drawn only where it is not behind the full set's map g_TextureArrays[nTex4] slice vParams3.x by more than vParams3.y (depth)
+// The ambient light's part of a colour whose light is baked into it, for the ambient occlusion's target
+// (XR_AMBIENT, General.hlsl; set only while it is bound)
+#define DF2_AO_BAKED        0x01000000  //!< the terrain, the vegetation: the colour (before DF2_SHADOW_TINT) times vMipBias.yzw, the share of the light the shadow leaves
+#define DF2_AO_ALL          0x02000000  //!< the templates lit by the ambient colour alone, the terrain's shadow: all of the colour
 
 // SDrawConstants::nFlags of the post program (Post.hlsl): one mode, with POST_EFFECTS the effects drawn
 #define POST_DOWNSAMPLE     0x00000001  //!< the mean of tex0 over the target's pixel: vParams0.z x vParams0.z bilinear taps
@@ -152,7 +156,8 @@ struct SFrameConstants
   XR_FLOAT4(vDepthParams);        //!< the projection's m22 (x) and m32 (y): distance along the view axis = y / (depth + x)
   XR_FLOAT4(vSunSpec);            //!< rgb: the sun's specular colour (DF_SPECULAR)
   XR_FLOAT4(vJitter);             //!< the upscaler's (Upscaler.h): xy its jitter in clip space (xy += vJitter.xy * w), zw the target's pixels per pixel of the engine (DF_SCREEN_POS); 0, 0, 1, 1 without one
-  XR_FLOAT4(vMipBias);            //!< x: the mip bias of the materials' textures (log2(render / display size) - 1 while upscaling, else 0)
+  XR_FLOAT4(vMipBias);            //!< x: the mip bias of the materials' textures (log2(render / display size) - 1 while upscaling, else 0);
+                                  //!< yzw: DF2_AO_BAKED's share of the ambient light in a baked colour
   XR_FLOAT4(vHdr);                //!< x: the light of the sky towards the sun times this (SkyGlow; 1: as the game's, always outside HDR targets)
   XR_FLOAT4X4_ARRAY(mCascade, XR_MAX_CASCADES);  //!< world to the sun's cascade i (DF2_SUN_CASCADES): x, y -1..1 across its map, z depth 0..1 away from the sun
   XR_FLOAT4(vCascadeEnd);         //!< the view depth (ViewDepth) where each cascade ends
@@ -213,7 +218,9 @@ struct SAoResolveConstants
   XR_FLOAT4(vSize);               //!< x width, y height (pixels), z 1 / width, w 1 / height
   XR_FLOAT4(vDepthParams);        //!< as SFrameConstants'
   XR_FLOAT4(vFogParams);          //!< as SFrameConstants'
-  XR_FLOAT4(vParams);             //!< x the exponent of the visibility (d3d12_AOStrength / 2.2: the scene's colours are the game's, not linear)
+  XR_FLOAT4(vParams);             //!< x the exponent of the visibility (d3d12_AOStrength / 2.2: the scene's colours are the game's, not linear;
+                                  //!< d3d12_AOStrength with y), y 1: the ambient light's part (d3d12_AOApply 1), z 1: with it the factor too
+                                  //!< (d3d12_AODebug 1)
 };
 
 #endif

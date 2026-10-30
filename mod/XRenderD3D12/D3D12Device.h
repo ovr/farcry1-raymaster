@@ -33,6 +33,7 @@ constexpr DXGI_FORMAT D3D12_HDR_FORMAT = DXGI_FORMAT_R16G16B16A16_FLOAT;  //!< t
 constexpr DXGI_FORMAT D3D12_HDR10_FORMAT = DXGI_FORMAT_R10G10B10A2_UNORM; //!< the swap chain of the HDR10 output (PQ, Rec. 2020; HdrOutput.cpp)
 constexpr DXGI_FORMAT D3D12_SCRGB_FORMAT = DXGI_FORMAT_R16G16B16A16_FLOAT; //!< the swap chain of the scRGB output (linear Rec. 709, 1 = 80 nits)
 constexpr DXGI_FORMAT D3D12_HIGHLIGHT_FORMAT = DXGI_FORMAT_R16G16B16A16_FLOAT; //!< the highlight layer (HdrOutput.cpp)
+constexpr DXGI_FORMAT D3D12_AMBIENT_FORMAT = DXGI_FORMAT_R11G11B10_FLOAT; //!< the ambient light of the ambient occlusion (BindAmbient)
 
 //! What the swap chain shows (d3d12_HDROutput, HdrOutput.cpp).
 enum class EDisplayOutput
@@ -193,6 +194,15 @@ public:
   //! target's in BeginHdr .. EndHdr, else the back buffer's.
   DXGI_FORMAT GetMainColorFormat() const { return m_bInScene ? m_SceneColorFormat : m_bInHdr ? D3D12_HDR_FORMAT : D3D12_BACKBUFFER_FORMAT; }
 
+  //! The ambient light of the ambient occlusion (AmbientOcclusion.cpp, d3d12_AOApply 1), a target of
+  //! the main view's size in D3D12_AMBIENT_FORMAT: from here (in a frame) SetBackBufferTargets binds
+  //! hRTV as the fourth colour target of the main view (SV_Target3, SPipelineKey::bAmbient), after the
+  //! scene's motion vectors and the upscaler's depth or, without an upscaler, two null targets of their
+  //! formats; an empty handle unbinds it. The caller makes its transitions.
+  void BindAmbient(D3D12_CPU_DESCRIPTOR_HANDLE hRTV);
+  //! The main view's draws write the ambient light too (bound, not off screen).
+  bool IsAmbientBound() const { return m_hAmbientRTV.ptr && !m_pOffscreen; }
+
   //! An off screen target of nWidth x nHeight: pColor in Format (the back buffer's, or
   //! D3D12_HDR_FORMAT; in the state PIXEL_SHADER_RESOURCE while it is not drawn into) and pDepth
   //! (D24S8, DEPTH_WRITE), their views written to hRTV and hDSV. pColor gets nMips mip levels: hRTV
@@ -305,7 +315,8 @@ private:
   //! The frame target from its state to State.
   void SetFrameState(D3D12_RESOURCE_STATES State);
   //! The views after the back buffers': n 0 the scene's colour, 1 its motion vectors, 2 the
-  //! upscaler's depth; 3 the HDR target; 4 the frame target, 5 the highlight layer.
+  //! upscaler's depth; 3 the HDR target; 4 the frame target, 5 the highlight layer; 6 and 7 null
+  //! views of the motion vectors' and the upscaler depth's formats (BindAmbient).
   D3D12_CPU_DESCRIPTOR_HANDLE SceneRTV(int n) const;
   //! The swap chain's current buffer's view.
   D3D12_CPU_DESCRIPTOR_HANDLE SwapChainRTV() const;
@@ -366,6 +377,7 @@ private:
   bool m_bInScene = false;                          //!< BeginScene .. EndScene
   ComPtr<ID3D12Resource> m_pHdrColor;               //!< SetHdrTarget
   bool m_bInHdr = false;                            //!< BeginHdr .. EndHdr
+  D3D12_CPU_DESCRIPTOR_HANDLE m_hAmbientRTV = {};   //!< BindAmbient
 
   int m_nWidth = 0, m_nHeight = 0;
   int m_nFrameSlot = 0;

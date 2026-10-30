@@ -192,7 +192,13 @@ void CD3D12Renderer::RegisterVariables()
                      "The ambient occlusion's strength: the exponent of the visibility (1 as the backend computes it, 0 none)");
   iConsole->Register("d3d12_AODenoise", &CV_d3d12_AODenoise, 2, VF_DUMPTODISK,
                      "The ambient occlusion's denoising: XeGTAO 0 (none) to 3 passes, CACAO 1 to 8 blur passes");
-  iConsole->Register("d3d12_AODebug", &CV_d3d12_AODebug, 0, 0, "1: the ambient occlusion's factor in grey over the whole picture");
+  iConsole->Register("d3d12_AOApply", &CV_d3d12_AOApply, 1, VF_DUMPTODISK,
+                     "What the ambient occlusion darkens: 0 the whole picture, 1 the ambient light alone (not the sun's and the lamps' direct light)");
+  iConsole->Register("d3d12_AOBakedShare", &CV_d3d12_AOBakedShare, 0.5f, VF_DUMPTODISK,
+                     "With d3d12_AOApply 1, the ambient light's share of the light baked into the terrain and the vegetation where the frame "
+                     "has no shadows on the terrain to take it from, 0 to 1");
+  iConsole->Register("d3d12_AODebug", &CV_d3d12_AODebug, 0, 0,
+                     "1: the ambient occlusion's factor in grey over the whole picture; with d3d12_AOApply 1, 2: the ambient light, 3: the light it takes away");
   // The HDR pipeline (r_HDRRendering, Hdr.cpp).
   iConsole->Register("d3d12_ToneMap", &CV_d3d12_ToneMap, 1, VF_DUMPTODISK,
                      "With r_HDRRendering, the tone map: 0 clamp, 1 soft shoulder (the game's look up to d3d12_ToneMapKnee, then each channel rolls off to 1), 2 ACES fitted, 3 AgX");
