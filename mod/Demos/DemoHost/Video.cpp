@@ -10,7 +10,7 @@
 #include "DemoHost.h"
 #include "Video.h"
 
-bool CVideo::Open(const char *szFile, int nWidth, int nHeight, int nFps)
+bool CVideo::Open(const char *szFile, int nWidth, int nHeight, int nFps, float fHdrPeak, float fHdrFrameAverage)
 {
   Close();
   SECURITY_ATTRIBUTES Inherit = { sizeof(Inherit), NULL, TRUE };
@@ -24,11 +24,27 @@ bool CVideo::Open(const char *szFile, int nWidth, int nHeight, int nFps)
   // The frames are full range RGB; yuv420p is the format every player takes. Converted with the
   // BT.709 matrix and tagged so, as players take untagged HD video for BT.709.
   char szCmd[2048];
-  _snprintf(szCmd, sizeof(szCmd) - 1,
-    "ffmpeg -hide_banner -loglevel warning -y -f rawvideo -pix_fmt bgra -video_size %dx%d -framerate %d -i - "
-    "-vf scale=out_color_matrix=bt709:out_range=tv -c:v libx264 -preset medium -crf 16 -pix_fmt yuv420p "
-    "-colorspace bt709 -color_primaries bt709 -color_trc bt709 -color_range tv -movflags +faststart \"%s\"",
-    nWidth, nHeight, nFps, szFile);
+  if (fHdrPeak > 0)
+  {
+    // HDR10: the BT.2020 (non-constant luminance) matrix, 10 bits, HEVC with the static metadata:
+    // the mastering display's primaries Rec. 2020 (in 0.00002) with the peak (in 0.0001 nits),
+    // MaxCLL and MaxFALL.
+    const int nPeak = (int)(fHdrPeak + 0.5f), nAverage = (int)(fHdrFrameAverage + 0.5f);
+    _snprintf(szCmd, sizeof(szCmd) - 1,
+      "ffmpeg -hide_banner -loglevel warning -y -f rawvideo -pix_fmt x2bgr10le -video_size %dx%d -framerate %d "
+      "-color_primaries bt2020 -color_trc smpte2084 -colorspace bt2020nc -i - "
+      "-vf scale=out_color_matrix=bt2020:out_range=tv,format=yuv420p10le -c:v libx265 -preset medium -crf 16 -pix_fmt yuv420p10le "
+      "-tag:v hvc1 -colorspace bt2020nc -color_primaries bt2020 -color_trc smpte2084 -color_range tv "
+      "-x265-params log-level=error:hdr10=1:repeat-headers=1:colorprim=bt2020:transfer=smpte2084:colormatrix=bt2020nc:range=limited:"
+      "master-display=G(8500,39850)B(6550,2300)R(35400,14600)WP(15635,16450)L(%d,1):max-cll=%d,%d -movflags +faststart \"%s\"",
+      nWidth, nHeight, nFps, nPeak * 10000, nPeak, nAverage, szFile);
+  }
+  else
+    _snprintf(szCmd, sizeof(szCmd) - 1,
+      "ffmpeg -hide_banner -loglevel warning -y -f rawvideo -pix_fmt bgra -video_size %dx%d -framerate %d -i - "
+      "-vf scale=out_color_matrix=bt709:out_range=tv -c:v libx264 -preset medium -crf 16 -pix_fmt yuv420p "
+      "-colorspace bt709 -color_primaries bt709 -color_trc bt709 -color_range tv -movflags +faststart \"%s\"",
+      nWidth, nHeight, nFps, szFile);
   szCmd[sizeof(szCmd) - 1] = 0;
   STARTUPINFOA Startup = { sizeof(Startup) };
   Startup.dwFlags = STARTF_USESTDHANDLES;

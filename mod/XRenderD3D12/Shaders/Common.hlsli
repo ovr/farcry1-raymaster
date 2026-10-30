@@ -111,6 +111,27 @@ float HdrEncode(float fLight)
   return fLight > 1 ? 1 + (fLight - 1) / HDR_GAMMA : pow(max(fLight, 0), 1 / HDR_GAMMA);
 }
 
+//! The highlight layer of the HDR output (HdrOutput.cpp). A pass that puts the scene into the
+//! 8-bit back buffer also writes the layer: rgb the light of the scene on an HDR display over the
+//! light of its colour in the back buffer, per channel, and a the fingerprint of that colour as the
+//! back buffer stores it (8 bits a channel). The output pass takes the layer's light where the
+//! back buffer still holds that colour, i.e. where nothing was drawn over the scene since. One
+//! channel one step off (rounding) still matches: 0.45 / 255 at most, within HIGHLIGHT_TOLERANCE
+//! with the layer's half float.
+static const float3 HIGHLIGHT_WEIGHTS = float3(0.3, 0.45, 0.25);
+static const float HIGHLIGHT_TOLERANCE = 0.6 / 255;
+float HighlightFingerprint(float3 c)
+{
+  return dot(round(saturate(c) * 255), HIGHLIGHT_WEIGHTS) / 255;
+}
+
+//! The outputs of a pass that writes the highlight layer (SPipelineKey::nTarget 4).
+struct SHighlightOutput
+{
+  float4 vColor : SV_Target0;
+  float4 vHighlight : SV_Target1;
+};
+
 //! The sky with r_HDRRendering (DF2_SKY_GLOW, the water's reflected sky box; Hdr.cpp): the factor
 //! of the sky's colour in the direction vDir from the camera that makes its light g_Frame.vHdr.x
 //! times brighter towards the sun, falling off with the cosine of the angle to the sun to the power

@@ -29,7 +29,12 @@ xrender_d3d12_shader(Water_Hdr_Velocity_PS Water.hlsl ps_6_0 PSMain XR_VELOCITY 
 # The screen effects (eD3D12P_Post).
 xrender_d3d12_shader(Post_VS Post.hlsl vs_6_0 VSMain)
 xrender_d3d12_shader(Post_PS Post.hlsl ps_6_0 PSMain)
+# The upscaler's picture over the back buffer writing the highlight layer too (HdrOutput.cpp,
+# SPipelineKey::nTarget 4).
+xrender_d3d12_shader(Post_Highlight_PS Post.hlsl ps_6_0 PSHighlight)
 
 # Exposure, bloom and tone mapping of the HDR scene (eD3D12P_Hdr, r_HDRRendering).
 xrender_d3d12_shader(Hdr_VS Hdr.hlsl vs_6_0 VSMain)
 xrender_d3d12_shader(Hdr_PS Hdr.hlsl ps_6_0 PSMain)
+# The resolve writing the highlight layer too (HdrOutput.cpp, SPipelineKey::nTarget 4).
+xrender_d3d12_shader(Hdr_Highlight_PS Hdr.hlsl ps_6_0 PSHighlight)

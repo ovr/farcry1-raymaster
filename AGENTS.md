@@ -301,8 +301,10 @@ it as well: it holds local, machine-specific instructions and is not committed (
   `low` the other presets (the values of `DemoQuality.cpp`), `keep` leaves `system.cfg` as it is.
   Demos are run at the maximum quality, with the original renderer and ours alike, and frames
   are compared only between runs at the same quality. The demo's `--video <file.mp4>` writes
-  every frame of the run into a video through ffmpeg (on PATH), `--until <frame>` makes the run
-  longer than its frames to save.
+  every frame of the run into a video through ffmpeg (on PATH), `--video-hdr <file.mp4>` (with
+  XRenderD3D12) into an HDR10 video what its HDR output shows (HEVC Main 10 through libx265, PQ,
+  Rec. 2020, the mastering display and content light levels from the peak and paper white),
+  `--until <frame>` makes the run longer than its frames to save.
 - The demos in the main menu: DemoTextures (a texture of the game and the demo's own test
   texture, drawn in 2D in several ways), DemoFonts (the game's fonts), DemoCamera (lines and
   textured cubes in 3D under an orbiting camera), DemoObject (a static object turning), DemoLight
@@ -432,9 +434,41 @@ it as well: it holds local, machine-specific instructions and is not committed (
     error goes to the log once per file name, seen with `log_Verbosity` 1 or more, and the frame
     dump gives the size read, 0 for none), mixed in by `d3d12_ColorLutAmount`. Neutral settings
     use no table (the frames are those without it).
-  - The game's menu gets an entry from `assets/scripts/hdr-options.patch`: HDR in Advanced Video
-    Options, None / Soft / ACES / AgX for `r_HDRRendering` 0 or 1 with `d3d12_ToneMap` 1 to 3
-    (greyed out without `d3d12_ToneMap`, that is with another renderer).
+  - HDR output to a display in HDR mode (Windows: Use HDR), `HdrOutput.cpp`: `d3d12_HDROutput`
+    0 SDR (the default), 1 HDR10 (an R10G10B10A2 swap chain, PQ, Rec. 2020, with the HDR10
+    metadata), 2 scRGB (R16G16B16A16_FLOAT, linear Rec. 709, 80 nits per 1). The frame is drawn
+    as without it into an 8-bit back buffer, then the device's own frame target (the screen
+    effects, the 2D with its masks through the back buffer's alpha, the screen copies, every read
+    of the frame and `--video` stay as they are; with output 0 the frames are those of the
+    renderer without it). Next to it a highlight layer (R16G16B16A16_FLOAT, cleared to 1, 1, 1,
+    -1): the pass that puts the scene into the back buffer (the resolve, or the upscaler's
+    composite) also writes the ratio of the scene's light on the HDR display to the light of its
+    SDR colour per channel, and a fingerprint of that colour (`HighlightFingerprint`,
+    `Shaders/Common.hlsli`). The tone map goes on above its knee up to the peak instead of white
+    (`HighlightRatio`, `Shaders/Hdr.hlsl`: the soft shoulder's excess, which ACES and AgX are
+    mapped to), so below the knee the ratio is 1. The output pass before Present (`HDR_OUTPUT`)
+    gives each pixel the light of its SDR colour, times the ratio where the fingerprint still
+    matches (nothing was drawn over the scene), times paper white, at most the peak. So the HUD,
+    the menu and the screen effects show as SDR content does under Windows HDR, and the scene's
+    highlights (the sun, fire, lamps) go up to the peak; night vision, the blur, the flash and
+    motion blur take the highlights away where they change the pixels. `d3d12_HDRPaperWhite`
+    (0: Windows' SDR content brightness of the display, `DisplayConfigGetDeviceInfo`) and
+    `d3d12_HDRPeak` (0: the display's, `IDXGIOutput6::GetDesc1`) in nits; without the display's,
+    203 and 1000. The display is looked at once a second (the window's monitor, a new DXGI factory
+    when Windows' displays changed): HDR switched off in Windows, `r_HDRRendering 0` or a swap
+    chain without the colour space and the output is SDR, the log says why (a warning). The
+    frame dump gives the mode, the levels, the display's and how much of the frame has the scene
+    and highlights. `d3d12_HDROutputDebug 1` shows the highlights (grey none, yellow to red at
+    the peak, blue where something was drawn over the scene), `2` patches at paper white, twice
+    and four times that and at the peak, to set `d3d12_HDRPeak` by eye.
+    `XRenderD3D12_ReadFrameHdr10` (exported, for DemoHost's `--video-hdr`) runs the output pass
+    in HDR10 into a target of its own and reads it; from its first call the layer is kept
+    whatever the display and `d3d12_HDROutput`.
+  - The game's menu gets entries from `assets/scripts/hdr-options.patch` in Advanced Video
+    Options: HDR, None / Soft / ACES / AgX for `r_HDRRendering` 0 or 1 with `d3d12_ToneMap` 1 to 3,
+    and next to the Basic Video Options button HDR output, SDR / HDR10 / scRGB for
+    `d3d12_HDROutput` (choosing HDR10 or scRGB with HDR at None sets it to Soft); both greyed out
+    without the variables, that is with another renderer.
 - `d3d12_DumpFrame 1` writes the render items of the next frame to
   `farcry1_testing1/XRenderD3D12_frame.txt` (never committed): the camera (position, angles,
   field of view, near and far plane, view and projection matrices), then for each item its list, sort

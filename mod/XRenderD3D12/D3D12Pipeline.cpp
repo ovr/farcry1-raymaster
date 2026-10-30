@@ -29,8 +29,10 @@
 #include "Water_Hdr_Velocity_PS.h"
 #include "Post_VS.h"
 #include "Post_PS.h"
+#include "Post_Highlight_PS.h"
 #include "Hdr_VS.h"
 #include "Hdr_PS.h"
+#include "Hdr_Highlight_PS.h"
 
 using Microsoft::WRL::ComPtr;
 
@@ -500,6 +502,7 @@ ComPtr<ID3D12PipelineState> CD3D12Pipeline::CreatePSO(const SPipelineKey &Key)
   const bool bScene = Key.nTarget == 3;
   const bool bDepth = Key.nTarget == 0 || Key.nTarget == 2 || bScene;
   const bool bShadowMap = Key.nTarget == 2;
+  const bool bHighlight = Key.nTarget == 4;
   const uint32 nState = Key.nState;
   // In an upscaler's scene the general program's opaque draws write the motion vectors, and the
   // ones that write the depth buffer the upscaler's depth too; the blended ones leave those of
@@ -534,6 +537,11 @@ ComPtr<ID3D12PipelineState> CD3D12Pipeline::CreatePSO(const SPipelineKey &Key)
       Desc.PS = { g_General_Hdr_PS, sizeof(g_General_Hdr_PS) };
     else if (bHdr && bWater)
       Desc.PS = { g_Water_Hdr_PS, sizeof(g_Water_Hdr_PS) };
+    // With the highlight layer as the second target (HdrOutput.cpp).
+    else if (bHighlight && Key.nProgram == eD3D12P_Hdr)
+      Desc.PS = { g_Hdr_Highlight_PS, sizeof(g_Hdr_Highlight_PS) };
+    else if (bHighlight && Key.nProgram == eD3D12P_Post)
+      Desc.PS = { g_Post_Highlight_PS, sizeof(g_Post_Highlight_PS) };
   }
 
   // Blending: off when neither factor is set.
@@ -647,10 +655,18 @@ ComPtr<ID3D12PipelineState> CD3D12Pipeline::CreatePSO(const SPipelineKey &Key)
   const int nTopology = Key.nTopology;
   Desc.PrimitiveTopologyType = nTopology >= D3D12_PRIMITIVE_TOPOLOGY_TYPE_POINT && nTopology <= D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE ?
     (D3D12_PRIMITIVE_TOPOLOGY_TYPE)nTopology : D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
-  Desc.NumRenderTargets = bShadowMap ? 0 : bScene ? 3 : 1;
-  Desc.RTVFormats[0] = bShadowMap ? DXGI_FORMAT_UNKNOWN : Key.nColorFormat == PIPELINE_COLOR_HDR ? D3D12_HDR_FORMAT :
-                       Key.nColorFormat == PIPELINE_COLOR_R32F ? DXGI_FORMAT_R32_FLOAT : bDepth ? D3D12_BACKBUFFER_FORMAT : DXGI_FORMAT_R8G8B8A8_UNORM;
-  Desc.RTVFormats[1] = bScene ? D3D12_VELOCITY_FORMAT : DXGI_FORMAT_UNKNOWN;
+  Desc.NumRenderTargets = bShadowMap ? 0 : bScene ? 3 : bHighlight ? 2 : 1;
+  switch (Key.nColorFormat)
+  {
+  case PIPELINE_COLOR_HDR:   Desc.RTVFormats[0] = D3D12_HDR_FORMAT; break;
+  case PIPELINE_COLOR_R32F:  Desc.RTVFormats[0] = DXGI_FORMAT_R32_FLOAT; break;
+  case PIPELINE_COLOR_RGBA8: Desc.RTVFormats[0] = DXGI_FORMAT_R8G8B8A8_UNORM; break;
+  case PIPELINE_COLOR_HDR10: Desc.RTVFormats[0] = D3D12_HDR10_FORMAT; break;
+  default:                   Desc.RTVFormats[0] = bDepth || bHighlight ? D3D12_BACKBUFFER_FORMAT : DXGI_FORMAT_R8G8B8A8_UNORM; break;
+  }
+  if (bShadowMap)
+    Desc.RTVFormats[0] = DXGI_FORMAT_UNKNOWN;
+  Desc.RTVFormats[1] = bScene ? D3D12_VELOCITY_FORMAT : bHighlight ? D3D12_HIGHLIGHT_FORMAT : DXGI_FORMAT_UNKNOWN;
   Desc.RTVFormats[2] = bScene ? D3D12_UPSCALE_DEPTH_FORMAT : DXGI_FORMAT_UNKNOWN;
   Desc.DSVFormat = bShadowMap ? D3D12_SHADOW_MAP_FORMAT : bScene ? D3D12_SCENE_DEPTH_FORMAT : bDepth ? D3D12_DEPTH_FORMAT : DXGI_FORMAT_UNKNOWN;
   Desc.SampleDesc.Count = 1;

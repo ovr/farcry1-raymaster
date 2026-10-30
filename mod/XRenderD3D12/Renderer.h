@@ -26,6 +26,9 @@
 #include "Upscaler.h"
 #include "Shaders/Constants.h"
 
+struct SDisplayInfo;
+enum class EDisplayOutput;
+
 class CD3D12Device;
 class CD3D12Upload;
 class CD3D12Texture;
@@ -695,6 +698,7 @@ public:
     int nExposure = 0;                      //!< pExposure's current one
     std::vector<CD3D12Texture *> Bloom;     //!< the bloom's levels, the first half the scene's size
     CD3D12Texture *pLdr = nullptr;          //!< the tone mapped scene for an upscaler (R8G8B8A8)
+    CD3D12Texture *pRatio = nullptr;        //!< with it and the highlight layer, the layer's ratio at the scene's size (D3D12_HIGHLIGHT_FORMAT)
     int nWidth = 0, nHeight = 0;            //!< the scene's size they are for
     bool bAdapted = false;                  //!< pExposure[nExposure] holds an adapted EV
     int nResolvedFrame = -1;                //!< m_nFrames of the last resolve
@@ -712,11 +716,17 @@ public:
   //! bloom and the resolve, into the back buffer, or with bToTexture into m_Hdr.pLdr, which it
   //! returns (nullptr: the back buffer, or no targets).
   CD3D12Texture *ResolveHdr(int nSceneSRV, int nWidth, int nHeight, bool bToTexture);
-  //! The resolve's pass over the whole back buffer.
+  //! The resolve's pass over the whole back buffer; with the highlight layer it writes the layer
+  //! too (HdrOutput.cpp).
   void DrawHdrToBackBuffer(const SDrawConstants &dc);
-  //! A pass of the HDR program into pTarget, with the blend of nState.
-  void DrawHdrPass(CD3D12Texture *pTarget, const SDrawConstants &dc, uint32 nState = 0);
-  //! m_Hdr's targets for a scene of nWidth x nHeight (and pLdr with bLdr), made when it changes. False: none.
+  //! A full screen pass of the HDR program into what is bound, whatever the engine's viewport and
+  //! scissors; nTarget and nColorFormat as SPipelineKey's.
+  void DrawHdrFullScreen(const SDrawConstants &dc, uint8 nTarget, uint8 nColorFormat);
+  //! A pass of the HDR program into pTarget, with the blend of nState; with pRatio (the layer's
+  //! ratio at pTarget's size) PSHighlight writes it too.
+  void DrawHdrPass(CD3D12Texture *pTarget, const SDrawConstants &dc, uint32 nState = 0, CD3D12Texture *pRatio = nullptr);
+  //! m_Hdr's targets for a scene of nWidth x nHeight (and pLdr with bLdr, pRatio with it and the
+  //! highlight layer), made when it changes. False: none.
   bool EnsureHdrTargets(int nWidth, int nHeight, bool bLdr);
   void ReleaseHdrTargets();
   //! The device's HDR target and its texture table entry.
@@ -741,6 +751,44 @@ public:
 
   SHdrState m_Hdr;
   bool m_bHdrScene = false;                 //!< BeginMainScene .. EndMainScene: the main scene draws in D3D12_HDR_FORMAT
+
+  //////////////////////////////////////////////////////////////////////////
+  // HdrOutput.cpp: the HDR output to the display (d3d12_HDROutput)
+
+  //! XRenderD3D12_ReadFrameHdr10 (HdrOutput.cpp): the current frame through the output pass in
+  //! HDR10 (PQ, Rec. 2020), R10G10B10A2 rows of nPitch bytes into pDst. The highlight layer is on
+  //! from the first call on (pDst NULL: only that, and the size and the levels).
+  bool ReadFrameHdr10(void *pDst, int nPitch, int *pWidth, int *pHeight, float *pPaperWhite, float *pPeak);
+  //! The output for the next frames (after EndFrame): what d3d12_HDROutput asks for, if
+  //! r_HDRRendering is on and the display is in HDR; the highlight layer also for ReadFrameHdr10.
+  void UpdateHdrOutput();
+  //! The light of paper white (the frame's white) and of the peak, in nits, of the display as it is.
+  void GetHdrLevels(const SDisplayInfo &Info, float &fPaperWhite, float &fPeak) const;
+  //! The device's frame target and highlight layer in the texture table (again when made anew);
+  //! false: there are none.
+  bool UpdateLayerSRVs();
+  //! The output pass's constants (Hdr.hlsl, HDR_OUTPUT) for Output.
+  SDrawConstants HdrOutputConstants(EDisplayOutput Output) const;
+  //! Before EndFrame with an HDR output: the frame and its highlights into the swap chain's buffer.
+  void DrawHdrOutput();
+  //! The frame dump's line (and the share of the frame the highlight layer has the scene of).
+  void DumpHdrOutput();
+  void ReleaseHdrOutput();
+  //! In the constants of the resolve and the upscaler's picture: the highlight layer's.
+  void SetHighlightConstants(SDrawConstants &dc) const;
+
+  struct SHdrOutputState
+  {
+    float fPaperWhite = 203, fPeak = 1000;  //!< the levels in use (nits)
+    std::string Reason;                     //!< why the output is SDR (logged when it changes)
+    int nLogged = -1;                       //!< the EDisplayOutput logged
+    bool bCapture = false;                  //!< ReadFrameHdr10 was called: the highlight layer stays on
+    CD3D12Texture *pCapture = nullptr;      //!< ReadFrameHdr10's target (D3D12_HDR10_FORMAT)
+    std::vector<uint8> Pixels;              //!< its pixels read back
+    ComPtr<ID3D12Resource> pFrame, pHighlight;   //!< the device's the SRVs are of
+    int nFrameSRV = -1, nHighlightSRV = -1;
+  };
+  SHdrOutputState m_HdrOut;
 
   //////////////////////////////////////////////////////////////////////////
   // ColorGrading.cpp: the colour grading of the HDR pipeline's resolve
@@ -967,6 +1015,10 @@ public:
   float CV_d3d12_HDRSun = 8;                //!< the light of the sun's flare in HDR, times the game's
   float CV_d3d12_HDRSky = 2;                //!< the light of the sky towards the sun in HDR, times the game's
   float CV_d3d12_HDRGlow = 3;               //!< the light of what glows in HDR, times the game's
+  int CV_d3d12_HDROutput = 0;               //!< the output to the display: 0 SDR, 1 HDR10, 2 scRGB (HdrOutput.cpp)
+  float CV_d3d12_HDRPaperWhite = 0;         //!< its paper white in nits (0: Windows' SDR white level of the display)
+  float CV_d3d12_HDRPeak = 0;               //!< its peak in nits (0: the display's)
+  int CV_d3d12_HDROutputDebug = 0;          //!< 1: the highlight mask, 2: test patches
   float CV_d3d12_Saturation = 1;            //!< the colour grading (ColorGrading.cpp): 1, 1, 0, 0 neutral
   float CV_d3d12_Contrast = 1;
   float CV_d3d12_Temperature = 0;
@@ -975,3 +1027,6 @@ public:
 };
 
 extern CD3D12Renderer *g_pRenderer;
+
+//! A half float (IEEE 754 binary16) as a float (Hdr.cpp).
+float HalfToFloat(uint16 h);

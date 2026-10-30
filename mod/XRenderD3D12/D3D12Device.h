@@ -30,6 +30,28 @@ constexpr DXGI_FORMAT D3D12_VELOCITY_FORMAT = DXGI_FORMAT_R16G16_FLOAT; //!< the
 constexpr DXGI_FORMAT D3D12_UPSCALE_DEPTH_FORMAT = DXGI_FORMAT_R32_FLOAT; //!< the scene targets' depth for an upscaler (with the water's)
 constexpr DXGI_FORMAT D3D12_UPSCALE_FORMAT = DXGI_FORMAT_R8G8B8A8_UNORM; //!< an upscaler's output (unordered access, which B8G8R8A8 may not have)
 constexpr DXGI_FORMAT D3D12_HDR_FORMAT = DXGI_FORMAT_R16G16B16A16_FLOAT;  //!< the main view's colour with r_HDRRendering (Hdr.cpp)
+constexpr DXGI_FORMAT D3D12_HDR10_FORMAT = DXGI_FORMAT_R10G10B10A2_UNORM; //!< the swap chain of the HDR10 output (PQ, Rec. 2020; HdrOutput.cpp)
+constexpr DXGI_FORMAT D3D12_SCRGB_FORMAT = DXGI_FORMAT_R16G16B16A16_FLOAT; //!< the swap chain of the scRGB output (linear Rec. 709, 1 = 80 nits)
+constexpr DXGI_FORMAT D3D12_HIGHLIGHT_FORMAT = DXGI_FORMAT_R16G16B16A16_FLOAT; //!< the highlight layer (HdrOutput.cpp)
+
+//! What the swap chain shows (d3d12_HDROutput, HdrOutput.cpp).
+enum class EDisplayOutput
+{
+  Sdr,      //!< D3D12_BACKBUFFER_FORMAT, sRGB (G22_P709): the frame as it is drawn
+  Hdr10,    //!< D3D12_HDR10_FORMAT, G2084_P2020
+  ScRgb,    //!< D3D12_SCRGB_FORMAT, G10_P709
+};
+
+//! The display the window is on (CD3D12Device::GetDisplayInfo).
+struct SDisplayInfo
+{
+  bool bHdr = false;                //!< in HDR mode (Windows: Use HDR): its colour space is G2084_P2020
+  float fMaxNits = 0;               //!< its peak luminance (DXGI_OUTPUT_DESC1), 0: not reported
+  float fMaxFullFrameNits = 0;
+  float fMinNits = 0;
+  float fSdrWhiteNits = 0;          //!< the brightness Windows gives SDR content on it (the SDR white level), 0: unknown
+  char szName[32] = {};             //!< its GDI name (\\.\DISPLAY1), empty: not found
+};
 
 class CD3D12Device
 {
@@ -81,8 +103,37 @@ public:
 
   int GetWidth() const { return m_nWidth; }
   int GetHeight() const { return m_nHeight; }
-  ID3D12Resource *GetBackBuffer() const { return m_pBackBuffers[m_nBackBuffer].Get(); }
+  //! What everything draws into: the frame target with the highlight layer (SetOutput), else the
+  //! swap chain's current buffer.
+  ID3D12Resource *GetBackBuffer() const { return m_pFrame ? m_pFrame.Get() : m_pBackBuffers[m_nBackBuffer].Get(); }
   D3D12_CPU_DESCRIPTOR_HANDLE GetBackBufferRTV() const;
+
+  //! The display the window is on, looked up again when DXGI's factory is no longer current (a
+  //! display came or went, or its HDR mode changed), when the window went to another monitor, and
+  //! once a second (the SDR white level).
+  const SDisplayInfo &GetDisplayInfo();
+  //! The swap chain's output (its format and colour space; HDR10's metadata from fPeakNits and
+  //! fFrameAverageNits) and, with bLayer, the frame target and the highlight layer (HdrOutput.cpp;
+  //! always with an HDR output). Outside a frame; waits for the GPU. False when the swap chain
+  //! cannot show the output's colour space: it stays SDR.
+  bool SetOutput(EDisplayOutput Output, bool bLayer, float fPeakNits, float fFrameAverageNits);
+  EDisplayOutput GetOutput() const { return m_Output; }
+  //! With the highlight layer the back buffer is the frame target (D3D12_BACKBUFFER_FORMAT, the
+  //! swap chain's size): in RENDER_TARGET state in a frame, else PIXEL_SHADER_RESOURCE. At the end
+  //! of the frame the output pass draws it into the swap chain's buffer, or in SDR it is copied there.
+  bool HasLayer() const { return m_pFrame != nullptr; }
+  ID3D12Resource *GetFrameTarget() const { return m_pFrame.Get(); }
+  //! The highlight layer (D3D12_HIGHLIGHT_FORMAT, the swap chain's size): cleared to (1, 1, 1, -1)
+  //! when a frame begins, in PIXEL_SHADER_RESOURCE state outside BindHighlight.
+  ID3D12Resource *GetHighlight() const { return m_pHighlight.Get(); }
+  //! true: the back buffer and the highlight layer bound (no depth buffer, the full viewport) for a
+  //! pass that writes both; false: the back buffer alone again.
+  void BindHighlight(bool bOn);
+  //! The frame target as a shader resource while the frame goes on (true), a render target again (false).
+  void SetFrameReadable(bool bReadable);
+  //! The output pass: the frame target a shader resource, the swap chain's buffer bound (full
+  //! viewport, no depth). EndFrame then presents it.
+  void BeginOutput();
   D3D12_CPU_DESCRIPTOR_HANDLE GetDSV() const;
   //! Sets the back buffer and the depth buffer as render targets, the full viewport and scissor
   //! (ends drawing off screen); between BeginScene and EndScene the scene targets instead.
@@ -189,9 +240,10 @@ public:
   //! between frames) to pDst: nWidth x nHeight pixels of B, G, R, A, rows from the top.
   //! Waits for the GPU.
   bool ReadBackBuffer(uint8 *pDst, int nWidth, int nHeight);
-  //! Copies level 0 of pTexture (2D, 4 bytes a pixel, in State and not drawn into) to pDst: nWidth x
-  //! nHeight pixels, rows from the top. Waits for the GPU; in a frame the frame recorded so far is
-  //! executed (FlushFrame), and the draws go to the back buffer again.
+  //! Copies level 0 of pTexture (2D, 4 bytes a pixel, or 8 for the R16G16B16A16 formats; in State
+  //! and not drawn into) to pDst: nWidth x nHeight pixels, rows from the top. Waits for the GPU; in
+  //! a frame the frame recorded so far is executed (FlushFrame), and the draws go to the back
+  //! buffer again.
   bool ReadBackTexture(ID3D12Resource *pTexture, D3D12_RESOURCE_STATES State, uint8 *pDst, int nWidth, int nHeight);
 
   //! The debug layer's messages to the engine's log.
@@ -234,9 +286,15 @@ private:
   bool CreateSwapChainBuffers();
   void ReleaseSwapChainBuffers();
   void ReleaseSceneTargets();
-  //! The scene targets' views: n 0 the colour, 1 the motion vectors, 2 the upscaler's depth; 3 the
-  //! HDR target's.
+  //! The frame target and the highlight layer of the swap chain's size (with m_bLayer).
+  bool CreateLayer();
+  //! The frame target from its state to State.
+  void SetFrameState(D3D12_RESOURCE_STATES State);
+  //! The views after the back buffers': n 0 the scene's colour, 1 its motion vectors, 2 the
+  //! upscaler's depth; 3 the HDR target; 4 the frame target, 5 the highlight layer.
   D3D12_CPU_DESCRIPTOR_HANDLE SceneRTV(int n) const;
+  //! The swap chain's current buffer's view.
+  D3D12_CPU_DESCRIPTOR_HANDLE SwapChainRTV() const;
   D3D12_CPU_DESCRIPTOR_HANDLE SceneDSV() const;
   //! Resets the slot's allocator and the list and binds the heap, root signature and targets.
   void OpenCmdList();
@@ -246,12 +304,27 @@ private:
   void EndOffscreen();
 
   ComPtr<IDXGIFactory4> m_pFactory;
+  UINT m_nFactoryFlags = 0;
   ComPtr<IDXGIAdapter1> m_pAdapter;
   ComPtr<ID3D12Device> m_pDevice;
   ComPtr<ID3D12CommandQueue> m_pQueue;
   ComPtr<IDXGISwapChain3> m_pSwapChain;
   ComPtr<ID3D12InfoQueue> m_pInfoQueue;
   bool m_bTearing = false;
+  HWND m_hWnd = nullptr;
+
+  EDisplayOutput m_Output = EDisplayOutput::Sdr;    //!< SetOutput
+  DXGI_FORMAT m_SwapChainFormat = D3D12_BACKBUFFER_FORMAT;
+  float m_fMetadataPeak = 0, m_fMetadataFrameAverage = 0;   //!< HDR10's metadata as set
+  bool m_bLayer = false;                            //!< the frame target and the highlight layer are wanted
+  ComPtr<ID3D12Resource> m_pFrame, m_pHighlight;    //!< CreateLayer
+  D3D12_RESOURCE_STATES m_FrameState = D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE;
+  bool m_bHighlightBound = false;                   //!< BindHighlight
+  bool m_bOutput = false;                           //!< BeginOutput .. EndFrame
+  SDisplayInfo m_Display;
+  bool m_bDisplayInfo = false;                      //!< m_Display was looked up
+  HMONITOR m_hDisplayMonitor = nullptr;             //!< the monitor it is of
+  uint64 m_nDisplayInfoTime = 0;                    //!< GetTickCount64 when
 
   ComPtr<ID3D12CommandAllocator> m_pAllocators[D3D12_FRAMES];
   uint64 m_nFrameFence[D3D12_FRAMES] = {};

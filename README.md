@@ -21,9 +21,12 @@ Mods for Far Cry, built with the CryENGINE MOD SDK for Far Cry:
   - `field-of-view.patch` - a field of view for screens wider than 4:3 that keeps the view up and
     down of a 4:3 screen (Hor+), and the console variable `cl_fov`, the field of view across the
     screen in degrees (0, the default, for the automatic one).
-  - `hdr-options.patch` - an HDR entry in Advanced Video Options, where the game hides its own:
-    None, Soft, ACES or AgX, which sets `r_HDRRendering` and `d3d12_ToneMap`, the HDR pipeline of
-    XRenderD3D12 and its tone map.
+  - `hdr-options.patch` - HDR entries in Advanced Video Options, where the game hides its own:
+    HDR, None, Soft, ACES or AgX, which sets `r_HDRRendering` and `d3d12_ToneMap`, the HDR
+    pipeline of XRenderD3D12 and its tone map; and HDR output, SDR, HDR10 or scRGB, which sets
+    `d3d12_HDROutput`: on a display in HDR mode (Windows: Use HDR) the sun, fire and lamps go up to
+    the display's peak brightness, while the rest of the picture and the menu stay as bright as SDR
+    content.
 
 How to build and run them: `AGENTS.md`.
 

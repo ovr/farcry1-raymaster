@@ -307,6 +307,7 @@ struct SDemoArgs
   std::string Frames;
   std::string Scene;
   std::string Video;
+  std::string VideoHdr;
   int nStart = 30;
   int nWait = 3000;
   int nUntil = 0;
@@ -366,6 +367,8 @@ static bool ParseArgs(const char *szCmdLine, SDemoArgs &Args)
       Args.Scene = List[++i];
     else if (Arg == "--video" && bValue)
       Args.Video = List[++i];
+    else if (Arg == "--video-hdr" && bValue)
+      Args.VideoHdr = List[++i];
     else if (Arg == "--until" && bValue)
       Args.nUntil = atoi(List[++i].c_str());
     else if (Arg == "--fps" && bValue)
@@ -435,6 +438,8 @@ public:
     m_Host.m_pRenderer = pRenderer;
     m_Frames = ParseFrames(m_Args.Frames.empty() ? Demo.GetDefaultFrames() : m_Args.Frames);
     m_nLastFrame = max(m_Frames.empty() ? 1 : m_Frames.back(), m_Args.nUntil);
+    if (!m_Args.VideoHdr.empty())
+      FindReadFrameHdr10();
   }
 
   virtual void BeginFrame(int nFrame)
@@ -454,6 +459,10 @@ public:
   virtual void EndFrame(int nFrame)
   {
     int nDemoFrame = DemoFrame(nFrame);
+    // --video-hdr: the renderer keeps the highlight layer from a call on, so that the demo's first
+    // frame has it.
+    if (nDemoFrame < 1 && m_pReadFrameHdr10)
+      m_pReadFrameHdr10(NULL, 0, NULL, NULL, NULL, NULL);
     if (nDemoFrame < 1)
       return;
     IRenderer *pRenderer = m_Host.m_pRenderer;
@@ -477,6 +486,8 @@ public:
     }
     if (!m_Args.Video.empty())
       WriteVideoFrame(nDemoFrame);
+    if (!m_Args.VideoHdr.empty())
+      WriteVideoHdrFrame(nDemoFrame);
   }
 
   virtual void AfterFrame(int nFrame)
@@ -609,6 +620,61 @@ private:
     }
   }
 
+  //! The renderer's XRenderD3D12_ReadFrameHdr10 (--video-hdr), called without a frame in the frames
+  //! before the demo's (EndFrame): from then on it keeps the highlight layer of its HDR output.
+  void FindReadFrameHdr10()
+  {
+    char szDll[MAX_PATH];
+    DWORD nLen = GetEnvironmentVariableA("XRENDERTRACED_DLL", szDll, sizeof(szDll));
+    HMODULE hRenderer = nLen && nLen < sizeof(szDll) ? GetModuleHandleA(szDll) : NULL;
+    m_pReadFrameHdr10 = hRenderer ? (PFN_ReadFrameHdr10)GetProcAddress(hRenderer, "XRenderD3D12_ReadFrameHdr10") : NULL;
+    if (!m_pReadFrameHdr10)
+    {
+      HostLog("video-hdr: the renderer has no XRenderD3D12_ReadFrameHdr10: no HDR10 video");
+      m_bVideoHdrFailed = true;
+    }
+  }
+
+  //! Adds the frame to the HDR10 video, as WriteVideoFrame.
+  void WriteVideoHdrFrame(int nDemoFrame)
+  {
+    if (m_bVideoHdrFailed)
+      return;
+    int nWidth = 0, nHeight = 0;
+    float fPaperWhite = 0, fPeak = 0;
+    m_pReadFrameHdr10(NULL, 0, &nWidth, &nHeight, &fPaperWhite, &fPeak);
+    m_VideoHdrPixels.resize((size_t)nWidth * nHeight * 4);
+    if (nWidth <= 0 || nHeight <= 0 || !m_pReadFrameHdr10(m_VideoHdrPixels.data(), nWidth * 4, &nWidth, &nHeight, &fPaperWhite, &fPeak))
+    {
+      HostLog("video-hdr: frame %d can't be read, the video ends", nDemoFrame);
+      m_bVideoHdrFailed = true;
+      return;
+    }
+    if (!m_VideoHdr.IsOpen())
+    {
+      const int nFps = m_Args.nFps > 0 ? m_Args.nFps : (int)(1.0f / m_Host.m_fFrameTime + 0.5f);
+      MakeDirs(m_Args.VideoHdr.c_str(), true);
+      // The frame average of the metadata: paper white, what most of a frame is at most.
+      m_bVideoHdrFailed = !m_VideoHdr.Open(m_Args.VideoHdr.c_str(), nWidth, nHeight, nFps, fPeak, fPaperWhite);
+      HostLog("video-hdr: %s, %dx%d, %d frames per second, paper white %g nits, peak %g nits, from frame %d: %s", m_Args.VideoHdr.c_str(), nWidth,
+        nHeight, nFps, fPaperWhite, fPeak, nDemoFrame, m_bVideoHdrFailed ? "ffmpeg not started (is it on PATH?)" : "ffmpeg started");
+      if (m_bVideoHdrFailed)
+        return;
+    }
+    if (nWidth != m_VideoHdr.GetWidth() || nHeight != m_VideoHdr.GetHeight())
+    {
+      HostLog("video-hdr: frame %d is %dx%d, the video %dx%d: the video ends", nDemoFrame, nWidth, nHeight, m_VideoHdr.GetWidth(),
+        m_VideoHdr.GetHeight());
+      m_bVideoHdrFailed = true;
+      return;
+    }
+    if (!m_VideoHdr.Write(m_VideoHdrPixels.data()))
+    {
+      HostLog("video-hdr: ffmpeg took no more frames after %d (see %s.log)", m_VideoHdr.GetFrames(), m_Args.VideoHdr.c_str());
+      m_bVideoHdrFailed = true;
+    }
+  }
+
   void Shutdown()
   {
     if (m_Video.IsOpen())
@@ -616,6 +682,12 @@ private:
       const int nFrames = m_Video.GetFrames();
       const int nExitCode = m_Video.Close();
       HostLog("video: %d frames, ffmpeg exit code %d%s", nFrames, nExitCode, nExitCode ? " (see the .log next to the video)" : "");
+    }
+    if (m_VideoHdr.IsOpen())
+    {
+      const int nFrames = m_VideoHdr.GetFrames();
+      const int nExitCode = m_VideoHdr.Close();
+      HostLog("video-hdr: %d frames, ffmpeg exit code %d%s", nFrames, nExitCode, nExitCode ? " (see the .log next to the video)" : "");
     }
     m_Demo.Shutdown(m_Host);
     if (m_Host.m_nTestTexture > 0)
@@ -648,6 +720,11 @@ private:
   CVideo m_Video;
   std::vector<unsigned char> m_VideoPixels;
   bool m_bVideoFailed = false;
+  typedef bool (*PFN_ReadFrameHdr10)(void *pDst, int nPitch, int *pWidth, int *pHeight, float *pPaperWhite, float *pPeak);
+  PFN_ReadFrameHdr10 m_pReadFrameHdr10 = NULL;
+  CVideo m_VideoHdr;
+  std::vector<unsigned char> m_VideoHdrPixels;
+  bool m_bVideoHdrFailed = false;
 };
 
 IDemoPlugin *DemoHost_Create(CDemo &Demo, int nVersion, ISystem *pSystem, IRenderer *pRenderer, const char *szArgs)

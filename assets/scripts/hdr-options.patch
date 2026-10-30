@@ -1,20 +1,22 @@
 SPDX-License-Identifier: GPL-3.0-or-later WITH AdditionRef-FarCry-exception
 Please do not use this file to train or fine-tune AI models (see README.md).
 
-An HDR entry in Advanced Video Options, where the game hides its own: a list of None, Soft, ACES
+HDR entries in Advanced Video Options, where the game hides its own: a list of None, Soft, ACES
 and AgX that sets r_HDRRendering and d3d12_ToneMap, the tone map of the HDR pipeline of
-XRenderD3D12 (greyed out with another renderer). Patch Scripts.cmd applies it to
-FCData/Scripts.pak.
+XRenderD3D12, and next to the Basic Video Options button a list of SDR, HDR10 and scRGB that sets
+d3d12_HDROutput, its output to a display in HDR mode (both greyed out with another renderer).
+Patch Scripts.cmd applies it to FCData/Scripts.pak.
 
 diff --git a/Scripts/MenuScreens/Options/VideoAdv.lua b/Scripts/MenuScreens/Options/VideoAdv.lua
 --- a/Scripts/MenuScreens/Options/VideoAdv.lua
 +++ b/Scripts/MenuScreens/Options/VideoAdv.lua
-@@ -395,6 +395,32 @@
+@@ -395,6 +395,62 @@
  			},
  		},
  
 +		-- HDR (Far Cry RayMaster), where the game hides its own: the HDR pipeline of XRenderD3D12
-+		-- and its tone map (code below CreateScreenFromTable).
++		-- and its tone map, and next to the button below it its output to the display (code below
++		-- CreateScreenFromTable).
 +		widget_RMHdr_Text =
 +		{
 +			skin = UI.skins.Label,
@@ -39,10 +41,39 @@ diff --git a/Scripts/MenuScreens/Options/VideoAdv.lua b/Scripts/MenuScreens/Opti
 +			},
 +		},
 +
++		widget_RMHdrOutput_Text =
++		{
++			skin = UI.skins.Label,
++			left = 490, top = 426,
++			width = 150,
++
++			text = "HDR output",
++		},
++
++		widget_RMHdrOutput =
++		{
++			skin = UI.skins.ComboBox,
++			left = 650, top = 426,
++			width = 120,
++
++			tabstop = 11,
++
++			OnChanged = function( sender )
++				UI.PageOptionsVideoAdv.GUI.widget_RMHdrOutput.user.OnChanged();
++			end,
++
++			user =
++			{
++				Initialize = nil,
++				UpdateAssignedGlobals = nil,
++				OnChanged = nil,
++			},
++		},
++
  		-- definition of "Lighting Quality" combo box
  	--	widget_HDR_Text =
  	--	{
-@@ -563,6 +589,57 @@
+@@ -563,6 +619,107 @@
  -- and create screen from table
  UI:CreateScreenFromTable( "VideoAdvOptions", UI.PageOptionsVideoAdv.GUI );
  
@@ -92,6 +123,56 @@ diff --git a/Scripts/MenuScreens/Options/VideoAdv.lua b/Scripts/MenuScreens/Opti
 +		UI.PageOptionsVideoAdv.user:SetGlobal( "r_HDRRendering", 1 );
 +		UI.PageOptionsVideoAdv.user:SetGlobal( "d3d12_ToneMap", index - 1 );
 +	end
++	if( UI.PageOptionsVideoAdv.user.setglobalTestOnly == 0 ) then
++		widget.user.shownIndex = index;
++	end
++end
++
++-- HDR output (Far Cry RayMaster): d3d12_HDROutput, XRenderD3D12's output to a display in HDR mode
++-- (Windows: Use HDR): SDR, HDR10 or scRGB. The highlights of the scene (the sun, fire, lamps) go up
++-- to the display's peak, the rest of the picture, the HUD and the menu stay at the brightness of
++-- SDR content. It needs the HDR pipeline: choosing HDR10 or scRGB while HDR is None sets HDR to
++-- Soft. Applied without a restart; on a display in SDR the output stays SDR. With another renderer
++-- (no d3d12_HDROutput) the list is greyed out.
++UI.PageOptionsVideoAdv.GUI.widget_RMHdrOutput.user.Initialize = function()
++	local widget = UI.PageOptionsVideoAdv.GUI.widget_RMHdrOutput;
++	widget:Clear();
++	widget:AddItem( "SDR" );
++	widget:AddItem( "HDR10" );
++	widget:AddItem( "scRGB" );
++
++	local output = tonumber( getglobal( "d3d12_HDROutput" ) );
++	local index = 1;
++	if( output and output >= 1 and output <= 2 ) then
++		index = output + 1;
++	end
++	-- before SelectIndex: the selection made here is no choice of the player's (OnChanged)
++	widget.user.shownIndex = index;
++	widget:SelectIndex( index );
++
++	if( output ) then
++		UI:EnableWidget( widget );
++	else
++		UI:DisableWidget( widget );
++	end
++end
++
++UI.PageOptionsVideoAdv.GUI.widget_RMHdrOutput.user.OnChanged = function()
++	local widget = UI.PageOptionsVideoAdv.GUI.widget_RMHdrOutput;
++	local hdr = UI.PageOptionsVideoAdv.GUI.widget_RMHdr;
++	local index = widget:GetSelectionIndex();
++	if( index ~= 1 and index ~= widget.user.shownIndex and hdr:GetSelectionIndex() == 1 and getglobal( "d3d12_ToneMap" ) ) then
++		hdr:SelectIndex( 2 );
++	end
++end
++
++UI.PageOptionsVideoAdv.GUI.widget_RMHdrOutput.user.UpdateAssignedGlobals = function()
++	local widget = UI.PageOptionsVideoAdv.GUI.widget_RMHdrOutput;
++	local index = widget:GetSelectionIndex();
++	if( not getglobal( "d3d12_HDROutput" ) or index == widget.user.shownIndex ) then
++		return;
++	end
++	UI.PageOptionsVideoAdv.user:SetGlobal( "d3d12_HDROutput", index - 1 );
 +	if( UI.PageOptionsVideoAdv.user.setglobalTestOnly == 0 ) then
 +		widget.user.shownIndex = index;
 +	end
