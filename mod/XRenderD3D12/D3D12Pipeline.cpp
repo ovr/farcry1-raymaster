@@ -45,6 +45,8 @@
 #include "Hdr_VS.h"
 #include "Hdr_PS.h"
 #include "Hdr_Highlight_PS.h"
+#include "RayDebug_VS.h"
+#include "RayDebug_PS.h"
 
 using Microsoft::WRL::ComPtr;
 
@@ -79,6 +81,7 @@ namespace
     { "Water", g_Water_VS, sizeof(g_Water_VS), g_Water_PS, sizeof(g_Water_PS) },
     { "Post", g_Post_VS, sizeof(g_Post_VS), g_Post_PS, sizeof(g_Post_PS) },
     { "Hdr", g_Hdr_VS, sizeof(g_Hdr_VS), g_Hdr_PS, sizeof(g_Hdr_PS) },
+    { "RayDebug", g_RayDebug_VS, sizeof(g_RayDebug_VS), g_RayDebug_PS, sizeof(g_RayDebug_PS) },
   };
 
   //! The general program's pixel shaders with the ambient light's part (XR_AMBIENT) by [cascades][HDR][velocity].
@@ -371,7 +374,7 @@ bool CD3D12Pipeline::CreateRootSignature()
       (int)Options.ResourceBindingTier);
 
   // All views of the texture table start at its first slot.
-  D3D12_DESCRIPTOR_RANGE Ranges[3] = {};
+  D3D12_DESCRIPTOR_RANGE Ranges[4] = {};
   Ranges[0].RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_SRV;
   Ranges[0].NumDescriptors = UINT_MAX;          // unbounded
   Ranges[0].BaseShaderRegister = 0;
@@ -381,8 +384,10 @@ bool CD3D12Pipeline::CreateRootSignature()
   Ranges[1].RegisterSpace = 2;                  // TextureCube g_Cubes[]
   Ranges[2] = Ranges[0];
   Ranges[2].RegisterSpace = 3;                  // Texture2DArray g_TextureArrays[]
+  Ranges[3] = Ranges[0];
+  Ranges[3].RegisterSpace = 4;                  // ByteAddressBuffer g_Buffers[] (the rays' vertices and indices)
 
-  D3D12_ROOT_PARAMETER Params[3] = {};
+  D3D12_ROOT_PARAMETER Params[5] = {};
   Params[0].ParameterType = D3D12_ROOT_PARAMETER_TYPE_CBV;      // b0 SFrameConstants
   Params[0].Descriptor.ShaderRegister = 0;
   Params[0].ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
@@ -390,9 +395,17 @@ bool CD3D12Pipeline::CreateRootSignature()
   Params[1].Descriptor.ShaderRegister = 1;
   Params[1].ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
   Params[2].ParameterType = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
-  Params[2].DescriptorTable.NumDescriptorRanges = 3;
+  Params[2].DescriptorTable.NumDescriptorRanges = 4;
   Params[2].DescriptorTable.pDescriptorRanges = Ranges;
   Params[2].ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
+  Params[ROOT_RAY_SCENE].ParameterType = D3D12_ROOT_PARAMETER_TYPE_SRV;    // t0 space5 the TLAS
+  Params[ROOT_RAY_SCENE].Descriptor.ShaderRegister = 0;
+  Params[ROOT_RAY_SCENE].Descriptor.RegisterSpace = 5;
+  Params[ROOT_RAY_SCENE].ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
+  Params[ROOT_RAY_INSTANCES].ParameterType = D3D12_ROOT_PARAMETER_TYPE_SRV;  // t1 space5 its instances
+  Params[ROOT_RAY_INSTANCES].Descriptor.ShaderRegister = 1;
+  Params[ROOT_RAY_INSTANCES].Descriptor.RegisterSpace = 5;
+  Params[ROOT_RAY_INSTANCES].ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
 
   D3D12_STATIC_SAMPLER_DESC Samplers[5];
   Samplers[XR_SAMPLER_LINEAR_WRAP] = StaticSampler(XR_SAMPLER_LINEAR_WRAP, D3D12_FILTER_ANISOTROPIC, D3D12_TEXTURE_ADDRESS_MODE_WRAP);
@@ -404,7 +417,7 @@ bool CD3D12Pipeline::CreateRootSignature()
   Samplers[4].ComparisonFunc = D3D12_COMPARISON_FUNC_LESS_EQUAL;
 
   D3D12_ROOT_SIGNATURE_DESC Desc = {};
-  Desc.NumParameters = 3;
+  Desc.NumParameters = 5;
   Desc.pParameters = Params;
   Desc.NumStaticSamplers = 5;
   Desc.pStaticSamplers = Samplers;

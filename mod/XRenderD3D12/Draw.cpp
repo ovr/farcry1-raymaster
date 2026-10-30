@@ -14,6 +14,7 @@
 #include "D3D12Device.h"
 #include "D3D12Upload.h"
 #include "D3D12Descriptors.h"
+#include "RayTracing.h"
 
 namespace
 {
@@ -125,6 +126,13 @@ void CD3D12Renderer::DrawGeometry(const SPipelineKey &Key, const SDrawConstants 
     return;
   const bool bOffscreen = m_pDevice->IsOffscreen();
   const bool bScene = m_pDevice->IsSceneBound();
+  // The main view's opaque draws for the scene for rays (RayTracing.h).
+  if (m_pRayScene && m_pRayScene->IsCapturing() && !bOffscreen)
+    m_pRayScene->CaptureDraw(Key, dc, eTopology, VB, pIB, nCount, nFirst, nBaseVertex);
+  // A program with rays needs this frame's scene.
+  const D3D12_GPU_VIRTUAL_ADDRESS nRayScene = Key.nProgram == eD3D12P_RayDebug && m_pRayScene ? m_pRayScene->GetTLAS() : 0;
+  if (Key.nProgram == eD3D12P_RayDebug && !nRayScene)
+    return;
   SPipelineKey FullKey = Key;
   FullKey.nTopology = (uint8)GetTopologyType(eTopology);
   FullKey.nStreams = (pTexCoord1 ? PIPELINE_STREAM_TEXCOORD1 : 0) | (pTangents ? PIPELINE_STREAM_TANGENTS : 0);
@@ -178,6 +186,8 @@ void CD3D12Renderer::DrawGeometry(const SPipelineKey &Key, const SDrawConstants 
   pList->SetPipelineState(pPSO);
   pList->SetGraphicsRootConstantBufferView(0, m_nFrameCB);
   pList->SetGraphicsRootConstantBufferView(1, UploadConstants(*m_pUpload, *pDC));
+  if (nRayScene)
+    pList->SetGraphicsRootShaderResourceView(ROOT_RAY_SCENE, nRayScene);
   pList->IASetVertexBuffers(0, 1, &VB);
   m_pPipeline->BindDefaultStream(pList);
   if (pTexCoord1)

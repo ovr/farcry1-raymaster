@@ -16,6 +16,7 @@
 #include "D3D12Descriptors.h"
 #include "D3D12Pipeline.h"
 #include "D3D12Compute.h"
+#include "RayTracing.h"
 #include "Texture.h"
 #include "Shader.h"
 #include "Scene.h"
@@ -199,6 +200,15 @@ void CD3D12Renderer::RegisterVariables()
                      "has no shadows on the terrain to take it from, 0 to 1");
   iConsole->Register("d3d12_AODebug", &CV_d3d12_AODebug, 0, 0,
                      "1: the ambient occlusion's factor in grey over the whole picture; with d3d12_AOApply 1, 2: the ambient light, 3: the light it takes away");
+  // The scene for rays (RayTracing.cpp), on a device with DXR 1.1.
+  iConsole->Register("d3d12_RTDebug", &CV_d3d12_RTDebug, 0, 0,
+                     "The scene for rays seen from the camera, one ray per pixel over the whole picture: 1 its instances in colours, "
+                     "3 the distance to the hit (blue near, red far), 5 the kind of BLAS (static green, of the frame red, alpha tested lighter)");
+  iConsole->Register("d3d12_RTDistance", &CV_d3d12_RTDistance, 150.0f, VF_DUMPTODISK, "The rays' length (m)");
+  iConsole->Register("d3d12_RTMemory", &CV_d3d12_RTMemory, 384, VF_DUMPTODISK,
+                     "The memory of the static geometry's acceleration structures (MB) beyond which the least recently used go");
+  iConsole->Register("d3d12_RTMask", &CV_d3d12_RTMask, 31, 0,
+                     "The kinds of geometry the rays see, bits: 1 static, 2 alpha tested, 4 changing every frame");
   // The HDR pipeline (r_HDRRendering, Hdr.cpp).
   iConsole->Register("d3d12_ToneMap", &CV_d3d12_ToneMap, 1, VF_DUMPTODISK,
                      "With r_HDRRendering, the tone map: 0 clamp, 1 soft shoulder (the game's look up to d3d12_ToneMapKnee, then each channel rolls off to 1), 2 ACES fitted, 3 AgX");
@@ -309,6 +319,7 @@ WIN_HWND CD3D12Renderer::Init(int x,int y,int width,int height,unsigned int cbpp
   m_pUpload = std::make_unique<CD3D12Upload>();
   m_pPipeline = std::make_unique<CD3D12Pipeline>();
   m_pCompute = std::make_unique<CD3D12Compute>();
+  m_pRayScene = std::make_unique<CD3D12RayScene>();
   m_pTextures = std::make_unique<CTextureManager>();
   m_pShaders = std::make_unique<CShaderManager>();
   m_pScene = std::make_unique<CScene>();
@@ -324,6 +335,8 @@ WIN_HWND CD3D12Renderer::Init(int x,int y,int width,int height,unsigned int cbpp
     iLog->LogError("XRenderD3D12: initialization failed");
     return 0;
   }
+  // Without rays the scene for them stays empty (RayTracing.h).
+  m_pRayScene->Init(m_pDevice->GetDevice());
   m_Viewport[0] = 0;
   m_Viewport[1] = 0;
   m_Viewport[2] = m_nWidth;
@@ -595,6 +608,8 @@ void CD3D12Renderer::Release()
   m_nSceneSkyBox = -1;
   if (m_pTextures)
     m_pTextures->Shutdown();
+  if (m_pRayScene)
+    m_pRayScene->Shutdown();
   if (m_pCompute)
     m_pCompute->Shutdown();
   if (m_pPipeline)
@@ -608,6 +623,7 @@ void CD3D12Renderer::Release()
   m_pScene.reset();
   m_pShaders.reset();
   m_pTextures.reset();
+  m_pRayScene.reset();
   m_pCompute.reset();
   m_pPipeline.reset();
   m_pUpload.reset();

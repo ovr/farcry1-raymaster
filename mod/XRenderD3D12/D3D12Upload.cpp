@@ -16,9 +16,9 @@
 //	without a signal of its own: the allocator and the staging blocks wait
 //	for the next fence value the queue signals (CD3D12Device::GetFrameFence,
 //	which comes after the batch), so that the frame's fence keeps covering
-//	the frame's own command list. Buffers end every batch in
-//	VERTEX_AND_CONSTANT_BUFFER | INDEX_BUFFER, textures in
-//	PIXEL_SHADER_RESOURCE.
+//	the frame's own command list. Buffers end every batch in BUFFER_STATE
+//	(their draws' states and the shader resource states of the rays),
+//	textures in PIXEL_SHADER_RESOURCE.
 //
 //////////////////////////////////////////////////////////////////////
 
@@ -39,7 +39,8 @@ namespace
   constexpr uint64 MAX_IN_FLIGHT_BYTES = 256 * 1024 * 1024; //!< more staging in flight waits for the GPU
   constexpr size_t MAX_FREE_STAGING = 16;                   //!< staging blocks kept for reuse
 
-  constexpr D3D12_RESOURCE_STATES BUFFER_STATE = D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER | D3D12_RESOURCE_STATE_INDEX_BUFFER;
+  constexpr D3D12_RESOURCE_STATES BUFFER_STATE = D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER | D3D12_RESOURCE_STATE_INDEX_BUFFER |
+    D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE | D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE;
   constexpr D3D12_RESOURCE_STATES TEXTURE_STATE = D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE;
 
   //! n rounded up to a multiple of nAlign (any nAlign > 0).
@@ -182,6 +183,7 @@ void CD3D12Upload::Shutdown()
   m_Scratch.shrink_to_fit();
   m_nCurBlock = -1;
   m_nCurOffset = 0;
+  m_Buffers.clear();
   m_pDevice = nullptr;
 }
 
@@ -522,6 +524,8 @@ CD3D12Buffer *CD3D12Upload::CreateBuffer(const void *pData, uint32 nSize)
   pBuf->m_pResource = pResource.Detach();
   pBuf->m_nGPU = pBuf->m_pResource->GetGPUVirtualAddress();
   pBuf->m_nSize = nSize;
+  pBuf->m_nId = m_nNextBufferId++;
+  m_Buffers[pBuf->m_nGPU] = pBuf;
   AddVideoMemory(pBuf->m_pResource);
   return pBuf;
 }
@@ -540,6 +544,7 @@ void CD3D12Upload::UpdateBuffer(CD3D12Buffer *pBuf, uint32 nOffset, const void *
   Barrier(pBuf->m_pResource, D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES, BUFFER_STATE, D3D12_RESOURCE_STATE_COPY_DEST);
   m_pCmdList->CopyBufferRegion(pBuf->m_pResource, nOffset, Staging.pResource, Staging.nOffset, nSize);
   Barrier(pBuf->m_pResource, D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES, D3D12_RESOURCE_STATE_COPY_DEST, BUFFER_STATE);
+  pBuf->m_nVersion++;
 }
 
 void CD3D12Upload::ReleaseBuffer(CD3D12Buffer *pBuf)
@@ -551,7 +556,20 @@ void CD3D12Upload::ReleaseBuffer(CD3D12Buffer *pBuf)
     SubVideoMemory(pBuf->m_pResource);
     g_pRenderer->m_pDevice->DeferredRelease(pBuf->m_pResource);
   }
+  auto it = m_Buffers.find(pBuf->m_nGPU);
+  if (it != m_Buffers.end() && it->second == pBuf)
+    m_Buffers.erase(it);
   delete pBuf;
+}
+
+const CD3D12Buffer *CD3D12Upload::FindBuffer(D3D12_GPU_VIRTUAL_ADDRESS nGPU) const
+{
+  auto it = m_Buffers.upper_bound(nGPU);
+  if (it == m_Buffers.begin())
+    return nullptr;
+  --it;
+  const CD3D12Buffer *pBuf = it->second;
+  return nGPU - pBuf->m_nGPU < pBuf->m_nSize ? pBuf : nullptr;
 }
 
 //////////////////////////////////////////////////////////////////////////

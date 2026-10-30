@@ -22,6 +22,7 @@
 #pragma once
 
 #include <wrl/client.h>
+#include <map>
 #include <vector>
 #include "D3D12Device.h"
 
@@ -34,16 +35,19 @@ struct SD3D12FrameAlloc
   uint64 nOffset;                     //!< in pResource
 };
 
-//! A buffer in the default heap (vertices, indices), in the state
-//! VERTEX_AND_CONSTANT_BUFFER | INDEX_BUFFER between uploads.
+//! A buffer in the default heap (vertices, indices), in the state VERTEX_AND_CONSTANT_BUFFER |
+//! INDEX_BUFFER | NON_PIXEL_SHADER_RESOURCE | PIXEL_SHADER_RESOURCE between uploads (the shader
+//! resource states for the rays: the scene's builds and the shaders read it, RayTracing.h).
 class CD3D12Buffer
 {
 public:
   ID3D12Resource *m_pResource;
   D3D12_GPU_VIRTUAL_ADDRESS m_nGPU;
   uint32 m_nSize;
+  uint64 m_nId;                       //!< never the same for two buffers (FindBuffer's callers tell them apart by it)
+  uint32 m_nVersion;                  //!< counts the UpdateBuffer calls
 
-  CD3D12Buffer() : m_pResource(NULL), m_nGPU(0), m_nSize(0) {}
+  CD3D12Buffer() : m_pResource(NULL), m_nGPU(0), m_nSize(0), m_nId(0), m_nVersion(0) {}
 };
 
 //! A texture in the default heap, in the state PIXEL_SHADER_RESOURCE between uploads (render
@@ -97,6 +101,8 @@ public:
   void UpdateBuffer(CD3D12Buffer *pBuf, uint32 nOffset, const void *pData, uint32 nSize);
   //! Deferred until the GPU is done with it; deletes pBuf.
   void ReleaseBuffer(CD3D12Buffer *pBuf);
+  //! The static buffer that holds the GPU address nGPU, NULL when none does (e.g. per frame memory).
+  const CD3D12Buffer *FindBuffer(D3D12_GPU_VIRTUAL_ADDRESS nGPU) const;
 
   //! A 2D texture (or a cube with 6 faces), nMips levels, with an SRV in the texture table.
   //! pSubData: [face * nMips + mip] for every face and mip, or NULL (contents undefined); an
@@ -186,4 +192,8 @@ private:
   uint64 m_nInFlightBytes = 0;        //!< staging bytes of the executed batches not retired yet
 
   uint64 m_nVideoMemory = 0;
+
+  // Static buffers
+  std::map<D3D12_GPU_VIRTUAL_ADDRESS, CD3D12Buffer *> m_Buffers;   //!< by their GPU address
+  uint64 m_nNextBufferId = 1;
 };

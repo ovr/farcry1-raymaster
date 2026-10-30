@@ -37,6 +37,7 @@ class CD3D12Texture;
 class CD3D12Descriptors;
 class CD3D12Pipeline;
 class CD3D12Compute;
+class CD3D12RayScene;
 class CTexture;
 class CTextureManager;
 class CShaderManager;
@@ -560,6 +561,20 @@ public:
   ICVar *m_pAOVar = nullptr;                //!< d3d12_AO
 
   //////////////////////////////////////////////////////////////////////////
+  // RayTracing.cpp: the scene for rays (RayTracing.h, d3d12_RT*)
+
+  //! The device has rays and a cvar wants them.
+  bool WantsRays() const;
+  //! Before the main view's opaque list (not its reflection, sprites, shadow maps, cubes or heat
+  //! vision): its draws go into the scene for rays.
+  void BeginRayCapture();
+  //! After the main view's opaque list: the builds of the scene, for the draws after it.
+  void BuildRayScene();
+  //! d3d12_RTDebug: the scene for rays seen from the main view's camera, over the whole picture
+  //! (after EndMainScene).
+  void DrawRayDebug();
+
+  //////////////////////////////////////////////////////////////////////////
   // Water.cpp
 
   //! Key and constants of a water surface (eDC_Water): the water program over the copy of the
@@ -1022,6 +1037,7 @@ public:
   std::unique_ptr<CD3D12Descriptors> m_pDescriptors;
   std::unique_ptr<CD3D12Pipeline> m_pPipeline;
   std::unique_ptr<CD3D12Compute> m_pCompute;
+  std::unique_ptr<CD3D12RayScene> m_pRayScene;
   std::unique_ptr<CTextureManager> m_pTextures;
   std::unique_ptr<CShaderManager> m_pShaders;
   std::unique_ptr<CScene> m_pScene;
@@ -1135,6 +1151,10 @@ public:
   int CV_d3d12_AOApply = 1;                 //!< 0: it multiplies the whole picture, 1: it takes away the ambient light alone
   float CV_d3d12_AOBakedShare = 0.5f;       //!< the ambient light's share of a baked light without the terrain's shadows to take it from
   int CV_d3d12_AODebug = 0;                 //!< 1: its factor in grey; 2: the ambient light, 3: the light taken (d3d12_AOApply 1)
+  int CV_d3d12_RTDebug = 0;                 //!< the scene for rays from the main camera (XR_RAY_DEBUG_*, Shaders/RayConstants.h)
+  float CV_d3d12_RTDistance = 150;          //!< the rays' length (m)
+  int CV_d3d12_RTMemory = 384;              //!< the static BLAS' memory (MB) beyond which the least recently used go
+  int CV_d3d12_RTMask = 31;                 //!< the kinds of instances the rays see (XR_RAY_* bits)
   int CV_d3d12_ToneMap = 1;                 //!< the HDR pipeline's tone map: 0 clamp, 1 soft shoulder, 2 ACES fitted, 3 AgX
   float CV_d3d12_ToneMapKnee = 0.85f;       //!< where the soft shoulder starts (a display value)
   float CV_d3d12_Exposure = 0;              //!< the exposure's compensation, EV

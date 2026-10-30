@@ -562,11 +562,20 @@ void CScene::EndEf3D(int nFlags)
       std::vector<SRenderItem> &list = s.Lists[l];
       // The main view's ambient occlusion over what the opaque list drew (its ambient light with
       // d3d12_AOApply 1).
+      // Its draws make the scene for rays (RayTracing.h), built after the ambient occlusion for the
+      // draws after it.
       if (l == eRL_Opaque)
+      {
         g_pRenderer->BeginAOTarget(s.Items.data(), nItems);
+        if (m_nDrawing == 1)
+          g_pRenderer->BeginRayCapture();
+      }
       g_pRenderer->DrawItems(list.data(), (int)list.size(), l);
       if (l == eRL_Opaque)
+      {
         g_pRenderer->DrawAmbientOcclusion();
+        g_pRenderer->BuildRayScene();
+      }
     }
   }
   if (m_nDrawing == 1)
@@ -574,6 +583,7 @@ void CScene::EndEf3D(int nFlags)
     g_pRenderer->EndMainScene();
     g_pRenderer->DrawScreenEffects();
     g_pRenderer->DrawAODebug();
+    g_pRenderer->DrawRayDebug();
     g_pRenderer->DrawShadowMapDebug();
     g_pRenderer->GpuSection("other");
   }
