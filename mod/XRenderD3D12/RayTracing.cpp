@@ -850,6 +850,7 @@ void CD3D12Renderer::BeginRayCapture()
 
 void CD3D12Renderer::BuildRayScene()
 {
+  FUNCTION_PROFILER(iSystem, PROFILE_RENDERER);
   if (!m_pRayScene || !m_pRayScene->IsCapturing())
     return;
   m_pRayScene->EndCapture();

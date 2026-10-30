@@ -450,6 +450,7 @@ void CScene::AddEf(int nFog, CRendElement *pRE, IShader *pEf, SRenderShaderResou
 
 int CScene::PrepareItems(SSceneSlot &Slot)
 {
+  FUNCTION_PROFILER(iSystem, PROFILE_RENDERER);
   // Items added from inside these calls (none expected) are not drawn: indices, no iterators.
   const size_t nItems = Slot.Items.size();
 
@@ -487,6 +488,7 @@ int CScene::PrepareItems(SSceneSlot &Slot)
 
 void CScene::BuildLists(SSceneSlot &Slot, int nItems, bool bSort)
 {
+  FUNCTION_PROFILER(iSystem, PROFILE_RENDERER);
   for (std::vector<SRenderItem> &l : Slot.Lists)
     l.clear();
   // The caustics go with the terrain: in its list and sort group (all its sectors share them).

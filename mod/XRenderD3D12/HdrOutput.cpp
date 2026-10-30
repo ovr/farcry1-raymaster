@@ -162,6 +162,7 @@ SDrawConstants CD3D12Renderer::HdrOutputConstants(EDisplayOutput Output) const
 
 void CD3D12Renderer::DrawHdrOutput()
 {
+  FUNCTION_PROFILER(iSystem, PROFILE_RENDERER);
   const EDisplayOutput Output = m_pDevice->GetOutput();
   if (Output == EDisplayOutput::Sdr || !m_pDevice->HasLayer() || !UpdateLayerSRVs())
     return;

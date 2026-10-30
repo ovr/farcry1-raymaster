@@ -391,6 +391,8 @@ void CRendererProxy::ExecuteCommands(const char *szCommands)
       ParticlesCommand(szCmd + 9);
     else if (!strncmp(szCmd, "cvars", 5) && (!szCmd[5] || szCmd[5] == ' '))
       CVarsCommand(szCmd + 5);
+    else if (!strncmp(szCmd, "profilers", 9) && (!szCmd[9] || szCmd[9] == ' '))
+      ProfilersCommand(szCmd + 9);
     else if (!strncmp(szCmd, "veggroup ", 9))
       VegGroupCommand(szCmd + 9);
     else if (!strncmp(szCmd, "decal ", 6))
@@ -590,6 +592,88 @@ void CRendererProxy::CVarsCommand(const char *szArgs)
   Sink.m_nFound = 0;
   iConsole->DumpCVars(&Sink);
   Trace_Write("    %d console variables starting with '%s'", Sink.m_nFound, szArgs);
+}
+
+static int CompareAddresses(const void *a, const void *b)
+{
+  const UINT_PTR x = *(const UINT_PTR *)a, y = *(const UINT_PTR *)b;
+  return x < y ? -1 : x > y ? 1 : 0;
+}
+
+//! m_nHistoryCount of a CFrameProfilerSamplesHistory (protected): after the samples and m_nHistoryNext.
+template<class T> static int HistoryCount(const CFrameProfilerSamplesHistory<T, 64> &History)
+{
+  return ((const int *)((const char *)&History + sizeof(T) * 64))[1];
+}
+
+//! The base name of the module that holds an address ("?" for none) and the offset in it.
+static const char *ModuleOfAddress(const void *p, UINT_PTR &nOffset, char (&szPath)[MAX_PATH])
+{
+  HMODULE hModule = NULL;
+  nOffset = (UINT_PTR)p;
+  if (!GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT, (LPCSTR)p, &hModule) ||
+      !GetModuleFileNameA(hModule, szPath, MAX_PATH))
+    return "?";
+  nOffset = (UINT_PTR)p - (UINT_PTR)hModule;
+  const char *szName = strrchr(szPath, '\\');
+  return szName ? szName + 1 : szPath;
+}
+
+//! The engine's frame profilers, read with the SDK's CFrameProfiler. The values at the end of the
+//! class (the history counts, at most 64) and the smallest distance between two profilers of one
+//! module tell whether the engine's class is the SDK's.
+void CRendererProxy::ProfilersCommand(const char *szArgs)
+{
+  while (*szArgs == ' ')
+    szArgs++;
+  IFrameProfileSystem *pProfiles = iSystem ? iSystem->GetIProfileSystem() : NULL;
+  if (!pProfiles)
+  {
+    Trace_Write("    no IFrameProfileSystem");
+    return;
+  }
+  const int nCount = pProfiles->GetProfilerCount();
+  Trace_Write("    %d frame profilers, enabled %d, profiling %d; sizeof(CFrameProfiler) %d in the SDK's header", nCount,
+    (int)pProfiles->IsEnabled(), (int)pProfiles->IsProfiling(), (int)sizeof(CFrameProfiler));
+  static UINT_PTR s_Addresses[4096];
+  int nAddresses = 0, nListed = 0;
+  for (int i = 0; i < nCount; i++)
+  {
+    CFrameProfiler *p = pProfiles->GetProfiler(i);
+    if (!p || !Trace_IsReadable(p, sizeof(CFrameProfiler)))
+    {
+      Trace_Write("    [%d] %p: not readable", i, p);
+      continue;
+    }
+    if (nAddresses < (int)ARRAYSIZE(s_Addresses))
+      s_Addresses[nAddresses++] = (UINT_PTR)p;
+    const char *szName = p->m_name && Trace_IsReadable(p->m_name, 1) ? p->m_name : "?";
+    if (_strnicmp(szName, szArgs, strlen(szArgs)))
+      continue;
+    nListed++;
+    char szPath[MAX_PATH];
+    UINT_PTR nOffset = 0;
+    const char *szModule = ModuleOfAddress(p, nOffset, szPath);
+    Trace_Write("    [%d] %s+0x%llx '%s' subsystem %d: count %d, total %lld, self %lld, sum %lld / %lld, shown %.3f / %.3f, "
+      "parent %p, history %d %d %d, graph %p, offline %p", i, szModule, (unsigned long long)nOffset, szName, (int)p->m_subsystem,
+      p->m_count, p->m_totalTime, p->m_selfTime, p->m_sumTotalTime, p->m_sumSelfTime, p->m_displayedValue, p->m_displayedCurrentValue,
+      p->m_pParent, HistoryCount(p->m_totalTimeHistory), HistoryCount(p->m_selfTimeHistory), HistoryCount(p->m_countHistory), p->m_pGraph,
+      p->m_pOfflineHistory);
+  }
+  // The smallest distance between two profilers of one module.
+  qsort(s_Addresses, nAddresses, sizeof(s_Addresses[0]), CompareAddresses);
+  UINT_PTR nMin = 0;
+  for (int i = 1; i < nAddresses; i++)
+  {
+    char szPath[MAX_PATH], szPrevPath[MAX_PATH];
+    UINT_PTR nOffset, nPrevOffset;
+    if (strcmp(ModuleOfAddress((void *)s_Addresses[i], nOffset, szPath), ModuleOfAddress((void *)s_Addresses[i - 1], nPrevOffset, szPrevPath)))
+      continue;
+    const UINT_PTR nDist = s_Addresses[i] - s_Addresses[i - 1];
+    if (!nMin || nDist < nMin)
+      nMin = nDist;
+  }
+  Trace_Write("    %d listed; the smallest distance between two profilers of one module: %llu bytes", nListed, (unsigned long long)nMin);
 }
 
 //! The player: the first entity of class "Player".

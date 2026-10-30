@@ -237,6 +237,7 @@ void CD3D12Renderer::BeginUpscale()
 
 void CD3D12Renderer::UpscaleScene()
 {
+  FUNCTION_PROFILER(iSystem, PROFILE_RENDERER);
   if (!m_bUpscaling)
     return;
   m_bUpscaling = false;

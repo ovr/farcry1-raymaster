@@ -173,6 +173,7 @@ CD3D12Renderer::SShadowMap *CD3D12Renderer::FindDrawnShadowMap(const void *pFrus
 
 void CD3D12Renderer::UpdateShadowMaps()
 {
+  FUNCTION_PROFILER(iSystem, PROFILE_RENDERER);
   // The frame's lists stay for the live cascades (Cascades.cpp).
   m_FrameCasterLists.clear();
   m_FrameCasterLists.swap(m_ShadowCasterLists);

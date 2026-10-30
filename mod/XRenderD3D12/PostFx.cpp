@@ -87,6 +87,7 @@ SFlashLook FlashLook(float t)
 
 void CD3D12Renderer::DrawScreenEffects()
 {
+  FUNCTION_PROFILER(iSystem, PROFILE_RENDERER);
   // The main view of the game only (not the scenes drawn into textures).
   if (!m_pScene || !(m_nSceneFlags & SHDF_ALLOWHDR) || m_nRecurseLevel > 1 || m_bReflectionPass || m_bSpritePass ||
       m_bShadowMapPass || !EnsureFrame())

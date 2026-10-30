@@ -83,7 +83,11 @@ it as well: it holds local, machine-specific instructions and is not committed (
   `screenfx ?Effect` in `XRENDERTRACED_EXEC`/`XRENDERTRACED_EXEC_LEVEL` calls the screen effect
   functions of `I3DEngine`; `particles [count] [blend type] [size]` spawns particles around the
   camera (`I3DEngine::SpawnParticles`); `cvars [prefix]` writes the console variables whose names
-  start with the prefix, with their values and flags (`IConsole::DumpCVars`); `veggroup id|* field
+  start with the prefix, with their values and flags (`IConsole::DumpCVars`); `profilers [prefix]`
+  writes the engine's frame profilers (`IFrameProfileSystem`; `profile 1` collects them) whose names
+  start with the prefix: the module that holds each, its subsystem and values, and the smallest
+  distance between two of one module (896 bytes, `sizeof(CFrameProfiler)` of the SDK's header, so
+  the engine's class is the SDK's); `veggroup id|* field
   value` changes a vegetation group (`I3DEngine::SetStatInstGroup`; fields `fadeSize`, `useSprites`,
   `maxViewDistRatio`, `spriteDistRatio`, `brightness`); `lightradius r [direct] [colour scale]` gives the point lights
   that reach `EF_ADDDlight` the radius r, the direct factor and a scaled colour (0: their own);
@@ -330,7 +334,12 @@ it as well: it holds local, machine-specific instructions and is not committed (
   (the game's time demos played back: `Levels/<level>/<level>.tmd` of Training, Volcano, Research
   and Regulator; with `-GameArgs -DEVMODE` the game's recorder plays them, `runs` times, and with
   `info = 1` the demo's log gets the frame rates of each run from `Levels/<level>/<level>.log`
-  (`--until 100000` keeps the run going to the recording's end after the last frame to save);
+  (`--until 100000` keeps the run going to the recording's end after the last frame to save;
+  with XRenderD3D12 a run of Training is at about 260 FPS or at about 140, where some frames
+  take 20 ms and more while the renderer waits for nothing; which one repeats for one renderer DLL
+  with the same arguments and environment and changes with any of them, for a build before a
+  change as for the one after it, so frame rates are compared over several runs and launches;
+  `profile 1` gives about 225 every time);
   a path through the whole level to compare a change in many places) and DemoSurfaces (objects
   of different materials, glass among them, on a beach and in its shallow water under a moving
   light, handed to the engine's
@@ -592,6 +601,20 @@ it as well: it holds local, machine-specific instructions and is not committed (
   The game's menu gets it from `assets/scripts/video-ray-tracing.patch`: Ray Traced Reflections,
   None / Rays / Hybrid in Advanced Video Options; the rows of the page move closer together to make
   room for it, greyed out without `d3d12_RTReflections`.
+- The engine's statistics: `GetPolyCount` gives the triangles drawn in the frame the last `Update`
+  ended (every draw into every target; no shadow volumes), which the game asks for after the frame
+  is shown: the time demo's `Tri/Frame`, `Tri/Sec` and ratio to the recording in
+  `Levels/<level>/<level>.log` (the original renderer of the x64 build gives 0, so 0 and `1.#J`).
+  The renderer's work is in the engine's frame profiler under the subsystem Renderer
+  (`FUNCTION_PROFILER(iSystem, PROFILE_RENDERER)`, `FrameProfiler.h`; `profile 1` shows it, the
+  tracer's `profilers CD3D12` writes it): `CD3D12Renderer::BeginFrame` with
+  `CD3D12Device::BeginFrame:WaitForGpu` (the CPU waiting for the GPU), the passes inside the 3D
+  engine's own `Renderer::EF_EndEf3D` (`UpdateSunCascades`, `UpdateWaterReflection`,
+  `DrawItems:Opaque`, `:Nearest`, `:Blended`, `BuildRayScene`, `DrawScreenEffects`, ...),
+  `CD3D12Renderer::Update` with `CD3D12Device::EndFrame:Present`, `FlushFrame`, and the loading
+  (`EF_LoadTexture`, `DownLoadToVideoMemory`, `EF_LoadShaderItem`, `CD3D12Pipeline::CreatePSO`, ...).
+  The original renderer of the x64 build registers none. They are CPU times; the GPU's are
+  `d3d12_GpuTimes`.
 - `d3d12_DumpFrame 1` writes the render items of the next frame to
   `farcry1_testing1/XRenderD3D12_frame.txt` (never committed): the camera (position, angles,
   field of view, near and far plane, view and projection matrices), then for each item its list, sort

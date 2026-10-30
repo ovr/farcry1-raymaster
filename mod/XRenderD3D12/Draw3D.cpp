@@ -246,6 +246,13 @@ void CD3D12Renderer::BeginScene3D()
 
 void CD3D12Renderer::DrawItems(SRenderItem *pItems, int nItems, int eList)
 {
+  // The engine's frame profiler, a counter per list.
+  static CFrameProfiler s_Profilers[eRL_Num] = {
+    { iSystem, "CD3D12Renderer::DrawItems:Opaque", PROFILE_RENDERER },
+    { iSystem, "CD3D12Renderer::DrawItems:Nearest", PROFILE_RENDERER },
+    { iSystem, "CD3D12Renderer::DrawItems:Blended", PROFILE_RENDERER },
+  };
+  CFrameProfilerSection ProfilerSection(eList >= 0 && eList < eRL_Num ? &s_Profilers[eList] : nullptr);
   if (!m_pScene || !EnsureFrame())
     return;
   if (eList == eRL_Opaque)

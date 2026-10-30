@@ -132,6 +132,7 @@ CLeafBuffer *CD3D12Renderer::CreateLeafBufferInitialized(void *pVertBuffer, int 
   int nPrimetiveType, const char *szSource, EBufferType eBufType, int nMatInfoCount, int nClientTextureBindID,
   bool (*PrepareBufferCallback)(CLeafBuffer *, bool), void *CustomData, bool bOnlyVideoBuffer, bool bPrecache)
 {
+  FUNCTION_PROFILER(iSystem, PROFILE_RENDERER);
   const bool bDynamic = eBufType == eBT_Dynamic;
   const int nFormat = GeometryImpl::VertexSize(nVertFormat) > 0 ? nVertFormat : VERTEX_FORMAT_P3F;
   nVertCount = std::max(nVertCount, 0);

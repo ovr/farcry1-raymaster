@@ -27,6 +27,7 @@ IShader *CD3D12Renderer::EF_LoadShader(const char *name, EShClass Class, int fla
 
 SShaderItem CD3D12Renderer::EF_LoadShaderItem(const char *name, EShClass Class, bool bShare, const char *templName, int flags, SInputShaderResources *Res, uint64 nMaskGen)
 {
+  FUNCTION_PROFILER(iSystem, PROFILE_RENDERER);
   if (!m_pShaders)
     return SShaderItem();
   return m_pShaders->LoadShaderItem(name, Class, bShare, templName, flags, Res, nMaskGen);

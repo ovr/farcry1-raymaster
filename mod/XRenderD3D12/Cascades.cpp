@@ -221,6 +221,7 @@ bool CD3D12Renderer::EnsureCascadeMaps()
 
 void CD3D12Renderer::UpdateSunCascades(std::span<const SRenderItem> MainItems)
 {
+  FUNCTION_PROFILER(iSystem, PROFILE_RENDERER);
   if (m_nCascades)
   {
     m_nCascades = 0;
@@ -409,6 +410,7 @@ void CD3D12Renderer::DrawCascadeItems(std::span<const SRenderItem> Items, std::u
 
 void CD3D12Renderer::DrawCascadeCasters(std::span<const SRenderItem> Items)
 {
+  FUNCTION_PROFILER(iSystem, PROFILE_RENDERER);
   // The live casters are in the full set too (what the camera towards the sun does not get: the
   // player's body), before their own set, which compares with it.
   const int nSet = m_nCascadeSet;

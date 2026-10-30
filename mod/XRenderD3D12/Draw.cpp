@@ -33,6 +33,20 @@ D3D12_PRIMITIVE_TOPOLOGY_TYPE GetTopologyType(D3D_PRIMITIVE_TOPOLOGY eTopology)
   }
 }
 
+//! The triangles a draw of nCount vertices or indices makes (GetPolyCount).
+int CountTriangles(D3D_PRIMITIVE_TOPOLOGY eTopology, uint32 nCount)
+{
+  switch (eTopology)
+  {
+  case D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST:
+    return (int)(nCount / 3);
+  case D3D_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP:
+    return nCount > 2 ? (int)(nCount - 2) : 0;
+  default:
+    return 0;
+  }
+}
+
 //! A copy of the constants in this frame's memory.
 template<class T> D3D12_GPU_VIRTUAL_ADDRESS UploadConstants(CD3D12Upload &Upload, const T &Data)
 {
@@ -249,6 +263,7 @@ void CD3D12Renderer::DrawGeometry(const SPipelineKey &Key, const SDrawConstants 
     return;
   pList->RSSetScissorRects(1, &Scissor);
 
+  m_nFramePolygons += CountTriangles(eTopology, nCount);
   if (pIB)
   {
     pList->IASetIndexBuffer(pIB);

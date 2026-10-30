@@ -1108,7 +1108,11 @@ void CD3D12Device::BeginFrame()
 {
   if (m_bInFrame || !m_pDevice)
     return;
-  WaitForFence(m_nFrameFence[m_nFrameSlot]);
+  {
+    // The GPU still drawing the frame D3D12_FRAMES back.
+    FRAME_PROFILER("CD3D12Device::BeginFrame:WaitForGpu", iSystem, PROFILE_RENDERER);
+    WaitForFence(m_nFrameFence[m_nFrameSlot]);
+  }
   ReadGpuTimes();
   ReadOcclusionResults();
   CollectGarbage();
@@ -1136,6 +1140,7 @@ void CD3D12Device::BeginFrame()
 
 void CD3D12Device::EndFrame(bool bPresent, bool bVSync)
 {
+  FUNCTION_PROFILER(iSystem, PROFILE_RENDERER);
   if (!m_bInFrame)
     return;
   EndScene();
@@ -1178,7 +1183,10 @@ void CD3D12Device::EndFrame(bool bPresent, bool bVSync)
   m_pQueue->ExecuteCommandLists(1, &pList);
   HRESULT hr = S_OK;
   if (bPresent)
+  {
+    FRAME_PROFILER("CD3D12Device::EndFrame:Present", iSystem, PROFILE_RENDERER);
     hr = m_pSwapChain->Present(bVSync ? 1 : 0, !bVSync && m_bTearing ? DXGI_PRESENT_ALLOW_TEARING : 0);
+  }
   // A removed device, once, whether the frame was presented or not (a demo's frames need not be).
   static bool s_bLogged = false;
   if (!s_bLogged)
@@ -1198,6 +1206,7 @@ void CD3D12Device::EndFrame(bool bPresent, bool bVSync)
 
 void CD3D12Device::FlushFrame()
 {
+  FUNCTION_PROFILER(iSystem, PROFILE_RENDERER);
   if (!m_bInFrame)
     return;
   // The back buffer stays a render target across the two lists.

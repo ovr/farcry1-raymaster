@@ -77,6 +77,7 @@ Vec3 EnvCubeCenter(const SRenderItem &it)
 
 void CD3D12Renderer::UpdateEnvCubes(std::span<const SRenderItem> Items)
 {
+  FUNCTION_PROFILER(iSystem, PROFILE_RENDERER);
   // The main view of the game.
   I3DEngine *p3D = iSystem ? iSystem->GetI3DEngine() : nullptr;
   if (!(m_nSceneFlags & SHDF_ALLOWHDR) || m_nRecurseLevel > 1 || m_bReflectionPass || m_bEnvCubePass || m_bSpritePass || m_bShadowMapPass ||

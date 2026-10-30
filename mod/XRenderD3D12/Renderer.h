@@ -1060,6 +1060,8 @@ public:
   bool m_bVSync = false;
   int m_nFrameID = 65535;             //!< GetFrameID, from 65535; the engine keeps a pointer to it (EFQ_Pointer2FrameID)
   int m_nFrames = 0;                  //!< frames ended by Update
+  int m_nFramePolygons = 0;           //!< the triangles drawn since the last Update (DrawGeometry)
+  int m_nPolygons = 0;                //!< GetPolyCount: the triangles of the frame the last Update ended
   int64 m_nLastFrameTicks = 0;        //!< ReportGpuTimes: when the last frame ended (0: timing off)
   double m_fFrameMs = 0;              //!< ReportGpuTimes: the time between frames added up
   int m_nTimedFrames = 0;

@@ -700,6 +700,7 @@ bool CD3D12Renderer::EnsureFrame()
 
 void CD3D12Renderer::BeginFrame (void)
 {
+  FUNCTION_PROFILER(iSystem, PROFILE_RENDERER);
   EnsureFrame();
   if (m_pScene)
     m_pScene->BeginFrame();
@@ -733,6 +734,7 @@ void CD3D12Renderer::BeginFrame (void)
 
 void CD3D12Renderer::Update (void)
 {
+  FUNCTION_PROFILER(iSystem, PROFILE_RENDERER);
   if (!m_pDevice)
     return;
   EnsureFrame();
@@ -743,6 +745,9 @@ void CD3D12Renderer::Update (void)
   if (m_bSwapBuffers)
     DrawHdrOutput();
   m_pDevice->EndFrame(m_bSwapBuffers, m_bVSync || CV_r_vsync != 0);
+  // The game asks for the triangles after the frame is shown (the time demo's Tri/Frame).
+  m_nPolygons = m_nFramePolygons;
+  m_nFramePolygons = 0;
   ReportGpuTimes();
   if (m_pFrameDump)
   {
@@ -1237,12 +1242,13 @@ void *CD3D12Renderer::EF_Query(int Query, int Param)
 
 int CD3D12Renderer::GetPolyCount()
 {
-  return 0;
+  return m_nPolygons;
 }
 
 void CD3D12Renderer::GetPolyCount(int &nPolygons,int &nShadowVolPolys)
 {
-  nPolygons = 0;
+  // No stencil shadow volumes are drawn (CRETriMeshShadow).
+  nPolygons = m_nPolygons;
   nShadowVolPolys = 0;
 }
 

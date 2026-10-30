@@ -289,6 +289,7 @@ int SliceThreadCount()
 
 unsigned int CD3D12Renderer::MakeSprite(float object_scale, int tex_size, float angle, IStatObj * pStatObj, uchar * pTmpBuffer, uint def_tid)
 {
+  FUNCTION_PROFILER(iSystem, PROFILE_RENDERER);
   // The pictures are made before the next main view (BakeSprites), into a texture array of the
   // object; the IDs the engine gets have no GPU texture.
   if (!pStatObj || !m_pTextures)
@@ -310,6 +311,7 @@ unsigned int CD3D12Renderer::MakeSprite(float object_scale, int tex_size, float 
 
 void CD3D12Renderer::BakeSprites()
 {
+  FUNCTION_PROFILER(iSystem, PROFILE_RENDERER);
   if (m_SpritesToBake.empty() || m_bSpritePass || m_bReflectionPass || !m_pDevice || !m_pDescriptors || !m_pTextures || !m_pScene ||
       !EnsureFrame())
     return;

@@ -218,6 +218,7 @@ void CD3D12Renderer::BeginAOTarget(const SRenderItem *pItems, int nItems)
 
 void CD3D12Renderer::DrawAmbientOcclusion()
 {
+  FUNCTION_PROFILER(iSystem, PROFILE_RENDERER);
   // The ambient light's target unbound, whatever comes next; readable by the resolve, then a shader
   // resource again.
   ID3D12Resource *pAmbient = nullptr;

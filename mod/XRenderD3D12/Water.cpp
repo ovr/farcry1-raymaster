@@ -454,6 +454,7 @@ void CD3D12Renderer::ReleaseWaterResources()
 
 void CD3D12Renderer::UpdateWaterReflection(std::span<const SRenderItem> Items)
 {
+  FUNCTION_PROFILER(iSystem, PROFILE_RENDERER);
   // The main view of the game with the ocean in it (the water volumes have levels of their own),
   // the camera above the water.
   I3DEngine *p3D = iSystem ? iSystem->GetI3DEngine() : nullptr;

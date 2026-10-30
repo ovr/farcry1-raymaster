@@ -541,6 +541,7 @@ ID3D12PipelineState *CD3D12Pipeline::GetPSO(const SPipelineKey &Key)
 
 ComPtr<ID3D12PipelineState> CD3D12Pipeline::CreatePSO(const SPipelineKey &Key)
 {
+  FUNCTION_PROFILER(iSystem, PROFILE_RENDERER);
   if (Key.nProgram >= eD3D12P_Num)
   {
     iLog->LogError("XRenderD3D12: no shader program %d", (int)Key.nProgram);
