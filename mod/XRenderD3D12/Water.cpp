@@ -18,10 +18,12 @@
 //	lit by the world colour.
 //
 //	With r_WaterReflections the ocean also reflects the scene mirrored in
-//	its plane: before the main view is drawn, the 3D engine renders the sky
-//	and the terrain (DrawLowDetail) seen by the camera mirrored in the
-//	water plane into a target of its own, as a scene nested in the main
-//	one, redrawn as r_WaterUpdateFactor, r_WaterUpdateDistance and
+//	its plane: before the main view is drawn, the 3D engine renders the sky,
+//	the terrain, the static objects and the far sprites (DrawLowDetail with
+//	d3d12_WaterReflectionFlags; not the entities: drawn for another camera,
+//	the fish then swim differently in the main view) seen by the camera
+//	mirrored in the water plane into a target of its own, as a scene nested
+//	in the main one, redrawn as r_WaterUpdateFactor, r_WaterUpdateDistance and
 //	r_WaterUpdateDeltaAngle say. Its near plane is the water plane, so
 //	nothing under the water shows in it. With r_HDRRendering the target is
 //	in D3D12_HDR_FORMAT, as the main scene.

@@ -388,7 +388,8 @@ void CD3D12Renderer::DrawLeafItem(const SRenderItem &it)
   // A face of an environment cube is mirrored (EnvCubes.cpp).
   Key.nCull = CullOf(GetCullMode(pSh, pRes), (Det3(World) < 0) != m_bEnvCubePass);
   // The water reflection sees the land from below the water: both sides, so that where the waves move
-  // the reflection over a shore, it shows the land rather than the sky behind it.
+  // the reflection over a shore, it shows the land rather than the sky behind it, and an object
+  // standing in the water, cut open by the water plane, shows its inside rather than a hole.
   if (m_bReflectionPass)
     Key.nCull = R_CULL_NONE;
   Key.bWireframe = m_nPolygonMode == R_WIREFRAME_MODE ? 1 : 0;

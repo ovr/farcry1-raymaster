@@ -541,7 +541,8 @@ public:
   //! Before the main view is drawn (Items: its render items): with r_WaterReflections and an
   //! ocean surface among the items, the scene mirrored in the water plane into m_pReflectionColor,
   //! when the last one is out of date (r_WaterUpdate*): the 3D engine renders it with
-  //! DrawLowDetail (the sky, the terrain), seen by the camera mirrored in the water plane.
+  //! DrawLowDetail (d3d12_WaterReflectionFlags: the sky, the terrain, the static objects, the far
+  //! sprites), seen by the camera mirrored in the water plane.
   void UpdateWaterReflection(std::span<const SRenderItem> Items);
   void ReleaseWaterReflection();
   //! The reflection pass's projection: its near plane replaced by the water plane, so that nothing
@@ -1063,7 +1064,7 @@ public:
   float CV_d3d12_WaterSunGlint = 0;   //!< strength of the sun's highlight on water (0: none)
   int CV_d3d12_GpuTimes = 0;          //!< N: the GPU time of the frame's sections to the log every N frames
   float CV_d3d12_WaterReflectionScale = 0.5f;   //!< size of the water reflection, a fraction of the screen's
-  int CV_d3d12_WaterReflectionFlags = DLD_TERRAIN | DLD_TERRAIN_FULLRES;   //!< what the water reflects (EDrawLowDetailFlags)
+  int CV_d3d12_WaterReflectionFlags = DLD_TERRAIN | DLD_TERRAIN_FULLRES | DLD_STATIC_OBJECTS | DLD_FAR_SPRITES;   //!< what the water reflects (EDrawLowDetailFlags)
   int CV_d3d12_SpriteRes = 128;             //!< size of the far vegetation sprites' textures (made at the level load)
   int CV_d3d12_Shadows = 1;                 //!< 0: no shadow maps
   int CV_d3d12_ShadowMapSize = 1024;        //!< size of the shadow maps (0: the engine's, 512)
