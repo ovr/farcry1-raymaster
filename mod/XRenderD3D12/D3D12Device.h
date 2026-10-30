@@ -211,8 +211,11 @@ public:
   //! A shadow map of nSize x nSize: R32_TYPELESS (D3D12_SHADOW_MAP_FORMAT, its DSV written to hDSV,
   //! read as R32_FLOAT), in the state PIXEL_SHADER_RESOURCE while it is not drawn into.
   bool CreateShadowMap(int nSize, ComPtr<ID3D12Resource> &pDepth, D3D12_CPU_DESCRIPTOR_HANDLE hDSV);
+  //! The same with nSlices slices (a texture array), the DSV of slice i written to phDSV[i].
+  bool CreateShadowMapArray(int nSize, int nSlices, ComPtr<ID3D12Resource> &pDepth, const D3D12_CPU_DESCRIPTOR_HANDLE *phDSV);
   //! Draws into a shadow map of CreateShadowMap (depth only, no colour target) until
-  //! SetBackBufferTargets (in a frame).
+  //! SetBackBufferTargets (in a frame); hDSV may be the DSV of a slice of CreateShadowMapArray (the
+  //! slices of one array one after another stay in the state of a depth target).
   void SetShadowMapTarget(ID3D12Resource *pDepth, D3D12_CPU_DESCRIPTOR_HANDLE hDSV, int nSize);
   //! The size of the targets drawn into.
   int GetTargetWidth() const { return m_pOffscreen ? m_nOffscreenWidth : GetMainWidth(); }

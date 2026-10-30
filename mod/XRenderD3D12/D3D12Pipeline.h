@@ -59,7 +59,7 @@ struct SPipelineKey
   uint8 nTopology;        //!< D3D12_PRIMITIVE_TOPOLOGY_TYPE (TRIANGLE or LINE)
   uint8 nCull;            //!< R_CULL_NONE, R_CULL_FRONT, R_CULL_BACK (the engine's front faces are counter-clockwise
                           //!< as the viewer sees them; one constant in D3D12Pipeline.cpp)
-  uint8 bDepthBias;       //!< polygon offset (decals, EF_PolygonOffset)
+  uint8 bDepthBias;       //!< polygon offset (decals, EF_PolygonOffset); 2 in a shadow map: the sun's cascades (no depth clip)
   uint8 nStreams;         //!< PIPELINE_STREAM_* bits
   uint8 nTarget;          //!< 0 back buffer (D3D12_BACKBUFFER_FORMAT + D3D12_DEPTH_FORMAT), 1 R8G8B8A8 target without depth,
                           //!< 2 a shadow map (D3D12_SHADOW_MAP_FORMAT only; bDepthBias gives the shadow maps' bias),
@@ -70,7 +70,9 @@ struct SPipelineKey
                           //!< layer (D3D12_HIGHLIGHT_FORMAT, HdrOutput.cpp) without depth: the HDR and post programs' passes that write both
   uint8 bWireframe;       //!< fill mode wireframe (SetPolygonMode R_WIREFRAME_MODE)
   uint8 nColorFormat;     //!< the format of colour target 0: PIPELINE_COLOR_* (DrawGeometry sets it for the main view's target)
-  uint8 nPad[3];          //!< 0: no padding bytes in the key
+  uint8 bCascades;        //!< the general program's pixel shader with the sun's cascades (XR_CASCADES; DrawGeometry sets it
+                          //!< for the draws with DF2_SUN_CASCADES or DF2_CASCADE_CASTER)
+  uint8 nPad[2];          //!< 0: no padding bytes in the key
 };
 
 //! SPipelineKey::nColorFormat.

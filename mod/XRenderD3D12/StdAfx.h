@@ -67,6 +67,7 @@
 #include <span>
 #include <algorithm>
 #include <unordered_map>
+#include <unordered_set>
 
 using Microsoft::WRL::ComPtr;
 

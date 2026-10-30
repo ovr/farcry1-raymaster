@@ -484,6 +484,36 @@ it as well: it holds local, machine-specific instructions and is not committed (
   0, e.g. `-DemoArgs '--exec-at 1 "d3d12_PixelLighting 0"'`): the new paths are branches of their
   own, so the old ones compile instruction for instruction as before (dxc reassociates the
   `fast` arithmetic of a branch that is changed).
+- `d3d12_ShadowCascades` (4, 0 to 4) gives the sun's cascaded shadow maps around the camera while
+  the game's shadows are on (`e_shadow_maps`, as the high and very high presets have them), in a
+  main view with the sun (`Cascades.cpp`). The view's depth up to `d3d12_ShadowDistance` (120 m)
+  is split mostly logarithmically; each cascade is a slice of `d3d12_ShadowCascadeSize` (2048)
+  seen from the sun, a square around the sphere of its part of the frustum, moved in whole
+  texels so that the shadows do not crawl. There are two sets of slices:
+  - the full set, with all that casts: the static objects and entities that
+    `I3DEngine::DrawLowDetail` gives a camera at the view's position looking towards the sun,
+    170 degrees wide (the engine culls by its own frustum of the camera it is given, so the
+    casters between the view and the sun come from there), the main view's own items (the
+    terrain, what is indoors) and the live casters. The camera stays at the view's position and
+    does not draw the terrain: a camera 30 m above the view changed the main view's terrain
+    textures and some objects in the frames after it, even after the cascades were turned off
+    (the engine seems to keep what it chose for the last camera); at the view's position without the
+    terrain, the frames differ by one level along one rock's edge;
+  - the live set, with the casters the engine names for its shadow maps in the frame
+    (characters, vehicles, the vegetation that casts), each only where nothing in the full set
+    is nearer to the sun.
+
+  Lit objects take the sun from the full set. Light maps and the terrain, whose light has the
+  static world's shadows already, take it from the live set; the terrain is darkened to the
+  colour of the engine's shadows on it (`EntityShadowOnTerrain`, which fade out where the
+  cascades reach). Beyond the cascades the objects' shadow maps work as before.
+  `d3d12_ShadowSoftness` (0.05 m) is the filter's radius (at least a texel and a half).
+  `d3d12_ShadowDebug` 1 also shows the slices, 3 colours the cascades, 4 shows the full set's
+  shadow in red and the live set's in green. With `d3d12_ShadowCascades 0` (from the start,
+  `--exec-at 0`) or `e_shadow_maps 0` the frames are those of the renderer without them
+  (DemoCompare difference 0 for the former). The cascades' code is in pixel shaders of its own
+  (`XR_CASCADES`, for the draws with their flags): in the general one, with dxc's code for the old
+  paths unchanged, the GPU's compiler still changed a few pixels by a level.
 - `d3d12_DumpFrame 1` writes the render items of the next frame to
   `farcry1_testing1/XRenderD3D12_frame.txt` (never committed): the camera (position, angles,
   field of view, near and far plane, view and projection matrices), then for each item its list, sort

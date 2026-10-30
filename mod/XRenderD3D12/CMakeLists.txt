@@ -36,6 +36,7 @@ set(XRENDERD3D12_SOURCES
     EnvCubes.cpp
     FarSprites.cpp
     Shadows.cpp
+    Cascades.cpp
     PostFx.cpp
     Hdr.cpp
     ColorGrading.cpp

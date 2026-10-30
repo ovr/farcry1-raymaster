@@ -103,11 +103,14 @@ bool CD3D12Device::Init(HWND hWnd, int nWidth, int nHeight, bool bDebug)
 
   // The messages are kept for LogDebugMessages; nothing breaks into a debugger. Not kept: the
   // hint that a clear of an off screen target is not to its optimised clear colour (the
-  // reflection's is the scene's clear colour, which changes).
+  // reflection's is the scene's clear colour, which changes), and the one that a pixel shader
+  // writes a colour no target takes (the shadow maps' pipelines: depth only, with the general
+  // program's pixel shader for its alpha test).
   if (bDebug && SUCCEEDED(m_pDevice.As(&m_pInfoQueue)))
   {
     m_pInfoQueue->SetMessageCountLimit(4096);
-    D3D12_MESSAGE_ID DenyIDs[] = { D3D12_MESSAGE_ID_CLEARRENDERTARGETVIEW_MISMATCHINGCLEARVALUE };
+    D3D12_MESSAGE_ID DenyIDs[] = { D3D12_MESSAGE_ID_CLEARRENDERTARGETVIEW_MISMATCHINGCLEARVALUE,
+                                   D3D12_MESSAGE_ID_CREATEGRAPHICSPIPELINESTATE_RENDERTARGETVIEW_NOT_SET };
     D3D12_INFO_QUEUE_FILTER Filter = {};
     Filter.DenyList.NumIDs = (UINT)std::size(DenyIDs);
     Filter.DenyList.pIDList = DenyIDs;
@@ -517,12 +520,50 @@ bool CD3D12Device::CreateShadowMap(int nSize, ComPtr<ID3D12Resource> &pDepth, D3
   return true;
 }
 
+bool CD3D12Device::CreateShadowMapArray(int nSize, int nSlices, ComPtr<ID3D12Resource> &pDepth, const D3D12_CPU_DESCRIPTOR_HANDLE *phDSV)
+{
+  if (!m_pDevice || nSize <= 0 || nSlices <= 0 || !phDSV)
+    return false;
+  D3D12_HEAP_PROPERTIES Heap = {};
+  Heap.Type = D3D12_HEAP_TYPE_DEFAULT;
+  D3D12_RESOURCE_DESC Desc = {};
+  Desc.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
+  Desc.Width = nSize;
+  Desc.Height = nSize;
+  Desc.DepthOrArraySize = (UINT16)nSlices;
+  Desc.MipLevels = 1;
+  Desc.Format = DXGI_FORMAT_R32_TYPELESS;
+  Desc.SampleDesc.Count = 1;
+  Desc.Flags = D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL;
+  D3D12_CLEAR_VALUE Clear = {};
+  Clear.Format = D3D12_SHADOW_MAP_FORMAT;
+  Clear.DepthStencil.Depth = 1.0f;
+  if (Failed(m_pDevice->CreateCommittedResource(&Heap, D3D12_HEAP_FLAG_NONE, &Desc, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, &Clear,
+    IID_PPV_ARGS(&pDepth)), "CreateCommittedResource (shadow map array)"))
+    return false;
+  for (int i = 0; i < nSlices; i++)
+  {
+    if (!phDSV[i].ptr)
+      return false;
+    D3D12_DEPTH_STENCIL_VIEW_DESC View = {};
+    View.Format = D3D12_SHADOW_MAP_FORMAT;
+    View.ViewDimension = D3D12_DSV_DIMENSION_TEXTURE2DARRAY;
+    View.Texture2DArray.FirstArraySlice = i;
+    View.Texture2DArray.ArraySize = 1;
+    m_pDevice->CreateDepthStencilView(pDepth.Get(), &View, phDSV[i]);
+  }
+  return true;
+}
+
 void CD3D12Device::SetShadowMapTarget(ID3D12Resource *pDepth, D3D12_CPU_DESCRIPTOR_HANDLE hDSV, int nSize)
 {
   if (!m_bInFrame || !pDepth)
     return;
-  EndOffscreen();
-  Barrier(m_pCmdList.Get(), pDepth, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, D3D12_RESOURCE_STATE_DEPTH_WRITE);
+  if (m_pOffscreen != pDepth || !m_bOffscreenShadowMap)
+  {
+    EndOffscreen();
+    Barrier(m_pCmdList.Get(), pDepth, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, D3D12_RESOURCE_STATE_DEPTH_WRITE);
+  }
   m_pOffscreen = pDepth;
   m_bOffscreenShadowMap = true;
   m_OffscreenFormat = DXGI_FORMAT_UNKNOWN;

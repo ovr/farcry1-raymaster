@@ -21,6 +21,10 @@
 #include "General_Velocity_PS.h"
 #include "General_Hdr_PS.h"
 #include "General_Hdr_Velocity_PS.h"
+#include "General_Cascades_PS.h"
+#include "General_Cascades_Velocity_PS.h"
+#include "General_Cascades_Hdr_PS.h"
+#include "General_Cascades_Hdr_Velocity_PS.h"
 #include "Water_VS.h"
 #include "Water_PS.h"
 #include "Water_Velocity_VS.h"
@@ -523,6 +527,12 @@ ComPtr<ID3D12PipelineState> CD3D12Pipeline::CreatePSO(const SPipelineKey &Key)
     Desc.PS = bHdr ? D3D12_SHADER_BYTECODE{ g_Water_Hdr_Velocity_PS, sizeof(g_Water_Hdr_Velocity_PS) }
                    : D3D12_SHADER_BYTECODE{ g_Water_Velocity_PS, sizeof(g_Water_Velocity_PS) };
   }
+  else if ((bVelocity || bUpscaleDepth) && Key.bCascades)
+  {
+    Desc.VS = { g_General_Velocity_VS, sizeof(g_General_Velocity_VS) };
+    Desc.PS = bHdr ? D3D12_SHADER_BYTECODE{ g_General_Cascades_Hdr_Velocity_PS, sizeof(g_General_Cascades_Hdr_Velocity_PS) }
+                   : D3D12_SHADER_BYTECODE{ g_General_Cascades_Velocity_PS, sizeof(g_General_Cascades_Velocity_PS) };
+  }
   else if (bVelocity || bUpscaleDepth)
   {
     Desc.VS = { g_General_Velocity_VS, sizeof(g_General_Velocity_VS) };
@@ -533,7 +543,10 @@ ComPtr<ID3D12PipelineState> CD3D12Pipeline::CreatePSO(const SPipelineKey &Key)
   {
     Desc.VS = { Program.pVS, Program.nVS };
     Desc.PS = { Program.pPS, Program.nPS };
-    if (bHdr && bGeneral)
+    if (bGeneral && Key.bCascades)
+      Desc.PS = bHdr ? D3D12_SHADER_BYTECODE{ g_General_Cascades_Hdr_PS, sizeof(g_General_Cascades_Hdr_PS) }
+                     : D3D12_SHADER_BYTECODE{ g_General_Cascades_PS, sizeof(g_General_Cascades_PS) };
+    else if (bHdr && bGeneral)
       Desc.PS = { g_General_Hdr_PS, sizeof(g_General_Hdr_PS) };
     else if (bHdr && bWater)
       Desc.PS = { g_Water_Hdr_PS, sizeof(g_Water_Hdr_PS) };
@@ -618,7 +631,9 @@ ComPtr<ID3D12PipelineState> CD3D12Pipeline::CreatePSO(const SPipelineKey &Key)
     Raster.SlopeScaledDepthBias = SLOPE_SCALED_DEPTH_BIAS;
   }
   Raster.DepthBiasClamp = 0.0f;
-  Raster.DepthClipEnable = TRUE;
+  // The sun's cascades (bDepthBias 2): what is nearer to the sun than a map's range is drawn at its
+  // near end (the depth clamped, not clipped), so that it still casts its shadow.
+  Raster.DepthClipEnable = bShadowMap && Key.bDepthBias == 2 ? FALSE : TRUE;
   Raster.MultisampleEnable = FALSE;
   Raster.AntialiasedLineEnable = FALSE;
   Raster.ForcedSampleCount = 0;

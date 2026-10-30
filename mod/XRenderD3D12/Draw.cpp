@@ -113,6 +113,7 @@ void CD3D12Renderer::MakeFrameConstants(SFrameConstants &fc, bool bScene) const
   Set4(fc.vWorldColor, m_WorldColor[0], m_WorldColor[1], m_WorldColor[2], m_WorldColor[3]);
   Set4(fc.vDepthParams, m_ProjMatrix.data[10], m_ProjMatrix.data[14], 0, 0);
   Set4(fc.vHdr, HdrSkyGlow(), 0, 0, 0);
+  SetCascadeConstants(fc);
 }
 
 void CD3D12Renderer::DrawGeometry(const SPipelineKey &Key, const SDrawConstants &dc, D3D_PRIMITIVE_TOPOLOGY eTopology, const D3D12_VERTEX_BUFFER_VIEW &VB,
@@ -132,6 +133,8 @@ void CD3D12Renderer::DrawGeometry(const SPipelineKey &Key, const SDrawConstants 
   // the environment cubes with r_HDRRendering.
   if ((FullKey.nTarget == 0 || FullKey.nTarget == 3) && m_pDevice->GetTargetColorFormat() == D3D12_HDR_FORMAT)
     FullKey.nColorFormat = PIPELINE_COLOR_HDR;
+  // The sun's cascades in the general program's pixel shader that has them.
+  FullKey.bCascades = Key.nProgram == eD3D12P_General && (dc.nFlags2 & (DF2_SUN_CASCADES | DF2_CASCADE_CASTER)) ? 1 : 0;
   ID3D12PipelineState *pPSO = m_pPipeline->GetPSO(FullKey);
   if (!pPSO)
     return;
