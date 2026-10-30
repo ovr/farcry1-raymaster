@@ -154,12 +154,20 @@ bool CD3D12Device::Init(HWND hWnd, int nWidth, int nHeight, bool bDebug)
   D3D12_DESCRIPTOR_HEAP_DESC HeapDesc = {};
   // The back buffers' views, then the scene targets' (colour, motion vectors, the upscaler's
   // depth; the depth buffer's after the back buffers' in the DSV heap), the HDR target's, the
-  // frame target's and the highlight layer's (SceneRTV).
+  // frame target's, the highlight layer's and two null ones (SceneRTV).
   HeapDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_RTV;
-  HeapDesc.NumDescriptors = D3D12_BACKBUFFERS + 6;
+  HeapDesc.NumDescriptors = D3D12_BACKBUFFERS + 8;
   if (Failed(m_pDevice->CreateDescriptorHeap(&HeapDesc, IID_PPV_ARGS(&m_pRTVHeap)), "CreateDescriptorHeap (RTV)"))
     return false;
   m_nRTVSize = m_pDevice->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_RTV);
+  // The null targets in the places of the motion vectors and the upscaler's depth before the
+  // ambient light without an upscaler (BindAmbient).
+  D3D12_RENDER_TARGET_VIEW_DESC NullView = {};
+  NullView.ViewDimension = D3D12_RTV_DIMENSION_TEXTURE2D;
+  NullView.Format = D3D12_VELOCITY_FORMAT;
+  m_pDevice->CreateRenderTargetView(nullptr, &NullView, SceneRTV(6));
+  NullView.Format = D3D12_UPSCALE_DEPTH_FORMAT;
+  m_pDevice->CreateRenderTargetView(nullptr, &NullView, SceneRTV(7));
   HeapDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_DSV;
   HeapDesc.NumDescriptors = 2;
   if (Failed(m_pDevice->CreateDescriptorHeap(&HeapDesc, IID_PPV_ARGS(&m_pDSVHeap)), "CreateDescriptorHeap (DSV)"))
@@ -242,7 +250,8 @@ bool CD3D12Device::CreateSwapChainBuffers()
   Desc.Height = m_nHeight;
   Desc.DepthOrArraySize = 1;
   Desc.MipLevels = 1;
-  Desc.Format = D3D12_DEPTH_FORMAT;
+  // Typeless, so that it can also be read (ambient occlusion); drawn into as D3D12_DEPTH_FORMAT.
+  Desc.Format = DXGI_FORMAT_R24G8_TYPELESS;
   Desc.SampleDesc.Count = 1;
   Desc.Flags = D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL;
   D3D12_CLEAR_VALUE Clear = {};
@@ -251,7 +260,10 @@ bool CD3D12Device::CreateSwapChainBuffers()
   if (Failed(m_pDevice->CreateCommittedResource(&Heap, D3D12_HEAP_FLAG_NONE, &Desc, D3D12_RESOURCE_STATE_DEPTH_WRITE, &Clear, IID_PPV_ARGS(&m_pDepth)),
     "CreateCommittedResource (depth)"))
     return false;
-  m_pDevice->CreateDepthStencilView(m_pDepth.Get(), nullptr, m_pDSVHeap->GetCPUDescriptorHandleForHeapStart());
+  D3D12_DEPTH_STENCIL_VIEW_DESC View = {};
+  View.Format = D3D12_DEPTH_FORMAT;
+  View.ViewDimension = D3D12_DSV_DIMENSION_TEXTURE2D;
+  m_pDevice->CreateDepthStencilView(m_pDepth.Get(), &View, m_pDSVHeap->GetCPUDescriptorHandleForHeapStart());
   m_nBackBuffer = m_pSwapChain->GetCurrentBackBufferIndex();
   return !m_bLayer || CreateLayer();
 }
@@ -607,24 +619,27 @@ void CD3D12Device::SetBackBufferTargets()
   EndOffscreen();
   if (m_bInScene)
   {
-    const D3D12_CPU_DESCRIPTOR_HANDLE hRTV[3] = { SceneRTV(0), SceneRTV(1), SceneRTV(2) }, hDSV = SceneDSV();
-    m_pCmdList->OMSetRenderTargets(3, hRTV, FALSE, &hDSV);
-  }
-  else if (m_bInHdr)
-  {
-    const D3D12_CPU_DESCRIPTOR_HANDLE hRTV = SceneRTV(3), hDSV = GetDSV();
-    m_pCmdList->OMSetRenderTargets(1, &hRTV, FALSE, &hDSV);
+    const D3D12_CPU_DESCRIPTOR_HANDLE hRTV[4] = { SceneRTV(0), SceneRTV(1), SceneRTV(2), m_hAmbientRTV }, hDSV = SceneDSV();
+    m_pCmdList->OMSetRenderTargets(m_hAmbientRTV.ptr ? 4 : 3, hRTV, FALSE, &hDSV);
   }
   else
   {
-    const D3D12_CPU_DESCRIPTOR_HANDLE hRTV = GetBackBufferRTV(), hDSV = GetDSV();
-    m_pCmdList->OMSetRenderTargets(1, &hRTV, FALSE, &hDSV);
+    const D3D12_CPU_DESCRIPTOR_HANDLE hRTV[4] = { m_bInHdr ? SceneRTV(3) : GetBackBufferRTV(), SceneRTV(6), SceneRTV(7), m_hAmbientRTV };
+    const D3D12_CPU_DESCRIPTOR_HANDLE hDSV = GetDSV();
+    m_pCmdList->OMSetRenderTargets(m_hAmbientRTV.ptr ? 4 : 1, hRTV, FALSE, &hDSV);
   }
   const int w = GetMainWidth(), h = GetMainHeight();
   const D3D12_VIEWPORT vp = { 0, 0, (float)w, (float)h, 0, 1 };
   const D3D12_RECT rc = { 0, 0, w, h };
   m_pCmdList->RSSetViewports(1, &vp);
   m_pCmdList->RSSetScissorRects(1, &rc);
+}
+
+void CD3D12Device::BindAmbient(D3D12_CPU_DESCRIPTOR_HANDLE hRTV)
+{
+  m_hAmbientRTV = hRTV;
+  if (m_bInFrame && !m_pOffscreen)
+    SetBackBufferTargets();
 }
 
 void CD3D12Device::BindRootSignature()
@@ -641,6 +656,16 @@ void CD3D12Device::Transition(ID3D12Resource *pRes, D3D12_RESOURCE_STATES Before
 {
   if (m_bInFrame && pRes)
     Barrier(m_pCmdList.Get(), pRes, Before, After);
+}
+
+void CD3D12Device::UavBarrier(ID3D12Resource *pRes)
+{
+  if (!m_bInFrame || !pRes)
+    return;
+  D3D12_RESOURCE_BARRIER b = {};
+  b.Type = D3D12_RESOURCE_BARRIER_TYPE_UAV;
+  b.UAV.pResource = pRes;
+  m_pCmdList->ResourceBarrier(1, &b);
 }
 
 D3D12_CPU_DESCRIPTOR_HANDLE CD3D12Device::SceneRTV(int n) const
@@ -1113,6 +1138,7 @@ void CD3D12Device::EndFrame(bool bPresent, bool bVSync)
   EndHdr();
   EndOffscreen();
   BindHighlight(false);
+  m_hAmbientRTV = {};
   // The timestamp that ends the frame's last section; all of them to the readback buffer.
   if (const int n = m_nGpuMarks[m_nFrameSlot]; n > 0)
   {
@@ -1302,7 +1328,7 @@ void CD3D12Device::CopyTargets(ID3D12Resource *pColor, ID3D12Resource *pDepth)
   if (!m_bInFrame || !pColor)
     return;
   ID3D12Resource *pMainColor = m_bInScene ? m_pSceneColor.Get() : m_bInHdr ? m_pHdrColor.Get() : GetBackBuffer();
-  ID3D12Resource *pMainDepth = m_bInScene ? m_pSceneDepth.Get() : m_pDepth.Get();
+  ID3D12Resource *pMainDepth = GetMainDepth();
   const auto Matches = [](ID3D12Resource *pCopy, ID3D12Resource *pSource, DXGI_FORMAT Format)
   {
     const D3D12_RESOURCE_DESC a = pCopy->GetDesc(), b = pSource->GetDesc();

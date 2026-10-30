@@ -12,6 +12,9 @@
 //	so the whole table is always valid. Slot 0 is reserved for the white
 //	texture (D3D12_SRV_WHITE), slot 1 holds a null cube SRV for good
 //	(D3D12_SRV_NULL_CUBE).
+//	The last D3D12_TABLE_SLOTS slots of the heap are not textures but the
+//	descriptor tables of the compute passes (D3D12Compute.h): runs of
+//	consecutive SRVs and UAVs (AllocRange).
 //	RTVs and DSVs of render targets come from CPU only heaps.
 //
 //////////////////////////////////////////////////////////////////////
@@ -26,6 +29,8 @@ static const int D3D12_SRV_WHITE = 0;
 //! A null TEXTURECUBE SRV (samples 0): the cube index of DF_CUBE0 when there is no cube texture,
 //! since a cube must not be sampled through the 2D null SRVs of the free slots.
 static const int D3D12_SRV_NULL_CUBE = 1;
+//! The slots at the end of the heap that AllocRange hands out (not textures).
+static const int D3D12_TABLE_SLOTS = 2048;
 
 class CD3D12Descriptors
 {
@@ -45,6 +50,17 @@ public:
   //! Gives the slot back: it keeps its view until the GPU finished the current frame, then
   //! CollectGarbage makes it a null SRV and free again. The reserved slots are ignored.
   void FreeSRV(int nSlot);
+
+  //! nCount consecutive slots for a descriptor table (written with WriteSRV and WriteUAV), the first
+  //! one's index; -1 when there is no such run left (logged once).
+  int AllocRange(int nCount);
+  //! Gives the run back, as FreeSRV a slot: after the GPU finished the current frame.
+  void FreeRange(int nFirst, int nCount);
+  //! Writes a UAV of pResource into a slot of AllocRange (pDesc NULL: the default view; pResource NULL
+  //! with pDesc: a null UAV).
+  void WriteUAV(int nSlot, ID3D12Resource *pResource, const D3D12_UNORDERED_ACCESS_VIEW_DESC *pDesc);
+  //! GPU handle of a slot (a descriptor table starting there).
+  D3D12_GPU_DESCRIPTOR_HANDLE GetGPU(int nSlot) const;
 
   D3D12_CPU_DESCRIPTOR_HANDLE AllocRTV();
   void FreeRTV(D3D12_CPU_DESCRIPTOR_HANDLE h);
@@ -89,5 +105,15 @@ private:
   std::vector<int> m_FreeSlots;       //!< the lowest slot last
   std::vector<SFreedSlot> m_Freed;    //!< waiting for the GPU, in the order freed
   bool m_bFullLogged = false;
+  //! A run of table slots.
+  struct SRange
+  {
+    int nFirst;
+    int nCount;
+    uint64 nFence;    //!< m_FreedRanges: the frame that freed it
+  };
+  std::vector<SRange> m_FreeRanges;   //!< by nFirst, neighbours merged
+  std::vector<SRange> m_FreedRanges;  //!< waiting for the GPU
+  bool m_bRangesFullLogged = false;
   SCPUHeap m_RTV, m_DSV;
 };

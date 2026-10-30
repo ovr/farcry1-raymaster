@@ -677,6 +677,34 @@ CD3D12Texture *CD3D12Upload::CreateRenderTarget(int nWidth, int nHeight, DXGI_FO
   return pTex;
 }
 
+CD3D12Texture *CD3D12Upload::CreateComputeTarget(int nWidth, int nHeight, int nMips, DXGI_FORMAT Format, const wchar_t *szName)
+{
+  if (!m_pDevice || nWidth <= 0 || nHeight <= 0 || nMips <= 0)
+    return nullptr;
+  const D3D12_HEAP_PROPERTIES Heap = HeapProps(D3D12_HEAP_TYPE_DEFAULT);
+  const D3D12_RESOURCE_DESC Desc = TextureDesc(nWidth, nHeight, 1, nMips, Format, D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS);
+  ComPtr<ID3D12Resource> pResource;
+  HRESULT hr = m_pDevice->CreateCommittedResource(&Heap, D3D12_HEAP_FLAG_NONE, &Desc, D3D12_RESOURCE_STATE_UNORDERED_ACCESS, nullptr,
+                                                  IID_PPV_ARGS(&pResource));
+  if (FAILED(hr))
+  {
+    iLog->LogError("XRenderD3D12: CreateCommittedResource (compute target %dx%d, %d mips, format %d) failed (0x%08X)",
+      nWidth, nHeight, nMips, (int)Format, (unsigned)hr);
+    return nullptr;
+  }
+  if (szName)
+    pResource->SetName(szName);
+
+  CD3D12Texture *pTex = new CD3D12Texture;
+  pTex->m_pResource = pResource.Detach();
+  pTex->m_Format = Format;
+  pTex->m_nWidth = nWidth;
+  pTex->m_nHeight = nHeight;
+  pTex->m_nMips = nMips;
+  AddVideoMemory(pTex->m_pResource);
+  return pTex;
+}
+
 void CD3D12Upload::UpdateTexture(CD3D12Texture *pTex, int nFace, int nMip, int x, int y, int nWidth, int nHeight, const SD3D12SubData &Data)
 {
   if (!pTex || !pTex->m_pResource || !Data.pData || !m_pDevice)

@@ -129,6 +129,24 @@
 //	the pixel (MotionVector) from mWorldViewProj and mPrevWorldViewProj to
 //	SV_Target1 and its depth to SV_Target2 (the pipeline masks what the draw
 //	does not write).
+//	Compiled with XR_AMBIENT (the main view's opaque list while the ambient
+//	occlusion's target is bound, d3d12_AOApply 1) it also writes to
+//	SV_Target3 A, how much of the colour is the ambient light's (rgb, in the
+//	colour's units), what the ambient occlusion takes away
+//	(AmbientOcclusion.cpp). The pipeline blends it as the colour, so each
+//	pass adds or keeps its own: the ambient part of the light (per pixel
+//	DrawLighting's sums with the ambient colour less those without it; per
+//	vertex about min(vColor * ambient, the light); MaterialLighting's
+//	diffuse less the lights alone; under a light map the colour times the
+//	ambient colour, with DF2_LIGHTMAP_LIGHTS the lights' ambient part),
+//	times what multiplies the colour after it, not what is added to it (the
+//	highlights, DF2_ADD_TEX4, DF2_ALPHA_GLOW); DF2_AO_BAKED the colour
+//	before DF2_SHADOW_TINT times vMipBias.yzw, DF2_AO_ALL all of it; at most
+//	the colour, times the fog's share of it. A pass that multiplies the
+//	picture (DF_DETAIL_LAYER, DF_CAUSTICS, DF2_MODULATE) writes its colour,
+//	the factor; the rest 0 (the unlit, the light passes, the fog volumes,
+//	the scope's glass). Without an upscaler SV_Target1 and 2 are null
+//	targets.
 //
 //////////////////////////////////////////////////////////////////////
 
@@ -152,6 +170,12 @@ struct SVertexOutput
   float4 vPrevClip : TEXCOORD10; //!< the same in the frame before
 #endif
 };
+
+#ifdef XR_AMBIENT
+//! The ambient colour's part of DrawLighting's last light and of its vNoSunLight, or of
+//! MaterialLighting's last vDiffuse (s_vAmbientLight); A of ShadePixel.
+static float3 s_vAmbientLight, s_vAmbientNoSun, s_vAmbient;
+#endif
 
 //! The light of the sun, the ambient colour and the draw's lights at world position vPos with the
 //! normalised normal vN, which multiplies the colour (DF_LIGHTING): s * (saturate(ambient / s +
@@ -219,6 +243,12 @@ float3 DrawLighting(float3 vPos, float3 vN, bool bPerPixel, out float3 vNoSunLig
     else
       vOthers += saturate(vThis);
   }
+#ifdef XR_AMBIENT
+  // What each sum loses without the ambient colour.
+  float3 vAmbient = g_Draw.vAmbient.rgb / fScale;
+  s_vAmbientLight = fScale * (saturate(vLight) - saturate(vLight - vAmbient));
+  s_vAmbientNoSun = fScale * (saturate(vNoSun) - saturate(vNoSun - vAmbient));
+#endif
   vNoSunLight = fScale * (saturate(vNoSun) + vOthers);
   return fScale * (saturate(vLight) + vOthers);
 }
@@ -260,6 +290,9 @@ void MaterialLighting(float3 vPos, float3 vN, float fSun, out float3 vDiffuse, o
   }
   vDiffuse = saturate(g_Draw.vAmbient.rgb + g_Draw.vColor.rgb * vLight);
   vSpecular = saturate(g_Draw.vSpecular.rgb * vSpec);
+#ifdef XR_AMBIENT
+  s_vAmbientLight = vDiffuse - saturate(g_Draw.vColor.rgb * vLight);
+#endif
 }
 
 //! How much of a fog volume's colour covers the point vPos of an object in it (DF2_FOG_VOLUME):
@@ -387,6 +420,9 @@ static const float HDR_CORE_POWER = 4;
 
 float4 ShadePixel(SVertexOutput In)
 {
+#ifdef XR_AMBIENT
+  s_vAmbient = 0;
+#endif
   if (HasFlag2(DF2_SCOPE_LENS))
     return ScopeLens(In);
 #ifdef XR_CASCADES
@@ -445,12 +481,19 @@ float4 ShadePixel(SVertexOutput In)
 #endif
   float4 vVertexColor = In.vColor;
   float3 vSpecular = 0;
+#ifdef XR_AMBIENT
+  // A: the ambient light's part of vVertexColor.rgb, then of vColor.rgb.
+  float3 vAmb = 0;
+#endif
   if (HasFlag(DF_LIGHTING) && HasFlag(DF_PIXEL_LIGHTING))
   {
     float3 vNoSunLight, vSunSpec, vOtherSpec;
     float3 vN = HasFlag(DF_BUMP) ? vBumpN : SafeNormalize(In.vNormal);
     float3 vLight = DrawLighting(In.vWorldPos, vN, true, vNoSunLight, vSunSpec, vOtherSpec);
     vVertexColor.rgb *= lerp(vNoSunLight, vLight, fSun);
+#ifdef XR_AMBIENT
+    vAmb = In.vColor.rgb * lerp(s_vAmbientNoSun, s_vAmbientLight, fSun);
+#endif
     if (HasFlag(DF_SPECULAR))
       vSpecular = 2 * g_Draw.vSpecular.rgb * (g_Draw.vSpecular.w > 0 ? vTex.a : 1) * (fSun * vSunSpec + vOtherSpec);
   }
@@ -459,15 +502,27 @@ float4 ShadePixel(SVertexOutput In)
     float3 vDiffuse;
     MaterialLighting(In.vWorldPos, HasFlag(DF_BUMP) ? vBumpN : SafeNormalize(In.vNormal), fSun, vDiffuse, vSpecular);
     vVertexColor.rgb = vDiffuse;
+#ifdef XR_AMBIENT
+    vAmb = s_vAmbientLight;
+#endif
   }
   else if (HasFlag(DF_SHADOWS) && HasFlag(DF_LIGHTING))
     vVertexColor.rgb = lerp(In.vColorNoSun.rgb, In.vColor.rgb, fSun);
+#ifdef XR_AMBIENT
+  // Lit per vertex: about the draw's colour times the ambient colour, not more than the light.
+  if (HasFlag(DF_LIGHTING) && !HasFlag(DF_PIXEL_LIGHTING) && !HasFlag2(DF2_MATERIAL_LIGHT))
+    vAmb = min(g_Draw.vColor.rgb * g_Draw.vAmbient.rgb, vVertexColor.rgb);
+#endif
 
   float4 vColor;
   if (HasFlag(DF_TEX0_ALPHA_ONLY))
     vColor = float4(vVertexColor.rgb, vVertexColor.a * vTex.a);
   else
     vColor = vVertexColor * vTex;
+#ifdef XR_AMBIENT
+  if (!HasFlag(DF_TEX0_ALPHA_ONLY))
+    vAmb *= vTex.rgb;
+#endif
   vColor.rgb += vSpecular;
   if (HasFlag2(DF2_ADD_TEX4))
   {
@@ -496,10 +551,17 @@ float4 ShadePixel(SVertexOutput In)
         float4 vDir = SampleTexture(g_Draw.nTex2, nSampler1, In.vTex1);
         vLight *= saturate(dot(vMap, vDir.xyz * 2 - 1)) * vDir.a;
       }
+#ifdef XR_AMBIENT
+      // The colour is unlit here: its light is the light map's and the ambient colour under it.
+      vAmb = vColor.rgb * g_Draw.vAmbient.rgb;
+#endif
       if (HasFlag2(DF2_LIGHTMAP_LIGHTS))
       {
         float3 vNoSunLight, vSunSpec, vOtherSpec;
         DrawLighting(In.vWorldPos, HasFlag(DF_BUMP) ? vBumpN : SafeNormalize(In.vNormal), true, vNoSunLight, vSunSpec, vOtherSpec);
+#ifdef XR_AMBIENT
+        vAmb = vColor.rgb * s_vAmbientNoSun;
+#endif
         vColor.rgb *= 4 * fSun * vLight + vNoSunLight;
       }
       else
@@ -509,6 +571,13 @@ float4 ShadePixel(SVertexOutput In)
       vColor.rgb = 2 * vColor.rgb + vTex1.rgb - 0.5;
     else
       vColor *= vTex1;
+#ifdef XR_AMBIENT
+    // The detail texture (the terrain's, DF2_AO_BAKED below) adds about nothing to the mean.
+    if (HasFlag(DF_TEX1_DETAIL) && !HasFlag(DF_TEX1_LIGHTMAP))
+      vAmb *= 2;
+    else if (!HasFlag(DF_TEX1_LIGHTMAP))
+      vAmb *= vTex1.rgb;
+#endif
   }
   if (HasFlag2(DF2_ALPHA_GLOW))
     vColor.rgb += vTex.rgb * vTex.a;
@@ -523,6 +592,11 @@ float4 ShadePixel(SVertexOutput In)
     if (vW.y > 0)
       vColor.rgb *= lerp(1, 2 * SampleTexture(g_Draw.nTex3, XR_SAMPLER_LINEAR_WRAP, float2(dot(vPos, g_Draw.vParams2), dot(vPos, g_Draw.vParams3))).rgb, vW.y);
   }
+#ifdef XR_AMBIENT
+  // A baked light's ambient part: the share of it the shadow leaves (the terrain's in the shadow).
+  if (HasFlag2(DF2_AO_BAKED))
+    vAmb = vColor.rgb * g_Frame.vMipBias.yzw;
+#endif
 #ifdef XR_CASCADES
   if (HasFlag2(DF2_SHADOW_TINT))
     vColor.rgb *= lerp(g_Frame.vShadowTint.rgb, 1, fSun);
@@ -558,6 +632,11 @@ float4 ShadePixel(SVertexOutput In)
     vColor.a = 1;
   if (HasFlag2(DF2_FOG_VOLUME))
     return float4(g_Draw.vColor.rgb, FogVolumeAlpha(In.vWorldPos) * (g_Draw.vParams0.w > 0 ? vColor.a : 1));
+#ifdef XR_AMBIENT
+  if (HasFlag2(DF2_AO_ALL))
+    vAmb = vColor.rgb;
+  vAmb = min(vAmb, max(vColor.rgb, 0));
+#endif
 
   float3 vFogColor = HasFlag2(DF2_FOG_BLACK) ? 0 : HasFlag2(DF2_MODULATE) ? 1 : g_Frame.vFogColor.rgb;
   if (HasFlag(DF_DETAIL_LAYER))
@@ -605,7 +684,16 @@ float4 ShadePixel(SVertexOutput In)
   if (HasFlag(DF_FOG) && g_Frame.vFogParams.w != 0)
   {
     vColor.rgb = lerp(vFogColor, vColor.rgb, SceneFog(In.vWorldPos));
+#ifdef XR_AMBIENT
+    vAmb *= SceneFog(In.vWorldPos);
+#endif
   }
+#ifdef XR_AMBIENT
+  // A pass that multiplies the picture multiplies A as much.
+  if (HasFlag(DF_DETAIL_LAYER | DF_CAUSTICS) || HasFlag2(DF2_MODULATE))
+    vAmb = vColor.rgb;
+  s_vAmbient = vAmb;
+#endif
 
   if (HasFlag(DF_SHADOW_DEBUG))
     vColor = float4(fSun, fSun, fSun, 1);
@@ -622,6 +710,9 @@ struct SPixelOutput
   float4 vColor : SV_Target0;
   float2 vMotion : SV_Target1;
   float fDepth : SV_Target2;
+#ifdef XR_AMBIENT
+  float4 vAmbient : SV_Target3;   //!< A, with the colour's alpha for the blend
+#endif
 };
 
 SPixelOutput PSMain(SVertexOutput In)
@@ -630,6 +721,23 @@ SPixelOutput PSMain(SVertexOutput In)
   Out.vColor = SceneOutput(ShadePixel(In));
   Out.vMotion = MotionVector(In.vCurClip, In.vPrevClip);
   Out.fDepth = In.vPos.z;
+#ifdef XR_AMBIENT
+  Out.vAmbient = float4(s_vAmbient, Out.vColor.a);
+#endif
+  return Out;
+}
+#elif defined(XR_AMBIENT)
+struct SPixelOutput
+{
+  float4 vColor : SV_Target0;
+  float4 vAmbient : SV_Target3;
+};
+
+SPixelOutput PSMain(SVertexOutput In)
+{
+  SPixelOutput Out;
+  Out.vColor = SceneOutput(ShadePixel(In));
+  Out.vAmbient = float4(s_vAmbient, Out.vColor.a);
   return Out;
 }
 #else

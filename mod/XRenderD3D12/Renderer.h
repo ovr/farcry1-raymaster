@@ -15,6 +15,7 @@
 //	  Scene.cpp             - render objects, render elements, lights, EF_StartEf .. EF_EndEf3D
 //	  Draw3D.cpp            - drawing the render items of EF_EndEf3D (no IRenderer methods)
 //	  Upscale.cpp           - the upscaler of the main view (no IRenderer methods)
+//	  AmbientOcclusion.cpp  - the ambient occlusion of the main view (no IRenderer methods)
 //	The state of a subsystem lives in its own class (m_pTextures, m_pShaders, m_pScene, ...).
 //	All calls come from one thread.
 //
@@ -24,6 +25,7 @@
 
 #include "D3D12Pipeline.h"
 #include "Upscaler.h"
+#include "AmbientOcclusion.h"
 #include "Shaders/Constants.h"
 
 struct SDisplayInfo;
@@ -34,6 +36,7 @@ class CD3D12Upload;
 class CD3D12Texture;
 class CD3D12Descriptors;
 class CD3D12Pipeline;
+class CD3D12Compute;
 class CTexture;
 class CTextureManager;
 class CShaderManager;
@@ -515,6 +518,48 @@ public:
   ICVar *m_pUpscalerVar = nullptr;          //!< d3d12_Upscaler
 
   //////////////////////////////////////////////////////////////////////////
+  // AmbientOcclusion.cpp: the ambient occlusion of the main view (d3d12_AO, AmbientOcclusion.h)
+
+  //! Before the main view's opaque list (pItems): with d3d12_AOApply 1 the ambient light's target,
+  //! cleared, bound for its draws to write the ambient light's part of their colour into
+  //! (CD3D12Device::BindAmbient), and the share of a baked light (m_AOBakedShare) from the list's
+  //! shadows on the terrain.
+  void BeginAOTarget(const SRenderItem *pItems, int nItems);
+  //! After the main view's opaque list, before the first person objects: the backend's occlusion of
+  //! what the depth buffer holds, as a factor (AoResolve.hlsl) the scene drawn so far is multiplied by,
+  //! or with the ambient light's target the light it takes from the scene (subtracted).
+  void DrawAmbientOcclusion();
+  //! d3d12_AODebug: the factor over the whole picture in grey, the ambient light or the light taken
+  //! (after EndMainScene).
+  void DrawAODebug();
+  //! The main view is drawn, in a frame, into its own targets: not its reflection, sprites, shadow
+  //! maps, cubes or heat vision.
+  bool IsAOView();
+  //! The backend of d3d12_AO for the main view's depth buffer, size and d3d12_AOApply, made when they
+  //! changed; false: none.
+  bool UpdateAO();
+  //! bForget false: what it was made for stays known, so that a backend that failed is not made
+  //! again every frame.
+  void ReleaseAO(bool bForget = true);
+
+  std::unique_ptr<IAmbientOcclusion> m_pAO;
+  std::string m_AOName;                     //!< the d3d12_AO m_pAO was made for (or not)
+  ComPtr<ID3D12Resource> m_pAODepth;        //!< the depth buffer it reads (held, so that a new one is never at its address)
+  int m_nAOWidth = 0, m_nAOHeight = 0;
+  int m_nAOApply = 0;                       //!< the d3d12_AOApply it was made for (0 or 1)
+  CD3D12Texture *m_pAOOutput = nullptr;     //!< the backend's visibility (R8_TYPELESS)
+  CD3D12Texture *m_pAOFactor = nullptr;     //!< the resolve's factor (R8G8B8A8_UNORM, an SRV in the texture table)
+  CD3D12Texture *m_pAOAmbient = nullptr;    //!< d3d12_AOApply 1: the ambient light (D3D12_AMBIENT_FORMAT, a render target;
+                                            //!< PIXEL_SHADER_RESOURCE | NON_PIXEL_SHADER_RESOURCE outside BeginAOTarget .. DrawAmbientOcclusion)
+  CD3D12Texture *m_pAOTaken = nullptr;      //!< d3d12_AOApply 1: the light the occlusion takes (R16G16B16A16_FLOAT, an SRV)
+  bool m_bAOAmbientBound = false;           //!< m_pAOAmbient is bound (BeginAOTarget .. DrawAmbientOcclusion)
+  float m_AOBakedShare[3] = { 0.5f, 0.5f, 0.5f };   //!< DF2_AO_BAKED's share (SFrameConstants::vMipBias.yzw)
+  int m_nAOResolveTable = -1;               //!< the resolve's descriptor tables (CD3D12Descriptors::AllocRange)
+  int m_nAOFrames = 0;                      //!< the frames with ambient occlusion (the noise's index)
+  int m_nAODrawnFrame = -1;                 //!< m_nFrames of the last one (DrawAODebug)
+  ICVar *m_pAOVar = nullptr;                //!< d3d12_AO
+
+  //////////////////////////////////////////////////////////////////////////
   // Water.cpp
 
   //! Key and constants of a water surface (eDC_Water): the water program over the copy of the
@@ -976,6 +1021,7 @@ public:
   std::unique_ptr<CD3D12Upload> m_pUpload;
   std::unique_ptr<CD3D12Descriptors> m_pDescriptors;
   std::unique_ptr<CD3D12Pipeline> m_pPipeline;
+  std::unique_ptr<CD3D12Compute> m_pCompute;
   std::unique_ptr<CTextureManager> m_pTextures;
   std::unique_ptr<CShaderManager> m_pShaders;
   std::unique_ptr<CScene> m_pScene;
@@ -1082,6 +1128,13 @@ public:
   int CV_d3d12_UpscaleMode = 0;             //!< EUpscaleMode of the upscaler (d3d12_Upscaler, a string)
   float CV_d3d12_UpscaleSharpness = 0.5f;   //!< the upscaler's sharpening, 0 (none) to 1
   int CV_d3d12_UpscaleDebug = 0;            //!< non-zero: the upscaler's debug view
+  int CV_d3d12_AOQuality = 2;               //!< the ambient occlusion's (d3d12_AO, a string) quality, 0 to 3
+  float CV_d3d12_AORadius = 1;              //!< its radius (m)
+  float CV_d3d12_AOStrength = 1;            //!< the exponent of its visibility
+  int CV_d3d12_AODenoise = 2;               //!< its denoise passes (XeGTAO) or blur passes (CACAO)
+  int CV_d3d12_AOApply = 1;                 //!< 0: it multiplies the whole picture, 1: it takes away the ambient light alone
+  float CV_d3d12_AOBakedShare = 0.5f;       //!< the ambient light's share of a baked light without the terrain's shadows to take it from
+  int CV_d3d12_AODebug = 0;                 //!< 1: its factor in grey; 2: the ambient light, 3: the light taken (d3d12_AOApply 1)
   int CV_d3d12_ToneMap = 1;                 //!< the HDR pipeline's tone map: 0 clamp, 1 soft shoulder, 2 ACES fitted, 3 AgX
   float CV_d3d12_ToneMapKnee = 0.85f;       //!< where the soft shoulder starts (a display value)
   float CV_d3d12_Exposure = 0;              //!< the exposure's compensation, EV

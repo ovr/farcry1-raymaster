@@ -25,6 +25,14 @@
 #include "General_Cascades_Velocity_PS.h"
 #include "General_Cascades_Hdr_PS.h"
 #include "General_Cascades_Hdr_Velocity_PS.h"
+#include "General_Ambient_PS.h"
+#include "General_Ambient_Velocity_PS.h"
+#include "General_Ambient_Hdr_PS.h"
+#include "General_Ambient_Hdr_Velocity_PS.h"
+#include "General_Ambient_Cascades_PS.h"
+#include "General_Ambient_Cascades_Velocity_PS.h"
+#include "General_Ambient_Cascades_Hdr_PS.h"
+#include "General_Ambient_Cascades_Hdr_Velocity_PS.h"
 #include "Water_VS.h"
 #include "Water_PS.h"
 #include "Water_Velocity_VS.h"
@@ -71,6 +79,17 @@ namespace
     { "Water", g_Water_VS, sizeof(g_Water_VS), g_Water_PS, sizeof(g_Water_PS) },
     { "Post", g_Post_VS, sizeof(g_Post_VS), g_Post_PS, sizeof(g_Post_PS) },
     { "Hdr", g_Hdr_VS, sizeof(g_Hdr_VS), g_Hdr_PS, sizeof(g_Hdr_PS) },
+  };
+
+  //! The general program's pixel shaders with the ambient light's part (XR_AMBIENT) by [cascades][HDR][velocity].
+  const D3D12_SHADER_BYTECODE s_AmbientPS[2][2][2] =
+  {
+    { { { g_General_Ambient_PS, sizeof(g_General_Ambient_PS) }, { g_General_Ambient_Velocity_PS, sizeof(g_General_Ambient_Velocity_PS) } },
+      { { g_General_Ambient_Hdr_PS, sizeof(g_General_Ambient_Hdr_PS) }, { g_General_Ambient_Hdr_Velocity_PS, sizeof(g_General_Ambient_Hdr_Velocity_PS) } } },
+    { { { g_General_Ambient_Cascades_PS, sizeof(g_General_Ambient_Cascades_PS) },
+        { g_General_Ambient_Cascades_Velocity_PS, sizeof(g_General_Ambient_Cascades_Velocity_PS) } },
+      { { g_General_Ambient_Cascades_Hdr_PS, sizeof(g_General_Ambient_Cascades_Hdr_PS) },
+        { g_General_Ambient_Cascades_Hdr_Velocity_PS, sizeof(g_General_Ambient_Cascades_Hdr_Velocity_PS) } } },
   };
 
   //! Input slot 1: what a vertex format lacks, read with stride 0 by every vertex.
@@ -507,6 +526,8 @@ ComPtr<ID3D12PipelineState> CD3D12Pipeline::CreatePSO(const SPipelineKey &Key)
   const bool bDepth = Key.nTarget == 0 || Key.nTarget == 2 || bScene;
   const bool bShadowMap = Key.nTarget == 2;
   const bool bHighlight = Key.nTarget == 4;
+  // The ambient occlusion's target bound as the fourth (CD3D12Device::BindAmbient).
+  const bool bAmbient = Key.bAmbient && (Key.nTarget == 0 || bScene);
   const uint32 nState = Key.nState;
   // In an upscaler's scene the general program's opaque draws write the motion vectors, and the
   // ones that write the depth buffer the upscaler's depth too; the blended ones leave those of
@@ -556,6 +577,14 @@ ComPtr<ID3D12PipelineState> CD3D12Pipeline::CreatePSO(const SPipelineKey &Key)
     else if (bHighlight && Key.nProgram == eD3D12P_Post)
       Desc.PS = { g_Post_Highlight_PS, sizeof(g_Post_Highlight_PS) };
   }
+  // The general program writing the ambient light's part of its colour too.
+  if (bAmbient && bGeneral)
+  {
+    const bool bMotion = bVelocity || bUpscaleDepth;
+    Desc.VS = bMotion ? D3D12_SHADER_BYTECODE{ g_General_Velocity_VS, sizeof(g_General_Velocity_VS) }
+                      : D3D12_SHADER_BYTECODE{ g_General_VS, sizeof(g_General_VS) };
+    Desc.PS = s_AmbientPS[Key.bCascades ? 1 : 0][bHdr ? 1 : 0][bMotion ? 1 : 0];
+  }
 
   // Blending: off when neither factor is set.
   D3D12_RENDER_TARGET_BLEND_DESC &Blend = Desc.BlendState.RenderTarget[0];
@@ -564,10 +593,10 @@ ComPtr<ID3D12PipelineState> CD3D12Pipeline::CreatePSO(const SPipelineKey &Key)
     Blend.BlendEnable = TRUE;
     Blend.SrcBlend = SrcBlend(nState);
     Blend.DestBlend = DstBlend(nState);
-    Blend.BlendOp = D3D12_BLEND_OP_ADD;
+    Blend.BlendOp = Key.nBlendOp ? D3D12_BLEND_OP_REV_SUBTRACT : D3D12_BLEND_OP_ADD;
     Blend.SrcBlendAlpha = AlphaBlend(Blend.SrcBlend);
     Blend.DestBlendAlpha = AlphaBlend(Blend.DestBlend);
-    Blend.BlendOpAlpha = D3D12_BLEND_OP_ADD;
+    Blend.BlendOpAlpha = Blend.BlendOp;
   }
   else
   {
@@ -608,6 +637,28 @@ ComPtr<ID3D12PipelineState> CD3D12Pipeline::CreatePSO(const SPipelineKey &Key)
     Nearest.DestBlend = Nearest.DestBlendAlpha = D3D12_BLEND_ONE;
     Nearest.BlendOp = Nearest.BlendOpAlpha = D3D12_BLEND_OP_MIN;
     Nearest.RenderTargetWriteMask = bUpscaleDepth ? D3D12_COLOR_WRITE_ENABLE_RED : 0;
+  }
+  if (bAmbient)
+  {
+    Desc.BlendState.IndependentBlendEnable = TRUE;
+    // Without an upscaler the second and third are null targets.
+    for (int i = 1; i < 3 && !bScene; i++)
+    {
+      D3D12_RENDER_TARGET_BLEND_DESC &Null = Desc.BlendState.RenderTarget[i];
+      Null.BlendEnable = FALSE;
+      Null.LogicOpEnable = FALSE;
+      Null.SrcBlend = Null.SrcBlendAlpha = D3D12_BLEND_ONE;
+      Null.DestBlend = Null.DestBlendAlpha = D3D12_BLEND_ZERO;
+      Null.BlendOp = Null.BlendOpAlpha = D3D12_BLEND_OP_ADD;
+      Null.LogicOp = D3D12_LOGIC_OP_NOOP;
+      Null.RenderTargetWriteMask = 0;
+    }
+    // The ambient light blends as the colour: a pass adds, keeps or scales it as the colour, with
+    // its own (General.hlsl, XR_AMBIENT).
+    D3D12_RENDER_TARGET_BLEND_DESC &Ambient = Desc.BlendState.RenderTarget[3];
+    Ambient = Blend;
+    Ambient.RenderTargetWriteMask = bGeneral && !(nState & (GS_NOCOLMASK | GS_COLMASKONLYALPHA)) ?
+      D3D12_COLOR_WRITE_ENABLE_RED | D3D12_COLOR_WRITE_ENABLE_GREEN | D3D12_COLOR_WRITE_ENABLE_BLUE : 0;
   }
   Desc.SampleMask = UINT_MAX;
 
@@ -670,7 +721,7 @@ ComPtr<ID3D12PipelineState> CD3D12Pipeline::CreatePSO(const SPipelineKey &Key)
   const int nTopology = Key.nTopology;
   Desc.PrimitiveTopologyType = nTopology >= D3D12_PRIMITIVE_TOPOLOGY_TYPE_POINT && nTopology <= D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE ?
     (D3D12_PRIMITIVE_TOPOLOGY_TYPE)nTopology : D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
-  Desc.NumRenderTargets = bShadowMap ? 0 : bScene ? 3 : bHighlight ? 2 : 1;
+  Desc.NumRenderTargets = bShadowMap ? 0 : bAmbient ? 4 : bScene ? 3 : bHighlight ? 2 : 1;
   switch (Key.nColorFormat)
   {
   case PIPELINE_COLOR_HDR:   Desc.RTVFormats[0] = D3D12_HDR_FORMAT; break;
@@ -682,8 +733,9 @@ ComPtr<ID3D12PipelineState> CD3D12Pipeline::CreatePSO(const SPipelineKey &Key)
   }
   if (bShadowMap)
     Desc.RTVFormats[0] = DXGI_FORMAT_UNKNOWN;
-  Desc.RTVFormats[1] = bScene ? D3D12_VELOCITY_FORMAT : bHighlight ? D3D12_HIGHLIGHT_FORMAT : DXGI_FORMAT_UNKNOWN;
-  Desc.RTVFormats[2] = bScene ? D3D12_UPSCALE_DEPTH_FORMAT : DXGI_FORMAT_UNKNOWN;
+  Desc.RTVFormats[1] = bScene || bAmbient ? D3D12_VELOCITY_FORMAT : bHighlight ? D3D12_HIGHLIGHT_FORMAT : DXGI_FORMAT_UNKNOWN;
+  Desc.RTVFormats[2] = bScene || bAmbient ? D3D12_UPSCALE_DEPTH_FORMAT : DXGI_FORMAT_UNKNOWN;
+  Desc.RTVFormats[3] = bAmbient ? D3D12_AMBIENT_FORMAT : DXGI_FORMAT_UNKNOWN;
   Desc.DSVFormat = bShadowMap ? D3D12_SHADOW_MAP_FORMAT : bScene ? D3D12_SCENE_DEPTH_FORMAT : bDepth ? D3D12_DEPTH_FORMAT : DXGI_FORMAT_UNKNOWN;
   Desc.SampleDesc.Count = 1;
   Desc.SampleDesc.Quality = 0;
@@ -695,9 +747,9 @@ ComPtr<ID3D12PipelineState> CD3D12Pipeline::CreatePSO(const SPipelineKey &Key)
   if (FAILED(hr))
   {
     iLog->LogError("XRenderD3D12: CreateGraphicsPipelineState failed (0x%08X): program %s, vertex format %d, state 0x%08X, "
-      "cull %d, topology %d, target %d, depth bias %d, streams %d, wireframe %d, colour format %d", (unsigned)hr, Program.szName,
-      (int)Key.nVertexFormat, nState, (int)Key.nCull, nTopology, (int)Key.nTarget, (int)Key.bDepthBias,
-      (int)Key.nStreams, (int)Key.bWireframe, (int)Key.nColorFormat);
+      "cull %d, topology %d, target %d, depth bias %d, streams %d, wireframe %d, colour format %d, ambient %d, blend op %d", (unsigned)hr,
+      Program.szName, (int)Key.nVertexFormat, nState, (int)Key.nCull, nTopology, (int)Key.nTarget, (int)Key.bDepthBias,
+      (int)Key.nStreams, (int)Key.bWireframe, (int)Key.nColorFormat, (int)Key.bAmbient, (int)Key.nBlendOp);
     return nullptr;
   }
   return pPSO;

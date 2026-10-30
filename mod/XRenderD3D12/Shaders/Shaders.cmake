@@ -19,6 +19,16 @@ xrender_d3d12_shader(General_Cascades_PS General.hlsl ps_6_0 PSMain XR_CASCADES)
 xrender_d3d12_shader(General_Cascades_Velocity_PS General.hlsl ps_6_0 PSMain XR_CASCADES XR_VELOCITY)
 xrender_d3d12_shader(General_Cascades_Hdr_PS General.hlsl ps_6_0 PSMain XR_CASCADES XR_HDR)
 xrender_d3d12_shader(General_Cascades_Hdr_Velocity_PS General.hlsl ps_6_0 PSMain XR_CASCADES XR_VELOCITY XR_HDR)
+# All of them writing the ambient light's part of the colour too (XR_AMBIENT, SV_Target3), for the draws while
+# the ambient occlusion's target is bound (SPipelineKey::bAmbient); with the same vertex shaders.
+xrender_d3d12_shader(General_Ambient_PS General.hlsl ps_6_0 PSMain XR_AMBIENT)
+xrender_d3d12_shader(General_Ambient_Velocity_PS General.hlsl ps_6_0 PSMain XR_AMBIENT XR_VELOCITY)
+xrender_d3d12_shader(General_Ambient_Hdr_PS General.hlsl ps_6_0 PSMain XR_AMBIENT XR_HDR)
+xrender_d3d12_shader(General_Ambient_Hdr_Velocity_PS General.hlsl ps_6_0 PSMain XR_AMBIENT XR_VELOCITY XR_HDR)
+xrender_d3d12_shader(General_Ambient_Cascades_PS General.hlsl ps_6_0 PSMain XR_AMBIENT XR_CASCADES)
+xrender_d3d12_shader(General_Ambient_Cascades_Velocity_PS General.hlsl ps_6_0 PSMain XR_AMBIENT XR_CASCADES XR_VELOCITY)
+xrender_d3d12_shader(General_Ambient_Cascades_Hdr_PS General.hlsl ps_6_0 PSMain XR_AMBIENT XR_CASCADES XR_HDR)
+xrender_d3d12_shader(General_Ambient_Cascades_Hdr_Velocity_PS General.hlsl ps_6_0 PSMain XR_AMBIENT XR_CASCADES XR_VELOCITY XR_HDR)
 
 # Water surfaces (eD3D12P_Water).
 xrender_d3d12_shader(Water_VS Water.hlsl vs_6_0 VSMain)
@@ -42,3 +52,15 @@ xrender_d3d12_shader(Hdr_VS Hdr.hlsl vs_6_0 VSMain)
 xrender_d3d12_shader(Hdr_PS Hdr.hlsl ps_6_0 PSMain)
 # The resolve writing the highlight layer too (HdrOutput.cpp, SPipelineKey::nTarget 4).
 xrender_d3d12_shader(Hdr_Highlight_PS Hdr.hlsl ps_6_0 PSHighlight)
+
+# The compute kernels (D3D12Compute.h, ED3D12Kernel): Intel XeGTAO's passes (XeGtao.hlsl, one per
+# compile) and the ambient occlusion's resolve.
+xrender_d3d12_shader(Gtao_PrefilterDepths_CS XeGtao.hlsl cs_6_0 CSMain XR_GTAO_PREFILTER)
+xrender_d3d12_shader(Gtao_Normals_CS XeGtao.hlsl cs_6_0 CSMain XR_GTAO_NORMALS)
+xrender_d3d12_shader(Gtao_Low_CS XeGtao.hlsl cs_6_0 CSMain XR_GTAO_MAIN XR_GTAO_SLICES=1 XR_GTAO_STEPS=2)
+xrender_d3d12_shader(Gtao_Medium_CS XeGtao.hlsl cs_6_0 CSMain XR_GTAO_MAIN XR_GTAO_SLICES=2 XR_GTAO_STEPS=2)
+xrender_d3d12_shader(Gtao_High_CS XeGtao.hlsl cs_6_0 CSMain XR_GTAO_MAIN XR_GTAO_SLICES=3 XR_GTAO_STEPS=3)
+xrender_d3d12_shader(Gtao_Ultra_CS XeGtao.hlsl cs_6_0 CSMain XR_GTAO_MAIN XR_GTAO_SLICES=9 XR_GTAO_STEPS=3)
+xrender_d3d12_shader(Gtao_Denoise_CS XeGtao.hlsl cs_6_0 CSMain XR_GTAO_DENOISE)
+xrender_d3d12_shader(Gtao_DenoiseLast_CS XeGtao.hlsl cs_6_0 CSMain XR_GTAO_DENOISE XR_GTAO_LAST)
+xrender_d3d12_shader(AoResolve_CS AoResolve.hlsl cs_6_0 CSMain)
