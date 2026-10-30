@@ -15,6 +15,9 @@ Mods for Far Cry, built with the CryENGINE MOD SDK for Far Cry:
 - `mod/Demos` - demo scenes that run inside the game, and their runner.
 - `third_party/amd-fsr-sdk` - the parts of the AMD FSR SDK that XRenderD3D12 uses for AMD FSR
   Upscaling.
+- `third_party/xegtao`, `third_party/fidelityfx-cacao` - Intel XeGTAO and AMD FidelityFX CACAO,
+  the ambient occlusion of XRenderD3D12; `third_party/directx-headers` - Microsoft's d3dx12
+  headers, which CACAO needs.
 - `assets/scripts` - patches to the game's scripts, and `Patch Scripts.cmd`, which applies them to
   the scripts of an installed game (`Patch Scripts.cmd <game folder>`, written to
   `FCData\zz_RayMaster.pak`; deleting that file gives back the original scripts):
@@ -42,7 +45,10 @@ SDK for Far Cry and the AMD FSR SDK (`LICENSE-EXCEPTION.md`).
 
 `third_party/amd-fsr-sdk/` holds parts of the AMD FSR SDK by Advanced Micro Devices, Inc., under
 AMD's MIT license (`third_party/amd-fsr-sdk/docs/license.md`); the build downloads its upscaler
-DLL (`third_party/amd-fsr-sdk/README.md`).
+DLL (`third_party/amd-fsr-sdk/README.md`). `third_party/xegtao/` holds parts of XeGTAO by Intel
+Corporation, `third_party/fidelityfx-cacao/` parts of FidelityFX CACAO by Advanced Micro Devices,
+Inc., and `third_party/directx-headers/` parts of DirectX-Headers by Microsoft Corporation, each under
+its MIT license (`LICENSE`, `license.txt`, `LICENSE` in its folder).
 
 `mod/XRenderCommon/` is dedicated to the public domain (CC0 1.0, `mod/XRenderCommon/COPYING`): its
 authors claim no rights to it, and any renderer for the game may use it, under any license.

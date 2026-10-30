@@ -44,9 +44,11 @@ it as well: it holds local, machine-specific instructions and is not committed (
 - `third_party/` - other projects' files, unchanged from a tagged release in their own folder
   layout, with a `README.md` of ours naming the tag and the hashes of the binaries.
   `third_party/amd-fsr-sdk` is the part of the AMD FSR SDK that XRenderD3D12 uses; its 57 MB
-  upscaler DLL is not committed but downloaded by CMake. Every library added there needs a
-  matching permission in `LICENSE-EXCEPTION.md` unless its license is GPL-compatible and it comes
-  with its source.
+  upscaler DLL is not committed but downloaded by CMake. `third_party/xegtao` (Intel XeGTAO) and
+  `third_party/fidelityfx-cacao` (AMD FidelityFX CACAO) are XRenderD3D12's ambient occlusion,
+  `third_party/directx-headers` the d3dx12 headers that CACAO's host includes. Every library added
+  there needs a matching permission in `LICENSE-EXCEPTION.md` unless its license is GPL-compatible
+  and it comes with its source.
 - `farcry1_testing1/` - the game install for tracing (git-ignored):
   - `Bin32` - retail 1.4 (x86; stops at its CD check, which is not to be bypassed),
   - `Bin64` - the Cumulative Patch x64 build described above.
