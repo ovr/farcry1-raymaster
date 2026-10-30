@@ -9,8 +9,13 @@
 //	There is one root signature for every draw (Shaders/Constants.h):
 //	  0: root CBV b0 (SFrameConstants)
 //	  1: root CBV b1 (SDrawConstants)
-//	  2: descriptor table, the whole texture table (t0 space1 and t0 space2)
+//	  2: descriptor table, the whole texture table (t0 space1, space2 and
+//	     space3; raw buffers in space4 for the rays)
+//	  3: root SRV t0 space5, the scene for rays (ROOT_RAY_SCENE)
+//	  4: root SRV t1 space5, its instances (ROOT_RAY_INSTANCES)
 //	  static samplers s0..s3, s4 the comparison sampler of the shadow maps
+//	Only the programs with rays (Shader Model 6.5, RayTracing.h) read 3 and
+//	4; DrawGeometry binds them for those alone.
 //	The programs are general ("fixed function") shaders whose features are
 //	switched by SDrawConstants::nFlags, so a pipeline state depends only on
 //	the program, the vertex format and the fixed state below.
@@ -41,8 +46,13 @@ enum ED3D12Program
   eD3D12P_Water,          //!< Shaders/Water.hlsl: water surfaces (refraction, reflection, waves)
   eD3D12P_Post,           //!< Shaders/Post.hlsl: the screen effects (POST_* flags)
   eD3D12P_Hdr,            //!< Shaders/Hdr.hlsl: exposure, bloom and tone mapping of the HDR scene (HDR_* flags)
+  eD3D12P_RayDebug,       //!< Shaders/RayDebug.hlsl: the scene for rays seen from the main view's camera (d3d12_RTDebug)
   eD3D12P_Num
 };
+
+//! The root parameters the programs with rays read (above).
+constexpr UINT ROOT_RAY_SCENE = 3;
+constexpr UINT ROOT_RAY_INSTANCES = 4;
 
 //! SPipelineKey::nStreams: the extra vertex streams of a draw.
 constexpr uint8 PIPELINE_STREAM_TEXCOORD1 = 1;    //!< TEXCOORD1 from slot 2 (VERTEX_FORMAT_TEX2F)
@@ -76,6 +86,9 @@ struct SPipelineKey
                           //!< without an upscaler after the null second and third): the general program writes the ambient
                           //!< light's part of its colour there (XR_AMBIENT), blended as the colour; DrawGeometry sets it
   uint8 nBlendOp;         //!< 0 the colour blends add, 1 subtract the source from the target (REV_SUBTRACT)
+  uint8 bRayTrace;        //!< the water program with rays (XR_RAYTRACE, Shader Model 6.5; DrawGeometry clears it without a scene
+                          //!< for rays in the frame)
+  uint8 nPad[3];
 };
 
 //! SPipelineKey::nColorFormat.
@@ -104,6 +117,10 @@ public:
   //! Size in bytes of a vertex of the format (m_VertexSize of VertexFormats.h, also for the
   //! formats gBufInfoTable leaves out).
   static int GetVertexSize(int nVertexFormat);
+  //! Where a vertex of the format keeps its normal, first colour and texture coordinates 0 and 1
+  //! (bytes from its start), -1 for those it lacks (the default stream's then); false for a format
+  //! not drawn on its own.
+  static bool GetVertexAttributes(int nVertexFormat, int &nNormal, int &nColor0, int &nTex0, int &nTex1);
 
 private:
   struct SKeyHash

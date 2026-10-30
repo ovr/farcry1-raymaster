@@ -64,6 +64,7 @@ bool CD3D12Descriptors::Init(ID3D12Device *pDevice)
   for (int i = FIRST_TABLE_SLOT - 1; i >= FIRST_FREE_SLOT; i--)
     m_FreeSlots.push_back(i);
   m_FreeRanges.assign(1, { FIRST_TABLE_SLOT, D3D12_TABLE_SLOTS, 0 });
+  m_Generation.resize(D3D12_MAX_TEXTURES);
 
   if (!InitCPUHeap(m_RTV, D3D12_DESCRIPTOR_HEAP_TYPE_RTV, RTV_COUNT) ||
       !InitCPUHeap(m_DSV, D3D12_DESCRIPTOR_HEAP_TYPE_DSV, DSV_COUNT))
@@ -170,6 +171,7 @@ void CD3D12Descriptors::FreeSRV(int nSlot)
   if (!m_pHeap || nSlot < FIRST_FREE_SLOT || nSlot >= FIRST_TABLE_SLOT)
     return;
   m_Freed.push_back({ nSlot, g_pRenderer->m_pDevice->GetFrameFence() });
+  m_Generation[nSlot]++;
 }
 
 int CD3D12Descriptors::AllocRange(int nCount)

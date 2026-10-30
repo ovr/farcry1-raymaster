@@ -50,8 +50,9 @@ CD3D12Device::~CD3D12Device()
   Shutdown();
 }
 
-bool CD3D12Device::Init(HWND hWnd, int nWidth, int nHeight, bool bDebug)
+bool CD3D12Device::Init(HWND hWnd, int nWidth, int nHeight, int nDebug)
 {
+  const bool bDebug = nDebug != 0;
   UINT nFactoryFlags = 0;
   if (bDebug)
   {
@@ -59,11 +60,14 @@ bool CD3D12Device::Init(HWND hWnd, int nWidth, int nHeight, bool bDebug)
     if (SUCCEEDED(D3D12GetDebugInterface(IID_PPV_ARGS(&pDebug))))
     {
       pDebug->EnableDebugLayer();
+      // GPU based validation turns the frames of the water's rays (d3d12_RTReflections) black,
+      // without a message: the debug layer alone checks them.
       ComPtr<ID3D12Debug1> pDebug1;
-      if (SUCCEEDED(pDebug.As(&pDebug1)))
+      const bool bGPU = nDebug != 2 && SUCCEEDED(pDebug.As(&pDebug1));
+      if (bGPU)
         pDebug1->SetEnableGPUBasedValidation(TRUE);
       nFactoryFlags |= DXGI_CREATE_FACTORY_DEBUG;
-      iLog->Log("XRenderD3D12: debug layer and GPU based validation on");
+      iLog->Log(bGPU ? "XRenderD3D12: debug layer and GPU based validation on" : "XRenderD3D12: debug layer on");
     }
     else
       iLog->LogWarning("XRenderD3D12: the debug layer is not installed (Graphics Tools)");
@@ -1172,14 +1176,18 @@ void CD3D12Device::EndFrame(bool bPresent, bool bVSync)
     g_pRenderer->m_pUpload->Flush();
   ID3D12CommandList *pList = m_pCmdList.Get();
   m_pQueue->ExecuteCommandLists(1, &pList);
+  HRESULT hr = S_OK;
   if (bPresent)
+    hr = m_pSwapChain->Present(bVSync ? 1 : 0, !bVSync && m_bTearing ? DXGI_PRESENT_ALLOW_TEARING : 0);
+  // A removed device, once, whether the frame was presented or not (a demo's frames need not be).
+  static bool s_bLogged = false;
+  if (!s_bLogged)
   {
-    const HRESULT hr = m_pSwapChain->Present(bVSync ? 1 : 0, !bVSync && m_bTearing ? DXGI_PRESENT_ALLOW_TEARING : 0);
-    static bool s_bLogged = false;
-    if ((hr == DXGI_ERROR_DEVICE_REMOVED || hr == DXGI_ERROR_DEVICE_RESET) && !s_bLogged)
+    const HRESULT hrReason = m_pDevice->GetDeviceRemovedReason();
+    if (hr == DXGI_ERROR_DEVICE_REMOVED || hr == DXGI_ERROR_DEVICE_RESET || FAILED(hrReason))
     {
       s_bLogged = true;
-      iLog->LogError("XRenderD3D12: device removed (0x%08X, reason 0x%08X)", (unsigned)hr, (unsigned)m_pDevice->GetDeviceRemovedReason());
+      iLog->LogError("XRenderD3D12: device removed (0x%08X, reason 0x%08X)", (unsigned)hr, (unsigned)hrReason);
     }
   }
   m_nFrameFence[m_nFrameSlot] = Signal();

@@ -56,6 +56,8 @@ add_library(DemoHost STATIC
     DemoHost/SceneFile.cpp
     DemoHost/Capture.h
     DemoHost/Capture.cpp
+    DemoHost/DemoMaterials.h
+    DemoHost/DemoMaterials.cpp
     DemoHost/Tga.h
     DemoHost/TestTexture.h
     DemoHost/TestTexture.cpp
@@ -90,6 +92,7 @@ add_demo(DemoShaders DemoShaders/DemoShaders.cpp)
 add_demo(DemoTextureFormats DemoTextureFormats/DemoTextureFormats.cpp)
 add_demo(DemoMultiLight DemoMultiLight/DemoMultiLight.cpp)
 add_demo(DemoShadows DemoShadows/DemoShadows.cpp)
+add_demo(DemoSurfaces DemoSurfaces/DemoSurfaces.cpp)
 add_demo(DemoParticles DemoParticles/DemoParticles.cpp)
 add_demo(DemoScreenFx DemoScreenFx/DemoScreenFx.cpp)
 add_demo(DemoDecals DemoDecals/DemoDecals.cpp)

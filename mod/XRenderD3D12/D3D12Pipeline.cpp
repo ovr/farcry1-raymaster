@@ -39,12 +39,18 @@
 #include "Water_Velocity_PS.h"
 #include "Water_Hdr_PS.h"
 #include "Water_Hdr_Velocity_PS.h"
+#include "Water_RT_PS.h"
+#include "Water_RT_Velocity_PS.h"
+#include "Water_RT_Hdr_PS.h"
+#include "Water_RT_Hdr_Velocity_PS.h"
 #include "Post_VS.h"
 #include "Post_PS.h"
 #include "Post_Highlight_PS.h"
 #include "Hdr_VS.h"
 #include "Hdr_PS.h"
 #include "Hdr_Highlight_PS.h"
+#include "RayDebug_VS.h"
+#include "RayDebug_PS.h"
 
 using Microsoft::WRL::ComPtr;
 
@@ -79,6 +85,7 @@ namespace
     { "Water", g_Water_VS, sizeof(g_Water_VS), g_Water_PS, sizeof(g_Water_PS) },
     { "Post", g_Post_VS, sizeof(g_Post_VS), g_Post_PS, sizeof(g_Post_PS) },
     { "Hdr", g_Hdr_VS, sizeof(g_Hdr_VS), g_Hdr_PS, sizeof(g_Hdr_PS) },
+    { "RayDebug", g_RayDebug_VS, sizeof(g_RayDebug_VS), g_RayDebug_PS, sizeof(g_RayDebug_PS) },
   };
 
   //! The general program's pixel shaders with the ambient light's part (XR_AMBIENT) by [cascades][HDR][velocity].
@@ -198,7 +205,7 @@ namespace
   static_assert(sizeof(struct_VERTEX_FORMAT_P3F_N_COL4UB_COL4UB_TEX2F) == 40);
   static_assert(sizeof(SPipTangents) == 36);
   static_assert(sizeof(SDefaultStream) == 72);
-  static_assert(sizeof(SPipelineKey) == 16, "SPipelineKey is hashed and compared as bytes");
+  static_assert(sizeof(SPipelineKey) == 20, "SPipelineKey is hashed and compared as bytes");
 
   //! The most elements of an input layout.
   constexpr int MAX_INPUT_ELEMENTS = 9;
@@ -371,7 +378,7 @@ bool CD3D12Pipeline::CreateRootSignature()
       (int)Options.ResourceBindingTier);
 
   // All views of the texture table start at its first slot.
-  D3D12_DESCRIPTOR_RANGE Ranges[3] = {};
+  D3D12_DESCRIPTOR_RANGE Ranges[4] = {};
   Ranges[0].RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_SRV;
   Ranges[0].NumDescriptors = UINT_MAX;          // unbounded
   Ranges[0].BaseShaderRegister = 0;
@@ -381,8 +388,10 @@ bool CD3D12Pipeline::CreateRootSignature()
   Ranges[1].RegisterSpace = 2;                  // TextureCube g_Cubes[]
   Ranges[2] = Ranges[0];
   Ranges[2].RegisterSpace = 3;                  // Texture2DArray g_TextureArrays[]
+  Ranges[3] = Ranges[0];
+  Ranges[3].RegisterSpace = 4;                  // ByteAddressBuffer g_Buffers[] (the rays' vertices and indices)
 
-  D3D12_ROOT_PARAMETER Params[3] = {};
+  D3D12_ROOT_PARAMETER Params[5] = {};
   Params[0].ParameterType = D3D12_ROOT_PARAMETER_TYPE_CBV;      // b0 SFrameConstants
   Params[0].Descriptor.ShaderRegister = 0;
   Params[0].ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
@@ -390,9 +399,17 @@ bool CD3D12Pipeline::CreateRootSignature()
   Params[1].Descriptor.ShaderRegister = 1;
   Params[1].ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
   Params[2].ParameterType = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
-  Params[2].DescriptorTable.NumDescriptorRanges = 3;
+  Params[2].DescriptorTable.NumDescriptorRanges = 4;
   Params[2].DescriptorTable.pDescriptorRanges = Ranges;
   Params[2].ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
+  Params[ROOT_RAY_SCENE].ParameterType = D3D12_ROOT_PARAMETER_TYPE_SRV;    // t0 space5 the TLAS
+  Params[ROOT_RAY_SCENE].Descriptor.ShaderRegister = 0;
+  Params[ROOT_RAY_SCENE].Descriptor.RegisterSpace = 5;
+  Params[ROOT_RAY_SCENE].ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
+  Params[ROOT_RAY_INSTANCES].ParameterType = D3D12_ROOT_PARAMETER_TYPE_SRV;  // t1 space5 its instances
+  Params[ROOT_RAY_INSTANCES].Descriptor.ShaderRegister = 1;
+  Params[ROOT_RAY_INSTANCES].Descriptor.RegisterSpace = 5;
+  Params[ROOT_RAY_INSTANCES].ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
 
   D3D12_STATIC_SAMPLER_DESC Samplers[5];
   Samplers[XR_SAMPLER_LINEAR_WRAP] = StaticSampler(XR_SAMPLER_LINEAR_WRAP, D3D12_FILTER_ANISOTROPIC, D3D12_TEXTURE_ADDRESS_MODE_WRAP);
@@ -404,7 +421,7 @@ bool CD3D12Pipeline::CreateRootSignature()
   Samplers[4].ComparisonFunc = D3D12_COMPARISON_FUNC_LESS_EQUAL;
 
   D3D12_ROOT_SIGNATURE_DESC Desc = {};
-  Desc.NumParameters = 3;
+  Desc.NumParameters = 5;
   Desc.pParameters = Params;
   Desc.NumStaticSamplers = 5;
   Desc.pStaticSamplers = Samplers;
@@ -496,6 +513,19 @@ int CD3D12Pipeline::GetVertexSize(int nVertexFormat)
   return s_VertexSizes[nVertexFormat];
 }
 
+bool CD3D12Pipeline::GetVertexAttributes(int nVertexFormat, int &nNormal, int &nColor0, int &nTex0, int &nTex1)
+{
+  nNormal = nColor0 = nTex0 = nTex1 = -1;
+  if (nVertexFormat <= 0 || nVertexFormat >= VERTEX_FORMAT_NUMS || s_Layouts[nVertexFormat].nPos < 0)
+    return false;
+  const SFormatLayout &Layout = s_Layouts[nVertexFormat];
+  nNormal = Layout.nNormal;
+  nColor0 = Layout.nColor0;
+  nTex0 = Layout.nTex0;
+  nTex1 = Layout.nTex1;
+  return true;
+}
+
 ID3D12PipelineState *CD3D12Pipeline::GetPSO(const SPipelineKey &Key)
 {
   if (!m_pRootSignature)
@@ -576,6 +606,16 @@ ComPtr<ID3D12PipelineState> CD3D12Pipeline::CreatePSO(const SPipelineKey &Key)
       Desc.PS = { g_Hdr_Highlight_PS, sizeof(g_Hdr_Highlight_PS) };
     else if (bHighlight && Key.nProgram == eD3D12P_Post)
       Desc.PS = { g_Post_Highlight_PS, sizeof(g_Post_Highlight_PS) };
+  }
+  // The water's reflection by rays (d3d12_RTReflections), by [HDR][velocity].
+  if (bWater && Key.bRayTrace)
+  {
+    static const D3D12_SHADER_BYTECODE s_WaterRayPS[2][2] =
+    {
+      { { g_Water_RT_PS, sizeof(g_Water_RT_PS) }, { g_Water_RT_Velocity_PS, sizeof(g_Water_RT_Velocity_PS) } },
+      { { g_Water_RT_Hdr_PS, sizeof(g_Water_RT_Hdr_PS) }, { g_Water_RT_Hdr_Velocity_PS, sizeof(g_Water_RT_Hdr_Velocity_PS) } },
+    };
+    Desc.PS = s_WaterRayPS[bHdr ? 1 : 0][bVelocity || bUpscaleDepth ? 1 : 0];
   }
   // The general program writing the ambient light's part of its colour too.
   if (bAmbient && bGeneral)
@@ -747,9 +787,9 @@ ComPtr<ID3D12PipelineState> CD3D12Pipeline::CreatePSO(const SPipelineKey &Key)
   if (FAILED(hr))
   {
     iLog->LogError("XRenderD3D12: CreateGraphicsPipelineState failed (0x%08X): program %s, vertex format %d, state 0x%08X, "
-      "cull %d, topology %d, target %d, depth bias %d, streams %d, wireframe %d, colour format %d, ambient %d, blend op %d", (unsigned)hr,
+      "cull %d, topology %d, target %d, depth bias %d, streams %d, wireframe %d, colour format %d, ambient %d, blend op %d, rays %d", (unsigned)hr,
       Program.szName, (int)Key.nVertexFormat, nState, (int)Key.nCull, nTopology, (int)Key.nTarget, (int)Key.bDepthBias,
-      (int)Key.nStreams, (int)Key.bWireframe, (int)Key.nColorFormat, (int)Key.bAmbient, (int)Key.nBlendOp);
+      (int)Key.nStreams, (int)Key.bWireframe, (int)Key.nColorFormat, (int)Key.bAmbient, (int)Key.nBlendOp, (int)Key.bRayTrace);
     return nullptr;
   }
   return pPSO;

@@ -22,6 +22,7 @@
 #pragma once
 
 #include <wrl/client.h>
+#include <map>
 #include <vector>
 #include "D3D12Device.h"
 
@@ -34,16 +35,20 @@ struct SD3D12FrameAlloc
   uint64 nOffset;                     //!< in pResource
 };
 
-//! A buffer in the default heap (vertices, indices), in the state
-//! VERTEX_AND_CONSTANT_BUFFER | INDEX_BUFFER between uploads.
+//! A buffer in the default heap (vertices, indices), in the state VERTEX_AND_CONSTANT_BUFFER |
+//! INDEX_BUFFER | NON_PIXEL_SHADER_RESOURCE | PIXEL_SHADER_RESOURCE between uploads (the shader
+//! resource states for the rays: the scene's builds and the shaders read it, RayTracing.h).
 class CD3D12Buffer
 {
 public:
   ID3D12Resource *m_pResource;
   D3D12_GPU_VIRTUAL_ADDRESS m_nGPU;
   uint32 m_nSize;
+  uint64 m_nId;                       //!< never the same for two buffers (FindBuffer's callers tell them apart by it)
+  uint32 m_nVersion;                  //!< counts the UpdateBuffer calls
+  int m_nRawSRV;                      //!< its raw SRV in the texture table (GetRawSRV), -1 none yet
 
-  CD3D12Buffer() : m_pResource(NULL), m_nGPU(0), m_nSize(0) {}
+  CD3D12Buffer() : m_pResource(NULL), m_nGPU(0), m_nSize(0), m_nId(0), m_nVersion(0), m_nRawSRV(-1) {}
 };
 
 //! A texture in the default heap, in the state PIXEL_SHADER_RESOURCE between uploads (render
@@ -97,6 +102,14 @@ public:
   void UpdateBuffer(CD3D12Buffer *pBuf, uint32 nOffset, const void *pData, uint32 nSize);
   //! Deferred until the GPU is done with it; deletes pBuf.
   void ReleaseBuffer(CD3D12Buffer *pBuf);
+  //! The static buffer that holds the GPU address nGPU, NULL when none does (e.g. per frame memory).
+  const CD3D12Buffer *FindBuffer(D3D12_GPU_VIRTUAL_ADDRESS nGPU) const;
+  //! A raw SRV (a ByteAddressBuffer in the texture table, D3D12Pipeline.h's space4) of the static
+  //! buffer or the block of this frame's memory that holds nGPU, made when first asked for and kept
+  //! with it; nOffset the bytes from the start of the view to nGPU. -1 when none holds it or there
+  //! are MAX_RAW_SRVS already (the rays read vertices and indices through them, RayTracing.h).
+  int GetRawSRV(D3D12_GPU_VIRTUAL_ADDRESS nGPU, uint64 &nOffset);
+  static constexpr int MAX_RAW_SRVS = 16384;
 
   //! A 2D texture (or a cube with 6 faces), nMips levels, with an SRV in the texture table.
   //! pSubData: [face * nMips + mip] for every face and mip, or NULL (contents undefined); an
@@ -129,6 +142,7 @@ private:
     uint8 *pCPU = nullptr;
     D3D12_GPU_VIRTUAL_ADDRESS nGPU = 0;
     uint64 nSize = 0;
+    int nRawSRV = -1;                 //!< per frame memory: GetRawSRV's view of it
   };
   //! The per frame memory of one frame slot.
   struct SFrameSlot
@@ -162,6 +176,9 @@ private:
   uint64 GetAllocationSize(ID3D12Resource *pResource) const;
   void AddVideoMemory(ID3D12Resource *pResource);
   void SubVideoMemory(ID3D12Resource *pResource);
+  //! A raw SRV of all of pResource (nSize bytes), -1 when refused.
+  int CreateRawSRV(ID3D12Resource *pResource, uint64 nSize);
+  void FreeRawSRV(int &nSlot);
 
   ID3D12Device *m_pDevice = nullptr;
   uint32 m_nFrameRingSize = 0;
@@ -186,4 +203,9 @@ private:
   uint64 m_nInFlightBytes = 0;        //!< staging bytes of the executed batches not retired yet
 
   uint64 m_nVideoMemory = 0;
+
+  // Static buffers
+  std::map<D3D12_GPU_VIRTUAL_ADDRESS, CD3D12Buffer *> m_Buffers;   //!< by their GPU address
+  uint64 m_nNextBufferId = 1;
+  int m_nRawSRVs = 0;                 //!< GetRawSRV's views alive
 };

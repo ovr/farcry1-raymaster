@@ -50,6 +50,9 @@ public:
   //! Gives the slot back: it keeps its view until the GPU finished the current frame, then
   //! CollectGarbage makes it a null SRV and free again. The reserved slots are ignored.
   void FreeSRV(int nSlot);
+  //! How often the slot was given back: a slot kept for later frames (the ray scene's) still has its
+  //! view while this stays the same.
+  uint32 GetGeneration(int nSlot) const { return nSlot >= 0 && nSlot < (int)m_Generation.size() ? m_Generation[nSlot] : 0; }
 
   //! nCount consecutive slots for a descriptor table (written with WriteSRV and WriteUAV), the first
   //! one's index; -1 when there is no such run left (logged once).
@@ -104,6 +107,7 @@ private:
   D3D12_GPU_DESCRIPTOR_HANDLE m_GPUStart = {};
   std::vector<int> m_FreeSlots;       //!< the lowest slot last
   std::vector<SFreedSlot> m_Freed;    //!< waiting for the GPU, in the order freed
+  std::vector<uint32> m_Generation;   //!< per slot: FreeSRV's count (GetGeneration)
   bool m_bFullLogged = false;
   //! A run of table slots.
   struct SRange

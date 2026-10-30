@@ -49,6 +49,17 @@
 //	    volume's fog, other water the scene above through the window of
 //	    total internal reflection;
 //	  - the frame's linear fog (not on the ocean from below).
+//	Compiled with XR_RAYTRACE (d3d12_RTReflections, Shader Model 6.5) the
+//	reflection also comes from the scene for rays (RayShade.hlsli): a ray
+//	along the calmer normal's reflected direction, as long as the rays'
+//	length, shaded where it hits and fogged as the planar reflection is
+//	(by the whole path from the camera), fading out over the last quarter
+//	of the length. Mode 1 puts it in place of the screen space reflection,
+//	mode 2 where the screen space one finds nothing; sharp as that one is,
+//	it gives way to the blurred planar reflection where the ripple finer
+//	than a pixel blurs it. The ray cone starts as wide as the pixel on the
+//	surface and spreads by the pixel's angle and the ripple's RMS slope
+//	(its textures' mip levels).
 //	The result replaces the pixel (no blending). The upscaler's jitter
 //	(vJitter) moves the clip position; compiled with XR_VELOCITY (in an
 //	upscaler's scene) the pixel shader also writes the motion vector of the
@@ -77,10 +88,16 @@
 //	            world to clip
 //	  vTexGenU  x the factor of the variance of the slopes finer than a pixel
 //	            (d3d12_WaterReflectionBlur; 0: the reflection is not blurred)
+//	  vTexGenV  XR_RAYTRACE: x the mode (1, 2), y the rays' length (m), z the
+//	            instance mask (bits 0-7) and bit 8 the sun's shadow at the
+//	            hits
 //
 //////////////////////////////////////////////////////////////////////
 
 #include "Common.hlsli"
+#ifdef XR_RAYTRACE
+#include "RayShade.hlsli"
+#endif
 
 struct SWaterOutput
 {
@@ -325,6 +342,36 @@ float4 ScreenReflection(float3 P, float3 R, float2 vViewToBuffer)
   return 0;
 }
 
+#ifdef XR_RAYTRACE
+//! The reflection by a ray from the surface point P (fDistance from the camera) in direction R:
+//! the colour of the scene for rays where it hits, fogged by the path from the camera along the
+//! view axis's slant, w how much it counts (0 on a miss, fading out over the last quarter of the
+//! rays' length); fT the distance to the hit. The cone: fPixelAngle wide at the camera, spreading
+//! by it and twice the RMS slope of the ripple finer than a pixel (fVar its variance).
+float4 RayReflection(float3 P, float3 R, float fDistance, float fPixelAngle, float fVar, out float fT)
+{
+  RayDesc Ray;
+  Ray.Origin = P + float3(0, 0, 0.02);
+  Ray.Direction = normalize(float3(R.xy, max(R.z, 0.01)));
+  Ray.TMin = 0.01;
+  Ray.TMax = g_Draw.vTexGenV.y;
+  const uint nMask = asuint(g_Draw.vTexGenV.z);
+  const float fWidth = fDistance * fPixelAngle, fSpread = fPixelAngle + 2 * sqrt(fVar);
+  const SRayHit Hit = TraceScene(Ray, nMask & 0xff, fWidth, fSpread);
+  fT = Hit.fT;
+  if (!Hit.bHit)
+    return 0;
+  bool bFog;
+  float4 vColor = RayShade(Hit, Ray.Direction, fWidth + Hit.fT * fSpread, (nMask & 0x100) != 0, nMask & 0xff, bFog);
+  if (bFog && g_Frame.vFogParams.w != 0)
+  {
+    const float fDepth = ViewDepth(P) * (fDistance + Hit.fT) / max(fDistance, 1e-3);
+    vColor.rgb = lerp(g_Frame.vFogColor.rgb, vColor.rgb, saturate((g_Frame.vFogParams.y - fDepth) * g_Frame.vFogParams.z));
+  }
+  return float4(vColor.rgb, 1 - smoothstep(0.75 * Ray.TMax, Ray.TMax, Hit.fT));
+}
+#endif
+
 float4 ShadeWater(SWaterOutput In)
 {
   float3 vCamera = g_Frame.vCameraPos.xyz;
@@ -332,6 +379,10 @@ float4 ShadeWater(SWaterOutput In)
   float fDistance = length(vToCamera);
   float3 V = vToCamera / max(fDistance, 1e-4);
   bool bBelow = vCamera.z < In.vWorldPos.z;
+#ifdef XR_RAYTRACE
+  // The angle between neighbouring pixels' view rays (before any branch).
+  float fPixelAngle = max(length(ddx(V)), length(ddy(V)));
+#endif
 
   float fLostVar;
   float3 N = WaveNormal(In.vWorldPos.xy, g_Frame.vTime.x, g_Draw.vParams0.x, fLostVar);
@@ -444,9 +495,25 @@ float4 ShadeWater(SWaterOutput In)
     }
     // The screen's copy is sharp: it gives way to the blurred planar reflection where the blur up
     // and down is wider than 4 pixels on the screen, all of it from 8.
+#ifdef XR_RAYTRACE
+    float4 vSSR = g_Draw.vTexGenV.x >= 2 ? ScreenReflection(In.vWorldPos, Rs, g_Frame.vScreen.xy * vInvSize) : 0;
+#else
     float4 vSSR = ScreenReflection(In.vWorldPos, Rs, g_Frame.vScreen.xy * vInvSize);
+#endif
     if (fBlur > 0)
       vSSR.w *= saturate(2 - fBlur * g_Frame.vScreen.y / 4);
+#ifdef XR_RAYTRACE
+    // The rays: in place of the screen's reflection (mode 1), or where it finds nothing (2, none where
+    // it is sure); as sharp, they give way to the blurred planar reflection as it does.
+    // No ray where nothing of it would be seen (no reflection, or blurred away), but in the debug views.
+    float fRayT = g_Draw.vTexGenV.y;
+    float4 vRay = 0;
+    const float fRayFade = fBlur > 0 ? saturate(2 - fBlur * g_Frame.vScreen.y / 4) : 1;
+    if ((g_Draw.vTexGenV.x < 2 || vSSR.w < 1) && ((F > 0 && fRayFade > 0) || g_Draw.vParams0.z >= 13))
+      vRay = RayReflection(In.vWorldPos, Rs, fDistance, fPixelAngle, fVar, fRayT);
+    vRay.w *= fRayFade;
+    vReflected = lerp(vReflected, vRay.rgb, vRay.w);
+#endif
     vReflected = lerp(vReflected, vSSR.rgb, vSSR.w);
 
     // The sun's highlight (d3d12_WaterSunGlint), as much of it as the facets reflect (fresnel at the
@@ -485,6 +552,15 @@ float4 ShadeWater(SWaterOutput In)
       return float4(In.vColor.aaa, 1);
     if (g_Draw.vParams0.z == 12)
       return float4(saturate(sqrt(fLostVar) * 10).xxx, 1);
+#ifdef XR_RAYTRACE
+    if (g_Draw.vParams0.z == 13)
+      return float4(vRay.rgb, 1);
+    if (g_Draw.vParams0.z == 14)
+      return float4(fRayT < g_Draw.vTexGenV.y ? saturate(float3(2 * fRayT / g_Draw.vTexGenV.y - 1, 1 - abs(2 * fRayT / g_Draw.vTexGenV.y - 1),
+                                                               1 - 2 * fRayT / g_Draw.vTexGenV.y)) : 0, 1);
+    if (g_Draw.vParams0.z == 15)
+      return float4(vRay.www, 1);
+#endif
   }
   else if (g_Draw.vParams3.w == 0)
   {

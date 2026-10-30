@@ -19,7 +19,8 @@ it, also when it is larger than the screen). -Quality writes the game's quality 
 system.cfg before each run: by default the most the Advanced Video Options offer (the very high
 preset and anisotropic filtering level 8), so every demo runs at the maximum quality; the values of
 the presets are read from DemoQuality.cpp. system.cfg is put back as it was after each run (a game
-closed by hand, with --hold, writes it).
+closed by hand, with --hold, writes it). -GameArgs passes arguments to FarCry.exe, e.g. -DEVMODE,
+the game's dev mode, in which its own recorder plays its time demos (DemoReplay).
 
 .EXAMPLE
 mod\Demos\RunDemo.ps1 DemoTextures
@@ -29,6 +30,9 @@ mod\Demos\RunDemo.ps1 DemoTextures -Renderer XRenderD3D9Ray.dll -DemoArgs '--fra
 
 .EXAMPLE
 mod\Demos\RunDemo.ps1 all -DemoArgs '--label run2'
+
+.EXAMPLE
+mod\Demos\RunDemo.ps1 DemoReplay -Renderer XRenderD3D12.dll -GameArgs -DEVMODE -DemoArgs '--scene Demos\DemoReplayVolcano.ini'
 #>
 param(
     [Parameter(Mandatory = $true, Position = 0)]
@@ -45,7 +49,10 @@ param(
     # The quality settings: veryhigh (the very high preset with anisotropic filtering level 8, the
     # most the menu offers), high, medium, low, or keep (system.cfg as it is).
     [ValidateSet('veryhigh', 'high', 'medium', 'low', 'keep')]
-    [string] $Quality = 'veryhigh'
+    [string] $Quality = 'veryhigh',
+    # Arguments of FarCry.exe, e.g. -DEVMODE (the game's dev mode: DemoReplay's playback by the game's
+    # own time demo recorder).
+    [string] $GameArgs = ''
 )
 
 $ErrorActionPreference = 'Stop'
@@ -109,6 +116,9 @@ function Invoke-Demo([string] $Name) {
     $Info = New-Object System.Diagnostics.ProcessStartInfo $Exe
     $Info.WorkingDirectory = $GameDir
     $Info.UseShellExecute = $false
+    if ($GameArgs) {
+        $Info.Arguments = $GameArgs
+    }
     # The game writes its log to the console as well (log.txt has it): read and dropped.
     $Info.RedirectStandardOutput = $true
     $Info.RedirectStandardError = $true
@@ -121,7 +131,7 @@ function Invoke-Demo([string] $Name) {
 
     $HostLog = Join-Path $GameDir "$Name.host.log"
     Remove-Item $HostLog -ErrorAction SilentlyContinue
-    Write-Host "FarCry.exe: demo $Name, renderer $($Info.EnvironmentVariables['XRENDERTRACED_DLL']), arguments '$DemoArgs'$(if ($Resolution) { ", $Resolution" }), quality $Quality"
+    Write-Host "FarCry.exe$(if ($GameArgs) { " $GameArgs" }): demo $Name, renderer $($Info.EnvironmentVariables['XRENDERTRACED_DLL']), arguments '$DemoArgs'$(if ($Resolution) { ", $Resolution" }), quality $Quality"
     $Config = [System.IO.File]::ReadAllBytes($SystemCfg)
     if ($QualitySettings) {
         $Text = Set-ConfigValues ([System.Text.Encoding]::ASCII.GetString($Config)) $QualitySettings

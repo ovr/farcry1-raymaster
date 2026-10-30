@@ -73,6 +73,8 @@ set(XRENDERD3D12_SOURCES
     AmbientOcclusion.cpp
     AOXeGtao.cpp
     AOCacao.cpp
+    RayTracing.h
+    RayTracing.cpp
     Cacao/base/UserMarkers.h
 )
 source_group("Source Files" FILES ${XRENDERD3D12_SOURCES})

@@ -292,7 +292,8 @@ it as well: it holds local, machine-specific instructions and is not committed (
 - `mod/Demos/RunDemo.ps1 <demo>[,<demo>...]|all [-Renderer old|<dll>] [-DemoArgs '...']` starts
   `farcry1_testing1/Bin64/FarCry.exe` with these variables and `XRENDERTRACED_DLL`, waits until the
   demo ends the game (it kills it, as a trace run is ended) and prints `<demo>.host.log`; the exit
-  code is 0 when every frame to save was saved. The frames go to
+  code is 0 when every frame to save was saved. `-GameArgs '<args>'` passes arguments to FarCry.exe,
+  e.g. `-DEVMODE` (the game's dev mode, which the game's own time demo playback needs). The frames go to
   `farcry1_testing1/DemoShots/<label>` (`old` for the original renderer), the scene files are
   `farcry1_testing1/Demos/<demo>.ini`; neither is ever committed. `-Resolution 3840x2160` sets
   `XRENDERTRACED_RESOLUTION`: XRenderD3D9Traced starts the renderer with that size (r_Width and
@@ -325,8 +326,16 @@ it as well: it holds local, machine-specific instructions and is not committed (
   light; also in the main menu), DemoParticles (fire, smoke and sparks), DemoScreenFx (the screen
   effects one after the other), DemoDecals (bullet holes, blood and scorch marks), DemoFlares
   (the sun's flare passing behind what stands in front of it, and the coronas of two lamps), DemoSkyFog
-  (fog and sky changed), DemoQuality (the quality presets of the video options) and DemoReplay
-  (the game's time demos played back).
+  (fog and sky changed), DemoQuality (the quality presets of the video options), DemoReplay
+  (the game's time demos played back: `Levels/<level>/<level>.tmd` of Training, Volcano, Research
+  and Regulator; with `-GameArgs -DEVMODE` the game's recorder plays them, `runs` times, and with
+  `info = 1` the demo's log gets the frame rates of each run from `Levels/<level>/<level>.log`
+  (`--until 100000` keeps the run going to the recording's end after the last frame to save);
+  a path through the whole level to compare a change in many places) and DemoSurfaces (objects
+  of different materials, glass among them, on a beach and in its shallow water under a moving
+  light, handed to the engine's
+  scene through `I3DEngine::SetRenderCallback`: the engine calls it for the main view only, not
+  for the water's reflection).
 - The keys of each scene file are in the head comment of the demo's source (a line starting with
   `#` or `;` is a comment; `exec` keys take console commands separated by `;` or `|`); `--scene`
   picks another scene file, e.g. a second one for DemoLevel.
@@ -348,7 +357,10 @@ it as well: it holds local, machine-specific instructions and is not committed (
   `r_Driver = "Direct3D8"` with `XRENDERTRACED_DLL=XRenderD3D12.dll`, or
   `RunDemo.ps1 -Renderer XRenderD3D12.dll`.
 - `XRENDERD3D12_DEBUG=1` (or `d3d12_Debug 1`, read at start-up) turns on the debug layer and GPU
-  based validation; their messages go to the engine log, starting with `[D3D12]`.
+  based validation, `2` the debug layer alone; their messages go to the engine log, starting with
+  `[D3D12]`. A device that is removed is logged too (`device removed`). With GPU based validation
+  the frames of the water's rays (`d3d12_RTReflections`) come out black, with no message; check
+  them with `2`.
 - The window: the video options set `r_Width`, `r_Height` and `r_Fullscreen` while the game runs
   and ask for no restart, so the renderer applies them after the frame they change in
   (`CheckResolutionChange`). Windowed, the window's outer size is `r_Width` x `r_Height` and the
@@ -556,7 +568,30 @@ it as well: it holds local, machine-specific instructions and is not committed (
   `cacao`, and `d3d12_AOApply 0` for the old way) against the same run without it.
   The game's menu gets it from `assets/scripts/video-ambient-occlusion.patch`: Ambient Occlusion,
   None / GTAO / CACAO in Advanced Video Options, in the row of the Basic Video Options button
-  (which moves to the bar of Apply), greyed out without `d3d12_AO`.
+  (which moves to the bar of Apply; `video-ray-tracing.patch` moves it up a row), greyed out
+  without `d3d12_AO`.
+- Ray tracing (`RayTracing.h`, DXR 1.1 with inline `RayQuery`, Shader Model 6.5): the main view's
+  opaque draws and the static ones of the water's planar reflection become acceleration
+  structures every frame (the `ray scene` section of the GPU times, a `ray scene:` line in the
+  frame dump), once a frame and only while something wants rays (else their memory goes).
+  `XRENDERD3D12_NORT=1` (or a device without tier 1.1) turns them off; the log says why.
+  `Shaders/RayShade.hlsli` traces (`TraceScene`, alpha tested triangles tested) and shades the
+  hits as the general program does without the draw's lights:
+  textures, vertex colour, light maps (dot3 ones too), the sun with its shadow by a ray
+  (`d3d12_RTShadows`, default 1). `d3d12_RTReflections` (0 by default, read every frame): 1 the
+  water's reflection by rays in place of the screen space reflection, 2 hybrid (the screen space
+  reflection where it is sure, the rays elsewhere); not registered without rays.
+  `d3d12_RTDistance` (150 m) the rays' length, `d3d12_RTMemory` (384 MB) the static BLAS kept,
+  `d3d12_RTMask` (31) the kinds the rays see (1 static, 2 alpha tested, 4 of the frame; a draw is
+  in the scene when the mask has all of its kinds).
+  `d3d12_RTDebug` views the scene for rays from the camera: 1 instances, 2 shaded hits on the right
+  half, 3 distance, 4 mip level, 5 kind, 6 alpha tests, 7 shaded hits over the whole picture;
+  `d3d12_WaterDebug` 13, 14, 15 the water rays' colour, distance and weight. With the rays off the
+  frames are the same as without the code (WaterMove, bit for bit). Check the rays under the debug
+  layer with `XRENDERD3D12_DEBUG=2`: GPU based validation turns the water rays' frames black.
+  The game's menu gets it from `assets/scripts/video-ray-tracing.patch`: Ray Traced Reflections,
+  None / Rays / Hybrid in Advanced Video Options; the rows of the page move closer together to make
+  room for it, greyed out without `d3d12_RTReflections`.
 - `d3d12_DumpFrame 1` writes the render items of the next frame to
   `farcry1_testing1/XRenderD3D12_frame.txt` (never committed): the camera (position, angles,
   field of view, near and far plane, view and projection matrices), then for each item its list, sort
