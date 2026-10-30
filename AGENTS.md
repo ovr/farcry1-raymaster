@@ -57,6 +57,14 @@ it as well: it holds local, machine-specific instructions and is not committed (
   `farcry1_testing1/Bin64` (`XRENDER_OUTPUT_DIR`).
 - `farcry1_testing1/system.cfg` selects the proxy with `r_Driver = "Direct3D8"` and runs windowed
   (`r_Fullscreen = "0"`); the original is `farcry1_testing1/system.cfg.xrt-backup`.
+- Every run of the game (a trace, a demo, a benchmark, a run for the user to play) is at the
+  maximum quality: `farcry1_testing1/system.cfg` holds the very high preset of the Advanced Video
+  Options with anisotropic filtering level 8 (the values of `DemoQuality.cpp`, which `RunDemo.ps1
+  -Quality veryhigh` writes for its runs as well), and `farcry1_testing1/game.cfg` the game's
+  default key bindings (W, S, A, D, crouch Left Ctrl, prone V, from `Profiles/defaults`). The
+  player profile (`Profiles/player/<name>_system.cfg`, `<name>_game.cfg`) gets the same. A run to
+  play starts with `farcry1_testing1/Far Cry.cmd`, which switches the keyboard to English before
+  the game names its keys (with another layout the letter keys do not work).
 - Run `farcry1_testing1/Bin64/FarCry.exe` with `farcry1_testing1` as the working directory.
   `XRENDERTRACED_EXEC="map training"` (and `XRENDERTRACED_EXEC_FRAME`) loads a level without
   input; `XRENDERTRACED_CAPTURE=300` writes every call of the 300th frame after the level load.
