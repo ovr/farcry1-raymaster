@@ -113,6 +113,8 @@ public:
   ID3D12PipelineState *GetPSO(const SPipelineKey &Key);
   //! Binds input slot 1, the default values of the attributes a vertex format lacks.
   void BindDefaultStream(ID3D12GraphicsCommandList *pList);
+  //! The keys asked for so far (each made once).
+  size_t GetPSOCount() const { return m_PSOs.size(); }
 
   //! Size in bytes of a vertex of the format (m_VertexSize of VertexFormats.h, also for the
   //! formats gBufInfoTable leaves out).

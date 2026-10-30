@@ -80,6 +80,8 @@ public:
   bool IsSupported() const { return m_pDevice5 != nullptr; }
   //! The renderer's m_nFrames of the last Build (-1: none).
   int GetBuiltFrame() const { return m_nBuiltFrame; }
+  //! Bytes of the static geometry's acceleration structures (d3d12_RTMemory).
+  uint64 GetStaticBytes() const { return m_nStaticBytes; }
 
   //! The main view's opaque list starts: its draws until EndCapture make this frame's scene.
   //! ViewProj: its camera's world to clip (the draws' mWorld times it is their mWorldViewProj).

@@ -16,6 +16,7 @@
 //	  Draw3D.cpp            - drawing the render items of EF_EndEf3D (no IRenderer methods)
 //	  Upscale.cpp           - the upscaler of the main view (no IRenderer methods)
 //	  AmbientOcclusion.cpp  - the ambient occlusion of the main view (no IRenderer methods)
+//	  Stats.cpp             - r_Stats, the statistics of the frames on the screen (no IRenderer methods)
 //	The state of a subsystem lives in its own class (m_pTextures, m_pShaders, m_pScene, ...).
 //	All calls come from one thread.
 //
@@ -44,6 +45,41 @@ class CShaderManager;
 class CScene;
 struct SRenderItem;
 struct SScreenFxState;
+
+//! GPU milliseconds per section added up over frames (CD3D12Device::GetGpuTimes), the sections in
+//! the order they first came.
+struct SGpuTimes
+{
+  std::vector<std::pair<const char *, double>> Sections;
+  int nFrames = 0;
+
+  //! The device's times of nTimedFrames frames.
+  void Add(const std::vector<std::pair<const char *, double>> &Times, int nTimedFrames);
+  void Reset()
+  {
+    Sections.clear();
+    nFrames = 0;
+  }
+};
+
+//! r_Stats: the numbers of the frames added up (Stats.cpp), and the memory when they were.
+struct SFrameStats
+{
+  SGpuTimes Gpu;
+  int nFrames = 0;
+  double fFrameMs = 0;            //!< the time between frames
+  double fWaitMs = 0;             //!< waiting for the GPU at the start of the frame (CD3D12Device::BeginFrame)
+  double fPresentMs = 0;          //!< Present
+  double fDraws = 0;              //!< DrawGeometry's draws
+  double fPSOChanges = 0;         //!< of them, those with another pipeline state than the draw before
+  double fTriangles = 0;
+  double fFrameMemory = 0;        //!< bytes of per frame memory (CD3D12Upload::AllocFrame)
+  uint64 nVideoUsage = 0;         //!< the process' video memory (DXGI) and how much it may use
+  uint64 nVideoBudget = 0;
+  uint64 nResourceBytes = 0;      //!< the textures and buffers (CD3D12Upload::GetVideoMemory)
+  uint64 nRayBytes = 0;           //!< the acceleration structures of the static geometry
+  size_t nPSOs = 0;               //!< the pipeline states made
+};
 
 class CD3D12Renderer : public IRenderer
 {
@@ -331,6 +367,16 @@ public:
   void GpuSection(const char *szSection);
   //! d3d12_GpuTimes: after each frame; every so many frames the averages to the log.
   void ReportGpuTimes();
+
+  //////////////////////////////////////////////////////////////////////////
+  // Stats.cpp: r_Stats, the statistics of the frames on the screen
+
+  //! After each frame (Update): the device's GPU times since the last call to d3d12_GpuTimes'
+  //! report and to r_Stats, the frame's numbers to m_StatsSum, every half second to m_Stats.
+  void CollectStats();
+  //! The statistics over the frame, once a frame: at Update, or when the frame is read before it
+  //! (ReadFrameBuffer: a demo's frames).
+  void DrawStats();
   //! The projection of the main view from the camera.
   static Matrix44 MakeProjection(const CCamera &cam);
 
@@ -1062,9 +1108,18 @@ public:
   int m_nFrames = 0;                  //!< frames ended by Update
   int m_nFramePolygons = 0;           //!< the triangles drawn since the last Update (DrawGeometry)
   int m_nPolygons = 0;                //!< GetPolyCount: the triangles of the frame the last Update ended
+  int m_nFrameDraws = 0;              //!< the draws since the last Update (DrawGeometry)
+  int m_nFramePSOChanges = 0;         //!< of them, those with another pipeline state than the draw before
+  ID3D12PipelineState *m_pLastPSO = nullptr;  //!< the pipeline state of the last draw (counted only)
   int64 m_nLastFrameTicks = 0;        //!< ReportGpuTimes: when the last frame ended (0: timing off)
   double m_fFrameMs = 0;              //!< ReportGpuTimes: the time between frames added up
   int m_nTimedFrames = 0;
+  SGpuTimes m_GpuReport;              //!< ReportGpuTimes: the GPU times since its last report
+  SFrameStats m_StatsSum;             //!< r_Stats: the frames being added up
+  SFrameStats m_Stats;                //!< r_Stats: the last half second's, shown (nFrames 0: none yet)
+  double m_fStatsStart = 0;           //!< r_Stats: when m_StatsSum started (ms of the CPU's clock; 0: off)
+  double m_fStatsLastFrame = 0;       //!< r_Stats: when the last frame ended
+  int m_nStatsDrawnFrame = -1;        //!< r_Stats: the m_nFrameID they were drawn into
   int m_nRecurseLevel = 1;            //!< EFQ_RecurseLevel: 1 for the main view
   int m_nDeviceLost = 0;              //!< EFQ_DeviceLost
   int m_nPolygonMode = R_SOLID_MODE;
@@ -1134,6 +1189,7 @@ public:
   int CV_d3d12_Caustics = 1;          //!< 0: no caustics under the ocean
   float CV_d3d12_WaterSunGlint = 0;   //!< strength of the sun's highlight on water (0: none)
   int CV_d3d12_GpuTimes = 0;          //!< N: the GPU time of the frame's sections to the log every N frames
+  int CV_r_Stats = 0;                 //!< the statistics on the screen: 1 the GPU time of the passes, 2 also the memory
   float CV_d3d12_WaterReflectionScale = 0.5f;   //!< size of the water reflection, a fraction of the screen's
   float CV_d3d12_WaterReflectionBlur = 0.1f; //!< how much the ripple finer than a pixel blurs the water's reflection (0: none)
   int CV_d3d12_WaterReflectionFlags = DLD_TERRAIN | DLD_TERRAIN_FULLRES | DLD_STATIC_OBJECTS | DLD_FAR_SPRITES;   //!< what the water reflects (EDrawLowDetailFlags)

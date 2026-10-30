@@ -149,6 +149,9 @@ void CD3D12Renderer::RegisterVariables()
   iConsole->Register("d3d12_GpuTimes", &CV_d3d12_GpuTimes, 0, 0,
                      "N: every N frames, the average GPU time of the frame's sections (shadow maps, water reflection, opaque, "
                      "water, blended, ...) and the time between frames to the console and XRenderD3D12_gpu.txt; 0 off");
+  iConsole->Register("r_Stats", &CV_r_Stats, 0, 0,
+                     "The renderer's statistics at the top left, averages of half a second: 1 the GPU time of each pass in the order they run "
+                     "(as d3d12_GpuTimes), the time between frames, the GPU's and the CPU's waits, the draws and triangles; 2 also the memory");
   iConsole->Register("d3d12_WaterReflectionScale", &CV_d3d12_WaterReflectionScale, 0.5f, VF_DUMPTODISK,
                      "Size of the water reflection (r_WaterReflections), a fraction of the screen's");
   iConsole->Register("d3d12_WaterReflectionBlur", &CV_d3d12_WaterReflectionBlur, 0.1f, 0,
@@ -690,8 +693,9 @@ bool CD3D12Renderer::EnsureFrame()
     return false;
   if (!m_pDevice->IsInFrame())
   {
-    m_pDevice->SetGpuTiming(CV_d3d12_GpuTimes > 0);
+    m_pDevice->SetGpuTiming(CV_d3d12_GpuTimes > 0 || CV_r_Stats > 0);
     m_pDevice->BeginFrame();
+    m_pLastPSO = nullptr;         // a new command list
     InvalidateFrameConstants();   // the frame memory of the slot starts again
     ReadFlareTests();
   }
@@ -740,6 +744,7 @@ void CD3D12Renderer::Update (void)
   EnsureFrame();
   EndMainScene();               // a main view whose EF_EndEf3D did not end (none expected)
   DrawQueuedBoxes();
+  DrawStats();
   DumpHdrOutput();
   // Shown only when swapping is on: the hidden frames of a level load are drawn but never seen.
   if (m_bSwapBuffers)
@@ -748,6 +753,7 @@ void CD3D12Renderer::Update (void)
   // The game asks for the triangles after the frame is shown (the time demo's Tri/Frame).
   m_nPolygons = m_nFramePolygons;
   m_nFramePolygons = 0;
+  CollectStats();
   ReportGpuTimes();
   if (m_pFrameDump)
   {
@@ -774,7 +780,7 @@ void CD3D12Renderer::ReportGpuTimes()
   QueryPerformanceFrequency(&Frequency);
   if (CV_d3d12_GpuTimes <= 0)
   {
-    m_pDevice->ResetGpuTimes();
+    m_GpuReport.Reset();
     m_nTimedFrames = 0;
     m_fFrameMs = 0;
     m_nLastFrameTicks = 0;
@@ -787,13 +793,13 @@ void CD3D12Renderer::ReportGpuTimes()
     m_nTimedFrames++;
   }
   m_nLastFrameTicks = Now.QuadPart;
-  const int n = m_pDevice->GetGpuTimedFrames();
+  const int n = m_GpuReport.nFrames;
   if (n < CV_d3d12_GpuTimes)
     return;
   std::string Line = "frame " + std::to_string(m_nFrameID) + ", GPU ms per frame (" + std::to_string(n) + " frames):";
   double fTotal = 0;
   char sz[96];
-  for (const auto &[szSection, fMs] : m_pDevice->GetGpuTimes())
+  for (const auto &[szSection, fMs] : m_GpuReport.Sections)
   {
     snprintf(sz, sizeof(sz), " %s %.2f,", szSection, fMs / n);
     Line += sz;
@@ -809,7 +815,7 @@ void CD3D12Renderer::ReportGpuTimes()
     fprintf(m_pGpuTimes.get(), "%s\n", Line.c_str());
     fflush(m_pGpuTimes.get());
   }
-  m_pDevice->ResetGpuTimes();
+  m_GpuReport.Reset();
   m_nTimedFrames = 0;
   m_fFrameMs = 0;
 }
@@ -1187,6 +1193,9 @@ void CD3D12Renderer::ReadFrameBuffer(unsigned char * pRGB, int nSizeX, int nSize
   // nScaledX x nScaledY (point sampled) when given.
   if (!m_pDevice || !pRGB || nSizeX <= 0 || nSizeY <= 0)
     return;
+  // A frame read before Update (a demo's) has the statistics Update would draw.
+  if (m_pDevice->IsInFrame())
+    DrawStats();
   const int w = m_pDevice->GetWidth(), h = m_pDevice->GetHeight();
   std::vector<uint8> Pixels((size_t)w * h * 4);
   if (!m_pDevice->ReadBackBuffer(Pixels.data(), w, h))

@@ -200,6 +200,8 @@ void CD3D12Renderer::DrawGeometry(const SPipelineKey &Key, const SDrawConstants 
   }
   ID3D12GraphicsCommandList *pList = m_pDevice->GetCmdList();
   pList->SetPipelineState(pPSO);
+  m_nFramePSOChanges += pPSO != m_pLastPSO;
+  m_pLastPSO = pPSO;
   pList->SetGraphicsRootConstantBufferView(0, m_nFrameCB);
   pList->SetGraphicsRootConstantBufferView(1, UploadConstants(*m_pUpload, *pDC));
   if (nRayScene)
@@ -264,6 +266,7 @@ void CD3D12Renderer::DrawGeometry(const SPipelineKey &Key, const SDrawConstants 
   pList->RSSetScissorRects(1, &Scissor);
 
   m_nFramePolygons += CountTriangles(eTopology, nCount);
+  m_nFrameDraws++;
   if (pIB)
   {
     pList->IASetIndexBuffer(pIB);

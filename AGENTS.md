@@ -604,7 +604,8 @@ it as well: it holds local, machine-specific instructions and is not committed (
 - The engine's statistics: `GetPolyCount` gives the triangles drawn in the frame the last `Update`
   ended (every draw into every target; no shadow volumes), which the game asks for after the frame
   is shown: the time demo's `Tri/Frame`, `Tri/Sec` and ratio to the recording in
-  `Levels/<level>/<level>.log` (the original renderer of the x64 build gives 0, so 0 and `1.#J`).
+  `Levels/<level>/<level>.log`, and the `Polygons` and `P/Sec` of the engine's `r_DisplayInfo` block
+  (the engine draws that block at the top right itself).
   The renderer's work is in the engine's frame profiler under the subsystem Renderer
   (`FUNCTION_PROFILER(iSystem, PROFILE_RENDERER)`, `FrameProfiler.h`; `profile 1` shows it, the
   tracer's `profilers CD3D12` writes it): `CD3D12Renderer::BeginFrame` with
@@ -613,8 +614,17 @@ it as well: it holds local, machine-specific instructions and is not committed (
   `DrawItems:Opaque`, `:Nearest`, `:Blended`, `BuildRayScene`, `DrawScreenEffects`, ...),
   `CD3D12Renderer::Update` with `CD3D12Device::EndFrame:Present`, `FlushFrame`, and the loading
   (`EF_LoadTexture`, `DownLoadToVideoMemory`, `EF_LoadShaderItem`, `CD3D12Pipeline::CreatePSO`, ...).
-  The original renderer of the x64 build registers none. They are CPU times; the GPU's are
-  `d3d12_GpuTimes`.
+  They are CPU times; the GPU's are `d3d12_GpuTimes` (a section `flush` is the GPU waiting for
+  the CPU after a `FlushFrame`, e.g. a demo reading every frame for its clip).
+- `r_Stats` shows the renderer's statistics at the top left, below the time demo's lines, averaged
+  over half a second (`Stats.cpp`): `1` the GPU time of each pass in the order they run (the
+  sections of `d3d12_GpuTimes`, with a bar of each one's share of the GPU's frame), the time
+  between frames, the CPU's wait for the GPU at the start of a frame and in `Present`, the draws,
+  how many of them changed the pipeline state, and the triangles; `2` (and more) also the memory:
+  the process' video memory and its budget (DXGI), the textures and buffers, the static
+  geometry's acceleration structures, the frame memory and the pipeline states made. A frame read
+  before `Update` (a demo's frames and clips) has them too. It turns the GPU's timestamps on, as
+  `d3d12_GpuTimes` does; both get the same times.
 - `d3d12_DumpFrame 1` writes the render items of the next frame to
   `farcry1_testing1/XRenderD3D12_frame.txt` (never committed): the camera (position, angles,
   field of view, near and far plane, view and projection matrices), then for each item its list, sort

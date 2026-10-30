@@ -162,7 +162,6 @@ constexpr SIntVar s_IntVars[] =
   { "r_SmoothTangents", 1, VF_REQUIRE_LEVEL_RELOAD },
   { "r_SpecAntialias", 0, 0 },
   { "r_SSE", 1, 0 },
-  { "r_Stats", 0, 0 },
   { "r_StripMesh", 1, 0 },
   { "r_SubSurfaceType", 1, 0 },
   { "r_SunStyleCoronas", 0, 0 },

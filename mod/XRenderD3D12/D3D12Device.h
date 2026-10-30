@@ -276,8 +276,9 @@ public:
 
   //! GPU timing (d3d12_GpuTimes): while on, the GPU time of each frame is split into sections,
   //! each from its GpuSection call to the next one or the end of the frame (the first one of a
-  //! frame is "other"). A frame's times are read when the GPU has finished it (BeginFrame of its
-  //! slot) and add up in GetGpuTimes.
+  //! frame is "other"; from a FlushFrame until its second list runs it is "flush", the GPU waiting
+  //! for the CPU). A frame's times are read when the GPU has finished it (BeginFrame of its slot)
+  //! and add up in GetGpuTimes.
   void SetGpuTiming(bool bOn) { m_bGpuTiming = bOn; }
   //! From here on the GPU time counts for szSection (a string with static storage).
   void GpuSection(const char *szSection);
@@ -290,6 +291,15 @@ public:
     m_GpuTimes.clear();
     m_nGpuTimedFrames = 0;
   }
+  //! The CPU's milliseconds in the last frame: BeginFrame's wait for the GPU (to finish the frame
+  //! D3D12_FRAMES back) and EndFrame's Present.
+  double GetWaitMs() const { return m_fWaitMs; }
+  double GetPresentMs() const { return m_fPresentMs; }
+  //! The adapter's name (UTF-8).
+  const char *GetAdapterName() const { return m_szAdapter; }
+  //! The process' use of the adapter's own memory and how much it may use (its budget); false
+  //! when DXGI does not tell.
+  bool GetVideoMemory(uint64 &nUsage, uint64 &nBudget) const;
 
   //! Occlusion queries: BeginOcclusion .. EndOcclusion count the samples drawn in between that
   //! pass the depth test, at most OCCLUSION_QUERIES per frame. A frame's counts come when the GPU
@@ -392,6 +402,9 @@ private:
   int m_nGpuMarks[D3D12_FRAMES] = {};
   std::vector<std::pair<const char *, double>> m_GpuTimes;
   int m_nGpuTimedFrames = 0;
+  double m_fWaitMs = 0;                             //!< GetWaitMs
+  double m_fPresentMs = 0;                          //!< GetPresentMs
+  char m_szAdapter[128] = {};                       //!< GetAdapterName
 
   ComPtr<ID3D12QueryHeap> m_pOcclusion;             //!< OCCLUSION_QUERIES per frame slot; NULL: no queries
   ComPtr<ID3D12Resource> m_pOcclusionReadback;      //!< the resolved counts, in the same places

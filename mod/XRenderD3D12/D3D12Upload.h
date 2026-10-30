@@ -133,6 +133,8 @@ public:
 
   //! Bytes of the textures and buffers alive (GetMemoryUsage).
   uint64 GetVideoMemory() const;
+  //! Bytes of per frame memory handed out since the current frame slot started (AllocFrame).
+  uint64 GetFrameMemory() const { return m_Slots[m_nSlot].nUsed; }
 
 private:
   //! A persistently mapped buffer in the upload heap.

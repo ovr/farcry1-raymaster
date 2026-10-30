@@ -555,8 +555,9 @@ void CD3D12Renderer::DrawText800(float x, float y, float fSize, const float *pRG
   pFont->SetSameSize(false);
   pFont->SetSize(vector2f(fPixels, fPixels));
   pFont->SetColor(pRGBA ? color4f(pRGBA[0], pRGBA[1], pRGBA[2], pRGBA[3]) : color4f(1, 1, 1, 1));
+  // GetTextSize is in the screen's pixels (as the game's dialogs scale it).
   if (bCenter)
-    x -= pFont->GetTextSize(szText).x * 0.5f;
+    x -= pFont->GetTextSize(szText).x * 800.0f / (float)std::max(m_nWidth, 1) * 0.5f;
   pFont->DrawString(x, y, szText);
 }
 

@@ -33,6 +33,20 @@ void Barrier(ID3D12GraphicsCommandList *pList, ID3D12Resource *pRes, D3D12_RESOU
 //! The scene targets outside BeginScene .. EndScene: read by an upscaler's compute or pixel shaders.
 constexpr D3D12_RESOURCE_STATES SCENE_READ = D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE | D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE;
 
+//! The CPU's clock in milliseconds.
+double NowMs()
+{
+  static const double fMsPerTick = []
+  {
+    LARGE_INTEGER Frequency;
+    QueryPerformanceFrequency(&Frequency);
+    return 1000.0 / (double)Frequency.QuadPart;
+  }();
+  LARGE_INTEGER Now;
+  QueryPerformanceCounter(&Now);
+  return (double)Now.QuadPart * fMsPerTick;
+}
+
 //! Logs a failed call; true if hr failed.
 bool Failed(HRESULT hr, const char *szWhat)
 {
@@ -95,9 +109,8 @@ bool CD3D12Device::Init(HWND hWnd, int nWidth, int nHeight, int nDebug)
     if (SUCCEEDED(D3D12CreateDevice(pAdapter.Get(), D3D_FEATURE_LEVEL_11_0, IID_PPV_ARGS(&m_pDevice))))
     {
       m_pAdapter = pAdapter;
-      char szName[128];
-      WideCharToMultiByte(CP_UTF8, 0, Desc.Description, -1, szName, sizeof(szName), nullptr, nullptr);
-      iLog->Log("XRenderD3D12: adapter '%s', %u MB video memory", szName, (unsigned)(Desc.DedicatedVideoMemory >> 20));
+      WideCharToMultiByte(CP_UTF8, 0, Desc.Description, -1, m_szAdapter, sizeof(m_szAdapter), nullptr, nullptr);
+      iLog->Log("XRenderD3D12: adapter '%s', %u MB video memory", m_szAdapter, (unsigned)(Desc.DedicatedVideoMemory >> 20));
     }
   }
   if (!m_pDevice)
@@ -1111,7 +1124,9 @@ void CD3D12Device::BeginFrame()
   {
     // The GPU still drawing the frame D3D12_FRAMES back.
     FRAME_PROFILER("CD3D12Device::BeginFrame:WaitForGpu", iSystem, PROFILE_RENDERER);
+    const double fStart = NowMs();
     WaitForFence(m_nFrameFence[m_nFrameSlot]);
+    m_fWaitMs = NowMs() - fStart;
   }
   ReadGpuTimes();
   ReadOcclusionResults();
@@ -1182,10 +1197,13 @@ void CD3D12Device::EndFrame(bool bPresent, bool bVSync)
   ID3D12CommandList *pList = m_pCmdList.Get();
   m_pQueue->ExecuteCommandLists(1, &pList);
   HRESULT hr = S_OK;
+  m_fPresentMs = 0;
   if (bPresent)
   {
     FRAME_PROFILER("CD3D12Device::EndFrame:Present", iSystem, PROFILE_RENDERER);
+    const double fStart = NowMs();
     hr = m_pSwapChain->Present(bVSync ? 1 : 0, !bVSync && m_bTearing ? DXGI_PRESENT_ALLOW_TEARING : 0);
+    m_fPresentMs = NowMs() - fStart;
   }
   // A removed device, once, whether the frame was presented or not (a demo's frames need not be).
   static bool s_bLogged = false;
@@ -1209,6 +1227,12 @@ void CD3D12Device::FlushFrame()
   FUNCTION_PROFILER(iSystem, PROFILE_RENDERER);
   if (!m_bInFrame)
     return;
+  // The GPU waits from the end of this list until the next one runs (at EndFrame or the next
+  // flush, after the CPU's work in between): that is a section of its own, then the one before
+  // goes on.
+  const int nMarks = m_nGpuMarks[m_nFrameSlot];
+  const char *szSection = nMarks > 0 ? m_GpuSections[m_nFrameSlot][nMarks - 1] : nullptr;
+  GpuSection("flush");
   // The back buffer stays a render target across the two lists.
   m_pCmdList->Close();
   if (g_pRenderer->m_pUpload)
@@ -1217,6 +1241,8 @@ void CD3D12Device::FlushFrame()
   m_pQueue->ExecuteCommandLists(1, &pList);
   WaitForFence(Signal());
   OpenCmdList();
+  if (szSection)
+    GpuSection(szSection);
   BindRootSignature();
   SetBackBufferTargets();
 }
@@ -1255,6 +1281,17 @@ void CD3D12Device::ReadGpuTimes()
   const D3D12_RANGE Written = {};
   m_pTimestampReadback->Unmap(0, &Written);
   m_nGpuTimedFrames++;
+}
+
+bool CD3D12Device::GetVideoMemory(uint64 &nUsage, uint64 &nBudget) const
+{
+  ComPtr<IDXGIAdapter3> pAdapter3;
+  DXGI_QUERY_VIDEO_MEMORY_INFO Info;
+  if (!m_pAdapter || FAILED(m_pAdapter.As(&pAdapter3)) || FAILED(pAdapter3->QueryVideoMemoryInfo(0, DXGI_MEMORY_SEGMENT_GROUP_LOCAL, &Info)))
+    return false;
+  nUsage = Info.CurrentUsage;
+  nBudget = Info.Budget;
+  return true;
 }
 
 int CD3D12Device::BeginOcclusion()
