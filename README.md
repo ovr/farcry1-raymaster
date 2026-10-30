@@ -33,6 +33,9 @@ Mods for Far Cry, built with the CryENGINE MOD SDK for Far Cry:
   - `video-ambient-occlusion.patch` - Ambient Occlusion in Advanced Video Options: None, GTAO or
     CACAO, which sets `d3d12_AO`, the screen space ambient occlusion of XRenderD3D12 (Intel
     XeGTAO or AMD FidelityFX CACAO); the Basic Video Options button moves to the bar of Apply.
+  - `video-ray-tracing.patch` - Ray Traced Reflections in Advanced Video Options: None, Rays or
+    Hybrid, which sets `d3d12_RTReflections`, the water's reflection by rays of XRenderD3D12 (a
+    graphics card with DXR 1.1; greyed out without one); the rows of the page move closer together.
 
 How to build and run them: `AGENTS.md`.
 

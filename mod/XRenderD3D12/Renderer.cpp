@@ -345,8 +345,13 @@ WIN_HWND CD3D12Renderer::Init(int x,int y,int width,int height,unsigned int cbpp
     iLog->LogError("XRenderD3D12: initialization failed");
     return 0;
   }
-  // Without rays the scene for them stays empty (RayTracing.h).
-  m_pRayScene->Init(m_pDevice->GetDevice());
+  // Without rays the scene for them stays empty (RayTracing.h), and the water has no reflection by
+  // them: no d3d12_RTReflections, which greys out the menu's list (video-ray-tracing.patch).
+  if (!m_pRayScene->Init(m_pDevice->GetDevice()) && iConsole->GetCVar("d3d12_RTReflections"))
+  {
+    iConsole->UnregisterVariable("d3d12_RTReflections", true);
+    CV_d3d12_RTReflections = 0;
+  }
   m_Viewport[0] = 0;
   m_Viewport[1] = 0;
   m_Viewport[2] = m_nWidth;

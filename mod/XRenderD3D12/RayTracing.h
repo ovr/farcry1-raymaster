@@ -7,8 +7,9 @@
 //	shaders): the main view's opaque draws as acceleration structures.
 //
 //	- The device: DXR tier 1.1 and Shader Model 6.5 (Init), not with
-//	  XRENDERD3D12_NORT=1. Without them there are no rays, and the cvars
-//	  that want them change nothing.
+//	  XRENDERD3D12_NORT=1. Without them there are no rays, the cvars that
+//	  want them change nothing and d3d12_RTReflections is unregistered
+//	  (the menu greys out its list).
 //	- Capture: while the main view's opaque list is drawn (CScene::EndEf3D,
 //	  BeginCapture .. EndCapture), DrawGeometry hands its draws to
 //	  CaptureDraw: those of the general program that write the depth, do

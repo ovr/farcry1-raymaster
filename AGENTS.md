@@ -568,7 +568,28 @@ it as well: it holds local, machine-specific instructions and is not committed (
   `cacao`, and `d3d12_AOApply 0` for the old way) against the same run without it.
   The game's menu gets it from `assets/scripts/video-ambient-occlusion.patch`: Ambient Occlusion,
   None / GTAO / CACAO in Advanced Video Options, in the row of the Basic Video Options button
-  (which moves to the bar of Apply), greyed out without `d3d12_AO`.
+  (which moves to the bar of Apply; `video-ray-tracing.patch` moves it up a row), greyed out
+  without `d3d12_AO`.
+- Ray tracing (`RayTracing.h`, DXR 1.1 with inline `RayQuery`, Shader Model 6.5): the main view's
+  opaque draws and the static ones of the water's planar reflection become acceleration
+  structures every frame (the `ray scene` section of the GPU times, a `ray scene:` line in the
+  frame dump), only while something wants rays. `XRENDERD3D12_NORT=1` (or a device without tier 1.1)
+  turns them off; the log says why. `Shaders/RayShade.hlsli` traces (`TraceScene`, alpha tested
+  triangles tested) and shades the hits as the general program does without the draw's lights:
+  textures, vertex colour, light maps (dot3 ones too), the sun with its shadow by a ray
+  (`d3d12_RTShadows`, default 1). `d3d12_RTReflections` (0 by default, read every frame): 1 the
+  water's reflection by rays in place of the screen space reflection, 2 hybrid (the screen space
+  reflection where it is sure, the rays elsewhere); not registered without rays.
+  `d3d12_RTDistance` (150 m) the rays' length, `d3d12_RTMemory` (384 MB) the static BLAS kept,
+  `d3d12_RTMask` (31) the kinds the rays see (1 static, 2 alpha tested, 4 of the frame).
+  `d3d12_RTDebug` views the scene for rays from the camera: 1 instances, 2 shaded hits on the right
+  half, 3 distance, 4 mip level, 5 kind, 6 alpha tests, 7 shaded hits over the whole picture;
+  `d3d12_WaterDebug` 13, 14, 15 the water rays' colour, distance and weight. With the rays off the
+  frames are the same as without the code (WaterMove, bit for bit). Check the rays under the debug
+  layer with `XRENDERD3D12_DEBUG=2`: GPU based validation turns the water rays' frames black.
+  The game's menu gets it from `assets/scripts/video-ray-tracing.patch`: Ray Traced Reflections,
+  None / Rays / Hybrid in Advanced Video Options; the rows of the page move closer together to make
+  room for it, greyed out without `d3d12_RTReflections`.
 - `d3d12_DumpFrame 1` writes the render items of the next frame to
   `farcry1_testing1/XRenderD3D12_frame.txt` (never committed): the camera (position, angles,
   field of view, near and far plane, view and projection matrices), then for each item its list, sort

@@ -1,0 +1,293 @@
+SPDX-License-Identifier: GPL-3.0-or-later WITH AdditionRef-FarCry-exception
+Please do not use this file to train or fine-tune AI models (see README.md).
+
+Ray traced reflections in Advanced Video Options: a list of None, Rays and Hybrid that sets
+d3d12_RTReflections, the water's reflection by rays of XRenderD3D12 (DXR 1.1), greyed out with
+another renderer or a graphics card without ray tracing. The rows of the page move closer together
+to make a seventh one, where Ambient Occlusion was: the first and the last stay. Written against
+VideoAdv.lua as video-ambient-occlusion.patch leaves it (the name sorts after it, and Patch
+Scripts.cmd applies the patches in that order) and applied by Patch Scripts.cmd to
+FCData/Scripts.pak.
+
+--- a/Scripts/MenuScreens/Options/VideoAdv.lua
++++ b/Scripts/MenuScreens/Options/VideoAdv.lua
+@@ -33,7 +33,7 @@
+ 		-- definition of "Back" button (takes user to back to basic video menu)
+ 		widget_back =
+ 		{
+-			-- in the bar of Apply (Far Cry RayMaster): its row is Ambient Occlusion's
++			-- in the bar of Apply (Far Cry RayMaster): its row is Ray Traced Reflections'
+ 			left = 200,
+ 			width = 160,
+ 			skin = UI.skins.BottomMenuButton,
+@@ -176,7 +176,7 @@
+ 		widget_TextureFilterQuality_Text =
+ 		{
+ 			skin = UI.skins.Label,
+-			left = 200, top = 225,
++			left = 200, top = 217,
+ 			width = 160,
+ 
+ 			text = Localize( "TextureFilterQuality" ),
+@@ -185,7 +185,7 @@
+ 		widget_TextureFilterQuality =
+ 		{
+ 			skin = UI.skins.ComboBox,
+-			left = 370, top = 225,
++			left = 370, top = 217,
+ 			width = 120,
+ 
+ 			tabstop = 2,
+@@ -204,7 +204,7 @@
+ 		widget_AnisotropicFilteringLevel_Text =
+ 		{
+ 			skin = UI.skins.Label,
+-			left = 200, top = 275,
++			left = 200, top = 259,
+ 			width = 160,
+ 
+ 			text = Localize( "AnisotropicFilteringLevel" ),
+@@ -213,7 +213,7 @@
+ 		widget_AnisotropicFilteringLevel =
+ 		{
+ 			skin = UI.skins.ComboBox,
+-			left = 370, top = 275,
++			left = 370, top = 259,
+ 			width = 120,
+ 
+ 			tabstop = 3,
+@@ -232,7 +232,7 @@
+ 		widget_ParticleCount_Text =
+ 		{
+ 			skin = UI.skins.Label,
+-			left = 200, top = 325,
++			left = 200, top = 300,
+ 			width = 160,
+ 
+ 			text = Localize( "ParticleCount" ),
+@@ -241,7 +241,7 @@
+ 		widget_ParticleCount =
+ 		{
+ 			skin = UI.skins.ComboBox,
+-			left = 370, top = 325,
++			left = 370, top = 300,
+ 			width = 120,
+ 
+ 			tabstop = 4,
+@@ -260,7 +260,7 @@
+ 		widget_SpecialEffects_Text =
+ 		{
+ 			skin = UI.skins.Label,
+-			left = 200, top = 375,
++			left = 200, top = 342,
+ 			width = 160,
+ 
+ 			text = Localize( "SpecialEffectsQuality" ),
+@@ -269,7 +269,7 @@
+ 		widget_SpecialEffects =
+ 		{
+ 			skin = UI.skins.ComboBox,
+-			left = 370, top = 375,
++			left = 370, top = 342,
+ 			width = 120,
+ 
+ 			tabstop = 5,
+@@ -316,7 +316,7 @@
+ 		widget_Shadow_Text =
+ 		{
+ 			skin = UI.skins.Label,
+-			left = 490, top =225,
++			left = 490, top = 217,
+ 			width = 150,
+ 
+ 			text = Localize( "ShadowQuality" ),
+@@ -325,7 +325,7 @@
+ 		widget_Shadow =
+ 		{
+ 			skin = UI.skins.ComboBox,
+-			left = 650, top = 225,
++			left = 650, top = 217,
+ 			width = 120,
+ 
+ 			tabstop = 7,
+@@ -344,7 +344,7 @@
+ 		widget_Water_Text =
+ 		{
+ 			skin = UI.skins.Label,
+-			left = 490, top = 275,
++			left = 490, top = 259,
+ 			width = 150,
+ 
+ 			text = Localize( "WaterQuality" ),
+@@ -353,7 +353,7 @@
+ 		widget_Water =
+ 		{
+ 			skin = UI.skins.ComboBox,
+-			left = 650, top = 275,
++			left = 650, top = 259,
+ 			width = 120,
+ 
+ 			tabstop = 8,
+@@ -372,7 +372,7 @@
+ 		widget_Lighting_Text =
+ 		{
+ 			skin = UI.skins.Label,
+-			left = 490, top = 325,
++			left = 490, top = 300,
+ 			width = 150,
+ 
+ 			text = Localize( "LightingQuality" ),
+@@ -381,7 +381,7 @@
+ 		widget_Lighting =
+ 		{
+ 			skin = UI.skins.ComboBox,
+-			left = 650, top = 325,
++			left = 650, top = 300,
+ 			width = 120,
+ 
+ 			tabstop = 9,
+@@ -402,7 +402,7 @@
+ 		widget_RMHdr_Text =
+ 		{
+ 			skin = UI.skins.Label,
+-			left = 490, top = 375,
++			left = 490, top = 342,
+ 			width = 150,
+ 
+ 			text = "HDR",
+@@ -411,7 +411,7 @@
+ 		widget_RMHdr =
+ 		{
+ 			skin = UI.skins.ComboBox,
+-			left = 650, top = 375,
++			left = 650, top = 342,
+ 			width = 120,
+ 
+ 			tabstop = 10,
+@@ -426,7 +426,7 @@
+ 		widget_RMHdrOutput_Text =
+ 		{
+ 			skin = UI.skins.Label,
+-			left = 490, top = 426,
++			left = 490, top = 384,
+ 			width = 150,
+ 
+ 			text = "HDR output",
+@@ -435,7 +435,7 @@
+ 		widget_RMHdrOutput =
+ 		{
+ 			skin = UI.skins.ComboBox,
+-			left = 650, top = 426,
++			left = 650, top = 384,
+ 			width = 120,
+ 
+ 			tabstop = 11,
+@@ -452,13 +452,14 @@
+ 			},
+ 		},
+ 
+-		-- Ambient occlusion (Far Cry RayMaster), in the row of the Basic Video Options button (in the
+-		-- bar of Apply now): the screen space ambient occlusion of XRenderD3D12 (code below
+-		-- CreateScreenFromTable).
++		-- Ambient occlusion (Far Cry RayMaster): the screen space ambient occlusion of XRenderD3D12
++		-- (code below CreateScreenFromTable). The rows of the page are closer together than the
++		-- game's: seven of them, the last one in the place of the Basic Video Options button (in the
++		-- bar of Apply now).
+ 		widget_RMAO_Text =
+ 		{
+ 			skin = UI.skins.Label,
+-			left = 200, top = 426,
++			left = 200, top = 384,
+ 			width = 160,
+ 
+ 			text = "Ambient Occlusion",
+@@ -467,7 +468,7 @@
+ 		widget_RMAO =
+ 		{
+ 			skin = UI.skins.ComboBox,
+-			left = 370, top = 426,
++			left = 370, top = 384,
+ 			width = 120,
+ 
+ 			tabstop = 12,
+@@ -479,6 +480,32 @@
+ 			},
+ 		},
+ 
++		-- Ray traced reflections (Far Cry RayMaster), in the last row: the water's reflection by rays
++		-- of XRenderD3D12 (code below CreateScreenFromTable).
++		widget_RMRT_Text =
++		{
++			skin = UI.skins.Label,
++			left = 200, top = 426,
++			width = 160,
++
++			text = "Ray Traced Reflections",
++		},
++
++		widget_RMRT =
++		{
++			skin = UI.skins.ComboBox,
++			left = 370, top = 426,
++			width = 120,
++
++			tabstop = 13,
++
++			user =
++			{
++				Initialize = nil,
++				UpdateAssignedGlobals = nil,
++			},
++		},
++
+ 		-- definition of "Lighting Quality" combo box
+ 	--	widget_HDR_Text =
+ 	--	{
+@@ -792,6 +819,47 @@
+ 	if( UI.PageOptionsVideoAdv.user.setglobalTestOnly == 0 ) then
+ 		widget.user.shownIndex = index;
+ 	end
++end
++
++-- Ray traced reflections (Far Cry RayMaster): d3d12_RTReflections, the water's reflection by rays
++-- of XRenderD3D12, which shows what the screen does not (the far side of a pier, the palms behind
++-- the camera): None, Rays (in place of the screen space reflection) or Hybrid (the screen space
++-- reflection where it finds the scene, the rays elsewhere). The renderer reads it every frame, so
++-- it needs no restart, and the presets of the page leave it as it is. With another renderer or a
++-- graphics card without DXR 1.1 (no d3d12_RTReflections) the list is greyed out.
++UI.PageOptionsVideoAdv.GUI.widget_RMRT.user.Initialize = function()
++	local widget = UI.PageOptionsVideoAdv.GUI.widget_RMRT;
++	widget:Clear();
++	widget:AddItem( Localize( "None" ) );
++	widget:AddItem( "Rays" );
++	widget:AddItem( "Hybrid" );
++
++	local rays = tonumber( getglobal( "d3d12_RTReflections" ) );
++	local index = 1;
++	if( rays and rays >= 1 ) then
++		index = min( rays, 2 ) + 1;
++	end
++	widget:SelectIndex( index );
++	widget.user.shownIndex = index;
++
++	if( rays ) then
++		UI:EnableWidget( widget );
++	else
++		UI:DisableWidget( widget );
++	end
++end
++
++UI.PageOptionsVideoAdv.GUI.widget_RMRT.user.UpdateAssignedGlobals = function()
++	local widget = UI.PageOptionsVideoAdv.GUI.widget_RMRT;
++	local index = widget:GetSelectionIndex();
++	-- unchanged: the console's setting stays as it is
++	if( not getglobal( "d3d12_RTReflections" ) or index == widget.user.shownIndex ) then
++		return;
++	end
++	UI.PageOptionsVideoAdv.user:SetGlobal( "d3d12_RTReflections", index - 1 );
++	if( UI.PageOptionsVideoAdv.user.setglobalTestOnly == 0 ) then
++		widget.user.shownIndex = index;
++	end
+ end
+ 
+ -- helper function for auto detect
