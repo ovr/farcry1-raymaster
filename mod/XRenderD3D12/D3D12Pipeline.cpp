@@ -39,6 +39,10 @@
 #include "Water_Velocity_PS.h"
 #include "Water_Hdr_PS.h"
 #include "Water_Hdr_Velocity_PS.h"
+#include "Water_RT_PS.h"
+#include "Water_RT_Velocity_PS.h"
+#include "Water_RT_Hdr_PS.h"
+#include "Water_RT_Hdr_Velocity_PS.h"
 #include "Post_VS.h"
 #include "Post_PS.h"
 #include "Post_Highlight_PS.h"
@@ -201,7 +205,7 @@ namespace
   static_assert(sizeof(struct_VERTEX_FORMAT_P3F_N_COL4UB_COL4UB_TEX2F) == 40);
   static_assert(sizeof(SPipTangents) == 36);
   static_assert(sizeof(SDefaultStream) == 72);
-  static_assert(sizeof(SPipelineKey) == 16, "SPipelineKey is hashed and compared as bytes");
+  static_assert(sizeof(SPipelineKey) == 20, "SPipelineKey is hashed and compared as bytes");
 
   //! The most elements of an input layout.
   constexpr int MAX_INPUT_ELEMENTS = 9;
@@ -603,6 +607,16 @@ ComPtr<ID3D12PipelineState> CD3D12Pipeline::CreatePSO(const SPipelineKey &Key)
     else if (bHighlight && Key.nProgram == eD3D12P_Post)
       Desc.PS = { g_Post_Highlight_PS, sizeof(g_Post_Highlight_PS) };
   }
+  // The water's reflection by rays (d3d12_RTReflections), by [HDR][velocity].
+  if (bWater && Key.bRayTrace)
+  {
+    static const D3D12_SHADER_BYTECODE s_WaterRayPS[2][2] =
+    {
+      { { g_Water_RT_PS, sizeof(g_Water_RT_PS) }, { g_Water_RT_Velocity_PS, sizeof(g_Water_RT_Velocity_PS) } },
+      { { g_Water_RT_Hdr_PS, sizeof(g_Water_RT_Hdr_PS) }, { g_Water_RT_Hdr_Velocity_PS, sizeof(g_Water_RT_Hdr_Velocity_PS) } },
+    };
+    Desc.PS = s_WaterRayPS[bHdr ? 1 : 0][bVelocity || bUpscaleDepth ? 1 : 0];
+  }
   // The general program writing the ambient light's part of its colour too.
   if (bAmbient && bGeneral)
   {
@@ -773,9 +787,9 @@ ComPtr<ID3D12PipelineState> CD3D12Pipeline::CreatePSO(const SPipelineKey &Key)
   if (FAILED(hr))
   {
     iLog->LogError("XRenderD3D12: CreateGraphicsPipelineState failed (0x%08X): program %s, vertex format %d, state 0x%08X, "
-      "cull %d, topology %d, target %d, depth bias %d, streams %d, wireframe %d, colour format %d, ambient %d, blend op %d", (unsigned)hr,
+      "cull %d, topology %d, target %d, depth bias %d, streams %d, wireframe %d, colour format %d, ambient %d, blend op %d, rays %d", (unsigned)hr,
       Program.szName, (int)Key.nVertexFormat, nState, (int)Key.nCull, nTopology, (int)Key.nTarget, (int)Key.bDepthBias,
-      (int)Key.nStreams, (int)Key.bWireframe, (int)Key.nColorFormat, (int)Key.bAmbient, (int)Key.nBlendOp);
+      (int)Key.nStreams, (int)Key.bWireframe, (int)Key.nColorFormat, (int)Key.bAmbient, (int)Key.nBlendOp, (int)Key.bRayTrace);
     return nullptr;
   }
   return pPSO;

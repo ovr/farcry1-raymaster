@@ -62,8 +62,9 @@ public:
   CD3D12Device(const CD3D12Device &) = delete;
   CD3D12Device &operator=(const CD3D12Device &) = delete;
 
-  //! Creates the device and a swap chain for hWnd. bDebug: the debug layer and GPU based validation.
-  bool Init(HWND hWnd, int nWidth, int nHeight, bool bDebug);
+  //! Creates the device and a swap chain for hWnd. nDebug: 1 the debug layer and GPU based
+  //! validation, 2 the debug layer alone.
+  bool Init(HWND hWnd, int nWidth, int nHeight, int nDebug);
   //! Waits for the GPU and releases everything.
   void Shutdown();
   //! New back buffer size (waits for the GPU).

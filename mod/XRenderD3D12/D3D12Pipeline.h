@@ -86,6 +86,9 @@ struct SPipelineKey
                           //!< without an upscaler after the null second and third): the general program writes the ambient
                           //!< light's part of its colour there (XR_AMBIENT), blended as the colour; DrawGeometry sets it
   uint8 nBlendOp;         //!< 0 the colour blends add, 1 subtract the source from the target (REV_SUBTRACT)
+  uint8 bRayTrace;        //!< the water program with rays (XR_RAYTRACE, Shader Model 6.5; DrawGeometry clears it without a scene
+                          //!< for rays in the frame)
+  uint8 nPad[3];
 };
 
 //! SPipelineKey::nColorFormat.

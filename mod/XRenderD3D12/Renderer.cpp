@@ -31,12 +31,14 @@ constexpr float fPi = 3.14159265358979f;
 char s_szVertexProfile[] = "vs_6_0";
 char s_szPixelProfile[] = "ps_6_0";
 
-//! XRENDERD3D12_DEBUG=1 (or any value but 0)
-bool IsDebugEnv()
+//! XRENDERD3D12_DEBUG: 2 the debug layer alone, any other value but 0 with GPU based validation (1).
+int DebugEnv()
 {
   char szValue[16];
   const DWORD nLen = GetEnvironmentVariableA("XRENDERD3D12_DEBUG", szValue, sizeof(szValue));
-  return nLen && nLen < sizeof(szValue) && strcmp(szValue, "0") != 0;
+  if (!nLen || nLen >= sizeof(szValue) || strcmp(szValue, "0") == 0)
+    return 0;
+  return strcmp(szValue, "2") == 0 ? 2 : 1;
 }
 
 int GetCVarInt(const char *szName, int nDefault)
@@ -134,12 +136,13 @@ void CD3D12Renderer::RegisterVariables()
   iConsole->CreateVariable("r_DetailDefault", "Textures/Detail/rock", 0);
   iConsole->Register("r_VSync", &CV_r_vsync, 0, VF_DUMPTODISK);
   RegisterOtherVariables();
-  iConsole->Register("d3d12_Debug", &CV_d3d12_debug, 0, VF_DUMPTODISK, "Direct3D 12 debug layer and GPU based validation (read at start-up)");
+  iConsole->Register("d3d12_Debug", &CV_d3d12_debug, 0, VF_DUMPTODISK, "Direct3D 12 debug layer (read at start-up): 1 with GPU based validation, 2 without it");
   iConsole->Register("d3d12_DumpFrame", &CV_d3d12_DumpFrame, 0, 0, "Writes the render items and draws of the next frame to XRenderD3D12_frame.txt");
   iConsole->Register("d3d12_WaterDebug", &CV_d3d12_WaterDebug, 0, 0,
                      "Water surfaces show one term: 1 refraction, 2 reflection, 3 water thickness (0-2 m: black-white), 4 normal, 5 screen space reflection hits, 6 their colour, 7 the planar reflection, "
                      "8 the scene behind, 9 view path (red, 0-32 m), depth (green, 0-16 m) and fresnel (blue), 10 the vertex colour, 11 its alpha, "
-                     "12 the RMS of the wave slopes finer than a pixel (white: 0.1)");
+                     "12 the RMS of the wave slopes finer than a pixel (white: 0.1); with d3d12_RTReflections: 13 the rays' hits, 14 their distance "
+                     "(blue near, red at d3d12_RTDistance), 15 how much they count");
   iConsole->Register("d3d12_Caustics", &CV_d3d12_Caustics, 1, VF_DUMPTODISK, "Caustics on the terrain under the ocean; 0 off");
   iConsole->Register("d3d12_WaterSunGlint", &CV_d3d12_WaterSunGlint, 0.0f, VF_DUMPTODISK,
                      "The sun's highlight on water surfaces: its strength (0: none, as the game draws water)");
@@ -211,6 +214,9 @@ void CD3D12Renderer::RegisterVariables()
                      "The memory of the static geometry's acceleration structures (MB) beyond which the least recently used go");
   iConsole->Register("d3d12_RTMask", &CV_d3d12_RTMask, 31, 0,
                      "The kinds of geometry the rays see, bits: 1 static, 2 alpha tested, 4 changing every frame");
+  iConsole->Register("d3d12_RTReflections", &CV_d3d12_RTReflections, 0, VF_DUMPTODISK,
+                     "The water's reflection by rays: 0 off, 1 the rays in place of the screen space reflection, 2 both, the screen space "
+                     "reflection where it finds the scene and the rays elsewhere (a device with DXR 1.1)");
   iConsole->Register("d3d12_RTShadows", &CV_d3d12_RTShadows, 1, VF_DUMPTODISK,
                      "1: the sun's shadow at the hits of the rays, by a ray towards the sun (the surfaces the sun's shadow falls on)");
   // The HDR pipeline (r_HDRRendering, Hdr.cpp).
@@ -317,7 +323,7 @@ WIN_HWND CD3D12Renderer::Init(int x,int y,int width,int height,unsigned int cbpp
     SetFocus(m_hWnd);
   }
 
-  const bool bDebug = CV_d3d12_debug != 0 || IsDebugEnv();
+  const int nDebug = CV_d3d12_debug != 0 ? (CV_d3d12_debug == 2 ? 2 : 1) : DebugEnv();
   m_pDevice = std::make_unique<CD3D12Device>();
   m_pDescriptors = std::make_unique<CD3D12Descriptors>();
   m_pUpload = std::make_unique<CD3D12Upload>();
@@ -327,7 +333,7 @@ WIN_HWND CD3D12Renderer::Init(int x,int y,int width,int height,unsigned int cbpp
   m_pTextures = std::make_unique<CTextureManager>();
   m_pShaders = std::make_unique<CShaderManager>();
   m_pScene = std::make_unique<CScene>();
-  if (!m_pDevice->Init(m_hWnd, m_nWidth, m_nHeight, bDebug)
+  if (!m_pDevice->Init(m_hWnd, m_nWidth, m_nHeight, nDebug)
     || !m_pDescriptors->Init(m_pDevice->GetDevice())
     || !m_pUpload->Init(m_pDevice->GetDevice(), nFrameRingSize)
     || !m_pPipeline->Init(m_pDevice->GetDevice())
@@ -655,9 +661,12 @@ void CD3D12Renderer::RefreshResources(int nFlags)
 void CD3D12Renderer::PreLoad (void)
 {
   // A new level registers its own fog volumes and makes its own sprites; the objects of a load
-  // that never got drawn may be gone.
+  // that never got drawn may be gone, and so may the textures of the water reflection's draws
+  // kept for the rays.
   if (m_pScene)
     m_pScene->ResetFogVolumes();
+  if (m_pRayScene)
+    m_pRayScene->ClearReflection();
   m_SpritesToBake.clear();
   PurgeSprites();
 }

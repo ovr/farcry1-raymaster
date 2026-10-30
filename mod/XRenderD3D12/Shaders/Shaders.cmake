@@ -39,6 +39,12 @@ xrender_d3d12_shader(Water_Velocity_PS Water.hlsl ps_6_0 PSMain XR_VELOCITY)
 # Into D3D12_HDR_FORMAT (XR_HDR: the reflected sky box with SkyGlow).
 xrender_d3d12_shader(Water_Hdr_PS Water.hlsl ps_6_0 PSMain XR_HDR)
 xrender_d3d12_shader(Water_Hdr_Velocity_PS Water.hlsl ps_6_0 PSMain XR_VELOCITY XR_HDR)
+# All four with the reflection by rays (XR_RAYTRACE, d3d12_RTReflections, SPipelineKey::bRayTrace): Shader Model 6.5
+# (inline RayQuery), drawn only on a device with DXR 1.1 (RayTracing.h).
+xrender_d3d12_shader(Water_RT_PS Water.hlsl ps_6_5 PSMain XR_RAYTRACE)
+xrender_d3d12_shader(Water_RT_Velocity_PS Water.hlsl ps_6_5 PSMain XR_RAYTRACE XR_VELOCITY)
+xrender_d3d12_shader(Water_RT_Hdr_PS Water.hlsl ps_6_5 PSMain XR_RAYTRACE XR_HDR)
+xrender_d3d12_shader(Water_RT_Hdr_Velocity_PS Water.hlsl ps_6_5 PSMain XR_RAYTRACE XR_VELOCITY XR_HDR)
 
 # The screen effects (eD3D12P_Post).
 xrender_d3d12_shader(Post_VS Post.hlsl vs_6_0 VSMain)

@@ -357,7 +357,10 @@ it as well: it holds local, machine-specific instructions and is not committed (
   `r_Driver = "Direct3D8"` with `XRENDERTRACED_DLL=XRenderD3D12.dll`, or
   `RunDemo.ps1 -Renderer XRenderD3D12.dll`.
 - `XRENDERD3D12_DEBUG=1` (or `d3d12_Debug 1`, read at start-up) turns on the debug layer and GPU
-  based validation; their messages go to the engine log, starting with `[D3D12]`.
+  based validation, `2` the debug layer alone; their messages go to the engine log, starting with
+  `[D3D12]`. A device that is removed is logged too (`device removed`). With GPU based validation
+  the frames of the water's rays (`d3d12_RTReflections`) come out black, with no message; check
+  them with `2`.
 - The window: the video options set `r_Width`, `r_Height` and `r_Fullscreen` while the game runs
   and ask for no restart, so the renderer applies them after the frame they change in
   (`CheckResolutionChange`). Windowed, the window's outer size is `r_Width` x `r_Height` and the

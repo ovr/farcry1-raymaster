@@ -24,11 +24,15 @@
 //	sun and the ambient colour for DF_LIGHTING (s * saturate(ambient / s +
 //	sun N.L), DF2_MATERIAL_LIGHT saturate(ambient + vColor * sun N.L)),
 //	texture 0 (DF_TEX0, DF_TEX0_ARRAY, DF_CUBE0 with the ray reflected),
-//	DF2_ADD_TEX4, the light map (4 * sun * light map + ambient), texture 1,
+//	DF2_ADD_TEX4, the light map (4 * sun * light map + ambient; a dot3
+//	one times saturate(D.z) * D.a, the surface's own normal), texture 1,
 //	DF2_ALPHA_GLOW; the detail texture and the cliffs' as their mean
 //	(rgb * 2); the sun's visibility by a ray towards it (TraceSun) for the
-//	draws the sun's shadow falls on (DF_SHADOWS, DF2_SUN_CASCADES), with
-//	DF2_SHADOW_TINT. Not fogged: the caller fogs it by its path.
+//	draws the sun's shadow falls on (DF_SHADOWS, DF2_SUN_CASCADES; with
+//	DF2_CASCADES_LIVE, a light map or the terrain with their shadows baked
+//	in, only the geometry of the frame casts, as only the live casters'
+//	cascades do), with DF2_SHADOW_TINT. Not fogged: the caller fogs it by
+//	its path.
 //
 //////////////////////////////////////////////////////////////////////
 
@@ -344,8 +348,9 @@ float4 RayShade(SRayHit Hit, float3 vRayDir, float fConeWidth, bool bShadows, ui
     return float4(0.5, 0.5, 0.5, 1);
 
   float fSun = 1;
-  if (bShadows && ((nFlags & DF_SHADOWS) || (nFlags2 & DF2_SUN_CASCADES)) && dot(S.vNormal, g_Frame.vSunDir.xyz) > 0)
-    fSun = TraceSun(S.vPos, S.vFaceNormal, nMask, fConeWidth);
+  const uint nCasters = (nFlags2 & DF2_CASCADES_LIVE) ? nMask & XR_RAY_DYNAMIC : nMask;
+  if (bShadows && ((nFlags & DF_SHADOWS) || (nFlags2 & DF2_SUN_CASCADES)) && nCasters && dot(S.vNormal, g_Frame.vSunDir.xyz) > 0)
+    fSun = TraceSun(S.vPos, S.vFaceNormal, nCasters, fConeWidth);
 
   float4 vVertexColor = RayVertexColor(I, S);
   if (nFlags & DF_LIGHTING)
@@ -367,7 +372,15 @@ float4 RayShade(SRayHit Hit, float3 vRayDir, float fConeWidth, bool bShadows, ui
   if (nFlags & DF_ALPHA_FROM_TEX)
     vColor.a = vTex.a;
   if (nFlags & DF_TEX1_LIGHTMAP)
-    vColor.rgb *= 4 * fSun * RaySampleTexture(I.nMaterial.w, nSampler1, S.vTex1, S.fLod1).rgb + I.vAmbient.rgb;
+  {
+    float3 vLight = RaySampleTexture(I.nMaterial.w, nSampler1, S.vTex1, S.fLod1).rgb;
+    if (nFlags & DF_LIGHTMAP_DIR)
+    {
+      const float4 vDir = RaySampleTexture(I.nMaterial2.w, nSampler1, S.vTex1, S.fLod1);
+      vLight *= saturate(vDir.z * 2 - 1) * vDir.a;
+    }
+    vColor.rgb *= 4 * fSun * vLight + I.vAmbient.rgb;
+  }
   else if (nFlags & DF_TEX1_DETAIL)
     vColor.rgb *= 2;
   else if (nFlags & DF_TEX1)

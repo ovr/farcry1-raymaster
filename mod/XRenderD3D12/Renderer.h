@@ -1120,7 +1120,7 @@ public:
   int CV_r_DetailTextures = 1;        //!< 0: the terrain's detail layers are not drawn
   float CV_r_DetailScale = 8;         //!< metres per repeat of the detail texture
   float CV_r_DetailDistance = 4;      //!< the terrain's detail layers fade out from here to twice this far
-  int CV_d3d12_debug = 0;             //!< debug layer (also XRENDERD3D12_DEBUG=1); only read at Init
+  int CV_d3d12_debug = 0;             //!< debug layer, 1 with GPU based validation, 2 without (also XRENDERD3D12_DEBUG); only read at Init
   int CV_d3d12_DumpFrame = 0;         //!< non-zero: the next frame's 3D draws go to XRenderD3D12_frame.txt, then 0
   ICVar *m_pVolumetricFog = nullptr;  //!< r_VolumetricFog, looked up on first use
   ICVar *m_pScopeLens = nullptr;      //!< r_ScopeLens_fx, looked up on first use
@@ -1156,6 +1156,7 @@ public:
   int CV_d3d12_RTMemory = 384;              //!< the static BLAS' memory (MB) beyond which the least recently used go
   int CV_d3d12_RTMask = 31;                 //!< the kinds of instances the rays see (XR_RAY_* bits)
   int CV_d3d12_RTShadows = 1;               //!< the sun's shadow at the hits (a ray towards it, RayShade.hlsli)
+  int CV_d3d12_RTReflections = 0;           //!< the water's reflection by rays: 1 in place of the screen space one, 2 where it misses
   int CV_d3d12_ToneMap = 1;                 //!< the HDR pipeline's tone map: 0 clamp, 1 soft shoulder, 2 ACES fitted, 3 AgX
   float CV_d3d12_ToneMapKnee = 0.85f;       //!< where the soft shoulder starts (a display value)
   float CV_d3d12_Exposure = 0;              //!< the exposure's compensation, EV

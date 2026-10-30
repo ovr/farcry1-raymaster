@@ -32,6 +32,13 @@
 //	wave texture's alpha holds the squared slope, whose mean over a mip
 //	texel, less the square of the mean slope, is the variance it lost.
 //
+//	With d3d12_RTReflections the water also reflects the scene for rays
+//	(RayTracing.h): the main view's opaque draws and the static ones of the
+//	planar reflection's scene, which sees what is out of the main view;
+//	the water program's variants with rays (Water.hlsl, XR_RAYTRACE) trace
+//	a ray along the reflected direction instead of the screen space
+//	reflection, or where it finds nothing.
+//
 //////////////////////////////////////////////////////////////////////
 
 #include "StdAfx.h"
@@ -40,6 +47,7 @@
 #include "D3D12Descriptors.h"
 #include "Texture.h"
 #include "Scene.h"
+#include "RayTracing.h"
 
 namespace
 {
@@ -559,7 +567,13 @@ void CD3D12Renderer::UpdateWaterReflection(std::span<const SRenderItem> Items)
   m_fReflectionWaterZ = fWaterZ;
   SetCamera(Mirror);
   p3D->SetCamera(Mirror, false);
+  // Its static draws join the scene for rays until the next one (what the main view misses).
+  const bool bRayCapture = WantsRays();
+  if (bRayCapture)
+    m_pRayScene->BeginReflectionCapture(m_CameraView * m_ProjMatrix);
   p3D->DrawLowDetail(CV_d3d12_WaterReflectionFlags);
+  if (bRayCapture)
+    m_pRayScene->EndReflectionCapture();
   m_bReflectionPass = false;
 
   // Its mip levels: each texel the mean of the 2 x 2 above it (one bilinear tap halfway between).
@@ -713,6 +727,14 @@ bool CD3D12Renderer::SetupWaterDraw(SPipelineKey &Key, SDrawConstants &dc, const
   }
   // How much the ripple finer than a pixel blurs the reflection (and turns the fresnel term).
   Set4(dc.vTexGenU, std::max(CV_d3d12_WaterReflectionBlur, 0.0f), 0, 0, 0);
+  // The reflection by rays, with this frame's scene for them.
+  if (CV_d3d12_RTReflections > 0 && !m_bEnvCubePass && m_pRayScene && m_pRayScene->GetTLAS())
+  {
+    Key.bRayTrace = 1;
+    const uint32 nMask = ((uint32)CV_d3d12_RTMask & 0xff) | (CV_d3d12_RTShadows ? 0x100u : 0u);
+    Set4(dc.vTexGenV, (float)std::min(CV_d3d12_RTReflections, 2), std::max(CV_d3d12_RTDistance, 1.0f), 0, 0);
+    memcpy(&dc.vTexGenV[2], &nMask, sizeof(nMask));
+  }
 
   Set4(dc.vParams2, WATER_ABSORPTION[0] + WATER_TURBIDITY, WATER_ABSORPTION[1] + WATER_TURBIDITY, WATER_ABSORPTION[2] + WATER_TURBIDITY,
        WATER_DISPLACEMENT);

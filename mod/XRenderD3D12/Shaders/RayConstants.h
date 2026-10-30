@@ -55,7 +55,7 @@ struct SRayInstance
                           //!< (8 bits each from the lowest, 0xff: not there); z the raw view of the stream of uv1
                           //!< (VERTEX_FORMAT_TEX2F, XR_RAY_NONE: none), w the bytes to the BLAS's vertex 0 in it
   XR_UINT4(nMaterial);    //!< x nFlags, y nFlags2, z nTex0, w nTex1
-  XR_UINT4(nMaterial2);   //!< x nSamplers, y fAlphaRef (its bits), z nTex4, w the kind (XR_RAY_*)
+  XR_UINT4(nMaterial2);   //!< x nSamplers, y fAlphaRef (its bits), z nTex4, w nTex2
   XR_FLOAT4(vColor);
   XR_FLOAT4(vAmbient);
   XR_FLOAT4(vTexGenU);

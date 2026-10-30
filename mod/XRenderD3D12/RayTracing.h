@@ -14,6 +14,11 @@
 //	  CaptureDraw: those of the general program that write the depth, do
 //	  not blend and are triangle lists in world or object space. A draw
 //	  whose mWorld is not the one of its mWorldViewProj is left out.
+//	  The water's planar reflection (UpdateWaterReflection) sees what is
+//	  out of the main view: its static draws (BeginReflectionCapture ..
+//	  EndReflectionCapture) are kept until it is drawn again and join every
+//	  Build, those whose buffers are gone or changed and those the main
+//	  view has too (the same geometry and transform) left out.
 //	- BLAS: one per draw's geometry, the vertex positions (at offset 0, three
 //	  floats) and the indices as DrawGeometry has them, untransformed.
 //	  Geometry in static buffers (CD3D12Upload::FindBuffer) keeps its BLAS
@@ -70,6 +75,13 @@ public:
   void BeginCapture(const Matrix44 &ViewProj, const Vec3 &vCamera);
   void EndCapture() { m_bCapturing = false; }
   bool IsCapturing() const { return m_bCapturing; }
+  //! The water's planar reflection is drawn: its static draws until EndReflectionCapture replace those
+  //! kept of the last one. ViewProj: its camera's.
+  void BeginReflectionCapture(const Matrix44 &ViewProj);
+  void EndReflectionCapture() { m_bCapturingReflection = false; }
+  bool IsCapturingReflection() const { return m_bCapturingReflection; }
+  //! Forgets the reflection's draws (a new level: their textures may be gone).
+  void ClearReflection() { m_ReflectionDraws.clear(); }
   //! A draw of DrawGeometry while capturing; it picks those for the scene.
   void CaptureDraw(const SPipelineKey &Key, const SDrawConstants &dc, D3D_PRIMITIVE_TOPOLOGY eTopology, const D3D12_VERTEX_BUFFER_VIEW &VB,
     const D3D12_INDEX_BUFFER_VIEW *pIB, uint32 nCount, uint32 nFirst, int nBaseVertex, const D3D12_VERTEX_BUFFER_VIEW *pTexCoord1);
@@ -128,6 +140,8 @@ private:
     SBlasKey Key;                   //!< XR_RAY_STATIC
     D3D12_GPU_VIRTUAL_ADDRESS nBlas;
     SRayInstance Inst;
+    D3D12_GPU_VIRTUAL_ADDRESS nTexCoord1;   //!< the second stream's first vertex (0: none)
+    uint64 nTexCoord1Id;            //!< its static buffer's CD3D12Buffer::m_nId (0: per frame memory)
   };
   //! A buffer of a frame slot that grows (RAYTRACING_ACCELERATION_STRUCTURE or UNORDERED_ACCESS).
   struct SSlotBuffer
@@ -140,9 +154,13 @@ private:
     SSlotBuffer Scratch, Blas, Tlas;
   };
 
+  //! The draw's buffers are still those it was captured with.
+  static bool IsAlive(const SDraw &d);
+  //! The draw's geometry and transform (the same in the main view and in the reflection).
+  static uint64 DrawHash(const SDraw &d);
   //! The instance's data of a draw (its geometry Tri, its first vertex in the draw's buffers).
   static void FillInstance(SRayInstance &Inst, const SPipelineKey &Key, const SDrawConstants &dc, const D3D12_RAYTRACING_GEOMETRY_TRIANGLES_DESC &Tri,
-    const D3D12_VERTEX_BUFFER_VIEW &TexCoord1, uint32 nFirstVertex, uint8 nKind);
+    const D3D12_VERTEX_BUFFER_VIEW &TexCoord1, uint32 nFirstVertex);
   //! A buffer of nSize bytes with unordered access in the default heap; NULL when refused (logged).
   Microsoft::WRL::ComPtr<ID3D12Resource> CreateBuffer(uint64 nSize, D3D12_RESOURCE_STATES State, const wchar_t *szName);
   //! At least nSize bytes in Buf (a new buffer, the old one released when the GPU is done with it).
@@ -157,7 +175,10 @@ private:
 
   Microsoft::WRL::ComPtr<ID3D12Device5> m_pDevice5;
   bool m_bCapturing = false;
+  bool m_bCapturingReflection = false;
   Matrix44 m_ViewProj;
+  Matrix44 m_ReflectionViewProj;
+  std::vector<SDraw> m_ReflectionDraws;   //!< the static draws of the last water reflection
   Vec3 m_vCamera = Vec3(0, 0, 0);
   int m_nFrame = 0;                 //!< counts BeginCapture
   uint64 m_nBuiltFence = 0;         //!< the frame fence of the last Build (GetTLAS)

@@ -126,14 +126,16 @@ void CD3D12Renderer::DrawGeometry(const SPipelineKey &Key, const SDrawConstants 
     return;
   const bool bOffscreen = m_pDevice->IsOffscreen();
   const bool bScene = m_pDevice->IsSceneBound();
-  // The main view's opaque draws for the scene for rays (RayTracing.h).
-  if (m_pRayScene && m_pRayScene->IsCapturing() && !bOffscreen)
+  // The main view's opaque draws and the water reflection's for the scene for rays (RayTracing.h).
+  if (m_pRayScene && ((m_pRayScene->IsCapturing() && !bOffscreen) || m_pRayScene->IsCapturingReflection()))
     m_pRayScene->CaptureDraw(Key, dc, eTopology, VB, pIB, nCount, nFirst, nBaseVertex, pTexCoord1);
-  // A program with rays needs this frame's scene.
-  const D3D12_GPU_VIRTUAL_ADDRESS nRayScene = Key.nProgram == eD3D12P_RayDebug && m_pRayScene ? m_pRayScene->GetTLAS() : 0;
+  // A program with rays needs this frame's scene; the water goes without them when there is none.
+  const bool bRays = Key.nProgram == eD3D12P_RayDebug || (Key.nProgram == eD3D12P_Water && Key.bRayTrace);
+  const D3D12_GPU_VIRTUAL_ADDRESS nRayScene = bRays && m_pRayScene ? m_pRayScene->GetTLAS() : 0;
   if (Key.nProgram == eD3D12P_RayDebug && !nRayScene)
     return;
   SPipelineKey FullKey = Key;
+  FullKey.bRayTrace = nRayScene ? Key.bRayTrace : 0;
   FullKey.nTopology = (uint8)GetTopologyType(eTopology);
   FullKey.nStreams = (pTexCoord1 ? PIPELINE_STREAM_TEXCOORD1 : 0) | (pTangents ? PIPELINE_STREAM_TANGENTS : 0);
   if (bScene && FullKey.nTarget == 0)
