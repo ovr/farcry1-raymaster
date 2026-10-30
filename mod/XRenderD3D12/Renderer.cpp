@@ -153,6 +153,9 @@ void CD3D12Renderer::RegisterVariables()
   iConsole->Register("d3d12_ShadowMapSize", &CV_d3d12_ShadowMapSize, 1024, VF_DUMPTODISK,
                      "Size of the shadow maps, 128 to 4096 (0: the engine's); the maps made from then on");
   iConsole->Register("d3d12_ShadowDebug", &CV_d3d12_ShadowDebug, 0, 0, "1: shows the shadow maps of the frame at the top left (depth in red); 2: the receivers show the sun's visibility in grey");
+  iConsole->Register("d3d12_PixelLighting", &CV_d3d12_PixelLighting, 1, VF_DUMPTODISK,
+                     "1: every lit material is lit per pixel, and the dynamic lights reach the objects with light maps; 0: lit per vertex "
+                     "but for the bump templates, the light mapped objects by their light map alone");
   iConsole->CreateVariable("d3d12_Upscaler", "none", VF_DUMPTODISK,
                            "The upscaler of the 3D scene: none, or fsr (AMD FSR Upscaling); with d3d12_UpscaleMode 0 anti-aliasing only");
   iConsole->Register("d3d12_UpscaleMode", &CV_d3d12_UpscaleMode, 0, VF_DUMPTODISK,

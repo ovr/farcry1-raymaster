@@ -304,7 +304,9 @@ it as well: it holds local, machine-specific instructions and is not committed (
   every frame of the run into a video through ffmpeg (on PATH), `--video-hdr <file.mp4>` (with
   XRenderD3D12) into an HDR10 video what its HDR output shows (HEVC Main 10 through libx265, PQ,
   Rec. 2020, the mastering display and content light levels from the peak and paper white),
-  `--until <frame>` makes the run longer than its frames to save.
+  `--until <frame>` makes the run longer than its frames to save, `--exec-at <frame> "<commands>"`
+  runs console commands at the start of a frame (frame 0: before the demo's `Init`, so before a
+  level is loaded, for what a renderer makes at the load).
 - The demos in the main menu: DemoTextures (a texture of the game and the demo's own test
   texture, drawn in 2D in several ways), DemoFonts (the game's fonts), DemoCamera (lines and
   textured cubes in 3D under an orbiting camera), DemoObject (a static object turning), DemoLight
@@ -469,6 +471,19 @@ it as well: it holds local, machine-specific instructions and is not committed (
     and next to the Basic Video Options button HDR output, SDR / HDR10 / scRGB for
     `d3d12_HDROutput` (choosing HDR10 or scRGB with HDR at None sets it to Soft); both greyed out
     without the variables, that is with another renderer.
+- `d3d12_PixelLighting` (1, read every frame) lights every lit material per pixel
+  (`DF_PIXEL_LIGHTING`): the bump mapping templates as before (with `r_Quality_BumpMapping`), the
+  others and the projected lights' passes with the lights as the game's vertex lighting takes
+  them (`DF2_VERTEX_LIGHTS`: the same sum, the colours not clamped; a character's point light
+  falls off as 1 / (a0 + a1 d), a static object's by the curve the original fits a line to per
+  object, 2 (1 - smoothstep(0, 0.9 R, d)), `DF2_SMOOTH_FALLOFF`). The auto cube map materials keep
+  the fixed function's lighting. An object with a light map also gets the lights of its light
+  mask that the light map does not have (not the sun, not a `DLF_LM` light) per pixel, in place
+  of the ambient under the light map (`DF2_LIGHTMAP_LIGHTS`), as the original adds its vertex
+  lighting there. With 0 the frames are those of the renderer without it (DemoCompare difference
+  0, e.g. `-DemoArgs '--exec-at 1 "d3d12_PixelLighting 0"'`): the new paths are branches of their
+  own, so the old ones compile instruction for instruction as before (dxc reassociates the
+  `fast` arithmetic of a branch that is changed).
 - `d3d12_DumpFrame 1` writes the render items of the next frame to
   `farcry1_testing1/XRenderD3D12_frame.txt` (never committed): the camera (position, angles,
   field of view, near and far plane, view and projection matrices), then for each item its list, sort

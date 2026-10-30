@@ -999,6 +999,7 @@ public:
   int CV_d3d12_Shadows = 1;                 //!< 0: no shadow maps
   int CV_d3d12_ShadowMapSize = 1024;        //!< size of the shadow maps (0: the engine's, 512)
   int CV_d3d12_ShadowDebug = 0;             //!< non-zero: the shadow maps of the frame are shown
+  int CV_d3d12_PixelLighting = 1;           //!< 1: every lit material is lit per pixel, the light mapped ones by the dynamic lights too (DrawLeafItem)
   int CV_d3d12_UpscaleMode = 0;             //!< EUpscaleMode of the upscaler (d3d12_Upscaler, a string)
   float CV_d3d12_UpscaleSharpness = 0.5f;   //!< the upscaler's sharpening, 0 (none) to 1
   int CV_d3d12_UpscaleDebug = 0;            //!< non-zero: the upscaler's debug view

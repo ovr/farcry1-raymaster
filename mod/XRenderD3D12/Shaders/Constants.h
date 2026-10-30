@@ -75,7 +75,7 @@ typedef float float4x4_t[16];
 #define DF_VALPHA_ONLY      0x08000000  //!< with DF_VCOLOR: only the vertex colour's alpha counts (rgb white)
 #define DF_LIGHTMAP_DIR     0x04000000  //!< with DF_TEX1_LIGHTMAP, a dot3 light map: the light map times saturate(D.z) * D.a, D = tex2 at uv1 (rgb * 2 - 1: the light's dominant direction in the surface's tangent space, a: its strength)
 #define DF_DETAIL_LAYER     0x00080000  //!< rgb = lerp(0.5, tex0, colour a * saturate((vParams0.y - d) * vParams0.z)), a = 1, fogged towards 0.5 (d: distance to the camera)
-#define DF_PIXEL_LIGHTING   0x40000000  //!< with DF_LIGHTING: lit per pixel (each light's colour clamped to 1, point lights falling off as saturate(1 - d * vLightAtten.w)), with the vertex normal or N' (DF_BUMP)
+#define DF_PIXEL_LIGHTING   0x40000000  //!< with DF_LIGHTING: lit per pixel (each light's colour clamped to 1, point lights falling off as saturate(1 - d * vLightAtten.w); DF2_VERTEX_LIGHTS: as per vertex), with the vertex normal or N' (DF_BUMP)
 #define DF_SPECULAR         0x80000000  //!< with DF_PIXEL_LIGHTING: + 2 * vSpecular.rgb * gloss * sum of the lights' specular colour (clamped to 1) * falloff * saturate(R.V)^32, R the light reflected about N', where N'.L > 0
 #define DF_BUMP             0x20000000  //!< bump mapping: N' = the normal map tex3 at uv0 (rgb * 2 - 1, its green times vParams1.y) in the vertex's tangent frame (TANGENT, BINORMAL, TNORMAL) for DF_PIXEL_LIGHTING; DF_LIGHTMAP_DIR takes saturate(dot(N', D)) for D.z
 
@@ -97,6 +97,9 @@ typedef float float4x4_t[16];
 #define DF2_BUMP_OFFSET     0x00004000  //!< with DF_TEX0: tex0 looked up at uv0 + (tex3 at uv1 rg * 2 - 1) * vParams0.x, the texture wobbled by a normal map (the beach foam)
 #define DF2_SKY_GLOW        0x00008000  //!< the sky with r_HDRRendering: rgb *= SkyGlow (Common.hlsli) in the direction of the world position
 #define DF2_HDR_CORE        0x00010000  //!< a light added with r_HDRRendering: rgb *= HdrEncode(1 + (vHdrCore.x - 1) * m^4) (Common.hlsli), m its shape 0..1 (tex0's largest channel, times tex0 a with vHdrCore.y, times DF2_GLOW_FALLOFF): brighter in its core, its soft edge as the game's
+#define DF2_VERTEX_LIGHTS   0x00020000  //!< with DF_PIXEL_LIGHTING: the lights as the vertex lighting takes them, per pixel: colours not clamped, a point light's attenuation 1 / (vLightAtten.x + vLightAtten.y d) up to vLightAtten.z (d3d12_PixelLighting)
+#define DF2_SMOOTH_FALLOFF  0x00040000  //!< with DF2_VERTEX_LIGHTS: a point light falls off as 2 (1 - smoothstep(0, 0.9, d * vLightAtten.w)) instead (static objects: the falloff the per vertex attenuation is fitted to)
+#define DF2_LIGHTMAP_LIGHTS 0x00080000  //!< with DF_TEX1_LIGHTMAP (no DF_LIGHTING): the draw's lights without the sun (per pixel, DF2_VERTEX_LIGHTS) in place of the ambient under the light map (d3d12_PixelLighting)
 
 // SDrawConstants::nFlags of the post program (Post.hlsl): one mode, with POST_EFFECTS the effects drawn
 #define POST_DOWNSAMPLE     0x00000001  //!< the mean of tex0 over the target's pixel: vParams0.z x vParams0.z bilinear taps
