@@ -30,6 +30,9 @@ Mods for Far Cry, built with the CryENGINE MOD SDK for Far Cry:
     `d3d12_HDROutput`: on a display in HDR mode (Windows: Use HDR) the sun, fire and lamps go up to
     the display's peak brightness, while the rest of the picture and the menu stay as bright as SDR
     content.
+  - `video-ambient-occlusion.patch` - Ambient Occlusion in Advanced Video Options: None, GTAO or
+    CACAO, which sets `d3d12_AO`, the screen space ambient occlusion of XRenderD3D12 (Intel
+    XeGTAO or AMD FidelityFX CACAO); the Basic Video Options button moves to the bar of Apply.
 
 How to build and run them: `AGENTS.md`.
 

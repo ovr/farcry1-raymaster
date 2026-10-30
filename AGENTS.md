@@ -535,6 +535,9 @@ it as well: it holds local, machine-specific instructions and is not committed (
   the factor in grey over the whole frame. The frame dump has an `ao:` line and the GPU times an
   `ao` section. For comparisons, DemoLevel with `--scene Demos\DemoLevelPierWalk.ini` and
   `-DemoArgs '--exec-at 1 "d3d12_AO gtao"'` (or `cacao`) against the same run without it.
+  The game's menu gets it from `assets/scripts/video-ambient-occlusion.patch`: Ambient Occlusion,
+  None / GTAO / CACAO in Advanced Video Options, in the row of the Basic Video Options button
+  (which moves to the bar of Apply), greyed out without `d3d12_AO`.
 - `d3d12_DumpFrame 1` writes the render items of the next frame to
   `farcry1_testing1/XRenderD3D12_frame.txt` (never committed): the camera (position, angles,
   field of view, near and far plane, view and projection matrices), then for each item its list, sort
