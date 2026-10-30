@@ -381,25 +381,56 @@ void CD3D12Renderer::DrawCascadeItems(std::span<const SRenderItem> Items, std::u
   // from the sun than the slice's range.
   const SCascadeMaps &Maps = m_CascadeMaps[m_nCascadeSet];
   const Vec3 &X = m_vCascadeAxes[0], &Y = m_vCascadeAxes[1], &Z = m_vCascadeAxes[2];
-  m_bShadowMapPass = true;
-  for (int i = 0; i < m_nCascades && !Parts.empty(); i++)
+  auto Reaches = [&](const SPart &p, const SCascade &Cas)
   {
-    SCascade &Cas = m_Cascades[i];
-    m_pDevice->SetShadowMapTarget(Maps.pDepth.Get(), Maps.hDSV[i], m_nCascadeSize);
-    m_CameraView = m_ViewMatrix = Cas.WorldToMap;
+    return !(p.r >= 0 && (fabsf(p.c.Dot(X) - Cas.fCenter[0]) > Cas.fHalfSize + p.r || fabsf(p.c.Dot(Y) - Cas.fCenter[1]) > Cas.fHalfSize + p.r ||
+                          p.c.Dot(Z) + p.r < Cas.fZMin));
+  };
+  auto SetSlice = [&](int i, D3D12_CPU_DESCRIPTOR_HANDLE hDSV)
+  {
+    m_pDevice->SetShadowMapTarget(Maps.pDepth.Get(), hDSV, m_nCascadeSize);
+    m_CameraView = m_ViewMatrix = m_Cascades[i].WorldToMap;
     m_ProjMatrix.SetIdentity();
     m_SkyProjMatrix = m_ProjMatrix;
     m_nMatrixDepth = 0;
     m_bFog = false;
     m_nCascadeSlice = i;
     InvalidateFrameConstants();
+  };
+  m_bShadowMapPass = true;
+  // The full set: each part once, into all the slices it reaches (an instance each; the depth is
+  // the same as slice by slice, with one draw per part instead of one per slice). The live set
+  // compares each slice with the full set's (SetupCascadeCaster): slice by slice.
+  if (m_nCascadeSet == 0 && CV_d3d12_CascadeInstancing && !Parts.empty())
+  {
+    SetSlice(0, Maps.hDSV[XR_MAX_CASCADES]);
     for (const SPart &p : Parts)
     {
-      if (p.r >= 0 && (fabsf(p.c.Dot(X) - Cas.fCenter[0]) > Cas.fHalfSize + p.r || fabsf(p.c.Dot(Y) - Cas.fCenter[1]) > Cas.fHalfSize + p.r ||
-                       p.c.Dot(Z) + p.r < Cas.fZMin))
-        continue;
-      DrawLeafItem(*p.pItem);
-      Cas.nCasters[m_nCascadeSet]++;
+      m_nCascadeInstances = 0;
+      for (int i = 0; i < m_nCascades; i++)
+        if (Reaches(p, m_Cascades[i]))
+        {
+          m_CascadeInstances[m_nCascadeInstances++] = i;
+          m_Cascades[i].nCasters[0]++;
+        }
+      if (m_nCascadeInstances)
+        DrawLeafItem(*p.pItem);
+    }
+    m_nCascadeInstances = 0;
+  }
+  else
+  {
+    for (int i = 0; i < m_nCascades && !Parts.empty(); i++)
+    {
+      SCascade &Cas = m_Cascades[i];
+      SetSlice(i, Maps.hDSV[i]);
+      for (const SPart &p : Parts)
+      {
+        if (!Reaches(p, Cas))
+          continue;
+        DrawLeafItem(*p.pItem);
+        Cas.nCasters[m_nCascadeSet]++;
+      }
     }
   }
   m_bShadowMapPass = false;

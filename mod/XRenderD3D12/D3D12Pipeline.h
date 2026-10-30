@@ -88,7 +88,9 @@ struct SPipelineKey
   uint8 nBlendOp;         //!< 0 the colour blends add, 1 subtract the source from the target (REV_SUBTRACT)
   uint8 bRayTrace;        //!< the water program with rays (XR_RAYTRACE, Shader Model 6.5; DrawGeometry clears it without a scene
                           //!< for rays in the frame)
-  uint8 nPad[3];
+  uint8 bCascadeInstances;  //!< nTarget 2: the general program's vertex shader of the full set of the sun's cascades, a slice
+                            //!< per instance (XR_CASCADE_INSTANCES: mShadow[i] into slice nShadowTex[i]; Cascades.cpp)
+  uint8 nPad[2];
 };
 
 //! SPipelineKey::nColorFormat.

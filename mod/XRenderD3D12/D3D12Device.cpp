@@ -594,6 +594,13 @@ bool CD3D12Device::CreateShadowMapArray(int nSize, int nSlices, ComPtr<ID3D12Res
     View.Texture2DArray.ArraySize = 1;
     m_pDevice->CreateDepthStencilView(pDepth.Get(), &View, phDSV[i]);
   }
+  if (!phDSV[nSlices].ptr)
+    return false;
+  D3D12_DEPTH_STENCIL_VIEW_DESC View = {};
+  View.Format = D3D12_SHADOW_MAP_FORMAT;
+  View.ViewDimension = D3D12_DSV_DIMENSION_TEXTURE2DARRAY;
+  View.Texture2DArray.ArraySize = nSlices;
+  m_pDevice->CreateDepthStencilView(pDepth.Get(), &View, phDSV[nSlices]);
   return true;
 }
 

@@ -147,6 +147,10 @@
 //	the factor; the rest 0 (the unlit, the light passes, the fog volumes,
 //	the scope's glass). Without an upscaler SV_Target1 and 2 are null
 //	targets.
+//	Compiled with XR_CASCADE_INSTANCES (the vertex shader of the full set of
+//	the sun's cascades, Cascades.cpp) instance i is drawn with mShadow[i] in
+//	place of mWorldViewProj into slice nShadowTex[i] of the array
+//	(SV_RenderTargetArrayIndex).
 //
 //////////////////////////////////////////////////////////////////////
 
@@ -168,6 +172,9 @@ struct SVertexOutput
 #ifdef XR_VELOCITY
   float4 vCurClip : TEXCOORD9;  //!< the clip position without the jitter
   float4 vPrevClip : TEXCOORD10; //!< the same in the frame before
+#endif
+#ifdef XR_CASCADE_INSTANCES
+  uint nSlice : SV_RenderTargetArrayIndex;  //!< the slice of the cascades' array (last: the pixel shaders' inputs stay where they are)
 #endif
 };
 
@@ -340,7 +347,13 @@ float4 ScopeLens(SVertexOutput In)
   return float4(vScene * g_Draw.vColor.rgb, g_Draw.vColor.a * exp2(-r2 * r2));
 }
 
+#ifdef XR_CASCADE_INSTANCES
+//! A caster of the full set of the sun's cascades into all the slices it reaches at once, an
+//! instance each: mShadow[i] the world to slice nShadowTex[i] in place of mWorldViewProj.
+SVertexOutput VSMain(SVertexInput In, uint nInstance : SV_InstanceID)
+#else
 SVertexOutput VSMain(SVertexInput In)
+#endif
 {
   SVertexOutput Out;
 
@@ -357,7 +370,12 @@ SVertexOutput VSMain(SVertexInput In)
   else
   {
     float4 vPos = float4(In.vPos.xyz, 1);
+#ifdef XR_CASCADE_INSTANCES
+    Out.vPos = mul(vPos, g_Draw.mShadow[nInstance]);
+    Out.nSlice = g_Draw.nShadowTex[nInstance];
+#else
     Out.vPos = mul(vPos, g_Draw.mWorldViewProj);
+#endif
     vWorldPos = mul(vPos, g_Draw.mWorld).xyz;
 #ifdef XR_VELOCITY
     Out.vCurClip = Out.vPos;

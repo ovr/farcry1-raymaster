@@ -19,6 +19,7 @@
 #include "General_PS.h"
 #include "General_Velocity_VS.h"
 #include "General_Velocity_PS.h"
+#include "General_CascadeInstances_VS.h"
 #include "General_Hdr_PS.h"
 #include "General_Hdr_Velocity_PS.h"
 #include "General_Cascades_PS.h"
@@ -626,6 +627,9 @@ ComPtr<ID3D12PipelineState> CD3D12Pipeline::CreatePSO(const SPipelineKey &Key)
                       : D3D12_SHADER_BYTECODE{ g_General_VS, sizeof(g_General_VS) };
     Desc.PS = s_AmbientPS[Key.bCascades ? 1 : 0][bHdr ? 1 : 0][bMotion ? 1 : 0];
   }
+  // A caster of the sun's cascades into all its slices at once.
+  if (bGeneral && bShadowMap && Key.bCascadeInstances)
+    Desc.VS = { g_General_CascadeInstances_VS, sizeof(g_General_CascadeInstances_VS) };
 
   // Blending: off when neither factor is set.
   D3D12_RENDER_TARGET_BLEND_DESC &Blend = Desc.BlendState.RenderTarget[0];

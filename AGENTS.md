@@ -339,7 +339,7 @@ it as well: it holds local, machine-specific instructions and is not committed (
   take 20 ms and more while the renderer waits for nothing; which one repeats for one renderer DLL
   with the same arguments and environment and changes with any of them, for a build before a
   change as for the one after it, so frame rates are compared over several runs and launches;
-  `profile 1` gives about 225 every time);
+  with `profile 1` too, at about 225 or about 130);
   a path through the whole level to compare a change in many places) and DemoSurfaces (objects
   of different materials, glass among them, on a beach and in its shallow water under a moving
   light, handed to the engine's
@@ -353,11 +353,14 @@ it as well: it holds local, machine-specific instructions and is not committed (
   same frames, except a few pixels of the characters (DemoAnimation, DemoCharacters:
   `--tolerance 1`) and of overlapping decals (DemoDecals: `--tolerance 6`); the fire and smoke of
   DemoParticles, the water of DemoQuality from its medium preset on and the walking figures in
-  the background of the beach demos differ more and are compared by eye. So a larger difference
-  between `DemoShots/old` and the frames of our renderer is the renderer's. Two builds of the
-  renderer can also differ in what the game animates, the same in every run of each build: the
-  seagulls over the water of DemoLevelAA (a wing a few pixels apart in frame 100), even when the
-  shaders are the same instruction for instruction.
+  the background of the beach demos differ more and are compared by eye, as do the seagulls and
+  the people of DemoLevelPierWalk and, in DemoReplay's Training from about frame 2000 on, the
+  weapon in the hands, the fisherman, the fish and the shore's waves (frames 100 to 1300 are
+  the same in every run). So a larger difference between `DemoShots/old` and the frames of our
+  renderer is the renderer's. Two builds of the renderer can also differ in what the game
+  animates, the same in every run of each build: the seagulls over the water of DemoLevelAA (a
+  wing a few pixels apart in frame 100), even when the shaders are the same instruction for
+  instruction.
 
 ## XRenderD3D12
 
@@ -525,6 +528,14 @@ it as well: it holds local, machine-specific instructions and is not committed (
   - the live set, with the casters the engine names for its shadow maps in the frame
     (characters, vehicles, the vegetation that casts), each only where nothing in the full set
     is nearer to the sun.
+
+  Each part of the full set is drawn once, into all the slices its sphere reaches: an instance
+  per slice, which the vertex shader sends to its slice (`SV_RenderTargetArrayIndex`,
+  `General_CascadeInstances_VS`). The depth is the same as drawn slice by slice (DemoLevelSurvey
+  with `d3d12_CascadeInstancing 0`, which draws slice by slice, and 1: DemoCompare difference 0;
+  elsewhere only what the game animates differently from run to run) with far fewer draws
+  (Training's time demo, frame 2600: 1,677 in the frame instead of 3,120). The live set is
+  drawn slice by slice, each compared with the full set's.
 
   Lit objects take the sun from the full set. Light maps and the terrain, whose light has the
   static world's shadows already, take it from the live set; the terrain is darkened to the

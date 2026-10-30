@@ -134,9 +134,9 @@ void CD3D12Renderer::MakeFrameConstants(SFrameConstants &fc, bool bScene) const
 
 void CD3D12Renderer::DrawGeometry(const SPipelineKey &Key, const SDrawConstants &dc, D3D_PRIMITIVE_TOPOLOGY eTopology, const D3D12_VERTEX_BUFFER_VIEW &VB,
   const D3D12_INDEX_BUFFER_VIEW *pIB, uint32 nCount, uint32 nFirst, int nBaseVertex, const D3D12_VERTEX_BUFFER_VIEW *pTexCoord1,
-  const D3D12_VERTEX_BUFFER_VIEW *pTangents)
+  const D3D12_VERTEX_BUFFER_VIEW *pTangents, uint32 nInstances)
 {
-  if (!nCount || !m_pPipeline || !m_pUpload || !EnsureFrame())
+  if (!nCount || !nInstances || !m_pPipeline || !m_pUpload || !EnsureFrame())
     return;
   const bool bOffscreen = m_pDevice->IsOffscreen();
   const bool bScene = m_pDevice->IsSceneBound();
@@ -265,15 +265,15 @@ void CD3D12Renderer::DrawGeometry(const SPipelineKey &Key, const SDrawConstants 
     return;
   pList->RSSetScissorRects(1, &Scissor);
 
-  m_nFramePolygons += CountTriangles(eTopology, nCount);
+  m_nFramePolygons += CountTriangles(eTopology, nCount) * nInstances;
   m_nFrameDraws++;
   if (pIB)
   {
     pList->IASetIndexBuffer(pIB);
-    pList->DrawIndexedInstanced(nCount, 1, nFirst, nBaseVertex, 0);
+    pList->DrawIndexedInstanced(nCount, nInstances, nFirst, nBaseVertex, 0);
   }
   else
-    pList->DrawInstanced(nCount, 1, nFirst, 0);
+    pList->DrawInstanced(nCount, nInstances, nFirst, 0);
 }
 
 void CD3D12Renderer::DrawImmediate(const SPipelineKey &Key, const SDrawConstants &dc, D3D_PRIMITIVE_TOPOLOGY eTopology, int nVertexFormat,

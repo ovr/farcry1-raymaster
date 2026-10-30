@@ -201,8 +201,9 @@ struct SDrawConstants
   XR_UINT(nTex6);
   XR_UINT(nFlags2);               //!< DF2_*
   XR_FLOAT4X4(mParams0);          //!< a matrix of the other programs (Water.hlsl) and DF2_PROJECTOR
-  XR_FLOAT4X4_ARRAY(mShadow, XR_MAX_DRAW_SHADOWS);  //!< DF_SHADOWS: world to a shadow map: x, y -1..1 across its circle, z depth 0..1 (away from the sun)
-  XR_UINT4(nShadowTex);           //!< their depth textures (texture table indices)
+  XR_FLOAT4X4_ARRAY(mShadow, XR_MAX_DRAW_SHADOWS);  //!< DF_SHADOWS: world to a shadow map: x, y -1..1 across its circle, z depth 0..1 (away from the sun);
+                                                    //!< XR_CASCADE_INSTANCES: object to slice nShadowTex[i] of the cascades for instance i
+  XR_UINT4(nShadowTex);           //!< their depth textures (texture table indices); XR_CASCADE_INSTANCES: the instances' slices
   XR_FLOAT4(vShadowParams);       //!< x the number of maps, y the fade of the shadow per unit of depth behind its casters (0: none), z filter radius in texels, w offset along the normal (m)
   XR_FLOAT4_ARRAY(vLightSpec, XR_MAX_DRAW_LIGHTS);  //!< DF_SPECULAR: rgb the light's specular colour
   XR_FLOAT4(vSpecular);           //!< DF_SPECULAR: rgb the material's specular colour, w 1: times the texture's alpha (gloss)

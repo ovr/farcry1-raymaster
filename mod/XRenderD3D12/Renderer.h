@@ -396,7 +396,7 @@ public:
   //! and the key's target 0 made 3).
   void DrawGeometry(const SPipelineKey &Key, const SDrawConstants &dc, D3D_PRIMITIVE_TOPOLOGY eTopology, const D3D12_VERTEX_BUFFER_VIEW &VB,
     const D3D12_INDEX_BUFFER_VIEW *pIB, uint32 nCount, uint32 nFirst = 0, int nBaseVertex = 0, const D3D12_VERTEX_BUFFER_VIEW *pTexCoord1 = nullptr,
-    const D3D12_VERTEX_BUFFER_VIEW *pTangents = nullptr);
+    const D3D12_VERTEX_BUFFER_VIEW *pTangents = nullptr, uint32 nInstances = 1);
   //! The same with the vertices (and indices) copied into per frame memory. Fans are not supported
   //! by Direct3D 12: the callers make lists.
   void DrawImmediate(const SPipelineKey &Key, const SDrawConstants &dc, D3D_PRIMITIVE_TOPOLOGY eTopology, int nVertexFormat,
@@ -826,7 +826,7 @@ public:
   struct SCascadeMaps
   {
     ComPtr<ID3D12Resource> pDepth;
-    D3D12_CPU_DESCRIPTOR_HANDLE hDSV[XR_MAX_CASCADES] = {};
+    D3D12_CPU_DESCRIPTOR_HANDLE hDSV[XR_MAX_CASCADES + 1] = {};  //!< the slices', then all of them (CreateShadowMapArray)
     int nSRV = -1;            //!< the texture table index (a TEXTURE2DARRAY view)
   };
   //! Before the main view is drawn, its items prepared (MainItems): with d3d12_ShadowCascades and
@@ -866,6 +866,8 @@ public:
   bool m_bCascadePass = false;                        //!< the casters of the cascades are being drawn
   int m_nCascadeSet = 0;                              //!< the set being drawn: 0 the full set, 1 the live set
   int m_nCascadeSlice = 0;                            //!< the slice being drawn
+  int m_CascadeInstances[XR_MAX_CASCADES] = {};       //!< d3d12_CascadeInstancing: the slices the part being drawn reaches
+  int m_nCascadeInstances = 0;                        //!< how many (0: one slice, m_nCascadeSlice)
   int m_nCascadeFrame = -1;                           //!< m_nFrames of the cascades (m_nCascades), when drawn
   std::unordered_set<uint64> m_CascadeDrawn;          //!< the parts drawn into the full set (DrawCascadeItems)
   ICVar *m_pShadowMapsVar = nullptr;                  //!< e_shadow_maps, looked up on first use
@@ -1201,6 +1203,7 @@ public:
   int CV_d3d12_ShadowCascades = 4;          //!< the sun's cascaded shadow maps: how many (0: none)
   float CV_d3d12_ShadowDistance = 120;      //!< how far they reach from the camera (m)
   int CV_d3d12_ShadowCascadeSize = 2048;    //!< the size of their maps
+  int CV_d3d12_CascadeInstancing = 1;       //!< 1: a caster of the full set drawn once into all the slices it reaches (DrawCascadeItems)
   float CV_d3d12_ShadowSoftness = 0.05f;    //!< the radius of their filter (m)
   int CV_d3d12_UpscaleMode = 0;             //!< EUpscaleMode of the upscaler (d3d12_Upscaler, a string)
   float CV_d3d12_UpscaleSharpness = 0.5f;   //!< the upscaler's sharpening, 0 (none) to 1

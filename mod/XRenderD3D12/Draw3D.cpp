@@ -478,6 +478,7 @@ void CD3D12Renderer::DrawLeafItem(const SRenderItem &it)
   const ELighting eLighting = bSelfIllum ? ELighting::None : Props.eLighting;
   Set4(dc.vAmbient, pObj->m_AmbColor.x, pObj->m_AmbColor.y, pObj->m_AmbColor.z, eLighting == ELighting::Vertex ? 1.0f : 2.0f);
   std::optional<D3D12_VERTEX_BUFFER_VIEW> TexCoord1, Tangents;
+  uint32 nInstances = 1;
 
   auto Draw = [&]()
   {
@@ -485,9 +486,9 @@ void CD3D12Renderer::DrawLeafItem(const SRenderItem &it)
       DumpDraw(dc, Key, pTex);
     const D3D12_VERTEX_BUFFER_VIEW *pTC1 = TexCoord1 ? &*TexCoord1 : nullptr, *pTangents = Tangents ? &*Tangents : nullptr;
     if (Geom->IsIndexed())
-      DrawGeometry(Key, dc, Geom->Topology, Geom->VB, &Geom->IB, Geom->nNumIndices, Geom->nFirstIndex, Geom->nBaseVertex, pTC1, pTangents);
+      DrawGeometry(Key, dc, Geom->Topology, Geom->VB, &Geom->IB, Geom->nNumIndices, Geom->nFirstIndex, Geom->nBaseVertex, pTC1, pTangents, nInstances);
     else
-      DrawGeometry(Key, dc, Geom->Topology, Geom->VB, nullptr, Geom->nNumVertices, Geom->nFirstVertex, 0, pTC1, pTangents);
+      DrawGeometry(Key, dc, Geom->Topology, Geom->VB, nullptr, Geom->nNumVertices, Geom->nFirstVertex, 0, pTC1, pTangents, nInstances);
   };
   // An object lit in passes (FOB_ZPASS: the ambient and the light map; then for each light an
   // FOB_LIGHTPASS element with that light alone in m_DynLMMask and no ambient): the light passes
@@ -498,8 +499,23 @@ void CD3D12Renderer::DrawLeafItem(const SRenderItem &it)
   {
     if (bLightPass)
       return;
-    if (SetupShadowCasterDraw(Key, dc, it))
-      Draw();
+    if (!SetupShadowCasterDraw(Key, dc, it))
+      return;
+    // Into the slices of the sun's cascades it reaches, an instance each (DrawCascadeItems): the
+    // world to each slice as WorldViewProj would be with its matrix.
+    if (m_nCascadeInstances > 0)
+    {
+      for (int i = 0; i < m_nCascadeInstances; i++)
+      {
+        const int nSlice = m_CascadeInstances[i];
+        const Matrix44 WorldToSlice = World * m_Cascades[nSlice].WorldToMap * m_ProjMatrix;
+        memcpy(dc.mShadow[i], WorldToSlice.data, sizeof(dc.mShadow[i]));
+        dc.nShadowTex[i] = (uint32)nSlice;
+      }
+      Key.bCascadeInstances = 1;
+      nInstances = (uint32)m_nCascadeInstances;
+    }
+    Draw();
     return;
   }
 
