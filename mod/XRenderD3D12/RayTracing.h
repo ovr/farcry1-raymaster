@@ -15,11 +15,17 @@
 //	  CaptureDraw: those of the general program that write the depth, do
 //	  not blend and are triangle lists in world or object space. A draw
 //	  whose mWorld is not the one of its mWorldViewProj is left out.
+//	  A draw with a depth bias (a decal on a surface) is left out, and of
+//	  draws with the same geometry and transform (passes over one another)
+//	  the first is kept.
 //	  The water's planar reflection (UpdateWaterReflection) sees what is
 //	  out of the main view: its static draws (BeginReflectionCapture ..
 //	  EndReflectionCapture) are kept until it is drawn again and join every
-//	  Build, those whose buffers are gone or changed and those the main
-//	  view has too (the same geometry and transform) left out.
+//	  Build, those whose buffers or textures are gone or changed and those
+//	  the main view has too (the same geometry and transform) left out.
+//	- One scene a frame: the first main view's (another top level view in
+//	  the same frame draws with it). Without a cvar that wants rays, its
+//	  memory goes (Release).
 //	- BLAS: one per draw's geometry, the vertex positions (at offset 0, three
 //	  floats) and the indices as DrawGeometry has them, untransformed.
 //	  Geometry in static buffers (CD3D12Upload::FindBuffer) keeps its BLAS
@@ -30,9 +36,9 @@
 //	  of a frame are limited (MAX_*_TRIANGLES); what is over waits for the
 //	  next frames.
 //	- TLAS: built every frame after the opaque list (Build), one instance
-//	  per draw, the instance's transform its mWorld, its mask and
-//	  InstanceContributionToHitGroupIndex its kind (Shaders/RayConstants.h),
-//	  culling off.
+//	  per draw whose kinds d3d12_RTMask has all of, the instance's transform
+//	  its mWorld, its mask and InstanceContributionToHitGroupIndex its kind
+//	  (Shaders/RayConstants.h), culling off.
 //	- Instances: an SRayInstance per instance of the TLAS (its InstanceID),
 //	  in per frame memory: the raw views of its vertices, indices and second
 //	  stream (CD3D12Upload::GetRawSRV) and the part of its draw's constants
@@ -69,7 +75,11 @@ public:
   bool Init(ID3D12Device *pDevice);
   //! Releases everything at once (the GPU is idle).
   void Shutdown();
+  //! Releases the memory of the scene once the GPU is done with it (nothing wants rays); the device stays.
+  void Release();
   bool IsSupported() const { return m_pDevice5 != nullptr; }
+  //! The renderer's m_nFrames of the last Build (-1: none).
+  int GetBuiltFrame() const { return m_nBuiltFrame; }
 
   //! The main view's opaque list starts: its draws until EndCapture make this frame's scene.
   //! ViewProj: its camera's world to clip (the draws' mWorld times it is their mWorldViewProj).
@@ -143,6 +153,7 @@ private:
     SRayInstance Inst;
     D3D12_GPU_VIRTUAL_ADDRESS nTexCoord1;   //!< the second stream's first vertex (0: none)
     uint64 nTexCoord1Id;            //!< its static buffer's CD3D12Buffer::m_nId (0: per frame memory)
+    uint32 nTexGeneration[4];       //!< CD3D12Descriptors::GetGeneration of Inst's textures (GetTextureSlots)
   };
   //! A buffer of a frame slot that grows (RAYTRACING_ACCELERATION_STRUCTURE or UNORDERED_ACCESS).
   struct SSlotBuffer
@@ -155,13 +166,17 @@ private:
     SSlotBuffer Scratch, Blas, Tlas;
   };
 
-  //! The draw's buffers are still those it was captured with.
+  //! The texture slots of an instance (SRayInstance: nTex0, nTex1, nTex4, nTex2).
+  static void GetTextureSlots(const SRayInstance &Inst, uint32 Slots[4]);
+  //! The draw's buffers and textures are still those it was captured with.
   static bool IsAlive(const SDraw &d);
-  //! The draw's geometry and transform (the same in the main view and in the reflection).
+  //! The draw's geometry and transform (the same in the main view and in the reflection, in all passes
+  //! over it).
   static uint64 DrawHash(const SDraw &d);
-  //! The instance's data of a draw (its geometry Tri, its first vertex in the draw's buffers).
+  //! The instance's data of a draw (its geometry Tri; nTexCoord1 the second stream's first vertex, 0 for
+  //! none).
   static void FillInstance(SRayInstance &Inst, const SPipelineKey &Key, const SDrawConstants &dc, const D3D12_RAYTRACING_GEOMETRY_TRIANGLES_DESC &Tri,
-    const D3D12_VERTEX_BUFFER_VIEW &TexCoord1, uint32 nFirstVertex);
+    D3D12_GPU_VIRTUAL_ADDRESS nTexCoord1);
   //! A buffer of nSize bytes with unordered access in the default heap; NULL when refused (logged).
   Microsoft::WRL::ComPtr<ID3D12Resource> CreateBuffer(uint64 nSize, D3D12_RESOURCE_STATES State, const wchar_t *szName);
   //! At least nSize bytes in Buf (a new buffer, the old one released when the GPU is done with it).
@@ -182,7 +197,7 @@ private:
   std::vector<SDraw> m_ReflectionDraws;   //!< the static draws of the last water reflection
   Vec3 m_vCamera = Vec3(0, 0, 0);
   int m_nFrame = 0;                 //!< counts BeginCapture
-  uint64 m_nBuiltFence = 0;         //!< the frame fence of the last Build (GetTLAS)
+  int m_nBuiltFrame = -1;           //!< the renderer's m_nFrames of the last Build (GetTLAS)
   int m_nBuiltSlot = 0;
   D3D12_GPU_VIRTUAL_ADDRESS m_nInstances = 0;   //!< the last Build's SRayInstance array
   std::vector<SDraw> m_Draws;

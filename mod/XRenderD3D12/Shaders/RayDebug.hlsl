@@ -102,7 +102,8 @@ float4 PSMain(SRayDebugOutput In) : SV_Target
       const SRaySurface S = RaySurface(Hit.nInstance, Hit.nPrimitive, Hit.vBary, Hit.mObjectToWorld, Ray.Direction, Hit.fT * fSpread);
       if (!(I.nMaterial.x & (DF_TEX0 | DF_TEX0_ARRAY)) || (I.nMaterial.x & DF_CUBE0))
         return float4(0.2, 0.2, 0.2, 1);
-      return float4(Ramp(RayTextureLevel(I.nMaterial.z, S.fLod) / 8), 1);
+      const float fLevel = (I.nMaterial.x & DF_TEX0_ARRAY) ? RayTextureArrayLevel(I.nMaterial.z, S.fLod) : RayTextureLevel(I.nMaterial.z, S.fLod);
+      return float4(Ramp(fLevel / 8), 1);
     }
     bool bFog;
     float4 vColor = RayShade(Hit, Ray.Direction, Hit.fT * fSpread, (asuint(g_Draw.vParams1.w) & 0x100) != 0, nMask, bFog);

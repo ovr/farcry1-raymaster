@@ -208,12 +208,18 @@ float4 RaySampleTexture(uint nIndex, uint nSampler, float2 vUV, float fLod)
   }
 }
 
+//! The mip level of texture array nIndex under the surface's ray cone.
+float RayTextureArrayLevel(uint nIndex, float fLod)
+{
+  uint w, h, nSlices, nLevels;
+  g_TextureArrays[NonUniformResourceIndex(nIndex)].GetDimensions(0, w, h, nSlices, nLevels);
+  return max(fLod + 0.5 * log2(max(w * h, 1u)), 0);
+}
+
 float4 RaySampleTextureArray(uint nIndex, uint nSampler, float3 vUVW, float fLod)
 {
   Texture2DArray Tex = g_TextureArrays[NonUniformResourceIndex(nIndex)];
-  uint w, h, nSlices, nLevels;
-  Tex.GetDimensions(0, w, h, nSlices, nLevels);
-  const float fLevel = max(fLod + 0.5 * log2(max(w * h, 1u)), 0);
+  const float fLevel = RayTextureArrayLevel(nIndex, fLod);
   switch (nSampler)
   {
   case XR_SAMPLER_LINEAR_CLAMP:

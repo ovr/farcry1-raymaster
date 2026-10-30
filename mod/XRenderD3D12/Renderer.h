@@ -565,8 +565,11 @@ public:
 
   //! The device has rays and a cvar wants them.
   bool WantsRays() const;
+  //! The rays' mask for the shaders: d3d12_RTMask's kinds, 0x100 with d3d12_RTShadows.
+  uint32 RayMask() const;
   //! Before the main view's opaque list (not its reflection, sprites, shadow maps, cubes or heat
-  //! vision): its draws go into the scene for rays.
+  //! vision): its draws go into the scene for rays, the first such view of a frame. Without a cvar
+  //! that wants rays the scene's memory goes.
   void BeginRayCapture();
   //! After the main view's opaque list: the builds of the scene, for the draws after it.
   void BuildRayScene();

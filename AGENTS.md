@@ -573,15 +573,17 @@ it as well: it holds local, machine-specific instructions and is not committed (
 - Ray tracing (`RayTracing.h`, DXR 1.1 with inline `RayQuery`, Shader Model 6.5): the main view's
   opaque draws and the static ones of the water's planar reflection become acceleration
   structures every frame (the `ray scene` section of the GPU times, a `ray scene:` line in the
-  frame dump), only while something wants rays. `XRENDERD3D12_NORT=1` (or a device without tier 1.1)
-  turns them off; the log says why. `Shaders/RayShade.hlsli` traces (`TraceScene`, alpha tested
-  triangles tested) and shades the hits as the general program does without the draw's lights:
+  frame dump), once a frame and only while something wants rays (else their memory goes).
+  `XRENDERD3D12_NORT=1` (or a device without tier 1.1) turns them off; the log says why.
+  `Shaders/RayShade.hlsli` traces (`TraceScene`, alpha tested triangles tested) and shades the
+  hits as the general program does without the draw's lights:
   textures, vertex colour, light maps (dot3 ones too), the sun with its shadow by a ray
   (`d3d12_RTShadows`, default 1). `d3d12_RTReflections` (0 by default, read every frame): 1 the
   water's reflection by rays in place of the screen space reflection, 2 hybrid (the screen space
   reflection where it is sure, the rays elsewhere); not registered without rays.
   `d3d12_RTDistance` (150 m) the rays' length, `d3d12_RTMemory` (384 MB) the static BLAS kept,
-  `d3d12_RTMask` (31) the kinds the rays see (1 static, 2 alpha tested, 4 of the frame).
+  `d3d12_RTMask` (31) the kinds the rays see (1 static, 2 alpha tested, 4 of the frame; a draw is
+  in the scene when the mask has all of its kinds).
   `d3d12_RTDebug` views the scene for rays from the camera: 1 instances, 2 shaded hits on the right
   half, 3 distance, 4 mip level, 5 kind, 6 alpha tests, 7 shaded hits over the whole picture;
   `d3d12_WaterDebug` 13, 14, 15 the water rays' colour, distance and weight. With the rays off the

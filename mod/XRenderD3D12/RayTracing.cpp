@@ -19,6 +19,7 @@
 #include <unordered_set>
 #include "Renderer.h"
 #include "D3D12Device.h"
+#include "D3D12Descriptors.h"
 #include "D3D12Upload.h"
 #include "D3D12Pipeline.h"
 #include "RayTracing.h"
@@ -129,8 +130,41 @@ void CD3D12RayScene::Shutdown()
   m_PendingFree.clear();
   for (SFrameSlot &Slot : m_Slots)
     Slot = SFrameSlot();
-  m_nBuiltFence = 0;
+  m_nBuiltFrame = -1;
+  m_nInstances = 0;
   m_pDevice5.Reset();
+}
+
+void CD3D12RayScene::Release()
+{
+  bool bHeld = !m_Pools.empty() || !m_ReflectionDraws.empty();
+  for (const SFrameSlot &Slot : m_Slots)
+    bHeld = bHeld || Slot.Scratch.pBuffer || Slot.Blas.pBuffer || Slot.Tlas.pBuffer;
+  if (!bHeld || !g_pRenderer->m_pDevice)
+    return;
+  CD3D12Device &Device = *g_pRenderer->m_pDevice;
+  for (const auto &p : m_Pools)
+  {
+    if (p->pBuffer)
+      Device.DeferredRelease(p->pBuffer);
+  }
+  for (SFrameSlot &Slot : m_Slots)
+  {
+    for (SSlotBuffer *pBuf : { &Slot.Scratch, &Slot.Blas, &Slot.Tlas })
+    {
+      if (pBuf->pBuffer)
+        Device.DeferredRelease(pBuf->pBuffer);
+    }
+    Slot = SFrameSlot();
+  }
+  m_Pools.clear();
+  m_PendingFree.clear();
+  m_Static.clear();
+  m_nStaticBytes = 0;
+  m_Draws.clear();
+  m_ReflectionDraws.clear();
+  m_nBuiltFrame = -1;
+  m_nInstances = 0;
 }
 
 //////////////////////////////////////////////////////////////////////////
@@ -153,8 +187,24 @@ void CD3D12RayScene::BeginReflectionCapture(const Matrix44 &ViewProj)
   m_bCapturingReflection = m_pDevice5 != nullptr;
 }
 
+void CD3D12RayScene::GetTextureSlots(const SRayInstance &Inst, uint32 Slots[4])
+{
+  Slots[0] = Inst.nMaterial[2];
+  Slots[1] = Inst.nMaterial[3];
+  Slots[2] = Inst.nMaterial2[2];
+  Slots[3] = Inst.nMaterial2[3];
+}
+
 bool CD3D12RayScene::IsAlive(const SDraw &d)
 {
+  // Its textures: a slot given back may hold another view by now.
+  uint32 Slots[4];
+  GetTextureSlots(d.Inst, Slots);
+  for (int i = 0; i < 4; i++)
+  {
+    if (g_pRenderer->m_pDescriptors->GetGeneration((int)Slots[i]) != d.nTexGeneration[i])
+      return false;
+  }
   const CD3D12Upload &Upload = *g_pRenderer->m_pUpload;
   const CD3D12Buffer *pVB = Upload.FindBuffer(d.Geom.Triangles.VertexBuffer.StartAddress);
   if (!pVB || pVB->m_nId != d.Key.nVBId || pVB->m_nVersion != d.Key.nVBVersion)
@@ -176,21 +226,30 @@ bool CD3D12RayScene::IsAlive(const SDraw &d)
 
 uint64 CD3D12RayScene::DrawHash(const SDraw &d)
 {
+  // The static buffers by id and version (Key), per frame memory by address (the triangles' desc).
   uint64 nHash = SBlasKeyHash()(d.Key);
-  const uint8 *p = (const uint8 *)d.Transform;
-  for (size_t i = 0; i < sizeof(d.Transform); i++)
+  const auto Add = [&nHash](const void *pData, size_t nSize)
   {
-    nHash ^= p[i];
-    nHash *= 1099511628211ull;
-  }
+    const uint8 *p = (const uint8 *)pData;
+    for (size_t i = 0; i < nSize; i++)
+    {
+      nHash ^= p[i];
+      nHash *= 1099511628211ull;
+    }
+  };
+  static_assert(sizeof(D3D12_RAYTRACING_GEOMETRY_TRIANGLES_DESC) == 48, "the triangles' desc is hashed as bytes");
+  Add(&d.Geom.Triangles, sizeof(d.Geom.Triangles));
+  Add(d.Transform, sizeof(d.Transform));
   return nHash;
 }
 
 void CD3D12RayScene::CaptureDraw(const SPipelineKey &Key, const SDrawConstants &dc, D3D_PRIMITIVE_TOPOLOGY eTopology, const D3D12_VERTEX_BUFFER_VIEW &VB,
   const D3D12_INDEX_BUFFER_VIEW *pIB, uint32 nCount, uint32 nFirst, int nBaseVertex, const D3D12_VERTEX_BUFFER_VIEW *pTexCoord1)
 {
-  // The opaque surfaces: the general program writing the depth, not blended, not a pass over others.
-  if (Key.nProgram != eD3D12P_General || eTopology != D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST || Key.bWireframe || Key.nTarget != 0)
+  // The opaque surfaces: the general program writing the depth, not blended, not a pass over others
+  // (those with the same geometry go in Build, a depth bias is a decal on a surface).
+  if (Key.nProgram != eD3D12P_General || eTopology != D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST || Key.bWireframe || Key.nTarget != 0 ||
+      Key.bDepthBias)
     return;
   if (!(Key.nState & GS_DEPTHWRITE) || (Key.nState & (GS_BLSRC_MASK | GS_BLDST_MASK | GS_NODEPTHTEST | GS_NOCOLMASK)))
     return;
@@ -260,14 +319,25 @@ void CD3D12RayScene::CaptureDraw(const SPipelineKey &Key, const SDrawConstants &
   CD3D12Upload &Upload = *g_pRenderer->m_pUpload;
   const CD3D12Buffer *pVBuf = Upload.FindBuffer(Tri.VertexBuffer.StartAddress);
   const CD3D12Buffer *pIBuf = pIB ? Upload.FindBuffer(Tri.IndexBuffer) : nullptr;
+  const uint64 nVBOffset = pVBuf ? Tri.VertexBuffer.StartAddress - pVBuf->m_nGPU : 0;
+  if (pVBuf)
+  {
+    // The build reads the position (12 bytes) of every vertex: the last one's must be in the buffer. A
+    // view longer than its buffer has vertices no index uses.
+    const uint64 nFit = pVBuf->m_nSize >= nVBOffset + 12 ? (pVBuf->m_nSize - nVBOffset - 12) / nStride + 1 : 0;
+    if (Tri.VertexCount > nFit)
+    {
+      if (!pIB || !nFit)
+        return;
+      Tri.VertexCount = (UINT)nFit;
+    }
+  }
   bool bStatic = pVBuf && (!pIB || pIBuf);
   if (bStatic)
   {
-    const uint64 nVBOffset = Tri.VertexBuffer.StartAddress - pVBuf->m_nGPU;
     const uint64 nIBOffset = pIBuf ? Tri.IndexBuffer - pIBuf->m_nGPU : 0;
     const uint32 nIndexSize = Tri.IndexFormat == DXGI_FORMAT_R32_UINT ? 4 : 2;
-    bStatic = nVBOffset + (uint64)Tri.VertexCount * nStride <= pVBuf->m_nSize + nStride &&
-              (!pIBuf || nIBOffset + (uint64)Tri.IndexCount * nIndexSize <= pIBuf->m_nSize);
+    bStatic = !pIBuf || nIBOffset + (uint64)Tri.IndexCount * nIndexSize <= pIBuf->m_nSize;
     d.Key.nVBId = pVBuf->m_nId;
     d.Key.nVBVersion = pVBuf->m_nVersion;
     d.Key.nVBOffset = (uint32)nVBOffset;
@@ -279,17 +349,22 @@ void CD3D12RayScene::CaptureDraw(const SPipelineKey &Key, const SDrawConstants &
     d.Key.nStride = nStride;
     d.Key.nFlags = (uint32)d.Geom.Flags;
   }
-  // The second stream; the reflection's draws are kept for later frames, so all of theirs must be static.
-  if (pTexCoord1 && pTexCoord1->BufferLocation)
+  // The second stream (lightmap coordinates, two floats a vertex, as the shaders read them); the
+  // reflection's draws are kept for later frames, so all of theirs must be static.
+  if (pTexCoord1 && pTexCoord1->BufferLocation && pTexCoord1->StrideInBytes == 8)
   {
-    d.nTexCoord1 = pTexCoord1->BufferLocation + (uint64)(pIB ? (uint32)nBaseVertex : nFirst) * pTexCoord1->StrideInBytes;
+    d.nTexCoord1 = pTexCoord1->BufferLocation + (uint64)(pIB ? (uint32)nBaseVertex : nFirst) * 8;
     const CD3D12Buffer *pTC = Upload.FindBuffer(d.nTexCoord1);
     d.nTexCoord1Id = pTC ? pTC->m_nId : 0;
   }
   if (bReflection && (!bStatic || (d.nTexCoord1 && !d.nTexCoord1Id)))
     return;
   d.nKind = (uint8)((bStatic ? XR_RAY_STATIC : XR_RAY_DYNAMIC) | (bAlphaTest ? XR_RAY_ALPHATEST : 0));
-  FillInstance(d.Inst, Key, dc, Tri, pTexCoord1 ? *pTexCoord1 : D3D12_VERTEX_BUFFER_VIEW{}, pIB ? (uint32)nBaseVertex : nFirst);
+  FillInstance(d.Inst, Key, dc, Tri, d.nTexCoord1);
+  uint32 Slots[4];
+  GetTextureSlots(d.Inst, Slots);
+  for (int i = 0; i < 4; i++)
+    d.nTexGeneration[i] = g_pRenderer->m_pDescriptors->GetGeneration((int)Slots[i]);
   // The instance's transform: object to world for column vectors, mWorld's for row vectors transposed.
   for (int r = 0; r < 3; r++)
   {
@@ -300,7 +375,7 @@ void CD3D12RayScene::CaptureDraw(const SPipelineKey &Key, const SDrawConstants &
 }
 
 void CD3D12RayScene::FillInstance(SRayInstance &Inst, const SPipelineKey &Key, const SDrawConstants &dc, const D3D12_RAYTRACING_GEOMETRY_TRIANGLES_DESC &Tri,
-  const D3D12_VERTEX_BUFFER_VIEW &TexCoord1, uint32 nFirstVertex)
+  D3D12_GPU_VIRTUAL_ADDRESS nTexCoord1)
 {
   CD3D12Upload &Upload = *g_pRenderer->m_pUpload;
   Inst = {};
@@ -325,9 +400,9 @@ void CD3D12RayScene::FillInstance(SRayInstance &Inst, const SPipelineKey &Key, c
   Inst.nLayout[1] = Byte(nNormal) | Byte(nColor0) << 8 | Byte(nTex0) << 16 | Byte(nTex1) << 24;
   Inst.nLayout[2] = XR_RAY_NONE;
   // The second stream (lightmap coordinates): its vertices as the first stream's.
-  if (TexCoord1.BufferLocation && TexCoord1.StrideInBytes == 8)
+  if (nTexCoord1)
   {
-    const int nTC = Upload.GetRawSRV(TexCoord1.BufferLocation + (uint64)nFirstVertex * 8, nOffset);
+    const int nTC = Upload.GetRawSRV(nTexCoord1, nOffset);
     if (nTC >= 0)
     {
       Inst.nLayout[2] = (uint32)nTC;
@@ -527,7 +602,7 @@ void CD3D12RayScene::Evict(uint64 nBudget)
 void CD3D12RayScene::Build(FILE *pDump)
 {
   m_bCapturing = false;
-  m_nBuiltFence = 0;
+  m_nBuiltFrame = -1;
   m_nInstances = 0;
   CD3D12Device &Device = *g_pRenderer->m_pDevice;
   if (!m_pDevice5 || !Device.IsInFrame())
@@ -539,23 +614,22 @@ void CD3D12RayScene::Build(FILE *pDump)
   const int nSlot = Device.GetFrameSlot();
   SFrameSlot &Slot = m_Slots[nSlot];
 
-  // The water reflection's draws the main view does not have, as long as their buffers are there.
+  // The kinds d3d12_RTMask has all of; of the draws with the same geometry and transform (passes over one
+  // another) the first; then the water reflection's draws the main view does not have, as long as their
+  // buffers and textures are there.
+  const uint32 nKinds = (uint32)g_pRenderer->CV_d3d12_RTMask & 0xff;
+  std::unordered_set<uint64> Seen;
+  const size_t nCaptured = m_Draws.size();
+  m_Draws.erase(std::remove_if(m_Draws.begin(), m_Draws.end(),
+    [&](const SDraw &d) { return (d.nKind & ~nKinds) != 0 || !Seen.insert(DrawHash(d)).second; }), m_Draws.end());
+  const int nLeftOut = (int)(nCaptured - m_Draws.size());
   int nReflection = 0;
-  if (!m_ReflectionDraws.empty())
+  for (const SDraw &d : m_ReflectionDraws)
   {
-    std::unordered_set<uint64> Main;
-    for (const SDraw &d : m_Draws)
+    if (!(d.nKind & ~nKinds) && IsAlive(d) && Seen.insert(DrawHash(d)).second)
     {
-      if (d.nKind & XR_RAY_STATIC)
-        Main.insert(DrawHash(d));
-    }
-    for (const SDraw &d : m_ReflectionDraws)
-    {
-      if (IsAlive(d) && !Main.count(DrawHash(d)))
-      {
-        m_Draws.push_back(d);
-        nReflection++;
-      }
+      m_Draws.push_back(d);
+      nReflection++;
     }
   }
 
@@ -716,7 +790,7 @@ void CD3D12RayScene::Build(FILE *pDump)
   TopDesc.ScratchAccelerationStructureData = nScratchGPU;
   pList->BuildRaytracingAccelerationStructure(&TopDesc, 0, nullptr);
   pList->ResourceBarrier(1, &Barrier);
-  m_nBuiltFence = Device.GetFrameFence();
+  m_nBuiltFrame = g_pRenderer->m_nFrames;
   m_nBuiltSlot = nSlot;
   m_nInstances = RayInstanceMem.nGPU;
 
@@ -727,10 +801,11 @@ void CD3D12RayScene::Build(FILE *pDump)
     for (const auto &p : m_Pools)
       nPools += p->nSize;
     fprintf(pDump,
-      "ray scene: %u instances of %d draws (%d of the water reflection; %d left out by their transforms), %u triangles; static BLAS %d kept, %d built "
-      "(%u triangles), %d waiting; %d of this frame (%u triangles), %d over the limit; static BLAS %.1f MB (%d, pools %.1f MB), "
-      "frame BLAS %.1f MB, TLAS %.1f KB, scratch %.1f MB\n",
-      nInstance, (int)m_Draws.size(), nReflection, m_nSkippedTransform, nTris, nCached, nNewStatic, nNewStaticTris, nWaiting, nFrame, nFrameTris, nOver,
+      "ray scene: %u instances of %d draws (%d of the water reflection; %d left out by their transforms, %d by d3d12_RTMask or as passes "
+      "over others), %u triangles; static BLAS %d kept, %d built (%u triangles), %d waiting; %d of this frame (%u triangles), %d over the "
+      "limit; static BLAS %.1f MB (%d, pools %.1f MB), frame BLAS %.1f MB, TLAS %.1f KB, scratch %.1f MB\n",
+      nInstance, (int)m_Draws.size(), nReflection, m_nSkippedTransform, nLeftOut, nTris, nCached, nNewStatic, nNewStaticTris, nWaiting, nFrame,
+      nFrameTris, nOver,
       m_nStaticBytes / 1048576.0, (int)m_Static.size(), nPools / 1048576.0, nFrameBlas / 1048576.0, TopInfo.ResultDataMaxSizeInBytes / 1024.0,
       Slot.Scratch.nSize / 1048576.0);
   }
@@ -738,7 +813,8 @@ void CD3D12RayScene::Build(FILE *pDump)
 
 D3D12_GPU_VIRTUAL_ADDRESS CD3D12RayScene::GetTLAS() const
 {
-  if (!m_nBuiltFence || !g_pRenderer->m_pDevice || m_nBuiltFence != g_pRenderer->m_pDevice->GetFrameFence())
+  // This frame's, though the fence may have moved on since (an upload or a readback waiting for the GPU).
+  if (m_nBuiltFrame < 0 || m_nBuiltFrame != g_pRenderer->m_nFrames)
     return 0;
   const SSlotBuffer &Tlas = m_Slots[m_nBuiltSlot].Tlas;
   return Tlas.pBuffer ? Tlas.pBuffer->GetGPUVirtualAddress() : 0;
@@ -752,9 +828,22 @@ bool CD3D12Renderer::WantsRays() const
   return m_pRayScene && m_pRayScene->IsSupported() && (CV_d3d12_RTDebug != 0 || CV_d3d12_RTReflections > 0);
 }
 
+uint32 CD3D12Renderer::RayMask() const
+{
+  return ((uint32)CV_d3d12_RTMask & 0xff) | (CV_d3d12_RTShadows ? 0x100u : 0u);
+}
+
 void CD3D12Renderer::BeginRayCapture()
 {
-  if (!WantsRays() || !IsAOView())
+  if (!m_pRayScene)
+    return;
+  if (!WantsRays())
+  {
+    m_pRayScene->Release();
+    return;
+  }
+  // One scene a frame: rebuilt for another top level view, it would change under the draws of the first.
+  if (!IsAOView() || m_pRayScene->GetBuiltFrame() == m_nFrames)
     return;
   m_pRayScene->BeginCapture(m_CameraView * m_ProjMatrix, m_Camera.GetPos());
 }
@@ -793,7 +882,7 @@ void CD3D12Renderer::DrawRayDebug()
   memcpy(dc.mParams0, ClipToWorld.data, sizeof(dc.mParams0));
   Set4(dc.vParams0, 1.0f / w, 1.0f / h, (float)CV_d3d12_RTDebug, std::max(CV_d3d12_RTDistance, 1.0f));
   const Vec3 &vCamera = m_pRayScene->GetCamera();
-  const uint32 nMask = ((uint32)CV_d3d12_RTMask & 0xff) | (CV_d3d12_RTShadows ? 0x100u : 0u);
+  const uint32 nMask = RayMask();
   Set4(dc.vParams1, vCamera.x, vCamera.y, vCamera.z, 0);
   memcpy(&dc.vParams1[3], &nMask, sizeof(nMask));
   DrawImmediate(Key, dc, D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST, VERTEX_FORMAT_P3F, s_FullScreen, 3);

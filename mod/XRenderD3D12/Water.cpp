@@ -731,7 +731,7 @@ bool CD3D12Renderer::SetupWaterDraw(SPipelineKey &Key, SDrawConstants &dc, const
   if (CV_d3d12_RTReflections > 0 && !m_bEnvCubePass && m_pRayScene && m_pRayScene->GetTLAS())
   {
     Key.bRayTrace = 1;
-    const uint32 nMask = ((uint32)CV_d3d12_RTMask & 0xff) | (CV_d3d12_RTShadows ? 0x100u : 0u);
+    const uint32 nMask = RayMask();
     Set4(dc.vTexGenV, (float)std::min(CV_d3d12_RTReflections, 2), std::max(CV_d3d12_RTDistance, 1.0f), 0, 0);
     memcpy(&dc.vTexGenV[2], &nMask, sizeof(nMask));
   }

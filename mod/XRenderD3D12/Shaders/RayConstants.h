@@ -24,7 +24,7 @@
 
 #include "Constants.h"
 
-//! The kinds of instances: bits of their masks (d3d12_RTMask picks those the rays see).
+//! The kinds of instances: bits of their masks (the TLAS has those whose kinds d3d12_RTMask has all of).
 #define XR_RAY_STATIC     1     //!< a BLAS kept from frame to frame: static vertices and indices
 #define XR_RAY_ALPHATEST  2     //!< an alpha tested draw (its triangles not opaque)
 #define XR_RAY_DYNAMIC    4     //!< a BLAS of this frame: vertices or indices in per frame memory

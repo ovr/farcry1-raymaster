@@ -574,7 +574,8 @@ void CScene::EndEf3D(int nFlags)
       if (l == eRL_Opaque)
       {
         g_pRenderer->DrawAmbientOcclusion();
-        g_pRenderer->BuildRayScene();
+        if (m_nDrawing == 1)
+          g_pRenderer->BuildRayScene();
       }
     }
   }

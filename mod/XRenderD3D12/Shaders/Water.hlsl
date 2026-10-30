@@ -505,12 +505,13 @@ float4 ShadeWater(SWaterOutput In)
 #ifdef XR_RAYTRACE
     // The rays: in place of the screen's reflection (mode 1), or where it finds nothing (2, none where
     // it is sure); as sharp, they give way to the blurred planar reflection as it does.
+    // No ray where nothing of it would be seen (no reflection, or blurred away), but in the debug views.
     float fRayT = g_Draw.vTexGenV.y;
     float4 vRay = 0;
-    if (g_Draw.vTexGenV.x < 2 || vSSR.w < 1)
+    const float fRayFade = fBlur > 0 ? saturate(2 - fBlur * g_Frame.vScreen.y / 4) : 1;
+    if ((g_Draw.vTexGenV.x < 2 || vSSR.w < 1) && ((F > 0 && fRayFade > 0) || g_Draw.vParams0.z >= 13))
       vRay = RayReflection(In.vWorldPos, Rs, fDistance, fPixelAngle, fVar, fRayT);
-    if (fBlur > 0)
-      vRay.w *= saturate(2 - fBlur * g_Frame.vScreen.y / 4);
+    vRay.w *= fRayFade;
     vReflected = lerp(vReflected, vRay.rgb, vRay.w);
 #endif
     vReflected = lerp(vReflected, vSSR.rgb, vSSR.w);
