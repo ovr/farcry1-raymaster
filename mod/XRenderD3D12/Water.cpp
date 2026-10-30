@@ -26,7 +26,11 @@
 //	in the main one, redrawn as r_WaterUpdateFactor, r_WaterUpdateDistance and
 //	r_WaterUpdateDeltaAngle say. Its near plane is the water plane, so
 //	nothing under the water shows in it. With r_HDRRendering the target is
-//	in D3D12_HDR_FORMAT, as the main scene.
+//	in D3D12_HDR_FORMAT, as the main scene. Its mip levels (each the mean of
+//	2 x 2 texels of the one above) let the water blur it where the ripple
+//	gets finer than a pixel (Water.hlsl; d3d12_WaterReflectionBlur): the
+//	wave texture's alpha holds the squared slope, whose mean over a mip
+//	texel, less the square of the mean slope, is the variance it lost.
 //
 //////////////////////////////////////////////////////////////////////
 
@@ -79,6 +83,9 @@ float Sign(float f)
 constexpr float REFLECTION_MAX_INTERVAL = 0.3f;
 constexpr float REFLECTION_MAX_NEAR = 16.0f;
 
+//! A triangle over the whole target (clip space).
+const float s_FullScreen[3][3] = { { -1, -1, 0 }, { -1, 3, 0 }, { 3, -1, 0 } };
+
 // The optics of water without a fog volume: absorption per metre (red goes first; weak, as the
 // levels paint the sea floor in the colours of the water above it), the light scattered per metre,
 // the colour of deep water in full light where the level gives none (in the ocean's fog volume);
@@ -101,6 +108,7 @@ constexpr float BEACH_BUMP_SIZE = 16.0f;
 constexpr float BEACH_BUMP_OFFSET = 0.5f;
 
 constexpr int WAVE_TEXTURE_SIZE = 256;
+constexpr float WAVE_SLOPE_SQ_RANGE = 16.0f;
 
 // The caustics: the pattern repeats every so many metres, the light of a texel of the texture is
 // stored as 255 / CAUSTICS_RANGE per unit of the mean; the share of the light on the sea floor that
@@ -124,8 +132,11 @@ constexpr float SCOPE_LENS_RADIUS = 0.3f;
 
 //! The wave texture, B, G, R, A bytes: the slopes of a height field that tiles over the texture,
 //! dH/du in red and dH/dv in green, the height in blue (128: 0; 32 units: the RMS of the slopes,
-//! and of the height). The field is a few hundred waves with whole numbers of cycles per tile,
-//! their heights falling with the wave number as in a wind sea, most of them along u.
+//! and of the height), in alpha the square of the slopes as red and green give them, (dH/du)^2 +
+//! (dH/dv)^2 in those units, WAVE_SLOPE_SQ_RANGE at 255 (the mean of the mip levels' texels, less
+//! the square of their mean slope, is the variance of the slopes they smoothed out). The field is
+//! a few hundred waves with whole numbers of cycles per tile, their heights falling with the wave
+//! number as in a wind sea, most of them along u.
 std::vector<byte> MakeWaveTexture(int N)
 {
   constexpr int TABLE = 4096;               // a whole cycle; N divides it
@@ -196,7 +207,8 @@ std::vector<byte> MakeWaveTexture(int N)
     Pixels[i * 4 + 0] = Encode(Field[i * 3 + 2] * fHeightScale);
     Pixels[i * 4 + 1] = Encode(Field[i * 3 + 1] * fSlopeScale);
     Pixels[i * 4 + 2] = Encode(Field[i * 3 + 0] * fSlopeScale);
-    Pixels[i * 4 + 3] = 255;
+    const float dx = (Pixels[i * 4 + 2] - 128) / 32.0f, dy = (Pixels[i * 4 + 1] - 128) / 32.0f;
+    Pixels[i * 4 + 3] = (byte)std::clamp((int)lrintf((dx * dx + dy * dy) * (255 / WAVE_SLOPE_SQ_RANGE)), 0, 255);
   }
   return Pixels;
 }
@@ -460,15 +472,43 @@ void CD3D12Renderer::UpdateWaterReflection(std::span<const SRenderItem> Items)
   const DXGI_FORMAT Format = IsHdrOn() ? D3D12_HDR_FORMAT : D3D12_BACKBUFFER_FORMAT;
   if (!m_pReflectionColor || w != m_nReflectionWidth || h != m_nReflectionHeight || m_pReflectionColor->GetDesc().Format != Format)
   {
+    // The colour target with its mip levels (down to 1 x 1 at most), each with an RTV, and an SRV
+    // of each level alone but the last (the next is made from it).
     ReleaseWaterReflection();
+    int nMips = 1;
+    while (nMips < REFLECTION_MIPS && std::max(w, h) >> nMips)
+      nMips++;
     m_hReflectionRTV = m_pDescriptors->AllocRTV();
     m_hReflectionDSV = m_pDescriptors->AllocDSV();
-    if (!m_pDevice->CreateOffscreenTargets(w, h, m_pReflectionColor, m_pReflectionDepth, m_hReflectionRTV, m_hReflectionDSV, Format) ||
+    bool bViews = true;
+    for (int i = 1; i < nMips; i++)
+    {
+      m_hReflectionMipRTV[i - 1] = m_pDescriptors->AllocRTV();
+      bViews = bViews && m_hReflectionMipRTV[i - 1].ptr;
+    }
+    if (!bViews ||
+        !m_pDevice->CreateOffscreenTargets(w, h, m_pReflectionColor, m_pReflectionDepth, m_hReflectionRTV, m_hReflectionDSV, Format, nMips,
+                                           m_hReflectionMipRTV) ||
         (m_nReflectionSRV = m_pDescriptors->AllocSRV(m_pReflectionColor.Get(), nullptr)) < 0)
     {
       ReleaseWaterReflection();
       return;
     }
+    for (int i = 0; i + 1 < nMips; i++)
+    {
+      D3D12_SHADER_RESOURCE_VIEW_DESC View = {};
+      View.Format = Format;
+      View.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
+      View.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+      View.Texture2D.MostDetailedMip = (UINT)i;
+      View.Texture2D.MipLevels = 1;
+      if ((m_nReflectionMipSRV[i] = m_pDescriptors->AllocSRV(m_pReflectionColor.Get(), &View)) < 0)
+      {
+        ReleaseWaterReflection();
+        return;
+      }
+    }
+    m_nReflectionMips = nMips;
     m_nReflectionWidth = w;
     m_nReflectionHeight = h;
   }
@@ -509,7 +549,8 @@ void CD3D12Renderer::UpdateWaterReflection(std::span<const SRenderItem> Items)
   // The 3D engine renders the scene (a frame of its own, nested in this one) with the mirrored
   // camera into the targets.
   if (m_pFrameDump)
-    fprintf(m_pFrameDump.get(), "water reflection: %d x %d%s, water level %.2f\n", w, h, Format == D3D12_HDR_FORMAT ? " (HDR)" : "", fWaterZ);
+    fprintf(m_pFrameDump.get(), "water reflection: %d x %d%s, %d mip levels, water level %.2f\n", w, h, Format == D3D12_HDR_FORMAT ? " (HDR)" : "",
+            m_nReflectionMips, fWaterZ);
   m_pDevice->SetOffscreenTargets(m_pReflectionColor.Get(), m_hReflectionRTV, m_hReflectionDSV, w, h);
   const float Clear[4] = { m_vClearColor.x, m_vClearColor.y, m_vClearColor.z, 0 };
   m_pDevice->ClearColor(Clear);
@@ -520,6 +561,24 @@ void CD3D12Renderer::UpdateWaterReflection(std::span<const SRenderItem> Items)
   p3D->SetCamera(Mirror, false);
   p3D->DrawLowDetail(CV_d3d12_WaterReflectionFlags);
   m_bReflectionPass = false;
+
+  // Its mip levels: each texel the mean of the 2 x 2 above it (one bilinear tap halfway between).
+  SPipelineKey Key = {};
+  Key.nProgram = eD3D12P_Post;
+  Key.nState = GS_NODEPTHTEST;
+  Key.nCull = R_CULL_NONE;
+  Key.nTarget = 1;
+  Key.nColorFormat = Format == D3D12_HDR_FORMAT ? PIPELINE_COLOR_HDR : PIPELINE_COLOR_BGRA8;
+  for (int i = 1; i < m_nReflectionMips; i++)
+  {
+    const int nMipW = std::max(w >> i, 1), nMipH = std::max(h >> i, 1);
+    m_pDevice->SetOffscreenTargets(m_pReflectionColor.Get(), m_hReflectionMipRTV[i - 1], {}, nMipW, nMipH, (UINT)i);
+    SDrawConstants dc = DefaultDrawConstants();
+    dc.nFlags = POST_DOWNSAMPLE;
+    dc.nTex0 = (uint32)m_nReflectionMipSRV[i - 1];
+    Set4(dc.vParams0, 1.0f / nMipW, 1.0f / nMipH, 1, 0);
+    DrawImmediate(Key, dc, D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST, VERTEX_FORMAT_P3F, s_FullScreen, 3);
+  }
   m_pDevice->SetBackBufferTargets();
 
   // The frame as it was.
@@ -578,10 +637,23 @@ void CD3D12Renderer::ReleaseWaterReflection()
       m_pDescriptors->FreeRTV(m_hReflectionRTV);
     if (m_hReflectionDSV.ptr)
       m_pDescriptors->FreeDSV(m_hReflectionDSV);
+    for (int i = 0; i < REFLECTION_MIPS - 1; i++)
+    {
+      if (m_hReflectionMipRTV[i].ptr)
+        m_pDescriptors->FreeRTV(m_hReflectionMipRTV[i]);
+      if (m_nReflectionMipSRV[i] >= 0)
+        m_pDescriptors->FreeSRV(m_nReflectionMipSRV[i]);
+    }
   }
   m_nReflectionSRV = -1;
   m_hReflectionRTV = {};
   m_hReflectionDSV = {};
+  for (int i = 0; i < REFLECTION_MIPS - 1; i++)
+  {
+    m_hReflectionMipRTV[i] = {};
+    m_nReflectionMipSRV[i] = -1;
+  }
+  m_nReflectionMips = 0;
   if (m_pDevice)
   {
     m_pDevice->DeferredRelease(m_pReflectionColor);
@@ -639,6 +711,8 @@ bool CD3D12Renderer::SetupWaterDraw(SPipelineKey &Key, SDrawConstants &dc, const
     dc.vParams1[3] = 1;
     memcpy(dc.mParams0, m_ReflectionViewProj.data, sizeof(dc.mParams0));
   }
+  // How much the ripple finer than a pixel blurs the reflection (and turns the fresnel term).
+  Set4(dc.vTexGenU, std::max(CV_d3d12_WaterReflectionBlur, 0.0f), 0, 0, 0);
 
   Set4(dc.vParams2, WATER_ABSORPTION[0] + WATER_TURBIDITY, WATER_ABSORPTION[1] + WATER_TURBIDITY, WATER_ABSORPTION[2] + WATER_TURBIDITY,
        WATER_DISPLACEMENT);

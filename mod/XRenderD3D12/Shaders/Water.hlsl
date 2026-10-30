@@ -28,11 +28,19 @@
 //	    sky box in the reflected direction (the box as the sky draws it;
 //	    without a sky, none); the scene is looked up along the reflection of
 //	    a calmer normal (half the slopes), so that it ripples rather than
-//	    breaks up. Weighted by a fresnel term (the ocean as the game's
-//	    terrain water: a quarter looking straight down, times twice the
-//	    vertex alpha, which the 3D engine lowers in shallow water near the
-//	    camera; other water Schlick's: 2 %; all of it at grazing angles)
-//	    and the reflection amount;
+//	    breaks up. Where the ripple gets finer than a pixel (the texture's
+//	    mip levels smooth it out of the normal) it still turns the reflected
+//	    rays: the planar reflection is blurred by the variance of the slopes
+//	    lost (LEAN: the mean of the squared slope, which the texture keeps,
+//	    less the square of the mean slope), up and down most (streaks
+//	    towards the camera), from its mip levels; the screen space one,
+//	    sharp, fades out where that blur gets wider than a few pixels; the
+//	    lost slopes also turn facets towards the camera, which lowers the
+//	    fresnel term at grazing angles. Weighted by a fresnel term (the
+//	    ocean as the game's terrain water: a quarter looking straight down,
+//	    times twice the vertex alpha, which the 3D engine lowers in shallow
+//	    water near the camera; other water Schlick's: 2 %; all of it at
+//	    grazing angles) and the reflection amount;
 //	  - the sun's highlight on the waves (off as in the game; a console
 //	    variable of our own);
 //	  - near the shore (close to the camera) the surface fades into the
@@ -63,8 +71,12 @@
 //	  nTex0     colour copy, nTex1 depth copy (R24 of D24S8, R32 of an
 //	            upscaler's scene)
 //	  nTex2..4  the sky box textures: top, _12, _34
-//	  nTex5     the wave slopes (red dH/du, green dH/dv; 128 flat, 32 the RMS)
-//	  nTex6     the planar reflection, mParams0 its camera's world to clip
+//	  nTex5     the wave slopes (red dH/du, green dH/dv; 128 flat, 32 the RMS;
+//	            alpha their square, 16 at 1)
+//	  nTex6     the planar reflection (with mip levels), mParams0 its camera's
+//	            world to clip
+//	  vTexGenU  x the factor of the variance of the slopes finer than a pixel
+//	            (d3d12_WaterReflectionBlur; 0: the reflection is not blurred)
 //
 //////////////////////////////////////////////////////////////////////
 
@@ -108,8 +120,10 @@ float LinearDepth(float fDepth)
 //! The surface normal at a horizontal position: three layers of the wave texture (nTex5: the
 //! slopes of a tiling height field, RMS 1 after decoding), each with its own direction (the
 //! texture's u), tile size in metres and speed in metres per second. The texture's mip levels
-//! smooth the waves out where they get finer than a pixel.
-float3 WaveNormal(float2 vPos, float fTime, float fScale)
+//! smooth the waves out where they get finer than a pixel; fLostVar: the variance of the slopes
+//! (across and along together) they smoothed out of this pixel, the mean of the squared slope
+//! (the texture's alpha) less the square of the mean slope, for each layer.
+float3 WaveNormal(float2 vPos, float fTime, float fScale, out float fLostVar)
 {
   static const float4 Layers[3] =
   {
@@ -119,15 +133,25 @@ float3 WaveNormal(float2 vPos, float fTime, float fScale)
   };
   static const float Weights[3] = { 0.55, 0.40, 0.30 };
   float2 vSlope = 0;
+  fLostVar = 0;
   [unroll]
   for (int i = 0; i < 3; i++)
   {
     float2 d = Layers[i].xy, e = float2(-d.y, d.x);
     float2 vUV = float2(dot(vPos, d) - fTime * Layers[i].w, dot(vPos, e)) / Layers[i].z;
-    float2 s = (g_Textures[g_Draw.nTex5].Sample(g_SamplerLinearWrap, vUV).rg * 255 - 128) / 32;
+    float3 t = g_Textures[g_Draw.nTex5].Sample(g_SamplerLinearWrap, vUV).rga;
+    float2 s = (t.xy * 255 - 128) / 32;
     vSlope += (s.x * d + s.y * e) * Weights[i];
+    fLostVar += max(t.z * 16 - dot(s, s), 0) * (Weights[i] * Weights[i]);
   }
+  fLostVar *= fScale * fScale;
   return normalize(float3(-vSlope * fScale, 1));
+}
+
+float3 WaveNormal(float2 vPos, float fTime, float fScale)
+{
+  float fLostVar;
+  return WaveNormal(vPos, fTime, fScale, fLostVar);
 }
 
 //! How much of its colour the ocean's fog volume lays over a point fDepth metres under its layer,
@@ -208,6 +232,48 @@ float3 PlanarReflection(float3 P, float3 R, float fReach)
   return g_Textures[g_Draw.nTex6].SampleLevel(g_SamplerLinearClamp, ClipToUV(vClip, 1), 0).rgb;
 }
 
+//! The planar reflection as the ripple finer than a pixel blurs it: fVar the variance of its
+//! slopes (across and along together), c the cosine of the angle of incidence. A slope across the
+//! line of sight turns the reflected ray up or down by twice as much, one along it to the side by
+//! twice as much times c: streaks up and down, the thinner the lower the view. Six taps up and
+//! down the RMS angle (in the texture: where the turned direction vanishes, less where R does; the
+//! gaussian's weights at 0.35, 1.05 and 1.75 of it), from the mip level as wide as the gaps between
+//! them and the blur to the side. fBlur: the RMS blur up and down in the texture's coordinates.
+float3 BlurredPlanarReflection(float3 P, float3 R, float fReach, float fVar, float c, out float fBlur)
+{
+  static const float Taps[3] = { 0.35, 1.05, 1.75 };
+  static const float Weights[3] = { 0.941, 0.576, 0.216 };
+  fBlur = 0;
+  R.z = max(R.z, 0.01);
+  float2 vUV = ClipToUV(mul(float4(P + R * fReach, 1), g_Draw.mParams0), 1);
+  float fUp = 2 * sqrt(fVar * 0.5), fSide = fUp * c;
+  float3 Th = cross(R, float3(0, 0, 1));
+  float fLength = length(Th);
+  Th = fLength > 1e-4 ? Th / fLength : float3(1, 0, 0);
+  float3 Tv = cross(Th, R);
+  float4 vClip = mul(float4(R, 0), g_Draw.mParams0);
+  float4 vClipUp = mul(float4(R + Tv * fUp, 0), g_Draw.mParams0);
+  float4 vClipSide = mul(float4(R + Th * fSide, 0), g_Draw.mParams0);
+  if (min(vClip.w, min(vClipUp.w, vClipSide.w)) <= 1e-3)
+    return g_Textures[g_Draw.nTex6].SampleLevel(g_SamplerLinearClamp, vUV, 0).rgb;
+  float2 vVanish = ClipToUV(vClip, 1);
+  float2 vUp = ClipToUV(vClipUp, 1) - vVanish, vSide = ClipToUV(vClipSide, 1) - vVanish;
+  uint nW, nH, nLevels;
+  g_Textures[g_Draw.nTex6].GetDimensions(0, nW, nH, nLevels);
+  float2 vSize = float2(nW, nH);
+  float fTexels = max(length(vUp * vSize) * (Taps[1] - Taps[0]), length(vSide * vSize) * 2);
+  float fLod = min(log2(max(fTexels, 1)), nLevels - 1);
+  float3 vSum = 0;
+  [unroll]
+  for (int k = 0; k < 3; k++)
+  {
+    vSum += (g_Textures[g_Draw.nTex6].SampleLevel(g_SamplerLinearClamp, vUV + vUp * Taps[k], fLod).rgb +
+             g_Textures[g_Draw.nTex6].SampleLevel(g_SamplerLinearClamp, vUV - vUp * Taps[k], fLod).rgb) * Weights[k];
+  }
+  fBlur = length(vUp);
+  return vSum / (2 * (Weights[0] + Weights[1] + Weights[2]));
+}
+
 //! The scene in direction R from P where the frame's copies show it: the ray marches in steps
 //! that grow with the distance; when it gets behind the depth buffer the crossing is refined, and
 //! it is a hit if the ray is then no more than a few centimetres behind the surface there (more
@@ -267,7 +333,8 @@ float4 ShadeWater(SWaterOutput In)
   float3 V = vToCamera / max(fDistance, 1e-4);
   bool bBelow = vCamera.z < In.vWorldPos.z;
 
-  float3 N = WaveNormal(In.vWorldPos.xy, g_Frame.vTime.x, g_Draw.vParams0.x);
+  float fLostVar;
+  float3 N = WaveNormal(In.vWorldPos.xy, g_Frame.vTime.x, g_Draw.vParams0.x, fLostVar);
   if (bBelow)
     N = -N;
 
@@ -341,23 +408,45 @@ float4 ShadeWater(SWaterOutput In)
     // The reflection, all of it at grazing angles: the ocean as the game's terrain water shaders
     // (a quarter straight down, by the calmer normal; times twice the alpha of the mesh the 3D
     // engine gives, which fades it out in shallow water near the camera), other water by
-    // Schlick's term (2 %).
+    // Schlick's term (2 %). The ripple finer than a pixel (its slopes' variance fVar, as
+    // d3d12_WaterReflectionBlur scales it) turns facets towards the camera: the cosine as the
+    // RMS of theirs.
+    float fVar = fLostVar * g_Draw.vTexGenU.x;
     float3 Ns = normalize(float3(N.xy * 0.5, N.z));
     float F;
     if (g_Draw.vParams3.w != 1)
     {
       float c = saturate(dot(Ns, V));
+      if (fVar > 0)
+        c = sqrt(c * c + fVar);
       F = (0.9932 + c * (-0.3742 + c * (-1.1438 + c * 0.7584))) * saturate(In.vColor.a * 2);
     }
     else
-      F = 0.02 + 0.98 * pow(1 - saturate(dot(N, V)), 5);
+    {
+      float c = saturate(dot(N, V));
+      if (fVar > 0)
+        c = sqrt(c * c + fVar);
+      F = 0.02 + 0.98 * pow(1 - c, 5);
+    }
     F *= g_Draw.vParams0.y;
     float3 R = reflect(-V, N);
     float3 Rs = reflect(-V, Ns);
     float3 vReflected = g_Draw.vParams1.y != 0 ? SkyBoxColor(R) * SkyGlow(R) : vScatter;
+    float3 vPlanar = 0;
+    float fBlur = 0;
     if (g_Draw.vParams1.w != 0)
-      vReflected = PlanarReflection(In.vWorldPos, Rs, fDistance * 0.3);
+    {
+      if (fVar > 0)
+        vPlanar = BlurredPlanarReflection(In.vWorldPos, Rs, fDistance * 0.3, fVar, saturate(dot(Ns, V)), fBlur);
+      else
+        vPlanar = PlanarReflection(In.vWorldPos, Rs, fDistance * 0.3);
+      vReflected = vPlanar;
+    }
+    // The screen's copy is sharp: it gives way to the blurred planar reflection where the blur up
+    // and down is wider than 4 pixels on the screen, all of it from 8.
     float4 vSSR = ScreenReflection(In.vWorldPos, Rs, g_Frame.vScreen.xy * vInvSize);
+    if (fBlur > 0)
+      vSSR.w *= saturate(2 - fBlur * g_Frame.vScreen.y / 4);
     vReflected = lerp(vReflected, vSSR.rgb, vSSR.w);
 
     // The sun's highlight (d3d12_WaterSunGlint), as much of it as the facets reflect (fresnel at the
@@ -385,7 +474,7 @@ float4 ShadeWater(SWaterOutput In)
     if (g_Draw.vParams0.z == 6)
       return float4(vSSR.rgb, 1);
     if (g_Draw.vParams0.z == 7)
-      return float4(g_Draw.vParams1.w != 0 ? PlanarReflection(In.vWorldPos, Rs, fDistance * 0.3) : 0, 1);
+      return float4(vPlanar, 1);
     if (g_Draw.vParams0.z == 8)
       return float4(vScene0, 1);
     if (g_Draw.vParams0.z == 9)
@@ -394,6 +483,8 @@ float4 ShadeWater(SWaterOutput In)
       return float4(In.vColor.rgb, 1);
     if (g_Draw.vParams0.z == 11)
       return float4(In.vColor.aaa, 1);
+    if (g_Draw.vParams0.z == 12)
+      return float4(saturate(sqrt(fLostVar) * 10).xxx, 1);
   }
   else if (g_Draw.vParams3.w == 0)
   {
