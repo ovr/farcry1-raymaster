@@ -516,7 +516,8 @@ bool CD3D12Upload::PlaceRange(int nPool, uint64 nBytes, int &nHeap, uint64 &nOff
     Desc.SizeInBytes = POOL_HEAP_SIZE;
     Desc.Properties = HeapProps(D3D12_HEAP_TYPE_DEFAULT);
     Desc.Alignment = D3D12_DEFAULT_RESOURCE_PLACEMENT_ALIGNMENT;
-    Desc.Flags = nPool == POOL_BUFFERS ? D3D12_HEAP_FLAG_ALLOW_ONLY_BUFFERS : D3D12_HEAP_FLAG_ALLOW_ONLY_NON_RT_DS_TEXTURES;
+    Desc.Flags = nPool == POOL_BUFFERS ? D3D12_HEAP_FLAG_ALLOW_ONLY_BUFFERS
+               : nPool == POOL_TEXTURES ? D3D12_HEAP_FLAG_ALLOW_ONLY_NON_RT_DS_TEXTURES : D3D12_HEAP_FLAG_ALLOW_ONLY_RT_DS_TEXTURES;
     ComPtr<ID3D12Heap> pHeap;
     if (FAILED(m_pDevice->CreateHeap(&Desc, IID_PPV_ARGS(&pHeap))))
       return false;
@@ -592,7 +593,7 @@ void CD3D12Upload::ReleasePooled(int nPool, ID3D12Resource *pResource, int nHeap
 }
 
 HRESULT CD3D12Upload::CreatePooled(int nPool, const D3D12_RESOURCE_DESC &Desc, D3D12_RESOURCE_STATES eState, ID3D12Resource **ppResource,
-  int &nHeap, uint64 &nHeapOffset, uint64 &nHeapBytes)
+  int &nHeap, uint64 &nHeapOffset, uint64 &nHeapBytes, const D3D12_CLEAR_VALUE *pClear)
 {
   nHeap = -1;
   nHeapOffset = nHeapBytes = 0;
@@ -610,7 +611,7 @@ HRESULT CD3D12Upload::CreatePooled(int nPool, const D3D12_RESOURCE_DESC &Desc, D
     nHeapBytes = AlignUp(nBytes, (uint64)D3D12_DEFAULT_RESOURCE_PLACEMENT_ALIGNMENT);
     if (PlaceRange(nPool, nHeapBytes, nHeap, nHeapOffset))
     {
-      hr = m_pDevice->CreatePlacedResource(m_Pools[nPool].Heaps[nHeap].Get(), nHeapOffset, &Desc, eState, nullptr, IID_PPV_ARGS(ppResource));
+      hr = m_pDevice->CreatePlacedResource(m_Pools[nPool].Heaps[nHeap].Get(), nHeapOffset, &Desc, eState, pClear, IID_PPV_ARGS(ppResource));
       if (FAILED(hr))
       {
         FreeRange(nPool, nHeap, nHeapOffset, nHeapBytes);
@@ -624,7 +625,7 @@ HRESULT CD3D12Upload::CreatePooled(int nPool, const D3D12_RESOURCE_DESC &Desc, D
   {
     nHeapOffset = nHeapBytes = 0;
     const D3D12_HEAP_PROPERTIES Heap = HeapProps(D3D12_HEAP_TYPE_DEFAULT);
-    hr = m_pDevice->CreateCommittedResource(&Heap, D3D12_HEAP_FLAG_NONE, &Desc, eState, nullptr, IID_PPV_ARGS(ppResource));
+    hr = m_pDevice->CreateCommittedResource(&Heap, D3D12_HEAP_FLAG_NONE, &Desc, eState, pClear, IID_PPV_ARGS(ppResource));
   }
   return hr;
 }
@@ -1007,4 +1008,21 @@ void CD3D12Upload::ReleaseTexture(CD3D12Texture *pTex)
     ReleasePooled(POOL_TEXTURES, pTex->m_pResource, pTex->m_nHeap, pTex->m_nHeapOffset, pTex->m_nHeapBytes);
   }
   delete pTex;
+}
+
+HRESULT CD3D12Upload::CreateDepthTarget(const D3D12_RESOURCE_DESC &Desc, D3D12_RESOURCE_STATES eState, const D3D12_CLEAR_VALUE &Clear,
+  ComPtr<ID3D12Resource> &pResource, SD3D12Placement &Place)
+{
+  Place = SD3D12Placement();
+  if (!m_pDevice)
+    return E_FAIL;
+  pResource.Reset();
+  return CreatePooled(POOL_DEPTH_TARGETS, Desc, eState, pResource.GetAddressOf(), Place.nHeap, Place.nOffset, Place.nBytes, &Clear);
+}
+
+void CD3D12Upload::ReleaseDepthTarget(ComPtr<ID3D12Resource> &pResource, SD3D12Placement &Place)
+{
+  if (pResource)
+    ReleasePooled(POOL_DEPTH_TARGETS, pResource.Detach(), Place.nHeap, Place.nOffset, Place.nBytes);
+  Place = SD3D12Placement();
 }

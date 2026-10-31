@@ -35,7 +35,8 @@ constexpr int kResFlag2Sided = 0x2;
 //! Material made with the Cry shader flag (MTLFLAG_CRYSHADER): only then is m_AlphaRef its alpha
 //! reference.
 constexpr int kResFlagCryShader = 0x40;
-//! The texture slots EF_LoadShaderItem loads; the others keep only their names.
+//! The texture slots EF_LoadShaderItem loads for every material that is drawn; of the others it
+//! loads those the material's shader draws with (LoadDrawnTextures), the rest keep their names.
 constexpr int kLoadedSlots[] = { EFTT_DIFFUSE };
 
 //! A template a material can name.
@@ -1023,8 +1024,11 @@ SShaderItem CShaderManager::LoadShaderItem(const char *szName, EShClass eClass, 
     pRR->m_LMaterial = OwnLightMaterial(pRes->m_LMaterial);
     // Materials that are never drawn keep their texture names only (LoadResourceTexture loads them).
     if (pSH->GetDrawClass() != eDC_NoDraw)
+    {
       for (int nSlot : kLoadedSlots)
         LoadResourceTexture(pRR, nSlot);
+      LoadDrawnTextures(pSH, pRR);
+    }
     AddAttenuationTextures(pRR);
     Item.m_pShaderResources = pRR;
   }
@@ -1133,6 +1137,29 @@ CTexture *CShaderManager::LoadResourceTexture(SRenderShaderResources *pRes, int 
       TU.m_ITexPic = LoadTextureFile(pTex->m_Name.c_str(), szPath, TU);
   }
   return GetResourceTexture(pRes, nSlot);
+}
+
+CTexture *CShaderManager::LoadNormalMap(SRenderShaderResources *pRes)
+{
+  auto Usable = [](CTexture *p) { return p && !p->IsCube() && !(p->GetFlags() & FT_NOTFOUND) && p->IsTextureLoaded(); };
+  CTexture *pMap = LoadResourceTexture(pRes, EFTT_NORMALMAP);
+  if (!Usable(pMap))
+    pMap = LoadResourceTexture(pRes, EFTT_BUMP);
+  return Usable(pMap) ? pMap : nullptr;
+}
+
+void CShaderManager::LoadDrawnTextures(const CShader *pSH, SRenderShaderResources *pRes)
+{
+  // As CD3D12Renderer::DrawLeafItem reads them: the normal map for the bump mapping of the pixel lit
+  // templates and for the terrain's detail layers, the gloss map for the glow and the reflection
+  // amount, the material's cube for the cube map templates.
+  const SShaderProps &Props = pSH->GetProps();
+  if ((Props.bPixelLighting && g_pRenderer && g_pRenderer->CV_r_Quality_BumpMapping > 0) || Props.eDrawClass == eDC_TerrainLayer)
+    LoadNormalMap(pRes);
+  if ((Props.eGlow != EGlow::None && Props.eGlow != EGlow::Alpha) || Props.eEnvMap == EEnvMap::CubeDecalAmount)
+    LoadResourceTexture(pRes, EFTT_GLOSS);
+  if (Props.eEnvMap != EEnvMap::None && Props.eEnvMap != EEnvMap::Auto)
+    LoadResourceTexture(pRes, EFTT_CUBEMAP);
 }
 
 void CShaderManager::AddAttenuationTextures(SRenderShaderResources *pRes)

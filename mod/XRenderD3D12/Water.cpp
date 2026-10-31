@@ -48,6 +48,7 @@
 #include "Texture.h"
 #include "Scene.h"
 #include "RayTracing.h"
+#include <atomic>
 
 namespace
 {
@@ -317,14 +318,62 @@ std::vector<byte> MakeCausticsTexture(int N, float &fMinMean)
   return Pixels;
 }
 
+//! The pixels of the wave and caustics textures: the same every time, made once for the process on
+//! a thread of its own from the renderer's start (StartWaterTextures). Made on first use they took
+//! some 50 ms of the frame where the water first shows. Kept for the process (a renderer made again
+//! takes them as they are).
+struct SWaterPixels
+{
+  std::vector<byte> Waves, Caustics;
+  float fCausticsMinMean = 1;
+};
+std::atomic<SWaterPixels *> g_pWaterPixels{ nullptr };
+HANDLE g_hWaterThread = nullptr;
+
+DWORD WINAPI MakeWaterPixels(void *)
+{
+  SWaterPixels *p = new SWaterPixels;
+  p->Waves = MakeWaveTexture(WAVE_TEXTURE_SIZE);
+  p->Caustics = MakeCausticsTexture(CAUSTICS_TEXTURE_SIZE, p->fCausticsMinMean);
+  g_pWaterPixels = p;
+  return 0;
+}
+
+//! Waits for the thread (made here, on this thread, when it could not start).
+const SWaterPixels &WaterPixels()
+{
+  if (!g_pWaterPixels && g_hWaterThread)
+    WaitForSingleObject(g_hWaterThread, INFINITE);
+  if (!g_pWaterPixels)
+    MakeWaterPixels(nullptr);
+  return *g_pWaterPixels;
+}
+
+}
+
+void CD3D12Renderer::StartWaterTextures()
+{
+  if (!g_pWaterPixels && !g_hWaterThread)
+    g_hWaterThread = CreateThread(nullptr, 0, MakeWaterPixels, nullptr, 0, nullptr);
+}
+
+void CD3D12Renderer::EndWaterTextures()
+{
+  if (g_hWaterThread)
+  {
+    WaitForSingleObject(g_hWaterThread, INFINITE);
+    CloseHandle(g_hWaterThread);
+    g_hWaterThread = nullptr;
+  }
 }
 
 int CD3D12Renderer::GetCausticsTexture()
 {
   if (!m_nCausticsTexture && m_pTextures)
   {
-    const std::vector<byte> Pixels = MakeCausticsTexture(CAUSTICS_TEXTURE_SIZE, m_fCausticsMinMean);
-    m_nCausticsTexture = m_pTextures->CreateFromMemory(Pixels.data(), CAUSTICS_TEXTURE_SIZE, CAUSTICS_TEXTURE_SIZE, eTF_8888, 2, true,
+    const SWaterPixels &Pixels = WaterPixels();
+    m_fCausticsMinMean = Pixels.fCausticsMinMean;
+    m_nCausticsTexture = m_pTextures->CreateFromMemory(Pixels.Caustics.data(), CAUSTICS_TEXTURE_SIZE, CAUSTICS_TEXTURE_SIZE, eTF_8888, 2, true,
                                                        FILTER_TRILINEAR, 0, "$Caustics", 0);
     if (!m_nCausticsTexture || !(m_fCausticsMinMean > 0))
       m_nCausticsTexture = -1;
@@ -380,9 +429,8 @@ int CD3D12Renderer::GetWaveTexture()
 {
   if (!m_nWaveTexture && m_pTextures)
   {
-    const std::vector<byte> Pixels = MakeWaveTexture(WAVE_TEXTURE_SIZE);
-    m_nWaveTexture = m_pTextures->CreateFromMemory(Pixels.data(), WAVE_TEXTURE_SIZE, WAVE_TEXTURE_SIZE, eTF_8888, 2, true, FILTER_TRILINEAR, 0,
-                                                   "$WaterWaves", 0);
+    m_nWaveTexture = m_pTextures->CreateFromMemory(WaterPixels().Waves.data(), WAVE_TEXTURE_SIZE, WAVE_TEXTURE_SIZE, eTF_8888, 2, true,
+                                                   FILTER_TRILINEAR, 0, "$WaterWaves", 0);
     if (!m_nWaveTexture)
       m_nWaveTexture = -1;
   }

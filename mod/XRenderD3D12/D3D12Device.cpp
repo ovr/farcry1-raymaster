@@ -540,12 +540,10 @@ void CD3D12Device::SetOffscreenTargets(ID3D12Resource *pColor, D3D12_CPU_DESCRIP
   m_pCmdList->RSSetScissorRects(1, &rc);
 }
 
-bool CD3D12Device::CreateShadowMap(int nSize, ComPtr<ID3D12Resource> &pDepth, D3D12_CPU_DESCRIPTOR_HANDLE hDSV)
+bool CD3D12Device::CreateShadowMap(int nSize, ComPtr<ID3D12Resource> &pDepth, SD3D12Placement &Place, D3D12_CPU_DESCRIPTOR_HANDLE hDSV)
 {
-  if (!m_pDevice || nSize <= 0 || !hDSV.ptr)
+  if (!m_pDevice || nSize <= 0 || !hDSV.ptr || !g_pRenderer->m_pUpload)
     return false;
-  D3D12_HEAP_PROPERTIES Heap = {};
-  Heap.Type = D3D12_HEAP_TYPE_DEFAULT;
   D3D12_RESOURCE_DESC Desc = {};
   Desc.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
   Desc.Width = nSize;
@@ -558,8 +556,7 @@ bool CD3D12Device::CreateShadowMap(int nSize, ComPtr<ID3D12Resource> &pDepth, D3
   D3D12_CLEAR_VALUE Clear = {};
   Clear.Format = D3D12_SHADOW_MAP_FORMAT;
   Clear.DepthStencil.Depth = 1.0f;
-  if (Failed(m_pDevice->CreateCommittedResource(&Heap, D3D12_HEAP_FLAG_NONE, &Desc, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, &Clear,
-    IID_PPV_ARGS(&pDepth)), "CreateCommittedResource (shadow map)"))
+  if (Failed(g_pRenderer->m_pUpload->CreateDepthTarget(Desc, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, Clear, pDepth, Place), "CreateDepthTarget (shadow map)"))
     return false;
   D3D12_DEPTH_STENCIL_VIEW_DESC View = {};
   View.Format = D3D12_SHADOW_MAP_FORMAT;

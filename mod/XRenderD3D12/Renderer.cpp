@@ -353,6 +353,7 @@ WIN_HWND CD3D12Renderer::Init(int x,int y,int width,int height,unsigned int cbpp
   m_pTextures = std::make_unique<CTextureManager>();
   m_pShaders = std::make_unique<CShaderManager>();
   m_pScene = std::make_unique<CScene>();
+  StartWaterTextures();
   if (!m_pDevice->Init(m_hWnd, m_nWidth, m_nHeight, nDebug)
     || !m_pDescriptors->Init(m_pDevice->GetDevice())
     || !m_pUpload->Init(m_pDevice->GetDevice(), nFrameRingSize)
@@ -626,6 +627,7 @@ void CD3D12Renderer::Release()
   Geometry::Shutdown();     // the leaf buffers the engine left, before the upload heap goes
   if (m_pShaders)
     m_pShaders->Shutdown();
+  EndWaterTextures();
   ReleaseWaterResources();
   ReleaseWaterReflection();
   ReleaseEnvCubes();

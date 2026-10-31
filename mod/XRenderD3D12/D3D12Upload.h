@@ -134,6 +134,14 @@ public:
   void UpdateTexture(CD3D12Texture *pTex, int nFace, int nMip, int x, int y, int nWidth, int nHeight, const SD3D12SubData &Data);
   //! Deferred until the GPU is done with it; frees the SRV slot, deletes pTex.
   void ReleaseTexture(CD3D12Texture *pTex);
+  //! A texture to draw depth into (Desc with ALLOW_DEPTH_STENCIL, Clear its clear value), starting
+  //! in eState; placed in a heap of depth targets when it takes up to POOL_PLACE_MAX bytes, so its
+  //! contents are undefined until the first draw into it clears it whole. Without views. D3D12
+  //! error codes.
+  HRESULT CreateDepthTarget(const D3D12_RESOURCE_DESC &Desc, D3D12_RESOURCE_STATES eState, const D3D12_CLEAR_VALUE &Clear,
+    Microsoft::WRL::ComPtr<ID3D12Resource> &pResource, SD3D12Placement &Place);
+  //! Deferred until the GPU is done with it; resets pResource and Place.
+  void ReleaseDepthTarget(Microsoft::WRL::ComPtr<ID3D12Resource> &pResource, SD3D12Placement &Place);
 
   //! Executes the recorded uploads now (the device calls it before it executes a frame). It does
   //! not signal the fence: its memory is reused once the next signal (GetFrameFence) completed.
@@ -197,9 +205,9 @@ private:
   //! range (m_PendingRanges), a committed one to DeferredRelease.
   void ReleasePooled(int nPool, ID3D12Resource *pResource, int nHeap, uint64 nHeapOffset, uint64 nHeapBytes);
   //! A placed resource in the pool when it takes up to POOL_PLACE_MAX bytes, else a committed one
-  //! (nHeap -1); D3D12 error codes.
+  //! (nHeap -1); pClear for depth and render targets. D3D12 error codes.
   HRESULT CreatePooled(int nPool, const D3D12_RESOURCE_DESC &Desc, D3D12_RESOURCE_STATES eState, ID3D12Resource **ppResource, int &nHeap,
-    uint64 &nHeapOffset, uint64 &nHeapBytes);
+    uint64 &nHeapOffset, uint64 &nHeapBytes, const D3D12_CLEAR_VALUE *pClear = nullptr);
   //! A raw SRV of all of pResource (nSize bytes), -1 when refused.
   int CreateRawSRV(ID3D12Resource *pResource, uint64 nSize);
   void FreeRawSRV(int &nSlot);
@@ -233,11 +241,12 @@ private:
   //! The heaps the buffers and textures of up to POOL_PLACE_MAX bytes are placed in: a committed
   //! resource costs the kernel a few hundred microseconds to make and as much to free (the
   //! terrain's index buffers change with its detail, a few every frame outdoors; the textures of a
-  //! place load when it comes into view), a placed one hardly anything. Buffers and textures each
+  //! place load when it comes into view; the shadow maps of the characters a turn brings into
+  //! view, a dozen at once), a placed one hardly anything. Buffers, textures and depth targets each
   //! have heaps of their own (resource heap tier 1).
   static constexpr uint64 POOL_HEAP_SIZE = 64ull << 20;
   static constexpr uint64 POOL_PLACE_MAX = 8ull << 20;
-  enum { POOL_BUFFERS, POOL_TEXTURES, POOL_NUM };
+  enum { POOL_BUFFERS, POOL_TEXTURES, POOL_DEPTH_TARGETS, POOL_NUM };
   struct SHeapPool
   {
     std::vector<Microsoft::WRL::ComPtr<ID3D12Heap>> Heaps;

@@ -19,6 +19,14 @@
 
 #include <span>
 
+//! Where CD3D12Upload::CreateDepthTarget put a resource.
+struct SD3D12Placement
+{
+  int nHeap = -1;                     //!< the heap of the depth targets' pool, -1 a committed resource
+  uint64 nOffset = 0;                 //!< where in that heap
+  uint64 nBytes = 0;                  //!< the bytes it takes there
+};
+
 constexpr int D3D12_FRAMES = 2;         //!< frames in flight
 constexpr int D3D12_BACKBUFFERS = 3;     //!< swap chain buffers
 
@@ -228,8 +236,9 @@ public:
   //! The colour format of the target drawn into: the off screen target's, else the main view's.
   DXGI_FORMAT GetTargetColorFormat() const { return m_pOffscreen ? m_OffscreenFormat : GetMainColorFormat(); }
   //! A shadow map of nSize x nSize: R32_TYPELESS (D3D12_SHADOW_MAP_FORMAT, its DSV written to hDSV,
-  //! read as R32_FLOAT), in the state PIXEL_SHADER_RESOURCE while it is not drawn into.
-  bool CreateShadowMap(int nSize, ComPtr<ID3D12Resource> &pDepth, D3D12_CPU_DESCRIPTOR_HANDLE hDSV);
+  //! read as R32_FLOAT), in the state PIXEL_SHADER_RESOURCE while it is not drawn into; a depth
+  //! target of CD3D12Upload (Place; released with ReleaseDepthTarget), undefined until cleared.
+  bool CreateShadowMap(int nSize, ComPtr<ID3D12Resource> &pDepth, SD3D12Placement &Place, D3D12_CPU_DESCRIPTOR_HANDLE hDSV);
   //! The same with nSlices slices (a texture array), the DSV of slice i written to phDSV[i], the DSV
   //! of all of them to phDSV[nSlices] (drawn into with SV_RenderTargetArrayIndex).
   bool CreateShadowMapArray(int nSize, int nSlices, ComPtr<ID3D12Resource> &pDepth, const D3D12_CPU_DESCRIPTOR_HANDLE *phDSV);

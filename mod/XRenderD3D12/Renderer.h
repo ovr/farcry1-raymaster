@@ -24,6 +24,7 @@
 
 #pragma once
 
+#include "D3D12Device.h"
 #include "D3D12Pipeline.h"
 #include "Upscaler.h"
 #include "AmbientOcclusion.h"
@@ -665,6 +666,11 @@ public:
   //! Copies the main view's target and its depth buffer as drawn so far (m_bSceneCopied).
   bool CopySceneForWater();
   void ReleaseWaterResources();
+  //! Starts making the pixels of the wave and caustics textures on a thread of their own (at
+  //! start-up; GetWaveTexture and GetCausticsTexture wait for it).
+  void StartWaterTextures();
+  //! Waits for that thread (Release: before the DLL can go).
+  void EndWaterTextures();
   //! The texture index of the wave slopes the water program samples (made on first use).
   int GetWaveTexture();
   //! The caustics on the terrain under the ocean (eDC_Caustics). False: not drawn.
@@ -791,6 +797,7 @@ public:
   {
     const void *pFrustum = nullptr;         //!< the frustum it was drawn for
     ComPtr<ID3D12Resource> pDepth;
+    SD3D12Placement Place;                  //!< where CreateShadowMap put pDepth
     D3D12_CPU_DESCRIPTOR_HANDLE hDSV = {};
     int nSRV = -1;                          //!< the texture table index
     int nSize = 0;

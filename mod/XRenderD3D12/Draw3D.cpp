@@ -1350,13 +1350,7 @@ CTexture *CD3D12Renderer::GetDetailTexture()
 
 CTexture *CD3D12Renderer::GetNormalMap(SRenderShaderResources *pRes)
 {
-  if (!pRes || !m_pShaders)
-    return nullptr;
-  auto Usable = [](CTexture *p) { return p && !p->IsCube() && !(p->GetFlags() & FT_NOTFOUND) && p->IsTextureLoaded(); };
-  CTexture *pMap = m_pShaders->LoadResourceTexture(pRes, EFTT_NORMALMAP);
-  if (!Usable(pMap))
-    pMap = m_pShaders->LoadResourceTexture(pRes, EFTT_BUMP);
-  return Usable(pMap) ? pMap : nullptr;
+  return pRes && m_pShaders ? m_pShaders->LoadNormalMap(pRes) : nullptr;
 }
 
 CTexture *CD3D12Renderer::GetGlowMap(SRenderShaderResources *pRes)
