@@ -205,7 +205,8 @@ bool CD3D12Device::Init(HWND hWnd, int nWidth, int nHeight, int nDebug)
   if (Failed(m_pDevice->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, m_pAllocators[0].Get(), nullptr, IID_PPV_ARGS(&m_pCmdList)), "CreateCommandList"))
     return false;
   m_pCmdList->Close();
-  if (Failed(m_pDevice->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&m_pFence)), "CreateFence"))
+  if (Failed(m_pDevice->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&m_pFence)), "CreateFence") ||
+      Failed(m_pDevice->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&m_pFlushFence)), "CreateFence (flush)"))
     return false;
   m_hFenceEvent = CreateEventA(nullptr, FALSE, FALSE, nullptr);
   // The compute queue for work beside the frame's (without it, that work is in the frame's list).
@@ -374,6 +375,7 @@ void CD3D12Device::Shutdown()
   for (int &n : m_nOcclusions)
     n = 0;
   m_pFence.Reset();
+  m_pFlushFence.Reset();
   if (m_hFenceEvent)
   {
     CloseHandle(m_hFenceEvent);
@@ -429,9 +431,14 @@ uint64 CD3D12Device::GetCompletedFence() const
 
 void CD3D12Device::WaitForFence(uint64 nValue)
 {
-  if (m_pFence->GetCompletedValue() >= nValue)
+  WaitForValue(m_pFence.Get(), nValue);
+}
+
+void CD3D12Device::WaitForValue(ID3D12Fence *pFence, uint64 nValue)
+{
+  if (pFence->GetCompletedValue() >= nValue)
     return;
-  m_pFence->SetEventOnCompletion(nValue, m_hFenceEvent);
+  pFence->SetEventOnCompletion(nValue, m_hFenceEvent);
   if (WaitForSingleObject(m_hFenceEvent, 10000) == WAIT_TIMEOUT)
     iLog->LogError("XRenderD3D12: the GPU did not finish within 10 s (device removed reason 0x%08X)", (unsigned)m_pDevice->GetDeviceRemovedReason());
 }
@@ -440,7 +447,17 @@ void CD3D12Device::WaitForGPU()
 {
   if (g_pRenderer->m_pUpload)
     g_pRenderer->m_pUpload->Flush();
-  WaitForFence(Signal());
+  if (!m_bInFrame)
+  {
+    WaitForFence(Signal());
+    return;
+  }
+  // The frame's list is recorded but not submitted, and what it uses may have been released with
+  // the frame's fence (GetFrameFence: the pools' ranges, DeferredRelease, the descriptors). That
+  // value signalled now would free them before the list runs; EndFrame signals it after the list.
+  // The frames before have their values done by the time this one is.
+  m_pQueue->Signal(m_pFlushFence.Get(), ++m_nFlushFence);
+  WaitForValue(m_pFlushFence.Get(), m_nFlushFence);
 }
 
 void CD3D12Device::DeferredRelease(IUnknown *p)

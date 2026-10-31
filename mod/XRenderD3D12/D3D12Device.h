@@ -88,13 +88,18 @@ public:
   //! frame slot (e.g. to read the back buffer back). The render targets are set up again.
   void FlushFrame();
 
-  //! Waits until the GPU finished everything submitted.
+  //! Waits until the GPU finished everything submitted (the uploads flushed first). In a frame the
+  //! frame's own list is not submitted yet: the wait does not signal the frame's fence (it would
+  //! come before that list), only a fence of its own, so what the frame released stays until the
+  //! frame's end. Its list keeps its state.
   void WaitForGPU();
-  //! Signals the queue's fence and returns the value.
+  //! Signals the queue's fence and returns the value; in a frame only after the frame's list so
+  //! far was executed (EndFrame, FlushFrame), as the frame's releases wait for that value.
   uint64 Signal();
   uint64 GetCompletedFence() const;
   //! The fence value the current frame (or, between frames, the next one) signals when it ends;
-  //! an object used in this frame can go when GetCompletedFence() reaches it.
+  //! an object used in this frame can go when GetCompletedFence() reaches it. It changes in a
+  //! frame only at FlushFrame, which executes the list first.
   uint64 GetFrameFence() const { return m_nNextFence; }
   //! Takes over one reference of p and releases it once the GPU has finished everything
   //! submitted so far and the current frame.
@@ -381,6 +386,8 @@ private:
   //! Resets the slot's allocator and the list and binds the heap, root signature and targets.
   void OpenCmdList();
   void WaitForFence(uint64 nValue);
+  //! Waits on the CPU until pFence reached nValue (10 s at most, logged).
+  void WaitForValue(ID3D12Fence *pFence, uint64 nValue);
 
   ComPtr<IDXGIFactory4> m_pFactory;
   UINT m_nFactoryFlags = 0;
@@ -413,6 +420,8 @@ private:
   ComPtr<ID3D12Fence> m_pFence;
   HANDLE m_hFenceEvent = nullptr;
   uint64 m_nNextFence = 1;
+  ComPtr<ID3D12Fence> m_pFlushFence;                //!< WaitForGPU's in a frame (not the frames' fence)
+  uint64 m_nFlushFence = 0;
   // The compute queue (BeginAsyncCompute): a slot's allocator is free when the slot's frame fence is
   // reached, the frame's list having waited for the compute list.
   ComPtr<ID3D12CommandQueue> m_pComputeQueue;

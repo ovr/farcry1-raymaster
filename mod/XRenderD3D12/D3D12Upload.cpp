@@ -299,9 +299,8 @@ SD3D12FrameAlloc CD3D12Upload::AllocFrame(uint32 nSize, uint32 nAlign)
 //////////////////////////////////////////////////////////////////////////
 // Upload batch
 
-void CD3D12Upload::RetireStaging()
+void CD3D12Upload::RetireStaging(uint64 nCompleted)
 {
-  const uint64 nCompleted = g_pRenderer->m_pDevice->GetCompletedFence();
   size_t nKept = 0;
   for (size_t i = 0; i < m_Staging.size(); i++)
   {
@@ -331,12 +330,16 @@ bool CD3D12Upload::OpenBatch()
     return false;
 
   // Level loads create textures without frames, so without signals: don't let the staging
-  // memory pile up (the wait signals and waits for everything submitted).
-  if (m_nInFlightBytes > MAX_IN_FLIGHT_BYTES)
+  // memory pile up. The batches are executed (none is open), and the wait is for everything
+  // submitted: after it every batch is done, also in a frame, whose fence (the batches') is
+  // signalled only at its end. Only the batches read their staging memory and use their
+  // allocators.
+  const bool bIdle = m_nInFlightBytes > MAX_IN_FLIGHT_BYTES;
+  if (bIdle)
     g_pRenderer->m_pDevice->WaitForGPU();
-  RetireStaging();
+  const uint64 nCompleted = bIdle ? UINT64_MAX - 1 : g_pRenderer->m_pDevice->GetCompletedFence();
+  RetireStaging(nCompleted);
 
-  const uint64 nCompleted = g_pRenderer->m_pDevice->GetCompletedFence();
   int nAllocator = -1;
   for (size_t i = 0; i < m_Allocators.size(); i++)
   {
@@ -411,7 +414,8 @@ void CD3D12Upload::Flush()
   else
     iLog->LogError("XRenderD3D12: ID3D12GraphicsCommandList::Close (uploads) failed (0x%08X); the uploads are lost", (unsigned)hr);
 
-  // The next signal on the queue (the frame's end, or a wait for the GPU) comes after the batch.
+  // The frame's fence (the frame's end, a wait for the GPU between frames, FlushFrame) is
+  // signalled after the batch.
   const uint64 nFence = g_pRenderer->m_pDevice->GetFrameFence();
   m_Allocators[m_nOpenAllocator].nFence = nFence;
   for (SStaging &Staging : m_Staging)
