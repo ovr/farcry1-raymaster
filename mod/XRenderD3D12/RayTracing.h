@@ -189,7 +189,8 @@ private:
     D3D12_GPU_VIRTUAL_ADDRESS nTexCoord1);
   //! A buffer of nSize bytes with unordered access in the default heap; NULL when refused (logged).
   Microsoft::WRL::ComPtr<ID3D12Resource> CreateBuffer(uint64 nSize, D3D12_RESOURCE_STATES State, const wchar_t *szName);
-  //! At least nSize bytes in Buf (a new buffer, the old one released when the GPU is done with it).
+  //! At least nSize bytes in Buf (a new buffer of the next power of two, the old one released when the GPU
+  //! is done with it).
   bool Reserve(SSlotBuffer &Buf, uint64 nSize, D3D12_RESOURCE_STATES State, const wchar_t *szName);
   bool AllocPool(uint64 nSize, SPoolRange &Out);
   //! Back to the pool once the GPU finished the current frame.

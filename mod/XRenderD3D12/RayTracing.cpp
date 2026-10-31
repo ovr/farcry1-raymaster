@@ -32,7 +32,13 @@ namespace
   constexpr uint64 AS_ALIGN = D3D12_RAYTRACING_ACCELERATION_STRUCTURE_BYTE_ALIGNMENT;
   constexpr uint64 BUFFER_ALIGN = 64 * 1024;
   constexpr uint64 POOL_SIZE = 64ull << 20;                   //!< the static BLAS' pools
-  constexpr uint64 MIN_SLOT_BUFFER = 1ull << 20;              //!< the frame slots' buffers start this big
+  //! The frame slots' buffers start this big (made in the first frame with rays, while a level loads) and
+  //! grow to the next power of two: a new buffer holds its frame up 0.5-1 ms however small, and the
+  //! scene's first look at a new place needed up to 7.2 MB of scratch, 1.6 MB of frame BLAS and 1.3 MB of
+  //! TLAS in the sweeps (each slot growing on its own, by a quarter at a time, 6-8 new buffers a level).
+  constexpr uint64 MIN_SCRATCH = 16ull << 20;
+  constexpr uint64 MIN_FRAME_BLAS = 4ull << 20;
+  constexpr uint64 MIN_TLAS = 4ull << 20;
   constexpr uint32 MAX_STATIC_BUILD_TRIANGLES = 1u << 20;     //!< the new static BLAS of a frame (one bigger alone)
   constexpr uint32 MAX_FRAME_TRIANGLES = 2u << 20;            //!< the BLAS of a frame
   constexpr int EVICT_FRAMES = 300;                           //!< a static BLAS not used for so many frames goes
@@ -495,7 +501,7 @@ bool CD3D12RayScene::Reserve(SSlotBuffer &Buf, uint64 nSize, D3D12_RESOURCE_STAT
 {
   if (Buf.pBuffer && nSize <= Buf.nSize)
     return true;
-  const uint64 nNew = AlignUp(std::max(nSize + nSize / 4, MIN_SLOT_BUFFER), BUFFER_ALIGN);
+  const uint64 nNew = AlignUp(std::bit_ceil(nSize), BUFFER_ALIGN);
   ComPtr<ID3D12Resource> pBuffer = CreateBuffer(nNew, State, szName);
   if (!pBuffer)
     return false;
@@ -650,6 +656,12 @@ void CD3D12RayScene::Build(FILE *pDump, bool bTop)
   CollectPools();
   const int nSlot = Device.GetFrameSlot();
   SFrameSlot &Slot = m_Slots[nSlot];
+  for (SFrameSlot &Each : m_Slots)
+  {
+    Reserve(Each.Scratch, MIN_SCRATCH, D3D12_RESOURCE_STATE_UNORDERED_ACCESS, L"XRenderD3D12 ray scene scratch");
+    Reserve(Each.Blas, MIN_FRAME_BLAS, D3D12_RESOURCE_STATE_RAYTRACING_ACCELERATION_STRUCTURE, L"XRenderD3D12 ray scene frame BLAS");
+    Reserve(Each.Tlas, MIN_TLAS, D3D12_RESOURCE_STATE_RAYTRACING_ACCELERATION_STRUCTURE, L"XRenderD3D12 ray scene TLAS");
+  }
 
   // The kinds d3d12_RTMask has all of; of the draws with the same geometry and transform (passes over one
   // another) the first; then the water reflection's draws the main view does not have, as long as their
