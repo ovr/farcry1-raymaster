@@ -312,6 +312,10 @@ void CD3D12Renderer::DrawItems(SRenderItem *pItems, int nItems, int eList)
       DrawFlares({ pItems, (size_t)nItems });
       bFlares = true;
     }
+    // A water surface is the water's time wherever the sort puts it (an alpha tested plant may come
+    // first), the rest of the list the blended list's (also after the flares).
+    if (eList == eRL_Blended)
+      GpuSection(it.eDrawClass == eDC_Water || it.eDrawClass == eDC_WaterBeach ? "water" : "blended");
     if (m_pFrameDump)
       DumpItem(i, it, eList);
     m_fDrawHeat = m_bHeatPass ? ItemHeat(it) : 0;
