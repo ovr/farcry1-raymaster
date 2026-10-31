@@ -191,6 +191,9 @@ void CD3D12Renderer::RegisterVariables()
   iConsole->Register("d3d12_ShadowCascadeSize", &CV_d3d12_ShadowCascadeSize, 2048, VF_DUMPTODISK, "The size of the sun's cascaded shadow maps, 512 to 4096");
   iConsole->Register("d3d12_CascadeInstancing", &CV_d3d12_CascadeInstancing, 1, 0,
                      "1: each caster of the sun's cascades drawn once into all the slices it reaches (instances); 0: once per slice");
+  iConsole->Register("d3d12_DepthPrepass", &CV_d3d12_DepthPrepass, 1, 0,
+                     "1: the main view's opaque surfaces that discard nothing drawn into the depth buffer before the opaque list, which "
+                     "then shades only the pixels it keeps; 0: the list alone");
   iConsole->Register("d3d12_ShadowSoftness", &CV_d3d12_ShadowSoftness, 0.05f, VF_DUMPTODISK,
                      "The softness of the sun's cascaded shadows: the radius of their filter (m; at least a texel and a half of each map)");
   iConsole->CreateVariable("d3d12_Upscaler", "none", VF_DUMPTODISK,

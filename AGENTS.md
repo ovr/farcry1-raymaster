@@ -206,7 +206,8 @@ instructions and is not committed (git-ignored). The references of the modules a
 - The features and their variables, described in `mod/XRenderD3D12/README.md`: the window and full
   screen (`r_Width`, `r_Height`, `r_Fullscreen` applied while the game runs); the upscaler
   (`d3d12_Upscaler`, AMD FSR); HDR (`r_HDRRendering`, `d3d12_ToneMap`, the bloom, colour grading,
-  the HDR output `d3d12_HDROutput`); per pixel lighting (`d3d12_PixelLighting`); the sun's shadow
+  the HDR output `d3d12_HDROutput`); per pixel lighting (`d3d12_PixelLighting`); the depth prepass
+  (`d3d12_DepthPrepass`); the sun's shadow
   cascades (`d3d12_ShadowCascades`, `d3d12_CascadeInstancing`); ambient occlusion (`d3d12_AO`:
   XeGTAO or CACAO); ray tracing (`d3d12_RTReflections`, `XRENDERD3D12_NORT`); the statistics
   (`r_Stats`, `r_DisplayInfo`, the engine's frame profiler, `d3d12_GpuTimes`, `d3d12_FrameLog`,

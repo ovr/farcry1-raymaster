@@ -289,6 +289,33 @@ void CD3D12Renderer::DrawItems(SRenderItem *pItems, int nItems, int eList)
   bool bFlares = eList != eRL_Blended;
   // A list copies the scene as drawn before it (the water, the flares, the glass of a scope).
   m_bSceneCopied = false;
+  // d3d12_DepthPrepass: the main view's opaque surfaces that write the depth and discard nothing
+  // into the depth buffer first, without a pixel shader (DrawGeometry); the list then shades only
+  // the pixels it keeps, where at 4K it shaded each pixel 4 to 6 times outdoors. Its depth test
+  // is unchanged: whatever the order, a pixel ends with the nearest of the surfaces, and the same
+  // vertex shader, matrix and vertex streams give each surface the same depth in both (as the
+  // light passes' DEPTHFUNC_EQUAL needs), so the frames are the same.
+  if (CV_d3d12_DepthPrepass && eList == eRL_Opaque && (m_nSceneFlags & SHDF_ALLOWHDR) && m_nRecurseLevel <= 1 && !m_bReflectionPass &&
+      !m_bSpritePass && !m_bShadowMapPass && !m_bEnvCubePass && !m_bCascadePass)
+  {
+    GpuSection("depth prepass");
+    const float fDepthMin = m_fDepthMin, fDepthMax = m_fDepthMax;
+    const bool bItemScissor = m_bItemScissor;
+    const RECT ItemScissor = m_ItemScissor;
+    m_bDepthPrepass = true;
+    for (int i = 0; i < nItems; i++)
+    {
+      const SRenderItem &it = pItems[i];
+      if (it.pRE && it.pRE->m_Type == eDATA_OcLeaf &&
+          (it.eDrawClass == eDC_Opaque || it.eDrawClass == eDC_VColor || it.eDrawClass == eDC_Terrain || it.eDrawClass == eDC_WaterBottom))
+        DrawLeafItem(it);
+    }
+    m_bDepthPrepass = false;
+    m_fDepthMin = fDepthMin;
+    m_fDepthMax = fDepthMax;
+    m_bItemScissor = bItemScissor;
+    m_ItemScissor = ItemScissor;
+  }
   GpuSection(eList == eRL_Opaque ? "opaque" : eList == eRL_Nearest ? "nearest" : "water");
   if (m_pFrameDump)
     fprintf(m_pFrameDump.get(), "list %d: %d items, recursion %d, scene flags 0x%x\n", eList, nItems, m_nRecurseLevel, m_nSceneFlags);
@@ -396,6 +423,9 @@ void CD3D12Renderer::DrawLeafItem(const SRenderItem &it)
   // sectors; under the water it is the volume's own, as in the other volumes.
   const bool bFogPass = eDC == eDC_FogLayer || it.bFogPass ||
                         (eDC != eDC_Caustics && ((it.nSort & ~EFSLIST_MASK) == eS_FogShader || (pObj->m_ObjFlags & FOB_FOGPASS)));
+  // The depth prepass: the first pass alone, which writes the depth.
+  if (m_bDepthPrepass && (bFogPass || (pObj->m_ObjFlags & FOB_LIGHTPASS)))
+    return;
   const SFogVolume *pFogVolume = bFogPass ? m_pScene->GetFogVolume(it.nFog) : nullptr;
   if (bFogPass && (!pFogVolume || (pFogVolume->bCaustics && (m_bReflectionPass || m_Camera.GetPos().z >= pFogVolume->fFogLayerZ)) ||
                    !IsVolumetricFogOn() || m_bShadowMapPass || m_bSpritePass))
@@ -434,7 +464,8 @@ void CD3D12Renderer::DrawLeafItem(const SRenderItem &it)
   SDrawConstants dc = DefaultDrawConstants();
   memcpy(dc.mWorld, World.data, sizeof(dc.mWorld));
   memcpy(dc.mWorldViewProj, WorldViewProj.data, sizeof(dc.mWorldViewProj));
-  SetObjectMotion(dc, pObj, World, bNearest);
+  if (!m_bDepthPrepass)
+    SetObjectMotion(dc, pObj, World, bNearest);
 
   // The diffuse texture; without one the texture the leaf buffer was given (terrain, grass).
   CTexture *pTex = GetDiffuseTexture(pRes);
@@ -511,7 +542,7 @@ void CD3D12Renderer::DrawLeafItem(const SRenderItem &it)
 
   auto Draw = [&]()
   {
-    if (m_pFrameDump)
+    if (m_pFrameDump && !m_bDepthPrepass)
       DumpDraw(dc, Key, pTex);
     const D3D12_VERTEX_BUFFER_VIEW *pTC1 = TexCoord1 ? &*TexCoord1 : nullptr, *pTangents = Tangents ? &*Tangents : nullptr;
     if (Geom->IsIndexed())
@@ -618,7 +649,8 @@ void CD3D12Renderer::DrawLeafItem(const SRenderItem &it)
     else if (HasNormal(nFormat))
     {
       dc.nFlags |= DF_LIGHTING;
-      SetObjectLights(dc, pObj, World, pLB);
+      if (!m_bDepthPrepass)
+        SetObjectLights(dc, pObj, World, pLB);
     }
     else if (HasColor(nFormat))
       dc.nFlags |= DF_VCOLOR;
@@ -626,7 +658,8 @@ void CD3D12Renderer::DrawLeafItem(const SRenderItem &it)
     // light map does not have (no sun, no DLF_LM light; not one lit in passes, whose light passes
     // bring them), per pixel as the vertex lighting takes them and in place of the ambient under the
     // light map, as the original adds its vertex lighting there (DF2_LIGHTMAP_LIGHTS).
-    if (CV_d3d12_PixelLighting && TexCoord1 && !(pObj->m_ObjFlags & FOB_ZPASS) && Props.eEnvMap != EEnvMap::Auto && HasNormal(nFormat))
+    if (CV_d3d12_PixelLighting && TexCoord1 && !(pObj->m_ObjFlags & FOB_ZPASS) && Props.eEnvMap != EEnvMap::Auto && HasNormal(nFormat) &&
+        !m_bDepthPrepass)
     {
       const uint32 nFlags2 = dc.nFlags2;
       SetObjectLights(dc, pObj, World, pLB);
@@ -666,6 +699,11 @@ void CD3D12Renderer::DrawLeafItem(const SRenderItem &it)
       dc.nFlags |= DF_PIXEL_LIGHTING;
       dc.nFlags2 |= DF2_VERTEX_LIGHTS | (pObj->m_pCharInstance ? 0 : DF2_SMOOTH_FALLOFF);
     }
+    // The depth prepass: the vertex streams as above, without the lights. The draw's input layout
+    // is the main pass's: in a pipeline without an object's tangents the GPU's compiler put some
+    // of its pixels a step nearer than with them (fish under Steam's water).
+    if (m_bDepthPrepass)
+      return;
     // The sun hidden by the shadow maps of the object's casters; by the sun's cascades where they
     // reach (a light map by the live casters only: it has the shadows of the rest).
     if (dc.nFlags & (DF_LIGHTING | DF_TEX1_LIGHTMAP))
@@ -1044,6 +1082,8 @@ void CD3D12Renderer::DrawLeafItem(const SRenderItem &it)
   }
   if (bFirstPass)
     Draw();
+  if (m_bDepthPrepass)
+    return;
   // The beach: the other waves and the wet sand.
   for (int nPass = 1; eDC == eDC_WaterBeach && nPass <= BEACH_WAVES && SetupBeachDraw(Key, dc, nPass); nPass++)
   {

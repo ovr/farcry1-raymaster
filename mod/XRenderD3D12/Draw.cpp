@@ -138,10 +138,16 @@ void CD3D12Renderer::DrawGeometry(const SPipelineKey &Key, const SDrawConstants 
 {
   if (!nCount || !nInstances || !m_pPipeline || !m_pUpload || !EnsureFrame())
     return;
+  // The depth prepass (DrawItems): the general program's draws that write the depth with LESS_EQUAL
+  // and discard nothing.
+  if (m_bDepthPrepass && (Key.nProgram != eD3D12P_General || Key.nTarget != 0 || Key.bWireframe || !(Key.nState & GS_DEPTHWRITE) ||
+                          (Key.nState & (GS_BLSRC_MASK | GS_BLDST_MASK | GS_NODEPTHTEST | GS_DEPTHFUNC_EQUAL | GS_DEPTHFUNC_GREAT)) ||
+                          (dc.nFlags & DF_ALPHATEST)))
+    return;
   const bool bOffscreen = m_pDevice->IsOffscreen();
   const bool bScene = m_pDevice->IsSceneBound();
   // The main view's opaque draws and the water reflection's for the scene for rays (RayTracing.h).
-  if (m_pRayScene && ((m_pRayScene->IsCapturing() && !bOffscreen) || m_pRayScene->IsCapturingReflection()))
+  if (m_pRayScene && !m_bDepthPrepass && ((m_pRayScene->IsCapturing() && !bOffscreen) || m_pRayScene->IsCapturingReflection()))
     m_pRayScene->CaptureDraw(Key, dc, eTopology, VB, pIB, nCount, nFirst, nBaseVertex, pTexCoord1);
   // A program with rays needs this frame's scene; the water goes without them when there is none.
   const bool bRays = Key.nProgram == eD3D12P_RayDebug || (Key.nProgram == eD3D12P_Water && Key.bRayTrace);
@@ -163,8 +169,9 @@ void CD3D12Renderer::DrawGeometry(const SPipelineKey &Key, const SDrawConstants 
   // A shadow map's caster without the alpha test or the live cascades' comparison with the full set
   // (the general program's discards): without a pixel shader. One that can discard keeps the depth
   // test and write after it for all its pixels.
-  FullKey.bDepthOnly = FullKey.nTarget == 2 && Key.nProgram == eD3D12P_General && !(dc.nFlags & DF_ALPHATEST) &&
-                       !(dc.nFlags2 & (DF2_CASCADE_CASTER | DF2_SCOPE_LENS)) ? 1 : 0;
+  // The depth prepass: the depth alone too.
+  FullKey.bDepthOnly = (FullKey.nTarget == 2 && Key.nProgram == eD3D12P_General && !(dc.nFlags & DF_ALPHATEST) &&
+                        !(dc.nFlags2 & (DF2_CASCADE_CASTER | DF2_SCOPE_LENS))) || m_bDepthPrepass ? 1 : 0;
   // The ambient occlusion's target bound to the main view (AmbientOcclusion.cpp).
   FullKey.bAmbient = (FullKey.nTarget == 0 || FullKey.nTarget == 3) && m_pDevice->IsAmbientBound() ? 1 : 0;
   ID3D12PipelineState *pPSO = m_pPipeline->GetPSO(FullKey);

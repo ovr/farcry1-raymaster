@@ -630,8 +630,8 @@ ComPtr<ID3D12PipelineState> CD3D12Pipeline::CreatePSO(const SPipelineKey &Key)
   // A caster of the sun's cascades into all its slices at once.
   if (bGeneral && bShadowMap && Key.bCascadeInstances)
     Desc.VS = { g_General_CascadeInstances_VS, sizeof(g_General_CascadeInstances_VS) };
-  // A caster's depth alone: the rasterizer's, as with the pixel shader that discards nothing.
-  if (bShadowMap && Key.bDepthOnly)
+  // The depth alone: the rasterizer's, as with the pixel shader that discards nothing.
+  if (Key.bDepthOnly)
     Desc.PS = {};
 
   // Blending: off when neither factor is set.
@@ -707,6 +707,13 @@ ComPtr<ID3D12PipelineState> CD3D12Pipeline::CreatePSO(const SPipelineKey &Key)
     Ambient = Blend;
     Ambient.RenderTargetWriteMask = bGeneral && !(nState & (GS_NOCOLMASK | GS_COLMASKONLYALPHA)) ?
       D3D12_COLOR_WRITE_ENABLE_RED | D3D12_COLOR_WRITE_ENABLE_GREEN | D3D12_COLOR_WRITE_ENABLE_BLUE : 0;
+  }
+  // Without a pixel shader no colour target is written.
+  if (Key.bDepthOnly)
+  {
+    Desc.BlendState.IndependentBlendEnable = TRUE;
+    for (D3D12_RENDER_TARGET_BLEND_DESC &Target : Desc.BlendState.RenderTarget)
+      Target.RenderTargetWriteMask = 0;
   }
   Desc.SampleMask = UINT_MAX;
 

@@ -1245,6 +1245,7 @@ public:
   bool m_bDepthBias = false;
   bool m_bHeatVision = false;               //!< EF_EnableHeatVision
   bool m_bHeatPass = false;                 //!< the main view's items are drawn in heat vision (DF2_HEAT)
+  bool m_bDepthPrepass = false;             //!< d3d12_DepthPrepass: the main view's opaque list into the depth alone (DrawItems)
   float m_fDrawHeat = 0;                    //!< the heat of the item being drawn (vHeat.x)
   float m_fLineWidth = 1;
 
@@ -1290,6 +1291,7 @@ public:
   float CV_d3d12_ShadowDistance = 120;      //!< how far they reach from the camera (m)
   int CV_d3d12_ShadowCascadeSize = 2048;    //!< the size of their maps
   int CV_d3d12_CascadeInstancing = 1;       //!< 1: a caster of the full set drawn once into all the slices it reaches (DrawCascadeItems)
+  int CV_d3d12_DepthPrepass = 1;            //!< 1: the main view's opaque surfaces into the depth buffer before the opaque list (DrawItems)
   float CV_d3d12_ShadowSoftness = 0.05f;    //!< the radius of their filter (m)
   int CV_d3d12_UpscaleMode = 0;             //!< EUpscaleMode of the upscaler (d3d12_Upscaler, a string)
   float CV_d3d12_UpscaleSharpness = 0.5f;   //!< the upscaler's sharpening, 0 (none) to 1

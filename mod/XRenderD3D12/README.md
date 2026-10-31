@@ -159,6 +159,23 @@ reference of its features and console variables.
   own, so the old ones compile instruction for instruction as before (dxc reassociates the
   `fast` arithmetic of a branch that is changed).
 
+## Depth prepass
+
+- `d3d12_DepthPrepass` (1, read every frame) draws the main view's opaque surfaces that write the
+  depth and discard nothing (the general program's opaque, vertex colour, terrain and sea floor
+  draws without the alpha test) into the depth buffer before the opaque list, without a pixel
+  shader or colour writes; the list then shades only the pixels it keeps. At 4K the list shaded
+  4 to 6 times the screen's pixels outdoors (Regulator's time demo: 35 to 50 million pixel
+  shader invocations a frame, 14 million indoors). The list's depth test is unchanged: whatever
+  the order, a pixel ends with the nearest surface, and each surface gets the same depth in both
+  passes from the same vertex shader, matrix and vertex streams (in a pipeline without an
+  object's tangents the GPU's compiler put some of its pixels a step nearer than with them), so
+  the frames are those without it (the PerfSweep frames of ten levels the same to the bit). The
+  prepass costs the CPU the items' transforms and textures once more, not their lights.
+  Time demos: Training 406 to 425 FPS (its opaque list 0.52 to 0.32 ms in frames 600 to 1200),
+  Volcano 453 to 479, Research 562 to 600, Regulator 369 to 381 (0.63 to 0.90 ms to 0.51 to 0.69);
+  the prepass itself 0.02 to 0.04 ms, the CPU's `EF_EndEf3D` 0.03 to 0.15 ms more.
+
 ## Sun shadow cascades
 
 - `d3d12_ShadowCascades` (4, 0 to 4) gives the sun's cascaded shadow maps around the camera while
