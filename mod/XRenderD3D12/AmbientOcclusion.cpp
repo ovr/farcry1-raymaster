@@ -57,6 +57,10 @@ constexpr int TABLE = CD3D12Compute::COMPUTE_SRVS + CD3D12Compute::COMPUTE_UAVS;
 constexpr D3D12_RESOURCE_STATES DEPTH_READ = D3D12_RESOURCE_STATE_DEPTH_READ | D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE;
 constexpr D3D12_RESOURCE_STATES AMBIENT_READ = D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE | D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE;
 constexpr DXGI_FORMAT TAKEN_FORMAT = DXGI_FORMAT_R16G16B16A16_FLOAT;
+//! The rays' GI's factor of the ambient light (RayAO.cpp).
+constexpr DXGI_FORMAT GI_FORMAT = DXGI_FORMAT_R16G16B16A16_FLOAT;
+//! m_AOName for the rays' GI (not a d3d12_AO).
+constexpr const char *AO_NAME_GI = "<rays' GI>";
 
 //! The backend of a d3d12_AO value; nullptr for "none" and unknown names.
 std::unique_ptr<IAmbientOcclusion> CreateAO(const char *szName)
@@ -84,7 +88,9 @@ bool CD3D12Renderer::UpdateAO()
     return false;
   if (!m_pAOVar)
     m_pAOVar = iConsole->GetCVar("d3d12_AO");
-  const char *szName = m_pAOVar && m_pAOVar->GetString() ? m_pAOVar->GetString() : "none";
+  // d3d12_RTGI in place of d3d12_AO.
+  const bool bGI = WantsRayGI();
+  const char *szName = bGI ? AO_NAME_GI : m_pAOVar && m_pAOVar->GetString() ? m_pAOVar->GetString() : "none";
   ID3D12Resource *pDepth = m_pDevice->GetMainDepth();
   const int w = m_pDevice->GetMainWidth(), h = m_pDevice->GetMainHeight();
   const int nApply = CV_d3d12_AOApply ? 1 : 0;
@@ -100,16 +106,17 @@ bool CD3D12Renderer::UpdateAO()
   m_nAOWidth = w;
   m_nAOHeight = h;
   m_nAOApply = nApply;
-  if (!_stricmp(szName, "none"))
+  m_bAOGI = bGI;
+  if (!bGI && !_stricmp(szName, "none"))
     return false;
-  m_pAO = CreateAO(szName);
+  m_pAO = bGI ? CreateGIRays() : CreateAO(szName);
   if (!m_pAO)
   {
     if (bNew)
       iLog->LogWarning("XRenderD3D12: d3d12_AO %s: no such ambient occlusion (none, gtao, cacao, rt); none", szName);
     return false;
   }
-  m_pAOOutput = m_pUpload->CreateComputeTarget(w, h, 1, DXGI_FORMAT_R8_TYPELESS, L"AO visibility");
+  m_pAOOutput = m_pUpload->CreateComputeTarget(w, h, 1, bGI ? GI_FORMAT : DXGI_FORMAT_R8_TYPELESS, bGI ? L"GI factor" : L"AO visibility");
   m_pAOFactor = m_pUpload->CreateComputeTarget(w, h, 1, DXGI_FORMAT_R8G8B8A8_UNORM, L"AO factor");
   if (m_pAOFactor)
     m_pAOFactor->m_nSRV = m_pDescriptors->AllocSRV(m_pAOFactor->m_pResource, nullptr);
@@ -143,7 +150,7 @@ bool CD3D12Renderer::UpdateAO()
   SRV.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
   SRV.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
   SRV.Texture2D.MipLevels = 1;
-  SRV.Format = DXGI_FORMAT_R8_UNORM;
+  SRV.Format = m_bAOGI ? GI_FORMAT : DXGI_FORMAT_R8_UNORM;
   m_pDescriptors->WriteSRV(m_nAOResolveTable, m_pAOOutput->m_pResource, &SRV);
   SRV.Format = Targets.DepthFormat;
   m_pDescriptors->WriteSRV(m_nAOResolveTable + 1, pDepth, &SRV);
@@ -184,6 +191,7 @@ void CD3D12Renderer::ReleaseAO(bool bForget)
   if (bForget)
   {
     m_AOName.clear();
+    m_bAOGI = false;
     m_pAODepth.Reset();
     m_nAOWidth = m_nAOHeight = 0;
     m_nAOApply = 0;
@@ -258,6 +266,17 @@ void CD3D12Renderer::DrawAmbientOcclusion()
   const float fFar = p[10] != -1 ? p[14] / (p[10] + 1) : 1000.0f;
   Frame.fFadeStart = m_bFog && m_fFogEnd > m_fFogStart ? m_fFogEnd : fFar * 0.5f;
   Frame.fFadeEnd = std::max(m_bFog && m_fFogEnd > m_fFogStart ? m_fFogEnd * 1.1f : fFar, Frame.fFadeStart + 1);
+  if (m_bAOGI)
+  {
+    Frame.nGI = std::clamp(CV_d3d12_RTGI, 1, 2);
+    Frame.fGIDistance = std::max(CV_d3d12_RTGIDistance, 0.1f);
+    Frame.fGIBounce = std::max(CV_d3d12_RTGIBounce, 0.0f);
+    I3DEngine *p3D = iSystem ? iSystem->GetI3DEngine() : nullptr;
+    const Vec3 vOutdoor = p3D ? p3D->GetOutdoorAmbientColor() : Vec3(0.5f, 0.5f, 0.5f);
+    Frame.vOutdoorAmbient[0] = vOutdoor.x;
+    Frame.vOutdoorAmbient[1] = vOutdoor.y;
+    Frame.vOutdoorAmbient[2] = vOutdoor.z;
+  }
   m_nAOFrames++;
   const bool bOk = m_pAO->Dispatch(Frame);
   // A backend may have bound a heap of its own.
@@ -277,7 +296,8 @@ void CD3D12Renderer::DrawAmbientOcclusion()
     Set4(rc.vDepthParams, p[10], p[14], 0, 0);
     const float fRange = m_fFogEnd - m_fFogStart;
     Set4(rc.vFogParams, m_fFogStart, m_fFogEnd, fRange > 0 ? 1.0f / fRange : 0.0f, m_bFog ? 1.0f : 0.0f);
-    Set4(rc.vParams, m_nAOApply ? fStrength : fStrength / 2.2f, m_nAOApply ? 1.0f : 0.0f, m_nAOApply && CV_d3d12_AODebug == 1 ? 1.0f : 0.0f, 0);
+    Set4(rc.vParams, m_nAOApply ? fStrength : fStrength / 2.2f, m_nAOApply ? 1.0f : 0.0f, m_nAOApply && CV_d3d12_AODebug == 1 ? 1.0f : 0.0f,
+         m_bAOGI ? 1.0f : 0.0f);
     const SD3D12FrameAlloc CB = m_pUpload->AllocFrame(sizeof(rc), 256);
     memcpy(CB.pCPU, &rc, sizeof(rc));
     m_pCompute->Dispatch(pList, eD3D12K_AoResolve, CB.nGPU, m_nAOResolveTable, m_nAOResolveTable + CD3D12Compute::COMPUTE_SRVS,
@@ -315,7 +335,7 @@ void CD3D12Renderer::DrawAmbientOcclusion()
     dc.nTex0 = (uint32)m_nAOResolveTable;
     dc.nTex1 = (uint32)m_nAOResolveTable + 1;
     dc.nTex2 = (uint32)m_nAOResolveTable + 2;
-    Set4(dc.vParams1, fStrength, 0, 0, 0);
+    Set4(dc.vParams1, fStrength, m_bAOGI ? 1.0f : 0.0f, 0, 0);
   }
   else
   {
@@ -325,6 +345,13 @@ void CD3D12Renderer::DrawAmbientOcclusion()
     Set4(dc.vParams1, 1, 1, 1, 1);
   }
   DrawImmediate(Key, dc, D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST, VERTEX_FORMAT_P3F, s_FullScreen, 3);
+  if (bTaken && m_bAOGI)
+  {
+    // The rays' GI: the light given, where the factor is over 1, added.
+    Key.nBlendOp = 0;
+    dc.vParams1[1] = 2;
+    DrawImmediate(Key, dc, D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST, VERTEX_FORMAT_P3F, s_FullScreen, 3);
+  }
   if (bTaken)
   {
     m_pDevice->SetDepthReadOnly(false);

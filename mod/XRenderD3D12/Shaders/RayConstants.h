@@ -116,7 +116,12 @@ struct SRayAOConstants
   XR_UINT4(nTrace);               //!< the rays' grid: x the pixels a side of a cell (1 or 2), y z the pixel of a cell traced in
                                   //!< this frame
   XR_UINT4(nFlags);               //!< x 1: a history to blend into, y the frame (the noise), z 1: denoised (the history and the
-                                  //!< filter), w the mask of the instances the rays see (RayMask, the low 8 bits)
+                                  //!< filter), w the mask of the instances the rays see (RayMask, the low 8 bits; the GI's with
+                                  //!< 0x100, the sun's shadow at the hits)
+  // The rays' GI (RAY_GI; vParams.x is then d3d12_RTGIDistance):
+  XR_FLOAT4(vGI);                 //!< x d3d12_RTGIBounce
+  XR_FLOAT4(vOutdoorAmbient);     //!< rgb the 3D engine's outdoor ambient colour (a hit's without one of its own)
+  XR_UINT4(nTextures2);           //!< texture table indices: x the frames of the history before, y this frame's
 };
 
 #endif

@@ -267,6 +267,14 @@ void CD3D12Renderer::RegisterVariables()
   iConsole->Register("d3d12_RTSunDenoise", &CV_d3d12_RTSunDenoise, 1, 0,
                      "With d3d12_RTSunShadows, 1: the rays of the frames before blended in where the surface was and the soft edges "
                      "filtered; 0: this frame's ray as it is");
+  iConsole->Register("d3d12_RTGI", &CV_d3d12_RTGI, 0, VF_DUMPTODISK,
+                     "The ambient light by rays, one bounce (a device with DXR 1.1, d3d12_AOApply 1; in place of d3d12_AO): what the "
+                     "rays from a surface find, lit by the sun and the light maps, darkens or lights its ambient light, what they miss "
+                     "leaves it as it is: 1 a ray for each 2 x 2 pixels, from each of them in turn; 2 a ray a pixel");
+  iConsole->Register("d3d12_RTGIDistance", &CV_d3d12_RTGIDistance, 4.0f, VF_DUMPTODISK,
+                     "With d3d12_RTGI, how far its rays look (m); what they find beyond the first 0.385 of it counts less and less");
+  iConsole->Register("d3d12_RTGIBounce", &CV_d3d12_RTGIBounce, 1.0f, VF_DUMPTODISK,
+                     "With d3d12_RTGI, how much light what the rays find gives back (1 as it is lit, 0 none: it only occludes)");
   iConsole->Register("d3d12_RTShadows", &CV_d3d12_RTShadows, 1, VF_DUMPTODISK,
                      "1: the sun's shadow at the hits of the rays, by a ray towards the sun (the surfaces the sun's shadow falls on)");
   iConsole->Register("d3d12_RTAsync", &CV_d3d12_RTAsync, 1, 0,
@@ -444,6 +452,8 @@ WIN_HWND CD3D12Renderer::Init(int x,int y,int width,int height,unsigned int cbpp
     CV_d3d12_RTReflections = 0;
     iConsole->UnregisterVariable("d3d12_RTSunShadows", true);
     CV_d3d12_RTSunShadows = 0;
+    iConsole->UnregisterVariable("d3d12_RTGI", true);
+    CV_d3d12_RTGI = 0;
   }
   m_Viewport[0] = 0;
   m_Viewport[1] = 0;

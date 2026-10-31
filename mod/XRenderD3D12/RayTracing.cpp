@@ -903,7 +903,12 @@ D3D12_GPU_VIRTUAL_ADDRESS CD3D12RayScene::GetTLAS() const
 
 bool CD3D12Renderer::WantsRays() const
 {
-  return m_pRayScene && m_pRayScene->IsSupported() && (CV_d3d12_RTDebug != 0 || CV_d3d12_RTReflections > 0 || WantsRaySun() || WantsRayAO());
+  return m_pRayScene && m_pRayScene->IsSupported() && (CV_d3d12_RTDebug != 0 || CV_d3d12_RTReflections > 0 || WantsRaySun() || WantsRayAO() || WantsRayGI());
+}
+
+bool CD3D12Renderer::WantsRayGI() const
+{
+  return m_pRayScene && m_pRayScene->IsSupported() && CV_d3d12_RTGI > 0 && CV_d3d12_AOApply != 0;
 }
 
 bool CD3D12Renderer::WantsRayAO() const
@@ -949,7 +954,7 @@ void CD3D12Renderer::BuildRayScene(std::span<const SRenderItem> Opaque, bool bTr
   // One scene a frame: rebuilt for another top level view, it would change under the draws of the first.
   if (!IsAOView() || m_pRayScene->GetBuiltFrame() == m_nFrames)
     return;
-  m_bRayTlas = bTraced || CV_d3d12_RTDebug != 0 || WantsRaySun() || WantsRayAO();
+  m_bRayTlas = bTraced || CV_d3d12_RTDebug != 0 || WantsRaySun() || WantsRayAO() || WantsRayGI();
   m_pRayScene->BeginCapture(m_CameraView * m_ProjMatrix, m_Camera.GetPos());
   // The list's draws as it will draw them, without their lights, before it is drawn.
   const float fDepthMin = m_fDepthMin, fDepthMax = m_fDepthMax;
@@ -1034,7 +1039,7 @@ bool CD3D12Renderer::WantsOffscreenRays() const
 {
   // 1: for what traces rays from the surfaces of the main view (not the water's reflection, which
   // sees what is in front of the camera and has the planar reflection's draws).
-  return WantsRays() && (CV_d3d12_RTOffscreen >= 2 || (CV_d3d12_RTOffscreen == 1 && (CV_d3d12_RTDebug != 0 || WantsRaySun() || WantsRayAO())));
+  return WantsRays() && (CV_d3d12_RTOffscreen >= 2 || (CV_d3d12_RTOffscreen == 1 && (CV_d3d12_RTDebug != 0 || WantsRaySun() || WantsRayAO() || WantsRayGI())));
 }
 
 void CD3D12Renderer::NoteRayOffscreenItems(std::span<const SRenderItem> Items)

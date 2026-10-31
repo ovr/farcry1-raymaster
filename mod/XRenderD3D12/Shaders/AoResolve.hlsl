@@ -11,7 +11,10 @@
 //	takes from the scene: the ambient light's part of the scene's colour
 //	(t2, General.hlsl's XR_AMBIENT, fogged already) times 1 - the
 //	visibility to the power vParams.x, 0 on the sky; with vParams.z also
-//	the factor without the fog, for d3d12_AODebug 1.
+//	the factor without the fog, for d3d12_AODebug 1. With vParams.w the
+//	rays' GI (d3d12_RTGI): t0 the factor of the ambient light (rgb, 1 as it
+//	was) in place of the visibility, the light taken where it is under 1,
+//	the factor's half for the debug view (grey 0.5 as it was).
 //
 //	Bindings (D3D12Compute.h): b0 SAoResolveConstants, t0 the visibility
 //	(R8_UNORM, 1 nothing occluded), t1 the depth buffer (0 near, 1 far),
@@ -27,7 +30,7 @@ cbuffer cbResolve : register(b0)
   SAoResolveConstants g_Resolve;
 };
 
-Texture2D<float> g_Visibility : register(t0);
+Texture2D<float4> g_Visibility : register(t0);
 Texture2D<float> g_Depth : register(t1);
 Texture2D<float3> g_Ambient : register(t2);
 RWTexture2D<float4> g_Factor : register(u0);
@@ -39,9 +42,17 @@ void CSMain(uint2 vPixel : SV_DispatchThreadID)
   if (any(vPixel >= (uint2)g_Resolve.vSize.xy))
     return;
   const float fDepth = g_Depth.Load(int3(vPixel, 0));
+  if (g_Resolve.vParams.y != 0 && g_Resolve.vParams.w != 0)
+  {
+    const float3 f = fDepth < 1 ? pow(max(g_Visibility.Load(int3(vPixel, 0)).rgb, 0), g_Resolve.vParams.x) : 1;
+    g_Taken[vPixel] = float4(saturate(1 - f) * g_Ambient.Load(int3(vPixel, 0)), 0);
+    if (g_Resolve.vParams.z != 0)
+      g_Factor[vPixel] = float4(saturate(0.5 * f), 1);
+    return;
+  }
   if (g_Resolve.vParams.y != 0)
   {
-    const float v = fDepth < 1 ? pow(saturate(g_Visibility.Load(int3(vPixel, 0))), g_Resolve.vParams.x) : 1;
+    const float v = fDepth < 1 ? pow(saturate(g_Visibility.Load(int3(vPixel, 0)).r), g_Resolve.vParams.x) : 1;
     g_Taken[vPixel] = float4((1 - v) * g_Ambient.Load(int3(vPixel, 0)), 0);
     if (g_Resolve.vParams.z != 0)
       g_Factor[vPixel] = float4(v, v, v, 1);
@@ -52,7 +63,7 @@ void CSMain(uint2 vPixel : SV_DispatchThreadID)
   {
     const float fViewDepth = g_Resolve.vDepthParams.y / (fDepth + g_Resolve.vDepthParams.x);
     const float fFog = g_Resolve.vFogParams.w != 0 ? saturate((g_Resolve.vFogParams.y - fViewDepth) * g_Resolve.vFogParams.z) : 1;
-    f = lerp(1, pow(saturate(g_Visibility.Load(int3(vPixel, 0))), g_Resolve.vParams.x), fFog);
+    f = lerp(1, pow(saturate(g_Visibility.Load(int3(vPixel, 0)).r), g_Resolve.vParams.x), fFog);
   }
   g_Factor[vPixel] = float4(f, f, f, 1);
 }

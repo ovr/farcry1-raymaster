@@ -20,6 +20,12 @@
 //	d3d12_AODenoise 0: no history and no filter, the rays round the pixel
 //	as they are. Up to where the AO fades out (SAOFrame::fFadeEnd); beyond
 //	it all is open.
+//	The rays' GI (d3d12_RTGI, CreateGIRays; in place of d3d12_AO, the
+//	kernels RayGI*_CS): the rays d3d12_RTGIDistance long, what they find
+//	shaded, the factor of the ambient light (rgb) in place of the
+//	visibility: its history in rgb with the frames in a texture of their
+//	own (GI_HISTORY_FRAMES at most), filtered into the factor
+//	(R16G16B16A16_FLOAT) the AO's draws take and add the light with.
 //
 //////////////////////////////////////////////////////////////////////
 
@@ -47,6 +53,12 @@ constexpr DXGI_FORMAT HISTORY_FORMAT = DXGI_FORMAT_R16G16B16A16_FLOAT;
 constexpr DXGI_FORMAT VISIBILITY_FORMAT = DXGI_FORMAT_R8_UNORM;
 //! The frames a history holds at most (what moves leaves its occlusion behind for about as long).
 constexpr float HISTORY_FRAMES = 16;
+//! The GI's factor (AmbientOcclusion.h: R16G16B16A16_FLOAT), as CSFilter writes it.
+constexpr DXGI_FORMAT GI_FORMAT = DXGI_FORMAT_R16G16B16A16_FLOAT;
+//! The GI's frames in its history (frames / 255).
+constexpr DXGI_FORMAT FRAMES_FORMAT = DXGI_FORMAT_R8_UNORM;
+//! The frames the GI's history holds at most (its rays bring more noise, colours and all).
+constexpr float GI_HISTORY_FRAMES = 24;
 constexpr D3D12_RESOURCE_STATES UAV = D3D12_RESOURCE_STATE_UNORDERED_ACCESS;
 constexpr D3D12_RESOURCE_STATES READ = D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE;
 //! The kernels' UAV tables (D3D12Compute.h): the rays', the history's of each texture, the visibility's.
@@ -76,17 +88,21 @@ void Barrier(ID3D12GraphicsCommandList *pList, ID3D12Resource *pRes, D3D12_RESOU
 class CAORays : public IAmbientOcclusion
 {
 public:
+  //! bGI: the rays' GI (RAY_GI).
+  explicit CAORays(bool bGI) : m_bGI(bGI) {}
   ~CAORays() override { Release(); }
   bool Create(ID3D12Device *pDevice, const SAOTargets &Targets, bool bDebug) override;
   bool Dispatch(const SAOFrame &Frame) override;
-  const char *GetName() const override { return "rays"; }
+  const char *GetName() const override { return m_bGI ? "rays' GI" : "rays"; }
 
 private:
   void Release();
 
+  const bool m_bGI;
   SAOTargets m_Targets;
   CD3D12Texture *m_pRays = nullptr;       //!< CSTrace's rays (UNORDERED_ACCESS between the dispatches)
   CD3D12Texture *m_pHistory[2] = {};      //!< this frame's history and the frame before's (the same)
+  CD3D12Texture *m_pFrames[2] = {};       //!< the GI's: the frames in m_pHistory's (R8_UNORM)
   int m_nHistory = 0;                     //!< m_pHistory's current one
   int m_nDepthSRV = -1;                   //!< the depth buffer in the texture table
   int m_nTables[TABLE_COUNT] = { -1, -1, -1, -1 };
@@ -100,7 +116,7 @@ void CAORays::Release()
   CD3D12Descriptors *pDesc = g_pRenderer ? g_pRenderer->m_pDescriptors.get() : nullptr;
   CD3D12Upload *pUpload = g_pRenderer ? g_pRenderer->m_pUpload.get() : nullptr;
   // (with their views in the texture table)
-  for (CD3D12Texture **pp : { &m_pRays, &m_pHistory[0], &m_pHistory[1] })
+  for (CD3D12Texture **pp : { &m_pRays, &m_pHistory[0], &m_pHistory[1], &m_pFrames[0], &m_pFrames[1] })
   {
     if (*pp && pUpload)
       pUpload->ReleaseTexture(*pp);
@@ -132,7 +148,12 @@ bool CAORays::Create(ID3D12Device *pDevice, const SAOTargets &Targets, bool bDeb
   m_pRays = pUpload->CreateComputeTarget(w, h, 1, RAYS_FORMAT, L"XRenderD3D12 AO rays");
   m_pHistory[0] = pUpload->CreateComputeTarget(w, h, 1, HISTORY_FORMAT, L"XRenderD3D12 AO history");
   m_pHistory[1] = pUpload->CreateComputeTarget(w, h, 1, HISTORY_FORMAT, L"XRenderD3D12 AO history");
-  if (!m_pRays || !m_pHistory[0] || !m_pHistory[1])
+  if (m_bGI)
+  {
+    m_pFrames[0] = pUpload->CreateComputeTarget(w, h, 1, FRAMES_FORMAT, L"XRenderD3D12 GI history frames");
+    m_pFrames[1] = pUpload->CreateComputeTarget(w, h, 1, FRAMES_FORMAT, L"XRenderD3D12 GI history frames");
+  }
+  if (!m_pRays || !m_pHistory[0] || !m_pHistory[1] || (m_bGI && (!m_pFrames[0] || !m_pFrames[1])))
   {
     Release();
     return false;
@@ -143,6 +164,10 @@ bool CAORays::Create(ID3D12Device *pDevice, const SAOTargets &Targets, bool bDeb
   SRV = TextureSRV(HISTORY_FORMAT);
   for (CD3D12Texture *pTex : m_pHistory)
     pTex->m_nSRV = pDesc->AllocSRV(pTex->m_pResource, &SRV);
+  SRV = TextureSRV(FRAMES_FORMAT);
+  for (CD3D12Texture *pTex : m_pFrames)
+    if (pTex)
+      pTex->m_nSRV = pDesc->AllocSRV(pTex->m_pResource, &SRV);
   SRV = TextureSRV(Targets.DepthFormat);
   m_nDepthSRV = pDesc->AllocSRV(Targets.pDepth, &SRV);
   ID3D12Resource *const Outputs[TABLE_COUNT] = { m_pRays->m_pResource, m_pHistory[0]->m_pResource, m_pHistory[1]->m_pResource, nullptr };
@@ -154,13 +179,18 @@ bool CAORays::Create(ID3D12Device *pDevice, const SAOTargets &Targets, bool bDeb
     View.ViewDimension = D3D12_UAV_DIMENSION_TEXTURE2D;
     for (int i = 0; i < CD3D12Compute::COMPUTE_UAVS; i++)
     {
-      // u0 the rays or the history (RGBA16F), u1 the visibility.
-      View.Format = i == 1 ? VISIBILITY_FORMAT : RAYS_FORMAT;
-      ID3D12Resource *pUAV = i == 0 ? Outputs[t] : i == 1 && t == TABLE_FILTER ? Targets.pOutput : nullptr;
+      // u0 the rays or the history (RGBA16F), u1 the visibility (the GI's factor), u2 the GI's history's frames.
+      View.Format = i == 1 ? (m_bGI ? GI_FORMAT : VISIBILITY_FORMAT) : i == 2 && m_bGI ? FRAMES_FORMAT : RAYS_FORMAT;
+      ID3D12Resource *pUAV = i == 0                                     ? Outputs[t]
+                             : i == 1 && t == TABLE_FILTER              ? Targets.pOutput
+                             : i == 2 && m_bGI && t == TABLE_TEMPORAL0 ? m_pFrames[0]->m_pResource
+                             : i == 2 && m_bGI && t == TABLE_TEMPORAL1 ? m_pFrames[1]->m_pResource
+                                                                       : nullptr;
       pDesc->WriteUAV(m_nTables[t] + i, pUAV, &View);
     }
   }
   if (m_pRays->m_nSRV < 0 || m_pHistory[0]->m_nSRV < 0 || m_pHistory[1]->m_nSRV < 0 || m_nDepthSRV < 0 ||
+      (m_bGI && (m_pFrames[0]->m_nSRV < 0 || m_pFrames[1]->m_nSRV < 0)) ||
       std::any_of(std::begin(m_nTables), std::end(m_nTables), [](int n) { return n < 0; }))
   {
     Release();
@@ -178,7 +208,7 @@ bool CAORays::Dispatch(const SAOFrame &Frame)
   if (m_nDepthSRV < 0 || !pList || !r->m_pCompute || !r->m_pRayScene || r->m_pRayScene->GetBuiltFrame() != r->m_nFrames ||
       !r->m_pRayScene->GetTLAS())
     return false;
-  r->GpuSection("rt ao");
+  r->GpuSection(m_bGI ? "rt gi" : "rt ao");
   const D3D12_GPU_VIRTUAL_ADDRESS nTlas = r->UseRayScene();
   if (!nTlas)
     return false;
@@ -192,7 +222,10 @@ bool CAORays::Dispatch(const SAOFrame &Frame)
   r->GetRayView(rc.vCameraPos, rc.vRayX, rc.vRayY, rc.vRayO);
   Set4(rc.vSize, (float)w, (float)h, 1.0f / w, 1.0f / h);
   Set4(rc.vJitter, fc.vJitter[0], fc.vJitter[1], m_PrevJitter[0], m_PrevJitter[1]);
-  Set4(rc.vParams, std::max(Frame.fRadius, 0.01f), std::max(Frame.fFadeEnd, 1.0f), 2 / (fabsf(Frame.Proj[5]) * h), HISTORY_FRAMES);
+  Set4(rc.vParams, m_bGI ? Frame.fGIDistance : std::max(Frame.fRadius, 0.01f), std::max(Frame.fFadeEnd, 1.0f), 2 / (fabsf(Frame.Proj[5]) * h),
+       m_bGI ? GI_HISTORY_FRAMES : HISTORY_FRAMES);
+  Set4(rc.vGI, Frame.fGIBounce, 0, 0, 0);
+  Set4(rc.vOutdoorAmbient, Frame.vOutdoorAmbient[0], Frame.vOutdoorAmbient[1], Frame.vOutdoorAmbient[2], 0);
   const bool bDenoise = Frame.nDenoise > 0;
   const bool bHistory = bDenoise && m_nFrame == r->m_nFrames - 1;
   const int nCur = m_nHistory ^= 1;
@@ -201,12 +234,16 @@ bool CAORays::Dispatch(const SAOFrame &Frame)
   rc.nTextures[1] = (uint32)m_pRays->m_nSRV;
   rc.nTextures[2] = (uint32)pPrevHistory->m_nSRV;
   rc.nTextures[3] = (uint32)pHistory->m_nSRV;
+  CD3D12Texture *pFrames = m_pFrames[nCur], *pPrevFrames = m_pFrames[nCur ^ 1];
+  rc.nTextures2[0] = pPrevFrames ? (uint32)pPrevFrames->m_nSRV : 0;
+  rc.nTextures2[1] = pFrames ? (uint32)pFrames->m_nSRV : 0;
   rc.nFlags[0] = bHistory ? 1 : 0;
   rc.nFlags[1] = (uint32)r->m_nFrames;
   rc.nFlags[2] = bDenoise ? 1 : 0;
-  rc.nFlags[3] = r->RayMask() & 0xff;
+  // (the GI's with the sun's shadow at the hits, 0x100)
+  rc.nFlags[3] = m_bGI ? r->RayMask() & 0x1ff : r->RayMask() & 0xff;
   // A ray for each 2 x 2 pixels, from each of them in turn over 4 frames (the history has them all), or for each pixel.
-  const int nStep = Frame.nQuality >= 3 ? 1 : 2;
+  const int nStep = (m_bGI ? Frame.nGI >= 2 : Frame.nQuality >= 3) ? 1 : 2;
   static constexpr uint32 CellPixels[4][2] = { { 0, 0 }, { 1, 1 }, { 1, 0 }, { 0, 1 } };
   rc.nTrace[0] = (uint32)nStep;
   rc.nTrace[1] = nStep == 2 ? CellPixels[r->m_nFrames & 3][0] : 0;
@@ -219,18 +256,30 @@ bool CAORays::Dispatch(const SAOFrame &Frame)
   CD3D12Compute *pCompute = r->m_pCompute.get();
   const UINT nGroupsX = (UINT)(w + XR_RAY_AO_GROUP - 1) / XR_RAY_AO_GROUP, nGroupsY = (UINT)(h + XR_RAY_AO_GROUP - 1) / XR_RAY_AO_GROUP;
   const int nCellsX = (w + nStep - 1) / nStep, nCellsY = (h + nStep - 1) / nStep;
-  pCompute->DispatchRays(pList, eD3D12K_RayAOTrace, FrameCB.nGPU, PassCB.nGPU, nTlas, r->m_pRayScene->GetInstances(), m_nTables[TABLE_TRACE],
+  const ED3D12Kernel eTrace = m_bGI ? eD3D12K_RayGITrace : eD3D12K_RayAOTrace;
+  const ED3D12Kernel eTemporal = m_bGI ? eD3D12K_RayGITemporal : eD3D12K_RayAOTemporal;
+  const ED3D12Kernel eFilter = m_bGI ? eD3D12K_RayGIFilter : eD3D12K_RayAOFilter;
+  pCompute->DispatchRays(pList, eTrace, FrameCB.nGPU, PassCB.nGPU, nTlas, r->m_pRayScene->GetInstances(), m_nTables[TABLE_TRACE],
                          (UINT)(nCellsX + XR_RAY_AO_GROUP - 1) / XR_RAY_AO_GROUP, (UINT)(nCellsY + XR_RAY_AO_GROUP - 1) / XR_RAY_AO_GROUP);
   Barrier(pList, m_pRays->m_pResource, UAV, READ);
   Barrier(pList, pPrevHistory->m_pResource, UAV, READ);
-  r->GpuSection("rt ao history");
-  pCompute->DispatchRays(pList, eD3D12K_RayAOTemporal, FrameCB.nGPU, PassCB.nGPU, 0, 0, m_nTables[TABLE_TEMPORAL0 + nCur], nGroupsX, nGroupsY);
+  if (pPrevFrames)
+    Barrier(pList, pPrevFrames->m_pResource, UAV, READ);
+  r->GpuSection(m_bGI ? "rt gi history" : "rt ao history");
+  pCompute->DispatchRays(pList, eTemporal, FrameCB.nGPU, PassCB.nGPU, 0, 0, m_nTables[TABLE_TEMPORAL0 + nCur], nGroupsX, nGroupsY);
   Barrier(pList, pHistory->m_pResource, UAV, READ);
-  r->GpuSection("rt ao filter");
-  pCompute->DispatchRays(pList, eD3D12K_RayAOFilter, FrameCB.nGPU, PassCB.nGPU, 0, 0, m_nTables[TABLE_FILTER], nGroupsX, nGroupsY);
+  if (pFrames)
+    Barrier(pList, pFrames->m_pResource, UAV, READ);
+  r->GpuSection(m_bGI ? "rt gi filter" : "rt ao filter");
+  pCompute->DispatchRays(pList, eFilter, FrameCB.nGPU, PassCB.nGPU, 0, 0, m_nTables[TABLE_FILTER], nGroupsX, nGroupsY);
   Barrier(pList, m_pRays->m_pResource, READ, UAV);
   Barrier(pList, pPrevHistory->m_pResource, READ, UAV);
   Barrier(pList, pHistory->m_pResource, READ, UAV);
+  if (pFrames)
+  {
+    Barrier(pList, pPrevFrames->m_pResource, READ, UAV);
+    Barrier(pList, pFrames->m_pResource, READ, UAV);
+  }
   // The resolve after it is the AO's.
   r->GpuSection("ao");
 
@@ -240,7 +289,11 @@ bool CAORays::Dispatch(const SAOFrame &Frame)
   m_PrevJitter[0] = fc.vJitter[0];
   m_PrevJitter[1] = fc.vJitter[1];
   m_nFrame = bDenoise ? r->m_nFrames : -1;
-  if (r->m_pFrameDump)
+  if (r->m_pFrameDump && m_bGI)
+    fprintf(r->m_pFrameDump.get(), "rt gi: %d x %d, a ray for each %d x %d pixels (%d %d of them), %g m, bounce %g, outdoor ambient %.3f %.3f %.3f, to %.1f m, denoise %d, history %d\n",
+            w, h, nStep, nStep, (int)rc.nTrace[1], (int)rc.nTrace[2], rc.vParams[0], rc.vGI[0], rc.vOutdoorAmbient[0], rc.vOutdoorAmbient[1],
+            rc.vOutdoorAmbient[2], rc.vParams[1], bDenoise ? 1 : 0, bHistory ? 1 : 0);
+  else if (r->m_pFrameDump)
     fprintf(r->m_pFrameDump.get(), "rt ao: %d x %d, a ray for each %d x %d pixels (%d %d of them), %g m, to %.1f m, denoise %d, history %d\n", w, h,
             nStep, nStep, (int)rc.nTrace[1], (int)rc.nTrace[2], rc.vParams[0], rc.vParams[1], bDenoise ? 1 : 0, bHistory ? 1 : 0);
   return true;
@@ -250,5 +303,10 @@ bool CAORays::Dispatch(const SAOFrame &Frame)
 
 std::unique_ptr<IAmbientOcclusion> CreateAORays()
 {
-  return std::make_unique<CAORays>();
+  return std::make_unique<CAORays>(false);
+}
+
+std::unique_ptr<IAmbientOcclusion> CreateGIRays()
+{
+  return std::make_unique<CAORays>(true);
 }

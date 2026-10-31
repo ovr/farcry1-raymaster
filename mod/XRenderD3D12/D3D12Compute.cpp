@@ -35,6 +35,9 @@
 #include "RayAOTrace_CS.h"
 #include "RayAOTemporal_CS.h"
 #include "RayAOFilter_CS.h"
+#include "RayGITrace_CS.h"
+#include "RayGITemporal_CS.h"
+#include "RayGIFilter_CS.h"
 
 using Microsoft::WRL::ComPtr;
 
@@ -71,6 +74,9 @@ const SKernel s_Kernels[eD3D12K_Num] =
   { "ambient occlusion by rays", g_RayAOTrace_CS, sizeof(g_RayAOTrace_CS), true },
   { "ambient occlusion by rays (history)", g_RayAOTemporal_CS, sizeof(g_RayAOTemporal_CS), true },
   { "ambient occlusion by rays (filter)", g_RayAOFilter_CS, sizeof(g_RayAOFilter_CS), true },
+  { "ambient light by rays", g_RayGITrace_CS, sizeof(g_RayGITrace_CS), true },
+  { "ambient light by rays (history)", g_RayGITemporal_CS, sizeof(g_RayGITemporal_CS), true },
+  { "ambient light by rays (filter)", g_RayGIFilter_CS, sizeof(g_RayGIFilter_CS), true },
 };
 static_assert(sizeof(s_Kernels) / sizeof(s_Kernels[0]) == eD3D12K_Num, "a kernel for each ED3D12Kernel");
 
