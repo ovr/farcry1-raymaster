@@ -653,13 +653,18 @@ public:
   bool WantsRays() const;
   //! The rays' mask for the shaders: d3d12_RTMask's kinds, 0x100 with d3d12_RTShadows.
   uint32 RayMask() const;
-  //! Before the main view's opaque list (not its reflection, sprites, shadow maps, cubes or heat
-  //! vision): its draws go into the scene for rays, the first such view of a frame; bTraced: the view
-  //! draws with rays (a water surface), else only the static BLAS are built. Without a cvar that
-  //! wants rays the scene's memory goes.
-  void BeginRayCapture(bool bTraced);
-  //! After the main view's opaque list: the builds of the scene, for the draws after it.
-  void BuildRayScene();
+  //! Before the main view's opaque list is drawn (not its reflection, sprites, shadow maps, cubes or
+  //! heat vision; the first such view of a frame): its draws make the scene for rays (a walk over
+  //! Opaque, m_bRayCaptureWalk: DrawLeafItem sets each draw up without its lights, DrawGeometry hands
+  //! it to the scene and draws nothing; the far vegetation sprites drawn by the 3D engine for it),
+  //! with the water reflection's, and its builds go to the GPU (on the compute queue, which the
+  //! frame's list waits for at the first draw or pass with rays). bTraced: the view draws with rays
+  //! (a water surface), else only the static BLAS are built. Without a cvar that wants rays the
+  //! scene's memory goes.
+  void BuildRayScene(std::span<const SRenderItem> Opaque, bool bTraced);
+  //! This frame's TLAS for a draw or pass that traces rays, the frame's list from here on after its
+  //! builds; 0 when there is none.
+  D3D12_GPU_VIRTUAL_ADDRESS UseRayScene();
   //! d3d12_RTDebug: the scene for rays seen from the main view's camera, over the whole picture
   //! (after EndMainScene).
   void DrawRayDebug();
@@ -1226,7 +1231,7 @@ public:
   std::unique_ptr<CD3D12Pipeline> m_pPipeline;
   std::unique_ptr<CD3D12Compute> m_pCompute;
   std::unique_ptr<CD3D12RayScene> m_pRayScene;
-  bool m_bRayTlas = false;                  //!< the scene being captured gets a TLAS (BeginRayCapture)
+  bool m_bRayTlas = false;                  //!< the scene being captured gets a TLAS (BuildRayScene)
   std::unique_ptr<CTextureManager> m_pTextures;
   std::unique_ptr<CShaderManager> m_pShaders;
   std::unique_ptr<CScene> m_pScene;
@@ -1328,6 +1333,7 @@ public:
   bool m_bHeatVision = false;               //!< EF_EnableHeatVision
   bool m_bHeatPass = false;                 //!< the main view's items are drawn in heat vision (DF2_HEAT)
   bool m_bDepthPrepass = false;             //!< d3d12_DepthPrepass: the main view's opaque list into the depth alone (DrawItems)
+  bool m_bRayCaptureWalk = false;           //!< the main view's opaque list set up for the scene for rays, not drawn (BuildRayScene)
   float m_fDrawHeat = 0;                    //!< the heat of the item being drawn (vHeat.x)
   float m_fLineWidth = 1;
 

@@ -10,9 +10,11 @@
 //	  XRENDERD3D12_NORT=1. Without them there are no rays, the cvars that
 //	  want them change nothing and d3d12_RTReflections is unregistered
 //	  (the menu greys out its list).
-//	- Capture: while the main view's opaque list is drawn (CScene::EndEf3D,
-//	  BeginCapture .. EndCapture), DrawGeometry hands its draws to
-//	  CaptureDraw: those of the general program that write the depth, do
+//	- Capture: before the main view's opaque list is drawn (CScene::EndEf3D,
+//	  CD3D12Renderer::BuildRayScene, BeginCapture .. EndCapture), its items
+//	  are set up as the list will draw them, without their lights, and
+//	  DrawGeometry hands their draws to CaptureDraw in place of drawing
+//	  them. It keeps those of the general program that write the depth, do
 //	  not blend and are triangle lists in world or object space. A draw
 //	  whose mWorld is not the one of its mWorldViewProj is left out.
 //	  A draw with a depth bias (a decal on a surface) is left out, and of
@@ -35,7 +37,7 @@
 //	  BLAS of the frame (built fast) in the frame slot's memory. The builds
 //	  of a frame are limited (MAX_*_TRIANGLES); what is over waits for the
 //	  next frames.
-//	- TLAS: built after the opaque list (Build) in a frame that traces rays
+//	- TLAS: built before the opaque list (Build) in a frame that traces rays
 //	  (a water surface in the main view's lists, or d3d12_RTDebug), one
 //	  instance per draw whose kinds d3d12_RTMask has all of, the instance's
 //	  transform its mWorld, its mask and InstanceContributionToHitGroupIndex
@@ -44,6 +46,10 @@
 //	  frame's nor the TLAS: away from the water 0.2 ms of the GPU and 0.1 ms
 //	  of the CPU less (the time demos of Volcano 340 -> 361 FPS, Research
 //	  446 -> 485).
+//	- Queues: with d3d12_RTAsync the builds run on the compute queue once
+//	  the uploads so far are done, beside the frame's work on the GPU; the
+//	  frame's list waits for them at the first draw or pass that traces rays
+//	  (CD3D12Renderer::UseRayScene), else at its end.
 //	- Instances: an SRayInstance per instance of the TLAS (its InstanceID),
 //	  in per frame memory: the raw views of its vertices, indices and second
 //	  stream (CD3D12Upload::GetRawSRV) and the part of its draw's constants

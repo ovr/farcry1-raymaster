@@ -483,7 +483,9 @@ void CD3D12Device::WaitForGPU()
   // The frame's list is recorded but not submitted, and what it uses may have been released with
   // the frame's fence (GetFrameFence: the pools' ranges, DeferredRelease, the descriptors). That
   // value signalled now would free them before the list runs; EndFrame signals it after the list.
-  // The frames before have their values done by the time this one is.
+  // The frames before have their values done by the time this one is. The compute list of the frame
+  // too, and the frame's list after it from here on.
+  QueueWaitAsyncCompute();
   m_pQueue->Signal(m_pFlushFence.Get(), ++m_nFlushFence);
   WaitForValue(m_pFlushFence.Get(), m_nFlushFence);
 }
@@ -1315,13 +1317,7 @@ void CD3D12Device::EndFrame(bool bPresent, bool bVSync)
     m_nGpuMarks[m_nFrameSlot] = n + 1;
     m_pCmdList->ResolveQueryData(m_pTimestamps.Get(), D3D12_QUERY_TYPE_TIMESTAMP, nFirst, n + 1, m_pTimestampReadback.Get(), sizeof(uint64) * nFirst);
   }
-  // The compute lists' (the frame's list waited for them).
-  if (const int n = m_nComputeLists[m_nFrameSlot]; n > 0)
-  {
-    const uint32 nFirst = m_nFrameSlot * COMPUTE_LISTS * 2;
-    m_pCmdList->ResolveQueryData(m_pComputeTimestamps.Get(), D3D12_QUERY_TYPE_TIMESTAMP, nFirst, n * 2, m_pComputeTimestampReadback.Get(),
-                                 sizeof(uint64) * nFirst);
-  }
+  // The compute lists resolved theirs (SubmitAsyncCompute).
   if (const int n = m_nOcclusions[m_nFrameSlot]; n > 0)
   {
     const uint32 nFirst = m_nFrameSlot * OCCLUSION_QUERIES;
@@ -1357,6 +1353,8 @@ void CD3D12Device::EndFrame(bool bPresent, bool bVSync)
   }
   // A removed device, whether the frame was presented or not (a demo's frames need not be).
   ReportDeviceRemoved(hr, "the frame's end");
+  // The frame's fence after its compute lists too (what they used goes with it).
+  QueueWaitAsyncCompute();
   m_nFrameFence[m_nFrameSlot] = Signal();
   m_nFrameSlot = (m_nFrameSlot + 1) % D3D12_FRAMES;
   m_bInFrame = false;
@@ -1391,32 +1389,77 @@ void CD3D12Device::SubmitAsyncCompute()
   FUNCTION_PROFILER(iSystem, PROFILE_RENDERER);
   if (!m_bInFrame || !m_pComputeList)
     return;
+  // The compute list's timestamps to the readback buffer by itself: the frame's list may run before it
+  // is done.
   if (m_bComputeTimed)
   {
     int &n = m_nComputeLists[m_nFrameSlot];
-    m_pComputeList->EndQuery(m_pComputeTimestamps.Get(), D3D12_QUERY_TYPE_TIMESTAMP, (m_nFrameSlot * COMPUTE_LISTS + n) * 2 + 1);
+    const UINT nQuery = (UINT)(m_nFrameSlot * COMPUTE_LISTS + n) * 2;
+    m_pComputeList->EndQuery(m_pComputeTimestamps.Get(), D3D12_QUERY_TYPE_TIMESTAMP, nQuery + 1);
+    m_pComputeList->ResolveQueryData(m_pComputeTimestamps.Get(), D3D12_QUERY_TYPE_TIMESTAMP, nQuery, 2, m_pComputeTimestampReadback.Get(),
+                                     sizeof(uint64) * nQuery);
     n++;
     m_bComputeTimed = false;
   }
   m_pComputeList->Close();
-  m_pCmdList->Close();
-  // The uploads, then the frame's list so far; the compute list once the uploads are done.
+  // The uploads so far, the compute list once they are done. The frame's list goes on: it runs after
+  // these uploads anyway, and splitting it here would cost the GPU a pause between its two parts.
   if (g_pRenderer->m_pUpload)
     g_pRenderer->m_pUpload->Flush();
   m_pQueue->Signal(m_pUploadFence.Get(), ++m_nUploadFence);
-  ID3D12CommandList *pList = m_pCmdList.Get();
-  m_pQueue->ExecuteCommandLists(1, &pList);
   m_pComputeQueue->Wait(m_pUploadFence.Get(), m_nUploadFence);
   ID3D12CommandList *pCompute = m_pComputeList.Get();
   m_pComputeQueue->ExecuteCommandLists(1, &pCompute);
   m_pComputeQueue->Signal(m_pComputeFence.Get(), ++m_nComputeFence);
+  m_bComputePending = true;
+}
+
+void CD3D12Device::WaitAsyncCompute()
+{
+  if (!m_bInFrame || !m_bComputePending)
+    return;
+  FUNCTION_PROFILER(iSystem, PROFILE_RENDERER);
+  // The wait is a section of its own, then the one before goes on.
+  const int nMarks = m_nGpuMarks[m_nFrameSlot];
+  const char *szSection = nMarks > 0 ? m_GpuSections[m_nFrameSlot][nMarks - 1] : nullptr;
+  GpuSection("ray scene");
+  m_pCmdList->Close();
+  if (g_pRenderer->m_pUpload)
+    g_pRenderer->m_pUpload->Flush();
+  ID3D12CommandList *pList = m_pCmdList.Get();
+  m_pQueue->ExecuteCommandLists(1, &pList);
+  QueueWaitAsyncCompute();
+  ContinueCmdList();
+  if (szSection)
+    GpuSection(szSection);
+}
+
+void CD3D12Device::QueueWaitAsyncCompute()
+{
+  if (!m_bComputePending)
+    return;
   m_pQueue->Wait(m_pComputeFence.Get(), m_nComputeFence);
-  // The frame goes on in the same allocator (its memory kept until the slot's fence).
+  m_bComputePending = false;
+}
+
+void CD3D12Device::ContinueCmdList()
+{
   m_pCmdList->Reset(m_pAllocators[m_nFrameSlot].Get(), nullptr);
   m_nStateEpoch++;
+  m_szDredSection = nullptr;
   BindRootSignature();
   if (!m_pOffscreen)
+  {
     SetBackBufferTargets();
+    return;
+  }
+  // The off screen target as SetOffscreenTargets or SetShadowMapTarget bound it.
+  m_pCmdList->OMSetRenderTargets(m_hOffscreenRTV.ptr ? 1 : 0, m_hOffscreenRTV.ptr ? &m_hOffscreenRTV : nullptr, FALSE,
+                                 m_hOffscreenDSV.ptr ? &m_hOffscreenDSV : nullptr);
+  const D3D12_VIEWPORT vp = { 0, 0, (float)m_nOffscreenWidth, (float)m_nOffscreenHeight, 0, 1 };
+  const D3D12_RECT rc = { 0, 0, m_nOffscreenWidth, m_nOffscreenHeight };
+  m_pCmdList->RSSetViewports(1, &vp);
+  m_pCmdList->RSSetScissorRects(1, &rc);
 }
 
 void CD3D12Device::FlushFrame()
@@ -1436,6 +1479,7 @@ void CD3D12Device::FlushFrame()
     g_pRenderer->m_pUpload->Flush();
   ID3D12CommandList *pList = m_pCmdList.Get();
   m_pQueue->ExecuteCommandLists(1, &pList);
+  QueueWaitAsyncCompute();
   WaitForFence(Signal());
   OpenCmdList();
   if (szSection)
