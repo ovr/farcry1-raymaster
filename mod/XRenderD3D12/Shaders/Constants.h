@@ -172,6 +172,7 @@ struct SFrameConstants
   XR_FLOAT4(vShadowTint);         //!< rgb: the terrain in the shadow of a live caster (DF2_SHADOW_TINT); w d3d12_ShadowDebug
   XR_FLOAT4(vFoliage);            //!< DF2_FOLIAGE: x the strength (d3d12_FoliageTranslucency), y the power of the cosine of the angle
                                   //!< to the sun, z the distance where it ends (m), w 2 / that distance (all of it up to half of it)
+  XR_UINT4(nRaySun);              //!< x the texture table index of the mask of the sun's shadow by rays (XR_RAY_SUN, RaySun.cpp)
 };
 
 //! b1: per draw.

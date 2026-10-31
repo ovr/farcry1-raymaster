@@ -666,7 +666,8 @@ public:
   void BuildRayScene(std::span<const SRenderItem> Opaque, bool bTraced);
   //! The sun's cascades draw the scene of a camera towards the sun or the live casters (Items): with
   //! d3d12_RTOffscreen their parts join the scene for rays, walked by BuildRayScene after the main
-  //! view's (those it has too left out).
+  //! view's (those it has too left out); with d3d12_RTSunShadows the live casters' are XR_RAY_LIVE
+  //! there.
   void NoteRayOffscreenItems(std::span<const SRenderItem> Items);
   //! A leaf item of a class that BuildRayScene walks (not the weapon in the hands, not a light pass).
   static bool IsRayWalked(const SRenderItem &it);
@@ -676,6 +677,38 @@ public:
   //! d3d12_RTDebug: the scene for rays seen from the main view's camera, over the whole picture
   //! (after EndMainScene).
   void DrawRayDebug();
+
+  //////////////////////////////////////////////////////////////////////////
+  // RaySun.cpp: the sun's shadow by rays (d3d12_RTSunShadows)
+
+  //! d3d12_RTSunShadows is on and can be: rays, the depth prepass and the cascades.
+  bool WantsRaySun() const;
+  //! In the main view's opaque list after the depth prepass (DrawItems): the mask of the sun's
+  //! visibility at the surfaces of the depth buffer, which the list's receivers of the cascades take
+  //! (SPipelineKey::bCascades 3) until EndRaySunMask.
+  void DrawRaySunMask();
+  //! After the main view's opaque list: the mask no longer read.
+  void EndRaySunMask();
+  //! m_RaySun's targets and views for nWidth x nHeight, made when it changes. False: none.
+  bool EnsureRaySunTargets(int nWidth, int nHeight);
+  void ReleaseRaySun();
+
+  struct SRaySunState
+  {
+    CD3D12Texture *pRays = nullptr;         //!< CSTrace's rays (R16G16B16A16_FLOAT, UNORDERED_ACCESS)
+    CD3D12Texture *pHistory[2] = {};        //!< the history, this frame's and the frame before's (R16G16B16A16_FLOAT, NON_PIXEL_SHADER_RESOURCE)
+    int nHistory = 0;                       //!< pHistory's current one
+    CD3D12Texture *pMask = nullptr;         //!< the mask (R32G32_FLOAT, PIXEL_SHADER_RESOURCE)
+    int nTables[4] = { -1, -1, -1, -1 };    //!< the kernels' UAV tables (RaySun.cpp)
+    int nWidth = 0, nHeight = 0;
+    ComPtr<ID3D12Resource> pDepth;          //!< the depth buffer nDepthSRV is of (kept: a new one is never at its address)
+    int nDepthSRV = -1;
+    float PrevViewProj[16] = {};            //!< the view's world to clip of the last mask
+    float PrevJitter[2] = {};               //!< and its jitter (SFrameConstants::vJitter.xy)
+    int nFrame = -1;                        //!< m_nFrames of the last mask with a history (-1: none to blend into)
+    bool bActive = false;                   //!< the opaque list reads the mask (DrawRaySunMask .. EndRaySunMask)
+  };
+  SRaySunState m_RaySun;
 
   //////////////////////////////////////////////////////////////////////////
   // Water.cpp
@@ -1343,6 +1376,7 @@ public:
   bool m_bDepthPrepass = false;             //!< d3d12_DepthPrepass: the main view's opaque list into the depth alone (DrawItems)
   bool m_bRayCaptureWalk = false;           //!< the main view's opaque list set up for the scene for rays, not drawn (BuildRayScene)
   std::vector<SRenderItem> m_RayOffscreenItems;   //!< NoteRayOffscreenItems' of the frame m_nRayOffscreenFrame
+  std::unordered_set<uint64> m_RayLiveParts;       //!< the PartKeys of the live casters of that frame (d3d12_RTSunShadows: XR_RAY_LIVE)
   int m_nRayOffscreenFrame = -1;
   float m_fDrawHeat = 0;                    //!< the heat of the item being drawn (vHeat.x)
   float m_fLineWidth = 1;
@@ -1412,6 +1446,9 @@ public:
   int CV_d3d12_RTAsync = 1;                 //!< the ray scene's builds on the compute queue beside the frame
   int CV_d3d12_RTOffscreen = 1;             //!< what is out of the main view in the scene for rays: 1 for the effects that need it, 2 always
   int CV_d3d12_RTReflections = 0;           //!< the water's reflection by rays: 1 in place of the screen space one, 2 where it misses
+  int CV_d3d12_RTSunShadows = 0;            //!< the sun's shadow by rays in place of the cascades' (RaySun.cpp)
+  float CV_d3d12_RTSunAngle = 0.53f;        //!< the sun's disc, degrees across (the soft edges of its shadow)
+  int CV_d3d12_RTSunDenoise = 1;            //!< the sun's shadow by rays blended over the frames and its soft edges filtered
   int CV_d3d12_ToneMap = 1;                 //!< the HDR pipeline's tone map: 0 clamp, 1 soft shoulder, 2 ACES fitted, 3 AgX
   float CV_d3d12_ToneMapKnee = 0.85f;       //!< where the soft shoulder starts (a display value)
   float CV_d3d12_Exposure = 0;              //!< the exposure's compensation, EV

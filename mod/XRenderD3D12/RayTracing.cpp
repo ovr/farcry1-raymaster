@@ -217,6 +217,7 @@ void CD3D12RayScene::BeginCapture(const Matrix44 &ViewProj, const Vec3 &vCamera)
   m_nFrame++;
   m_bCapturing = m_pDevice5 != nullptr;
   SetCaptureSource(SOURCE_VIEW);
+  SetCaptureLive(false);
 }
 
 void CD3D12RayScene::BeginReflectionCapture(const Matrix44 &ViewProj)
@@ -420,6 +421,7 @@ void CD3D12RayScene::CaptureDraw(const SPipelineKey &Key, const SDrawConstants &
   }
   d.nHash = DrawHash(d);
   d.eSource = bReflection ? SOURCE_REFLECTION : m_eCaptureSource;
+  d.bLive = !bReflection && m_bCaptureLive;
   (bReflection ? m_ReflectionDraws : m_Draws).push_back(d);
 }
 
@@ -828,7 +830,7 @@ void CD3D12RayScene::Build(FILE *pDump, bool bTop)
     pList->ResourceBarrier(1, &Barrier);
 
   // The TLAS, in a frame that traces rays.
-  UINT nInstance = 0;
+  UINT nInstance = 0, nLive = 0;
   if (nInstances)
   {
     const SD3D12FrameAlloc InstanceMem = g_pRenderer->m_pUpload->AllocFrame(nInstances * (uint32)sizeof(D3D12_RAYTRACING_INSTANCE_DESC),
@@ -843,8 +845,9 @@ void CD3D12RayScene::Build(FILE *pDump, bool bTop)
       D3D12_RAYTRACING_INSTANCE_DESC Instance = {};
       memcpy(Instance.Transform, d.Transform, sizeof(Instance.Transform));
       Instance.InstanceID = nInstance;
-      Instance.InstanceMask = d.nKind;
-      Instance.InstanceContributionToHitGroupIndex = d.nKind;
+      Instance.InstanceMask = d.nKind | (d.bLive ? XR_RAY_LIVE : 0);
+      Instance.InstanceContributionToHitGroupIndex = Instance.InstanceMask;
+      nLive += d.bLive ? 1 : 0;
       Instance.Flags = D3D12_RAYTRACING_INSTANCE_FLAG_TRIANGLE_CULL_DISABLE;
       Instance.AccelerationStructure = d.nBlas;
       pRayInstances[nInstance] = d.Inst;
@@ -861,6 +864,7 @@ void CD3D12RayScene::Build(FILE *pDump, bool bTop)
     m_nBuiltFrame = g_pRenderer->m_nFrames;
     m_nBuiltSlot = nSlot;
     m_nInstances = RayInstanceMem.nGPU;
+    m_nLiveInstances = nLive;
   }
   if (pAsync)
     Device.SubmitAsyncCompute();
@@ -872,11 +876,12 @@ void CD3D12RayScene::Build(FILE *pDump, bool bTop)
     for (const auto &p : m_Pools)
       nPools += p->nSize;
     fprintf(pDump,
-      "ray scene: %s%u instances of %d draws (%d out of the main view from the sun's cascades, %d of the water reflection; %d left out "
+      "ray scene: %s%u instances (%u of live casters) of %d draws (%d out of the main view from the sun's cascades, %d of the water "
+      "reflection; %d left out "
       "by their transforms, %d by d3d12_RTMask or as passes over others), %u triangles; static BLAS %d kept, %d built (%u triangles), %d "
       "waiting; %d of this frame (%u triangles), %d over the limit; static BLAS %.1f MB (%d, pools %.1f MB), frame BLAS %.1f MB, TLAS "
       "%.1f KB, scratch %.1f MB\n",
-      bTop ? "" : "no TLAS (nothing in the frame traces rays), ", nInstance, (int)m_Draws.size(), nOffscreen, nReflection, m_nSkippedTransform,
+      bTop ? "" : "no TLAS (nothing in the frame traces rays), ", nInstance, nLive, (int)m_Draws.size(), nOffscreen, nReflection, m_nSkippedTransform,
       nLeftOut, nTris, nCached, nNewStatic, nNewStaticTris, nWaiting, nFrame,
       nFrameTris, nOver,
       m_nStaticBytes / 1048576.0, (int)m_Static.size(), nPools / 1048576.0, nFrameBlas / 1048576.0, TopInfo.ResultDataMaxSizeInBytes / 1024.0,
@@ -898,7 +903,7 @@ D3D12_GPU_VIRTUAL_ADDRESS CD3D12RayScene::GetTLAS() const
 
 bool CD3D12Renderer::WantsRays() const
 {
-  return m_pRayScene && m_pRayScene->IsSupported() && (CV_d3d12_RTDebug != 0 || CV_d3d12_RTReflections > 0);
+  return m_pRayScene && m_pRayScene->IsSupported() && (CV_d3d12_RTDebug != 0 || CV_d3d12_RTReflections > 0 || WantsRaySun());
 }
 
 uint32 CD3D12Renderer::RayMask() const
@@ -919,21 +924,32 @@ void CD3D12Renderer::BuildRayScene(std::span<const SRenderItem> Opaque, bool bTr
   // One scene a frame: rebuilt for another top level view, it would change under the draws of the first.
   if (!IsAOView() || m_pRayScene->GetBuiltFrame() == m_nFrames)
     return;
-  m_bRayTlas = bTraced || CV_d3d12_RTDebug != 0;
+  m_bRayTlas = bTraced || CV_d3d12_RTDebug != 0 || WantsRaySun();
   m_pRayScene->BeginCapture(m_CameraView * m_ProjMatrix, m_Camera.GetPos());
   // The list's draws as it will draw them, without their lights, before it is drawn.
   const float fDepthMin = m_fDepthMin, fDepthMax = m_fDepthMax;
   const bool bItemScissor = m_bItemScissor;
   const RECT ItemScissor = m_ItemScissor;
   m_bRayCaptureWalk = true;
+  // The live casters' parts (the live set of the sun's cascades) as such.
+  const bool bLiveParts = m_nRayOffscreenFrame == m_nFrames && !m_RayLiveParts.empty();
+  auto Walk = [&](const SRenderItem &it)
+  {
+    if (bLiveParts)
+      m_pRayScene->SetCaptureLive(m_RayLiveParts.count(PartKey(it)) != 0);
+    DrawLeafItem(it);
+  };
   for (const SRenderItem &it : Opaque)
   {
     if (!it.pRE)
       continue;
     if (it.pRE->m_Type == eDATA_FarTreeSprites)
+    {
+      m_pRayScene->SetCaptureLive(false);
       it.pRE->mfDraw(RE_ShaderArg(it.pShader), nullptr);
+    }
     if (IsRayWalked(it))
-      DrawLeafItem(it);
+      Walk(it);
   }
   // The parts of the sun's cascades out of the main view (their objects are the frame's): set up as
   // the main view would draw them.
@@ -950,10 +966,11 @@ void CD3D12Renderer::BuildRayScene(std::span<const SRenderItem> Opaque, bool bTr
     for (const SRenderItem &it : m_RayOffscreenItems)
     {
       if (Parts.insert(PartKey(it)).second)
-        DrawLeafItem(it);
+        Walk(it);
     }
   }
   m_RayOffscreenItems.clear();
+  m_RayLiveParts.clear();
   m_bRayCaptureWalk = false;
   m_fDepthMin = fDepthMin;
   m_fDepthMax = fDepthMax;
@@ -992,22 +1009,28 @@ bool CD3D12Renderer::WantsOffscreenRays() const
 {
   // 1: for what traces rays from the surfaces of the main view (not the water's reflection, which
   // sees what is in front of the camera and has the planar reflection's draws).
-  return WantsRays() && (CV_d3d12_RTOffscreen >= 2 || (CV_d3d12_RTOffscreen == 1 && CV_d3d12_RTDebug != 0));
+  return WantsRays() && (CV_d3d12_RTOffscreen >= 2 || (CV_d3d12_RTOffscreen == 1 && (CV_d3d12_RTDebug != 0 || WantsRaySun())));
 }
 
 void CD3D12Renderer::NoteRayOffscreenItems(std::span<const SRenderItem> Items)
 {
-  if (!WantsOffscreenRays())
+  const bool bOffscreen = WantsOffscreenRays(), bLive = m_nCascadeSet == 1 && WantsRaySun();
+  if (!bOffscreen && !bLive)
     return;
   if (m_nRayOffscreenFrame != m_nFrames)
   {
     m_RayOffscreenItems.clear();
+    m_RayLiveParts.clear();
     m_nRayOffscreenFrame = m_nFrames;
   }
   for (const SRenderItem &it : Items)
   {
-    if (IsRayWalked(it))
+    if (!IsRayWalked(it))
+      continue;
+    if (bOffscreen)
       m_RayOffscreenItems.push_back(it);
+    if (bLive)
+      m_RayLiveParts.insert(PartKey(it));
   }
 }
 

@@ -77,7 +77,13 @@
 //	      lerp(vShadowTint, 1, v) after the terrain's cliff textures. Only in
 //	      the pixel shaders with XR_CASCADES (Shaders.cmake), which the draws
 //	      with DF2_SUN_CASCADES or DF2_CASCADE_CASTER get: the others' code is
-//	      the same as without the cascades
+//	      the same as without the cascades. With XR_RAY_SUN too (the main
+//	      view's opaque list with d3d12_RTSunShadows, RaySun.cpp): v from the
+//	      mask of the sun's shadow by rays where it is of the pixel's surface
+//	      (its view depth the pixel's: the depth prepass's surfaces; RaySunMask),
+//	      giving way to the cascades over the end of its range (DF_SHADOW_PASS:
+//	      1 there, as where the cascades reach); d3d12_ShadowDebug 4 shows it
+//	      as the cascades' with blue where it counts
 //	    DF_PIXEL_LIGHTING: DF_LIGHTING is lit here instead of per vertex
 //	      (DrawLighting: the same sum, but the lights' colours clamped to 1 and
 //	      point lights falling off as saturate(1 - d / radius); on the terrain
@@ -456,6 +462,20 @@ float3 FoliageLight(float3 vPos)
 }
 #endif
 
+#ifdef XR_RAY_SUN
+//! The mask of the sun's shadow by rays (RaySun.hlsl) at the pixel vPos (SV_Position): x the sun's
+//! visibility from all the casters, y from the live ones; fWeight how much it counts, 0 where the mask
+//! is of another surface (its view depth not the pixel's: a surface the depth prepass does not have).
+float2 RaySunMask(float4 vPos, out float fWeight)
+{
+  const float2 v = g_Textures[g_Frame.nRaySun.x].Load(int3(vPos.xy, 0)).xy;
+  const float d = g_Frame.vDepthParams.y / (vPos.z + g_Frame.vDepthParams.x);
+  const uint n = (uint)v.y;
+  fWeight = abs(v.x - d) <= 0.001 * d + 0.003 ? (float)(n >> 16) / 255 : 0;
+  return float2(n & 255, (n >> 8) & 255) / 255;
+}
+#endif
+
 float4 ShadePixel(SVertexOutput In)
 {
 #ifdef XR_AMBIENT
@@ -513,7 +533,17 @@ float4 ShadePixel(SVertexOutput In)
     vTex.rgb = 0.75 * vTex.rgb + 0.25;
 
   float fSun = HasFlag(DF_SHADOWS) ? SunVisibility(In.vWorldPos, In.vNormal, In.vPos.xy) : 1;
-#ifdef XR_CASCADES
+#ifdef XR_RAY_SUN
+  float fRayWeight = 0;
+  float2 vRaySun = 1;
+  if (HasFlag2(DF2_SUN_CASCADES))
+  {
+    vRaySun = RaySunMask(In.vPos, fRayWeight);
+    if (fRayWeight < 1)
+      fSun = SunCascades(In.vWorldPos, In.vNormal, In.vPos.xy, fSun);
+    fSun = lerp(fSun, HasFlag(DF_SHADOW_PASS) ? 1 : HasFlag2(DF2_CASCADES_LIVE) ? vRaySun.y : vRaySun.x, fRayWeight);
+  }
+#elif defined(XR_CASCADES)
   if (HasFlag2(DF2_SUN_CASCADES))
     fSun = SunCascades(In.vWorldPos, In.vNormal, In.vPos.xy, fSun);
 #endif
@@ -743,6 +773,10 @@ float4 ShadePixel(SVertexOutput In)
 #ifdef XR_CASCADES
   if (HasFlag2(DF2_SUN_CASCADES) && g_Frame.vShadowTint.w >= 3 && !HasFlag(DF_SHADOW_PASS))
     vColor.rgb = CascadeDebug(In.vWorldPos, In.vNormal, In.vPos.xy, vColor.rgb);
+#endif
+#ifdef XR_RAY_SUN
+  if (HasFlag2(DF2_SUN_CASCADES) && g_Frame.vShadowTint.w >= 4 && !HasFlag(DF_SHADOW_PASS) && fRayWeight > 0)
+    vColor.rgb = lerp(vColor.rgb, float3(1 - vRaySun.x, 1 - vRaySun.y, 0.6) * 0.8 + 0.2 * dot(saturate(vColor.rgb), float3(0.299, 0.587, 0.114)), fRayWeight);
 #endif
   return vColor;
 }

@@ -46,7 +46,8 @@
 //	  (a water surface in the main view's lists, or d3d12_RTDebug), one
 //	  instance per draw whose kinds d3d12_RTMask has all of, the instance's
 //	  transform its mWorld, its mask and InstanceContributionToHitGroupIndex
-//	  its kind (Shaders/RayConstants.h), culling off. In another frame only
+//	  its kind (Shaders/RayConstants.h; with XR_RAY_LIVE for a live caster
+//	  of the sun's), culling off. In another frame only
 //	  the missing static BLAS are built (for when the water shows), not the
 //	  frame's nor the TLAS: away from the water 0.2 ms of the GPU and 0.1 ms
 //	  of the CPU less (the time demos of Volcano 340 -> 361 FPS, Research
@@ -112,6 +113,8 @@ public:
   void BeginCapture(const Matrix44 &ViewProj, const Vec3 &vCamera);
   //! Where the draws captured from here on come from.
   void SetCaptureSource(ESource eSource) { m_eCaptureSource = eSource; }
+  //! The main view's draws captured from here on are of a live caster (XR_RAY_LIVE in their masks).
+  void SetCaptureLive(bool bLive) { m_bCaptureLive = bLive; }
   void EndCapture() { m_bCapturing = false; }
   bool IsCapturing() const { return m_bCapturing; }
   //! The water's planar reflection is drawn: its static draws until EndReflectionCapture replace those
@@ -132,6 +135,8 @@ public:
   D3D12_GPU_VIRTUAL_ADDRESS GetTLAS() const;
   //! Its instances (SRayInstance, by InstanceID), with GetTLAS.
   D3D12_GPU_VIRTUAL_ADDRESS GetInstances() const { return m_nInstances; }
+  //! Of them those of the live casters (XR_RAY_LIVE), with GetTLAS.
+  uint32 GetLiveInstances() const { return m_nLiveInstances; }
   //! The camera of the capture (Build's frame).
   const Matrix44 &GetViewProj() const { return m_ViewProj; }
   const Vec3 &GetCamera() const { return m_vCamera; }
@@ -185,6 +190,7 @@ private:
     uint32 nTexGeneration[4];       //!< CD3D12Descriptors::GetGeneration of Inst's textures (GetTextureSlots)
     uint64 nHash;                   //!< DrawHash
     ESource eSource;
+    bool bLive;                     //!< SetCaptureLive
   };
   //! A buffer of a frame slot that grows (RAYTRACING_ACCELERATION_STRUCTURE or UNORDERED_ACCESS).
   struct SSlotBuffer
@@ -230,11 +236,13 @@ private:
   Matrix44 m_ReflectionViewProj;
   std::vector<SDraw> m_ReflectionDraws;   //!< the static draws of the last water reflection
   ESource m_eCaptureSource = SOURCE_VIEW;
+  bool m_bCaptureLive = false;
   Vec3 m_vCamera = Vec3(0, 0, 0);
   int m_nFrame = 0;                 //!< counts BeginCapture
   int m_nBuiltFrame = -1;           //!< the renderer's m_nFrames of the last Build (GetTLAS)
   int m_nBuiltSlot = 0;
   D3D12_GPU_VIRTUAL_ADDRESS m_nInstances = 0;   //!< the last Build's SRayInstance array
+  uint32 m_nLiveInstances = 0;                  //!< of them the live casters'
   std::vector<SDraw> m_Draws;
   //! Build's DrawHash of the draws taken: open addressing, at most half full, 0 empty (a hash of 0
   //! counts as 1).

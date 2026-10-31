@@ -253,6 +253,17 @@ void CD3D12Renderer::RegisterVariables()
   iConsole->Register("d3d12_RTReflections", &CV_d3d12_RTReflections, 0, VF_DUMPTODISK,
                      "The water's reflection by rays: 0 off, 1 the rays in place of the screen space reflection, 2 both, the screen space "
                      "reflection where it finds the scene before it passes behind an object and the rays elsewhere (a device with DXR 1.1)");
+  iConsole->Register("d3d12_RTSunShadows", &CV_d3d12_RTSunShadows, 0, VF_DUMPTODISK,
+                     "The sun's shadow by rays (a device with DXR 1.1, d3d12_DepthPrepass and d3d12_ShadowCascades), towards the "
+                     "sun's disc from the surfaces of the depth prepass up to the end of the cascades, in place of the cascades' "
+                     "shadow (the other surfaces, alpha tested, leaves, blended, keep the cascades): 1 a ray for each 2 x 2 pixels, "
+                     "from each of them in turn; 2 a ray a pixel");
+  iConsole->Register("d3d12_RTSunAngle", &CV_d3d12_RTSunAngle, 0.53f, VF_DUMPTODISK,
+                     "With d3d12_RTSunShadows, the sun's disc in degrees across (0.53 as the sun's; 0: hard shadows): the soft edges "
+                     "of the shadow widen with the distance to what casts it");
+  iConsole->Register("d3d12_RTSunDenoise", &CV_d3d12_RTSunDenoise, 1, 0,
+                     "With d3d12_RTSunShadows, 1: the rays of the frames before blended in where the surface was and the soft edges "
+                     "filtered; 0: this frame's ray as it is");
   iConsole->Register("d3d12_RTShadows", &CV_d3d12_RTShadows, 1, VF_DUMPTODISK,
                      "1: the sun's shadow at the hits of the rays, by a ray towards the sun (the surfaces the sun's shadow falls on)");
   iConsole->Register("d3d12_RTAsync", &CV_d3d12_RTAsync, 1, 0,
@@ -428,6 +439,8 @@ WIN_HWND CD3D12Renderer::Init(int x,int y,int width,int height,unsigned int cbpp
   {
     iConsole->UnregisterVariable("d3d12_RTReflections", true);
     CV_d3d12_RTReflections = 0;
+    iConsole->UnregisterVariable("d3d12_RTSunShadows", true);
+    CV_d3d12_RTSunShadows = 0;
   }
   m_Viewport[0] = 0;
   m_Viewport[1] = 0;
@@ -696,6 +709,7 @@ void CD3D12Renderer::Release()
   ReleaseUpscaler();
   ReleaseHdr();
   ReleaseVolumetricLight();
+  ReleaseRaySun();
   ReleaseHdrOutput();
   m_pDetailTexture = nullptr;   // released with every texture
   m_pDefaultCube = nullptr;

@@ -315,6 +315,8 @@ void CD3D12Renderer::DrawItems(SRenderItem *pItems, int nItems, int eList)
     m_fDepthMax = fDepthMax;
     m_bItemScissor = bItemScissor;
     m_ItemScissor = ItemScissor;
+    // The sun's shadow by rays at the surfaces in the depth buffer, for the list's receivers.
+    DrawRaySunMask();
   }
   GpuSection(eList == eRL_Opaque ? "opaque" : eList == eRL_Nearest ? "nearest" : "water");
   if (m_pFrameDump)
@@ -377,6 +379,8 @@ void CD3D12Renderer::DrawItems(SRenderItem *pItems, int nItems, int eList)
   m_bItemScissor = false;
   m_fDepthMin = 0;
   m_fDepthMax = 1;
+  if (eList == eRL_Opaque)
+    EndRaySunMask();
 }
 
 float CD3D12Renderer::ItemHeat(const SRenderItem &it) const

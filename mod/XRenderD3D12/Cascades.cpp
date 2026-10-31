@@ -291,6 +291,7 @@ void CD3D12Renderer::UpdateSunCascades(std::span<const SRenderItem> MainItems)
 {
   FUNCTION_PROFILER(iSystem, PROFILE_RENDERER);
   m_RayOffscreenItems.clear();
+  m_RayLiveParts.clear();
   if (m_nCascades)
   {
     m_nCascades = 0;

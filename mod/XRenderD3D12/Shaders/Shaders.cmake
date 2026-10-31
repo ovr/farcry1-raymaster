@@ -42,6 +42,17 @@ xrender_d3d12_shader(General_Ambient_Foliage_PS General.hlsl ps_6_0 PSMain XR_AM
 xrender_d3d12_shader(General_Ambient_Foliage_Velocity_PS General.hlsl ps_6_0 PSMain XR_AMBIENT XR_FOLIAGE XR_VELOCITY)
 xrender_d3d12_shader(General_Ambient_Foliage_Hdr_PS General.hlsl ps_6_0 PSMain XR_AMBIENT XR_FOLIAGE XR_HDR)
 xrender_d3d12_shader(General_Ambient_Foliage_Hdr_Velocity_PS General.hlsl ps_6_0 PSMain XR_AMBIENT XR_FOLIAGE XR_VELOCITY XR_HDR)
+# The cascades' with the sun's visibility from the mask of its shadow by rays where the depth prepass has the
+# surface (XR_RAY_SUN, d3d12_RTSunShadows, SPipelineKey::bCascades 3): programs of their own, so that those of the
+# cascades stay as they were.
+xrender_d3d12_shader(General_RaySun_PS General.hlsl ps_6_0 PSMain XR_CASCADES XR_RAY_SUN)
+xrender_d3d12_shader(General_RaySun_Velocity_PS General.hlsl ps_6_0 PSMain XR_CASCADES XR_RAY_SUN XR_VELOCITY)
+xrender_d3d12_shader(General_RaySun_Hdr_PS General.hlsl ps_6_0 PSMain XR_CASCADES XR_RAY_SUN XR_HDR)
+xrender_d3d12_shader(General_RaySun_Hdr_Velocity_PS General.hlsl ps_6_0 PSMain XR_CASCADES XR_RAY_SUN XR_VELOCITY XR_HDR)
+xrender_d3d12_shader(General_Ambient_RaySun_PS General.hlsl ps_6_0 PSMain XR_AMBIENT XR_CASCADES XR_RAY_SUN)
+xrender_d3d12_shader(General_Ambient_RaySun_Velocity_PS General.hlsl ps_6_0 PSMain XR_AMBIENT XR_CASCADES XR_RAY_SUN XR_VELOCITY)
+xrender_d3d12_shader(General_Ambient_RaySun_Hdr_PS General.hlsl ps_6_0 PSMain XR_AMBIENT XR_CASCADES XR_RAY_SUN XR_HDR)
+xrender_d3d12_shader(General_Ambient_RaySun_Hdr_Velocity_PS General.hlsl ps_6_0 PSMain XR_AMBIENT XR_CASCADES XR_RAY_SUN XR_VELOCITY XR_HDR)
 
 # Water surfaces (eD3D12P_Water).
 xrender_d3d12_shader(Water_VS Water.hlsl vs_6_0 VSMain)
@@ -95,3 +106,8 @@ xrender_d3d12_shader(DepthTiles_CS DepthTiles.hlsl cs_6_0 CSMain)
 xrender_d3d12_shader(DepthTilesUp_CS DepthTiles.hlsl cs_6_0 CSMain XR_TILES_UP)
 xrender_d3d12_shader(VolumetricInject_CS Volumetric.hlsl cs_6_0 CSInject)
 xrender_d3d12_shader(VolumetricIntegrate_CS Volumetric.hlsl cs_6_0 CSIntegrate)
+# The sun's shadow by rays (d3d12_RTSunShadows, RaySun.cpp): Shader Model 6.5 (inline RayQuery), the compute root
+# signature with rays (D3D12Compute.h), run only on a device with DXR 1.1.
+xrender_d3d12_shader(RaySunTrace_CS RaySun.hlsl cs_6_5 CSTrace)
+xrender_d3d12_shader(RaySunTemporal_CS RaySun.hlsl cs_6_5 CSTemporal)
+xrender_d3d12_shader(RaySunFilter_CS RaySun.hlsl cs_6_5 CSFilter)

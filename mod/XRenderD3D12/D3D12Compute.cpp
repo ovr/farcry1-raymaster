@@ -11,6 +11,7 @@
 #include "Renderer.h"
 #include "D3D12Compute.h"
 #include "D3D12Descriptors.h"
+#include "D3D12Pipeline.h"
 
 // The kernels, compiled by dxc at build time (Shaders/Shaders.cmake).
 #include "Gtao_PrefilterDepths_CS.h"
@@ -28,6 +29,9 @@
 #include "DepthTilesUp_CS.h"
 #include "VolumetricInject_CS.h"
 #include "VolumetricIntegrate_CS.h"
+#include "RaySunTrace_CS.h"
+#include "RaySunTemporal_CS.h"
+#include "RaySunFilter_CS.h"
 
 using Microsoft::WRL::ComPtr;
 
@@ -39,6 +43,7 @@ struct SKernel
   const char *szName;
   const void *pCS;
   size_t nCS;
+  bool bRays;       //!< the root signature with rays (DispatchRays)
 };
 const SKernel s_Kernels[eD3D12K_Num] =
 {
@@ -57,7 +62,11 @@ const SKernel s_Kernels[eD3D12K_Num] =
   { "depth tiles (levels 5, 6)", g_DepthTilesUp_CS, sizeof(g_DepthTilesUp_CS) },
   { "volumetric light", g_VolumetricInject_CS, sizeof(g_VolumetricInject_CS) },
   { "volumetric light (integration)", g_VolumetricIntegrate_CS, sizeof(g_VolumetricIntegrate_CS) },
+  { "sun's shadow by rays", g_RaySunTrace_CS, sizeof(g_RaySunTrace_CS), true },
+  { "sun's shadow by rays (history)", g_RaySunTemporal_CS, sizeof(g_RaySunTemporal_CS), true },
+  { "sun's shadow by rays (filter)", g_RaySunFilter_CS, sizeof(g_RaySunFilter_CS), true },
 };
+static_assert(sizeof(s_Kernels) / sizeof(s_Kernels[0]) == eD3D12K_Num, "a kernel for each ED3D12Kernel");
 
 D3D12_STATIC_SAMPLER_DESC StaticSampler(UINT nRegister, D3D12_FILTER Filter)
 {
@@ -85,7 +94,7 @@ bool CD3D12Compute::Init(ID3D12Device *pDevice)
 {
   Shutdown();
   m_pDevice = pDevice;
-  return CreateRootSignature();
+  return CreateRootSignature() && CreateRayRootSignature();
 }
 
 void CD3D12Compute::Shutdown()
@@ -95,6 +104,7 @@ void CD3D12Compute::Shutdown()
   for (bool &b : m_bFailed)
     b = false;
   m_pRootSignature.Reset();
+  m_pRayRootSignature.Reset();
   m_pDevice = nullptr;
 }
 
@@ -147,14 +157,88 @@ bool CD3D12Compute::CreateRootSignature()
   return true;
 }
 
+bool CD3D12Compute::CreateRayRootSignature()
+{
+  // The texture table as the draws see it (D3D12Pipeline.cpp), the UAVs after it.
+  D3D12_DESCRIPTOR_RANGE Ranges[6] = {};
+  const UINT Spaces[5] = { 1, 2, 3, 4, 6 };
+  for (int i = 0; i < 5; i++)
+  {
+    Ranges[i].RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_SRV;
+    Ranges[i].NumDescriptors = UINT_MAX;
+    Ranges[i].RegisterSpace = Spaces[i];
+  }
+  Ranges[5].RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_UAV;
+  Ranges[5].NumDescriptors = COMPUTE_UAVS;
+
+  D3D12_ROOT_PARAMETER Params[6] = {};
+  for (D3D12_ROOT_PARAMETER &p : Params)
+    p.ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
+  Params[0].ParameterType = D3D12_ROOT_PARAMETER_TYPE_CBV;
+  Params[0].Descriptor.ShaderRegister = 0;
+  Params[1].ParameterType = D3D12_ROOT_PARAMETER_TYPE_CBV;
+  Params[1].Descriptor.ShaderRegister = 2;
+  Params[2].ParameterType = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
+  Params[2].DescriptorTable.NumDescriptorRanges = 5;
+  Params[2].DescriptorTable.pDescriptorRanges = Ranges;
+  Params[ROOT_RAY_SCENE].ParameterType = D3D12_ROOT_PARAMETER_TYPE_SRV;
+  Params[ROOT_RAY_SCENE].Descriptor.ShaderRegister = 0;
+  Params[ROOT_RAY_SCENE].Descriptor.RegisterSpace = 5;
+  Params[ROOT_RAY_INSTANCES].ParameterType = D3D12_ROOT_PARAMETER_TYPE_SRV;
+  Params[ROOT_RAY_INSTANCES].Descriptor.ShaderRegister = 1;
+  Params[ROOT_RAY_INSTANCES].Descriptor.RegisterSpace = 5;
+  Params[5].ParameterType = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
+  Params[5].DescriptorTable.NumDescriptorRanges = 1;
+  Params[5].DescriptorTable.pDescriptorRanges = &Ranges[5];
+
+  D3D12_STATIC_SAMPLER_DESC Samplers[5];
+  Samplers[XR_SAMPLER_LINEAR_WRAP] = StaticSampler(XR_SAMPLER_LINEAR_WRAP, D3D12_FILTER_ANISOTROPIC);
+  Samplers[XR_SAMPLER_LINEAR_CLAMP] = StaticSampler(XR_SAMPLER_LINEAR_CLAMP, D3D12_FILTER_MIN_MAG_MIP_LINEAR);
+  Samplers[XR_SAMPLER_POINT_WRAP] = StaticSampler(XR_SAMPLER_POINT_WRAP, D3D12_FILTER_MIN_MAG_MIP_POINT);
+  Samplers[XR_SAMPLER_POINT_CLAMP] = StaticSampler(XR_SAMPLER_POINT_CLAMP, D3D12_FILTER_MIN_MAG_MIP_POINT);
+  Samplers[4] = StaticSampler(4, D3D12_FILTER_COMPARISON_MIN_MAG_LINEAR_MIP_POINT);
+  for (int i : { XR_SAMPLER_LINEAR_WRAP, XR_SAMPLER_POINT_WRAP })
+    Samplers[i].AddressU = Samplers[i].AddressV = Samplers[i].AddressW = D3D12_TEXTURE_ADDRESS_MODE_WRAP;
+  Samplers[XR_SAMPLER_LINEAR_WRAP].MaxAnisotropy = 8;
+  Samplers[4].AddressU = Samplers[4].AddressV = Samplers[4].AddressW = D3D12_TEXTURE_ADDRESS_MODE_BORDER;
+  Samplers[4].BorderColor = D3D12_STATIC_BORDER_COLOR_OPAQUE_WHITE;
+  Samplers[4].ComparisonFunc = D3D12_COMPARISON_FUNC_LESS_EQUAL;
+
+  D3D12_ROOT_SIGNATURE_DESC Desc = {};
+  Desc.NumParameters = 6;
+  Desc.pParameters = Params;
+  Desc.NumStaticSamplers = 5;
+  Desc.pStaticSamplers = Samplers;
+
+  ComPtr<ID3DBlob> pBlob, pErrors;
+  HRESULT hr = D3D12SerializeRootSignature(&Desc, D3D_ROOT_SIGNATURE_VERSION_1, &pBlob, &pErrors);
+  if (FAILED(hr))
+  {
+    iLog->LogError("XRenderD3D12: D3D12SerializeRootSignature (compute with rays) failed (0x%08X): %s", (unsigned)hr,
+      pErrors ? (const char *)pErrors->GetBufferPointer() : "");
+    return false;
+  }
+  hr = m_pDevice->CreateRootSignature(0, pBlob->GetBufferPointer(), pBlob->GetBufferSize(), IID_PPV_ARGS(&m_pRayRootSignature));
+  if (FAILED(hr))
+  {
+    iLog->LogError("XRenderD3D12: CreateRootSignature (compute with rays) failed (0x%08X)", (unsigned)hr);
+    return false;
+  }
+  m_pRayRootSignature->SetName(L"XRenderD3D12 compute root signature with rays");
+  return true;
+}
+
 ID3D12PipelineState *CD3D12Compute::GetPSO(ED3D12Kernel eKernel)
 {
-  if (eKernel < 0 || eKernel >= eD3D12K_Num || !m_pRootSignature || m_bFailed[eKernel])
+  if (eKernel < 0 || eKernel >= eD3D12K_Num || m_bFailed[eKernel])
+    return nullptr;
+  ID3D12RootSignature *pRootSignature = s_Kernels[eKernel].bRays ? m_pRayRootSignature.Get() : m_pRootSignature.Get();
+  if (!pRootSignature)
     return nullptr;
   if (!m_pPSOs[eKernel])
   {
     D3D12_COMPUTE_PIPELINE_STATE_DESC Desc = {};
-    Desc.pRootSignature = m_pRootSignature.Get();
+    Desc.pRootSignature = pRootSignature;
     Desc.CS = { s_Kernels[eKernel].pCS, s_Kernels[eKernel].nCS };
     const HRESULT hr = m_pDevice->CreateComputePipelineState(&Desc, IID_PPV_ARGS(&m_pPSOs[eKernel]));
     if (FAILED(hr))
@@ -185,4 +269,28 @@ void CD3D12Compute::Dispatch(ID3D12GraphicsCommandList *pList, ED3D12Kernel eKer
   if (nUAVs >= 0)
     pList->SetComputeRootDescriptorTable(2, pDescriptors->GetGPU(nUAVs));
   pList->Dispatch(nGroupsX, nGroupsY, nGroupsZ);
+}
+
+void CD3D12Compute::DispatchRays(ID3D12GraphicsCommandList *pList, ED3D12Kernel eKernel, D3D12_GPU_VIRTUAL_ADDRESS FrameCB, D3D12_GPU_VIRTUAL_ADDRESS PassCB,
+                                 D3D12_GPU_VIRTUAL_ADDRESS nRayScene, D3D12_GPU_VIRTUAL_ADDRESS nRayInstances, int nUAVs, UINT nGroupsX, UINT nGroupsY)
+{
+  ID3D12PipelineState *pPSO = s_Kernels[eKernel].bRays ? GetPSO(eKernel) : nullptr;
+  CD3D12Descriptors *pDescriptors = g_pRenderer->m_pDescriptors.get();
+  if (!pList || !pPSO || !pDescriptors || !nGroupsX || !nGroupsY)
+    return;
+  g_pRenderer->m_pDevice->ForgetDrawState();
+  pList->SetComputeRootSignature(m_pRayRootSignature.Get());
+  pList->SetPipelineState(pPSO);
+  if (FrameCB)
+    pList->SetComputeRootConstantBufferView(0, FrameCB);
+  if (PassCB)
+    pList->SetComputeRootConstantBufferView(1, PassCB);
+  pList->SetComputeRootDescriptorTable(2, pDescriptors->GetTableStart());
+  if (nRayScene)
+    pList->SetComputeRootShaderResourceView(ROOT_RAY_SCENE, nRayScene);
+  if (nRayInstances)
+    pList->SetComputeRootShaderResourceView(ROOT_RAY_INSTANCES, nRayInstances);
+  if (nUAVs >= 0)
+    pList->SetComputeRootDescriptorTable(5, pDescriptors->GetGPU(nUAVs));
+  pList->Dispatch(nGroupsX, nGroupsY, 1);
 }

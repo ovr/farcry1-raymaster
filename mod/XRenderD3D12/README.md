@@ -348,8 +348,8 @@ reference of its features and console variables.
   opaque draws and the static ones of the water's planar reflection become acceleration
   structures (a `ray scene:` line in the frame dump), once a frame and only while something wants
   rays (else their memory goes). The top level one and those of the frame's geometry are built
-  only in a frame with a water surface (or with `d3d12_RTDebug`); in another one only the new
-  static geometry's, ready for when the water shows.
+  only in a frame with a water surface (or with `d3d12_RTDebug` or `d3d12_RTSunShadows`); in
+  another one only the new static geometry's, ready for when the water shows.
   The scene is made before the opaque list is drawn (`BuildRayScene`): a walk over the list sets
   each item up as it will be drawn, without its lights, and hands its draws to the scene instead of
   drawing them, so that the opaque list and the passes after it can trace rays too.
@@ -379,12 +379,40 @@ reference of its features and console variables.
   sun's cascades (what the 3D engine gives the camera towards the sun at the view's position, with
   the detail it picks for the view, and the live casters), set up as the main view would draw them,
   those it has too left out (a `ray scene:` count). 1 for the effects that trace rays from the main
-  view's surfaces (so far `d3d12_RTDebug`; not the water's reflection, which sees what is in front
-  of the camera and has the planar reflection's draws), 2 always, 0 never; only with the sun's
-  cascades on. On the sweeps it adds 180 to 360 instances to about 300 of the main view, 0.05 to
-  0.07 ms of the CPU and 0.04 ms of the compute queue's builds. A cache of the static draws seen in
-  earlier frames was tried and left out: flying over River it held 70 000 draws after 600 frames, 38 000
-  of them within 150 m, a tree seen from several distances with its LODs on top of one another.
+  view's surfaces (`d3d12_RTSunShadows`, `d3d12_RTDebug`; not the water's reflection, which sees
+  what is in front of the camera and has the planar reflection's draws), 2 always, 0 never; only
+  with the sun's cascades on. On the sweeps it adds 180 to 360 instances to about 300 of the main
+  view, 0.05 to 0.07 ms of the CPU and 0.04 ms of the compute queue's builds. A cache of the static
+  draws seen in earlier frames was tried and left out: flying over River it held 70 000 draws after
+  600 frames, 38 000 of them within 150 m, a tree seen from several distances with its LODs on top
+  of one another.
+  `d3d12_RTSunShadows` (0 by default, read every frame; not registered without rays) gives the sun's
+  shadow by rays in place of the cascades' (`RaySun.cpp`, `Shaders/RaySun.hlsl`). In the main view's
+  opaque list, after the depth prepass and before its surfaces are shaded, a pass makes the mask of
+  the sun's visibility at the surfaces in the depth buffer: from a pixel's point (from the depth), a
+  little off its face (the normal from the depths beside it), a ray towards a point of the sun's
+  disc (`d3d12_RTSunAngle`, 0.53 degrees as the sun's; 0 hard shadows), another point for each pixel
+  and frame. With 1 a ray for each 2 x 2 pixels, from each of them in turn over 4 frames (a quarter
+  of the rays; the history has them all), with 2 a ray for each pixel. The ray looks among all the
+  casters first; where what it finds is not a live caster, a second one looks among those
+  (`XR_RAY_LIVE` in the instances' masks and their `InstanceContributionToHitGroupIndex`: the parts
+  of the cascades' live set), so that the light maps and the terrain, whose light has the shadows of
+  the rest, take the sun from them, as from the live set of the cascades. Each pixel takes the rays
+  round it on its surface, the nearer the more (with 2 nearly only its own); with
+  `d3d12_RTSunDenoise` (1) the frames before are blended in where the surface was (at most 24,
+  clamped to what the rays round the pixel show this frame, and left out where the rays find what
+  the history was sure of turned the other way, so that a shadow that moves does not stay behind),
+  and where the result is neither all sun nor all shadow (or the history is young) it is filtered
+  over the width the sun's disc gives at the distance of what casts it: sharp where an object stands
+  on the ground, softer the higher the leaves are. The mask reaches as far as the cascades and gives
+  way to them over the last tenth. The general program takes it where its pixel is the mask's
+  surface (the view depth the same: the depth prepass's surfaces; `XR_RAY_SUN`, pixel shaders of
+  their own); the others (alpha tested surfaces, the leaves, what is blended, the weapon in the
+  hands) keep the cascades. It needs `d3d12_DepthPrepass` and `d3d12_ShadowCascades`;
+  `d3d12_ShadowDebug 4` shows it where it counts over the cascades' view: blue where the sun shows,
+  with red where all the casters hide it, with green too where the live ones do (yellow). GPU
+  sections `rt sun shadows` (the rays), `rt sun shadows history`, `rt sun shadows filter`. With it
+  off nothing of it runs and the frames are the same as without the code.
   `d3d12_RTDebug` views the scene for rays from the camera: 1 instances, 2 shaded hits on the right
   half, 3 distance, 4 mip level, 5 kind, 6 alpha tests, 7 shaded hits over the whole picture;
   `d3d12_WaterDebug` 13, 14, 15 the water rays' colour, distance and weight. With the rays off the
