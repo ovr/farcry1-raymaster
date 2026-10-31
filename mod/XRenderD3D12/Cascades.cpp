@@ -109,7 +109,8 @@ void SunBasis(const Vec3 &vToSun, Vec3 &x, Vec3 &y, Vec3 &z)
   y = z.Cross(x);
 }
 
-//! A part at its place: its render element and its object's position.
+}
+
 uint64 PartKey(const SRenderItem &it)
 {
   const Vec3 v = it.pObj->GetTranslation();
@@ -120,6 +121,9 @@ uint64 PartKey(const SRenderItem &it)
     h = (h ^ b) * 0x100000001B3ull;
   return h;
 }
+
+namespace
+{
 
 //! The sphere of an item's leaf buffer in the world: the box's centre and half its diagonal times
 //! the object's largest scale; r < 0 without a box.
@@ -286,6 +290,7 @@ bool CD3D12Renderer::EnsureCascadeMaps()
 void CD3D12Renderer::UpdateSunCascades(std::span<const SRenderItem> MainItems)
 {
   FUNCTION_PROFILER(iSystem, PROFILE_RENDERER);
+  m_RayOffscreenItems.clear();
   if (m_nCascades)
   {
     m_nCascades = 0;
@@ -524,6 +529,7 @@ void CD3D12Renderer::DrawCascadeItems(std::span<const SRenderItem> Items, std::u
 void CD3D12Renderer::DrawCascadeCasters(std::span<const SRenderItem> Items)
 {
   FUNCTION_PROFILER(iSystem, PROFILE_RENDERER);
+  NoteRayOffscreenItems(Items);
   // The live casters are in the full set too (what the camera towards the sun does not get: the
   // player's body), before their own set, which compares with it.
   const int nSet = m_nCascadeSet;

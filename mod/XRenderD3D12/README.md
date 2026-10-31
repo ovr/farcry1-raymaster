@@ -375,6 +375,16 @@ reference of its features and console variables.
   `d3d12_RTDistance` (150 m) the rays' length, `d3d12_RTMemory` (384 MB) the static BLAS kept,
   `d3d12_RTMask` (31) the kinds the rays see (1 static, 2 alpha tested, 4 of the frame; a draw is
   in the scene when the mask has all of its kinds).
+  `d3d12_RTOffscreen` (1) puts what is out of the main view into the scene too: the parts of the
+  sun's cascades (what the 3D engine gives the camera towards the sun at the view's position, with
+  the detail it picks for the view, and the live casters), set up as the main view would draw them,
+  those it has too left out (a `ray scene:` count). 1 for the effects that trace rays from the main
+  view's surfaces (so far `d3d12_RTDebug`; not the water's reflection, which sees what is in front
+  of the camera and has the planar reflection's draws), 2 always, 0 never; only with the sun's
+  cascades on. On the sweeps it adds 180 to 360 instances to about 300 of the main view, 0.05 to
+  0.07 ms of the CPU and 0.04 ms of the compute queue's builds. A cache of the static draws seen in
+  earlier frames was tried and left out: flying over River it held 70 000 draws after 600 frames, 38 000
+  of them within 150 m, a tree seen from several distances with its LODs on top of one another.
   `d3d12_RTDebug` views the scene for rays from the camera: 1 instances, 2 shaded hits on the right
   half, 3 distance, 4 mip level, 5 kind, 6 alpha tests, 7 shaded hits over the whole picture;
   `d3d12_WaterDebug` 13, 14, 15 the water rays' colour, distance and weight. With the rays off the
