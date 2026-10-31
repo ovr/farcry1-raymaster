@@ -51,7 +51,13 @@
 //	                  HdrOutput.cpp): the tone map continued above the knee up
 //	                  to the display's peak (HighlightRatio), vParams3.x the
 //	                  peak's display value HdrEncode(peak / paper white), y
-//	                  peak / paper white
+//	                  peak / paper white. With HDR_VOLUMETRIC the scene's light
+//	                  before the exposure through the volumetric light
+//	                  (Volumetric.cpp): tex4 the integrated froxels (Texture3D),
+//	                  tex5 the depth buffer, mParams0[0] x the volume's near
+//	                  depth, y 1 / log2(far / near), z half a slice, w the
+//	                  projection's m22, mParams0[1].x its m32, y 1: the
+//	                  light scattered alone (d3d12_VolumetricLight 2)
 //	  HDR_OUTPUT      tex0 the frame (the 8-bit back buffer), tex1 the
 //	                  highlight layer: the frame's light times the layer's
 //	                  ratio where its fingerprint matches, times paper white
@@ -287,6 +293,21 @@ float3 HighlightRatio(float3 vLight, float3 s, int nMode, float k)
   return max(Decode(h) / max(Decode(s), 1e-6), 1);
 }
 
+//! HDR_VOLUMETRIC: the light vLight of the scene at vPixel as it reaches the camera through the
+//! volumetric light: times the transmittance to the depth buffer's depth there, plus the light
+//! scattered towards the camera on the way (the integrated froxels at that depth). The sky is
+//! beyond the volume's far end.
+float3 Volumetric(float2 vPixel, float3 vLight)
+{
+  float4 p = g_Draw.mParams0[0];
+  float fDepth = g_Textures[g_Draw.nTex5].Load(int3(vPixel, 0)).r;
+  float d = g_Draw.mParams0[1].x / (fDepth + p.w);
+  // A froxel's integrated light is at its far end: half a slice after its centre.
+  float w = saturate(log2(max(d, 1e-3) / p.x) * p.y) - p.z;
+  float4 v = g_Volumes[g_Draw.nTex4].SampleLevel(g_SamplerLinearClamp, float3(vPixel * g_Draw.vParams0.xy, w), 0);
+  return g_Draw.mParams0[1].y > 0 ? v.rgb : vLight * v.a + v.rgb;
+}
+
 //! vRatio: the highlight layer's ratio (1 for the clamped scene and the debug views).
 float4 Resolve(float2 vPixel, out float3 vRatio)
 {
@@ -296,7 +317,10 @@ float4 Resolve(float2 vPixel, out float3 vRatio)
   if (g_Draw.vParams2.y > 0)
     return float4(saturate(vScene.rgb), fAlpha);
   float fExposure = Exposure(g_Draw.nTex2, g_Draw.vParams1.x, g_Draw.vParams1.y > 0);
-  float3 vLight = Decode(vScene.rgb) * fExposure;
+  float3 vLight = Decode(vScene.rgb);
+  if (HasFlag(HDR_VOLUMETRIC))
+    vLight = Volumetric(vPixel, vLight);
+  vLight *= fExposure;
   float3 vBloom = g_Draw.vParams1.z > 0 ? SampleClamp(g_Draw.nTex1, vPixel * g_Draw.vParams0.xy).rgb * g_Draw.vParams1.z : 0;
   int nDebug = (int)g_Draw.vParams2.z;
   if (nDebug == 1)

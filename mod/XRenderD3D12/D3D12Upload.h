@@ -130,6 +130,8 @@ public:
   //! pass writes them into its descriptor tables, so Format may be typeless); starts in
   //! UNORDERED_ACCESS. szName names it for the debug layer.
   CD3D12Texture *CreateComputeTarget(int nWidth, int nHeight, int nMips, DXGI_FORMAT Format, const wchar_t *szName);
+  //! The same as a 3D texture of nWidth x nHeight x nDepth texels, one mip.
+  CD3D12Texture *CreateComputeVolume(int nWidth, int nHeight, int nDepth, DXGI_FORMAT Format, const wchar_t *szName);
   //! Replaces a rectangle of one sub resource (x, y, nWidth, nHeight in texels; multiples of 4
   //! for BC formats).
   void UpdateTexture(CD3D12Texture *pTex, int nFace, int nMip, int x, int y, int nWidth, int nHeight, const SD3D12SubData &Data);

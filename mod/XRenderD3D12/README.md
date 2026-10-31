@@ -272,6 +272,45 @@ reference of its features and console variables.
   (which moves to the bar of Apply; `video-ray-tracing.patch` moves it up a row), greyed out
   without `d3d12_AO`.
 
+## Volumetric light
+
+- `d3d12_VolumetricLight` (1) is the light the air of the main view scatters, with
+  `r_HDRRendering` (`Volumetric.cpp`, `Shaders/Volumetric.hlsl`): the shafts of the sun through the
+  leaves, the windows and the gaps between the rocks, and a haze that thickens with the distance.
+  Its froxels are 160 across the view and as many down as its shape gives (90 at 16:9), in 128
+  slices from 0.5 m to `d3d12_VolumetricLightDistance` (60 m), each the same factor deeper than
+  the one before (`R16G16B16A16_FLOAT`: this frame's, the frame before's and the integrated ones,
+  15 MB each at 16:9). After the main scene, before the HDR resolve, a compute
+  pass puts into each froxel, at a point that moves within it from frame to frame (a Halton
+  sequence, and a noise across the columns), the air's extinction (`d3d12_VolumetricLightDensity`,
+  0.002 / m up to the water's level, thinning to half over each `d3d12_VolumetricLightHeight`,
+  40 m, above) and the light it scatters towards the camera: the sun's
+  (`d3d12_VolumetricLightSun`, 1: the sun's colour as it is, with the Henyey-Greenstein phase of
+  `d3d12_VolumetricLightAnisotropy`, 0.3, scaled so that the same all round is 1) where the full
+  set of the sun's cascades shows the sun (one bilinear comparison in the cascade of the froxel's
+  depth; beyond the cascades the sun reaches everywhere), and the light from all round
+  (`d3d12_VolumetricLightAmbient`, 1: the fog's colour, so that far off the air takes as much
+  light as it gives; a quarter of it where the sun is hidden, as the leaves and the roofs that hide
+  the sun hide most of the sky too). A froxel keeps 90% of the frame before's at the point's
+  place in the view then, which smooths the moving points out. A second pass sums each column
+  front to back (energy conserving, as in Frostbite's): the light scattered towards the camera up
+  to each froxel's far end and the part of the light behind that reaches the camera. The resolve
+  takes them at each pixel's depth (the depth buffer bound read only; the sky is beyond the far
+  end): the scene's light times that part plus the light scattered, before the exposure.
+  The physical share of the sun's light (a white wall facing the sun gives its light over pi, a
+  metre of air with the extinction a quarter of that) shows no shafts at a density the open sea
+  stands, so the sun is brighter in the air than that; at 2 the sky over the sea of Fort turned
+  white. With the defaults, the sky over the sea at Fort's spawn is 164 178 211 for 135 155 200,
+  the dark leaves in Training's village against the sun 87 99 101 for 25 46 13.
+  At 3840 x 2160 the froxels take 0.06 to 0.09 ms of the GPU outdoors (the sweeps of ten levels)
+  and the resolve 0.04 to 0.06 ms more; 3 to 10% of the frame rate at 400 to 600 FPS.
+  None with an upscaler, in heat vision or under water, and indoors where the outdoor lights do
+  not reach (the camera's vis area, `IVisArea::IsAfectedByOutLights`; it fades out and in over
+  half a second, and nothing of it runs there). `d3d12_VolumetricLight 0` gives the frames of the
+  renderer without it (DemoCompare difference 0), 2 shows the light scattered alone. All are read
+  every frame. The GPU times have a `volumetric light` section and the frame dump a
+  `volumetric light:` line.
+
 ## Ray tracing
 
 - Ray tracing (`RayTracing.h`, DXR 1.1 with inline `RayQuery`, Shader Model 6.5): the main view's

@@ -26,6 +26,8 @@
 #include "Bloom_CS.h"
 #include "DepthTiles_CS.h"
 #include "DepthTilesUp_CS.h"
+#include "VolumetricInject_CS.h"
+#include "VolumetricIntegrate_CS.h"
 
 using Microsoft::WRL::ComPtr;
 
@@ -53,6 +55,8 @@ const SKernel s_Kernels[eD3D12K_Num] =
   { "bloom", g_Bloom_CS, sizeof(g_Bloom_CS) },
   { "depth tiles", g_DepthTiles_CS, sizeof(g_DepthTiles_CS) },
   { "depth tiles (levels 5, 6)", g_DepthTilesUp_CS, sizeof(g_DepthTilesUp_CS) },
+  { "volumetric light", g_VolumetricInject_CS, sizeof(g_VolumetricInject_CS) },
+  { "volumetric light (integration)", g_VolumetricIntegrate_CS, sizeof(g_VolumetricIntegrate_CS) },
 };
 
 D3D12_STATIC_SAMPLER_DESC StaticSampler(UINT nRegister, D3D12_FILTER Filter)
@@ -113,12 +117,16 @@ bool CD3D12Compute::CreateRootSignature()
     Params[1 + i].DescriptorTable.pDescriptorRanges = &Ranges[i];
     Params[1 + i].ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
   }
-  const D3D12_STATIC_SAMPLER_DESC Samplers[2] = { StaticSampler(0, D3D12_FILTER_MIN_MAG_MIP_POINT), StaticSampler(1, D3D12_FILTER_MIN_MAG_MIP_LINEAR) };
+  D3D12_STATIC_SAMPLER_DESC Samplers[3] = { StaticSampler(0, D3D12_FILTER_MIN_MAG_MIP_POINT), StaticSampler(1, D3D12_FILTER_MIN_MAG_MIP_LINEAR),
+                                            StaticSampler(2, D3D12_FILTER_COMPARISON_MIN_MAG_LINEAR_MIP_POINT) };
+  Samplers[2].AddressU = Samplers[2].AddressV = Samplers[2].AddressW = D3D12_TEXTURE_ADDRESS_MODE_BORDER;
+  Samplers[2].BorderColor = D3D12_STATIC_BORDER_COLOR_OPAQUE_WHITE;
+  Samplers[2].ComparisonFunc = D3D12_COMPARISON_FUNC_LESS_EQUAL;
 
   D3D12_ROOT_SIGNATURE_DESC Desc = {};
   Desc.NumParameters = 3;
   Desc.pParameters = Params;
-  Desc.NumStaticSamplers = 2;
+  Desc.NumStaticSamplers = 3;
   Desc.pStaticSamplers = Samplers;
 
   ComPtr<ID3DBlob> pBlob, pErrors;
@@ -160,11 +168,11 @@ ID3D12PipelineState *CD3D12Compute::GetPSO(ED3D12Kernel eKernel)
 }
 
 void CD3D12Compute::Dispatch(ID3D12GraphicsCommandList *pList, ED3D12Kernel eKernel, D3D12_GPU_VIRTUAL_ADDRESS CB, int nSRVs, int nUAVs,
-                             UINT nGroupsX, UINT nGroupsY)
+                             UINT nGroupsX, UINT nGroupsY, UINT nGroupsZ)
 {
   ID3D12PipelineState *pPSO = GetPSO(eKernel);
   CD3D12Descriptors *pDescriptors = g_pRenderer->m_pDescriptors.get();
-  if (!pList || !pPSO || !pDescriptors || !nGroupsX || !nGroupsY)
+  if (!pList || !pPSO || !pDescriptors || !nGroupsX || !nGroupsY || !nGroupsZ)
     return;
   // Its pipeline state in place of the last draw's.
   g_pRenderer->m_pDevice->ForgetDrawState();
@@ -176,5 +184,5 @@ void CD3D12Compute::Dispatch(ID3D12GraphicsCommandList *pList, ED3D12Kernel eKer
     pList->SetComputeRootDescriptorTable(1, pDescriptors->GetGPU(nSRVs));
   if (nUAVs >= 0)
     pList->SetComputeRootDescriptorTable(2, pDescriptors->GetGPU(nUAVs));
-  pList->Dispatch(nGroupsX, nGroupsY, 1);
+  pList->Dispatch(nGroupsX, nGroupsY, nGroupsZ);
 }

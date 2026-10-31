@@ -10,7 +10,7 @@
 //	  0: root CBV b0 (SFrameConstants)
 //	  1: root CBV b1 (SDrawConstants)
 //	  2: descriptor table, the whole texture table (t0 space1, space2 and
-//	     space3; raw buffers in space4 for the rays)
+//	     space3; raw buffers in space4 for the rays; volumes in space6)
 //	  3: root SRV t0 space5, the scene for rays (ROOT_RAY_SCENE)
 //	  4: root SRV t1 space5, its instances (ROOT_RAY_INSTANCES)
 //	  static samplers s0..s3, s4 the comparison sampler of the shadow maps
