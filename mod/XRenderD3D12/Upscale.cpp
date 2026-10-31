@@ -95,13 +95,15 @@ bool CD3D12Renderer::UpdateUpscaler()
     m_pUpscalerVar = iConsole->GetCVar("d3d12_Upscaler");
   const char *szName = m_pUpscalerVar && m_pUpscalerVar->GetString() ? m_pUpscalerVar->GetString() : "none";
   const int w = m_pDevice->GetWidth(), h = m_pDevice->GetHeight();
-  if (_stricmp(szName, m_UpscalerName.c_str()) != 0 || w != m_nUpscalerWidth || h != m_nUpscalerHeight)
+  const int nVersion = std::max(CV_d3d12_UpscaleVersion, 0);
+  if (_stricmp(szName, m_UpscalerName.c_str()) != 0 || w != m_nUpscalerWidth || h != m_nUpscalerHeight || nVersion != m_nUpscalerVersion)
   {
-    const bool bNew = _stricmp(szName, m_UpscalerName.c_str()) != 0;
+    const bool bNew = _stricmp(szName, m_UpscalerName.c_str()) != 0 || nVersion != m_nUpscalerVersion;
     ReleaseUpscaler();
     m_UpscalerName = szName;
     m_nUpscalerWidth = w;
     m_nUpscalerHeight = h;
+    m_nUpscalerVersion = nVersion;
     m_pUpscaler = CreateUpscaler(szName);
     if (!m_pUpscaler)
     {
@@ -109,7 +111,7 @@ bool CD3D12Renderer::UpdateUpscaler()
         iLog->LogWarning("XRenderD3D12: d3d12_Upscaler %s: no such upscaler (none, fsr); none", szName);
       return false;
     }
-    if (!m_pUpscaler->Create(m_pDevice->GetDevice(), w, h, CV_d3d12_debug != 0))
+    if (!m_pUpscaler->Create(m_pDevice->GetDevice(), w, h, CV_d3d12_debug != 0, nVersion))
     {
       m_pUpscaler.reset();
       if (bNew)
@@ -249,6 +251,10 @@ void CD3D12Renderer::UpscaleScene()
   if (m_bHdrScene)
   {
     GpuSection("hdr");
+    // The volumetric light at the scene's depth (Volumetric.cpp), as without an upscaler: its
+    // froxels are of the view without the jitter, many pixels each.
+    if (UpdateVolumetricLight(m_pDevice->GetSceneDepth(), DXGI_FORMAT_R32_FLOAT))
+      GpuSection("hdr");
     pLdr = ResolveHdr(m_nUpscaleColorSRV, m_pDevice->GetSceneColor(), m_pDevice->GetSceneWidth(), m_pDevice->GetSceneHeight(), true);
     InvalidateFrameConstants();
   }

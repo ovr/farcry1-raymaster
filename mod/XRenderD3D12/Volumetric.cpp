@@ -28,12 +28,14 @@
 //	    towards the camera up to each froxel's far end and the part of the
 //	    light behind that reaches the camera.
 //	The resolve (Hdr.hlsl, HDR_VOLUMETRIC) takes them at each pixel's depth
-//	(the depth buffer, read only meanwhile): the scene's light times that
+//	(the depth buffer, read only meanwhile; with an upscaler the scene's,
+//	at the render size, whose jitter is a small part of a froxel): the
+//	scene's light times that
 //	part plus the light scattered, before the exposure. The sky is behind
 //	all the froxels. The shafts of light are where the sun's light gets
 //	through the leaves and the beams of a building's windows; beyond the
 //	cascades the sun reaches everywhere.
-//	None with an upscaler, in heat vision or under water, and indoors where
+//	None in heat vision or under water, and indoors where
 //	the outdoor lights do not reach (the camera's vis area; it fades out and
 //	in over FADE_TIME); off, nothing of it runs and the frame is the same as
 //	without it.
@@ -113,7 +115,7 @@ D3D12_UNORDERED_ACCESS_VIEW_DESC VolumeUAV()
 
 }
 
-bool CD3D12Renderer::UpdateVolumetricLight()
+bool CD3D12Renderer::UpdateVolumetricLight(ID3D12Resource *pDepth, DXGI_FORMAT DepthFormat)
 {
   if (!CV_d3d12_VolumetricLight)
   {
@@ -121,7 +123,7 @@ bool CD3D12Renderer::UpdateVolumetricLight()
       ReleaseVolumetricLight();
     return false;
   }
-  if (m_bUpscaling || m_bHeatVision || !m_pCompute || !m_pUpload || !m_pDescriptors || !m_pDevice)
+  if (m_bHeatVision || !m_pCompute || !m_pUpload || !m_pDescriptors || !m_pDevice)
     return false;
   I3DEngine *p3D = iSystem ? iSystem->GetI3DEngine() : nullptr;
   const float fWaterZ = p3D ? p3D->GetWaterLevel() : -FLT_MAX;
@@ -148,14 +150,14 @@ bool CD3D12Renderer::UpdateVolumetricLight()
   m_Volumetric.nOutdoorFrame = m_nFrames;
   if (m_Volumetric.fOutdoor <= 0)
     return false;
-  ID3D12Resource *pDepth = m_pDevice->GetMainDepth();
+  // The depth buffer's view (a new one for the upscaler's scene depth and back).
   if (pDepth != m_Volumetric.pDepth.Get())
   {
     if (m_Volumetric.nDepthSRV >= 0)
       m_pDescriptors->FreeSRV(m_Volumetric.nDepthSRV);
     m_Volumetric.pDepth = pDepth;
     D3D12_SHADER_RESOURCE_VIEW_DESC SRV = {};
-    SRV.Format = m_pDevice->GetMainDepthSRVFormat();
+    SRV.Format = DepthFormat;
     SRV.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
     SRV.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
     SRV.Texture2D.MipLevels = 1;

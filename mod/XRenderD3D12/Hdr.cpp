@@ -23,8 +23,8 @@
 //	    (a 3 x 3 tent), each added to the one above; a level from one twice
 //	    its size by a kernel (Shaders/Bloom.hlsl), which reads each of the
 //	    taps it shares with its neighbours once;
-//	  - the resolve: the light (through the volumetric light without an
-//	    upscaler, Volumetric.cpp) exposed (plus d3d12_Exposure), with the
+//	  - the resolve: the light (through the volumetric light,
+//	    Volumetric.cpp) exposed (plus d3d12_Exposure), with the
 //	    bloom, tone mapped (d3d12_ToneMap), colour graded (ColorGrading.cpp)
 //	    into the back buffer, or for an upscaler into an LDR target of the
 //	    scene's size, which it upscales as it would the scene (its flags
@@ -137,7 +137,7 @@ void CD3D12Renderer::EndMainScene()
     m_pDevice->EndHdr();
     InvalidateFrameConstants();
     // The volumetric light's froxels (Volumetric.cpp), which the resolve takes.
-    if (UpdateVolumetricLight())
+    if (UpdateVolumetricLight(m_pDevice->GetMainDepth(), m_pDevice->GetMainDepthSRVFormat()))
       GpuSection("hdr");
     ResolveHdr(m_Hdr.nHdrColorSRV, m_Hdr.pHdrColor.Get(), m_pDevice->GetWidth(), m_pDevice->GetHeight(), false);
   }
@@ -248,14 +248,16 @@ CD3D12Texture *CD3D12Renderer::ResolveHdr(int nSceneSRV, ID3D12Resource *pScene,
   Set4(dc.vParams1, fComp, bAdapted ? 1.0f : 0.0f, fBloom / m_Hdr.Bloom.size(), (float)std::clamp(CV_d3d12_ToneMap, 0, 3));
   Set4(dc.vParams2, CV_d3d12_ToneMapKnee, bHeat ? 1.0f : 0.0f, (float)CV_d3d12_HDRDebug, nLutSRV >= 0 ? 1.0f : 0.0f);
   SetHighlightConstants(dc);
+  // The volumetric light, this frame's froxels at the depth buffer's depth (Volumetric.cpp). The
+  // upscaler's scene depth is readable already (CD3D12Device::EndScene); the back buffer's is
+  // bound read only meanwhile.
+  const bool bVolumetric = !bHeat && SetVolumetricConstants(dc);
   if (bToTexture)
   {
     DrawHdrPass(m_Hdr.pLdr, dc, 0, m_pDevice->HasLayer() ? m_Hdr.pRatio : nullptr);
     m_pDevice->SetBackBufferTargets();
     return m_Hdr.pLdr;
   }
-  // The volumetric light, this frame's froxels at the depth buffer's depth (Volumetric.cpp).
-  const bool bVolumetric = !bHeat && SetVolumetricConstants(dc);
   if (bVolumetric)
     SetVolumetricDepthRead(true);
   DrawHdrToBackBuffer(dc);

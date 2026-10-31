@@ -566,6 +566,7 @@ public:
   std::unique_ptr<IUpscaler> m_pUpscaler;
   std::string m_UpscalerName;               //!< the d3d12_Upscaler m_pUpscaler was made for (or not)
   int m_nUpscalerWidth = 0, m_nUpscalerHeight = 0;   //!< the back buffer's size it was made for
+  int m_nUpscalerVersion = 0;               //!< the d3d12_UpscaleVersion it was made with
   int m_nUpscaleMode = -1;                  //!< EUpscaleMode of the scene targets, -1 none
   bool m_bUpscaleHdr = false;               //!< their colour is D3D12_HDR_FORMAT
   int m_nUpscaleOutputSRV = -1;             //!< the upscaler's output in the texture table
@@ -1047,9 +1048,11 @@ public:
     int nOutdoorFrame = -1;                 //!< m_nFrames of fOutdoor's last step
   };
 
-  //! Before the HDR resolve of the main view (EndMainScene, not with an upscaler, not in heat vision
-  //! or under water): the froxels for this frame (Shaders/Volumetric.hlsl). False: none.
-  bool UpdateVolumetricLight();
+  //! Before the HDR resolve of the main view (EndMainScene, or with an upscaler UpscaleScene after
+  //! the scene's targets; not in heat vision or under water): the froxels for this frame
+  //! (Shaders/Volumetric.hlsl), which the resolve takes at the depth of pDepth (read through an SRV
+  //! of DepthFormat). False: none.
+  bool UpdateVolumetricLight(ID3D12Resource *pDepth, DXGI_FORMAT DepthFormat);
   //! The resolve's constants of this frame's froxels (HDR_VOLUMETRIC). False: none this frame.
   bool SetVolumetricConstants(SDrawConstants &dc) const;
   //! true: the main view's depth buffer readable by the resolve (DEPTH_READ, bound read only); false:
@@ -1365,6 +1368,7 @@ public:
   int CV_d3d12_UpscaleMode = 0;             //!< EUpscaleMode of the upscaler (d3d12_Upscaler, a string)
   float CV_d3d12_UpscaleSharpness = 0.5f;   //!< the upscaler's sharpening, 0 (none) to 1
   int CV_d3d12_UpscaleDebug = 0;            //!< non-zero: the upscaler's debug view
+  int CV_d3d12_UpscaleVersion = 0;          //!< the upscaler's major version (FSR 3 or 4), 0 its own choice
   int CV_d3d12_AOQuality = 2;               //!< the ambient occlusion's (d3d12_AO, a string) quality, 0 to 3
   float CV_d3d12_AORadius = 1;              //!< its radius (m)
   float CV_d3d12_AOStrength = 1;            //!< the exponent of its visibility
