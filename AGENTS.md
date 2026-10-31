@@ -53,7 +53,9 @@ instructions and is not committed (git-ignored). The references of the modules a
   and `Patch Scripts.cmd`, which applies them to the scripts of a game folder and writes the result
   to its `FCData/zz_RayMaster.pak`. The engine reads a script from the last pack opened that has it
   (the packs open in name order) and never a loose file in the game folder. Only the patches are
-  committed, never the game's scripts.
+  committed, never the game's scripts. The patches are numbered in the order they apply
+  (`NN-name.patch`, sorted by name): a later one may be written against a script as an earlier
+  one leaves it, and a new one takes the next number.
 - `third_party/` - other projects' files, unchanged from a tagged release in their own folder
   layout, with a `README.md` of ours naming the tag and the hashes of the binaries.
   `third_party/amd-fsr-sdk` is the part of the AMD FSR SDK that XRenderD3D12 uses; its 57 MB
