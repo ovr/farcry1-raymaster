@@ -780,6 +780,7 @@ void CD3D12Renderer::Update (void)
   if (m_bSwapBuffers)
     DrawHdrOutput();
   m_pDevice->EndFrame(m_bSwapBuffers, m_bVSync || CV_r_vsync != 0);
+  m_pPipeline->SaveKeys();
   // The game asks for the triangles after the frame is shown (the time demo's Tri/Frame).
   m_nPolygons = m_nFramePolygons;
   m_nFramePolygons = 0;

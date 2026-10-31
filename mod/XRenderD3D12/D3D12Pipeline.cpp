@@ -8,7 +8,11 @@
 //////////////////////////////////////////////////////////////////////
 
 #include "StdAfx.h"
+#include <algorithm>
+#include <atomic>
+#include <chrono>
 #include <cstddef>
+#include <thread>
 #include "Renderer.h"
 #include "D3D12Device.h"
 #include "D3D12Pipeline.h"
@@ -70,6 +74,32 @@ namespace
   //! the sun sees it (a constant part is in the receivers' comparison, SDrawConstants::vShadowParams).
   constexpr INT SHADOW_DEPTH_BIAS = 0;
   constexpr float SHADOW_SLOPE_SCALED_DEPTH_BIAS = 2.0f;
+
+  //! The file of keys (D3D12Pipeline.h): PIPELINE_KEY_MAGIC, PIPELINE_KEY_VERSION and the size of a key as
+  //! three uint32, then the keys. A file with another version or key size is written anew.
+  constexpr const char *PIPELINE_KEY_FILE = "XRenderD3D12_pipelines.bin";
+  constexpr uint32 PIPELINE_KEY_MAGIC = 0x4B535058;   // "XPSK"
+  //! One more when a member of SPipelineKey changes its meaning.
+  constexpr uint32 PIPELINE_KEY_VERSION = 1;
+  constexpr size_t MAX_PIPELINE_KEYS = 4096;
+
+  //! Writes keys to the file: szMode "wb" the whole file, "ab" after the keys in it (and the header
+  //! when it is empty). Nothing when it can't be written.
+  void WriteKeyFile(const char *szMode, const SPipelineKey *pKeys, size_t nKeys)
+  {
+    FILE *f = fopen(PIPELINE_KEY_FILE, szMode);
+    if (!f)
+      return;
+    fseek(f, 0, SEEK_END);
+    if (ftell(f) == 0)
+    {
+      const uint32 Header[3] = { PIPELINE_KEY_MAGIC, PIPELINE_KEY_VERSION, (uint32)sizeof(SPipelineKey) };
+      fwrite(Header, sizeof(Header), 1, f);
+    }
+    if (nKeys)
+      fwrite(pKeys, sizeof(SPipelineKey), nKeys, f);
+    fclose(f);
+  }
 
   //! The shader programs by ED3D12Program.
   struct SProgram
@@ -357,11 +387,18 @@ bool CD3D12Pipeline::Init(ID3D12Device *pDevice)
 {
   Shutdown();
   m_pDevice = pDevice;
-  return CreateRootSignature() && CreateDefaultStream();
+  if (!CreateRootSignature() || !CreateDefaultStream())
+    return false;
+  LoadKeys();
+  return true;
 }
 
 void CD3D12Pipeline::Shutdown()
 {
+  if (!m_NewKeys.empty())
+    WriteKeyFile("ab", m_NewKeys.data(), m_NewKeys.size());
+  m_NewKeys.clear();
+  m_nNewKeysBefore = 0;
   m_PSOs.clear();
   m_pDefaultStream.Reset();
   m_DefaultStreamView = {};
@@ -534,18 +571,86 @@ ID3D12PipelineState *CD3D12Pipeline::GetPSO(const SPipelineKey &Key)
   auto it = m_PSOs.find(Key);
   if (it != m_PSOs.end())
     return it->second.Get();
-  ComPtr<ID3D12PipelineState> pPSO = CreatePSO(Key);
+  ComPtr<ID3D12PipelineState> pPSO;
+  {
+    FRAME_PROFILER("CD3D12Pipeline::CreatePSO", iSystem, PROFILE_RENDERER);
+    pPSO = CreatePSO(Key, true);
+  }
+  if (pPSO)
+    m_NewKeys.push_back(Key);
   ID3D12PipelineState *pResult = pPSO.Get();
   m_PSOs.emplace(Key, std::move(pPSO));
   return pResult;
 }
 
-ComPtr<ID3D12PipelineState> CD3D12Pipeline::CreatePSO(const SPipelineKey &Key)
+void CD3D12Pipeline::SaveKeys()
 {
-  FUNCTION_PROFILER(iSystem, PROFILE_RENDERER);
+  // A burst of new keys (where a level shows something new) in one write.
+  if (!m_NewKeys.empty() && m_NewKeys.size() == m_nNewKeysBefore)
+  {
+    WriteKeyFile("ab", m_NewKeys.data(), m_NewKeys.size());
+    m_NewKeys.clear();
+  }
+  m_nNewKeysBefore = m_NewKeys.size();
+}
+
+void CD3D12Pipeline::LoadKeys()
+{
+  std::vector<SPipelineKey> Keys;
+  bool bFile = false, bValid = false;
+  if (FILE *f = fopen(PIPELINE_KEY_FILE, "rb"))
+  {
+    bFile = true;
+    uint32 Header[3] = {};
+    bValid = fread(Header, sizeof(Header), 1, f) == 1 && Header[0] == PIPELINE_KEY_MAGIC && Header[1] == PIPELINE_KEY_VERSION &&
+             Header[2] == sizeof(SPipelineKey);
+    SPipelineKey Key;
+    while (bValid && Keys.size() < MAX_PIPELINE_KEYS && fread(&Key, sizeof(Key), 1, f) == 1)
+      Keys.push_back(Key);
+    fclose(f);
+  }
+  if (!bFile)
+    return;
+  const auto Start = std::chrono::steady_clock::now();
+  // Each key once, then its pipeline state made on one of the threads (the device is free-threaded;
+  // nothing is added to the map meanwhile).
+  for (const SPipelineKey &Key : Keys)
+    m_PSOs.emplace(Key, nullptr);
+  std::vector<std::pair<const SPipelineKey, ComPtr<ID3D12PipelineState>> *> Entries;
+  for (auto &Entry : m_PSOs)
+    Entries.push_back(&Entry);
+  std::atomic<size_t> nNext = 0;
+  auto Make = [&]()
+  {
+    for (size_t i; (i = nNext.fetch_add(1)) < Entries.size();)
+      Entries[i]->second = CreatePSO(Entries[i]->first, false);
+  };
+  const size_t nThreads = std::min<size_t>(std::clamp(std::thread::hardware_concurrency() / 2, 1u, 8u), Entries.size());
+  std::vector<std::thread> Threads;
+  for (size_t i = 1; i < nThreads; i++)
+    Threads.emplace_back(Make);
+  Make();
+  for (std::thread &Thread : Threads)
+    Thread.join();
+  // A key the device refuses now is made again (and its error logged) when a draw asks for it.
+  std::erase_if(m_PSOs, [](const auto &Entry) { return !Entry.second; });
+  if (!bValid || m_PSOs.size() != Keys.size())
+  {
+    std::vector<SPipelineKey> Made;
+    for (const auto &Entry : m_PSOs)
+      Made.push_back(Entry.first);
+    WriteKeyFile("wb", Made.data(), Made.size());
+  }
+  iLog->Log("XRenderD3D12: %d pipeline states of %s made in %.1f ms on %d threads", (int)m_PSOs.size(), PIPELINE_KEY_FILE,
+            std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - Start).count(), (int)std::max<size_t>(nThreads, 1));
+}
+
+ComPtr<ID3D12PipelineState> CD3D12Pipeline::CreatePSO(const SPipelineKey &Key, bool bLog)
+{
   if (Key.nProgram >= eD3D12P_Num)
   {
-    iLog->LogError("XRenderD3D12: no shader program %d", (int)Key.nProgram);
+    if (bLog)
+      iLog->LogError("XRenderD3D12: no shader program %d", (int)Key.nProgram);
     return nullptr;
   }
   D3D12_INPUT_ELEMENT_DESC Elements[MAX_INPUT_ELEMENTS];
@@ -801,6 +906,8 @@ ComPtr<ID3D12PipelineState> CD3D12Pipeline::CreatePSO(const SPipelineKey &Key)
   HRESULT hr = m_pDevice->CreateGraphicsPipelineState(&Desc, IID_PPV_ARGS(&pPSO));
   if (FAILED(hr))
   {
+    if (!bLog)
+      return nullptr;
     iLog->LogError("XRenderD3D12: CreateGraphicsPipelineState failed (0x%08X): program %s, vertex format %d, state 0x%08X, "
       "cull %d, topology %d, target %d, depth bias %d, streams %d, wireframe %d, colour format %d, ambient %d, blend op %d, rays %d", (unsigned)hr,
       Program.szName, (int)Key.nVertexFormat, nState, (int)Key.nCull, nTopology, (int)Key.nTarget, (int)Key.bDepthBias,

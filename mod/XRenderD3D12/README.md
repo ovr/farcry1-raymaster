@@ -310,6 +310,20 @@ reference of its features and console variables.
   None / Rays / Hybrid in Advanced Video Options; the rows of the page move closer together to make
   room for it, greyed out without `d3d12_RTReflections`.
 
+## Pipeline states
+
+A pipeline state is made the first time a draw asks for its key (`D3D12Pipeline.h`), which holds
+that frame up: 0.1-0.2 ms each with the driver's shader cache warm, 155 of them in the first run
+of the Training time demo, up to 40 in one frame while the level loads and about 20 while it plays.
+The keys made are appended to `XRenderD3D12_pipelines.bin` in the working directory (after a frame
+that made none, so a burst is one write; the demos end the game without a shutdown), and the
+renderer's initialization makes the keys of that file on several threads before the first frame
+(the 193 of the four time demos and ten sweeps in 9 ms on 8 threads), so a later run makes none
+while it plays. The file is a header (magic,
+`PIPELINE_KEY_VERSION`, the key's size) and the keys; one with another version or key size, the
+keys the device refuses and the repeats are dropped and the file written again. Deleting it gives
+the first run's behaviour back; the pictures are the same either way.
+
 ## Statistics and profiling
 
 - The engine's statistics: `GetPolyCount` gives the triangles drawn in the frame the last `Update`
