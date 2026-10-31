@@ -157,10 +157,25 @@
 //	the sun's cascades, Cascades.cpp) instance i is drawn with mShadow[i] in
 //	place of mWorldViewProj into slice nShadowTex[i] of the array
 //	(SV_RenderTargetArrayIndex).
+//	Compiled with XR_RAY_REFL (Shader Model 6.5, the main view's draws with
+//	DF_CUBE0 while d3d12_RTReflections and d3d12_RTReflectionSurfaces are on,
+//	SPipelineKey::bRayTrace) DF_CUBE0 traces a ray where it looks the cube
+//	up (SurfaceRay, RayShade.hlsli): the reflected one and DF2_GLASS's one
+//	through, from the pixel's point a little off its face, as long as
+//	g_Frame.nRaySun.y (d3d12_RTDistance), among the instances of the mask
+//	nRaySun.z's low bits (RayMask: bit 8 the sun's shadow at the hits); what
+//	it hits, shaded and fogged by its path, takes the cube's place, which
+//	stays where it hits nothing (the sky, the far) or the ocean first (not in
+//	the scene for rays: from above the ocean's level, nRaySun.w, a ray down
+//	ends there) and takes over again over the last quarter of its length.
+//	nRaySun.z >> 16 2 tints the hits red, the misses blue.
 //
 //////////////////////////////////////////////////////////////////////
 
 #include "Common.hlsli"
+#ifdef XR_RAY_REFL
+#include "RayShade.hlsli"
+#endif
 
 struct SVertexOutput
 {
@@ -476,10 +491,57 @@ float2 RaySunMask(float4 vPos, out float fWeight)
 }
 #endif
 
+#ifdef XR_RAY_REFL
+//! What a ray from the surface point P (fDistance from the camera; vFace the face's normal) in
+//! direction R sees, over vCube, the cube's colour that way: where it hits the scene for rays, that
+//! shaded and fogged by the path from the camera, fading back to vCube over the last quarter of the
+//! rays' length; vCube where it hits nothing or the ocean first. The cone: fPixelAngle wide at the
+//! camera, spreading by it.
+float3 SurfaceRay(float3 vCube, float3 P, float3 vFace, float3 R, float fDistance, float fPixelAngle)
+{
+  const float fWidth = fDistance * fPixelAngle;
+  RayDesc Ray;
+  Ray.Origin = P + (dot(R, vFace) >= 0 ? vFace : -vFace) * (0.02 + 0.5 * fWidth);
+  Ray.Direction = R;
+  Ray.TMin = 0.01;
+  Ray.TMax = asfloat(g_Frame.nRaySun.y);
+  const float fFadeStart = 0.75 * Ray.TMax;
+  // The ocean, from above it.
+  const float fWater = asfloat(g_Frame.nRaySun.w);
+  if (R.z < 0 && Ray.Origin.z > fWater)
+    Ray.TMax = min(Ray.TMax, (fWater - Ray.Origin.z) / R.z);
+  const uint nMask = g_Frame.nRaySun.z;
+  const SRayHit Hit = TraceScene(Ray, nMask & 0xff, fWidth, fPixelAngle);
+  const bool bDebug = (nMask >> 16) == 2;
+  if (!Hit.bHit)
+    return bDebug ? vCube * float3(0.25, 0.25, 1) : vCube;
+  bool bFog;
+  float3 vColor = RayShade(Hit, Ray.Direction, fWidth + Hit.fT * fPixelAngle, (nMask & 0x100) != 0, nMask & 0xff, bFog).rgb;
+  if (bFog && g_Frame.vFogParams.w != 0)
+  {
+    const float fDepth = ViewDepth(P) * (fDistance + Hit.fT) / max(fDistance, 1e-3);
+    vColor = lerp(g_Frame.vFogColor.rgb, vColor, saturate((g_Frame.vFogParams.y - fDepth) * g_Frame.vFogParams.z));
+  }
+  vColor = lerp(vColor, vCube, smoothstep(fFadeStart, asfloat(g_Frame.nRaySun.y), Hit.fT));
+  return bDebug ? vColor * float3(1, 0.25, 0.25) : vColor;
+}
+#endif
+
 float4 ShadePixel(SVertexOutput In)
 {
 #ifdef XR_AMBIENT
   s_vAmbient = 0;
+#endif
+#ifdef XR_RAY_REFL
+  // The rays' cone and their origin's face (before any branch or discard: derivatives).
+  const float3 vRayView = In.vWorldPos - g_Frame.vCameraPos.xyz;
+  const float fRayDistance = length(vRayView);
+  const float3 vRayDir = vRayView / max(fRayDistance, 1e-4);
+  const float fPixelAngle = max(length(ddx(vRayDir)), length(ddy(vRayDir)));
+  float3 vRayFace = cross(ddx(In.vWorldPos), ddy(In.vWorldPos));
+  vRayFace = dot(vRayFace, vRayFace) > 1e-20 ? normalize(vRayFace) : SafeNormalize(In.vNormal);
+  if (dot(vRayFace, vRayDir) > 0)
+    vRayFace = -vRayFace;
 #endif
   if (HasFlag2(DF2_SCOPE_LENS))
     return ScopeLens(In);
@@ -507,9 +569,15 @@ float4 ShadePixel(SVertexOutput In)
     float3 vView = SafeNormalize(In.vWorldPos - g_Frame.vCameraPos.xyz);
     float3 vN = HasFlag(DF_BUMP) ? vBumpN : SafeNormalize(In.vNormal);
     vTex = SampleCube(g_Draw.nTex0, nSampler0, reflect(vView, vN));
+#ifdef XR_RAY_REFL
+    vTex.rgb = SurfaceRay(vTex.rgb, In.vWorldPos, vRayFace, reflect(vView, vN), fRayDistance, fPixelAngle);
+#endif
     if (HasFlag2(DF2_GLASS))
     {
       float4 vThrough = SampleCube(g_Draw.nTex0, nSampler0, refract(vView, vN, g_Draw.vParams2.w));
+#ifdef XR_RAY_REFL
+      vThrough.rgb = SurfaceRay(vThrough.rgb, In.vWorldPos, vRayFace, refract(vView, vN, g_Draw.vParams2.w), fRayDistance, fPixelAngle);
+#endif
       float fFresnel = saturate(g_Draw.vParams2.z + g_Draw.vParams2.x * pow(1 - saturate(-dot(vView, vN)), g_Draw.vParams2.y));
       vTex = lerp(vThrough, vTex, fFresnel);
     }

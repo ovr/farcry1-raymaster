@@ -134,6 +134,17 @@ void CD3D12Renderer::MakeFrameConstants(SFrameConstants &fc, bool bScene) const
   Set4(fc.vFoliage, std::max(CV_d3d12_FoliageTranslucency, 0.0f), std::max(CV_d3d12_FoliageTranslucencyPower, 0.1f), fFoliageEnd, 2 / fFoliageEnd);
   if (m_RaySun.bActive && m_RaySun.pMask)
     fc.nRaySun[0] = (uint32)m_RaySun.pMask->m_nSRV;
+  // The reflections of cube maps by rays (General.hlsl's XR_RAY_REFL): their length, mask and mode, the
+  // ocean's level.
+  if (WantsRaySurfaces())
+  {
+    const float fLength = std::max(CV_d3d12_RTDistance, 1.0f);
+    I3DEngine *p3D = iSystem ? iSystem->GetI3DEngine() : nullptr;
+    const float fWater = p3D ? p3D->GetWaterLevel() : -FLT_MAX;
+    memcpy(&fc.nRaySun[1], &fLength, sizeof(fLength));
+    fc.nRaySun[2] = RayMask() | ((uint32)std::clamp(CV_d3d12_RTReflectionSurfaces, 0, 255) << 16);
+    memcpy(&fc.nRaySun[3], &fWater, sizeof(fWater));
+  }
 }
 
 void CD3D12Renderer::DrawGeometry(const SPipelineKey &Key, const SDrawConstants &dc, D3D_PRIMITIVE_TOPOLOGY eTopology, const D3D12_VERTEX_BUFFER_VIEW &VB,
@@ -160,14 +171,20 @@ void CD3D12Renderer::DrawGeometry(const SPipelineKey &Key, const SDrawConstants 
   // The water reflection's draws for the scene for rays (RayTracing.h).
   if (m_pRayScene && !m_bDepthPrepass && m_pRayScene->IsCapturingReflection())
     m_pRayScene->CaptureDraw(Key, dc, eTopology, VB, pIB, nCount, nFirst, nBaseVertex, pTexCoord1);
+  // The main view's draws that reflect a cube map, with rays in its place (d3d12_RTReflectionSurfaces;
+  // not the leaves letting the sun through).
+  const bool bSurfaceRays = Key.nProgram == eD3D12P_General && (dc.nFlags & DF_CUBE0) && !(dc.nFlags2 & DF2_FOLIAGE) && Key.nTarget == 0 &&
+                            !bOffscreen && !m_bDepthPrepass && !m_bEnvCubePass && !m_bReflectionPass && !m_bSpritePass && WantsRaySurfaces();
+  if (bSurfaceRays)
+    m_nRaySurfaceFrame = m_nFrames;
   // A program with rays needs this frame's scene (the list after its builds from here on); the water
-  // goes without them when there is none.
-  const bool bRays = Key.nProgram == eD3D12P_RayDebug || (Key.nProgram == eD3D12P_Water && Key.bRayTrace);
+  // and the cube maps go without them when there is none.
+  const bool bRays = Key.nProgram == eD3D12P_RayDebug || (Key.nProgram == eD3D12P_Water && Key.bRayTrace) || bSurfaceRays;
   const D3D12_GPU_VIRTUAL_ADDRESS nRayScene = bRays ? UseRayScene() : 0;
   if (Key.nProgram == eD3D12P_RayDebug && !nRayScene)
     return;
   SPipelineKey FullKey = Key;
-  FullKey.bRayTrace = nRayScene ? Key.bRayTrace : 0;
+  FullKey.bRayTrace = nRayScene ? (bSurfaceRays ? 1 : Key.bRayTrace) : 0;
   FullKey.nTopology = (uint8)GetTopologyType(eTopology);
   FullKey.nStreams = (pTexCoord1 ? PIPELINE_STREAM_TEXCOORD1 : 0) | (pTangents ? PIPELINE_STREAM_TANGENTS : 0);
   if (bScene && FullKey.nTarget == 0)
@@ -183,7 +200,9 @@ void CD3D12Renderer::DrawGeometry(const SPipelineKey &Key, const SDrawConstants 
     FullKey.bCascades = (dc.nFlags2 & DF2_FOLIAGE) ? 2 : (dc.nFlags2 & (DF2_SUN_CASCADES | DF2_CASCADE_CASTER)) ? 1 : 0;
   // The receivers of the cascades in the main view's opaque list with the mask of the sun's shadow by
   // rays where it is of their surface (RaySun.cpp).
-  if (FullKey.bCascades == 1 && m_RaySun.bActive && (dc.nFlags2 & DF2_SUN_CASCADES) && !bOffscreen && (FullKey.nTarget == 0 || FullKey.nTarget == 3))
+  // (Not those tracing rays in place of a cube map: their programs have the cascades alone.)
+  if (FullKey.bCascades == 1 && m_RaySun.bActive && (dc.nFlags2 & DF2_SUN_CASCADES) && !bOffscreen && (FullKey.nTarget == 0 || FullKey.nTarget == 3) &&
+      !(bSurfaceRays && FullKey.bRayTrace))
     FullKey.bCascades = 3;
   // A shadow map's caster without the alpha test or the live cascades' comparison with the full set
   // (the general program's discards): without a pixel shader. One that can discard keeps the depth

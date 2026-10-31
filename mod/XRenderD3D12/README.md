@@ -376,6 +376,7 @@ reference of its features and console variables.
   (`d3d12_RTShadows`, default 1). `d3d12_RTReflections` (0 by default, read every frame): 1 the
   water's reflection by rays in place of the screen space reflection, 2 hybrid (the screen space
   reflection where it is sure, the rays elsewhere, also where its march passes behind an object);
+  with either the surfaces reflecting a cube map trace rays too (`d3d12_RTReflectionSurfaces`);
   not registered without rays.
   `d3d12_RTDistance` (150 m) the rays' length, `d3d12_RTMemory` (384 MB) the static BLAS kept,
   `d3d12_RTMask` (31) the kinds the rays see (1 static, 2 alpha tested, 4 of the frame; a draw is
@@ -460,14 +461,39 @@ reference of its features and console variables.
   488, 467 -> 372, 341, 323 frames a second. Its rays alpha test at most 4 of the triangles they pass
   (`TraceScene`'s, `TraceSun`'s and `RayShade`'s `nMaxTests`, 16 for the others; what is past them counts
   as hit): in a palm's crown they take up to 4.9 ms, with 16 up to 6.
+  `d3d12_RTReflectionSurfaces` (1 by default, read every frame; not registered without rays) with
+  `d3d12_RTReflections` 1 or 2 gives the surfaces that reflect a cube map (`DF_CUBE0`: the chrome
+  and metal of `TemplReflCM` and `TemplBumpReflCM`, the screens and consoles of `TemplReflCMDecal*`,
+  the glass of `TemplGlassCM`, the environment cubes of `TemplReflEnvCM`) the scene by rays where
+  they look the cube up: in the main view's draws (the opaque list, the weapon in the hands and the
+  blended glass) the general program's pixel shaders with `XR_RAY_REFL` (Shader Model 6.5, programs
+  of their own: `SPipelineKey::bRayTrace` for the general program; with the cascades, not with the
+  mask of the sun's shadow by rays, which such a draw leaves to them) trace a ray from the pixel's
+  point, a little off its face, `d3d12_RTDistance` long, the reflected one and the glass's one
+  through it, among the scene for rays (`SurfaceRay`: `TraceScene`, `RayShade`, fogged by the path
+  from the camera as the water's). What it hits takes the cube's place; where it hits nothing (the
+  sky, the far) or the ocean first (not in the scene for rays: a ray down from above the ocean's
+  level ends there) the cube stays, and it takes over again over the last quarter of the rays'
+  length. The rest of the material is as with the cube (its lighting, `DF2_REFL_AMOUNT`'s gloss map,
+  the glass's Fresnel and texture). The frame constants' `nRaySun` y z w carry the length, the mask
+  with the mode and the ocean's level. 0 the cubes alone (the frames as without the code), 2 the
+  hits tinted red, the misses blue. A frame with such a draw builds the scene for rays (with what is
+  out of the view while there were some the frame before). The environment cubes are still updated:
+  the misses take them. At 3840 x 2160 on the beach of the surfaces scene (DemoSurfacesBeach: chrome
+  spheres and teapot, glass spheres and pane) the GPU takes 4.36 ms a frame with the cubes and 5.00
+  with the rays (the opaque list 0.64 -> 0.99, the blended glass 0.07 -> 0.42); from the side,
+  orbiting, 3.96 -> 4.83: the frame's list now waits for the build of the scene for rays at the
+  opaque list in place of the water, up to 3 ms in the frames where new objects come in. The sweeps
+  over Pier, River and Swamp, with next to no such surfaces, stay within their noise.
   `d3d12_RTDebug` views the scene for rays from the camera: 1 instances, 2 shaded hits on the right
   half, 3 distance, 4 mip level, 5 kind, 6 alpha tests, 7 shaded hits over the whole picture;
   `d3d12_WaterDebug` 13, 14, 15 the water rays' colour, distance and weight. With the rays off the
   frames are the same as without the code (WaterMove, bit for bit). Check the rays under the debug
   layer with `XRENDERD3D12_DEBUG=2`: GPU based validation turns the water rays' frames black.
   The game's menu gets it from `assets/scripts/04-video-ray-tracing.patch`: Ray Traced Reflections,
-  None / Rays / Hybrid in Advanced Video Options; the rows of the page move closer together to make
-  room for it, greyed out without `d3d12_RTReflections`.
+  None / Rays / Hybrid in Advanced Video Options (Rays and Hybrid also give the cube map surfaces
+  their rays); the rows of the page move closer together to make room for it, greyed out without
+  `d3d12_RTReflections`.
 
 ## Pipeline states
 

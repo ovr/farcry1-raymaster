@@ -211,7 +211,8 @@ instructions and is not committed (git-ignored). The references of the modules a
   the HDR output `d3d12_HDROutput`); per pixel lighting (`d3d12_PixelLighting`); the depth prepass
   (`d3d12_DepthPrepass`); the sun's shadow
   cascades (`d3d12_ShadowCascades`, `d3d12_CascadeInstancing`); ambient occlusion (`d3d12_AO`:
-  XeGTAO, CACAO or by rays, `rt`); ray tracing (`d3d12_RTReflections`, the sun's shadow `d3d12_RTSunShadows`,
+  XeGTAO, CACAO or by rays, `rt`); ray tracing (`d3d12_RTReflections` with the cube maps'
+  `d3d12_RTReflectionSurfaces`, the sun's shadow `d3d12_RTSunShadows`,
   the ambient light by rays `d3d12_RTGI`,
   `XRENDERD3D12_NORT`); the statistics
   (`r_Stats`, `r_DisplayInfo`, the engine's frame profiler, `d3d12_GpuTimes`, `d3d12_FrameLog`,

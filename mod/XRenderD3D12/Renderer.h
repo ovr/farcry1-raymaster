@@ -660,6 +660,9 @@ public:
   bool WantsRayAO() const;
   //! d3d12_RTGI on a device with rays, with d3d12_AOApply 1 (RayAO.cpp, in place of d3d12_AO).
   bool WantsRayGI() const;
+  //! d3d12_RTReflections with d3d12_RTReflectionSurfaces on a device with rays: the draws that reflect a cube map
+  //! (DF_CUBE0) trace rays in its place (General.hlsl's XR_RAY_REFL).
+  bool WantsRaySurfaces() const;
   //! The view's fields of a compute pass with rays over the main view's depth buffer (RayView.hlsli):
   //! the camera and the world positions at a view depth across the view (the jitter apart).
   void GetRayView(float vCameraPos[4], float vRayX[4], float vRayY[4], float vRayO[4]) const;
@@ -1386,6 +1389,7 @@ public:
   std::vector<SRenderItem> m_RayOffscreenItems;   //!< NoteRayOffscreenItems' of the frame m_nRayOffscreenFrame
   std::unordered_set<uint64> m_RayLiveParts;       //!< the PartKeys of the live casters of that frame (d3d12_RTSunShadows: XR_RAY_LIVE)
   int m_nRayOffscreenFrame = -1;
+  int m_nRaySurfaceFrame = -2;              //!< the last frame with a draw that traced rays in place of its cube map
   float m_fDrawHeat = 0;                    //!< the heat of the item being drawn (vHeat.x)
   float m_fLineWidth = 1;
 
@@ -1454,6 +1458,7 @@ public:
   int CV_d3d12_RTAsync = 1;                 //!< the ray scene's builds on the compute queue beside the frame
   int CV_d3d12_RTOffscreen = 1;             //!< what is out of the main view in the scene for rays: 1 for the effects that need it, 2 always
   int CV_d3d12_RTReflections = 0;           //!< the water's reflection by rays: 1 in place of the screen space one, 2 where it misses
+  int CV_d3d12_RTReflectionSurfaces = 1;    //!< with d3d12_RTReflections, the cube maps' reflections by rays (XR_RAY_REFL); 2 tinted
   int CV_d3d12_RTSunShadows = 0;            //!< the sun's shadow by rays in place of the cascades' (RaySun.cpp)
   float CV_d3d12_RTSunAngle = 0.53f;        //!< the sun's disc, degrees across (the soft edges of its shadow)
   int CV_d3d12_RTSunDenoise = 1;            //!< the sun's shadow by rays blended over the frames and its soft edges filtered

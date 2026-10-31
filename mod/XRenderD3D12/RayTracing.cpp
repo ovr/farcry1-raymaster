@@ -906,6 +906,11 @@ bool CD3D12Renderer::WantsRays() const
   return m_pRayScene && m_pRayScene->IsSupported() && (CV_d3d12_RTDebug != 0 || CV_d3d12_RTReflections > 0 || WantsRaySun() || WantsRayAO() || WantsRayGI());
 }
 
+bool CD3D12Renderer::WantsRaySurfaces() const
+{
+  return m_pRayScene && m_pRayScene->IsSupported() && CV_d3d12_RTReflections > 0 && CV_d3d12_RTReflectionSurfaces > 0;
+}
+
 bool CD3D12Renderer::WantsRayGI() const
 {
   return m_pRayScene && m_pRayScene->IsSupported() && CV_d3d12_RTGI > 0 && CV_d3d12_AOApply != 0;
@@ -1039,7 +1044,10 @@ bool CD3D12Renderer::WantsOffscreenRays() const
 {
   // 1: for what traces rays from the surfaces of the main view (not the water's reflection, which
   // sees what is in front of the camera and has the planar reflection's draws).
-  return WantsRays() && (CV_d3d12_RTOffscreen >= 2 || (CV_d3d12_RTOffscreen == 1 && (CV_d3d12_RTDebug != 0 || WantsRaySun() || WantsRayAO() || WantsRayGI())));
+  // The surfaces that reflect a cube map by rays, while there were some the frame before.
+  const bool bSurfaces = WantsRaySurfaces() && m_nRaySurfaceFrame + 1 >= m_nFrames;
+  return WantsRays() &&
+         (CV_d3d12_RTOffscreen >= 2 || (CV_d3d12_RTOffscreen == 1 && (CV_d3d12_RTDebug != 0 || WantsRaySun() || WantsRayAO() || WantsRayGI() || bSurfaces)));
 }
 
 void CD3D12Renderer::NoteRayOffscreenItems(std::span<const SRenderItem> Items)
