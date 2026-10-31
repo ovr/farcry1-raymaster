@@ -41,6 +41,10 @@
 //	                             about 1000 characters)
 //	  interpolation = linear     straight from keyframe to keyframe (default:
 //	                             catmull-rom, a smooth curve through them)
+//	  above = <m>                the path's camera at least that high above the
+//	                             terrain (a flyover at a fixed height would go
+//	                             through the hills: from inside a hill the
+//	                             engine draws what no player sees)
 //	  sequence = <name>          a sequence of the movie system to play (the
 //	                             level's own cut scene is stopped first, and
 //	                             without a sequence too). For the level's own
@@ -134,7 +138,18 @@ public:
   {
     if (!m_Path.empty())
     {
-      Cam.SetPos(PathValue(&SKey::vPos, (float)nFrame));
+      Vec3 vPos = PathValue(&SKey::vPos, (float)nFrame);
+      if (m_fAbove >= 0)
+      {
+        const float fLow = Host.Get3DEngine()->GetTerrainElevation(vPos.x, vPos.y) + m_fAbove;
+        if (vPos.z < fLow)
+        {
+          m_nRaised++;
+          m_fMaxRaise = fLow - vPos.z > m_fMaxRaise ? fLow - vPos.z : m_fMaxRaise;
+          vPos.z = fLow;
+        }
+      }
+      Cam.SetPos(vPos);
       Cam.SetAngle(PathValue(&SKey::vAngles, (float)nFrame));
       Cam.Update();
       return true;
@@ -152,7 +167,14 @@ public:
   virtual bool IsFinished(CDemoHost &Host, int nFrame)
   {
     if (!m_Path.empty() && nFrame >= m_Path.back().fFrame)
+    {
+      if (m_fAbove >= 0 && !m_bRaiseLogged)
+      {
+        m_bRaiseLogged = true;
+        Host.Log("DemoLevel: the camera raised above the terrain in %d frames, by up to %.1f m", m_nRaised, m_fMaxRaise);
+      }
       return true;
+    }
     return m_pSequence && !Host.GetSystem()->GetIMovieSystem()->IsPlaying(m_pSequence);
   }
 
@@ -205,8 +227,11 @@ private:
       }
     }
     m_bLinear = !stricmp(Host.GetScene().Get("interpolation").c_str(), "linear");
+    m_fAbove = Host.GetScene().GetFloat("above", -1);
     Host.Log("DemoLevel: camera path of %d keyframes, frames %g to %g, %s", (int)m_Path.size(), m_Path.front().fFrame,
       m_Path.back().fFrame, m_bLinear ? "linear" : "catmull-rom");
+    if (m_fAbove >= 0)
+      Host.Log("DemoLevel: the camera at least %g m above the terrain", m_fAbove);
   }
 
   //! The velocity of a member of the keyframes at keyframe i, per frame: Catmull-Rom, from the
@@ -257,6 +282,11 @@ private:
   std::vector<float> m_Camera;
   std::vector<SKey> m_Path;
   bool m_bLinear = false;
+  //! above, or -1 without it; the frames it raised the camera in and the most it did.
+  float m_fAbove = -1;
+  int m_nRaised = 0;
+  float m_fMaxRaise = 0;
+  bool m_bRaiseLogged = false;
 };
 
 DEMO_PLUGIN(CDemoLevel)
