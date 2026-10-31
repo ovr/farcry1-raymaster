@@ -137,6 +137,9 @@ public:
   D3D12_GPU_VIRTUAL_ADDRESS GetInstances() const { return m_nInstances; }
   //! Of them those of the live casters (XR_RAY_LIVE), with GetTLAS.
   uint32 GetLiveInstances() const { return m_nLiveInstances; }
+  //! The last Build's TLAS: its instances (0: none built) and their triangles (r_DisplayInfo).
+  uint32 GetSceneInstances() const { return m_nSceneInstances; }
+  uint32 GetSceneTriangles() const { return m_nSceneTriangles; }
   //! The camera of the capture (Build's frame).
   const Matrix44 &GetViewProj() const { return m_ViewProj; }
   const Vec3 &GetCamera() const { return m_vCamera; }
@@ -243,6 +246,8 @@ private:
   int m_nBuiltSlot = 0;
   D3D12_GPU_VIRTUAL_ADDRESS m_nInstances = 0;   //!< the last Build's SRayInstance array
   uint32 m_nLiveInstances = 0;                  //!< of them the live casters'
+  uint32 m_nSceneInstances = 0;                 //!< the last Build's instances in its TLAS (0: no TLAS)
+  uint32 m_nSceneTriangles = 0;                 //!< and their triangles
   std::vector<SDraw> m_Draws;
   //! Build's DrawHash of the draws taken: open addressing, at most half full, 0 empty (a hash of 0
   //! counts as 1).

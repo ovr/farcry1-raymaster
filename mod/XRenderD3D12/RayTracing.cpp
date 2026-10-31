@@ -866,6 +866,8 @@ void CD3D12RayScene::Build(FILE *pDump, bool bTop)
     m_nInstances = RayInstanceMem.nGPU;
     m_nLiveInstances = nLive;
   }
+  m_nSceneInstances = nInstance;
+  m_nSceneTriangles = nInstance ? nTris : 0;
   if (pAsync)
     Device.SubmitAsyncCompute();
 
