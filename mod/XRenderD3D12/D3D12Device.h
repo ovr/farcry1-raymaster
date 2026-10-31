@@ -131,11 +131,16 @@ public:
   //! scene's builds), its GPU time that of szSection (a string with static storage) in
   //! GetComputeGpuTimes; NULL without the queue. SubmitAsyncCompute runs it.
   ID3D12GraphicsCommandList4 *BeginAsyncCompute(const char *szSection);
-  //! Executes the frame's list so far after the upload batch, and the list of BeginAsyncCompute
-  //! beside it once the uploads are done; the frame goes on in the same slot's allocator, its list
-  //! after the compute list (the descriptor heap, the root signature and the render targets set
-  //! again).
+  //! Executes the list of BeginAsyncCompute once the upload batch so far is done, beside the frame's
+  //! work on the GPU; the frame's list goes on. It waits for the compute list from WaitAsyncCompute
+  //! on: the first draw or pass that reads what it made, else FlushFrame, WaitForGPU or EndFrame (the
+  //! frame's fence after it).
   void SubmitAsyncCompute();
+  //! The frame's list from here on after the compute list of SubmitAsyncCompute (nothing when there
+  //! is none or it waited already): its list so far executed, the GPU waiting in the section
+  //! "ray scene", the frame going on in the same slot's allocator (the descriptor heap, the root
+  //! signature and the targets set again).
+  void WaitAsyncCompute();
   //! 0 .. D3D12_FRAMES-1: the slot of the current frame (per frame resources, the upload ring).
   int GetFrameSlot() const { return m_nFrameSlot; }
 
@@ -405,6 +410,11 @@ private:
   D3D12_CPU_DESCRIPTOR_HANDLE ReadOnlyDSV(bool bScene) const;
   //! Resets the slot's allocator and the list and binds the heap, root signature and targets.
   void OpenCmdList();
+  //! The frame goes on in a new list of the slot's allocator after the one just executed (its memory
+  //! is kept until the slot's fence): the heap, the root signature and the targets bound again.
+  void ContinueCmdList();
+  //! The direct queue's work submitted from here on after the compute list of SubmitAsyncCompute.
+  void QueueWaitAsyncCompute();
   void WaitForFence(uint64 nValue);
   //! Waits on the CPU until pFence reached nValue (10 s at most, logged).
   void WaitForValue(ID3D12Fence *pFence, uint64 nValue);
@@ -454,6 +464,7 @@ private:
   ComPtr<ID3D12Fence> m_pUploadFence, m_pComputeFence;  //!< the uploads done (for the compute queue), the compute list done (for the direct one)
   uint64 m_nUploadFence = 0, m_nComputeFence = 0;
   bool m_bComputeAllocatorReset = false;            //!< the slot's compute allocator reset in this frame
+  bool m_bComputePending = false;                   //!< a compute list submitted that the frame's list has not waited for
   bool m_bComputeTimed = false;                     //!< the open compute list has its first timestamp
 
   ComPtr<ID3D12DescriptorHeap> m_pRTVHeap;

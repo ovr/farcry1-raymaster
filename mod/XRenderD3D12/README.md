@@ -350,15 +350,19 @@ reference of its features and console variables.
   rays (else their memory goes). The top level one and those of the frame's geometry are built
   only in a frame with a water surface (or with `d3d12_RTDebug`); in another one only the new
   static geometry's, ready for when the water shows.
-  They are built on the compute queue (`d3d12_RTAsync`, default 1; 0 in the frame's list after the
-  ambient occlusion, as before), beside the frame's shadows, opaque geometry and ambient occlusion:
-  the frame's list so far goes to the GPU after the uploads, the builds once the uploads are done
-  (they read only vertices and indices, uploaded or written by the CPU), the rest of the frame
-  after the builds. The GPU times have them as `ray scene (compute queue)` beside the frame's
-  sections (not part of its time); the frame's `ray scene` section is its wait for them. The
-  levels' sweeps (4K) run 6–8 % faster (River 392 → 423 frames a second, Dam 444 → 476), the
-  time demos Training 386 → 398 and Regulator 343 → 359 (Volcano and Research, without water,
-  the same).
+  The scene is made before the opaque list is drawn (`BuildRayScene`): a walk over the list sets
+  each item up as it will be drawn, without its lights, and hands its draws to the scene instead of
+  drawing them, so that the opaque list and the passes after it can trace rays too.
+  The builds run on the compute queue (`d3d12_RTAsync`, default 1; 0 in the frame's list before the
+  opaque list), beside the frame's shadows, opaque geometry and ambient occlusion: they start once
+  the uploads so far are done (they read only vertices and indices, uploaded or written by the CPU),
+  and the frame's list waits for them at its first draw or pass that traces rays (the water), else
+  at its end. The GPU times have them as `ray scene (compute queue)` beside the frame's sections
+  (not part of its time); the frame's `ray scene` section is its wait for them. Built on the compute
+  queue the levels' sweeps (4K) ran 6–8 % faster (River 392 → 423 frames a second, Dam 444 → 476),
+  the time demos Training 386 → 398 and Regulator 343 → 359 (Volcano and Research, without water,
+  the same). The walk before the opaque list costs the CPU 0.03–0.08 ms a frame; the frames are
+  those of the capture during the list, bit for bit.
   `XRENDERD3D12_NORT=1` (or a device without tier 1.1) turns them off; the log says why.
   `Shaders/RayShade.hlsli` traces (`TraceScene`, alpha tested triangles tested: of the triangle
   only what the test reads, the normal only for a cube map, the vertex colour not where the alpha

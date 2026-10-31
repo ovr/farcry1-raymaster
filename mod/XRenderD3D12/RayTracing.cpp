@@ -4,13 +4,15 @@
 //
 //	File: RayTracing.cpp
 //	Description: The scene for rays (RayTracing.h) and what the renderer
-//	does with it: the capture of the main view's opaque list, the builds
-//	after it (CScene::EndEf3D) and the debug view d3d12_RTDebug.
+//	does with it: the capture of the main view's opaque list and the builds
+//	before it is drawn (CScene::EndEf3D) and the debug view d3d12_RTDebug.
 //
-//	The builds of a frame, in its command list after the opaque list: the
-//	missing BLAS (each with a scratch range of its own), a UAV barrier, the
-//	TLAS (its instances in per frame memory, its scratch at the start of the
-//	same buffer), a UAV barrier. The draws after it read the TLAS.
+//	The builds of a frame, before its opaque list, in a list of the compute
+//	queue (d3d12_RTAsync) or in its command list: the missing BLAS (each
+//	with a scratch range of its own), a UAV barrier, the TLAS (its instances
+//	in per frame memory, its scratch at the start of the same buffer), a UAV
+//	barrier. The draws and passes that read the TLAS get it from
+//	CD3D12Renderer::UseRayScene, which makes the frame's list wait for them.
 //
 //////////////////////////////////////////////////////////////////////
 
@@ -23,6 +25,7 @@
 #include "D3D12Upload.h"
 #include "D3D12Pipeline.h"
 #include "RayTracing.h"
+#include "Scene.h"
 #include "Shaders/RayConstants.h"
 
 using Microsoft::WRL::ComPtr;
@@ -897,8 +900,9 @@ uint32 CD3D12Renderer::RayMask() const
   return ((uint32)CV_d3d12_RTMask & 0xff) | (CV_d3d12_RTShadows ? 0x100u : 0u);
 }
 
-void CD3D12Renderer::BeginRayCapture(bool bTraced)
+void CD3D12Renderer::BuildRayScene(std::span<const SRenderItem> Opaque, bool bTraced)
 {
+  FUNCTION_PROFILER(iSystem, PROFILE_RENDERER);
   if (!m_pRayScene)
     return;
   if (!WantsRays())
@@ -911,19 +915,55 @@ void CD3D12Renderer::BeginRayCapture(bool bTraced)
     return;
   m_bRayTlas = bTraced || CV_d3d12_RTDebug != 0;
   m_pRayScene->BeginCapture(m_CameraView * m_ProjMatrix, m_Camera.GetPos());
-}
-
-void CD3D12Renderer::BuildRayScene()
-{
-  FUNCTION_PROFILER(iSystem, PROFILE_RENDERER);
-  if (!m_pRayScene || !m_pRayScene->IsCapturing())
-    return;
+  // The list's draws as it will draw them, without their lights, before it is drawn.
+  const float fDepthMin = m_fDepthMin, fDepthMax = m_fDepthMax;
+  const bool bItemScissor = m_bItemScissor;
+  const RECT ItemScissor = m_ItemScissor;
+  m_bRayCaptureWalk = true;
+  for (const SRenderItem &it : Opaque)
+  {
+    if (!it.pRE)
+      continue;
+    if (it.pRE->m_Type == eDATA_FarTreeSprites)
+      it.pRE->mfDraw(RE_ShaderArg(it.pShader), nullptr);
+    if (it.pRE->m_Type != eDATA_OcLeaf)
+      continue;
+    // The classes drawn with depth writes and no blending (the others CaptureDraw leaves out).
+    switch (it.eDrawClass)
+    {
+    case eDC_Opaque:
+    case eDC_AlphaTest:
+    case eDC_VColor:
+    case eDC_AlphaTestVColor:
+    case eDC_Terrain:
+    case eDC_WaterBottom:
+      DrawLeafItem(it);
+      break;
+    default:
+      break;
+    }
+  }
+  m_bRayCaptureWalk = false;
+  m_fDepthMin = fDepthMin;
+  m_fDepthMax = fDepthMax;
+  m_bItemScissor = bItemScissor;
+  m_ItemScissor = ItemScissor;
   m_pRayScene->EndCapture();
   // The water reflection's draws while it is shown.
   if (!m_bReflectionValid)
     m_pRayScene->ClearReflection();
-  GpuSection("ray scene");
+  // On the compute queue the frame's list waits for the builds where it uses them (UseRayScene).
+  if (!CV_d3d12_RTAsync)
+    GpuSection("ray scene");
   m_pRayScene->Build(m_pFrameDump.get(), m_bRayTlas);
+}
+
+D3D12_GPU_VIRTUAL_ADDRESS CD3D12Renderer::UseRayScene()
+{
+  const D3D12_GPU_VIRTUAL_ADDRESS nTlas = m_pRayScene ? m_pRayScene->GetTLAS() : 0;
+  if (nTlas && m_pDevice)
+    m_pDevice->WaitAsyncCompute();
+  return nTlas;
 }
 
 void CD3D12Renderer::DrawRayDebug()

@@ -423,8 +423,8 @@ void CD3D12Renderer::DrawLeafItem(const SRenderItem &it)
   // sectors; under the water it is the volume's own, as in the other volumes.
   const bool bFogPass = eDC == eDC_FogLayer || it.bFogPass ||
                         (eDC != eDC_Caustics && ((it.nSort & ~EFSLIST_MASK) == eS_FogShader || (pObj->m_ObjFlags & FOB_FOGPASS)));
-  // The depth prepass: the first pass alone, which writes the depth.
-  if (m_bDepthPrepass && (bFogPass || (pObj->m_ObjFlags & FOB_LIGHTPASS)))
+  // The depth prepass and the scene for rays: the first pass alone, which writes the depth.
+  if ((m_bDepthPrepass || m_bRayCaptureWalk) && (bFogPass || (pObj->m_ObjFlags & FOB_LIGHTPASS)))
     return;
   const SFogVolume *pFogVolume = bFogPass ? m_pScene->GetFogVolume(it.nFog) : nullptr;
   if (bFogPass && (!pFogVolume || (pFogVolume->bCaustics && (m_bReflectionPass || m_Camera.GetPos().z >= pFogVolume->fFogLayerZ)) ||
@@ -442,7 +442,7 @@ void CD3D12Renderer::DrawLeafItem(const SRenderItem &it)
   // A procedural flare: a glow built around the chunk (Flares.cpp), casting no shadow.
   if (eDC == eDC_ProcFlare)
   {
-    if (!m_bShadowMapPass && !m_bSpritePass)
+    if (!m_bShadowMapPass && !m_bSpritePass && !m_bRayCaptureWalk)
       DrawProcFlare(it, World);
     return;
   }
@@ -464,7 +464,7 @@ void CD3D12Renderer::DrawLeafItem(const SRenderItem &it)
   SDrawConstants dc = DefaultDrawConstants();
   memcpy(dc.mWorld, World.data, sizeof(dc.mWorld));
   memcpy(dc.mWorldViewProj, WorldViewProj.data, sizeof(dc.mWorldViewProj));
-  if (!m_bDepthPrepass)
+  if (!m_bDepthPrepass && !m_bRayCaptureWalk)
     SetObjectMotion(dc, pObj, World, bNearest);
 
   // The diffuse texture; without one the texture the leaf buffer was given (terrain, grass).
@@ -542,7 +542,7 @@ void CD3D12Renderer::DrawLeafItem(const SRenderItem &it)
 
   auto Draw = [&]()
   {
-    if (m_pFrameDump && !m_bDepthPrepass)
+    if (m_pFrameDump && !m_bDepthPrepass && !m_bRayCaptureWalk)
       DumpDraw(dc, Key, pTex);
     const D3D12_VERTEX_BUFFER_VIEW *pTC1 = TexCoord1 ? &*TexCoord1 : nullptr, *pTangents = Tangents ? &*Tangents : nullptr;
     if (Geom->IsIndexed())
@@ -649,7 +649,7 @@ void CD3D12Renderer::DrawLeafItem(const SRenderItem &it)
     else if (HasNormal(nFormat))
     {
       dc.nFlags |= DF_LIGHTING;
-      if (!m_bDepthPrepass)
+      if (!m_bDepthPrepass && !m_bRayCaptureWalk)
         SetObjectLights(dc, pObj, World, pLB);
     }
     else if (HasColor(nFormat))
@@ -659,7 +659,7 @@ void CD3D12Renderer::DrawLeafItem(const SRenderItem &it)
     // bring them), per pixel as the vertex lighting takes them and in place of the ambient under the
     // light map, as the original adds its vertex lighting there (DF2_LIGHTMAP_LIGHTS).
     if (CV_d3d12_PixelLighting && TexCoord1 && !(pObj->m_ObjFlags & FOB_ZPASS) && Props.eEnvMap != EEnvMap::Auto && HasNormal(nFormat) &&
-        !m_bDepthPrepass)
+        !m_bDepthPrepass && !m_bRayCaptureWalk)
     {
       const uint32 nFlags2 = dc.nFlags2;
       SetObjectLights(dc, pObj, World, pLB);
@@ -705,7 +705,8 @@ void CD3D12Renderer::DrawLeafItem(const SRenderItem &it)
     if (m_bDepthPrepass)
       return;
     // The sun hidden by the shadow maps of the object's casters; by the sun's cascades where they
-    // reach (a light map by the live casters only: it has the shadows of the rest).
+    // reach (a light map by the live casters only: it has the shadows of the rest). The scene for
+    // rays takes their flags: which casters hide the sun at its hits (RayShade.hlsli).
     if (dc.nFlags & (DF_LIGHTING | DF_TEX1_LIGHTMAP))
     {
       SetupShadowReceiver(dc, pObj);
@@ -1086,7 +1087,7 @@ void CD3D12Renderer::DrawLeafItem(const SRenderItem &it)
   }
   if (bFirstPass)
     Draw();
-  if (m_bDepthPrepass)
+  if (m_bDepthPrepass || m_bRayCaptureWalk)
     return;
   // The beach: the other waves and the wet sand.
   for (int nPass = 1; eDC == eDC_WaterBeach && nPass <= BEACH_WAVES && SetupBeachDraw(Key, dc, nPass); nPass++)
