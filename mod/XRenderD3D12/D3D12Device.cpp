@@ -578,6 +578,7 @@ void CD3D12Device::SetOffscreenTargets(ID3D12Resource *pColor, D3D12_CPU_DESCRIP
 {
   if (!m_bInFrame || !pColor)
     return;
+  m_nStateEpoch++;
   EndOffscreen();
   Barrier(m_pCmdList.Get(), pColor, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, D3D12_RESOURCE_STATE_RENDER_TARGET, nSubresource);
   m_pOffscreen = pColor;
@@ -665,6 +666,7 @@ void CD3D12Device::SetShadowMapTarget(ID3D12Resource *pDepth, D3D12_CPU_DESCRIPT
 {
   if (!m_bInFrame || !pDepth)
     return;
+  m_nStateEpoch++;
   if (m_pOffscreen != pDepth || !m_bOffscreenShadowMap)
   {
     EndOffscreen();
@@ -697,6 +699,7 @@ void CD3D12Device::EndOffscreen()
 
 void CD3D12Device::SetBackBufferTargets()
 {
+  m_nStateEpoch++;
   EndOffscreen();
   if (m_bInScene)
   {
@@ -735,6 +738,7 @@ void CD3D12Device::BindRootSignature()
 {
   if (!m_bInFrame || !g_pRenderer->m_pDescriptors || !g_pRenderer->m_pPipeline)
     return;
+  m_nStateEpoch++;
   ID3D12DescriptorHeap *pHeap = g_pRenderer->m_pDescriptors->GetHeap();
   m_pCmdList->SetDescriptorHeaps(1, &pHeap);
   m_pCmdList->SetGraphicsRootSignature(g_pRenderer->m_pPipeline->GetRootSignature());
@@ -993,6 +997,7 @@ void CD3D12Device::BindHighlight(bool bOn)
 {
   if (!m_bInFrame || !m_pHighlight || bOn == m_bHighlightBound)
     return;
+  m_nStateEpoch++;
   m_bHighlightBound = bOn;
   if (!bOn)
   {
@@ -1020,6 +1025,7 @@ void CD3D12Device::BeginOutput()
 {
   if (!m_bInFrame || !m_pFrame || m_bOutput)
     return;
+  m_nStateEpoch++;
   EndScene();
   EndHdr();
   EndOffscreen();
@@ -1196,6 +1202,7 @@ void CD3D12Device::OpenCmdList()
 {
   m_pAllocators[m_nFrameSlot]->Reset();
   m_pCmdList->Reset(m_pAllocators[m_nFrameSlot].Get(), nullptr);
+  m_nStateEpoch++;
 }
 
 void CD3D12Device::BeginFrame()
@@ -1359,6 +1366,7 @@ void CD3D12Device::SubmitAsyncCompute()
   m_pQueue->Wait(m_pComputeFence.Get(), m_nComputeFence);
   // The frame goes on in the same allocator (its memory kept until the slot's fence).
   m_pCmdList->Reset(m_pAllocators[m_nFrameSlot].Get(), nullptr);
+  m_nStateEpoch++;
   BindRootSignature();
   if (!m_pOffscreen)
     SetBackBufferTargets();

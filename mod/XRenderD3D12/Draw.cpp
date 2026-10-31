@@ -210,24 +210,55 @@ void CD3D12Renderer::DrawGeometry(const SPipelineKey &Key, const SDrawConstants 
     }
     memcpy(LocalDC.mPrevWorldViewProj, LocalDC.mWorldViewProj, sizeof(LocalDC.mPrevWorldViewProj));
   }
-  ID3D12GraphicsCommandList *pList = m_pDevice->GetCmdList();
-  pList->SetPipelineState(pPSO);
+  // The state the draw before set stays while nothing else touched the command list.
+  ID3D12GraphicsCommandList *pList = m_pDevice->GetDrawCmdList();
+  SDrawState &Set = m_DrawState;
+  if (Set.nEpoch != m_pDevice->GetStateEpoch())
+  {
+    Set = {};
+    Set.nEpoch = m_pDevice->GetStateEpoch();
+  }
+  if (pPSO != Set.pPSO)
+  {
+    pList->SetPipelineState(pPSO);
+    Set.pPSO = pPSO;
+  }
   m_nFramePSOChanges += pPSO != m_pLastPSO;
   m_pLastPSO = pPSO;
-  pList->SetGraphicsRootConstantBufferView(0, m_nFrameCB);
+  if (m_nFrameCB != Set.nFrameCB)
+  {
+    pList->SetGraphicsRootConstantBufferView(0, m_nFrameCB);
+    Set.nFrameCB = m_nFrameCB;
+  }
   pList->SetGraphicsRootConstantBufferView(1, UploadConstants(*m_pUpload, *pDC));
   if (nRayScene)
   {
     pList->SetGraphicsRootShaderResourceView(ROOT_RAY_SCENE, nRayScene);
     pList->SetGraphicsRootShaderResourceView(ROOT_RAY_INSTANCES, m_pRayScene->GetInstances());
   }
-  pList->IASetVertexBuffers(0, 1, &VB);
-  m_pPipeline->BindDefaultStream(pList);
+  const auto SetVB = [&](UINT nSlot, const D3D12_VERTEX_BUFFER_VIEW &View)
+  {
+    if (memcmp(&View, &Set.VB[nSlot], sizeof(View)))
+    {
+      pList->IASetVertexBuffers(nSlot, 1, &View);
+      Set.VB[nSlot] = View;
+    }
+  };
+  SetVB(0, VB);
+  if (!Set.bDefaultStream)
+  {
+    m_pPipeline->BindDefaultStream(pList);
+    Set.bDefaultStream = true;
+  }
   if (pTexCoord1)
-    pList->IASetVertexBuffers(2, 1, pTexCoord1);
+    SetVB(2, *pTexCoord1);
   if (pTangents)
-    pList->IASetVertexBuffers(3, 1, pTangents);
-  pList->IASetPrimitiveTopology(eTopology);
+    SetVB(3, *pTangents);
+  if (eTopology != Set.eTopology)
+  {
+    pList->IASetPrimitiveTopology(eTopology);
+    Set.eTopology = eTopology;
+  }
 
   // The viewport inside the back buffer (an off screen target: all of it, or m_TargetRect); the
   // scissor rectangle inside the viewport (the scissors are the back buffer's). In an upscaler's
@@ -257,7 +288,11 @@ void CD3D12Renderer::DrawGeometry(const SPipelineKey &Key, const SDrawConstants 
   if (vw <= 0 || vh <= 0)
     return;
   const D3D12_VIEWPORT Viewport = { (float)vx, (float)vy, (float)vw, (float)vh, m_fDepthMin, m_fDepthMax };
-  pList->RSSetViewports(1, &Viewport);
+  if (memcmp(&Viewport, &Set.Viewport, sizeof(Viewport)))
+  {
+    pList->RSSetViewports(1, &Viewport);
+    Set.Viewport = Viewport;
+  }
   RECT Scissor = { vx, vy, vx + vw, vy + vh };
   if (m_bItemScissor && !bOffscreen)
   {
@@ -275,13 +310,21 @@ void CD3D12Renderer::DrawGeometry(const SPipelineKey &Key, const SDrawConstants 
   }
   if (Scissor.right <= Scissor.left || Scissor.bottom <= Scissor.top)
     return;
-  pList->RSSetScissorRects(1, &Scissor);
+  if (memcmp(&Scissor, &Set.Scissor, sizeof(Scissor)))
+  {
+    pList->RSSetScissorRects(1, &Scissor);
+    Set.Scissor = Scissor;
+  }
 
   m_nFramePolygons += CountTriangles(eTopology, nCount) * nInstances;
   m_nFrameDraws++;
   if (pIB)
   {
-    pList->IASetIndexBuffer(pIB);
+    if (memcmp(pIB, &Set.IB, sizeof(*pIB)))
+    {
+      pList->IASetIndexBuffer(pIB);
+      Set.IB = *pIB;
+    }
     pList->DrawIndexedInstanced(nCount, nInstances, nFirst, nBaseVertex, 0);
   }
   else

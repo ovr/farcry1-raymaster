@@ -162,6 +162,8 @@ void CD3D12Compute::Dispatch(ID3D12GraphicsCommandList *pList, ED3D12Kernel eKer
   CD3D12Descriptors *pDescriptors = g_pRenderer->m_pDescriptors.get();
   if (!pList || !pPSO || !pDescriptors || !nGroupsX || !nGroupsY)
     return;
+  // Its pipeline state in place of the last draw's.
+  g_pRenderer->m_pDevice->ForgetDrawState();
   pList->SetComputeRootSignature(m_pRootSignature.Get());
   pList->SetPipelineState(pPSO);
   if (CB)

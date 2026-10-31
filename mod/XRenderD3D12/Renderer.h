@@ -1187,6 +1187,22 @@ public:
   int m_nFrameSunLights = 0;          //!< r_DisplayInfo: the main view's sun (DLF_SUN) and other lights in this
   int m_nFrameDynLights = 0;          //!< frame (CScene::EndEf3D), 0 again at the end of Update
   ID3D12PipelineState *m_pLastPSO = nullptr;  //!< the pipeline state of the last draw (counted only)
+  //! What DrawGeometry set on the command list, while the device's GetStateEpoch is nEpoch: it
+  //! leaves out what the draw before set already (the driver's calls are a large part of the CPU's
+  //! frame, the viewport and the scissor the most of them after the draws). Zero: not set.
+  struct SDrawState
+  {
+    uint32 nEpoch = 0;
+    ID3D12PipelineState *pPSO = nullptr;
+    D3D12_GPU_VIRTUAL_ADDRESS nFrameCB = 0;
+    D3D12_VERTEX_BUFFER_VIEW VB[4] = {};
+    bool bDefaultStream = false;
+    D3D_PRIMITIVE_TOPOLOGY eTopology = D3D_PRIMITIVE_TOPOLOGY_UNDEFINED;
+    D3D12_VIEWPORT Viewport = {};
+    RECT Scissor = {};
+    D3D12_INDEX_BUFFER_VIEW IB = {};
+  };
+  SDrawState m_DrawState;
   int64 m_nLastFrameTicks = 0;        //!< ReportGpuTimes: when the last frame ended (0: timing off)
   double m_fFrameMs = 0;              //!< ReportGpuTimes: the time between frames added up
   int m_nTimedFrames = 0;

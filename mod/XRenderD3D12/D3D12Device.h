@@ -106,8 +106,20 @@ public:
 
   ID3D12Device *GetDevice() const { return m_pDevice.Get(); }
   ID3D12CommandQueue *GetQueue() const { return m_pQueue.Get(); }
-  //! The frame's command list; valid between BeginFrame and EndFrame.
-  ID3D12GraphicsCommandList *GetCmdList() const { return m_pCmdList.Get(); }
+  //! The frame's command list; valid between BeginFrame and EndFrame. The caller may set state of
+  //! its own on it: what DrawGeometry set is forgotten (GetStateEpoch).
+  ID3D12GraphicsCommandList *GetCmdList() const
+  {
+    m_nStateEpoch++;
+    return m_pCmdList.Get();
+  }
+  //! The frame's command list for DrawGeometry, which leaves out the state it set already while
+  //! GetStateEpoch stays the same.
+  ID3D12GraphicsCommandList *GetDrawCmdList() const { return m_pCmdList.Get(); }
+  //! Changes whenever the command list's state may have changed other than by DrawGeometry: a new
+  //! list, targets bound, the root signature, a GetCmdList, ForgetDrawState.
+  uint32 GetStateEpoch() const { return m_nStateEpoch; }
+  void ForgetDrawState() const { m_nStateEpoch++; }
   //! In a frame, an open command list of the compute queue for work beside the frame's (the ray
   //! scene's builds), its GPU time that of szSection (a string with static storage) in
   //! GetComputeGpuTimes; NULL without the queue. SubmitAsyncCompute runs it.
@@ -397,6 +409,7 @@ private:
   ComPtr<ID3D12CommandAllocator> m_pAllocators[D3D12_FRAMES];
   uint64 m_nFrameFence[D3D12_FRAMES] = {};
   ComPtr<ID3D12GraphicsCommandList> m_pCmdList;
+  mutable uint32 m_nStateEpoch = 0;                 //!< GetStateEpoch
   ComPtr<ID3D12Fence> m_pFence;
   HANDLE m_hFenceEvent = nullptr;
   uint64 m_nNextFence = 1;
