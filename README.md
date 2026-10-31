@@ -18,24 +18,30 @@ Mods for Far Cry, built with the CryENGINE MOD SDK for Far Cry:
 - `third_party/xegtao`, `third_party/fidelityfx-cacao` - Intel XeGTAO and AMD FidelityFX CACAO,
   the ambient occlusion of XRenderD3D12; `third_party/directx-headers` - Microsoft's d3dx12
   headers, which CACAO needs.
-- `assets/scripts` - patches to the game's scripts, and `Patch Scripts.cmd`, which applies them to
-  the scripts of an installed game (`Patch Scripts.cmd <game folder>`, written to
-  `FCData\zz_RayMaster.pak`; deleting that file gives back the original scripts):
-  - `field-of-view.patch` - a field of view for screens wider than 4:3 that keeps the view up and
+- `assets/scripts` - patches to the game's scripts, and `Patch Scripts.cmd`, which applies them in
+  the order of their numbers to the scripts of an installed game (`Patch Scripts.cmd <game
+  folder>`, written to `FCData\zz_RayMaster.pak`; deleting that file gives back the original
+  scripts):
+  - `01-field-of-view.patch` - a field of view for screens wider than 4:3 that keeps the view up and
     down of a 4:3 screen (Hor+), and the console variable `cl_fov`, the field of view across the
     screen in degrees (0, the default, for the automatic one).
-  - `hdr-options.patch` - HDR entries in Advanced Video Options, where the game hides its own:
+  - `02-hdr-options.patch` - HDR entries in Advanced Video Options, where the game hides its own:
     HDR, None, Soft, ACES or AgX, which sets `r_HDRRendering` and `d3d12_ToneMap`, the HDR
     pipeline of XRenderD3D12 and its tone map; and HDR output, SDR, HDR10 or scRGB, which sets
     `d3d12_HDROutput`: on a display in HDR mode (Windows: Use HDR) the sun, fire and lamps go up to
     the display's peak brightness, while the rest of the picture and the menu stay as bright as SDR
     content.
-  - `video-ambient-occlusion.patch` - Ambient Occlusion in Advanced Video Options: None, GTAO or
+  - `03-video-ambient-occlusion.patch` - Ambient Occlusion in Advanced Video Options: None, GTAO or
     CACAO, which sets `d3d12_AO`, the screen space ambient occlusion of XRenderD3D12 (Intel
     XeGTAO or AMD FidelityFX CACAO); the Basic Video Options button moves to the bar of Apply.
-  - `video-ray-tracing.patch` - Ray Traced Reflections in Advanced Video Options: None, Rays or
+  - `04-video-ray-tracing.patch` - Ray Traced Reflections in Advanced Video Options: None, Rays or
     Hybrid, which sets `d3d12_RTReflections`, the water's reflection by rays of XRenderD3D12 (a
     graphics card with DXR 1.1; greyed out without one); the rows of the page move closer together.
+  - `05-video-upscaler.patch` - Upscaler in Video Options, under Resolution: None, FSR (auto),
+    FSR 3.1 or FSR 4, which sets `d3d12_Upscaler` and `d3d12_UpscaleVersion`, the AMD FSR
+    Upscaling of XRenderD3D12 (auto: the version FSR picks for the graphics card); and Upscaler
+    Mode, Native AA, Quality, Balanced, Performance or Ultra Performance, which sets
+    `d3d12_UpscaleMode`, the size the 3D scene is rendered at.
 
 How to build and run them: `AGENTS.md`.
 

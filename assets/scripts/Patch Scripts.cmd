@@ -5,7 +5,8 @@
 :: game's FCData\Scripts.pak and puts the patched scripts into FCData\zz_RayMaster.pak, which the
 :: engine opens after its own packs, so that its files are the ones the game reads. Scripts.pak
 :: stays as it is: deleting zz_RayMaster.pak gives back the original scripts. Without an argument
-:: the game folder is the current folder.
+:: the game folder is the current folder. The patches go in the order of their numbers
+:: (NN-name.patch): a later one may be written against a script as an earlier one leaves it.
 ::
 :: The file is a batch file and a PowerShell script at once: cmd runs these lines (PowerShell
 :: reads them as a comment) and they run the rest of the file in PowerShell.

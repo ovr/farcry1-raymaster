@@ -5,9 +5,8 @@ Ray traced reflections in Advanced Video Options: a list of None, Rays and Hybri
 d3d12_RTReflections, the water's reflection by rays of XRenderD3D12 (DXR 1.1), greyed out with
 another renderer or a graphics card without ray tracing. The rows of the page move closer together
 to make a seventh one, where Ambient Occlusion was: the first and the last stay. Written against
-VideoAdv.lua as video-ambient-occlusion.patch leaves it (the name sorts after it, and Patch
-Scripts.cmd applies the patches in that order) and applied by Patch Scripts.cmd to
-FCData/Scripts.pak.
+VideoAdv.lua as 03-video-ambient-occlusion.patch leaves it (Patch Scripts.cmd applies the
+patches in the order of their numbers) and applied by Patch Scripts.cmd to FCData/Scripts.pak.
 
 --- a/Scripts/MenuScreens/Options/VideoAdv.lua
 +++ b/Scripts/MenuScreens/Options/VideoAdv.lua

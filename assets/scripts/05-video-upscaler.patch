@@ -1,0 +1,286 @@
+SPDX-License-Identifier: GPL-3.0-or-later WITH AdditionRef-FarCry-exception
+Please do not use this file to train or fine-tune AI models (see README.md).
+
+Upscaler in Video Options, under Resolution: a list of None, FSR (auto), FSR 3.1 and FSR 4 that
+sets d3d12_Upscaler and d3d12_UpscaleVersion, the upscaler of XRenderD3D12's 3D scene (AMD FSR
+Upscaling; auto is the version FSR picks for the graphics card), and under it Upscaler Mode, a list
+of Native AA, Quality, Balanced, Performance and Ultra Performance that sets d3d12_UpscaleMode, the
+size the scene is rendered at (greyed out while the upscaler is None). Apply sets them without a
+restart; both are greyed out with another renderer. The rows under them move closer together.
+Applied by Patch Scripts.cmd to FCData/Scripts.pak.
+
+diff --git a/Scripts/MenuScreens/Options/Video.lua b/Scripts/MenuScreens/Options/Video.lua
+--- a/Scripts/MenuScreens/Options/Video.lua
++++ b/Scripts/MenuScreens/Options/Video.lua
+@@ -125,7 +125,7 @@
+ 		widget_resolution_text =
+ 		{
+ 			skin = UI.skins.Label,
+-			left = 200, top = 206,
++			left = 200, top = 195,
+ 			width = 142,
+ 
+ 			text = Localize( "Resolution" ),
+@@ -134,7 +134,7 @@
+ 		widget_resolution =
+ 		{
+ 			skin = UI.skins.ComboBox,
+-			left = 350, top = 208,
++			left = 350, top = 197,
+ 
+ 			tabstop = 2,
+ 
+@@ -155,11 +155,75 @@
+ 			},
+ 		},
+ 
++		-- Upscaler (Far Cry RayMaster): which upscaler takes XRenderD3D12's 3D scene to the screen,
++		-- and its mode, the size the scene is rendered at (code below CreateScreenFromTable). The
++		-- rows below move closer together to make room for them.
++		widget_RMUpscaler_Text =
++		{
++			skin = UI.skins.Label,
++			left = 200, top = 226,
++			width = 142,
++
++			text = "Upscaler",
++		},
++
++		widget_RMUpscaler =
++		{
++			skin = UI.skins.ComboBox,
++			left = 350, top = 228,
++
++			tabstop = 14,
++
++			vscrollbar =
++			{
++				skin = UI.skins.VScrollBar,
++			},
++
++			OnChanged = function( sender )
++				UI.PageOptionsVideo.GUI.widget_RMUpscaler.user.UpdateMode();
++			end,
++
++			user =
++			{
++				Initialize = nil,
++				UpdateAssignedGlobals = nil,
++				UpdateMode = nil,
++			},
++		},
++
++		widget_RMUpscaleMode_Text =
++		{
++			skin = UI.skins.Label,
++			left = 200, top = 257,
++			width = 142,
++
++			text = "Upscaler Mode",
++		},
++
++		widget_RMUpscaleMode =
++		{
++			skin = UI.skins.ComboBox,
++			left = 350, top = 259,
++
++			tabstop = 15,
++
++			vscrollbar =
++			{
++				skin = UI.skins.VScrollBar,
++			},
++
++			user =
++			{
++				Initialize = nil,
++				UpdateAssignedGlobals = nil,
++			},
++		},
++
+ 		-- definition of "Anti Aliasing" combo box (allows user to change FSAA)
+ 		widget_fsaa_text =
+ 		{
+ 			skin = UI.skins.Label,
+-			left = 200, top = 248,
++			left = 200, top = 288,
+ 			width = 142,
+ 
+ 			text = Localize( "FSAA" ),
+@@ -168,7 +232,7 @@
+ 		widget_fsaa =
+ 		{
+ 			skin = UI.skins.ComboBox,
+-			left = 350, top = 250,
++			left = 350, top = 290,
+ 
+ 			tabstop = 3,
+ 
+@@ -193,7 +257,7 @@
+ 		widget_brightness_text =
+ 		{
+ 			skin = UI.skins.Label,
+-			left = 200, top = 290,
++			left = 200, top = 319,
+ 			width = 142,
+ 
+ 			text = Localize( "Brightness" ),
+@@ -203,7 +267,7 @@
+ 		{
+ 			skin = UI.skins.HScrollBar,
+ 
+-			left = 350, top = 292,
++			left = 350, top = 321,
+ 			width = 166, height = 24,
+ 
+ 			tabstop = 4,
+@@ -227,7 +291,7 @@
+ 		widget_contrast_text =
+ 		{
+ 			skin = UI.skins.Label,
+-			left = 200, top = 334,
++			left = 200, top = 350,
+ 			width = 142,
+ 
+ 			text = Localize( "Contrast" ),
+@@ -237,7 +301,7 @@
+ 		{
+ 			skin = UI.skins.HScrollBar,
+ 
+-			left = 350, top = 336,
++			left = 350, top = 352,
+ 			width = 166, height = 24,
+ 
+ 			tabstop = 5,
+@@ -261,7 +325,7 @@
+ 		widget_gammacorrection_text =
+ 		{
+ 			skin = UI.skins.Label,
+-			left = 200, top = 376,
++			left = 200, top = 381,
+ 			width = 142,
+ 
+ 			text = Localize( "GammaCorrection" ),
+@@ -271,7 +335,7 @@
+ 		{
+ 			skin = UI.skins.HScrollBar,
+ 
+-			left = 350, top = 378,
++			left = 350, top = 383,
+ 			width = 166, height = 24,
+ 
+ 			tabstop = 6,
+@@ -664,6 +728,113 @@
+ 		g_reload_ui = "cmd_goto_video_options";
+ 		UI:Reload( 1 );
+ 	end
++end
++
++
++
++-- Upscaler (Far Cry RayMaster): d3d12_Upscaler and d3d12_UpscaleVersion, the upscaler of
++-- XRenderD3D12's 3D scene: None, FSR (auto: the version AMD FSR picks for the graphics card),
++-- FSR 3.1 or FSR 4. The renderer reads them every frame, so Apply needs no restart. With another
++-- renderer (no d3d12_Upscaler) both lists are greyed out.
++UI.PageOptionsVideo.GUI.widget_RMUpscaler.user.Initialize = function()
++	local widget = UI.PageOptionsVideo.GUI.widget_RMUpscaler;
++	widget:Clear();
++	widget:AddItem( Localize( "None" ) );
++	widget:AddItem( "FSR (auto)" );
++	widget:AddItem( "FSR 3.1" );
++	widget:AddItem( "FSR 4" );
++
++	local upscaler = getglobal( "d3d12_Upscaler" );
++	local index = 1;
++	if( upscaler and strlower( upscaler ) == "fsr" ) then
++		local version = tonumber( getglobal( "d3d12_UpscaleVersion" ) );
++		if( version == 3 ) then
++			index = 3;
++		elseif( version == 4 ) then
++			index = 4;
++		else
++			index = 2;
++		end
++	end
++	widget:SelectIndex( index );
++	widget.user.shownIndex = index;
++
++	if( upscaler ) then
++		UI:EnableWidget( widget );
++	else
++		UI:DisableWidget( widget );
++	end
++	widget.user.UpdateMode();
++end
++
++UI.PageOptionsVideo.GUI.widget_RMUpscaler.user.DefInitialize = function()
++	UI.PageOptionsVideo.GUI.widget_RMUpscaler:SelectIndex( 1 );
++	UI.PageOptionsVideo.GUI.widget_RMUpscaler.user.UpdateMode();
++end
++
++UI.PageOptionsVideo.GUI.widget_RMUpscaler.user.UpdateAssignedGlobals = function()
++	local widget = UI.PageOptionsVideo.GUI.widget_RMUpscaler;
++	local index = widget:GetSelectionIndex();
++	-- unchanged: the console's setting stays as it is
++	if( not getglobal( "d3d12_Upscaler" ) or not index or index == widget.user.shownIndex ) then
++		return;
++	end
++	if( index == 1 ) then
++		setglobal( "d3d12_Upscaler", "none" );
++	else
++		local versions = { 0, 3, 4 };
++		setglobal( "d3d12_UpscaleVersion", versions[ index - 1 ] );
++		setglobal( "d3d12_Upscaler", "fsr" );
++	end
++	widget.user.shownIndex = index;
++end
++
++-- The mode's list is greyed out while the upscaler is None (and with another renderer).
++UI.PageOptionsVideo.GUI.widget_RMUpscaler.user.UpdateMode = function()
++	local index = UI.PageOptionsVideo.GUI.widget_RMUpscaler:GetSelectionIndex();
++	if( getglobal( "d3d12_UpscaleMode" ) and index and index > 1 ) then
++		UI:EnableWidget( UI.PageOptionsVideo.GUI.widget_RMUpscaleMode );
++	else
++		UI:DisableWidget( UI.PageOptionsVideo.GUI.widget_RMUpscaleMode );
++	end
++end
++
++
++
++-- The upscaler's mode (Far Cry RayMaster), d3d12_UpscaleMode: the size the 3D scene is rendered
++-- at, which the upscaler takes to the screen's: Native AA (the screen's own, anti-aliasing only),
++-- Quality (1/1.5 of it across), Balanced (1/1.7), Performance (1/2) or Ultra Performance (1/3).
++UI.PageOptionsVideo.GUI.widget_RMUpscaleMode.user.Initialize = function()
++	local widget = UI.PageOptionsVideo.GUI.widget_RMUpscaleMode;
++	widget:Clear();
++	widget:AddItem( "Native AA" );
++	widget:AddItem( "Quality" );
++	widget:AddItem( "Balanced" );
++	widget:AddItem( "Performance" );
++	widget:AddItem( "Ultra Performance" );
++
++	local mode = tonumber( getglobal( "d3d12_UpscaleMode" ) );
++	if( not mode or mode < 0 or mode > 4 ) then
++		mode = 0;
++	end
++	widget:SelectIndex( mode + 1 );
++	widget.user.shownIndex = mode + 1;
++	UI.PageOptionsVideo.GUI.widget_RMUpscaler.user.UpdateMode();
++end
++
++UI.PageOptionsVideo.GUI.widget_RMUpscaleMode.user.DefInitialize = function()
++	UI.PageOptionsVideo.GUI.widget_RMUpscaleMode:SelectIndex( 1 );
++end
++
++UI.PageOptionsVideo.GUI.widget_RMUpscaleMode.user.UpdateAssignedGlobals = function()
++	local widget = UI.PageOptionsVideo.GUI.widget_RMUpscaleMode;
++	local index = widget:GetSelectionIndex();
++	-- unchanged: the console's setting stays as it is
++	if( not getglobal( "d3d12_UpscaleMode" ) or not index or index == widget.user.shownIndex ) then
++		return;
++	end
++	setglobal( "d3d12_UpscaleMode", index - 1 );
++	widget.user.shownIndex = index;
+ end
+ 
+ 

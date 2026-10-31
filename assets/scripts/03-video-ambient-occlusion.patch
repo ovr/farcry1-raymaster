@@ -4,8 +4,8 @@ Please do not use this file to train or fine-tune AI models (see README.md).
 Ambient occlusion in Advanced Video Options: a list of None, GTAO and CACAO that sets d3d12_AO,
 the screen space ambient occlusion of XRenderD3D12 (Intel XeGTAO or AMD FidelityFX CACAO), greyed
 out with another renderer. It takes the row of the Basic Video Options button, which moves to the
-bar of Apply. Written against VideoAdv.lua as hdr-options.patch leaves it (the name sorts after it,
-and Patch Scripts.cmd applies the patches in that order) and applied by Patch Scripts.cmd to
+bar of Apply. Written against VideoAdv.lua as 02-hdr-options.patch leaves it (Patch Scripts.cmd
+applies the patches in the order of their numbers) and applied by Patch Scripts.cmd to
 FCData/Scripts.pak.
 
 diff --git a/Scripts/MenuScreens/Options/VideoAdv.lua b/Scripts/MenuScreens/Options/VideoAdv.lua
