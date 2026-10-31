@@ -226,9 +226,12 @@ reference of its features and console variables.
   engine's shadows on the terrain in this frame, else `d3d12_AOBakedShare`, 0.5); all of it for
   the templates lit by the ambient colour alone and the terrain's shadow (`DF2_AO_ALL`); fogged.
   It blends as the colour, so the lamps' passes add none and the detail layers scale it. The
-  resolve makes the light taken, `(1 - visibility ^ strength) * ambient` (`R16G16B16A16_FLOAT`,
-  the strength not divided by 2.2: the game adds its light in gamma space), and a blend of `ONE,
-  ONE` with `REV_SUBTRACT` (`SPipelineKey::nBlendOp`) takes it from the scene. A light map's light
+  light taken, `(1 - visibility ^ strength) * ambient` (at float16 precision; the strength not
+  divided by 2.2: the game adds its light in gamma space), is made by the draw that takes it from
+  the scene, a blend of `ONE, ONE` with `REV_SUBTRACT` (`SPipelineKey::nBlendOp`; `Post.hlsl`'s
+  `POST_AO_TAKEN`, with the depth buffer bound read only for its pixel shader,
+  `CD3D12Device::SetDepthReadOnly`); with `d3d12_AODebug` the resolve writes it into an
+  `R16G16B16A16_FLOAT` target first, for the debug view (0.1 ms more at 3840 x 2160). A light map's light
   counts as direct, so in the light-mapped interiors it darkens little; the target costs some
   0.03 ms of the opaque list at 2560 x 1440.
   `d3d12_AOQuality` 0 to 3 (2: XeGTAO Low to Ultra, CACAO LOW to HIGHEST), `d3d12_AORadius` (1 m),
@@ -367,6 +370,12 @@ reference of its features and console variables.
   variance (0.1; 0.25 matches the halved slopes of the calmer normal the reflection is looked up
   along, but already washes the reflections of the bay in PierWalk out; 0 gives exactly the frames
   of the mirror before it; not saved).
+- The glass of the scopes (`r_ScopeLens_fx`, the AG36's, the OICW's, the AW50's and the rocket
+  launcher's) shows the scene around the middle of the screen through the same copy of the scene
+  when its list has one; else (the weapon's list) a copy of only the part of the target it shows
+  (the middle out to `SCOPE_LENS_FIELD` times the glass's size on the screen, with room to spare;
+  the colour alone), whose edges its samples are clamped to: 0.14 ms less than the whole target
+  and its depth at 3840 x 2160. Each list copies the scene for itself.
 
 ## Vegetation sprites and terrain detail
 

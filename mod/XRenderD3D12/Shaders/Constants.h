@@ -123,6 +123,7 @@ typedef float float4x4_t[16];
 #define POST_SUN_PATCH      0x00000100  //!< 1 where the depth copy tex0 is the far plane, around the sun (SunPatch, Post.hlsl)
 #define POST_SUN_MASK       0x00000200  //!< the sun's mask: the patch tex0 blurred towards its middle (SunMask, Post.hlsl)
 #define POST_DEPTH_VIEW     0x00000400  //!< the depth tex0 as grey: the distance from vParams1.x (near, black) to vParams1.y (far, white), log scale
+#define POST_AO_TAKEN       0x00000800  //!< the light the ambient occlusion takes (AoTaken, Post.hlsl): tex0 the visibility, tex1 the depth, tex2 the ambient light
 
 // SDrawConstants::nFlags of the HDR program (Hdr.hlsl, Hdr.cpp): one mode
 #define HDR_LUMINANCE       0x00000001  //!< the meter's first level: (w * log2 L, w) of the scene tex0 over the target's texel, w the centre weight

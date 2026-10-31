@@ -664,8 +664,10 @@ public:
   bool SetupBeachDraw(SPipelineKey &Key, SDrawConstants &dc, int nPass);
   //! The sea floor under the ocean (eDC_WaterBottom) with the element's texture pTex (may be NULL).
   void SetupWaterBottomDraw(SPipelineKey &Key, SDrawConstants &dc, CTexture *pTex);
-  //! Copies the main view's target and its depth buffer as drawn so far (m_bSceneCopied).
-  bool CopySceneForWater();
+  //! Copies the main view's target and its depth buffer as drawn so far (m_bSceneCopied); with pRect
+  //! (left, top, right, bottom in its pixels) only that part of the target, which leaves the copies
+  //! incomplete (not m_bSceneCopied).
+  bool CopySceneForWater(const int *pRect = nullptr);
   void ReleaseWaterResources();
   //! Starts making the pixels of the wave and caustics textures on a thread of their own (at
   //! start-up; GetWaveTexture and GetCausticsTexture wait for it).
@@ -678,8 +680,11 @@ public:
   bool SetupCausticsDraw(SPipelineKey &Key, SDrawConstants &dc, const SRenderItem &it);
   //! The texture index of the caustics pattern (made on first use), -1 without one.
   int GetCausticsTexture();
-  //! The glass of a scope (eDC_ScopeLens). False: not drawn.
-  bool SetupScopeLensDraw(SPipelineKey &Key, SDrawConstants &dc);
+  //! The glass of a scope (eDC_ScopeLens, WorldViewProj its transform). False: not drawn.
+  bool SetupScopeLensDraw(SPipelineKey &Key, SDrawConstants &dc, const SRenderItem &it, const Matrix44 &WorldViewProj);
+  //! The part of the main view's target (left, top, right, bottom in its pixels) that the glass of a
+  //! scope shows (ScopeLens, General.hlsl); false when its vertices are not all in front of the camera.
+  bool ScopeLensRect(const SRenderItem &it, const Matrix44 &WorldViewProj, int Rect[4]) const;
   //! Before the main view is drawn (Items: its render items): with r_WaterReflections and an
   //! ocean surface among the items, the scene mirrored in the water plane into m_pReflectionColor,
   //! when the last one is out of date (r_WaterUpdate*): the 3D engine renders it with

@@ -327,7 +327,8 @@ float FogVolumeAlpha(float3 vPos)
 //! from the middle of the glass times vParams0.x from there. The middle of the glass is uv0 (0.5,
 //! 0.5); the offset in pixels comes from uv0 through its screen derivatives, so the picture stands
 //! upright whichever way the glass's texture coordinates run. The wave slopes (tex1, unit RMS) times
-//! vParams0.y move it in uv0: the glass is not quite even. rgb times vColor.rgb; alpha vColor.a *
+//! vParams0.y move it in uv0: the glass is not quite even. The samples stay in the part of the
+//! screen copied (vParams1: xy to zw in uv). rgb times vColor.rgb; alpha vColor.a *
 //! 2^-(r / vParams0.z)^4, r = |uv0 - 0.5|.
 float4 ScopeLens(SVertexOutput In)
 {
@@ -340,7 +341,8 @@ float4 ScopeLens(SVertexOutput In)
   float2 a = ddx(vUV), b = ddy(vUV);
   float fDet = a.x * b.y - b.x * a.y;
   float2 vPixels = abs(fDet) > 1e-12 ? float2(vOffset.x * b.y - b.x * vOffset.y, a.x * vOffset.y - vOffset.x * a.y) / fDet : 0;
-  float3 vScene = g_Textures[g_Draw.nTex0].SampleLevel(g_SamplerLinearClamp, (vMiddle + vPixels * g_Draw.vParams0.x) * g_Frame.vScreen.zw, 0).rgb;
+  float2 vAt = clamp((vMiddle + vPixels * g_Draw.vParams0.x) * g_Frame.vScreen.zw, g_Draw.vParams1.xy, g_Draw.vParams1.zw);
+  float3 vScene = g_Textures[g_Draw.nTex0].SampleLevel(g_SamplerLinearClamp, vAt, 0).rgb;
 
   float2 d = (vUV - 0.5) / g_Draw.vParams0.z;
   float r2 = dot(d, d);

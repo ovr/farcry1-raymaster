@@ -287,8 +287,8 @@ void CD3D12Renderer::DrawItems(SRenderItem *pItems, int nItems, int eList)
   bool bSprites = eList != eRL_Blended;
   // The flares after the rest of the scene, before the elements over it.
   bool bFlares = eList != eRL_Blended;
-  if (eList == eRL_Blended)
-    m_bSceneCopied = false;
+  // A list copies the scene as drawn before it (the water, the flares, the glass of a scope).
+  m_bSceneCopied = false;
   GpuSection(eList == eRL_Opaque ? "opaque" : eList == eRL_Nearest ? "nearest" : "water");
   if (m_pFrameDump)
     fprintf(m_pFrameDump.get(), "list %d: %d items, recursion %d, scene flags 0x%x\n", eList, nItems, m_nRecurseLevel, m_nSceneFlags);
@@ -1002,7 +1002,7 @@ void CD3D12Renderer::DrawLeafItem(const SRenderItem &it)
     pTex = nullptr;
     break;
   case eDC_ScopeLens:
-    if (!SetupScopeLensDraw(Key, dc))
+    if (!SetupScopeLensDraw(Key, dc, it, WorldViewProj))
       return;
     pTex = nullptr;
     break;

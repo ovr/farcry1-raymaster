@@ -211,6 +211,10 @@ public:
   void BindAmbient(D3D12_CPU_DESCRIPTOR_HANDLE hRTV);
   //! The main view's draws write the ambient light too (bound, not off screen).
   bool IsAmbientBound() const { return m_hAmbientRTV.ptr && !m_pOffscreen; }
+  //! true: from here (in a frame) SetBackBufferTargets binds the main view's depth buffer read only
+  //! (GetMainDepth in DEPTH_READ, which a pixel shader can then read too); false: writable again. The
+  //! caller makes its transitions.
+  void SetDepthReadOnly(bool bReadOnly);
 
   //! An off screen target of nWidth x nHeight: pColor in Format (the back buffer's, or
   //! D3D12_HDR_FORMAT; in the state PIXEL_SHADER_RESOURCE while it is not drawn into) and pDepth
@@ -268,8 +272,9 @@ public:
   ID3D12Resource *GetMainDepth() const { return m_bInScene ? m_pSceneDepth.Get() : m_pDepth.Get(); }
   //! Copies the main view's target (the back buffer, the HDR target or the scene's colour) and its depth buffer
   //! (when pDepth is given) as drawn so far in this frame into the textures of CreateTargetCopies
-  //! (PIXEL_SHADER_RESOURCE before and after); nothing when their size or format is another.
-  void CopyTargets(ID3D12Resource *pColor, ID3D12Resource *pDepth);
+  //! (PIXEL_SHADER_RESOURCE before and after); nothing when their size or format is another. With
+  //! pBox only that part of the colour, to the same place.
+  void CopyTargets(ID3D12Resource *pColor, ID3D12Resource *pDepth, const D3D12_BOX *pBox = nullptr);
 
   //! Copies the current back buffer (as drawn so far in this frame, or the last presented one
   //! between frames) to pDst: nWidth x nHeight pixels of B, G, R, A, rows from the top.
@@ -343,6 +348,8 @@ private:
   //! The swap chain's current buffer's view.
   D3D12_CPU_DESCRIPTOR_HANDLE SwapChainRTV() const;
   D3D12_CPU_DESCRIPTOR_HANDLE SceneDSV() const;
+  //! The read only view of the depth buffer (GetDSV) or of the scene's (SceneDSV).
+  D3D12_CPU_DESCRIPTOR_HANDLE ReadOnlyDSV(bool bScene) const;
   //! Resets the slot's allocator and the list and binds the heap, root signature and targets.
   void OpenCmdList();
   void WaitForFence(uint64 nValue);
@@ -401,6 +408,7 @@ private:
   ComPtr<ID3D12Resource> m_pHdrColor;               //!< SetHdrTarget
   bool m_bInHdr = false;                            //!< BeginHdr .. EndHdr
   D3D12_CPU_DESCRIPTOR_HANDLE m_hAmbientRTV = {};   //!< BindAmbient
+  bool m_bDepthReadOnly = false;                    //!< SetDepthReadOnly
 
   int m_nWidth = 0, m_nHeight = 0;
   int m_nFrameSlot = 0;

@@ -177,7 +177,8 @@ bool CD3D12Device::Init(HWND hWnd, int nWidth, int nHeight, int nDebug)
   D3D12_DESCRIPTOR_HEAP_DESC HeapDesc = {};
   // The back buffers' views, then the scene targets' (colour, motion vectors, the upscaler's
   // depth; the depth buffer's after the back buffers' in the DSV heap), the HDR target's, the
-  // frame target's, the highlight layer's and two null ones (SceneRTV).
+  // frame target's, the highlight layer's and two null ones (SceneRTV). The DSV heap: the depth
+  // buffer's, the scene's, then the same read only (ReadOnlyDSV).
   HeapDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_RTV;
   HeapDesc.NumDescriptors = D3D12_BACKBUFFERS + 8;
   if (Failed(m_pDevice->CreateDescriptorHeap(&HeapDesc, IID_PPV_ARGS(&m_pRTVHeap)), "CreateDescriptorHeap (RTV)"))
@@ -192,7 +193,7 @@ bool CD3D12Device::Init(HWND hWnd, int nWidth, int nHeight, int nDebug)
   NullView.Format = D3D12_UPSCALE_DEPTH_FORMAT;
   m_pDevice->CreateRenderTargetView(nullptr, &NullView, SceneRTV(7));
   HeapDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_DSV;
-  HeapDesc.NumDescriptors = 2;
+  HeapDesc.NumDescriptors = 4;
   if (Failed(m_pDevice->CreateDescriptorHeap(&HeapDesc, IID_PPV_ARGS(&m_pDSVHeap)), "CreateDescriptorHeap (DSV)"))
     return false;
 
@@ -287,6 +288,8 @@ bool CD3D12Device::CreateSwapChainBuffers()
   View.Format = D3D12_DEPTH_FORMAT;
   View.ViewDimension = D3D12_DSV_DIMENSION_TEXTURE2D;
   m_pDevice->CreateDepthStencilView(m_pDepth.Get(), &View, m_pDSVHeap->GetCPUDescriptorHandleForHeapStart());
+  View.Flags = D3D12_DSV_FLAG_READ_ONLY_DEPTH | D3D12_DSV_FLAG_READ_ONLY_STENCIL;
+  m_pDevice->CreateDepthStencilView(m_pDepth.Get(), &View, ReadOnlyDSV(false));
   m_nBackBuffer = m_pSwapChain->GetCurrentBackBufferIndex();
   return !m_bLayer || CreateLayer();
 }
@@ -646,13 +649,14 @@ void CD3D12Device::SetBackBufferTargets()
   EndOffscreen();
   if (m_bInScene)
   {
-    const D3D12_CPU_DESCRIPTOR_HANDLE hRTV[4] = { SceneRTV(0), SceneRTV(1), SceneRTV(2), m_hAmbientRTV }, hDSV = SceneDSV();
+    const D3D12_CPU_DESCRIPTOR_HANDLE hRTV[4] = { SceneRTV(0), SceneRTV(1), SceneRTV(2), m_hAmbientRTV };
+    const D3D12_CPU_DESCRIPTOR_HANDLE hDSV = m_bDepthReadOnly ? ReadOnlyDSV(true) : SceneDSV();
     m_pCmdList->OMSetRenderTargets(m_hAmbientRTV.ptr ? 4 : 3, hRTV, FALSE, &hDSV);
   }
   else
   {
     const D3D12_CPU_DESCRIPTOR_HANDLE hRTV[4] = { m_bInHdr ? SceneRTV(3) : GetBackBufferRTV(), SceneRTV(6), SceneRTV(7), m_hAmbientRTV };
-    const D3D12_CPU_DESCRIPTOR_HANDLE hDSV = GetDSV();
+    const D3D12_CPU_DESCRIPTOR_HANDLE hDSV = m_bDepthReadOnly ? ReadOnlyDSV(false) : GetDSV();
     m_pCmdList->OMSetRenderTargets(m_hAmbientRTV.ptr ? 4 : 1, hRTV, FALSE, &hDSV);
   }
   const int w = GetMainWidth(), h = GetMainHeight();
@@ -665,6 +669,13 @@ void CD3D12Device::SetBackBufferTargets()
 void CD3D12Device::BindAmbient(D3D12_CPU_DESCRIPTOR_HANDLE hRTV)
 {
   m_hAmbientRTV = hRTV;
+  if (m_bInFrame && !m_pOffscreen)
+    SetBackBufferTargets();
+}
+
+void CD3D12Device::SetDepthReadOnly(bool bReadOnly)
+{
+  m_bDepthReadOnly = bReadOnly;
   if (m_bInFrame && !m_pOffscreen)
     SetBackBufferTargets();
 }
@@ -706,6 +717,13 @@ D3D12_CPU_DESCRIPTOR_HANDLE CD3D12Device::SceneDSV() const
 {
   D3D12_CPU_DESCRIPTOR_HANDLE h = m_pDSVHeap->GetCPUDescriptorHandleForHeapStart();
   h.ptr += m_pDevice->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_DSV);
+  return h;
+}
+
+D3D12_CPU_DESCRIPTOR_HANDLE CD3D12Device::ReadOnlyDSV(bool bScene) const
+{
+  D3D12_CPU_DESCRIPTOR_HANDLE h = m_pDSVHeap->GetCPUDescriptorHandleForHeapStart();
+  h.ptr += (bScene ? 3 : 2) * m_pDevice->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_DSV);
   return h;
 }
 
@@ -768,6 +786,8 @@ bool CD3D12Device::SetSceneSize(int nWidth, int nHeight, DXGI_FORMAT ColorFormat
   View.Format = D3D12_SCENE_DEPTH_FORMAT;
   View.ViewDimension = D3D12_DSV_DIMENSION_TEXTURE2D;
   m_pDevice->CreateDepthStencilView(m_pSceneDepth.Get(), &View, SceneDSV());
+  View.Flags = D3D12_DSV_FLAG_READ_ONLY_DEPTH;
+  m_pDevice->CreateDepthStencilView(m_pSceneDepth.Get(), &View, ReadOnlyDSV(true));
   m_nSceneWidth = nWidth;
   m_nSceneHeight = nHeight;
   m_nSceneOutputWidth = m_nWidth;
@@ -1387,7 +1407,7 @@ bool CD3D12Device::CreateTargetCopies(ComPtr<ID3D12Resource> &pColor, ComPtr<ID3
   return true;
 }
 
-void CD3D12Device::CopyTargets(ID3D12Resource *pColor, ID3D12Resource *pDepth)
+void CD3D12Device::CopyTargets(ID3D12Resource *pColor, ID3D12Resource *pDepth, const D3D12_BOX *pBox)
 {
   if (!m_bInFrame || !pColor)
     return;
@@ -1416,7 +1436,17 @@ void CD3D12Device::CopyTargets(ID3D12Resource *pColor, ID3D12Resource *pDepth)
   Set(b[3], pDepth, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, D3D12_RESOURCE_STATE_COPY_DEST);
   const UINT nBarriers = pDepth ? 4 : 2;
   m_pCmdList->ResourceBarrier(nBarriers, b);
-  m_pCmdList->CopyResource(pColor, pMainColor);
+  if (pBox)
+  {
+    D3D12_TEXTURE_COPY_LOCATION Dst = {}, Src = {};
+    Dst.pResource = pColor;
+    Dst.Type = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
+    Src.pResource = pMainColor;
+    Src.Type = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
+    m_pCmdList->CopyTextureRegion(&Dst, pBox->left, pBox->top, 0, &Src, pBox);
+  }
+  else
+    m_pCmdList->CopyResource(pColor, pMainColor);
   if (pDepth)
     m_pCmdList->CopyResource(pDepth, pMainDepth);
   for (auto &r : b)
