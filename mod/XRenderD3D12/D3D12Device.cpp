@@ -208,6 +208,49 @@ bool CD3D12Device::Init(HWND hWnd, int nWidth, int nHeight, int nDebug)
   if (Failed(m_pDevice->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&m_pFence)), "CreateFence"))
     return false;
   m_hFenceEvent = CreateEventA(nullptr, FALSE, FALSE, nullptr);
+  // The compute queue for work beside the frame's (without it, that work is in the frame's list).
+  QueueDesc.Type = D3D12_COMMAND_LIST_TYPE_COMPUTE;
+  bool bCompute = SUCCEEDED(m_pDevice->CreateCommandQueue(&QueueDesc, IID_PPV_ARGS(&m_pComputeQueue)));
+  for (auto &pAllocator : m_pComputeAllocators)
+    bCompute = bCompute && SUCCEEDED(m_pDevice->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_COMPUTE, IID_PPV_ARGS(&pAllocator)));
+  bCompute = bCompute &&
+    SUCCEEDED(m_pDevice->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_COMPUTE, m_pComputeAllocators[0].Get(), nullptr, IID_PPV_ARGS(&m_pComputeList))) &&
+    SUCCEEDED(m_pComputeList->Close()) && SUCCEEDED(m_pDevice->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&m_pUploadFence))) &&
+    SUCCEEDED(m_pDevice->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&m_pComputeFence)));
+  if (bCompute)
+  {
+    m_pComputeQueue->SetName(L"XRenderD3D12 compute");
+    m_pComputeList->SetName(L"XRenderD3D12 compute");
+    uint64 nComputeFrequency = 0;
+    D3D12_QUERY_HEAP_DESC QueryDesc = {};
+    QueryDesc.Type = D3D12_QUERY_HEAP_TYPE_TIMESTAMP;
+    QueryDesc.Count = D3D12_FRAMES * COMPUTE_LISTS * 2;
+    D3D12_HEAP_PROPERTIES Heap = {};
+    Heap.Type = D3D12_HEAP_TYPE_READBACK;
+    D3D12_RESOURCE_DESC Desc = {};
+    Desc.Dimension = D3D12_RESOURCE_DIMENSION_BUFFER;
+    Desc.Width = sizeof(uint64) * QueryDesc.Count;
+    Desc.Height = 1;
+    Desc.DepthOrArraySize = 1;
+    Desc.MipLevels = 1;
+    Desc.SampleDesc.Count = 1;
+    Desc.Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
+    if (FAILED(m_pComputeQueue->GetTimestampFrequency(&nComputeFrequency)) || !nComputeFrequency ||
+        FAILED(m_pDevice->CreateQueryHeap(&QueryDesc, IID_PPV_ARGS(&m_pComputeTimestamps))) ||
+        FAILED(m_pDevice->CreateCommittedResource(&Heap, D3D12_HEAP_FLAG_NONE, &Desc, D3D12_RESOURCE_STATE_COPY_DEST, nullptr,
+                                                  IID_PPV_ARGS(&m_pComputeTimestampReadback))))
+      m_pComputeTimestamps.Reset();
+    else
+      m_fComputeTimestampMs = 1000.0 / (double)nComputeFrequency;
+  }
+  else
+  {
+    iLog->Log("XRenderD3D12: no compute queue; the work beside the frame's goes in the frame's command list");
+    m_pComputeQueue.Reset();
+    m_pComputeList.Reset();
+    for (auto &p : m_pComputeAllocators)
+      p.Reset();
+  }
 
   // GPU timing: a timestamp query heap and its readback buffer (none: no timing).
   uint64 nFrequency = 0;
@@ -315,6 +358,14 @@ void CD3D12Device::Shutdown()
   m_pCmdList.Reset();
   for (auto &p : m_pAllocators)
     p.Reset();
+  m_pComputeList.Reset();
+  for (auto &p : m_pComputeAllocators)
+    p.Reset();
+  m_pComputeQueue.Reset();
+  m_pUploadFence.Reset();
+  m_pComputeFence.Reset();
+  m_pComputeTimestamps.Reset();
+  m_pComputeTimestampReadback.Reset();
   m_pTimestamps.Reset();
   m_pTimestampReadback.Reset();
   m_pOcclusion.Reset();
@@ -1165,6 +1216,7 @@ void CD3D12Device::BeginFrame()
     g_pRenderer->m_pUpload->BeginFrame(m_nFrameSlot);
   m_nBackBuffer = m_pSwapChain->GetCurrentBackBufferIndex();
   m_bInFrame = true;
+  m_bComputeAllocatorReset = false;
   OpenCmdList();
   GpuSection("other");
   if (m_pFrame)
@@ -1201,6 +1253,13 @@ void CD3D12Device::EndFrame(bool bPresent, bool bVSync)
     m_GpuSections[m_nFrameSlot][n] = nullptr;
     m_nGpuMarks[m_nFrameSlot] = n + 1;
     m_pCmdList->ResolveQueryData(m_pTimestamps.Get(), D3D12_QUERY_TYPE_TIMESTAMP, nFirst, n + 1, m_pTimestampReadback.Get(), sizeof(uint64) * nFirst);
+  }
+  // The compute lists' (the frame's list waited for them).
+  if (const int n = m_nComputeLists[m_nFrameSlot]; n > 0)
+  {
+    const uint32 nFirst = m_nFrameSlot * COMPUTE_LISTS * 2;
+    m_pCmdList->ResolveQueryData(m_pComputeTimestamps.Get(), D3D12_QUERY_TYPE_TIMESTAMP, nFirst, n * 2, m_pComputeTimestampReadback.Get(),
+                                 sizeof(uint64) * nFirst);
   }
   if (const int n = m_nOcclusions[m_nFrameSlot]; n > 0)
   {
@@ -1252,6 +1311,59 @@ void CD3D12Device::EndFrame(bool bPresent, bool bVSync)
   LogDebugMessages();
 }
 
+ID3D12GraphicsCommandList4 *CD3D12Device::BeginAsyncCompute(const char *szSection)
+{
+  if (!m_bInFrame || !m_pComputeList)
+    return nullptr;
+  // The slot's allocator once a frame: its earlier lists in this frame may still run.
+  if (!m_bComputeAllocatorReset)
+  {
+    m_pComputeAllocators[m_nFrameSlot]->Reset();
+    m_bComputeAllocatorReset = true;
+  }
+  m_pComputeList->Reset(m_pComputeAllocators[m_nFrameSlot].Get(), nullptr);
+  int &n = m_nComputeLists[m_nFrameSlot];
+  m_bComputeTimed = m_bGpuTiming && m_pComputeTimestamps && n < COMPUTE_LISTS;
+  if (m_bComputeTimed)
+  {
+    m_pComputeList->EndQuery(m_pComputeTimestamps.Get(), D3D12_QUERY_TYPE_TIMESTAMP, (m_nFrameSlot * COMPUTE_LISTS + n) * 2);
+    m_ComputeSections[m_nFrameSlot][n] = szSection;
+  }
+  return m_pComputeList.Get();
+}
+
+void CD3D12Device::SubmitAsyncCompute()
+{
+  FUNCTION_PROFILER(iSystem, PROFILE_RENDERER);
+  if (!m_bInFrame || !m_pComputeList)
+    return;
+  if (m_bComputeTimed)
+  {
+    int &n = m_nComputeLists[m_nFrameSlot];
+    m_pComputeList->EndQuery(m_pComputeTimestamps.Get(), D3D12_QUERY_TYPE_TIMESTAMP, (m_nFrameSlot * COMPUTE_LISTS + n) * 2 + 1);
+    n++;
+    m_bComputeTimed = false;
+  }
+  m_pComputeList->Close();
+  m_pCmdList->Close();
+  // The uploads, then the frame's list so far; the compute list once the uploads are done.
+  if (g_pRenderer->m_pUpload)
+    g_pRenderer->m_pUpload->Flush();
+  m_pQueue->Signal(m_pUploadFence.Get(), ++m_nUploadFence);
+  ID3D12CommandList *pList = m_pCmdList.Get();
+  m_pQueue->ExecuteCommandLists(1, &pList);
+  m_pComputeQueue->Wait(m_pUploadFence.Get(), m_nUploadFence);
+  ID3D12CommandList *pCompute = m_pComputeList.Get();
+  m_pComputeQueue->ExecuteCommandLists(1, &pCompute);
+  m_pComputeQueue->Signal(m_pComputeFence.Get(), ++m_nComputeFence);
+  m_pQueue->Wait(m_pComputeFence.Get(), m_nComputeFence);
+  // The frame goes on in the same allocator (its memory kept until the slot's fence).
+  m_pCmdList->Reset(m_pAllocators[m_nFrameSlot].Get(), nullptr);
+  BindRootSignature();
+  if (!m_pOffscreen)
+    SetBackBufferTargets();
+}
+
 void CD3D12Device::FlushFrame()
 {
   FUNCTION_PROFILER(iSystem, PROFILE_RENDERER);
@@ -1288,10 +1400,35 @@ void CD3D12Device::GpuSection(const char *szSection)
 
 void CD3D12Device::ReadGpuTimes()
 {
+  const int nCompute = m_nComputeLists[m_nFrameSlot];
+  m_nComputeLists[m_nFrameSlot] = 0;
   const int n = m_nGpuMarks[m_nFrameSlot];
   m_nGpuMarks[m_nFrameSlot] = 0;
   if (n < 2)
     return;
+  const auto Add = [](std::vector<std::pair<const char *, double>> &Times, const char *szSection, double fMs)
+  {
+    auto It = std::find_if(Times.begin(), Times.end(), [szSection](const auto &e) { return strcmp(e.first, szSection) == 0; });
+    if (It == Times.end())
+      Times.emplace_back(szSection, fMs);
+    else
+      It->second += fMs;
+  };
+  if (nCompute > 0)
+  {
+    const size_t nFirst = (size_t)m_nFrameSlot * COMPUTE_LISTS * 2;
+    const D3D12_RANGE Range = { sizeof(uint64) * nFirst, sizeof(uint64) * (nFirst + nCompute * 2) };
+    const uint64 *pTicks = nullptr;
+    if (SUCCEEDED(m_pComputeTimestampReadback->Map(0, &Range, (void **)&pTicks)))
+    {
+      pTicks += nFirst;
+      for (int i = 0; i < nCompute; i++)
+        Add(m_ComputeGpuTimes, m_ComputeSections[m_nFrameSlot][i],
+            pTicks[i * 2 + 1] > pTicks[i * 2] ? (double)(pTicks[i * 2 + 1] - pTicks[i * 2]) * m_fComputeTimestampMs : 0.0);
+      const D3D12_RANGE Written = {};
+      m_pComputeTimestampReadback->Unmap(0, &Written);
+    }
+  }
   const size_t nFirst = (size_t)m_nFrameSlot * GPU_MARKS;
   const D3D12_RANGE Range = { sizeof(uint64) * nFirst, sizeof(uint64) * (nFirst + n) };
   const uint64 *pTicks = nullptr;
@@ -1300,13 +1437,7 @@ void CD3D12Device::ReadGpuTimes()
   pTicks += nFirst;
   for (int i = 0; i + 1 < n; i++)
   {
-    const char *szSection = m_GpuSections[m_nFrameSlot][i];
-    const double fMs = pTicks[i + 1] > pTicks[i] ? (double)(pTicks[i + 1] - pTicks[i]) * m_fTimestampMs : 0.0;
-    auto It = std::find_if(m_GpuTimes.begin(), m_GpuTimes.end(), [szSection](const auto &e) { return strcmp(e.first, szSection) == 0; });
-    if (It == m_GpuTimes.end())
-      m_GpuTimes.emplace_back(szSection, fMs);
-    else
-      It->second += fMs;
+    Add(m_GpuTimes, m_GpuSections[m_nFrameSlot][i], pTicks[i + 1] > pTicks[i] ? (double)(pTicks[i + 1] - pTicks[i]) * m_fTimestampMs : 0.0);
   }
   const D3D12_RANGE Written = {};
   m_pTimestampReadback->Unmap(0, &Written);

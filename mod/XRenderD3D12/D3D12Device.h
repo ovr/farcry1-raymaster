@@ -108,6 +108,15 @@ public:
   ID3D12CommandQueue *GetQueue() const { return m_pQueue.Get(); }
   //! The frame's command list; valid between BeginFrame and EndFrame.
   ID3D12GraphicsCommandList *GetCmdList() const { return m_pCmdList.Get(); }
+  //! In a frame, an open command list of the compute queue for work beside the frame's (the ray
+  //! scene's builds), its GPU time that of szSection (a string with static storage) in
+  //! GetComputeGpuTimes; NULL without the queue. SubmitAsyncCompute runs it.
+  ID3D12GraphicsCommandList4 *BeginAsyncCompute(const char *szSection);
+  //! Executes the frame's list so far after the upload batch, and the list of BeginAsyncCompute
+  //! beside it once the uploads are done; the frame goes on in the same slot's allocator, its list
+  //! after the compute list (the descriptor heap, the root signature and the render targets set
+  //! again).
+  void SubmitAsyncCompute();
   //! 0 .. D3D12_FRAMES-1: the slot of the current frame (per frame resources, the upload ring).
   int GetFrameSlot() const { return m_nFrameSlot; }
 
@@ -297,17 +306,20 @@ public:
   //! each from its GpuSection call to the next one or the end of the frame (the first one of a
   //! frame is "other"; from a FlushFrame until its second list runs it is "flush", the GPU waiting
   //! for the CPU). A frame's times are read when the GPU has finished it (BeginFrame of its slot)
-  //! and add up in GetGpuTimes.
+  //! and add up in GetGpuTimes; the compute queue's lists beside them in GetComputeGpuTimes (not
+  //! part of the frame's time).
   void SetGpuTiming(bool bOn) { m_bGpuTiming = bOn; }
   //! From here on the GPU time counts for szSection (a string with static storage).
   void GpuSection(const char *szSection);
   //! The sections' GPU milliseconds added up over GetGpuTimedFrames() frames, in the order they
   //! first came; ResetGpuTimes starts again.
   const std::vector<std::pair<const char *, double>> &GetGpuTimes() const { return m_GpuTimes; }
+  const std::vector<std::pair<const char *, double>> &GetComputeGpuTimes() const { return m_ComputeGpuTimes; }
   int GetGpuTimedFrames() const { return m_nGpuTimedFrames; }
   void ResetGpuTimes()
   {
     m_GpuTimes.clear();
+    m_ComputeGpuTimes.clear();
     m_nGpuTimedFrames = 0;
   }
   //! The CPU's milliseconds in the last frame: BeginFrame's wait for the GPU (to finish the frame
@@ -332,6 +344,7 @@ public:
 
 private:
   static constexpr int GPU_MARKS = 64;              //!< timestamps per frame (the last one ends the frame)
+  static constexpr int COMPUTE_LISTS = 4;           //!< compute lists timed per frame (two timestamps each)
   //! Adds the timestamps of the current slot's last frame (finished) to m_GpuTimes.
   void ReadGpuTimes();
   //! The occlusion counts of the current slot's last frame (finished) into m_OcclusionResults.
@@ -387,6 +400,15 @@ private:
   ComPtr<ID3D12Fence> m_pFence;
   HANDLE m_hFenceEvent = nullptr;
   uint64 m_nNextFence = 1;
+  // The compute queue (BeginAsyncCompute): a slot's allocator is free when the slot's frame fence is
+  // reached, the frame's list having waited for the compute list.
+  ComPtr<ID3D12CommandQueue> m_pComputeQueue;
+  ComPtr<ID3D12CommandAllocator> m_pComputeAllocators[D3D12_FRAMES];
+  ComPtr<ID3D12GraphicsCommandList4> m_pComputeList;
+  ComPtr<ID3D12Fence> m_pUploadFence, m_pComputeFence;  //!< the uploads done (for the compute queue), the compute list done (for the direct one)
+  uint64 m_nUploadFence = 0, m_nComputeFence = 0;
+  bool m_bComputeAllocatorReset = false;            //!< the slot's compute allocator reset in this frame
+  bool m_bComputeTimed = false;                     //!< the open compute list has its first timestamp
 
   ComPtr<ID3D12DescriptorHeap> m_pRTVHeap;
   ComPtr<ID3D12DescriptorHeap> m_pDSVHeap;
@@ -421,6 +443,12 @@ private:
   const char *m_GpuSections[D3D12_FRAMES][GPU_MARKS] = {};   //!< the section each timestamp starts
   int m_nGpuMarks[D3D12_FRAMES] = {};
   std::vector<std::pair<const char *, double>> m_GpuTimes;
+  ComPtr<ID3D12QueryHeap> m_pComputeTimestamps;     //!< COMPUTE_LISTS pairs per frame slot; NULL: the compute lists not timed
+  ComPtr<ID3D12Resource> m_pComputeTimestampReadback;
+  double m_fComputeTimestampMs = 0;
+  const char *m_ComputeSections[D3D12_FRAMES][COMPUTE_LISTS] = {};
+  int m_nComputeLists[D3D12_FRAMES] = {};
+  std::vector<std::pair<const char *, double>> m_ComputeGpuTimes;
   int m_nGpuTimedFrames = 0;
   double m_fWaitMs = 0;                             //!< GetWaitMs
   double m_fPresentMs = 0;                          //!< GetPresentMs

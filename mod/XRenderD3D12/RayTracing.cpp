@@ -746,6 +746,11 @@ void CD3D12RayScene::Build(FILE *pDump, bool bTop)
   }
 
   const D3D12_GPU_VIRTUAL_ADDRESS nScratchGPU = bWork ? Slot.Scratch.pBuffer->GetGPUVirtualAddress() : 0;
+  // On the compute queue: it reads the vertices and the indices only (uploaded, or written by the
+  // CPU), the frame's list waits for it from here on.
+  ID3D12GraphicsCommandList4 *pAsync = bWork && g_pRenderer->CV_d3d12_RTAsync ? Device.BeginAsyncCompute("ray scene (compute queue)") : nullptr;
+  if (pAsync)
+    pList = pAsync;
   for (const SBuild &b : Builds)
   {
     if (!b.pStatic)
@@ -801,6 +806,8 @@ void CD3D12RayScene::Build(FILE *pDump, bool bTop)
     m_nBuiltSlot = nSlot;
     m_nInstances = RayInstanceMem.nGPU;
   }
+  if (pAsync)
+    Device.SubmitAsyncCompute();
 
   Evict((uint64)std::max(g_pRenderer->CV_d3d12_RTMemory, 16) << 20);
   if (pDump)

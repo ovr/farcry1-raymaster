@@ -259,11 +259,19 @@ reference of its features and console variables.
 
 - Ray tracing (`RayTracing.h`, DXR 1.1 with inline `RayQuery`, Shader Model 6.5): the main view's
   opaque draws and the static ones of the water's planar reflection become acceleration
-  structures (the `ray scene` section of the GPU times, a `ray scene:` line in the frame dump),
-  once a frame and only while something wants rays (else their memory goes). The top level one
-  and those of the frame's geometry are built only in a frame with a water surface (or with
-  `d3d12_RTDebug`); in another one only the new static geometry's, ready for when the water
-  shows.
+  structures (a `ray scene:` line in the frame dump), once a frame and only while something wants
+  rays (else their memory goes). The top level one and those of the frame's geometry are built
+  only in a frame with a water surface (or with `d3d12_RTDebug`); in another one only the new
+  static geometry's, ready for when the water shows.
+  They are built on the compute queue (`d3d12_RTAsync`, default 1; 0 in the frame's list after the
+  ambient occlusion, as before), beside the frame's shadows, opaque geometry and ambient occlusion:
+  the frame's list so far goes to the GPU after the uploads, the builds once the uploads are done
+  (they read only vertices and indices, uploaded or written by the CPU), the rest of the frame
+  after the builds. The GPU times have them as `ray scene (compute queue)` beside the frame's
+  sections (not part of its time); the frame's `ray scene` section is its wait for them. The
+  levels' sweeps (4K) run 6–8 % faster (River 392 → 423 frames a second, Dam 444 → 476), the
+  time demos Training 386 → 398 and Regulator 343 → 359 (Volcano and Research, without water,
+  the same).
   `XRENDERD3D12_NORT=1` (or a device without tier 1.1) turns them off; the log says why.
   `Shaders/RayShade.hlsli` traces (`TraceScene`, alpha tested triangles tested: of the triangle
   only what the test reads, the normal only for a cube map, the vertex colour not where the alpha
@@ -302,7 +310,8 @@ reference of its features and console variables.
   `CD3D12Renderer::Update` with `CD3D12Device::EndFrame:Present`, `FlushFrame`, and the loading
   (`EF_LoadTexture`, `DownLoadToVideoMemory`, `EF_LoadShaderItem`, `CD3D12Pipeline::CreatePSO`, ...).
   They are CPU times; the GPU's are `d3d12_GpuTimes` (a section `flush` is the GPU waiting for
-  the CPU after a `FlushFrame`, e.g. a demo reading every frame for its clip).
+  the CPU after a `FlushFrame`, e.g. a demo reading every frame for its clip; the compute queue's
+  lists come after the frame's sections, beside them).
 - `r_Stats` shows the renderer's statistics at the top left (below the time demo's lines while it
   plays, measured in `DrawText800`, else at the top), averaged over half a second (`Stats.cpp`):
   `1` the GPU time of each pass in the order they run (the

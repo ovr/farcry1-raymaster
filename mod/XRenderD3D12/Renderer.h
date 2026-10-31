@@ -52,13 +52,15 @@ struct SScreenFxState;
 struct SGpuTimes
 {
   std::vector<std::pair<const char *, double>> Sections;
+  std::vector<std::pair<const char *, double>> Compute;   //!< the compute queue's beside them
   int nFrames = 0;
 
   //! The device's times of nTimedFrames frames.
-  void Add(const std::vector<std::pair<const char *, double>> &Times, int nTimedFrames);
+  void Add(const CD3D12Device &Device, int nTimedFrames);
   void Reset()
   {
     Sections.clear();
+    Compute.clear();
     nFrames = 0;
   }
 };
@@ -1304,6 +1306,7 @@ public:
   int CV_d3d12_RTMemory = 384;              //!< the static BLAS' memory (MB) beyond which the least recently used go
   int CV_d3d12_RTMask = 31;                 //!< the kinds of instances the rays see (XR_RAY_* bits)
   int CV_d3d12_RTShadows = 1;               //!< the sun's shadow at the hits (a ray towards it, RayShade.hlsli)
+  int CV_d3d12_RTAsync = 1;                 //!< the ray scene's builds on the compute queue beside the frame
   int CV_d3d12_RTReflections = 0;           //!< the water's reflection by rays: 1 in place of the screen space one, 2 where it misses
   int CV_d3d12_ToneMap = 1;                 //!< the HDR pipeline's tone map: 0 clamp, 1 soft shoulder, 2 ACES fitted, 3 AgX
   float CV_d3d12_ToneMapKnee = 0.85f;       //!< where the soft shoulder starts (a display value)

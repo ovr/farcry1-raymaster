@@ -95,16 +95,21 @@ struct SPanelColumns
 
 }
 
-void SGpuTimes::Add(const std::vector<std::pair<const char *, double>> &Times, int nTimedFrames)
+void SGpuTimes::Add(const CD3D12Device &Device, int nTimedFrames)
 {
-  for (const auto &[szSection, fMs] : Times)
+  const auto AddTo = [](std::vector<std::pair<const char *, double>> &Sum, const std::vector<std::pair<const char *, double>> &Times)
   {
-    auto It = std::find_if(Sections.begin(), Sections.end(), [szSection](const auto &e) { return strcmp(e.first, szSection) == 0; });
-    if (It == Sections.end())
-      Sections.emplace_back(szSection, fMs);
-    else
-      It->second += fMs;
-  }
+    for (const auto &[szSection, fMs] : Times)
+    {
+      auto It = std::find_if(Sum.begin(), Sum.end(), [szSection](const auto &e) { return strcmp(e.first, szSection) == 0; });
+      if (It == Sum.end())
+        Sum.emplace_back(szSection, fMs);
+      else
+        It->second += fMs;
+    }
+  };
+  AddTo(Sections, Device.GetGpuTimes());
+  AddTo(Compute, Device.GetComputeGpuTimes());
   nFrames += nTimedFrames;
 }
 
@@ -174,6 +179,9 @@ void CD3D12Renderer::LogFrame()
         fGpuMs += fMs;
         Sections += Format("%s%s=%.3f", Sections.empty() ? "" : ";", szSection, nGpuFrames ? fMs / nGpuFrames : 0.0);
       }
+      // The compute queue's beside the frame (not in its time).
+      for (const auto &[szSection, fMs] : m_pDevice->GetComputeGpuTimes())
+        Sections += Format("%s%s=%.3f", Sections.empty() ? "" : ";", szSection, nGpuFrames ? fMs / nGpuFrames : 0.0);
       // The engine's frame profiler: the self time of its last frame by subsystem, then the
       // profilers that took the most.
       std::string Profiles;
@@ -227,9 +235,9 @@ void CD3D12Renderer::CollectStats()
   if (const int n = m_pDevice->GetGpuTimedFrames())
   {
     if (CV_d3d12_GpuTimes > 0)
-      m_GpuReport.Add(m_pDevice->GetGpuTimes(), n);
+      m_GpuReport.Add(*m_pDevice, n);
     if (CV_r_Stats > 0)
-      m_StatsSum.Gpu.Add(m_pDevice->GetGpuTimes(), n);
+      m_StatsSum.Gpu.Add(*m_pDevice, n);
     m_pDevice->ResetGpuTimes();
   }
   const int nDraws = m_nFrameDraws, nPSOChanges = m_nFramePSOChanges;
@@ -391,6 +399,14 @@ void CD3D12Renderer::DrawStats()
         Line.fBar = fGpuMs > 0 ? (float)(fMs / fGpuMs) : 0.0f;
         Line.Value = Format("%.2f", fMs);
         Line.Share = Format("%.0f", fGpuMs > 0 ? fMs * 100.0 / fGpuMs : 0.0);
+      }
+      // Beside the frame, not in its time.
+      for (const auto &[szSection, fSum] : S.Gpu.Compute)
+      {
+        const double fMs = fSum / fGpuFrames;
+        SStatsLine &Line = Add(szSection, true);
+        Line.fBar = fGpuMs > 0 ? (float)(fMs / fGpuMs) : 0.0f;
+        Line.Value = Format("%.2f", fMs);
       }
     }
     // At the top left, below the time demo's lines (the game's, while it plays).
