@@ -9,8 +9,8 @@
 //	visibility); AmbientOcclusion.cpp makes it the factor the scene drawn
 //	so far is multiplied by, or (d3d12_AOApply 1) the part of the ambient
 //	light it takes from the scene. Intel XeGTAO is AOXeGtao.cpp, AMD
-//	FidelityFX CACAO AOCacao.cpp. Both make the normals from the depth
-//	themselves.
+//	FidelityFX CACAO AOCacao.cpp, the rays RayAO.cpp. All make the normals
+//	from the depth themselves.
 //
 //////////////////////////////////////////////////////////////////////
 
@@ -56,3 +56,5 @@ public:
 std::unique_ptr<IAmbientOcclusion> CreateAOXeGtao();
 //! AMD FidelityFX CACAO 1.2 (third_party/fidelityfx-cacao) through its own Direct3D 12 host.
 std::unique_ptr<IAmbientOcclusion> CreateAOCacao();
+//! Rays among the scene for rays (RayAO.cpp, a device with DXR 1.1).
+std::unique_ptr<IAmbientOcclusion> CreateAORays();

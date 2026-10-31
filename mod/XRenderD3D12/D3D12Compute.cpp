@@ -32,6 +32,9 @@
 #include "RaySunTrace_CS.h"
 #include "RaySunTemporal_CS.h"
 #include "RaySunFilter_CS.h"
+#include "RayAOTrace_CS.h"
+#include "RayAOTemporal_CS.h"
+#include "RayAOFilter_CS.h"
 
 using Microsoft::WRL::ComPtr;
 
@@ -65,6 +68,9 @@ const SKernel s_Kernels[eD3D12K_Num] =
   { "sun's shadow by rays", g_RaySunTrace_CS, sizeof(g_RaySunTrace_CS), true },
   { "sun's shadow by rays (history)", g_RaySunTemporal_CS, sizeof(g_RaySunTemporal_CS), true },
   { "sun's shadow by rays (filter)", g_RaySunFilter_CS, sizeof(g_RaySunFilter_CS), true },
+  { "ambient occlusion by rays", g_RayAOTrace_CS, sizeof(g_RayAOTrace_CS), true },
+  { "ambient occlusion by rays (history)", g_RayAOTemporal_CS, sizeof(g_RayAOTemporal_CS), true },
+  { "ambient occlusion by rays (filter)", g_RayAOFilter_CS, sizeof(g_RayAOFilter_CS), true },
 };
 static_assert(sizeof(s_Kernels) / sizeof(s_Kernels[0]) == eD3D12K_Num, "a kernel for each ED3D12Kernel");
 

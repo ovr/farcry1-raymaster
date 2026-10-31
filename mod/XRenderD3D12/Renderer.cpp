@@ -223,14 +223,17 @@ void CD3D12Renderer::RegisterVariables()
                      "The upscaler's major version: 0 its own choice for the GPU, 3 or 4 (AMD FSR 3.1 or FSR 4)");
   // The ambient occlusion (AmbientOcclusion.cpp).
   iConsole->CreateVariable("d3d12_AO", "cacao", VF_DUMPTODISK,
-                           "Screen space ambient occlusion of the 3D scene: none, gtao (Intel XeGTAO) or cacao (AMD FidelityFX CACAO)");
+                           "Ambient occlusion of the 3D scene: none, gtao (Intel XeGTAO), cacao (AMD FidelityFX CACAO), both in screen "
+                           "space, or rt (rays among the scene, a device with DXR 1.1)");
   iConsole->Register("d3d12_AOQuality", &CV_d3d12_AOQuality, 2, VF_DUMPTODISK,
-                     "The ambient occlusion's quality, 0 (low) to 3 (XeGTAO ultra, CACAO highest)");
+                     "The ambient occlusion's quality, 0 (low) to 3 (XeGTAO ultra, CACAO highest; rt: 0 to 2 a ray for each 2 x 2 "
+                     "pixels, 3 a ray a pixel)");
   iConsole->Register("d3d12_AORadius", &CV_d3d12_AORadius, 1.0f, VF_DUMPTODISK, "The ambient occlusion's radius (m): how far a surface occludes");
   iConsole->Register("d3d12_AOStrength", &CV_d3d12_AOStrength, 1.0f, VF_DUMPTODISK,
                      "The ambient occlusion's strength: the exponent of the visibility (1 as the backend computes it, 0 none)");
   iConsole->Register("d3d12_AODenoise", &CV_d3d12_AODenoise, 2, VF_DUMPTODISK,
-                     "The ambient occlusion's denoising: XeGTAO 0 (none) to 3 passes, CACAO 1 to 8 blur passes");
+                     "The ambient occlusion's denoising: XeGTAO 0 (none) to 3 passes, CACAO 1 to 8 blur passes, rt 0 (none) or more "
+                     "(the frames before and a filter)");
   iConsole->Register("d3d12_AOApply", &CV_d3d12_AOApply, 1, VF_DUMPTODISK,
                      "What the ambient occlusion darkens: 0 the whole picture, 1 the ambient light alone (not the sun's and the lamps' direct light)");
   iConsole->Register("d3d12_AOBakedShare", &CV_d3d12_AOBakedShare, 0.5f, VF_DUMPTODISK,

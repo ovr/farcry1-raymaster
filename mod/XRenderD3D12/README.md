@@ -239,10 +239,11 @@ reference of its features and console variables.
 
 - `d3d12_AO` is the screen space ambient occlusion of the main view: `none` (the frames are those
   of the renderer without it, DemoCompare difference 0), `gtao` (Intel XeGTAO
-  1.30, `AOXeGtao.cpp` with `Shaders/XeGtao.hlsl` on our compute passes, `D3D12Compute.h`) or
+  1.30, `AOXeGtao.cpp` with `Shaders/XeGtao.hlsl` on our compute passes, `D3D12Compute.h`),
   `cacao` (the default; AMD FidelityFX CACAO 1.2 through its own Direct3D 12 host, `AOCacao.cpp`, with a
   descriptor heap and root signatures of its own; the build compiles its shaders with our dxc; at 3840 x 2160
-  with its quality 2 some 0.65 to 0.85 ms of the GPU, outdoors and in). An
+  with its quality 2 some 0.65 to 0.85 ms of the GPU, outdoors and in) or `rt` (by rays among the
+  scene, not from the screen: see Ray tracing; on a device without DXR 1.1 it acts as `none`). An
   unknown one is logged once and acts as `none`. After the opaque list (`AmbientOcclusion.cpp`),
   before the weapon and the water (which then refracts the occluded bottom), the backend computes
   the visibility from the depth buffer (the back buffer's depth is `R24G8_TYPELESS` for that; both
@@ -270,10 +271,12 @@ reference of its features and console variables.
   `R16G16B16A16_FLOAT` target first, for the debug view (0.1 ms more at 3840 x 2160). A light map's light
   counts as direct, so in the light-mapped interiors it darkens little; the target costs some
   0.03 ms of the opaque list at 2560 x 1440.
-  `d3d12_AOQuality` 0 to 3 (2: XeGTAO Low to Ultra, CACAO LOW to HIGHEST), `d3d12_AORadius` (1 m),
+  `d3d12_AOQuality` 0 to 3 (2: XeGTAO Low to Ultra, CACAO LOW to HIGHEST; `rt` 0 to 2 a ray for
+  each 2 x 2 pixels, 3 for each pixel), `d3d12_AORadius` (1 m),
   `d3d12_AOStrength` (1, the exponent of the visibility), `d3d12_AODenoise` (2: XeGTAO's denoise
-  passes 0 to 3, CACAO's blur passes 1 to 8); with an upscaler XeGTAO's noise and CACAO's kernel
-  change from frame to frame for it to gather. All are read every frame. `d3d12_AODebug 1` shows
+  passes 0 to 3, CACAO's blur passes 1 to 8, `rt` 0 without its history and filter, else with
+  them); with an upscaler XeGTAO's noise and CACAO's kernel change from frame to frame for it to
+  gather. All are read every frame. `d3d12_AODebug 1` shows
   the factor in grey over the whole frame (with `d3d12_AOApply 1` the visibility to the power of
   the strength, without the fog), 2 the ambient light, 3 the light taken. The frame dump has an
   `ao:` line (with the baked share) and the GPU times an `ao` section. For comparisons, DemoLevel
@@ -348,7 +351,8 @@ reference of its features and console variables.
   opaque draws and the static ones of the water's planar reflection become acceleration
   structures (a `ray scene:` line in the frame dump), once a frame and only while something wants
   rays (else their memory goes). The top level one and those of the frame's geometry are built
-  only in a frame with a water surface (or with `d3d12_RTDebug` or `d3d12_RTSunShadows`); in
+  only in a frame with a water surface (or with `d3d12_RTDebug`, `d3d12_RTSunShadows` or
+  `d3d12_AO rt`); in
   another one only the new static geometry's, ready for when the water shows.
   The scene is made before the opaque list is drawn (`BuildRayScene`): a walk over the list sets
   each item up as it will be drawn, without its lights, and hands its draws to the scene instead of
@@ -379,13 +383,13 @@ reference of its features and console variables.
   sun's cascades (what the 3D engine gives the camera towards the sun at the view's position, with
   the detail it picks for the view, and the live casters), set up as the main view would draw them,
   those it has too left out (a `ray scene:` count). 1 for the effects that trace rays from the main
-  view's surfaces (`d3d12_RTSunShadows`, `d3d12_RTDebug`; not the water's reflection, which sees
-  what is in front of the camera and has the planar reflection's draws), 2 always, 0 never; only
-  with the sun's cascades on. On the sweeps it adds 180 to 360 instances to about 300 of the main
-  view, 0.05 to 0.07 ms of the CPU and 0.04 ms of the compute queue's builds. A cache of the static
-  draws seen in earlier frames was tried and left out: flying over River it held 70 000 draws after
-  600 frames, 38 000 of them within 150 m, a tree seen from several distances with its LODs on top
-  of one another.
+  view's surfaces (`d3d12_RTSunShadows`, `d3d12_AO rt`, `d3d12_RTDebug`; not the water's
+  reflection, which sees what is in front of the camera and has the planar reflection's draws), 2
+  always, 0 never; only with the sun's cascades on. On the sweeps it adds 180 to 360 instances to
+  about 300 of the main view, 0.05 to 0.07 ms of the CPU and 0.04 ms of the compute queue's builds.
+  A cache of the static draws seen in earlier frames was tried and left out: flying over River it
+  held 70 000 draws after 600 frames, 38 000 of them within 150 m, a tree seen from several
+  distances with its LODs on top of one another.
   `d3d12_RTSunShadows` (0 by default, read every frame; not registered without rays) gives the sun's
   shadow by rays in place of the cascades' (`RaySun.cpp`, `Shaders/RaySun.hlsl`). In the main view's
   opaque list, after the depth prepass and before its surfaces are shaded, a pass makes the mask of
@@ -413,6 +417,25 @@ reference of its features and console variables.
   with red where all the casters hide it, with green too where the live ones do (yellow). GPU
   sections `rt sun shadows` (the rays), `rt sun shadows history`, `rt sun shadows filter`. With it
   off nothing of it runs and the frames are the same as without the code.
+  `d3d12_AO rt` is the ambient occlusion by rays (`RayAO.cpp`, `Shaders/RayAO.hlsl`; what it shares
+  with the sun's rays in `Shaders/RayView.hlsli`), a backend of the ambient occlusion with the same
+  visibility for its resolve, after the opaque list: from a pixel's point, a little off its face, a
+  ray `d3d12_AORadius` long in a direction of the hemisphere about the face as the cosine spreads
+  them (each pixel its own, a hash, moved along an R2 sequence by its rays so far), among the scene
+  with what is out of the view, so that what is behind the camera or beside the view darkens the
+  surfaces near it too (the screen space ones see only what is in the picture). Where it finds
+  nothing the pixel is open; what it finds within the first 0.385 of the radius hides it all, less
+  and less over the rest (XeGTAO's falloff). `d3d12_AOQuality` 0 to 2 a ray for each 2 x 2 pixels,
+  from each of them in turn over 4 frames, 3 a ray for each pixel. With `d3d12_AODenoise` (not 0)
+  each pixel takes the rays round it on its surface, the nearer the more, blended into the frames
+  before where the surface was (at most 16), then a spiral of taps on its plane filters it: 16 over
+  16 pixels where the history is young, down to 8 over 5 pixels at 8 frames. As far as the AO fades
+  out with the fog. GPU sections `rt ao` (the rays), `rt ao history`, `rt ao filter`; the frame dump
+  an `rt ao:` line. Without `rt` nothing of it runs (the frames as without the code). At 3840 x 2160
+  in the hut (DemoShadowsHut) the rays take 0.53 ms, the history 0.28, the filter 0.35 (CACAO 0.89
+  in all), the GPU 2.45 -> 2.84 ms a frame; the sweeps over Pier, River and Swamp 520, 493, 487 ->
+  446, 416, 411 frames a second. In a palm's crown, the view full of alpha tested leaves, the rays
+  take up to 3.6 ms.
   `d3d12_RTDebug` views the scene for rays from the camera: 1 instances, 2 shaded hits on the right
   half, 3 distance, 4 mip level, 5 kind, 6 alpha tests, 7 shaded hits over the whole picture;
   `d3d12_WaterDebug` 13, 14, 15 the water rays' colour, distance and weight. With the rays off the

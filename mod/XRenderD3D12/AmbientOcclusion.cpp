@@ -65,6 +65,8 @@ std::unique_ptr<IAmbientOcclusion> CreateAO(const char *szName)
     return CreateAOXeGtao();
   if (!_stricmp(szName, "cacao"))
     return CreateAOCacao();
+  if (!_stricmp(szName, "rt"))
+    return CreateAORays();
   return nullptr;
 }
 
@@ -104,7 +106,7 @@ bool CD3D12Renderer::UpdateAO()
   if (!m_pAO)
   {
     if (bNew)
-      iLog->LogWarning("XRenderD3D12: d3d12_AO %s: no such ambient occlusion (none, gtao, cacao); none", szName);
+      iLog->LogWarning("XRenderD3D12: d3d12_AO %s: no such ambient occlusion (none, gtao, cacao, rt); none", szName);
     return false;
   }
   m_pAOOutput = m_pUpload->CreateComputeTarget(w, h, 1, DXGI_FORMAT_R8_TYPELESS, L"AO visibility");

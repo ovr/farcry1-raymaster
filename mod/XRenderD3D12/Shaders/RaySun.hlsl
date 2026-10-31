@@ -49,29 +49,16 @@
 
 ConstantBuffer<SRaySunConstants> g_Sun : register(b2);
 RWTexture2D<float4> g_Out : register(u0);
+#define RAY_VIEW g_Sun
+#include "RayView.hlsli"
 
 //! The frames a history holds at most.
 static const float HISTORY_FRAMES = 24;
 //! CSFilter's taps and their widest radius (pixels).
 static const uint FILTER_TAPS = 12;
 static const float FILTER_MAX_RADIUS = 32;
-//! How far apart two view depths of a surface may be, relative to them.
-static const float SAME_DEPTH = 0.02;
 //! A history of fewer frames is filtered also where it is all in the sun or in the shadow (its rays' noise).
 static const float FILTER_YOUNG = 4;
-
-//! The depth buffer at pixel p, clamped to the view.
-float DepthAt(int2 p)
-{
-  p = clamp(p, 0, (int2)g_Sun.vSize.xy - 1);
-  return g_Textures[g_Sun.nTextures.x].Load(int3(p, 0)).r;
-}
-
-//! The view depth of a value of the depth buffer.
-float ViewDepthOf(float z)
-{
-  return g_Frame.vDepthParams.y / (z + g_Frame.vDepthParams.x);
-}
 
 //! The view depth at pixel p, 0 where the mask has no surface (the sky, beyond its range).
 float SurfaceDepth(int2 p)
@@ -79,61 +66,6 @@ float SurfaceDepth(int2 p)
   const float z = DepthAt(p);
   const float d = ViewDepthOf(z);
   return z < 1 && d > 0 && d <= g_Sun.vParams.x ? d : 0;
-}
-
-//! The pixels a side of a cell of the rays' grid (1 or 2).
-int TraceStep()
-{
-  return (int)g_Sun.nTrace.x;
-}
-
-//! The cells of the rays' grid across and down.
-int2 RaysSize()
-{
-  return ((int2)g_Sun.vSize.xy + TraceStep() - 1) / TraceStep();
-}
-
-//! The pixel cell q's ray is from in this frame.
-int2 RayPixel(int2 q)
-{
-  return q * TraceStep() + (int2)g_Sun.nTrace.yz;
-}
-
-//! CSTrace's ray of cell q (clamped to the grid): x, y its distances (all, live; x < 0: none), z the
-//! view depth of its pixel.
-float3 RaysAt(int2 q)
-{
-  q = clamp(q, 0, RaysSize() - 1);
-  return g_Textures[g_Sun.nTextures.y].Load(int3(q, 0)).xyz;
-}
-
-//! The world position at vPixel (pixels, from the view's top left) and view depth d, the jitter taken off.
-float3 PixelPos(float2 vPixel, float d)
-{
-  const float2 v = float2(vPixel.x * g_Sun.vSize.z * 2 - 1, 1 - vPixel.y * g_Sun.vSize.w * 2) - g_Sun.vJitter.xy;
-  return g_Sun.vCameraPos.xyz + d * (g_Sun.vRayO.xyz + v.x * g_Sun.vRayX.xyz + v.y * g_Sun.vRayY.xyz);
-}
-
-//! The face's normal at pixel p (at vPos, view depth d), towards the camera.
-float3 FaceNormal(int2 p, float3 vPos, float d)
-{
-  const float dl = ViewDepthOf(DepthAt(p + int2(-1, 0))), dr = ViewDepthOf(DepthAt(p + int2(1, 0)));
-  const float du = ViewDepthOf(DepthAt(p + int2(0, -1))), dd = ViewDepthOf(DepthAt(p + int2(0, 1)));
-  const float2 c = p + 0.5;
-  const float3 vX = abs(dr - d) < abs(dl - d) ? PixelPos(c + float2(1, 0), dr) - vPos : vPos - PixelPos(c - float2(1, 0), dl);
-  const float3 vY = abs(dd - d) < abs(du - d) ? PixelPos(c + float2(0, 1), dd) - vPos : vPos - PixelPos(c - float2(0, 1), du);
-  const float3 vToCamera = g_Sun.vCameraPos.xyz - vPos;
-  float3 n = cross(vX, vY);
-  const float fLen = length(n);
-  n = fLen > 1e-12 ? n / fLen : normalize(vToCamera);
-  return dot(n, vToCamera) < 0 ? -n : n;
-}
-
-//! Interleaved gradient noise at pixel p, another pattern each frame.
-float Noise(float2 p, uint nFrame)
-{
-  p += 5.588238 * (float)(nFrame & 63);
-  return frac(52.9829189 * frac(dot(p, float2(0.06711056, 0.00583715))));
 }
 
 //! The distance along Ray to something among the instances of nMask that hides the sun, 0 where
@@ -217,36 +149,6 @@ struct SNearRays
 //! a tile of 12 x 12 or 6 x 6 from a cell q00; with them the history at each one's pixel (x < 0: none).
 groupshared float3 s_Rays[12 * 12];
 groupshared float2 s_RaysBefore[12 * 12];
-
-//! The history of the frame before at the point of vPixel (pixels, view depth d), where it was then: x y
-//! the visibilities, z the frames in it (0: none there, another surface or off the view).
-float3 HistoryAt(float2 vPixel, float d)
-{
-  float3 vHistory = 0;
-  const float4 c = mul(float4(PixelPos(vPixel, d), 1), g_Sun.mPrevViewProj);
-  if (c.w > 1e-3)
-  {
-    const float2 vNDC = c.xy / c.w + g_Sun.vJitter.zw;
-    const float2 t = float2(0.5 + 0.5 * vNDC.x, 0.5 - 0.5 * vNDC.y) * g_Sun.vSize.xy - 0.5;
-    const int2 b = (int2)floor(t);
-    const float2 f = t - b;
-    float4 vSum = 0;
-    [unroll]
-    for (int k = 0; k < 4; k++)
-    {
-      const int2 q = b + int2(k & 1, k >> 1);
-      if (any(q < 0) || any(q >= (int2)g_Sun.vSize.xy))
-        continue;
-      const float4 h = g_Textures[g_Sun.nTextures.z].Load(int3(q, 0));
-      const float w = ((k & 1) ? f.x : 1 - f.x) * ((k >> 1) ? f.y : 1 - f.y);
-      if (h.z > 0 && abs(h.w - c.w) <= SAME_DEPTH * c.w + 0.02)
-        vSum += w * float4(h.xyz, 1);
-    }
-    if (vSum.w > 1e-3)
-      vHistory = vSum.xyz / vSum.w;
-  }
-  return vHistory;
-}
 
 //! The rays of the cells within nCells of pixel p's (view depth d), from s_Rays (its tile from cell q00);
 //! nCells a constant (the loops unrolled). Those on its surface are weighed by their distance to it: of a

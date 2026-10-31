@@ -207,18 +207,8 @@ void CD3D12Renderer::DrawRaySunMask()
 
   SRaySunConstants rc = {};
   memcpy(rc.mPrevViewProj, m_RaySun.PrevViewProj, sizeof(rc.mPrevViewProj));
-  // The pixels' world positions from the view: its axes in the world (the columns of the view
-  // matrix) and the projection's terms of x, y and w.
-  const float *V = m_CameraView.data, *P = m_ProjMatrix.data;
-  const Vec3 vRight(V[0], V[4], V[8]), vUp(V[1], V[5], V[9]), vAxis(V[2], V[6], V[10]);
-  const float fW = P[11] != 0 ? P[11] : -1.0f;
-  const Vec3 vRayX = vRight / P[0], vRayY = vUp / P[5];
-  const Vec3 vRayO = vAxis / fW - vRayX * (P[8] / fW) - vRayY * (P[9] / fW);
-  const Vec3 vCamera = m_Camera.GetPos();
-  Set4(rc.vCameraPos, vCamera.x, vCamera.y, vCamera.z, 1);
-  Set4(rc.vRayX, vRayX.x, vRayX.y, vRayX.z, 0);
-  Set4(rc.vRayY, vRayY.x, vRayY.y, vRayY.z, 0);
-  Set4(rc.vRayO, vRayO.x, vRayO.y, vRayO.z, 0);
+  GetRayView(rc.vCameraPos, rc.vRayX, rc.vRayY, rc.vRayO);
+  const float *P = m_ProjMatrix.data;
   Set4(rc.vSize, (float)w, (float)h, 1.0f / w, 1.0f / h);
   Set4(rc.vJitter, fc.vJitter[0], fc.vJitter[1], m_RaySun.PrevJitter[0], m_RaySun.PrevJitter[1]);
   // The sun's disc: its direction and two across it.

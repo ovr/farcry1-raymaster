@@ -655,6 +655,11 @@ public:
   bool WantsOffscreenRays() const;
   //! The rays' mask for the shaders: d3d12_RTMask's kinds, 0x100 with d3d12_RTShadows.
   uint32 RayMask() const;
+  //! d3d12_AO rt on a device with rays (RayAO.cpp).
+  bool WantsRayAO() const;
+  //! The view's fields of a compute pass with rays over the main view's depth buffer (RayView.hlsli):
+  //! the camera and the world positions at a view depth across the view (the jitter apart).
+  void GetRayView(float vCameraPos[4], float vRayX[4], float vRayY[4], float vRayO[4]) const;
   //! Before the main view's opaque list is drawn (not its reflection, sprites, shadow maps, cubes or
   //! heat vision; the first such view of a frame): its draws make the scene for rays (a walk over
   //! Opaque, m_bRayCaptureWalk: DrawLeafItem sets each draw up without its lights, DrawGeometry hands
