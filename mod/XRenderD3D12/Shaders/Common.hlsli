@@ -372,6 +372,23 @@ float SunCascades(float3 vPos, float3 vNormal, float2 vScreenPos, float fMaps)
   return v;
 }
 
+//! The sun's visibility at world position vPos from the full set of the cascades by one bilinear
+//! comparison in the cascade of its depth, nearer to the sun by vCascadeParams.w metres and two texels
+//! (no normal: the leaves); 1 beyond them.
+float CascadeTap(float3 vPos)
+{
+  uint n = min((uint)g_Frame.vCascadeParams.x, XR_MAX_CASCADES);
+  float fDepth = ViewDepth(vPos);
+  if (n == 0 || fDepth >= g_Frame.vCascadeEnd[n - 1])
+    return 1;
+  float t;
+  uint i = CascadeOf(fDepth, n, t);
+  float4 v = mul(float4(vPos, 1), g_Frame.mCascade[i]);
+  float2 vUV = float2(0.5 + 0.5 * v.x, 0.5 - 0.5 * v.y);
+  float fRef = v.z - (g_Frame.vCascadeParams.w + 2 * g_Frame.vCascadeTexel[i]) * g_Frame.vCascadeDepth[i];
+  return g_TextureArrays[g_Frame.nCascadeTex.x].SampleCmpLevelZero(g_SamplerShadow, float3(vUV, i), fRef);
+}
+
 //! d3d12_ShadowDebug (vShadowTint.w) 3: the cascade of a point (red, green, blue, yellow), darker
 //! in the shadow of the full set; 4: the shadow of the full set in red, of the live set in green;
 //! over the point's colour vColor.

@@ -38,6 +38,14 @@
 #include "General_Ambient_Cascades_Velocity_PS.h"
 #include "General_Ambient_Cascades_Hdr_PS.h"
 #include "General_Ambient_Cascades_Hdr_Velocity_PS.h"
+#include "General_Foliage_PS.h"
+#include "General_Foliage_Velocity_PS.h"
+#include "General_Foliage_Hdr_PS.h"
+#include "General_Foliage_Hdr_Velocity_PS.h"
+#include "General_Ambient_Foliage_PS.h"
+#include "General_Ambient_Foliage_Velocity_PS.h"
+#include "General_Ambient_Foliage_Hdr_PS.h"
+#include "General_Ambient_Foliage_Hdr_Velocity_PS.h"
 #include "Water_VS.h"
 #include "Water_PS.h"
 #include "Water_Velocity_VS.h"
@@ -128,6 +136,17 @@ namespace
         { g_General_Ambient_Cascades_Velocity_PS, sizeof(g_General_Ambient_Cascades_Velocity_PS) } },
       { { g_General_Ambient_Cascades_Hdr_PS, sizeof(g_General_Ambient_Cascades_Hdr_PS) },
         { g_General_Ambient_Cascades_Hdr_Velocity_PS, sizeof(g_General_Ambient_Cascades_Hdr_Velocity_PS) } } },
+  };
+  //! The general program's pixel shaders with the sun through the leaves (XR_FOLIAGE, SPipelineKey::bCascades 2),
+  //! by [ambient][HDR][velocity].
+  const D3D12_SHADER_BYTECODE s_FoliagePS[2][2][2] =
+  {
+    { { { g_General_Foliage_PS, sizeof(g_General_Foliage_PS) }, { g_General_Foliage_Velocity_PS, sizeof(g_General_Foliage_Velocity_PS) } },
+      { { g_General_Foliage_Hdr_PS, sizeof(g_General_Foliage_Hdr_PS) }, { g_General_Foliage_Hdr_Velocity_PS, sizeof(g_General_Foliage_Hdr_Velocity_PS) } } },
+    { { { g_General_Ambient_Foliage_PS, sizeof(g_General_Ambient_Foliage_PS) },
+        { g_General_Ambient_Foliage_Velocity_PS, sizeof(g_General_Ambient_Foliage_Velocity_PS) } },
+      { { g_General_Ambient_Foliage_Hdr_PS, sizeof(g_General_Ambient_Foliage_Hdr_PS) },
+        { g_General_Ambient_Foliage_Hdr_Velocity_PS, sizeof(g_General_Ambient_Foliage_Hdr_Velocity_PS) } } },
   };
 
   //! Input slot 1: what a vertex format lacks, read with stride 0 by every vertex.
@@ -734,6 +753,9 @@ ComPtr<ID3D12PipelineState> CD3D12Pipeline::CreatePSO(const SPipelineKey &Key, b
                       : D3D12_SHADER_BYTECODE{ g_General_VS, sizeof(g_General_VS) };
     Desc.PS = s_AmbientPS[Key.bCascades ? 1 : 0][bHdr ? 1 : 0][bMotion ? 1 : 0];
   }
+  // The leaves and the grass letting the sun through (their vertex shaders those of the cascades' above).
+  if (bGeneral && Key.bCascades == 2)
+    Desc.PS = s_FoliagePS[bAmbient ? 1 : 0][bHdr ? 1 : 0][bVelocity || bUpscaleDepth ? 1 : 0];
   // A caster of the sun's cascades into all its slices at once.
   if (bGeneral && bShadowMap && Key.bCascadeInstances)
     Desc.VS = { g_General_CascadeInstances_VS, sizeof(g_General_CascadeInstances_VS) };

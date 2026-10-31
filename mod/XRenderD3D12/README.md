@@ -311,6 +311,23 @@ reference of its features and console variables.
   every frame. The GPU times have a `volumetric light` section and the frame dump a
   `volumetric light:` line.
 
+## Foliage translucency
+
+- `d3d12_FoliageTranslucency` (1.5) lets the sun through the leaves and the grass of the main view
+  seen against it (the vegetation's alpha tested class, `eDC_AlphaTestVColor`, which the game
+  lights by its vertex colours alone, so that against the sun the leaves were as dark as on the
+  shaded side). Their pixel shader (`DF2_FOLIAGE`, the general program's of their own, `XR_FOLIAGE`,
+  so that the others stay as they were; `FoliageLight` in `Shaders/General.hlsl`) adds the leaf's texture times the object's and the
+  world's colour times the sun's colour, times the strength, times the cosine of the angle between
+  the view and the sun to the power `d3d12_FoliageTranslucencyPower` (4), where the full set of the
+  sun's cascades shows the sun at the leaf (one bilinear comparison, `CascadeTap` in
+  `Shaders/Common.hlsli`): the outer leaves of a crown glow, those inside it and in the shadow of
+  others stay dark. It fades out from half of `d3d12_FoliageTranslucencyDistance` (60 m) to it.
+  At 3840 x 2160 the GPU's frame takes 0 to 0.07 ms more on the sweeps of ten levels (Swamp's
+  jungle the most), 0 to 3% of the frame rate. Only with the sun's cascades, not in heat vision, the reflections or
+  the sprites' pictures; with 0 the frames are those of the renderer without it (DemoCompare
+  difference 0). All three are read every frame.
+
 ## Ray tracing
 
 - Ray tracing (`RayTracing.h`, DXR 1.1 with inline `RayQuery`, Shader Model 6.5): the main view's

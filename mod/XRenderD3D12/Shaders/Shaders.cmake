@@ -32,6 +32,16 @@ xrender_d3d12_shader(General_Ambient_Cascades_PS General.hlsl ps_6_0 PSMain XR_A
 xrender_d3d12_shader(General_Ambient_Cascades_Velocity_PS General.hlsl ps_6_0 PSMain XR_AMBIENT XR_CASCADES XR_VELOCITY)
 xrender_d3d12_shader(General_Ambient_Cascades_Hdr_PS General.hlsl ps_6_0 PSMain XR_AMBIENT XR_CASCADES XR_HDR)
 xrender_d3d12_shader(General_Ambient_Cascades_Hdr_Velocity_PS General.hlsl ps_6_0 PSMain XR_AMBIENT XR_CASCADES XR_VELOCITY XR_HDR)
+# The leaves and the grass letting the sun through (XR_FOLIAGE, DF2_FOLIAGE, SPipelineKey::bCascades 2): programs of
+# their own, so that those of the cascades stay as they were.
+xrender_d3d12_shader(General_Foliage_PS General.hlsl ps_6_0 PSMain XR_FOLIAGE)
+xrender_d3d12_shader(General_Foliage_Velocity_PS General.hlsl ps_6_0 PSMain XR_FOLIAGE XR_VELOCITY)
+xrender_d3d12_shader(General_Foliage_Hdr_PS General.hlsl ps_6_0 PSMain XR_FOLIAGE XR_HDR)
+xrender_d3d12_shader(General_Foliage_Hdr_Velocity_PS General.hlsl ps_6_0 PSMain XR_FOLIAGE XR_VELOCITY XR_HDR)
+xrender_d3d12_shader(General_Ambient_Foliage_PS General.hlsl ps_6_0 PSMain XR_AMBIENT XR_FOLIAGE)
+xrender_d3d12_shader(General_Ambient_Foliage_Velocity_PS General.hlsl ps_6_0 PSMain XR_AMBIENT XR_FOLIAGE XR_VELOCITY)
+xrender_d3d12_shader(General_Ambient_Foliage_Hdr_PS General.hlsl ps_6_0 PSMain XR_AMBIENT XR_FOLIAGE XR_HDR)
+xrender_d3d12_shader(General_Ambient_Foliage_Hdr_Velocity_PS General.hlsl ps_6_0 PSMain XR_AMBIENT XR_FOLIAGE XR_VELOCITY XR_HDR)
 
 # Water surfaces (eD3D12P_Water).
 xrender_d3d12_shader(Water_VS Water.hlsl vs_6_0 VSMain)

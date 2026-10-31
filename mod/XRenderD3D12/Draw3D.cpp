@@ -788,6 +788,10 @@ void CD3D12Renderer::DrawLeafItem(const SRenderItem &it)
     {
       dc.nFlags |= DF_ALPHATEST;
       dc.fAlphaRef = GetAlphaRef(pSh, pRes) > 0 ? GetAlphaRef(pSh, pRes) : 128.0f / 255.0f;
+      // The leaves and the grass of the main view let the sun through, where the sun's cascades show it
+      // (d3d12_FoliageTranslucency).
+      if (CV_d3d12_FoliageTranslucency > 0 && !m_bHeatPass && CascadeReceiverFlags(false))
+        dc.nFlags2 |= DF2_FOLIAGE;
     }
     if (IsBlendedVColor(eDC, pRes, pObj))
     {

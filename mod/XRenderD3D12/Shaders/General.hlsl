@@ -438,6 +438,24 @@ SVertexOutput VSMain(SVertexInput In)
 //! DF2_HDR_CORE: how fast the light's factor falls off from its core to its edge.
 static const float HDR_CORE_POWER = 4;
 
+#ifdef XR_FOLIAGE
+//! DF2_FOLIAGE: the sun's light through a leaf at world position vPos towards the camera, per unit of
+//! its colour: the sun's colour times vFoliage.x, times the cosine of the angle between the view and the
+//! sun to the power vFoliage.y, where the full set of the cascades shows the sun (the outer leaves of a
+//! crown), fading out from half of vFoliage.z to vFoliage.z.
+float3 FoliageLight(float3 vPos)
+{
+  float3 vView = vPos - g_Frame.vCameraPos.xyz;
+  float fDist = length(vView);
+  float fBack = pow(saturate(dot(vView, g_Frame.vSunDir.xyz) / max(fDist, 1e-4)), g_Frame.vFoliage.y);
+  float fFade = saturate((g_Frame.vFoliage.z - fDist) * g_Frame.vFoliage.w);
+  float f = g_Frame.vFoliage.x * fBack * fFade;
+  if (f <= 0)
+    return 0;
+  return g_Frame.vSunColor.rgb * (f * CascadeTap(vPos));
+}
+#endif
+
 float4 ShadePixel(SVertexOutput In)
 {
 #ifdef XR_AMBIENT
@@ -544,6 +562,11 @@ float4 ShadePixel(SVertexOutput In)
     vAmb *= vTex.rgb;
 #endif
   vColor.rgb += vSpecular;
+#ifdef XR_FOLIAGE
+  // The sun through the leaves and the grass seen against it.
+  if (HasFlag2(DF2_FOLIAGE))
+    vColor.rgb += vTex.rgb * g_Draw.vColor.rgb * FoliageLight(In.vWorldPos);
+#endif
   if (HasFlag2(DF2_ADD_TEX4))
   {
     float4 vTex4 = SampleTexture(g_Draw.nTex4, XR_SAMPLER_LINEAR_WRAP, In.vTex0);
