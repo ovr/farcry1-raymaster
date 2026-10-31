@@ -250,7 +250,8 @@ reference of its features and console variables.
   textures, vertex colour, light maps (dot3 ones too), the sun with its shadow by a ray
   (`d3d12_RTShadows`, default 1). `d3d12_RTReflections` (0 by default, read every frame): 1 the
   water's reflection by rays in place of the screen space reflection, 2 hybrid (the screen space
-  reflection where it is sure, the rays elsewhere); not registered without rays.
+  reflection where it is sure, the rays elsewhere, also where its march passes behind an object);
+  not registered without rays.
   `d3d12_RTDistance` (150 m) the rays' length, `d3d12_RTMemory` (384 MB) the static BLAS kept,
   `d3d12_RTMask` (31) the kinds the rays see (1 static, 2 alpha tested, 4 of the frame; a draw is
   in the scene when the mask has all of its kinds).

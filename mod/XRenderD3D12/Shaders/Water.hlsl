@@ -55,7 +55,9 @@
 //	length, shaded where it hits and fogged as the planar reflection is
 //	(by the whole path from the camera), fading out over the last quarter
 //	of the length. Mode 1 puts it in place of the screen space reflection,
-//	mode 2 where the screen space one finds nothing; sharp as that one is,
+//	mode 2 where the screen space one finds nothing (which there gives up
+//	where its ray passes behind an object: the ray tracing sees what is
+//	behind, and the march on would mostly find nothing); sharp as that one is,
 //	it gives way to the blurred planar reflection where the ripple finer
 //	than a pixel blurs it. The ray cone starts as wide as the pixel on the
 //	surface and spreads by the pixel's angle and the ripple's RMS slope
@@ -294,50 +296,66 @@ float3 BlurredPlanarReflection(float3 P, float3 R, float fReach, float fVar, flo
 //! The scene in direction R from P where the frame's copies show it: the ray marches in steps
 //! that grow with the distance; when it gets behind the depth buffer the crossing is refined, and
 //! it is a hit if the ray is then no more than a few centimetres behind the surface there (more
-//! means it passed behind an object, whose back the copies do not show: it goes on). Never hits
-//! the sky (the far plane) or the first person weapon (nearer than 0.5 m). w: how much to trust
-//! it, 0 on a miss, fading towards the screen's edges.
-float4 ScreenReflection(float3 P, float3 R, float2 vViewToBuffer)
+//! means it passed behind an object, whose back the copies do not show: it goes on, or with
+//! bRaysAfter it ends there, a miss, for the rays to find what is behind). Never hits the sky (the
+//! far plane) or the first person weapon (nearer than 0.5 m). w: how much to trust it, 0 on a
+//! miss, fading towards the screen's edges. The steps go in fours, their depths read at once: the
+//! same steps as one at a time, with fewer waits for the reads.
+float4 ScreenReflection(float3 P, float3 R, float2 vViewToBuffer, bool bRaysAfter)
 {
   float tPrev = 0, t = 0.4;
   [loop]
-  for (int i = 0; i < 40; i++)
+  for (int i = 0; i < 40; i += 4)
   {
-    float4 vClip = mul(float4(P + R * t, 1), g_Frame.mViewProj);
-    if (vClip.w < 0.3)
-      break;
-    float2 vUV = ClipToUV(vClip, vViewToBuffer);
-    if (any(vUV <= 0) || any(vUV >= vViewToBuffer))
-      break;
-    float fDepth = g_Textures[g_Draw.nTex1].SampleLevel(g_SamplerPointClamp, vUV, 0).r;
-    float fScene = LinearDepth(fDepth);
-    if (vClip.w > fScene && fScene > 0.5 && fDepth < 0.99999)
+    float4 vClip[4];
+    float2 vUV[4];
+    float fDepth[4], tStep[4];
+    [unroll]
+    for (int j = 0; j < 4; j++)
     {
-      float a = tPrev, b = t, fBehind = vClip.w - fScene;
-      [unroll]
-      for (int k = 0; k < 6; k++)
-      {
-        float m = (a + b) * 0.5;
-        float4 vClipM = mul(float4(P + R * m, 1), g_Frame.mViewProj);
-        float fSceneM = LinearDepth(g_Textures[g_Draw.nTex1].SampleLevel(g_SamplerPointClamp, ClipToUV(vClipM, vViewToBuffer), 0).r);
-        if (vClipM.w > fSceneM)
-        {
-          b = m;
-          fBehind = vClipM.w - fSceneM;
-        }
-        else
-          a = m;
-      }
-      if (fBehind < 0.05 + 0.01 * vClip.w)
-      {
-        float2 vHit = ClipToUV(mul(float4(P + R * b, 1), g_Frame.mViewProj), vViewToBuffer);
-        float2 vEdge = min(vHit, vViewToBuffer - vHit) / vViewToBuffer;
-        float fTrust = saturate(min(vEdge.x, vEdge.y) * 12);
-        return float4(g_Textures[g_Draw.nTex0].SampleLevel(g_SamplerLinearClamp, vHit, 0).rgb, fTrust);
-      }
+      tStep[j] = t;
+      vClip[j] = mul(float4(P + R * t, 1), g_Frame.mViewProj);
+      vUV[j] = ClipToUV(vClip[j], vViewToBuffer);
+      fDepth[j] = g_Textures[g_Draw.nTex1].SampleLevel(g_SamplerPointClamp, vUV[j], 0).r;
+      t = t * 1.18 + 0.15;
     }
-    tPrev = t;
-    t = t * 1.18 + 0.15;
+    [unroll]
+    for (int j = 0; j < 4; j++)
+    {
+      if (vClip[j].w < 0.3)
+        return 0;
+      if (any(vUV[j] <= 0) || any(vUV[j] >= vViewToBuffer))
+        return 0;
+      float fScene = LinearDepth(fDepth[j]);
+      if (vClip[j].w > fScene && fScene > 0.5 && fDepth[j] < 0.99999)
+      {
+        float a = tPrev, b = tStep[j], fBehind = vClip[j].w - fScene;
+        [unroll]
+        for (int k = 0; k < 6; k++)
+        {
+          float m = (a + b) * 0.5;
+          float4 vClipM = mul(float4(P + R * m, 1), g_Frame.mViewProj);
+          float fSceneM = LinearDepth(g_Textures[g_Draw.nTex1].SampleLevel(g_SamplerPointClamp, ClipToUV(vClipM, vViewToBuffer), 0).r);
+          if (vClipM.w > fSceneM)
+          {
+            b = m;
+            fBehind = vClipM.w - fSceneM;
+          }
+          else
+            a = m;
+        }
+        if (fBehind < 0.05 + 0.01 * vClip[j].w)
+        {
+          float2 vHit = ClipToUV(mul(float4(P + R * b, 1), g_Frame.mViewProj), vViewToBuffer);
+          float2 vEdge = min(vHit, vViewToBuffer - vHit) / vViewToBuffer;
+          float fTrust = saturate(min(vEdge.x, vEdge.y) * 12);
+          return float4(g_Textures[g_Draw.nTex0].SampleLevel(g_SamplerLinearClamp, vHit, 0).rgb, fTrust);
+        }
+        if (bRaysAfter)
+          return 0;
+      }
+      tPrev = tStep[j];
+    }
   }
   return 0;
 }
@@ -496,9 +514,9 @@ float4 ShadeWater(SWaterOutput In)
     // The screen's copy is sharp: it gives way to the blurred planar reflection where the blur up
     // and down is wider than 4 pixels on the screen, all of it from 8.
 #ifdef XR_RAYTRACE
-    float4 vSSR = g_Draw.vTexGenV.x >= 2 ? ScreenReflection(In.vWorldPos, Rs, g_Frame.vScreen.xy * vInvSize) : 0;
+    float4 vSSR = g_Draw.vTexGenV.x >= 2 ? ScreenReflection(In.vWorldPos, Rs, g_Frame.vScreen.xy * vInvSize, true) : 0;
 #else
-    float4 vSSR = ScreenReflection(In.vWorldPos, Rs, g_Frame.vScreen.xy * vInvSize);
+    float4 vSSR = ScreenReflection(In.vWorldPos, Rs, g_Frame.vScreen.xy * vInvSize, false);
 #endif
     if (fBlur > 0)
       vSSR.w *= saturate(2 - fBlur * g_Frame.vScreen.y / 4);

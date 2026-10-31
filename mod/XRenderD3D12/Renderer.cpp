@@ -231,7 +231,7 @@ void CD3D12Renderer::RegisterVariables()
                      "the mask has all of its kinds (5: no alpha tested geometry)");
   iConsole->Register("d3d12_RTReflections", &CV_d3d12_RTReflections, 0, VF_DUMPTODISK,
                      "The water's reflection by rays: 0 off, 1 the rays in place of the screen space reflection, 2 both, the screen space "
-                     "reflection where it finds the scene and the rays elsewhere (a device with DXR 1.1)");
+                     "reflection where it finds the scene before it passes behind an object and the rays elsewhere (a device with DXR 1.1)");
   iConsole->Register("d3d12_RTShadows", &CV_d3d12_RTShadows, 1, VF_DUMPTODISK,
                      "1: the sun's shadow at the hits of the rays, by a ray towards the sun (the surfaces the sun's shadow falls on)");
   // The HDR pipeline (r_HDRRendering, Hdr.cpp).
