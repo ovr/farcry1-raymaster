@@ -181,6 +181,8 @@ private:
   //! The draw's geometry and transform (the same in the main view and in the reflection, in all passes
   //! over it).
   static uint64 DrawHash(const SDraw &d);
+  //! Adds a DrawHash to m_Seen; false when it is there already.
+  bool InsertSeen(uint64 nHash);
   //! The instance's data of a draw (its geometry Tri; nTexCoord1 the second stream's first vertex, 0 for
   //! none).
   static void FillInstance(SRayInstance &Inst, const SPipelineKey &Key, const SDrawConstants &dc, const D3D12_RAYTRACING_GEOMETRY_TRIANGLES_DESC &Tri,
@@ -209,6 +211,9 @@ private:
   int m_nBuiltSlot = 0;
   D3D12_GPU_VIRTUAL_ADDRESS m_nInstances = 0;   //!< the last Build's SRayInstance array
   std::vector<SDraw> m_Draws;
+  //! Build's DrawHash of the draws taken: open addressing, at most half full, 0 empty (a hash of 0
+  //! counts as 1).
+  std::vector<uint64> m_Seen;
   int m_nSkippedTransform = 0;      //!< draws left out by their transforms in this capture
 
   std::unordered_map<SBlasKey, SStaticBlas, SBlasKeyHash> m_Static;

@@ -189,6 +189,7 @@ void CD3D12Upload::Shutdown()
   m_nCurBlock = -1;
   m_nCurOffset = 0;
   m_Buffers.clear();
+  std::fill(std::begin(m_Found), std::end(m_Found), SFoundBuffer());
   m_PendingRanges.clear();
   for (SHeapPool &Pool : m_Pools)
     Pool = SHeapPool();
@@ -701,17 +702,33 @@ void CD3D12Upload::ReleaseBuffer(CD3D12Buffer *pBuf)
   auto it = m_Buffers.find(pBuf->m_nGPU);
   if (it != m_Buffers.end() && it->second == pBuf)
     m_Buffers.erase(it);
+  for (SFoundBuffer &Found : m_Found)
+  {
+    if (Found.pBuf == pBuf)
+      Found = SFoundBuffer();
+  }
   delete pBuf;
+}
+
+CD3D12Buffer *CD3D12Upload::LookUpBuffer(D3D12_GPU_VIRTUAL_ADDRESS nGPU) const
+{
+  SFoundBuffer &Found = m_Found[(nGPU * 0x9E3779B97F4A7C15ull) >> (64 - FOUND_BUFFERS_BITS)];
+  if (Found.pBuf && Found.nGPU == nGPU)
+    return Found.pBuf;
+  auto it = m_Buffers.upper_bound(nGPU);
+  if (it == m_Buffers.begin())
+    return nullptr;
+  CD3D12Buffer *pBuf = std::prev(it)->second;
+  if (nGPU - pBuf->m_nGPU >= pBuf->m_nSize)
+    return nullptr;
+  Found.nGPU = nGPU;
+  Found.pBuf = pBuf;
+  return pBuf;
 }
 
 const CD3D12Buffer *CD3D12Upload::FindBuffer(D3D12_GPU_VIRTUAL_ADDRESS nGPU) const
 {
-  auto it = m_Buffers.upper_bound(nGPU);
-  if (it == m_Buffers.begin())
-    return nullptr;
-  --it;
-  const CD3D12Buffer *pBuf = it->second;
-  return nGPU - pBuf->m_nGPU < pBuf->m_nSize ? pBuf : nullptr;
+  return LookUpBuffer(nGPU);
 }
 
 int CD3D12Upload::CreateRawSRV(ID3D12Resource *pResource, uint64 nSize)
@@ -745,11 +762,9 @@ int CD3D12Upload::GetRawSRV(D3D12_GPU_VIRTUAL_ADDRESS nGPU, uint64 &nOffset)
   nOffset = 0;
   if (!nGPU)
     return -1;
-  auto it = m_Buffers.upper_bound(nGPU);
-  if (it != m_Buffers.begin())
   {
-    CD3D12Buffer *pBuf = std::prev(it)->second;
-    if (nGPU - pBuf->m_nGPU < pBuf->m_nSize && pBuf->m_pResource)
+    CD3D12Buffer *pBuf = LookUpBuffer(nGPU);
+    if (pBuf && pBuf->m_pResource)
     {
       if (pBuf->m_nRawSRV < 0)
         pBuf->m_nRawSRV = CreateRawSRV(pBuf->m_pResource, pBuf->m_pResource->GetDesc().Width);

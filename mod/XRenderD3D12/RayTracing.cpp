@@ -16,7 +16,7 @@
 
 #include "StdAfx.h"
 #include <algorithm>
-#include <unordered_set>
+#include <bit>
 #include "Renderer.h"
 #include "D3D12Device.h"
 #include "D3D12Descriptors.h"
@@ -63,20 +63,49 @@ namespace
   }
 
   const float s_FullScreen[3][3] = { { -1, -1, 0 }, { -1, 3, 0 }, { 3, -1, 0 } };
+
+  //! A hash of whole 64 bit words: MurmurHash3's mixing of each word and its final mix (a
+  //! multiply a word on the chain, where a hash of the bytes takes one a byte).
+  class CWordHash
+  {
+  public:
+    template <class T> void Add(const T &Data)
+    {
+      static_assert(sizeof(T) % 8 == 0 && std::is_trivially_copyable_v<T>, "hashed as whole words");
+      const uint8 *p = (const uint8 *)&Data;
+      for (size_t i = 0; i < sizeof(T); i += 8)
+      {
+        uint64 k;
+        memcpy(&k, p + i, 8);
+        k *= 0x87c37b91114253d5ull;
+        k = _rotl64(k, 31);
+        k *= 0x4cf5ad432745937full;
+        m_nHash ^= k;
+        m_nHash = _rotl64(m_nHash, 27) * 5 + 0x52dce729;
+      }
+    }
+    uint64 Get() const
+    {
+      uint64 h = m_nHash;
+      h ^= h >> 33;
+      h *= 0xff51afd7ed558ccdull;
+      h ^= h >> 33;
+      h *= 0xc4ceb9fe1a85ec53ull;
+      h ^= h >> 33;
+      return h;
+    }
+
+  private:
+    uint64 m_nHash = 0;
+  };
 }
 
 size_t CD3D12RayScene::SBlasKeyHash::operator()(const SBlasKey &Key) const
 {
-  // FNV-1a over the bytes (SBlasKey has no padding).
   static_assert(sizeof(SBlasKey) == 48, "SBlasKey is hashed and compared as bytes");
-  const uint8 *p = (const uint8 *)&Key;
-  uint64 nHash = 14695981039346656037ull;
-  for (size_t i = 0; i < sizeof(Key); i++)
-  {
-    nHash ^= p[i];
-    nHash *= 1099511628211ull;
-  }
-  return (size_t)nHash;
+  CWordHash Hash;
+  Hash.Add(Key);
+  return (size_t)Hash.Get();
 }
 
 CD3D12RayScene::CD3D12RayScene() = default;
@@ -227,20 +256,28 @@ bool CD3D12RayScene::IsAlive(const SDraw &d)
 uint64 CD3D12RayScene::DrawHash(const SDraw &d)
 {
   // The static buffers by id and version (Key), per frame memory by address (the triangles' desc).
-  uint64 nHash = SBlasKeyHash()(d.Key);
-  const auto Add = [&nHash](const void *pData, size_t nSize)
-  {
-    const uint8 *p = (const uint8 *)pData;
-    for (size_t i = 0; i < nSize; i++)
-    {
-      nHash ^= p[i];
-      nHash *= 1099511628211ull;
-    }
-  };
   static_assert(sizeof(D3D12_RAYTRACING_GEOMETRY_TRIANGLES_DESC) == 48, "the triangles' desc is hashed as bytes");
-  Add(&d.Geom.Triangles, sizeof(d.Geom.Triangles));
-  Add(d.Transform, sizeof(d.Transform));
-  return nHash;
+  CWordHash Hash;
+  Hash.Add(d.Key);
+  Hash.Add(d.Geom.Triangles);
+  Hash.Add(d.Transform);
+  return Hash.Get();
+}
+
+bool CD3D12RayScene::InsertSeen(uint64 nHash)
+{
+  nHash += !nHash;
+  const size_t nMask = m_Seen.size() - 1;
+  for (size_t i = (size_t)nHash & nMask;; i = (i + 1) & nMask)
+  {
+    if (m_Seen[i] == nHash)
+      return false;
+    if (!m_Seen[i])
+    {
+      m_Seen[i] = nHash;
+      return true;
+    }
+  }
 }
 
 void CD3D12RayScene::CaptureDraw(const SPipelineKey &Key, const SDrawConstants &dc, D3D_PRIMITIVE_TOPOLOGY eTopology, const D3D12_VERTEX_BUFFER_VIEW &VB,
@@ -618,15 +655,15 @@ void CD3D12RayScene::Build(FILE *pDump, bool bTop)
   // another) the first; then the water reflection's draws the main view does not have, as long as their
   // buffers and textures are there.
   const uint32 nKinds = (uint32)g_pRenderer->CV_d3d12_RTMask & 0xff;
-  std::unordered_set<uint64> Seen;
   const size_t nCaptured = m_Draws.size();
+  m_Seen.assign(std::bit_ceil(std::max<size_t>(64, (nCaptured + m_ReflectionDraws.size()) * 2)), 0);
   m_Draws.erase(std::remove_if(m_Draws.begin(), m_Draws.end(),
-    [&](const SDraw &d) { return (d.nKind & ~nKinds) != 0 || !Seen.insert(DrawHash(d)).second; }), m_Draws.end());
+    [&](const SDraw &d) { return (d.nKind & ~nKinds) != 0 || !InsertSeen(DrawHash(d)); }), m_Draws.end());
   const int nLeftOut = (int)(nCaptured - m_Draws.size());
   int nReflection = 0;
   for (const SDraw &d : m_ReflectionDraws)
   {
-    if (!(d.nKind & ~nKinds) && IsAlive(d) && Seen.insert(DrawHash(d)).second)
+    if (!(d.nKind & ~nKinds) && IsAlive(d) && InsertSeen(DrawHash(d)))
     {
       m_Draws.push_back(d);
       nReflection++;

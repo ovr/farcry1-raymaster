@@ -239,6 +239,18 @@ private:
 
   // Static buffers
   std::map<D3D12_GPU_VIRTUAL_ADDRESS, CD3D12Buffer *> m_Buffers;   //!< by their GPU address
+  //! The addresses FindBuffer found a buffer for, by a hash of the address: the rays ask for the
+  //! same ones every frame (the draws' vertices and indices), and an address keeps its buffer while
+  //! that lives (buffers never overlap); ReleaseBuffer takes the buffer's entries out.
+  struct SFoundBuffer
+  {
+    D3D12_GPU_VIRTUAL_ADDRESS nGPU = 0;
+    CD3D12Buffer *pBuf = nullptr;
+  };
+  static constexpr int FOUND_BUFFERS_BITS = 11;
+  mutable SFoundBuffer m_Found[1 << FOUND_BUFFERS_BITS];
+  //! The static buffer that holds nGPU (m_Found, else m_Buffers), NULL when none does.
+  CD3D12Buffer *LookUpBuffer(D3D12_GPU_VIRTUAL_ADDRESS nGPU) const;
   //! The heaps the buffers and textures of up to POOL_PLACE_MAX bytes are placed in: a committed
   //! resource costs the kernel a few hundred microseconds to make and as much to free (the
   //! terrain's index buffers change with its detail, a few every frame outdoors; the textures of a
