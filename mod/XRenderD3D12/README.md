@@ -61,7 +61,7 @@ reference of its features and console variables.
     `SPipelineKey::nColorFormat`) with the steps below that only HDR has, so the general and water
     programs of the other targets stay those without HDR instruction for instruction.
   - The light of a colour is `pow(colour, 2.2)` up to 1 and linear above, `1 + 2.2 (colour - 1)`
-    (`HdrDecode` in `Shaders/Common.hlsli`): the game adds its colours in gamma space, and what it
+    (`HdrDecode` in `Shaders/HdrLight.hlsli`): the game adds its colours in gamma space, and what it
     adds up above white (additive sprites over each other) is light added up. With the power
     above 1 too, the bloom of a fire is a ball.
   - Then, at the scene's size: a meter (the centre-weighted mean log2 luminance of the light,
@@ -73,6 +73,13 @@ reference of its features and console variables.
     upscaler the resolve goes into an LDR target of the render size, which the upscaler gets as
     it would the scene. The screen effects and the 2D stay LDR on the back buffer. In heat
     vision the scene is only clamped (its colours are a palette), and the exposure is held.
+  - The meter's first level and each level of the bloom from one twice its size are compute
+    kernels (`Shaders/Meter.hlsl`, `Shaders/Bloom.hlsl`; the maths the pixel shader does too in
+    `Shaders/HdrShared.hlsli`). The meter's threads read its taps side by side and add them up in
+    the pixel shader's order (the same bits). The bloom's group reads each tap its texels share
+    once, at the uv of the texel centre or corner it is at: in a frame 0 to 2 pixels of the
+    picture differ from the pixel shader's by 1 of 255. At 4K the meter's first level and the
+    bloom's levels down take 0.14 to 0.17 ms, with pixel shaders 0.34 to 0.35.
   - `d3d12_ToneMap`: 0 clamp, 1 soft shoulder (the default: the game's picture up to
     `d3d12_ToneMapKnee`, then each channel rolls off smoothly to 1 where the original clips it,
     so the sun still goes white and bright fire yellow), 2 ACES (fitted), 3 AgX.

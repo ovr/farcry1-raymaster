@@ -34,6 +34,8 @@ enum ED3D12Kernel
   eD3D12K_GtaoDenoise,              //!< XeGTAO's denoise, a pass before the last
   eD3D12K_GtaoDenoiseLast,          //!< its last pass, into the output
   eD3D12K_AoResolve,                //!< the AO as the factor the scene is multiplied by (Shaders/AoResolve.hlsl)
+  eD3D12K_Meter,                    //!< the HDR meter's first level (Shaders/Meter.hlsl)
+  eD3D12K_Bloom,                    //!< a level of the bloom from one twice its size (Shaders/Bloom.hlsl)
   eD3D12K_Num
 };
 

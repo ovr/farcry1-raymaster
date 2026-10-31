@@ -875,12 +875,13 @@ CD3D12Texture *CD3D12Upload::CreateTexture(int nWidth, int nHeight, int nMips, D
   return pTex;
 }
 
-CD3D12Texture *CD3D12Upload::CreateRenderTarget(int nWidth, int nHeight, DXGI_FORMAT Format)
+CD3D12Texture *CD3D12Upload::CreateRenderTarget(int nWidth, int nHeight, DXGI_FORMAT Format, bool bUnorderedAccess)
 {
   if (!m_pDevice || nWidth <= 0 || nHeight <= 0)
     return nullptr;
   const D3D12_HEAP_PROPERTIES Heap = HeapProps(D3D12_HEAP_TYPE_DEFAULT);
-  const D3D12_RESOURCE_DESC Desc = TextureDesc(nWidth, nHeight, 1, 1, Format, D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET);
+  const D3D12_RESOURCE_DESC Desc = TextureDesc(nWidth, nHeight, 1, 1, Format,
+    D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET | (bUnorderedAccess ? D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS : D3D12_RESOURCE_FLAG_NONE));
   // Clears to transparent black are the fast ones.
   D3D12_CLEAR_VALUE Clear = {};
   Clear.Format = Format;

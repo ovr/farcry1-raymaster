@@ -98,7 +98,7 @@ typedef float float4x4_t[16];
 #define DF2_ALPHA_GLOW      0x00002000  //!< rgb += tex0 rgb * tex0 a after the light and the light map: the texture's alpha is a glow mask, unlit
 #define DF2_BUMP_OFFSET     0x00004000  //!< with DF_TEX0: tex0 looked up at uv0 + (tex3 at uv1 rg * 2 - 1) * vParams0.x, the texture wobbled by a normal map (the beach foam)
 #define DF2_SKY_GLOW        0x00008000  //!< the sky with r_HDRRendering: rgb *= SkyGlow (Common.hlsli) in the direction of the world position
-#define DF2_HDR_CORE        0x00010000  //!< a light added with r_HDRRendering: rgb *= HdrEncode(1 + (vHdrCore.x - 1) * m^4) (Common.hlsli), m its shape 0..1 (tex0's largest channel, times tex0 a with vHdrCore.y, times DF2_GLOW_FALLOFF): brighter in its core, its soft edge as the game's
+#define DF2_HDR_CORE        0x00010000  //!< a light added with r_HDRRendering: rgb *= HdrEncode(1 + (vHdrCore.x - 1) * m^4) (HdrLight.hlsli), m its shape 0..1 (tex0's largest channel, times tex0 a with vHdrCore.y, times DF2_GLOW_FALLOFF): brighter in its core, its soft edge as the game's
 #define DF2_VERTEX_LIGHTS   0x00020000  //!< with DF_PIXEL_LIGHTING: the lights as the vertex lighting takes them, per pixel: colours not clamped, a point light's attenuation 1 / (vLightAtten.x + vLightAtten.y d) up to vLightAtten.z (d3d12_PixelLighting)
 #define DF2_SMOOTH_FALLOFF  0x00040000  //!< with DF2_VERTEX_LIGHTS: a point light falls off as 2 (1 - smoothstep(0, 0.9, d * vLightAtten.w)) instead (static objects: the falloff the per vertex attenuation is fitted to)
 #define DF2_LIGHTMAP_LIGHTS 0x00080000  //!< with DF_TEX1_LIGHTMAP (no DF_LIGHTING): the draw's lights without the sun (per pixel, DF2_VERTEX_LIGHTS) in place of the ambient under the light map (d3d12_PixelLighting)
@@ -223,6 +223,22 @@ struct SAoResolveConstants
   XR_FLOAT4(vParams);             //!< x the exponent of the visibility (d3d12_AOStrength / 2.2: the scene's colours are the game's, not linear;
                                   //!< d3d12_AOStrength with y), y 1: the ambient light's part (d3d12_AOApply 1), z 1: with it the factor too
                                   //!< (d3d12_AODebug 1)
+};
+
+//! b0 of the meter's first level (Meter.hlsl, Hdr.cpp).
+struct SMeterConstants
+{
+  XR_FLOAT4(vSize);               //!< the level: x width, y height (texels), z 1 / width, w 1 / height
+  XR_UINT4(vTaps);                //!< x the taps a side of a texel (as HDR_LUMINANCE's vParams0.z)
+};
+
+//! b0 of a level of the bloom from one twice its size (Bloom.hlsl, Hdr.cpp).
+struct SBloomConstants
+{
+  XR_FLOAT4(vSize);               //!< the level: x width, y height (texels), z 1 / width, w 1 / height
+  XR_FLOAT4(vParams);             //!< as HDR_BLOOM_DOWN's vParams1 (Hdr.hlsl): x the compensation, y 1 with the adapted EV, z the threshold,
+                                  //!< w its soft knee
+  XR_UINT4(vFlags);               //!< x 1: from the scene, its light exposed (HDR_BLOOM_PREFILTER)
 };
 
 #endif

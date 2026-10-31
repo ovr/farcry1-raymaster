@@ -13,13 +13,16 @@
 //	additive particles, flares and glows) stays. EndMainScene then, at the
 //	scene's size (Shaders/Hdr.hlsl):
 //	  - the meter: the mean log2 luminance of the scene's light (centre
-//	    weighted), reduced to 1 x 1;
+//	    weighted), reduced to 1 x 1; its first level by a kernel
+//	    (Shaders/Meter.hlsl), whose threads read taps side by side;
 //	  - the adaptation: the exposure (EV) towards the meter's from the one
 //	    of the frame before, at the frame time's rate (d3d12_ExposureSpeed),
 //	    within d3d12_ExposureMin .. Max (d3d12_AutoExposure);
 //	  - the bloom (d3d12_Bloom): the exposed light above d3d12_BloomThreshold
 //	    at half the size, BLOOM_LEVELS levels down (13 taps), then back up
-//	    (a 3 x 3 tent), each added to the one above;
+//	    (a 3 x 3 tent), each added to the one above; a level from one twice
+//	    its size by a kernel (Shaders/Bloom.hlsl), which reads each of the
+//	    taps it shares with its neighbours once;
 //	  - the resolve: the light exposed (plus d3d12_Exposure), with the
 //	    bloom, tone mapped (d3d12_ToneMap), colour graded (ColorGrading.cpp)
 //	    into the back buffer, or for an upscaler into an LDR target of the
@@ -48,6 +51,7 @@
 #include "D3D12Upload.h"
 #include "D3D12Descriptors.h"
 #include "D3D12Pipeline.h"
+#include "D3D12Compute.h"
 #include "Scene.h"
 
 namespace
@@ -64,6 +68,9 @@ const float s_FullScreen[3][3] = { { -1, -1, 0 }, { -1, 3, 0 }, { 3, -1, 0 } };
 //! The meter's first level is the scene reduced by METER_FACTOR, each next one by METER_REDUCE,
 //! down to 1 x 1.
 constexpr int METER_FACTOR = 8;
+//! The bilinear taps a side of its texel: each of 2 x 2 texels of the scene.
+constexpr int METER_TAPS = (METER_FACTOR + 1) / 2;
+static_assert(METER_TAPS == 4, "Shaders/Meter.hlsl's TAPS");
 constexpr int METER_REDUCE = 4;
 //! The mean log2 luminance the exposure brings to EV 0: the game's daylight (Training's beach and
 //! hills from above read -2.56 and -2.69).
@@ -72,6 +79,8 @@ constexpr float EXPOSURE_KEY_LOG2 = -2.6f;
 constexpr int BLOOM_LEVELS = 6;
 //! The soft knee under the bloom's threshold, a part of the threshold.
 constexpr float BLOOM_KNEE = 0.5f;
+//! A table of a kernel: its SRVs and UAVs (D3D12Compute.h).
+constexpr int KERNEL_TABLE = CD3D12Compute::COMPUTE_SRVS + CD3D12Compute::COMPUTE_UAVS;
 
 const char *const s_ToneMapNames[] = { "clamp", "soft shoulder", "ACES fitted", "AgX" };
 
@@ -126,14 +135,14 @@ void CD3D12Renderer::EndMainScene()
     GpuSection("hdr");
     m_pDevice->EndHdr();
     InvalidateFrameConstants();
-    ResolveHdr(m_Hdr.nHdrColorSRV, m_pDevice->GetWidth(), m_pDevice->GetHeight(), false);
+    ResolveHdr(m_Hdr.nHdrColorSRV, m_Hdr.pHdrColor.Get(), m_pDevice->GetWidth(), m_pDevice->GetHeight(), false);
   }
   if (m_bHdrScene && m_pFrameDump)
     DumpHdr();
   m_bHdrScene = false;
 }
 
-CD3D12Texture *CD3D12Renderer::ResolveHdr(int nSceneSRV, int nWidth, int nHeight, bool bToTexture)
+CD3D12Texture *CD3D12Renderer::ResolveHdr(int nSceneSRV, ID3D12Resource *pScene, int nWidth, int nHeight, bool bToTexture)
 {
   if (nSceneSRV < 0 || !EnsureHdrTargets(nWidth, nHeight, bToTexture))
   {
@@ -169,8 +178,9 @@ CD3D12Texture *CD3D12Renderer::ResolveHdr(int nSceneSRV, int nWidth, int nHeight
       SDrawConstants dc = DefaultDrawConstants();
       dc.nFlags = i == 0 ? HDR_LUMINANCE : HDR_REDUCE;
       dc.nTex0 = (uint32)nSrcSRV;
-      Set4(dc.vParams0, 1.0f / pDst->m_nWidth, 1.0f / pDst->m_nHeight, (float)(((i == 0 ? METER_FACTOR : METER_REDUCE) + 1) / 2), 0);
-      DrawHdrPass(pDst, dc);
+      Set4(dc.vParams0, 1.0f / pDst->m_nWidth, 1.0f / pDst->m_nHeight, (float)(i == 0 ? METER_TAPS : (METER_REDUCE + 1) / 2), 0);
+      if (i > 0 || !DispatchMeter(pScene, dc))
+        DrawHdrPass(pDst, dc);
       nSrcSRV = pDst->m_nSRV;
     }
     const float fRate = std::max(CV_d3d12_ExposureSpeed, 0.0f) * fFrameTime;
@@ -192,6 +202,7 @@ CD3D12Texture *CD3D12Renderer::ResolveHdr(int nSceneSRV, int nWidth, int nHeight
   if (fBloom > 0)
   {
     int nSrcSRV = nSceneSRV, nSrcWidth = nWidth, nSrcHeight = nHeight;
+    ID3D12Resource *pSrc = pScene;
     for (size_t i = 0; i < m_Hdr.Bloom.size(); i++)
     {
       CD3D12Texture *pDst = m_Hdr.Bloom[i];
@@ -202,7 +213,9 @@ CD3D12Texture *CD3D12Renderer::ResolveHdr(int nSceneSRV, int nWidth, int nHeight
       Set4(dc.vParams0, 1.0f / pDst->m_nWidth, 1.0f / pDst->m_nHeight, 1.0f / nSrcWidth, 1.0f / nSrcHeight);
       const float fThreshold = std::max(CV_d3d12_BloomThreshold, 0.0f);
       Set4(dc.vParams1, fComp, bAdapted ? 1.0f : 0.0f, fThreshold, fThreshold * BLOOM_KNEE);
-      DrawHdrPass(pDst, dc);
+      if (!DispatchBloomLevel(i, pSrc, nSrcWidth, nSrcHeight, dc))
+        DrawHdrPass(pDst, dc);
+      pSrc = pDst->m_pResource;
       nSrcSRV = pDst->m_nSRV;
       nSrcWidth = pDst->m_nWidth;
       nSrcHeight = pDst->m_nHeight;
@@ -239,6 +252,75 @@ CD3D12Texture *CD3D12Renderer::ResolveHdr(int nSceneSRV, int nWidth, int nHeight
   }
   DrawHdrToBackBuffer(dc);
   return nullptr;
+}
+
+int CD3D12Renderer::GetHdrKernelTable(size_t nPass) const
+{
+  const size_t nTable = nPass * D3D12_FRAMES + m_pDevice->GetFrameSlot();
+  return nTable < m_Hdr.KernelTables.size() ? m_Hdr.KernelTables[nTable] : -1;
+}
+
+bool CD3D12Renderer::DispatchMeter(ID3D12Resource *pScene, const SDrawConstants &dc)
+{
+  CD3D12Texture *pLevel = m_Hdr.Meter[0];
+  const int nFirst = GetHdrKernelTable(m_Hdr.Bloom.size());
+  if (!m_pCompute || !pScene || dc.vParams0[2] != METER_TAPS || nFirst < 0)
+    return false;
+  // The scene, the level.
+  m_pDescriptors->WriteSRV(nFirst, pScene, nullptr);
+  D3D12_UNORDERED_ACCESS_VIEW_DESC UAV = {};
+  UAV.Format = D3D12_HDR_FORMAT;
+  UAV.ViewDimension = D3D12_UAV_DIMENSION_TEXTURE2D;
+  m_pDescriptors->WriteUAV(nFirst + CD3D12Compute::COMPUTE_SRVS, pLevel->m_pResource, &UAV);
+
+  SMeterConstants mc = {};
+  Set4(mc.vSize, (float)pLevel->m_nWidth, (float)pLevel->m_nHeight, dc.vParams0[0], dc.vParams0[1]);
+  mc.vTaps[0] = METER_TAPS;
+  const SD3D12FrameAlloc CB = m_pUpload->AllocFrame(sizeof(mc), 256);
+  memcpy(CB.pCPU, &mc, sizeof(mc));
+  m_pDevice->EndOffscreen();
+  m_pDevice->Transition(pLevel->m_pResource, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+  // 2 x 2 texels a group.
+  m_pCompute->Dispatch(m_pDevice->GetCmdList(), eD3D12K_Meter, CB.nGPU, nFirst, nFirst + CD3D12Compute::COMPUTE_SRVS,
+                       (UINT)(pLevel->m_nWidth + 1) / 2, (UINT)(pLevel->m_nHeight + 1) / 2);
+  m_pDevice->Transition(pLevel->m_pResource, D3D12_RESOURCE_STATE_UNORDERED_ACCESS, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+  return true;
+}
+
+bool CD3D12Renderer::DispatchBloomLevel(size_t nLevel, ID3D12Resource *pSource, int nSourceWidth, int nSourceHeight, const SDrawConstants &dc)
+{
+  // Its taps at the centres and corners of its texels: where the level before is twice its size.
+  CD3D12Texture *pLevel = m_Hdr.Bloom[nLevel];
+  const int nFirst = GetHdrKernelTable(nLevel);
+  if (!m_pCompute || !pSource || nSourceWidth != 2 * pLevel->m_nWidth || nSourceHeight != 2 * pLevel->m_nHeight || nFirst < 0)
+    return false;
+  // The level before, the EV, the level.
+  const bool bScene = (dc.nFlags & HDR_BLOOM_PREFILTER) != 0;
+  ID3D12Resource *pExposure = m_Hdr.pExposure[m_Hdr.nExposure]->m_pResource;
+  m_pDescriptors->WriteSRV(nFirst, pSource, nullptr);
+  m_pDescriptors->WriteSRV(nFirst + 1, pExposure, nullptr);
+  D3D12_UNORDERED_ACCESS_VIEW_DESC UAV = {};
+  UAV.Format = D3D12_HDR_FORMAT;
+  UAV.ViewDimension = D3D12_UAV_DIMENSION_TEXTURE2D;
+  m_pDescriptors->WriteUAV(nFirst + CD3D12Compute::COMPUTE_SRVS, pLevel->m_pResource, &UAV);
+
+  SBloomConstants bc = {};
+  Set4(bc.vSize, (float)pLevel->m_nWidth, (float)pLevel->m_nHeight, dc.vParams0[0], dc.vParams0[1]);
+  memcpy(bc.vParams, dc.vParams1, sizeof(bc.vParams));
+  bc.vFlags[0] = bScene ? 1 : 0;
+  const SD3D12FrameAlloc CB = m_pUpload->AllocFrame(sizeof(bc), 256);
+  memcpy(CB.pCPU, &bc, sizeof(bc));
+  // The pass before drew into the EV or the level before.
+  m_pDevice->EndOffscreen();
+  constexpr D3D12_RESOURCE_STATES READ = D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE | D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE;
+  ID3D12Resource *pRead = bScene ? pExposure : pSource;
+  m_pDevice->Transition(pRead, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, READ);
+  m_pDevice->Transition(pLevel->m_pResource, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+  m_pCompute->Dispatch(m_pDevice->GetCmdList(), eD3D12K_Bloom, CB.nGPU, nFirst, nFirst + CD3D12Compute::COMPUTE_SRVS,
+                       (UINT)(pLevel->m_nWidth + 7) / 8, (UINT)(pLevel->m_nHeight + 7) / 8);
+  m_pDevice->Transition(pLevel->m_pResource, D3D12_RESOURCE_STATE_UNORDERED_ACCESS, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+  m_pDevice->Transition(pRead, READ, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+  return true;
 }
 
 void CD3D12Renderer::DrawHdrToBackBuffer(const SDrawConstants &dc)
@@ -307,11 +389,11 @@ bool CD3D12Renderer::EnsureHdrTargets(int nWidth, int nHeight, bool bLdr)
   if (nWidth != m_Hdr.nWidth || nHeight != m_Hdr.nHeight)
   {
     ReleaseHdrTargets();
-    // The meter's levels, down to 1 x 1.
+    // The meter's levels, down to 1 x 1 (the kernel writes the first one).
     int w = std::max((nWidth + METER_FACTOR - 1) / METER_FACTOR, 1), h = std::max((nHeight + METER_FACTOR - 1) / METER_FACTOR, 1);
     for (;;)
     {
-      m_Hdr.Meter.push_back(m_pUpload->CreateRenderTarget(w, h, D3D12_HDR_FORMAT));
+      m_Hdr.Meter.push_back(m_pUpload->CreateRenderTarget(w, h, D3D12_HDR_FORMAT, m_Hdr.Meter.empty()));
       if (w == 1 && h == 1)
         break;
       w = std::max((w + METER_REDUCE - 1) / METER_REDUCE, 1);
@@ -319,14 +401,33 @@ bool CD3D12Renderer::EnsureHdrTargets(int nWidth, int nHeight, bool bLdr)
     }
     for (CD3D12Texture *&pTex : m_Hdr.pExposure)
       pTex = m_pUpload->CreateRenderTarget(1, 1, DXGI_FORMAT_R32_FLOAT);
-    // The bloom's, while they are at least 2 texels high.
+    // The bloom's, while they are at least 2 texels high (the kernel writes them too).
     w = nWidth;
     h = nHeight;
     for (int i = 0; i < BLOOM_LEVELS && (h + 1) / 2 >= 2; i++)
     {
       w = std::max((w + 1) / 2, 1);
       h = (h + 1) / 2;
-      m_Hdr.Bloom.push_back(m_pUpload->CreateRenderTarget(w, h, D3D12_HDR_FORMAT));
+      m_Hdr.Bloom.push_back(m_pUpload->CreateRenderTarget(w, h, D3D12_HDR_FORMAT, true));
+    }
+    // The kernels' tables, D3D12_FRAMES a pass; the views they do not use null.
+    D3D12_SHADER_RESOURCE_VIEW_DESC NullSRV = {};
+    NullSRV.Format = D3D12_HDR_FORMAT;
+    NullSRV.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
+    NullSRV.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+    NullSRV.Texture2D.MipLevels = 1;
+    D3D12_UNORDERED_ACCESS_VIEW_DESC NullUAV = {};
+    NullUAV.Format = D3D12_HDR_FORMAT;
+    NullUAV.ViewDimension = D3D12_UAV_DIMENSION_TEXTURE2D;
+    m_Hdr.KernelTables.assign((m_Hdr.Bloom.size() + 1) * D3D12_FRAMES, -1);
+    for (int &nTable : m_Hdr.KernelTables)
+    {
+      if ((nTable = m_pDescriptors->AllocRange(KERNEL_TABLE)) < 0)
+        continue;
+      for (int i = 0; i < CD3D12Compute::COMPUTE_SRVS; i++)
+        m_pDescriptors->WriteSRV(nTable + i, nullptr, &NullSRV);
+      for (int i = 0; i < CD3D12Compute::COMPUTE_UAVS; i++)
+        m_pDescriptors->WriteUAV(nTable + CD3D12Compute::COMPUTE_SRVS + i, nullptr, &NullUAV);
     }
     m_Hdr.nWidth = nWidth;
     m_Hdr.nHeight = nHeight;
@@ -378,6 +479,15 @@ void CD3D12Renderer::ReleaseHdrTargets()
   }
   m_Hdr.Meter.clear();
   m_Hdr.Bloom.clear();
+  if (m_pDescriptors)
+  {
+    for (int nTable : m_Hdr.KernelTables)
+    {
+      if (nTable >= 0)
+        m_pDescriptors->FreeRange(nTable, KERNEL_TABLE);
+    }
+  }
+  m_Hdr.KernelTables.clear();
   m_Hdr.pExposure[0] = m_Hdr.pExposure[1] = nullptr;
   m_Hdr.pLdr = nullptr;
   m_Hdr.pRatio = nullptr;
@@ -435,7 +545,7 @@ float CD3D12Renderer::HdrBoost(float fLight) const
 {
   if (!IsHdrTarget())
     return 1.0f;
-  // HdrEncode (Common.hlsli)
+  // HdrEncode (HdrLight.hlsli)
   return fLight > 1 ? 1 + (fLight - 1) / 2.2f : powf(std::max(fLight, 0.0f), 1.0f / 2.2f);
 }
 

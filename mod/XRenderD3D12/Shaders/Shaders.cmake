@@ -68,7 +68,7 @@ xrender_d3d12_shader(RayDebug_VS RayDebug.hlsl vs_6_5 VSMain)
 xrender_d3d12_shader(RayDebug_PS RayDebug.hlsl ps_6_5 PSMain)
 
 # The compute kernels (D3D12Compute.h, ED3D12Kernel): Intel XeGTAO's passes (XeGtao.hlsl, one per
-# compile) and the ambient occlusion's resolve.
+# compile), the ambient occlusion's resolve, the HDR meter's first level and the bloom's levels.
 xrender_d3d12_shader(Gtao_PrefilterDepths_CS XeGtao.hlsl cs_6_0 CSMain XR_GTAO_PREFILTER)
 xrender_d3d12_shader(Gtao_Normals_CS XeGtao.hlsl cs_6_0 CSMain XR_GTAO_NORMALS)
 xrender_d3d12_shader(Gtao_Low_CS XeGtao.hlsl cs_6_0 CSMain XR_GTAO_MAIN XR_GTAO_SLICES=1 XR_GTAO_STEPS=2)
@@ -78,3 +78,5 @@ xrender_d3d12_shader(Gtao_Ultra_CS XeGtao.hlsl cs_6_0 CSMain XR_GTAO_MAIN XR_GTA
 xrender_d3d12_shader(Gtao_Denoise_CS XeGtao.hlsl cs_6_0 CSMain XR_GTAO_DENOISE)
 xrender_d3d12_shader(Gtao_DenoiseLast_CS XeGtao.hlsl cs_6_0 CSMain XR_GTAO_DENOISE XR_GTAO_LAST)
 xrender_d3d12_shader(AoResolve_CS AoResolve.hlsl cs_6_0 CSMain)
+xrender_d3d12_shader(Meter_CS Meter.hlsl cs_6_0 CSMain)
+xrender_d3d12_shader(Bloom_CS Bloom.hlsl cs_6_0 CSMain)

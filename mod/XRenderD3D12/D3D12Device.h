@@ -236,6 +236,9 @@ public:
   //! others stay shader resources (the level above, read while this one is made from it).
   void SetOffscreenTargets(ID3D12Resource *pColor, D3D12_CPU_DESCRIPTOR_HANDLE hRTV, D3D12_CPU_DESCRIPTOR_HANDLE hDSV, int nWidth, int nHeight,
                            UINT nSubresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES);
+  //! The off screen colour target (or shadow map) back to PIXEL_SHADER_RESOURCE; nothing off screen
+  //! any more (a compute pass reads it next).
+  void EndOffscreen();
   bool IsOffscreen() const { return m_pOffscreen != nullptr; }
   //! The colour format of the target drawn into: the off screen target's, else the main view's.
   DXGI_FORMAT GetTargetColorFormat() const { return m_pOffscreen ? m_OffscreenFormat : GetMainColorFormat(); }
@@ -353,9 +356,6 @@ private:
   //! Resets the slot's allocator and the list and binds the heap, root signature and targets.
   void OpenCmdList();
   void WaitForFence(uint64 nValue);
-  //! The off screen colour target (or shadow map) back to PIXEL_SHADER_RESOURCE; nothing off screen
-  //! any more.
-  void EndOffscreen();
 
   ComPtr<IDXGIFactory4> m_pFactory;
   UINT m_nFactoryFlags = 0;

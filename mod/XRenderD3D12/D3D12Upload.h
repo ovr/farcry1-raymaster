@@ -124,7 +124,8 @@ public:
   //! entry with pData NULL leaves that sub resource undefined. NULL when the device refuses it.
   CD3D12Texture *CreateTexture(int nWidth, int nHeight, int nMips, DXGI_FORMAT Format, bool bCube, const SD3D12SubData *pSubData, int nArraySize = 1);
   //! A render target texture (one mip) with an RTV and an SRV; starts in PIXEL_SHADER_RESOURCE.
-  CD3D12Texture *CreateRenderTarget(int nWidth, int nHeight, DXGI_FORMAT Format);
+  //! bUnorderedAccess: compute passes write it too (ALLOW_UNORDERED_ACCESS; the pass makes the UAV).
+  CD3D12Texture *CreateRenderTarget(int nWidth, int nHeight, DXGI_FORMAT Format, bool bUnorderedAccess = false);
   //! A texture that compute passes write (ALLOW_UNORDERED_ACCESS), nMips levels, without views (the
   //! pass writes them into its descriptor tables, so Format may be typeless); starts in
   //! UNORDERED_ACCESS. szName names it for the debug layer.

@@ -936,6 +936,8 @@ public:
     CD3D12Texture *pExposure[2] = {};       //!< 1 x 1 R32_FLOAT, the adapted EV: this frame's and the frame before's
     int nExposure = 0;                      //!< pExposure's current one
     std::vector<CD3D12Texture *> Bloom;     //!< the bloom's levels, the first half the scene's size
+    std::vector<int> KernelTables;          //!< the tables of the kernels (D3D12Compute.h), D3D12_FRAMES a pass: the bloom's levels,
+                                            //!< then the meter's first level; -1 none
     CD3D12Texture *pLdr = nullptr;          //!< the tone mapped scene for an upscaler (R8G8B8A8)
     CD3D12Texture *pRatio = nullptr;        //!< with it and the highlight layer, the layer's ratio at the scene's size (D3D12_HIGHLIGHT_FORMAT)
     int nWidth = 0, nHeight = 0;            //!< the scene's size they are for
@@ -951,10 +953,23 @@ public:
   //! After its EF_EndEf3D, before the screen effects: the scene tone mapped (HDR) and upscaled
   //! (UpscaleScene) into the back buffer, which is bound again.
   void EndMainScene();
-  //! The HDR passes over the scene (nSceneSRV, nWidth x nHeight): the meter, the adaptation, the
-  //! bloom and the resolve, into the back buffer, or with bToTexture into m_Hdr.pLdr, which it
-  //! returns (nullptr: the back buffer, or no targets).
-  CD3D12Texture *ResolveHdr(int nSceneSRV, int nWidth, int nHeight, bool bToTexture);
+  //! The HDR passes over the scene (pScene in PIXEL_SHADER_RESOURCE | NON_PIXEL_SHADER_RESOURCE, its
+  //! SRV nSceneSRV, nWidth x nHeight): the meter, the adaptation, the bloom and the resolve, into the
+  //! back buffer, or with bToTexture into m_Hdr.pLdr, which it returns (nullptr: the back buffer, or
+  //! no targets).
+  CD3D12Texture *ResolveHdr(int nSceneSRV, ID3D12Resource *pScene, int nWidth, int nHeight, bool bToTexture);
+  //! This frame's table of an HDR kernel (m_Hdr.KernelTables): of bloom level nPass, or of the
+  //! meter's first level for m_Hdr.Bloom.size(). The GPU is done with the one of the frame
+  //! D3D12_FRAMES before. -1: none.
+  int GetHdrKernelTable(size_t nPass) const;
+  //! The meter's first level by the kernel (Shaders/Meter.hlsl) from pScene, dc the constants of its
+  //! pass (HDR_LUMINANCE). False: not by the kernel (other taps, no table), the pass draws it.
+  bool DispatchMeter(ID3D12Resource *pScene, const SDrawConstants &dc);
+  //! Level nLevel of the bloom by the kernel (Shaders/Bloom.hlsl) from pSource (nSourceWidth x
+  //! nSourceHeight; the scene, or the level before in PIXEL_SHADER_RESOURCE), dc the constants of its
+  //! pass (HDR_BLOOM_DOWN). False: not by the kernel (the level before is not twice its size, no
+  //! table), the pass draws it.
+  bool DispatchBloomLevel(size_t nLevel, ID3D12Resource *pSource, int nSourceWidth, int nSourceHeight, const SDrawConstants &dc);
   //! The resolve's pass over the whole back buffer; with the highlight layer it writes the layer
   //! too (HdrOutput.cpp).
   void DrawHdrToBackBuffer(const SDrawConstants &dc);
@@ -977,7 +992,7 @@ public:
   //! reflection, the environment cubes) outside heat vision.
   bool IsHdrTarget() const;
   //! There: the factor of a colour that makes white's light fLight times brighter (HdrEncode in
-  //! Shaders/Common.hlsli, as the resolve decodes it); else 1. For what the HDR pipeline draws
+  //! Shaders/HdrLight.hlsli, as the resolve decodes it); else 1. For what the HDR pipeline draws
   //! brighter than the game: the glow maps (d3d12_HDRGlow).
   float HdrBoost(float fLight) const;
   //! There: a light added (a flare, a corona, an additive sprite or surface, drawn
