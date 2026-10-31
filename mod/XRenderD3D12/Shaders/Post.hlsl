@@ -41,6 +41,11 @@
 //	  POST_DEPTH_VIEW  the depth tex0 (0 near to 1 far) as grey: the distance
 //	                   in log scale, black at vParams1.x (near), white at
 //	                   vParams1.y (far) (d3d12_UpscaleDebug 2)
+//	  POST_AO_TAKEN    the light the ambient occlusion takes from the scene,
+//	                   for a draw that subtracts it (AmbientOcclusion.cpp): the
+//	                   ambient light tex2 times 1 - the visibility tex0 to the
+//	                   power vParams1.x, 0 where the depth tex1 is the far
+//	                   plane; at float16 precision, as AoResolve.hlsl's
 //
 //////////////////////////////////////////////////////////////////////
 
@@ -196,8 +201,18 @@ float4 DepthView(float2 vPixel)
   return float4((float3)saturate(log2(fDist / fNear) / log2(fFar / fNear)), 1);
 }
 
+float4 AoTaken(float2 vPixel)
+{
+  float2 vUV = vPixel * g_Draw.vParams0.xy;
+  float fDepth = g_Textures[g_Draw.nTex1].SampleLevel(g_SamplerPointClamp, vUV, 0).r;
+  float v = fDepth < 1 ? pow(saturate(g_Textures[g_Draw.nTex0].SampleLevel(g_SamplerPointClamp, vUV, 0).r), g_Draw.vParams1.x) : 1;
+  return float4(f16tof32(f32tof16((1 - v) * g_Textures[g_Draw.nTex2].SampleLevel(g_SamplerPointClamp, vUV, 0).rgb)), 0);
+}
+
 float4 PSMain(SPostOutput In) : SV_Target
 {
+  if (HasFlag(POST_AO_TAKEN))
+    return AoTaken(In.vPos.xy);
   if (HasFlag(POST_DEPTH_VIEW))
     return DepthView(In.vPos.xy);
   if (HasFlag(POST_SUN_PATCH))

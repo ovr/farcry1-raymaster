@@ -25,7 +25,10 @@
 //	casters, each part once. The live set holds the casters the engine
 //	names for its own shadows in the frame (characters, vehicles, the
 //	vegetation that casts: AddLiveCasters), each only where nothing in the
-//	full set is nearer to the sun (DF2_CASCADE_CASTER).
+//	full set is nearer to the sun (DF2_CASCADE_CASTER). A part of either
+//	set goes into a slice only where its shadow falls on the slice's
+//	receivers (the view's points that take their shadow from it): the
+//	slice is not read elsewhere.
 //
 //	The receivers (SunCascades, Common.hlsli): the lit objects take the
 //	sun's visibility from the full set; the light maps and the terrain,
@@ -85,6 +88,14 @@ Matrix44 GetWorldMatrix(const CCObject *pObj)
   m.data[14] = pObj->m_Matrix.data[14];
   return m;
 }
+
+//! The texels around the outline of a cascade's receivers that a caster may still reach them in
+//! (CascadeSample: the point moved off the surface by a texel and a half, the filter's bilinear
+//! taps), besides the filter's radius.
+constexpr float CASCADE_RECEIVER_TEXELS = 5.0f;
+//! Around the camera in the first cascade's outline (m): the weapon in the hands, drawn with a
+//! projection of its own.
+constexpr float CASCADE_NEAR_MARGIN_M = 1.0f;
 
 //! The frame of the sun's view: z towards the sun, x across, y up the map.
 void SunBasis(const Vec3 &vToSun, Vec3 &x, Vec3 &y, Vec3 &z)
@@ -146,7 +157,13 @@ bool CD3D12Renderer::SetupCascades(int nCascades)
   vDir.Normalize();
   const Vec3 vPos = Cam.GetPos();
   const int nSize = m_nCascadeSize;
-  float fStart = fNear;
+  // The frustum's sides at depth d: d times (1 + the off-centre term) over the scale, across and up.
+  Vec3 vRight(m_CameraView.data[0], m_CameraView.data[4], m_CameraView.data[8]), vUp(m_CameraView.data[1], m_CameraView.data[5], m_CameraView.data[9]);
+  vRight.Normalize();
+  vUp.Normalize();
+  const float fSideX = m_ProjMatrix.data[0] != 0 ? (1 + fabsf(m_ProjMatrix.data[8])) / fabsf(m_ProjMatrix.data[0]) * 1.01f : 1e3f;
+  const float fSideY = m_ProjMatrix.data[5] != 0 ? (1 + fabsf(m_ProjMatrix.data[9])) / fabsf(m_ProjMatrix.data[5]) * 1.01f : 1e3f;
+  float fStart = fNear, fBlendFrom = 0;
   for (int i = 0; i < nCascades; i++)
   {
     const float t = (float)(i + 1) / nCascades;
@@ -179,6 +196,53 @@ bool CD3D12Renderer::SetupCascades(int nCascades)
       M[12 + k] = Offsets[k];
     }
     M[15] = 1;
+
+    // Its receivers (SunCascades): the view's points from where the cascade before blends into it
+    // (CascadeOf: over the last CASCADE_BLEND of that one, counted from 0 for the first) to its end;
+    // the first one's from the camera. Seen from the sun, the outline of the corners of that part of
+    // the frustum (counter-clockwise).
+    struct SPoint
+    {
+      float x, y;
+    };
+    const float fFrom = i ? fStart - (fStart - fBlendFrom) * CASCADE_BLEND : 0;
+    SPoint Points[8];
+    for (int k = 0; k < 8; k++)
+    {
+      const float d = (k & 4) ? fEnd : fFrom;
+      const Vec3 p = vPos + vDir * d + vRight * ((k & 1 ? 1 : -1) * d * fSideX) + vUp * ((k & 2 ? 1 : -1) * d * fSideY);
+      Points[k] = { p.Dot(X), p.Dot(Y) };
+    }
+    std::sort(std::begin(Points), std::end(Points), [](const SPoint &a, const SPoint &b) { return a.x < b.x || (a.x == b.x && a.y < b.y); });
+    const auto Turn = [](const SPoint &o, const SPoint &a, const SPoint &b) { return (a.x - o.x) * (b.y - o.y) - (a.y - o.y) * (b.x - o.x); };
+    SPoint Hull[16];
+    int nHull = 0;
+    for (int k = 0; k < 8; k++)
+    {
+      while (nHull >= 2 && Turn(Hull[nHull - 2], Hull[nHull - 1], Points[k]) <= 0)
+        nHull--;
+      Hull[nHull++] = Points[k];
+    }
+    for (int k = 6, nLower = nHull + 1; k >= 0; k--)
+    {
+      while (nHull >= nLower && Turn(Hull[nHull - 2], Hull[nHull - 1], Points[k]) <= 0)
+        nHull--;
+      Hull[nHull++] = Points[k];
+    }
+    nHull--;
+    for (int k = 0; k < nHull && Cas.nEdges < 8; k++)
+    {
+      const SPoint &a = Hull[k], &b = Hull[(k + 1) % nHull];
+      const float nx = b.y - a.y, ny = a.x - b.x, l = sqrtf(nx * nx + ny * ny);
+      if (l <= 0)
+        continue;
+      float *e = Cas.Edges[Cas.nEdges++];
+      e[0] = nx / l;
+      e[1] = ny / l;
+      e[2] = e[0] * a.x + e[1] * a.y;
+    }
+    Cas.fMargin = std::max(CV_d3d12_ShadowSoftness, 1.5f * Cas.fTexel) + CASCADE_RECEIVER_TEXELS * Cas.fTexel + (i ? 0 : CASCADE_NEAR_MARGIN_M);
+    fBlendFrom = i ? fStart : 0;
     fStart = fEnd;
   }
   return fFar > fNear;
@@ -221,6 +285,7 @@ bool CD3D12Renderer::EnsureCascadeMaps()
 
 void CD3D12Renderer::UpdateSunCascades(std::span<const SRenderItem> MainItems)
 {
+  FUNCTION_PROFILER(iSystem, PROFILE_RENDERER);
   if (m_nCascades)
   {
     m_nCascades = 0;
@@ -289,7 +354,10 @@ void CD3D12Renderer::UpdateSunCascades(std::span<const SRenderItem> MainItems)
   SunCam.Update();
   iSystem->SetViewCamera(SunCam);
   p3D->SetCamera(SunCam, false);
-  p3D->DrawLowDetail(CASCADE_CAMERA_FLAGS);
+  {
+    SCpuTime Time(m_fFrameLowDetailMs[LD_CASCADES]);
+    p3D->DrawLowDetail(CASCADE_CAMERA_FLAGS);
+  }
   iSystem->SetViewCamera(ViewCamera);
   p3D->SetCamera(Camera, false);
   m_Camera = Camera;
@@ -350,6 +418,7 @@ void CD3D12Renderer::DrawCascadeItems(std::span<const SRenderItem> Items, std::u
     const SRenderItem *pItem;
     Vec3 c;
     float r;
+    bool bDiscards;   //!< alpha tested (SetupShadowCasterDraw): its depth tested after its pixel shader
   };
   std::vector<SPart> Parts;
   Parts.reserve(Items.size());
@@ -373,32 +442,77 @@ void CD3D12Renderer::DrawCascadeItems(std::span<const SRenderItem> Items, std::u
       continue;
     SPart p = { &it, Vec3(0, 0, 0), -1 };
     PartSphere(it, p.c, p.r);
+    p.bDiscards = it.eDrawClass == eDC_AlphaTest || it.eDrawClass == eDC_AlphaTestVColor || GetAlphaRef(it.pShader, it.pRes) > 0;
     Parts.push_back(p);
   }
+  // Those that discard after the others (each kind in the order given, which keeps the draws of a
+  // shader together): the pixels of a part that discards are tested for depth after its pixel
+  // shader, so the fewer reach it the better (the hierarchical depth drops those behind what is
+  // drawn already). The maps are the same in any order: the nearest depth of each texel.
+  std::stable_partition(Parts.begin(), Parts.end(), [](const SPart &p) { return !p.bDiscards; });
 
-  // Into each slice that a part's sphere reaches: across the square, and not all of it farther
-  // from the sun than the slice's range.
+  // Into each slice that a part's sphere reaches: across the square, not all of it farther from the
+  // sun than the slice's range, and its shadow (the sphere drawn out away from the sun) over the
+  // outline of the slice's receivers: elsewhere the slice is not read.
   const SCascadeMaps &Maps = m_CascadeMaps[m_nCascadeSet];
   const Vec3 &X = m_vCascadeAxes[0], &Y = m_vCascadeAxes[1], &Z = m_vCascadeAxes[2];
-  m_bShadowMapPass = true;
-  for (int i = 0; i < m_nCascades && !Parts.empty(); i++)
+  auto Reaches = [&](const SPart &p, const SCascade &Cas)
   {
-    SCascade &Cas = m_Cascades[i];
-    m_pDevice->SetShadowMapTarget(Maps.pDepth.Get(), Maps.hDSV[i], m_nCascadeSize);
-    m_CameraView = m_ViewMatrix = Cas.WorldToMap;
+    if (p.r < 0)
+      return true;
+    const float x = p.c.Dot(X), y = p.c.Dot(Y);
+    if (fabsf(x - Cas.fCenter[0]) > Cas.fHalfSize + p.r || fabsf(y - Cas.fCenter[1]) > Cas.fHalfSize + p.r || p.c.Dot(Z) + p.r < Cas.fZMin)
+      return false;
+    for (int e = 0; e < Cas.nEdges; e++)
+      if (Cas.Edges[e][0] * x + Cas.Edges[e][1] * y - Cas.Edges[e][2] > p.r + Cas.fMargin)
+        return false;
+    return true;
+  };
+  auto SetSlice = [&](int i, D3D12_CPU_DESCRIPTOR_HANDLE hDSV)
+  {
+    m_pDevice->SetShadowMapTarget(Maps.pDepth.Get(), hDSV, m_nCascadeSize);
+    m_CameraView = m_ViewMatrix = m_Cascades[i].WorldToMap;
     m_ProjMatrix.SetIdentity();
     m_SkyProjMatrix = m_ProjMatrix;
     m_nMatrixDepth = 0;
     m_bFog = false;
     m_nCascadeSlice = i;
     InvalidateFrameConstants();
+  };
+  m_bShadowMapPass = true;
+  // The full set: each part once, into all the slices it reaches (an instance each; the depth is
+  // the same as slice by slice, with one draw per part instead of one per slice). The live set
+  // compares each slice with the full set's (SetupCascadeCaster): slice by slice.
+  if (m_nCascadeSet == 0 && CV_d3d12_CascadeInstancing && !Parts.empty())
+  {
+    SetSlice(0, Maps.hDSV[XR_MAX_CASCADES]);
     for (const SPart &p : Parts)
     {
-      if (p.r >= 0 && (fabsf(p.c.Dot(X) - Cas.fCenter[0]) > Cas.fHalfSize + p.r || fabsf(p.c.Dot(Y) - Cas.fCenter[1]) > Cas.fHalfSize + p.r ||
-                       p.c.Dot(Z) + p.r < Cas.fZMin))
-        continue;
-      DrawLeafItem(*p.pItem);
-      Cas.nCasters[m_nCascadeSet]++;
+      m_nCascadeInstances = 0;
+      for (int i = 0; i < m_nCascades; i++)
+        if (Reaches(p, m_Cascades[i]))
+        {
+          m_CascadeInstances[m_nCascadeInstances++] = i;
+          m_Cascades[i].nCasters[0]++;
+        }
+      if (m_nCascadeInstances)
+        DrawLeafItem(*p.pItem);
+    }
+    m_nCascadeInstances = 0;
+  }
+  else
+  {
+    for (int i = 0; i < m_nCascades && !Parts.empty(); i++)
+    {
+      SCascade &Cas = m_Cascades[i];
+      SetSlice(i, Maps.hDSV[i]);
+      for (const SPart &p : Parts)
+      {
+        if (!Reaches(p, Cas))
+          continue;
+        DrawLeafItem(*p.pItem);
+        Cas.nCasters[m_nCascadeSet]++;
+      }
     }
   }
   m_bShadowMapPass = false;
@@ -409,6 +523,7 @@ void CD3D12Renderer::DrawCascadeItems(std::span<const SRenderItem> Items, std::u
 
 void CD3D12Renderer::DrawCascadeCasters(std::span<const SRenderItem> Items)
 {
+  FUNCTION_PROFILER(iSystem, PROFILE_RENDERER);
   // The live casters are in the full set too (what the camera towards the sun does not get: the
   // player's body), before their own set, which compares with it.
   const int nSet = m_nCascadeSet;
@@ -438,6 +553,25 @@ uint32 CD3D12Renderer::CascadeReceiverFlags(bool bLive) const
       m_nRecurseLevel > 1 || !(m_nSceneFlags & SHDF_ALLOWHDR))
     return 0;
   return DF2_SUN_CASCADES | (bLive ? DF2_CASCADES_LIVE : 0);
+}
+
+bool CD3D12Renderer::IsWithinCascades(const Matrix44 &World, const Vec3 &vMin, const Vec3 &vMax) const
+{
+  if (!m_nCascades)
+    return false;
+  // The view depth (ViewDepth: |z| in the view) of the box's corners before the band over which
+  // the last cascade gives way (CascadeOf); the depth is linear, so the box's is between theirs.
+  const float fEnd = m_Cascades[m_nCascades - 1].fEnd, fStart = m_nCascades > 1 ? m_Cascades[m_nCascades - 2].fEnd : 0;
+  const float fFull = fEnd - (fEnd - fStart) * CASCADE_BLEND;
+  const Matrix44 WorldView = World * m_CameraView;
+  for (int c = 0; c < 8; c++)
+  {
+    const Vec3 p((c & 1) ? vMax.x : vMin.x, (c & 2) ? vMax.y : vMin.y, (c & 4) ? vMax.z : vMin.z);
+    const float z = p.x * WorldView.data[2] + p.y * WorldView.data[6] + p.z * WorldView.data[10] + WorldView.data[14];
+    if (!(fabsf(z) < fFull))
+      return false;
+  }
+  return true;
 }
 
 void CD3D12Renderer::SetCascadeConstants(SFrameConstants &fc) const

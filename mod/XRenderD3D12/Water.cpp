@@ -7,7 +7,8 @@
 //	volumes (eDC_Water), the foam on the beach (eDC_WaterBeach), the
 //	sea floor under the ocean (eDC_WaterBottom) and the caustics on the
 //	terrain under it (eDC_Caustics); also the glass of the scopes
-//	(eDC_ScopeLens), which shows the same copy of the scene.
+//	(eDC_ScopeLens), which shows the same copy of the scene, or a copy of
+//	the part of it around the middle of the screen that the glass shows.
 //
 //	The water surfaces come first in the blended list. Before the first
 //	one, the back buffer and the depth buffer are copied; the water program
@@ -44,10 +45,14 @@
 #include "StdAfx.h"
 #include "Renderer.h"
 #include "D3D12Device.h"
+#include "D3D12Upload.h"
 #include "D3D12Descriptors.h"
+#include "D3D12Compute.h"
+#include "D3D12Pipeline.h"
 #include "Texture.h"
 #include "Scene.h"
 #include "RayTracing.h"
+#include <atomic>
 
 namespace
 {
@@ -137,6 +142,11 @@ constexpr float SCOPE_LENS_WOBBLE = 0.004f;
 constexpr float SCOPE_LENS_TINT[3] = { 0.37f, 0.58f, 0.82f };
 constexpr float SCOPE_LENS_OPACITY = 0.9f;
 constexpr float SCOPE_LENS_RADIUS = 0.3f;
+// The part of the scene copied for the glass: around the middle of the screen, SCOPE_LENS_FIELD times
+// the glass's size on the screen, this much more (its unevenness, the derivatives of a quad) and
+// this many pixels.
+constexpr float SCOPE_LENS_REACH = 1.25f;
+constexpr float SCOPE_LENS_MARGIN = 4.0f;
 
 //! The wave texture, B, G, R, A bytes: the slopes of a height field that tiles over the texture,
 //! dH/du in red and dH/dv in green, the height in blue (128: 0; 32 units: the RMS of the slopes,
@@ -317,14 +327,62 @@ std::vector<byte> MakeCausticsTexture(int N, float &fMinMean)
   return Pixels;
 }
 
+//! The pixels of the wave and caustics textures: the same every time, made once for the process on
+//! a thread of its own from the renderer's start (StartWaterTextures). Made on first use they took
+//! some 50 ms of the frame where the water first shows. Kept for the process (a renderer made again
+//! takes them as they are).
+struct SWaterPixels
+{
+  std::vector<byte> Waves, Caustics;
+  float fCausticsMinMean = 1;
+};
+std::atomic<SWaterPixels *> g_pWaterPixels{ nullptr };
+HANDLE g_hWaterThread = nullptr;
+
+DWORD WINAPI MakeWaterPixels(void *)
+{
+  SWaterPixels *p = new SWaterPixels;
+  p->Waves = MakeWaveTexture(WAVE_TEXTURE_SIZE);
+  p->Caustics = MakeCausticsTexture(CAUSTICS_TEXTURE_SIZE, p->fCausticsMinMean);
+  g_pWaterPixels = p;
+  return 0;
+}
+
+//! Waits for the thread (made here, on this thread, when it could not start).
+const SWaterPixels &WaterPixels()
+{
+  if (!g_pWaterPixels && g_hWaterThread)
+    WaitForSingleObject(g_hWaterThread, INFINITE);
+  if (!g_pWaterPixels)
+    MakeWaterPixels(nullptr);
+  return *g_pWaterPixels;
+}
+
+}
+
+void CD3D12Renderer::StartWaterTextures()
+{
+  if (!g_pWaterPixels && !g_hWaterThread)
+    g_hWaterThread = CreateThread(nullptr, 0, MakeWaterPixels, nullptr, 0, nullptr);
+}
+
+void CD3D12Renderer::EndWaterTextures()
+{
+  if (g_hWaterThread)
+  {
+    WaitForSingleObject(g_hWaterThread, INFINITE);
+    CloseHandle(g_hWaterThread);
+    g_hWaterThread = nullptr;
+  }
 }
 
 int CD3D12Renderer::GetCausticsTexture()
 {
   if (!m_nCausticsTexture && m_pTextures)
   {
-    const std::vector<byte> Pixels = MakeCausticsTexture(CAUSTICS_TEXTURE_SIZE, m_fCausticsMinMean);
-    m_nCausticsTexture = m_pTextures->CreateFromMemory(Pixels.data(), CAUSTICS_TEXTURE_SIZE, CAUSTICS_TEXTURE_SIZE, eTF_8888, 2, true,
+    const SWaterPixels &Pixels = WaterPixels();
+    m_fCausticsMinMean = Pixels.fCausticsMinMean;
+    m_nCausticsTexture = m_pTextures->CreateFromMemory(Pixels.Caustics.data(), CAUSTICS_TEXTURE_SIZE, CAUSTICS_TEXTURE_SIZE, eTF_8888, 2, true,
                                                        FILTER_TRILINEAR, 0, "$Caustics", 0);
     if (!m_nCausticsTexture || !(m_fCausticsMinMean > 0))
       m_nCausticsTexture = -1;
@@ -358,13 +416,16 @@ bool CD3D12Renderer::SetupCausticsDraw(SPipelineKey &Key, SDrawConstants &dc, co
   return true;
 }
 
-bool CD3D12Renderer::SetupScopeLensDraw(SPipelineKey &Key, SDrawConstants &dc)
+bool CD3D12Renderer::SetupScopeLensDraw(SPipelineKey &Key, SDrawConstants &dc, const SRenderItem &it, const Matrix44 &WorldViewProj)
 {
-  // With r_ScopeLens_fx, in the main view: over the copy of the scene the blended list starts with
-  // (the water's; made here when no water came before), blended, without depth writes.
+  // With r_ScopeLens_fx, in the main view: over the copy of the scene the list has (the water's in
+  // the blended list), else over a copy of the part of it that the glass shows (the colour alone),
+  // blended, without depth writes. Its samples stay in that part.
   if (!IsScopeLensOn() || m_bReflectionPass || m_bShadowMapPass || m_bSpritePass || m_nRecurseLevel > 1)
     return false;
-  if (!m_bSceneCopied && !CopySceneForWater())
+  const int w = m_pDevice->GetMainWidth(), h = m_pDevice->GetMainHeight();
+  int Rect[4] = { 0, 0, w, h };
+  if (!m_bSceneCopied && !(ScopeLensRect(it, WorldViewProj, Rect) ? CopySceneForWater(Rect) : CopySceneForWater()))
     return false;
   dc.nFlags = 0;
   dc.nFlags2 = DF2_SCOPE_LENS;
@@ -372,24 +433,75 @@ bool CD3D12Renderer::SetupScopeLensDraw(SPipelineKey &Key, SDrawConstants &dc)
   dc.nTex1 = (uint32)GetWaveTexture();
   Set4(dc.vColor, SCOPE_LENS_TINT[0], SCOPE_LENS_TINT[1], SCOPE_LENS_TINT[2], SCOPE_LENS_OPACITY);
   Set4(dc.vParams0, SCOPE_LENS_FIELD, SCOPE_LENS_WOBBLE, SCOPE_LENS_RADIUS, 0);
+  Set4(dc.vParams1, (Rect[0] + 0.5f) / w, (Rect[1] + 0.5f) / h, (Rect[2] - 0.5f) / w, (Rect[3] - 0.5f) / h);
   Key.nState = GS_BLSRC_SRCALPHA | GS_BLDST_ONEMINUSSRCALPHA;
   return true;
+}
+
+bool CD3D12Renderer::ScopeLensRect(const SRenderItem &it, const Matrix44 &WorldViewProj, int Rect[4]) const
+{
+  // The glass's vertices on the screen.
+  const CREOcLeaf *pLeaf = it.pRE && it.pRE->m_Type == eDATA_OcLeaf ? static_cast<const CREOcLeaf *>(it.pRE) : nullptr;
+  const CMatInfo *pChunk = pLeaf ? pLeaf->m_pChunk : nullptr;
+  const CLeafBuffer *pVC = pLeaf && pLeaf->m_pBuffer ? pLeaf->m_pBuffer->GetVertexContainer() : nullptr;
+  if (!pChunk || !pVC)
+    return false;
+  const CVertexBuffer *pVB = pVC->m_pSecVertBuffer && pVC->m_pSecVertBuffer->m_VS[VSF_GENERAL].m_VData ? pVC->m_pSecVertBuffer : pVC->m_pVertexBuffer;
+  if (!pVB || !pVB->m_VS[VSF_GENERAL].m_VData)
+    return false;
+  const int nStride = CD3D12Pipeline::GetVertexSize(pVB->m_vertexformat);
+  const int nFirst = std::max(pChunk->nFirstVertId, 0);
+  const int nEnd = std::min(nFirst + pChunk->nNumVerts, pVB->m_NumVerts);
+  if (nStride < (int)sizeof(Vec3) || nFirst >= nEnd)
+    return false;
+  const byte *pData = (const byte *)pVB->m_VS[VSF_GENERAL].m_VData;
+  const float *m = WorldViewProj.data;
+  float Min[2] = { 1e30f, 1e30f }, Max[2] = { -1e30f, -1e30f };
+  for (int i = nFirst; i < nEnd; i++)
+  {
+    const Vec3 &p = *(const Vec3 *)(pData + (size_t)i * nStride);
+    const float fW = p.x * m[3] + p.y * m[7] + p.z * m[11] + m[15];
+    if (fW <= 1e-4f)
+      return false;
+    for (int c = 0; c < 2; c++)
+    {
+      const float v = (p.x * m[c] + p.y * m[4 + c] + p.z * m[8 + c] + m[12 + c]) / fW;
+      Min[c] = std::min(Min[c], v);
+      Max[c] = std::max(Max[c], v);
+    }
+  }
+  // A pixel shows the scene at SCOPE_LENS_FIELD times its offset from the middle of the glass, which
+  // is on the glass, from the middle of the screen (in the frame's pixels, as the shader's); that in
+  // the target's pixels, with the texels next to it that a bilinear sample reads.
+  float sx = 1, sy = 1;
+  if (m_pDevice->IsInScene())
+    GetSceneScale(sx, sy);
+  const float Screen[2] = { std::max(m_Viewport[2], 1) * sx, std::max(m_Viewport[3], 1) * sy };
+  const float fSize = std::max((Max[0] - Min[0]) * 0.5f * Screen[0], (Max[1] - Min[1]) * 0.5f * Screen[1]);
+  const float fReach = SCOPE_LENS_FIELD * SCOPE_LENS_REACH * fSize + SCOPE_LENS_MARGIN;
+  const int Size[2] = { m_pDevice->GetMainWidth(), m_pDevice->GetMainHeight() };
+  for (int c = 0; c < 2; c++)
+  {
+    const float fScale = Size[c] / Screen[c];
+    Rect[c] = std::clamp((int)floorf((0.5f * Screen[c] - fReach) * fScale - 0.5f), 0, Size[c]);
+    Rect[2 + c] = std::clamp((int)floorf((0.5f * Screen[c] + fReach) * fScale + 0.5f) + 1, Rect[c], Size[c]);
+  }
+  return Rect[2] > Rect[0] && Rect[3] > Rect[1];
 }
 
 int CD3D12Renderer::GetWaveTexture()
 {
   if (!m_nWaveTexture && m_pTextures)
   {
-    const std::vector<byte> Pixels = MakeWaveTexture(WAVE_TEXTURE_SIZE);
-    m_nWaveTexture = m_pTextures->CreateFromMemory(Pixels.data(), WAVE_TEXTURE_SIZE, WAVE_TEXTURE_SIZE, eTF_8888, 2, true, FILTER_TRILINEAR, 0,
-                                                   "$WaterWaves", 0);
+    m_nWaveTexture = m_pTextures->CreateFromMemory(WaterPixels().Waves.data(), WAVE_TEXTURE_SIZE, WAVE_TEXTURE_SIZE, eTF_8888, 2, true,
+                                                   FILTER_TRILINEAR, 0, "$WaterWaves", 0);
     if (!m_nWaveTexture)
       m_nWaveTexture = -1;
   }
   return m_nWaveTexture > 0 ? m_pTextures->GetSRV(m_nWaveTexture) : D3D12_SRV_WHITE;
 }
 
-bool CD3D12Renderer::CopySceneForWater()
+bool CD3D12Renderer::CopySceneForWater(const int *pRect)
 {
   if (!m_pDevice || !m_pDescriptors)
     return false;
@@ -419,17 +531,117 @@ bool CD3D12Renderer::CopySceneForWater()
       return false;
     }
   }
-  m_pDevice->CopyTargets(Copy.pColor.Get(), Copy.pDepth.Get());
+  if (pRect)
+  {
+    const D3D12_BOX Box = { (UINT)pRect[0], (UINT)pRect[1], 0, (UINT)pRect[2], (UINT)pRect[3], 1 };
+    m_pDevice->CopyTargets(Copy.pColor.Get(), nullptr, &Box);
+  }
+  else
+    m_pDevice->CopyTargets(Copy.pColor.Get(), Copy.pDepth.Get());
   m_nSceneColorSRV = Copy.nColorSRV;
   m_nSceneDepthSRV = Copy.nDepthSRV;
-  m_bSceneCopied = true;
+  m_bSceneCopied = !pRect;
+  m_pSceneCopy = pRect ? nullptr : &Copy;
+  m_nSceneTileSRV = -1;
   return true;
+}
+
+bool CD3D12Renderer::BuildDepthTiles()
+{
+  SSceneCopy *pCopy = m_pSceneCopy;
+  if (!pCopy || !pCopy->pDepth || !m_pDevice || !m_pDescriptors || !m_pUpload || !m_pCompute)
+    return false;
+  // Level 0 a multiple of 2^(DEPTH_TILE_LEVELS - 1) texels a side, so that each next level is half the
+  // one before (its texels past the copy's those of its edge).
+  constexpr int ALIGN = 1 << (DEPTH_TILE_LEVELS - 1);
+  constexpr int TABLE = CD3D12Compute::COMPUTE_SRVS + CD3D12Compute::COMPUTE_UAVS;
+  const int w = ((pCopy->nWidth + XR_DEPTH_TILE - 1) / XR_DEPTH_TILE + ALIGN - 1) & ~(ALIGN - 1);
+  const int h = ((pCopy->nHeight + XR_DEPTH_TILE - 1) / XR_DEPTH_TILE + ALIGN - 1) & ~(ALIGN - 1);
+  if (!pCopy->pTiles)
+  {
+    pCopy->pTiles = m_pUpload->CreateComputeTarget(w, h, DEPTH_TILE_LEVELS, DXGI_FORMAT_R32_FLOAT, L"water depth tiles");
+    if (pCopy->pTiles)
+    {
+      pCopy->pTiles->m_nSRV = m_pDescriptors->AllocSRV(pCopy->pTiles->m_pResource, nullptr);
+      pCopy->nTileTables = m_pDescriptors->AllocRange(2 * TABLE);
+    }
+    if (!pCopy->pTiles || pCopy->pTiles->m_nSRV < 0 || pCopy->nTileTables < 0)
+    {
+      FreeDepthTiles(*pCopy);
+      return false;
+    }
+    // The first kernel's table: t0 the depth copy; u0..u4 levels 0..4. The second's: u0 level 4, u1
+    // and u2 levels 5 and 6.
+    D3D12_SHADER_RESOURCE_VIEW_DESC SRV = {};
+    SRV.Format = pCopy->DepthFormat;
+    SRV.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
+    SRV.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+    SRV.Texture2D.MipLevels = 1;
+    D3D12_UNORDERED_ACCESS_VIEW_DESC UAV = {};
+    UAV.Format = DXGI_FORMAT_R32_FLOAT;
+    UAV.ViewDimension = D3D12_UAV_DIMENSION_TEXTURE2D;
+    ID3D12Resource *pTiles = pCopy->pTiles->m_pResource;
+    for (int t = 0; t < 2; t++)
+    {
+      const int nTable = pCopy->nTileTables + t * TABLE;
+      for (int i = 0; i < CD3D12Compute::COMPUTE_SRVS; i++)
+        m_pDescriptors->WriteSRV(nTable + i, t == 0 && i == 0 ? pCopy->pDepth.Get() : nullptr, &SRV);
+      for (int i = 0; i < CD3D12Compute::COMPUTE_UAVS; i++)
+      {
+        const int nLevel = t == 0 ? i : 4 + i;
+        UAV.Texture2D.MipSlice = (UINT)std::min(nLevel, DEPTH_TILE_LEVELS - 1);
+        m_pDescriptors->WriteUAV(nTable + CD3D12Compute::COMPUTE_SRVS + i, t == 0 || i < 3 ? pTiles : nullptr, &UAV);
+      }
+    }
+    // Made in UNORDERED_ACCESS (called in a frame).
+    m_pDevice->Transition(pTiles, D3D12_RESOURCE_STATE_UNORDERED_ACCESS, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+    pCopy->nTileWidth = w;
+    pCopy->nTileHeight = h;
+  }
+
+  // A group 16 x 16 texels of level 0 and those under them up to level 4, then a group 16 x 16 of
+  // level 5 and level 6 from them.
+  static_assert(DEPTH_TILE_LEVELS == 7, "the kernels make levels 0..6");
+  SDepthTileConstants tc = {};
+  Set4(tc.vSize, 1.0f / pCopy->nWidth, 1.0f / pCopy->nHeight, (float)(w >> 5), (float)(h >> 5));
+  const SD3D12FrameAlloc CB = m_pUpload->AllocFrame(sizeof(tc), 256);
+  memcpy(CB.pCPU, &tc, sizeof(tc));
+  constexpr D3D12_RESOURCE_STATES READ = D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE | D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE;
+  ID3D12Resource *pTiles = pCopy->pTiles->m_pResource;
+  ID3D12GraphicsCommandList *pList = m_pDevice->GetCmdList();
+  m_pDevice->Transition(pCopy->pDepth.Get(), D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, READ);
+  m_pDevice->Transition(pTiles, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+  m_pCompute->Dispatch(pList, eD3D12K_DepthTiles, CB.nGPU, pCopy->nTileTables, pCopy->nTileTables + CD3D12Compute::COMPUTE_SRVS,
+                       (UINT)w / 16, (UINT)h / 16);
+  m_pDevice->UavBarrier(pTiles);
+  m_pCompute->Dispatch(pList, eD3D12K_DepthTilesUp, CB.nGPU, pCopy->nTileTables + TABLE, pCopy->nTileTables + TABLE + CD3D12Compute::COMPUTE_SRVS,
+                       (UINT)((w >> 5) + 15) / 16, (UINT)((h >> 5) + 15) / 16);
+  m_pDevice->Transition(pTiles, D3D12_RESOURCE_STATE_UNORDERED_ACCESS, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+  m_pDevice->Transition(pCopy->pDepth.Get(), READ, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+  m_nSceneTileSRV = pCopy->pTiles->m_nSRV;
+  return true;
+}
+
+void CD3D12Renderer::FreeDepthTiles(SSceneCopy &Copy)
+{
+  if (m_pSceneCopy == &Copy)
+    m_nSceneTileSRV = -1;
+  if (Copy.nTileTables >= 0 && m_pDescriptors)
+    m_pDescriptors->FreeRange(Copy.nTileTables, 2 * (CD3D12Compute::COMPUTE_SRVS + CD3D12Compute::COMPUTE_UAVS));
+  Copy.nTileTables = -1;
+  if (Copy.pTiles && m_pUpload)
+    m_pUpload->ReleaseTexture(Copy.pTiles);
+  Copy.pTiles = nullptr;
+  Copy.nTileWidth = Copy.nTileHeight = 0;
 }
 
 void CD3D12Renderer::FreeSceneCopy(SSceneCopy &Copy)
 {
   if (m_nSceneColorSRV == Copy.nColorSRV)
     m_nSceneColorSRV = m_nSceneDepthSRV = -1;
+  FreeDepthTiles(Copy);
+  if (m_pSceneCopy == &Copy)
+    m_pSceneCopy = nullptr;
   if (m_pDescriptors)
   {
     if (Copy.nColorSRV >= 0)
@@ -454,6 +666,7 @@ void CD3D12Renderer::ReleaseWaterResources()
 
 void CD3D12Renderer::UpdateWaterReflection(std::span<const SRenderItem> Items)
 {
+  FUNCTION_PROFILER(iSystem, PROFILE_RENDERER);
   // The main view of the game with the ocean in it (the water volumes have levels of their own),
   // the camera above the water.
   I3DEngine *p3D = iSystem ? iSystem->GetI3DEngine() : nullptr;
@@ -571,7 +784,10 @@ void CD3D12Renderer::UpdateWaterReflection(std::span<const SRenderItem> Items)
   const bool bRayCapture = WantsRays();
   if (bRayCapture)
     m_pRayScene->BeginReflectionCapture(m_CameraView * m_ProjMatrix);
-  p3D->DrawLowDetail(CV_d3d12_WaterReflectionFlags);
+  {
+    SCpuTime Time(m_fFrameLowDetailMs[LD_WATER]);
+    p3D->DrawLowDetail(CV_d3d12_WaterReflectionFlags);
+  }
   if (bRayCapture)
     m_pRayScene->EndReflectionCapture();
   m_bReflectionPass = false;
@@ -691,6 +907,14 @@ bool CD3D12Renderer::SetupWaterDraw(SPipelineKey &Key, SDrawConstants &dc, const
   dc.nFlags = 0;
   dc.nTex0 = m_bEnvCubePass ? D3D12_SRV_WHITE : (uint32)m_nSceneColorSRV;
   dc.nTex1 = m_bEnvCubePass ? D3D12_SRV_WHITE : (uint32)m_nSceneDepthSRV;
+  // The depth tiles of the copy for the march of the ocean's screen space reflection (a lake's or a
+  // river's meets its banks near the water: the tiles would cost more than they save).
+  dc.nShadowTex[0] = dc.nShadowTex[1] = 0;
+  if (!m_bEnvCubePass && IsOcean(it) && (m_nSceneTileSRV >= 0 || BuildDepthTiles()))
+  {
+    dc.nShadowTex[0] = (uint32)m_nSceneTileSRV;
+    dc.nShadowTex[1] = DEPTH_TILE_LEVELS;
+  }
 
   // Waves as steep as the bump amounts of the object; how much of the sky it reflects.
   const CCObject *pObj = it.pObj;

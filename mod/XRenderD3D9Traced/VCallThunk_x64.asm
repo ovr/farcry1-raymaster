@@ -6,16 +6,20 @@
 ;//	Description: The common part of the x64 virtual call hooks (VCallHooks.cpp).
 ;//
 ;//	Every hooked vtable slot points to a small stub that loads its SVSlot
-;//	into r10 and jumps here. VCall_Thunk saves the arguments in an
-;//	SVCallFrame, lets VCall_Enter look at them, calls the original function
-;//	with the same arguments (the register ones and the first STACK_ARGS
-;//	stack ones), saves its result, lets VCall_Leave look at it and returns
-;//	it to the caller.
+;//	into r10 and jumps to VCall_Fast. A call that is only counted (one of
+;//	the slot's pFastReturn, see SVSlot) adds 1 to its count and goes on to
+;//	the original function; the others go to VCall_Thunk. It saves the
+;//	arguments in an SVCallFrame, lets VCall_Enter look at them, calls the
+;//	original function with the same arguments (the register ones and the
+;//	first STACK_ARGS stack ones), saves its result, lets VCall_Leave look
+;//	at it and returns it to the caller.
 ;//
 ;//////////////////////////////////////////////////////////////////////
 
 EXTERN VCall_Enter:PROC
 EXTERN VCall_Leave:PROC
+EXTERN g_nVCallFastEpoch:DWORD
+EXTERN g_pVCallFastTrace:QWORD
 PUBLIC VCall_ThunkReturn
 
 ; rsp is 8 off a multiple of 16 on entry, so FRAME_SIZE aligns it for the calls.
@@ -24,8 +28,41 @@ FRAME_SIZE  EQU 108h
 STACK_ARGS  EQU 10
 ; The SVCallFrame (see VCallHooks.cpp); the caller's return address follows it, at FRAME_SIZE.
 F           EQU 70h
+; SVSlot (see VCallHooks.cpp).
+S_ORIG      EQU 00h
+S_RETURN    EQU 08h
+S_COUNT     EQU 18h
+S_TRACE     EQU 28h
+S_EPOCH     EQU 2Ch
+S_THREAD    EQU 30h
 
 .code
+
+; No stack of its own (a leaf function to the unwinder): rax and r11 are free at a call.
+VCall_Fast PROC
+    mov     rax, [rsp]
+    cmp     rax, [r10+S_RETURN]
+    je      first
+    cmp     rax, [r10+S_RETURN+8]
+    jne     VCall_Thunk
+    mov     r11, [r10+S_COUNT+8]
+    jmp     check
+first:
+    mov     r11, [r10+S_COUNT]
+check:
+    mov     eax, dword ptr gs:[48h]     ; the thread's id (TEB ClientId.UniqueThread)
+    cmp     eax, [r10+S_THREAD]
+    jne     VCall_Thunk
+    mov     eax, g_nVCallFastEpoch
+    cmp     eax, [r10+S_EPOCH]
+    jne     VCall_Thunk
+    mov     rax, g_pVCallFastTrace
+    mov     eax, [rax]
+    cmp     eax, [r10+S_TRACE]
+    jne     VCall_Thunk
+    inc     dword ptr [r11]
+    jmp     qword ptr [r10+S_ORIG]
+VCall_Fast ENDP
 
 VCall_Thunk PROC FRAME
     sub     rsp, FRAME_SIZE

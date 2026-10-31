@@ -348,8 +348,12 @@ public:
   // Resources
 
   //! Loads the texture of slot nSlot (EFTT_*) of the resources if it is named and not loaded yet
-  //! (EF_LoadShaderItem loads only EFTT_DIFFUSE); returns it, NULL when there is none.
+  //! (EF_LoadShaderItem loads EFTT_DIFFUSE and the slots its shader draws with); returns it, NULL
+  //! when there is none.
   CTexture *LoadResourceTexture(SRenderShaderResources *pRes, int nSlot);
+  //! The normal map of the resources: EFTT_NORMALMAP, else EFTT_BUMP; NULL when neither is a 2D
+  //! texture that is loaded.
+  CTexture *LoadNormalMap(SRenderShaderResources *pRes);
 
   //////////////////////////////////////////////////////////////////////////
   // Light materials (SLightMaterial; owned here, never deleted before Shutdown)
@@ -375,6 +379,9 @@ private:
   //! material's folder); the placeholder of the first try when no file is found.
   CTexture *LoadTextureFile(const char *szName, const char *szPath, const SShaderTexUnit &TU);
   void AddAttenuationTextures(SRenderShaderResources *pRes);
+  //! Loads the textures besides the diffuse one that the drawing of pSH reads (the normal map, the
+  //! gloss map, the cube map), so that the first frame drawing the material does not read files.
+  void LoadDrawnTextures(const CShader *pSH, SRenderShaderResources *pRes);
   //! Reads the skies and the coronas of the shader scripts, once.
   void ReadScripts();
 

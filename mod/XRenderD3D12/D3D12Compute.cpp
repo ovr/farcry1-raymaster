@@ -22,6 +22,10 @@
 #include "Gtao_Denoise_CS.h"
 #include "Gtao_DenoiseLast_CS.h"
 #include "AoResolve_CS.h"
+#include "Meter_CS.h"
+#include "Bloom_CS.h"
+#include "DepthTiles_CS.h"
+#include "DepthTilesUp_CS.h"
 
 using Microsoft::WRL::ComPtr;
 
@@ -45,6 +49,10 @@ const SKernel s_Kernels[eD3D12K_Num] =
   { "XeGTAO denoise", g_Gtao_Denoise_CS, sizeof(g_Gtao_Denoise_CS) },
   { "XeGTAO denoise (last)", g_Gtao_DenoiseLast_CS, sizeof(g_Gtao_DenoiseLast_CS) },
   { "AO resolve", g_AoResolve_CS, sizeof(g_AoResolve_CS) },
+  { "HDR meter", g_Meter_CS, sizeof(g_Meter_CS) },
+  { "bloom", g_Bloom_CS, sizeof(g_Bloom_CS) },
+  { "depth tiles", g_DepthTiles_CS, sizeof(g_DepthTiles_CS) },
+  { "depth tiles (levels 5, 6)", g_DepthTilesUp_CS, sizeof(g_DepthTilesUp_CS) },
 };
 
 D3D12_STATIC_SAMPLER_DESC StaticSampler(UINT nRegister, D3D12_FILTER Filter)
@@ -158,6 +166,8 @@ void CD3D12Compute::Dispatch(ID3D12GraphicsCommandList *pList, ED3D12Kernel eKer
   CD3D12Descriptors *pDescriptors = g_pRenderer->m_pDescriptors.get();
   if (!pList || !pPSO || !pDescriptors || !nGroupsX || !nGroupsY)
     return;
+  // Its pipeline state in place of the last draw's.
+  g_pRenderer->m_pDevice->ForgetDrawState();
   pList->SetComputeRootSignature(m_pRootSignature.Get());
   pList->SetPipelineState(pPSO);
   if (CB)

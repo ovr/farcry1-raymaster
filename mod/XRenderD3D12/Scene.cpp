@@ -450,6 +450,7 @@ void CScene::AddEf(int nFog, CRendElement *pRE, IShader *pEf, SRenderShaderResou
 
 int CScene::PrepareItems(SSceneSlot &Slot)
 {
+  FUNCTION_PROFILER(iSystem, PROFILE_RENDERER);
   // Items added from inside these calls (none expected) are not drawn: indices, no iterators.
   const size_t nItems = Slot.Items.size();
 
@@ -487,6 +488,7 @@ int CScene::PrepareItems(SSceneSlot &Slot)
 
 void CScene::BuildLists(SSceneSlot &Slot, int nItems, bool bSort)
 {
+  FUNCTION_PROFILER(iSystem, PROFILE_RENDERER);
   for (std::vector<SRenderItem> &l : Slot.Lists)
     l.clear();
   // The caustics go with the terrain: in its list and sort group (all its sectors share them).
@@ -563,12 +565,13 @@ void CScene::EndEf3D(int nFlags)
       // The main view's ambient occlusion over what the opaque list drew (its ambient light with
       // d3d12_AOApply 1).
       // Its draws make the scene for rays (RayTracing.h), built after the ambient occlusion for the
-      // draws after it.
+      // draws after it: those of the water, which alone trace rays.
       if (l == eRL_Opaque)
       {
         g_pRenderer->BeginAOTarget(s.Items.data(), nItems);
         if (m_nDrawing == 1)
-          g_pRenderer->BeginRayCapture();
+          g_pRenderer->BeginRayCapture(std::any_of(s.Lists.begin(), s.Lists.end(), [](const std::vector<SRenderItem> &Items)
+            { return std::any_of(Items.begin(), Items.end(), [](const SRenderItem &it) { return it.eDrawClass == eDC_Water; }); }));
       }
       g_pRenderer->DrawItems(list.data(), (int)list.size(), l);
       if (l == eRL_Opaque)
@@ -581,6 +584,9 @@ void CScene::EndEf3D(int nFlags)
   }
   if (m_nDrawing == 1)
   {
+    g_pRenderer->m_nFrameSunLights = g_pRenderer->m_nFrameDynLights = 0;
+    for (const CDLight *pLight : s.Lights)
+      ++(pLight->m_Flags & DLF_SUN ? g_pRenderer->m_nFrameSunLights : g_pRenderer->m_nFrameDynLights);
     g_pRenderer->EndMainScene();
     g_pRenderer->DrawScreenEffects();
     g_pRenderer->DrawAODebug();
@@ -909,7 +915,12 @@ void CD3D12Renderer::EF_EndEf3D(int nFlags)
     return;
   const int nSavedFlags = m_nSceneFlags;
   m_nSceneFlags = nFlags;
-  m_pScene->EndEf3D(nFlags);
+  {
+    double fMs = 0;
+    const bool bOuter = !m_pScene->IsDrawing();
+    SCpuTime Time(bOuter ? m_fFrameEndEf3DMs : fMs);
+    m_pScene->EndEf3D(nFlags);
+  }
   m_nSceneFlags = nSavedFlags;
 }
 

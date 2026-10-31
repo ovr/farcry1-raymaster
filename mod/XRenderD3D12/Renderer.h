@@ -16,6 +16,7 @@
 //	  Draw3D.cpp            - drawing the render items of EF_EndEf3D (no IRenderer methods)
 //	  Upscale.cpp           - the upscaler of the main view (no IRenderer methods)
 //	  AmbientOcclusion.cpp  - the ambient occlusion of the main view (no IRenderer methods)
+//	  Stats.cpp             - r_Stats, the statistics of the frames on the screen (no IRenderer methods)
 //	The state of a subsystem lives in its own class (m_pTextures, m_pShaders, m_pScene, ...).
 //	All calls come from one thread.
 //
@@ -23,6 +24,7 @@
 
 #pragma once
 
+#include "D3D12Device.h"
 #include "D3D12Pipeline.h"
 #include "Upscaler.h"
 #include "AmbientOcclusion.h"
@@ -44,6 +46,45 @@ class CShaderManager;
 class CScene;
 struct SRenderItem;
 struct SScreenFxState;
+
+//! GPU milliseconds per section added up over frames (CD3D12Device::GetGpuTimes), the sections in
+//! the order they first came.
+struct SGpuTimes
+{
+  std::vector<std::pair<const char *, double>> Sections;
+  std::vector<std::pair<const char *, double>> Compute;   //!< the compute queue's beside them
+  int nFrames = 0;
+
+  //! The device's times of nTimedFrames frames.
+  void Add(const CD3D12Device &Device, int nTimedFrames);
+  void Reset()
+  {
+    Sections.clear();
+    Compute.clear();
+    nFrames = 0;
+  }
+};
+
+//! r_Stats: the numbers of the frames added up (Stats.cpp), and the memory when they were.
+struct SFrameStats
+{
+  SGpuTimes Gpu;
+  int nFrames = 0;
+  double fFrameMs = 0;            //!< the time between frames
+  double fMinFrameMs = 0;         //!< the shortest and the longest of them
+  double fMaxFrameMs = 0;
+  double fWaitMs = 0;             //!< waiting for the GPU at the start of the frame (CD3D12Device::BeginFrame)
+  double fPresentMs = 0;          //!< Present
+  double fDraws = 0;              //!< DrawGeometry's draws
+  double fPSOChanges = 0;         //!< of them, those with another pipeline state than the draw before
+  double fTriangles = 0;
+  double fFrameMemory = 0;        //!< bytes of per frame memory (CD3D12Upload::AllocFrame)
+  uint64 nVideoUsage = 0;         //!< the process' video memory (DXGI) and how much it may use
+  uint64 nVideoBudget = 0;
+  uint64 nResourceBytes = 0;      //!< the textures and buffers (CD3D12Upload::GetVideoMemory)
+  uint64 nRayBytes = 0;           //!< the acceleration structures of the static geometry
+  size_t nPSOs = 0;               //!< the pipeline states made
+};
 
 class CD3D12Renderer : public IRenderer
 {
@@ -331,6 +372,32 @@ public:
   void GpuSection(const char *szSection);
   //! d3d12_GpuTimes: after each frame; every so many frames the averages to the log.
   void ReportGpuTimes();
+
+  //////////////////////////////////////////////////////////////////////////
+  // Stats.cpp: r_Stats, the statistics of the frames on the screen
+
+  //! After each frame (Update): the device's GPU times since the last call to d3d12_GpuTimes'
+  //! report and to r_Stats, the frame's numbers to m_StatsSum, every half second to m_Stats.
+  void CollectStats();
+  //! d3d12_FrameLog: a line per frame to XRenderD3D12_frames.txt (from CollectStats, before the
+  //! GPU times are taken).
+  void LogFrame();
+  //! The CPU's clock in milliseconds (QueryPerformanceCounter).
+  static double CpuMs();
+  //! Adds the CPU time of its scope to a counter (d3d12_FrameLog).
+  struct SCpuTime
+  {
+    double &fMs;
+    const double fStart = CpuMs();
+    explicit SCpuTime(double &fCounter) : fMs(fCounter) {}
+    ~SCpuTime() { fMs += CpuMs() - fStart; }
+  };
+  //! The statistics over the frame, once a frame: at Update, or when the frame is read before it
+  //! (ReadFrameBuffer: a demo's frames); with r_DisplayInfo also the view's at the top right.
+  void DrawStats();
+  //! r_DisplayInfo: its value from now on is the console's to the renderer (m_DisplayInfo), the
+  //! variable itself stays 0, so that the engine does not draw its own block.
+  void TakeDisplayInfo();
   //! The projection of the main view from the camera.
   static Matrix44 MakeProjection(const CCamera &cam);
 
@@ -350,7 +417,7 @@ public:
   //! and the key's target 0 made 3).
   void DrawGeometry(const SPipelineKey &Key, const SDrawConstants &dc, D3D_PRIMITIVE_TOPOLOGY eTopology, const D3D12_VERTEX_BUFFER_VIEW &VB,
     const D3D12_INDEX_BUFFER_VIEW *pIB, uint32 nCount, uint32 nFirst = 0, int nBaseVertex = 0, const D3D12_VERTEX_BUFFER_VIEW *pTexCoord1 = nullptr,
-    const D3D12_VERTEX_BUFFER_VIEW *pTangents = nullptr);
+    const D3D12_VERTEX_BUFFER_VIEW *pTangents = nullptr, uint32 nInstances = 1);
   //! The same with the vertices (and indices) copied into per frame memory. Fans are not supported
   //! by Direct3D 12: the callers make lists.
   void DrawImmediate(const SPipelineKey &Key, const SDrawConstants &dc, D3D_PRIMITIVE_TOPOLOGY eTopology, int nVertexFormat,
@@ -440,6 +507,14 @@ public:
   };
   std::unique_ptr<FILE, SFileClose> m_pFrameDump; //!< open for the frame being dumped (d3d12_DumpFrame)
   std::unique_ptr<FILE, SFileClose> m_pGpuTimes;  //!< XRenderD3D12_gpu.txt, open while d3d12_GpuTimes is on
+  std::unique_ptr<FILE, SFileClose> m_pFrameLog;  //!< XRenderD3D12_frames.txt, open while d3d12_FrameLog is on
+  double m_fFrameLogLast = 0;               //!< d3d12_FrameLog: when the last frame ended (CpuMs; 0: none yet)
+  bool m_bFrameLogProfiles = false;         //!< d3d12_FrameLog 2 turned the engine's frame profiler on
+  double m_fFrameEndEf3DMs = 0;             //!< d3d12_FrameLog: the CPU's time in the main view's EF_EndEf3D
+  //! Of it, in the engine's DrawLowDetail: for the water's reflection, the sun's cascades, the
+  //! environment cubes.
+  enum { LD_WATER, LD_CASCADES, LD_ENVCUBES, LD_NUM };
+  double m_fFrameLowDetailMs[LD_NUM] = {};
 
   int m_nSceneFlags = 0;                    //!< SHDF_* of the EF_EndEf3D being drawn
   CTexture *m_pDetailTexture = nullptr;     //!< GetDetailTexture (one reference)
@@ -568,9 +643,10 @@ public:
   //! The rays' mask for the shaders: d3d12_RTMask's kinds, 0x100 with d3d12_RTShadows.
   uint32 RayMask() const;
   //! Before the main view's opaque list (not its reflection, sprites, shadow maps, cubes or heat
-  //! vision): its draws go into the scene for rays, the first such view of a frame. Without a cvar
-  //! that wants rays the scene's memory goes.
-  void BeginRayCapture();
+  //! vision): its draws go into the scene for rays, the first such view of a frame; bTraced: the view
+  //! draws with rays (a water surface), else only the static BLAS are built. Without a cvar that
+  //! wants rays the scene's memory goes.
+  void BeginRayCapture(bool bTraced);
   //! After the main view's opaque list: the builds of the scene, for the draws after it.
   void BuildRayScene();
   //! d3d12_RTDebug: the scene for rays seen from the main view's camera, over the whole picture
@@ -590,17 +666,27 @@ public:
   bool SetupBeachDraw(SPipelineKey &Key, SDrawConstants &dc, int nPass);
   //! The sea floor under the ocean (eDC_WaterBottom) with the element's texture pTex (may be NULL).
   void SetupWaterBottomDraw(SPipelineKey &Key, SDrawConstants &dc, CTexture *pTex);
-  //! Copies the main view's target and its depth buffer as drawn so far (m_bSceneCopied).
-  bool CopySceneForWater();
+  //! Copies the main view's target and its depth buffer as drawn so far (m_bSceneCopied); with pRect
+  //! (left, top, right, bottom in its pixels) only that part of the target, which leaves the copies
+  //! incomplete (not m_bSceneCopied).
+  bool CopySceneForWater(const int *pRect = nullptr);
   void ReleaseWaterResources();
+  //! Starts making the pixels of the wave and caustics textures on a thread of their own (at
+  //! start-up; GetWaveTexture and GetCausticsTexture wait for it).
+  void StartWaterTextures();
+  //! Waits for that thread (Release: before the DLL can go).
+  void EndWaterTextures();
   //! The texture index of the wave slopes the water program samples (made on first use).
   int GetWaveTexture();
   //! The caustics on the terrain under the ocean (eDC_Caustics). False: not drawn.
   bool SetupCausticsDraw(SPipelineKey &Key, SDrawConstants &dc, const SRenderItem &it);
   //! The texture index of the caustics pattern (made on first use), -1 without one.
   int GetCausticsTexture();
-  //! The glass of a scope (eDC_ScopeLens). False: not drawn.
-  bool SetupScopeLensDraw(SPipelineKey &Key, SDrawConstants &dc);
+  //! The glass of a scope (eDC_ScopeLens, WorldViewProj its transform). False: not drawn.
+  bool SetupScopeLensDraw(SPipelineKey &Key, SDrawConstants &dc, const SRenderItem &it, const Matrix44 &WorldViewProj);
+  //! The part of the main view's target (left, top, right, bottom in its pixels) that the glass of a
+  //! scope shows (ScopeLens, General.hlsl); false when its vertices are not all in front of the camera.
+  bool ScopeLensRect(const SRenderItem &it, const Matrix44 &WorldViewProj, int Rect[4]) const;
   //! Before the main view is drawn (Items: its render items): with r_WaterReflections and an
   //! ocean surface among the items, the scene mirrored in the water plane into m_pReflectionColor,
   //! when the last one is out of date (r_WaterUpdate*): the 3D engine renders it with
@@ -612,6 +698,8 @@ public:
   //! under the water is drawn into the reflection.
   void ClipProjectionToWater(Matrix44 &Proj, const Matrix44 &View) const;
 
+  //! The levels of a copy's depth tiles (BuildDepthTiles).
+  static constexpr int DEPTH_TILE_LEVELS = 7;
   //! A copy of the main view's target and of its depth buffer (CopySceneForWater).
   struct SSceneCopy
   {
@@ -620,12 +708,27 @@ public:
     int nWidth = 0, nHeight = 0;
     DXGI_FORMAT ColorFormat = DXGI_FORMAT_UNKNOWN;
     DXGI_FORMAT DepthFormat = DXGI_FORMAT_UNKNOWN;    //!< how the depth copy is read (CD3D12Device::GetMainDepthSRVFormat)
+    //! The depth tiles of the depth copy (R32_FLOAT, DEPTH_TILE_LEVELS mip levels, its SRV of all of
+    //! them; made on first use) and the descriptor tables of their two kernels.
+    CD3D12Texture *pTiles = nullptr;
+    int nTileTables = -1;
+    int nTileWidth = 0, nTileHeight = 0;    //!< level 0's size
   };
   void FreeSceneCopy(SSceneCopy &Copy);
+  //! The depth tiles of the copy made last (whole, not m_bSceneCopied's rectangle): level 0 the least
+  //! depth of each XR_DEPTH_TILE x XR_DEPTH_TILE pixels of the depth copy, each next level the least
+  //! of 2 x 2 texels of the one before, made in the copy's pTiles by two compute kernels
+  //! (DepthTiles.hlsl); m_nSceneTileSRV. The march of the ocean's reflection through the copies goes
+  //! past the steps they show cannot meet the scene (Water.hlsl). False: none (no copy, or the
+  //! tiles could not be made).
+  bool BuildDepthTiles();
+  void FreeDepthTiles(SSceneCopy &Copy);
   //! [0] of the back buffer (the screen effects), [1] of the HDR target or an upscaler's scene (the
   //! water, in the scene): apart, so that a frame with both does not make them again.
   SSceneCopy m_SceneCopies[2];
+  SSceneCopy *m_pSceneCopy = nullptr;       //!< the copy made last, whole
   int m_nSceneColorSRV = -1, m_nSceneDepthSRV = -1;   //!< the texture table indices of the copy made last
+  int m_nSceneTileSRV = -1;                 //!< the depth tiles of m_pSceneCopy, -1 until built for it
   bool m_bSceneCopied = false;              //!< the copies hold the current list's scene
   CTexture *m_pBeachTexture = nullptr;      //!< textures/wave1 (one reference)
   CTexture *m_pBeachWetTexture = nullptr;   //!< textures/water2 (one reference)
@@ -719,6 +822,7 @@ public:
   {
     const void *pFrustum = nullptr;         //!< the frustum it was drawn for
     ComPtr<ID3D12Resource> pDepth;
+    SD3D12Placement Place;                  //!< where CreateShadowMap put pDepth
     D3D12_CPU_DESCRIPTOR_HANDLE hDSV = {};
     int nSRV = -1;                          //!< the texture table index
     int nSize = 0;
@@ -752,11 +856,17 @@ public:
   //! The same when the map holds what the frustum shows now (nullptr: it has to be drawn).
   SShadowMap *FindDrawnShadowMap(const void *pFrustum);
   void FreeShadowMap(SShadowMap &Map);
+  //! A map no longer used goes to m_SpareShadowMaps (the oldest spare is freed past the limit).
+  void SpareShadowMap(SShadowMap &Map);
   void ReleaseShadowMaps();
   //! d3d12_ShadowDebug: the maps of the frame over the main view.
   void DrawShadowMapDebug();
 
   std::unordered_map<int, SShadowMap> m_ShadowMaps;   //!< by the ID written into the frustum
+  //! Maps no longer used, with their depth texture and views, for the next map of their size: an
+  //! entity's map goes when its caster is out of view for a frame and comes back with it, and a
+  //! new depth texture costs the kernel as much as a frame.
+  std::vector<SShadowMap> m_SpareShadowMaps;
   std::vector<const void *> m_ShadowCasterLists;      //!< NoteShadowCasters: the list2<ShadowMapLightSourceInstance> of the frame
   std::vector<const void *> m_FrameCasterLists;       //!< the same, taken by UpdateShadowMaps for the rest of the frame
   int m_nNextShadowMapID = 0x40000000;                //!< the maps' IDs, apart from the texture IDs
@@ -774,13 +884,19 @@ public:
     float fHalfSize = 0;      //!< half the width of its square (m)
     float fTexel = 0;         //!< the width of a texel (m)
     float fZMin = 0, fZMax = 0; //!< its range along the sun's z axis (towards the sun): depth 1 at fZMin, 0 at fZMax
+    //! Where its receivers are seen from the sun: the edges of the outline (the sun's x, y) of the
+    //! view's points that take their shadow from it, each its outward normal and its distance along
+    //! it; and how far around it the receivers read the slice (m).
+    float Edges[8][3] = {};
+    int nEdges = 0;
+    float fMargin = 0;
     int nCasters[2] = {};     //!< parts drawn into the full and the live slice
   };
   //! A set of cascades' maps: a texture array of a slice per cascade.
   struct SCascadeMaps
   {
     ComPtr<ID3D12Resource> pDepth;
-    D3D12_CPU_DESCRIPTOR_HANDLE hDSV[XR_MAX_CASCADES] = {};
+    D3D12_CPU_DESCRIPTOR_HANDLE hDSV[XR_MAX_CASCADES + 1] = {};  //!< the slices', then all of them (CreateShadowMapArray)
     int nSRV = -1;            //!< the texture table index (a TEXTURE2DARRAY view)
   };
   //! Before the main view is drawn, its items prepared (MainItems): with d3d12_ShadowCascades and
@@ -803,6 +919,9 @@ public:
   //! The flags of a receiver of the cascades for a draw of the main view (0 elsewhere or without
   //! them): DF2_SUN_CASCADES, with bLive DF2_CASCADES_LIVE.
   uint32 CascadeReceiverFlags(bool bLive) const;
+  //! Whether a box of an object's space (World) lies nearer to the view than where the last cascade
+  //! blends into the shadow maps: the cascades alone shadow it there (SunCascades).
+  bool IsWithinCascades(const Matrix44 &World, const Vec3 &vMin, const Vec3 &vMax) const;
   //! MakeFrameConstants: the cascades' constants where the receivers get them (else left 0).
   void SetCascadeConstants(SFrameConstants &fc) const;
   //! d3d12_ShadowDebug 1: the slices of the frame below the shadow maps.
@@ -820,6 +939,8 @@ public:
   bool m_bCascadePass = false;                        //!< the casters of the cascades are being drawn
   int m_nCascadeSet = 0;                              //!< the set being drawn: 0 the full set, 1 the live set
   int m_nCascadeSlice = 0;                            //!< the slice being drawn
+  int m_CascadeInstances[XR_MAX_CASCADES] = {};       //!< d3d12_CascadeInstancing: the slices the part being drawn reaches
+  int m_nCascadeInstances = 0;                        //!< how many (0: one slice, m_nCascadeSlice)
   int m_nCascadeFrame = -1;                           //!< m_nFrames of the cascades (m_nCascades), when drawn
   std::unordered_set<uint64> m_CascadeDrawn;          //!< the parts drawn into the full set (DrawCascadeItems)
   ICVar *m_pShadowMapsVar = nullptr;                  //!< e_shadow_maps, looked up on first use
@@ -834,6 +955,8 @@ public:
     CD3D12Texture *pExposure[2] = {};       //!< 1 x 1 R32_FLOAT, the adapted EV: this frame's and the frame before's
     int nExposure = 0;                      //!< pExposure's current one
     std::vector<CD3D12Texture *> Bloom;     //!< the bloom's levels, the first half the scene's size
+    std::vector<int> KernelTables;          //!< the tables of the kernels (D3D12Compute.h), D3D12_FRAMES a pass: the bloom's levels,
+                                            //!< then the meter's first level; -1 none
     CD3D12Texture *pLdr = nullptr;          //!< the tone mapped scene for an upscaler (R8G8B8A8)
     CD3D12Texture *pRatio = nullptr;        //!< with it and the highlight layer, the layer's ratio at the scene's size (D3D12_HIGHLIGHT_FORMAT)
     int nWidth = 0, nHeight = 0;            //!< the scene's size they are for
@@ -849,10 +972,23 @@ public:
   //! After its EF_EndEf3D, before the screen effects: the scene tone mapped (HDR) and upscaled
   //! (UpscaleScene) into the back buffer, which is bound again.
   void EndMainScene();
-  //! The HDR passes over the scene (nSceneSRV, nWidth x nHeight): the meter, the adaptation, the
-  //! bloom and the resolve, into the back buffer, or with bToTexture into m_Hdr.pLdr, which it
-  //! returns (nullptr: the back buffer, or no targets).
-  CD3D12Texture *ResolveHdr(int nSceneSRV, int nWidth, int nHeight, bool bToTexture);
+  //! The HDR passes over the scene (pScene in PIXEL_SHADER_RESOURCE | NON_PIXEL_SHADER_RESOURCE, its
+  //! SRV nSceneSRV, nWidth x nHeight): the meter, the adaptation, the bloom and the resolve, into the
+  //! back buffer, or with bToTexture into m_Hdr.pLdr, which it returns (nullptr: the back buffer, or
+  //! no targets).
+  CD3D12Texture *ResolveHdr(int nSceneSRV, ID3D12Resource *pScene, int nWidth, int nHeight, bool bToTexture);
+  //! This frame's table of an HDR kernel (m_Hdr.KernelTables): of bloom level nPass, or of the
+  //! meter's first level for m_Hdr.Bloom.size(). The GPU is done with the one of the frame
+  //! D3D12_FRAMES before. -1: none.
+  int GetHdrKernelTable(size_t nPass) const;
+  //! The meter's first level by the kernel (Shaders/Meter.hlsl) from pScene, dc the constants of its
+  //! pass (HDR_LUMINANCE). False: not by the kernel (other taps, no table), the pass draws it.
+  bool DispatchMeter(ID3D12Resource *pScene, const SDrawConstants &dc);
+  //! Level nLevel of the bloom by the kernel (Shaders/Bloom.hlsl) from pSource (nSourceWidth x
+  //! nSourceHeight; the scene, or the level before in PIXEL_SHADER_RESOURCE), dc the constants of its
+  //! pass (HDR_BLOOM_DOWN). False: not by the kernel (the level before is not twice its size, no
+  //! table), the pass draws it.
+  bool DispatchBloomLevel(size_t nLevel, ID3D12Resource *pSource, int nSourceWidth, int nSourceHeight, const SDrawConstants &dc);
   //! The resolve's pass over the whole back buffer; with the highlight layer it writes the layer
   //! too (HdrOutput.cpp).
   void DrawHdrToBackBuffer(const SDrawConstants &dc);
@@ -875,7 +1011,7 @@ public:
   //! reflection, the environment cubes) outside heat vision.
   bool IsHdrTarget() const;
   //! There: the factor of a colour that makes white's light fLight times brighter (HdrEncode in
-  //! Shaders/Common.hlsli, as the resolve decodes it); else 1. For what the HDR pipeline draws
+  //! Shaders/HdrLight.hlsli, as the resolve decodes it); else 1. For what the HDR pipeline draws
   //! brighter than the game: the glow maps (d3d12_HDRGlow).
   float HdrBoost(float fLight) const;
   //! There: a light added (a flare, a corona, an additive sprite or surface, drawn
@@ -1041,6 +1177,7 @@ public:
   std::unique_ptr<CD3D12Pipeline> m_pPipeline;
   std::unique_ptr<CD3D12Compute> m_pCompute;
   std::unique_ptr<CD3D12RayScene> m_pRayScene;
+  bool m_bRayTlas = false;                  //!< the scene being captured gets a TLAS (BeginRayCapture)
   std::unique_ptr<CTextureManager> m_pTextures;
   std::unique_ptr<CShaderManager> m_pShaders;
   std::unique_ptr<CScene> m_pScene;
@@ -1060,9 +1197,48 @@ public:
   bool m_bVSync = false;
   int m_nFrameID = 65535;             //!< GetFrameID, from 65535; the engine keeps a pointer to it (EFQ_Pointer2FrameID)
   int m_nFrames = 0;                  //!< frames ended by Update
+  int m_nFramePolygons = 0;           //!< the triangles drawn since the last Update (DrawGeometry)
+  int m_nPolygons = 0;                //!< GetPolyCount: the triangles of the frame the last Update ended
+  int m_nFrameDraws = 0;              //!< the draws since the last Update (DrawGeometry)
+  int m_nFramePSOChanges = 0;         //!< of them, those with another pipeline state than the draw before
+  int m_nFrameSunLights = 0;          //!< r_DisplayInfo: the main view's sun (DLF_SUN) and other lights in this
+  int m_nFrameDynLights = 0;          //!< frame (CScene::EndEf3D), 0 again at the end of Update
+  ID3D12PipelineState *m_pLastPSO = nullptr;  //!< the pipeline state of the last draw (counted only)
+  //! What DrawGeometry set on the command list, while the device's GetStateEpoch is nEpoch: it
+  //! leaves out what the draw before set already (the driver's calls are a large part of the CPU's
+  //! frame, the viewport and the scissor the most of them after the draws). Zero: not set.
+  struct SDrawState
+  {
+    uint32 nEpoch = 0;
+    ID3D12PipelineState *pPSO = nullptr;
+    D3D12_GPU_VIRTUAL_ADDRESS nFrameCB = 0;
+    D3D12_VERTEX_BUFFER_VIEW VB[4] = {};
+    bool bDefaultStream = false;
+    D3D_PRIMITIVE_TOPOLOGY eTopology = D3D_PRIMITIVE_TOPOLOGY_UNDEFINED;
+    D3D12_VIEWPORT Viewport = {};
+    RECT Scissor = {};
+    D3D12_INDEX_BUFFER_VIEW IB = {};
+  };
+  SDrawState m_DrawState;
   int64 m_nLastFrameTicks = 0;        //!< ReportGpuTimes: when the last frame ended (0: timing off)
   double m_fFrameMs = 0;              //!< ReportGpuTimes: the time between frames added up
   int m_nTimedFrames = 0;
+  SGpuTimes m_GpuReport;              //!< ReportGpuTimes: the GPU times since its last report
+  SFrameStats m_StatsSum;             //!< r_Stats: the frames being added up
+  SFrameStats m_Stats;                //!< r_Stats: the last half second's, shown (nFrames 0: none yet)
+  double m_fStatsStart = 0;           //!< r_Stats: when m_StatsSum started (ms of the CPU's clock; 0: off)
+  double m_fStatsLastFrame = 0;       //!< r_Stats: when the last frame ended
+  int m_nStatsDrawnFrame = -1;        //!< r_Stats: the m_nFrameID they were drawn into
+  float m_fTopLeftText[2] = {};       //!< r_Stats: the bottom of the text at the top left (DrawText800: the time
+                                      //!< demo's lines) in this frame and the last, in the 800 x 600 screen
+  //! r_DisplayInfo as the console sets it (TakeDisplayInfo).
+  struct SDisplayInfoSink : IConsoleVarSink
+  {
+    ICVar *pVar = nullptr;
+    int nValue = 0;
+    bool OnBeforeVarChange(ICVar *pChanged, const char *szNewValue) override;
+  };
+  SDisplayInfoSink m_DisplayInfo;
   int m_nRecurseLevel = 1;            //!< EFQ_RecurseLevel: 1 for the main view
   int m_nDeviceLost = 0;              //!< EFQ_DeviceLost
   int m_nPolygonMode = R_SOLID_MODE;
@@ -1102,6 +1278,7 @@ public:
   bool m_bDepthBias = false;
   bool m_bHeatVision = false;               //!< EF_EnableHeatVision
   bool m_bHeatPass = false;                 //!< the main view's items are drawn in heat vision (DF2_HEAT)
+  bool m_bDepthPrepass = false;             //!< d3d12_DepthPrepass: the main view's opaque list into the depth alone (DrawItems)
   float m_fDrawHeat = 0;                    //!< the heat of the item being drawn (vHeat.x)
   float m_fLineWidth = 1;
 
@@ -1132,6 +1309,9 @@ public:
   int CV_d3d12_Caustics = 1;          //!< 0: no caustics under the ocean
   float CV_d3d12_WaterSunGlint = 0;   //!< strength of the sun's highlight on water (0: none)
   int CV_d3d12_GpuTimes = 0;          //!< N: the GPU time of the frame's sections to the log every N frames
+  int CV_d3d12_FrameLog = 0;          //!< 1: a line per frame to XRenderD3D12_frames.txt (LogFrame), 2 with the engine's profilers
+  int CV_d3d12_CpuSamples = 0;        //!< N: the render thread's stack every N microseconds, to XRenderD3D12_samples.txt at 0 (CpuSampler)
+  int CV_r_Stats = 0;                 //!< the statistics on the screen: 1 the GPU time of the passes, 2 also the memory
   float CV_d3d12_WaterReflectionScale = 0.5f;   //!< size of the water reflection, a fraction of the screen's
   float CV_d3d12_WaterReflectionBlur = 0.1f; //!< how much the ripple finer than a pixel blurs the water's reflection (0: none)
   int CV_d3d12_WaterReflectionFlags = DLD_TERRAIN | DLD_TERRAIN_FULLRES | DLD_STATIC_OBJECTS | DLD_FAR_SPRITES;   //!< what the water reflects (EDrawLowDetailFlags)
@@ -1143,6 +1323,8 @@ public:
   int CV_d3d12_ShadowCascades = 4;          //!< the sun's cascaded shadow maps: how many (0: none)
   float CV_d3d12_ShadowDistance = 120;      //!< how far they reach from the camera (m)
   int CV_d3d12_ShadowCascadeSize = 2048;    //!< the size of their maps
+  int CV_d3d12_CascadeInstancing = 1;       //!< 1: a caster of the full set drawn once into all the slices it reaches (DrawCascadeItems)
+  int CV_d3d12_DepthPrepass = 1;            //!< 1: the main view's opaque surfaces into the depth buffer before the opaque list (DrawItems)
   float CV_d3d12_ShadowSoftness = 0.05f;    //!< the radius of their filter (m)
   int CV_d3d12_UpscaleMode = 0;             //!< EUpscaleMode of the upscaler (d3d12_Upscaler, a string)
   float CV_d3d12_UpscaleSharpness = 0.5f;   //!< the upscaler's sharpening, 0 (none) to 1
@@ -1159,6 +1341,7 @@ public:
   int CV_d3d12_RTMemory = 384;              //!< the static BLAS' memory (MB) beyond which the least recently used go
   int CV_d3d12_RTMask = 31;                 //!< the kinds of instances the rays see (XR_RAY_* bits)
   int CV_d3d12_RTShadows = 1;               //!< the sun's shadow at the hits (a ray towards it, RayShade.hlsli)
+  int CV_d3d12_RTAsync = 1;                 //!< the ray scene's builds on the compute queue beside the frame
   int CV_d3d12_RTReflections = 0;           //!< the water's reflection by rays: 1 in place of the screen space one, 2 where it misses
   int CV_d3d12_ToneMap = 1;                 //!< the HDR pipeline's tone map: 0 clamp, 1 soft shoulder, 2 ACES fitted, 3 AgX
   float CV_d3d12_ToneMapKnee = 0.85f;       //!< where the soft shoulder starts (a display value)

@@ -117,6 +117,7 @@ ITexPic *CD3D12Renderer::EF_GetTextureByID(int Id)
 
 ITexPic *CD3D12Renderer::EF_LoadTexture(const char* nameTex, uint flags, uint flags2, byte eTT, float fAmount1, float fAmount2, int Id, int BindId)
 {
+  FUNCTION_PROFILER(iSystem, PROFILE_RENDERER);
   return m_pTextures ? m_pTextures->LoadTexture(nameTex, flags, flags2, eTT, fAmount1, fAmount2, Id, BindId) : nullptr;
 }
 
@@ -137,6 +138,7 @@ bool CD3D12Renderer::EF_SetLightHole(Vec3 vPos, Vec3 vNormal, int idTex, float f
 
 unsigned int CD3D12Renderer::DownLoadToVideoMemory(unsigned char *data,int w, int h, ETEX_Format eTFSrc, ETEX_Format eTFDst, int nummipmap, bool repeat, int filter, int Id, char *szCacheName, int flags)
 {
+  FUNCTION_PROFILER(iSystem, PROFILE_RENDERER);
   // The texture keeps the source format (DXT formats as blocks, the others as B8G8R8A8); mip
   // maps are made from level 0 when nummipmap asks for them.
   if (!m_pTextures)
@@ -146,6 +148,7 @@ unsigned int CD3D12Renderer::DownLoadToVideoMemory(unsigned char *data,int w, in
 
 void CD3D12Renderer::UpdateTextureInVideoMemory(uint tnum, unsigned char *newdata,int posx,int posy,int w,int h,ETEX_Format eTFSrc)
 {
+  FUNCTION_PROFILER(iSystem, PROFILE_RENDERER);
   if (m_pTextures)
     m_pTextures->UpdateRect((int)tnum, newdata, posx, posy, w, h, eTFSrc);
 }

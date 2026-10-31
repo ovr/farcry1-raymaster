@@ -23,7 +23,9 @@
 //	colour of the engine's shadows on the terrain in this frame). Then 3.
 //	the resolve makes the light taken away (m_pAOTaken): that times 1 - the
 //	visibility to the power d3d12_AOStrength, 0 on the sky, and 4. it is
-//	subtracted from the scene (ONE x ONE, REV_SUBTRACT).
+//	subtracted from the scene (ONE x ONE, REV_SUBTRACT). Without
+//	d3d12_AODebug 3. and 4. are one draw (Post.hlsl, POST_AO_TAKEN), the
+//	depth buffer bound read only, so that it reads it.
 //	The first person objects, the water, the particles and the rest of the
 //	blended list are drawn after it and get none; the water's refraction
 //	copies the scene after it, so it shows the occlusion under the surface.
@@ -218,6 +220,7 @@ void CD3D12Renderer::BeginAOTarget(const SRenderItem *pItems, int nItems)
 
 void CD3D12Renderer::DrawAmbientOcclusion()
 {
+  FUNCTION_PROFILER(iSystem, PROFILE_RENDERER);
   // The ambient light's target unbound, whatever comes next; readable by the resolve, then a shader
   // resource again.
   ID3D12Resource *pAmbient = nullptr;
@@ -235,7 +238,11 @@ void CD3D12Renderer::DrawAmbientOcclusion()
   ID3D12GraphicsCommandList *pList = m_pDevice->GetCmdList();
   ID3D12Resource *pDepth = m_pAODepth.Get();
   const int w = m_nAOWidth, h = m_nAOHeight;
-  m_pDevice->Transition(pDepth, D3D12_RESOURCE_STATE_DEPTH_WRITE, DEPTH_READ);
+  // With d3d12_AOApply 1 the draw that subtracts the light takes it from the visibility itself; the
+  // debug views show the resolve's targets.
+  const bool bTaken = m_nAOApply && !CV_d3d12_AODebug;
+  const D3D12_RESOURCE_STATES DepthRead = bTaken ? DEPTH_READ | D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE : DEPTH_READ;
+  m_pDevice->Transition(pDepth, D3D12_RESOURCE_STATE_DEPTH_WRITE, DepthRead);
 
   SAOFrame Frame;
   Frame.pCmdList = pList;
@@ -258,7 +265,9 @@ void CD3D12Renderer::DrawAmbientOcclusion()
             m_pAO->GetName(), w, h, Frame.nQuality, Frame.fRadius, CV_d3d12_AOStrength, Frame.nDenoise, Frame.nNoiseIndex, m_nAOApply,
             m_AOBakedShare[0], m_AOBakedShare[1], m_AOBakedShare[2], bOk ? "" : ", failed");
   CD3D12Texture *pApplied = m_nAOApply ? m_pAOTaken : m_pAOFactor;
-  if (bOk)
+  // Taken from the ambient light: in the units the game adds its light in.
+  const float fStrength = std::max(CV_d3d12_AOStrength, 0.0f);
+  if (bOk && !bTaken)
   {
     m_pDevice->Transition(m_pAOOutput->m_pResource, D3D12_RESOURCE_STATE_UNORDERED_ACCESS, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
     SAoResolveConstants rc = {};
@@ -266,8 +275,6 @@ void CD3D12Renderer::DrawAmbientOcclusion()
     Set4(rc.vDepthParams, p[10], p[14], 0, 0);
     const float fRange = m_fFogEnd - m_fFogStart;
     Set4(rc.vFogParams, m_fFogStart, m_fFogEnd, fRange > 0 ? 1.0f / fRange : 0.0f, m_bFog ? 1.0f : 0.0f);
-    // Taken from the ambient light: in the units the game adds its light in.
-    const float fStrength = std::max(CV_d3d12_AOStrength, 0.0f);
     Set4(rc.vParams, m_nAOApply ? fStrength : fStrength / 2.2f, m_nAOApply ? 1.0f : 0.0f, m_nAOApply && CV_d3d12_AODebug == 1 ? 1.0f : 0.0f, 0);
     const SD3D12FrameAlloc CB = m_pUpload->AllocFrame(sizeof(rc), 256);
     memcpy(CB.pCPU, &rc, sizeof(rc));
@@ -275,7 +282,8 @@ void CD3D12Renderer::DrawAmbientOcclusion()
                          (UINT)(w + 7) / 8, (UINT)(h + 7) / 8);
     m_pDevice->Transition(m_pAOOutput->m_pResource, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
   }
-  m_pDevice->Transition(pDepth, DEPTH_READ, D3D12_RESOURCE_STATE_DEPTH_WRITE);
+  if (!bOk || !bTaken)
+    m_pDevice->Transition(pDepth, DepthRead, D3D12_RESOURCE_STATE_DEPTH_WRITE);
   InvalidateFrameConstants();
   if (!bOk)
     return;
@@ -289,19 +297,40 @@ void CD3D12Renderer::DrawAmbientOcclusion()
   m_Viewport[2] = m_pDevice->GetWidth();
   m_Viewport[3] = m_pDevice->GetHeight();
   m_bScissor = m_bItemScissor = false;
-  m_pDevice->Transition(pApplied->m_pResource, D3D12_RESOURCE_STATE_UNORDERED_ACCESS, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
   SPipelineKey Key = {};
   Key.nProgram = eD3D12P_Post;
   Key.nState = GS_NODEPTHTEST | GS_COLMASKONLYRGB | (m_nAOApply ? GS_BLSRC_ONE | GS_BLDST_ONE : GS_BLSRC_DSTCOL | GS_BLDST_ZERO);
   Key.nCull = R_CULL_NONE;
   Key.nBlendOp = m_nAOApply ? 1 : 0;
   SDrawConstants dc = DefaultDrawConstants();
-  dc.nFlags = POST_BLEND;
-  dc.nTex0 = (uint32)pApplied->m_nSRV;
   Set4(dc.vParams0, 1.0f / w, 1.0f / h, 0, 0);
-  Set4(dc.vParams1, 1, 1, 1, 1);
+  if (bTaken)
+  {
+    // The resolve's views: the visibility, the depth buffer, the ambient light.
+    m_pDevice->Transition(m_pAOOutput->m_pResource, D3D12_RESOURCE_STATE_UNORDERED_ACCESS, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+    m_pDevice->SetDepthReadOnly(true);
+    dc.nFlags = POST_AO_TAKEN;
+    dc.nTex0 = (uint32)m_nAOResolveTable;
+    dc.nTex1 = (uint32)m_nAOResolveTable + 1;
+    dc.nTex2 = (uint32)m_nAOResolveTable + 2;
+    Set4(dc.vParams1, fStrength, 0, 0, 0);
+  }
+  else
+  {
+    m_pDevice->Transition(pApplied->m_pResource, D3D12_RESOURCE_STATE_UNORDERED_ACCESS, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+    dc.nFlags = POST_BLEND;
+    dc.nTex0 = (uint32)pApplied->m_nSRV;
+    Set4(dc.vParams1, 1, 1, 1, 1);
+  }
   DrawImmediate(Key, dc, D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST, VERTEX_FORMAT_P3F, s_FullScreen, 3);
-  m_pDevice->Transition(pApplied->m_pResource, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+  if (bTaken)
+  {
+    m_pDevice->SetDepthReadOnly(false);
+    m_pDevice->Transition(m_pAOOutput->m_pResource, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+    m_pDevice->Transition(pDepth, DepthRead, D3D12_RESOURCE_STATE_DEPTH_WRITE);
+  }
+  else
+    m_pDevice->Transition(pApplied->m_pResource, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
   memcpy(m_Viewport, Viewport, sizeof(Viewport));
   m_bScissor = bScissor;
   m_bItemScissor = bItemScissor;

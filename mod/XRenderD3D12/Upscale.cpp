@@ -237,6 +237,7 @@ void CD3D12Renderer::BeginUpscale()
 
 void CD3D12Renderer::UpscaleScene()
 {
+  FUNCTION_PROFILER(iSystem, PROFILE_RENDERER);
   if (!m_bUpscaling)
     return;
   m_bUpscaling = false;
@@ -248,7 +249,7 @@ void CD3D12Renderer::UpscaleScene()
   if (m_bHdrScene)
   {
     GpuSection("hdr");
-    pLdr = ResolveHdr(m_nUpscaleColorSRV, m_pDevice->GetSceneWidth(), m_pDevice->GetSceneHeight(), true);
+    pLdr = ResolveHdr(m_nUpscaleColorSRV, m_pDevice->GetSceneColor(), m_pDevice->GetSceneWidth(), m_pDevice->GetSceneHeight(), true);
     InvalidateFrameConstants();
   }
   GpuSection("upscale");

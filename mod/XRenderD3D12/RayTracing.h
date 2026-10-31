@@ -35,10 +35,15 @@
 //	  BLAS of the frame (built fast) in the frame slot's memory. The builds
 //	  of a frame are limited (MAX_*_TRIANGLES); what is over waits for the
 //	  next frames.
-//	- TLAS: built every frame after the opaque list (Build), one instance
-//	  per draw whose kinds d3d12_RTMask has all of, the instance's transform
-//	  its mWorld, its mask and InstanceContributionToHitGroupIndex its kind
-//	  (Shaders/RayConstants.h), culling off.
+//	- TLAS: built after the opaque list (Build) in a frame that traces rays
+//	  (a water surface in the main view's lists, or d3d12_RTDebug), one
+//	  instance per draw whose kinds d3d12_RTMask has all of, the instance's
+//	  transform its mWorld, its mask and InstanceContributionToHitGroupIndex
+//	  its kind (Shaders/RayConstants.h), culling off. In another frame only
+//	  the missing static BLAS are built (for when the water shows), not the
+//	  frame's nor the TLAS: away from the water 0.2 ms of the GPU and 0.1 ms
+//	  of the CPU less (the time demos of Volcano 340 -> 361 FPS, Research
+//	  446 -> 485).
 //	- Instances: an SRayInstance per instance of the TLAS (its InstanceID),
 //	  in per frame memory: the raw views of its vertices, indices and second
 //	  stream (CD3D12Upload::GetRawSRV) and the part of its draw's constants
@@ -80,6 +85,8 @@ public:
   bool IsSupported() const { return m_pDevice5 != nullptr; }
   //! The renderer's m_nFrames of the last Build (-1: none).
   int GetBuiltFrame() const { return m_nBuiltFrame; }
+  //! Bytes of the static geometry's acceleration structures (d3d12_RTMemory).
+  uint64 GetStaticBytes() const { return m_nStaticBytes; }
 
   //! The main view's opaque list starts: its draws until EndCapture make this frame's scene.
   //! ViewProj: its camera's world to clip (the draws' mWorld times it is their mWorldViewProj).
@@ -97,8 +104,9 @@ public:
   void CaptureDraw(const SPipelineKey &Key, const SDrawConstants &dc, D3D_PRIMITIVE_TOPOLOGY eTopology, const D3D12_VERTEX_BUFFER_VIEW &VB,
     const D3D12_INDEX_BUFFER_VIEW *pIB, uint32 nCount, uint32 nFirst, int nBaseVertex, const D3D12_VERTEX_BUFFER_VIEW *pTexCoord1);
   //! Records the builds of the missing BLAS and of the TLAS of the captured draws into the frame's
-  //! command list; pDump: a line about them (d3d12_DumpFrame).
-  void Build(FILE *pDump);
+  //! command list; without bTop (nothing in the frame traces rays) only those of the missing static
+  //! BLAS. pDump: a line about them (d3d12_DumpFrame).
+  void Build(FILE *pDump, bool bTop);
   //! The TLAS built in this frame, 0 when there is none.
   D3D12_GPU_VIRTUAL_ADDRESS GetTLAS() const;
   //! Its instances (SRayInstance, by InstanceID), with GetTLAS.
@@ -173,13 +181,16 @@ private:
   //! The draw's geometry and transform (the same in the main view and in the reflection, in all passes
   //! over it).
   static uint64 DrawHash(const SDraw &d);
+  //! Adds a DrawHash to m_Seen; false when it is there already.
+  bool InsertSeen(uint64 nHash);
   //! The instance's data of a draw (its geometry Tri; nTexCoord1 the second stream's first vertex, 0 for
   //! none).
   static void FillInstance(SRayInstance &Inst, const SPipelineKey &Key, const SDrawConstants &dc, const D3D12_RAYTRACING_GEOMETRY_TRIANGLES_DESC &Tri,
     D3D12_GPU_VIRTUAL_ADDRESS nTexCoord1);
   //! A buffer of nSize bytes with unordered access in the default heap; NULL when refused (logged).
   Microsoft::WRL::ComPtr<ID3D12Resource> CreateBuffer(uint64 nSize, D3D12_RESOURCE_STATES State, const wchar_t *szName);
-  //! At least nSize bytes in Buf (a new buffer, the old one released when the GPU is done with it).
+  //! At least nSize bytes in Buf (a new buffer of the next power of two, the old one released when the GPU
+  //! is done with it).
   bool Reserve(SSlotBuffer &Buf, uint64 nSize, D3D12_RESOURCE_STATES State, const wchar_t *szName);
   bool AllocPool(uint64 nSize, SPoolRange &Out);
   //! Back to the pool once the GPU finished the current frame.
@@ -201,6 +212,9 @@ private:
   int m_nBuiltSlot = 0;
   D3D12_GPU_VIRTUAL_ADDRESS m_nInstances = 0;   //!< the last Build's SRayInstance array
   std::vector<SDraw> m_Draws;
+  //! Build's DrawHash of the draws taken: open addressing, at most half full, 0 empty (a hash of 0
+  //! counts as 1).
+  std::vector<uint64> m_Seen;
   int m_nSkippedTransform = 0;      //!< draws left out by their transforms in this capture
 
   std::unordered_map<SBlasKey, SStaticBlas, SBlasKeyHash> m_Static;

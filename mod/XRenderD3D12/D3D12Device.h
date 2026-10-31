@@ -19,6 +19,14 @@
 
 #include <span>
 
+//! Where CD3D12Upload::CreateDepthTarget put a resource.
+struct SD3D12Placement
+{
+  int nHeap = -1;                     //!< the heap of the depth targets' pool, -1 a committed resource
+  uint64 nOffset = 0;                 //!< where in that heap
+  uint64 nBytes = 0;                  //!< the bytes it takes there
+};
+
 constexpr int D3D12_FRAMES = 2;         //!< frames in flight
 constexpr int D3D12_BACKBUFFERS = 3;     //!< swap chain buffers
 
@@ -98,8 +106,29 @@ public:
 
   ID3D12Device *GetDevice() const { return m_pDevice.Get(); }
   ID3D12CommandQueue *GetQueue() const { return m_pQueue.Get(); }
-  //! The frame's command list; valid between BeginFrame and EndFrame.
-  ID3D12GraphicsCommandList *GetCmdList() const { return m_pCmdList.Get(); }
+  //! The frame's command list; valid between BeginFrame and EndFrame. The caller may set state of
+  //! its own on it: what DrawGeometry set is forgotten (GetStateEpoch).
+  ID3D12GraphicsCommandList *GetCmdList() const
+  {
+    m_nStateEpoch++;
+    return m_pCmdList.Get();
+  }
+  //! The frame's command list for DrawGeometry, which leaves out the state it set already while
+  //! GetStateEpoch stays the same.
+  ID3D12GraphicsCommandList *GetDrawCmdList() const { return m_pCmdList.Get(); }
+  //! Changes whenever the command list's state may have changed other than by DrawGeometry: a new
+  //! list, targets bound, the root signature, a GetCmdList, ForgetDrawState.
+  uint32 GetStateEpoch() const { return m_nStateEpoch; }
+  void ForgetDrawState() const { m_nStateEpoch++; }
+  //! In a frame, an open command list of the compute queue for work beside the frame's (the ray
+  //! scene's builds), its GPU time that of szSection (a string with static storage) in
+  //! GetComputeGpuTimes; NULL without the queue. SubmitAsyncCompute runs it.
+  ID3D12GraphicsCommandList4 *BeginAsyncCompute(const char *szSection);
+  //! Executes the frame's list so far after the upload batch, and the list of BeginAsyncCompute
+  //! beside it once the uploads are done; the frame goes on in the same slot's allocator, its list
+  //! after the compute list (the descriptor heap, the root signature and the render targets set
+  //! again).
+  void SubmitAsyncCompute();
   //! 0 .. D3D12_FRAMES-1: the slot of the current frame (per frame resources, the upload ring).
   int GetFrameSlot() const { return m_nFrameSlot; }
 
@@ -203,6 +232,10 @@ public:
   void BindAmbient(D3D12_CPU_DESCRIPTOR_HANDLE hRTV);
   //! The main view's draws write the ambient light too (bound, not off screen).
   bool IsAmbientBound() const { return m_hAmbientRTV.ptr && !m_pOffscreen; }
+  //! true: from here (in a frame) SetBackBufferTargets binds the main view's depth buffer read only
+  //! (GetMainDepth in DEPTH_READ, which a pixel shader can then read too); false: writable again. The
+  //! caller makes its transitions.
+  void SetDepthReadOnly(bool bReadOnly);
 
   //! An off screen target of nWidth x nHeight: pColor in Format (the back buffer's, or
   //! D3D12_HDR_FORMAT; in the state PIXEL_SHADER_RESOURCE while it is not drawn into) and pDepth
@@ -224,13 +257,18 @@ public:
   //! others stay shader resources (the level above, read while this one is made from it).
   void SetOffscreenTargets(ID3D12Resource *pColor, D3D12_CPU_DESCRIPTOR_HANDLE hRTV, D3D12_CPU_DESCRIPTOR_HANDLE hDSV, int nWidth, int nHeight,
                            UINT nSubresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES);
+  //! The off screen colour target (or shadow map) back to PIXEL_SHADER_RESOURCE; nothing off screen
+  //! any more (a compute pass reads it next).
+  void EndOffscreen();
   bool IsOffscreen() const { return m_pOffscreen != nullptr; }
   //! The colour format of the target drawn into: the off screen target's, else the main view's.
   DXGI_FORMAT GetTargetColorFormat() const { return m_pOffscreen ? m_OffscreenFormat : GetMainColorFormat(); }
   //! A shadow map of nSize x nSize: R32_TYPELESS (D3D12_SHADOW_MAP_FORMAT, its DSV written to hDSV,
-  //! read as R32_FLOAT), in the state PIXEL_SHADER_RESOURCE while it is not drawn into.
-  bool CreateShadowMap(int nSize, ComPtr<ID3D12Resource> &pDepth, D3D12_CPU_DESCRIPTOR_HANDLE hDSV);
-  //! The same with nSlices slices (a texture array), the DSV of slice i written to phDSV[i].
+  //! read as R32_FLOAT), in the state PIXEL_SHADER_RESOURCE while it is not drawn into; a depth
+  //! target of CD3D12Upload (Place; released with ReleaseDepthTarget), undefined until cleared.
+  bool CreateShadowMap(int nSize, ComPtr<ID3D12Resource> &pDepth, SD3D12Placement &Place, D3D12_CPU_DESCRIPTOR_HANDLE hDSV);
+  //! The same with nSlices slices (a texture array), the DSV of slice i written to phDSV[i], the DSV
+  //! of all of them to phDSV[nSlices] (drawn into with SV_RenderTargetArrayIndex).
   bool CreateShadowMapArray(int nSize, int nSlices, ComPtr<ID3D12Resource> &pDepth, const D3D12_CPU_DESCRIPTOR_HANDLE *phDSV);
   //! Draws into a shadow map of CreateShadowMap (depth only, no colour target) until
   //! SetBackBufferTargets (in a frame); hDSV may be the DSV of a slice of CreateShadowMapArray (the
@@ -258,8 +296,9 @@ public:
   ID3D12Resource *GetMainDepth() const { return m_bInScene ? m_pSceneDepth.Get() : m_pDepth.Get(); }
   //! Copies the main view's target (the back buffer, the HDR target or the scene's colour) and its depth buffer
   //! (when pDepth is given) as drawn so far in this frame into the textures of CreateTargetCopies
-  //! (PIXEL_SHADER_RESOURCE before and after); nothing when their size or format is another.
-  void CopyTargets(ID3D12Resource *pColor, ID3D12Resource *pDepth);
+  //! (PIXEL_SHADER_RESOURCE before and after); nothing when their size or format is another. With
+  //! pBox only that part of the colour, to the same place.
+  void CopyTargets(ID3D12Resource *pColor, ID3D12Resource *pDepth, const D3D12_BOX *pBox = nullptr);
 
   //! Copies the current back buffer (as drawn so far in this frame, or the last presented one
   //! between frames) to pDst: nWidth x nHeight pixels of B, G, R, A, rows from the top.
@@ -271,25 +310,39 @@ public:
   //! buffer again.
   bool ReadBackTexture(ID3D12Resource *pTexture, D3D12_RESOURCE_STATES State, uint8 *pDst, int nWidth, int nHeight);
 
-  //! The debug layer's messages to the engine's log.
+  //! The debug layer's messages to the engine's log and to XRenderD3D12_debug.txt (the engine's
+  //! log loses its last lines when the game ends a time demo).
   void LogDebugMessages();
 
   //! GPU timing (d3d12_GpuTimes): while on, the GPU time of each frame is split into sections,
   //! each from its GpuSection call to the next one or the end of the frame (the first one of a
-  //! frame is "other"). A frame's times are read when the GPU has finished it (BeginFrame of its
-  //! slot) and add up in GetGpuTimes.
+  //! frame is "other"; from a FlushFrame until its second list runs it is "flush", the GPU waiting
+  //! for the CPU). A frame's times are read when the GPU has finished it (BeginFrame of its slot)
+  //! and add up in GetGpuTimes; the compute queue's lists beside them in GetComputeGpuTimes (not
+  //! part of the frame's time).
   void SetGpuTiming(bool bOn) { m_bGpuTiming = bOn; }
   //! From here on the GPU time counts for szSection (a string with static storage).
   void GpuSection(const char *szSection);
   //! The sections' GPU milliseconds added up over GetGpuTimedFrames() frames, in the order they
   //! first came; ResetGpuTimes starts again.
   const std::vector<std::pair<const char *, double>> &GetGpuTimes() const { return m_GpuTimes; }
+  const std::vector<std::pair<const char *, double>> &GetComputeGpuTimes() const { return m_ComputeGpuTimes; }
   int GetGpuTimedFrames() const { return m_nGpuTimedFrames; }
   void ResetGpuTimes()
   {
     m_GpuTimes.clear();
+    m_ComputeGpuTimes.clear();
     m_nGpuTimedFrames = 0;
   }
+  //! The CPU's milliseconds in the last frame: BeginFrame's wait for the GPU (to finish the frame
+  //! D3D12_FRAMES back) and EndFrame's Present.
+  double GetWaitMs() const { return m_fWaitMs; }
+  double GetPresentMs() const { return m_fPresentMs; }
+  //! The adapter's name (UTF-8).
+  const char *GetAdapterName() const { return m_szAdapter; }
+  //! The process' use of the adapter's own memory and how much it may use (its budget); false
+  //! when DXGI does not tell.
+  bool GetVideoMemory(uint64 &nUsage, uint64 &nBudget) const;
 
   //! Occlusion queries: BeginOcclusion .. EndOcclusion count the samples drawn in between that
   //! pass the depth test, at most OCCLUSION_QUERIES per frame. A frame's counts come when the GPU
@@ -303,6 +356,7 @@ public:
 
 private:
   static constexpr int GPU_MARKS = 64;              //!< timestamps per frame (the last one ends the frame)
+  static constexpr int COMPUTE_LISTS = 4;           //!< compute lists timed per frame (two timestamps each)
   //! Adds the timestamps of the current slot's last frame (finished) to m_GpuTimes.
   void ReadGpuTimes();
   //! The occlusion counts of the current slot's last frame (finished) into m_OcclusionResults.
@@ -322,12 +376,11 @@ private:
   //! The swap chain's current buffer's view.
   D3D12_CPU_DESCRIPTOR_HANDLE SwapChainRTV() const;
   D3D12_CPU_DESCRIPTOR_HANDLE SceneDSV() const;
+  //! The read only view of the depth buffer (GetDSV) or of the scene's (SceneDSV).
+  D3D12_CPU_DESCRIPTOR_HANDLE ReadOnlyDSV(bool bScene) const;
   //! Resets the slot's allocator and the list and binds the heap, root signature and targets.
   void OpenCmdList();
   void WaitForFence(uint64 nValue);
-  //! The off screen colour target (or shadow map) back to PIXEL_SHADER_RESOURCE; nothing off screen
-  //! any more.
-  void EndOffscreen();
 
   ComPtr<IDXGIFactory4> m_pFactory;
   UINT m_nFactoryFlags = 0;
@@ -336,6 +389,7 @@ private:
   ComPtr<ID3D12CommandQueue> m_pQueue;
   ComPtr<IDXGISwapChain3> m_pSwapChain;
   ComPtr<ID3D12InfoQueue> m_pInfoQueue;
+  std::unique_ptr<FILE, int (*)(FILE *)> m_pDebugLog{ nullptr, &fclose };  //!< XRenderD3D12_debug.txt, with the debug layer
   bool m_bTearing = false;
   HWND m_hWnd = nullptr;
 
@@ -355,9 +409,19 @@ private:
   ComPtr<ID3D12CommandAllocator> m_pAllocators[D3D12_FRAMES];
   uint64 m_nFrameFence[D3D12_FRAMES] = {};
   ComPtr<ID3D12GraphicsCommandList> m_pCmdList;
+  mutable uint32 m_nStateEpoch = 0;                 //!< GetStateEpoch
   ComPtr<ID3D12Fence> m_pFence;
   HANDLE m_hFenceEvent = nullptr;
   uint64 m_nNextFence = 1;
+  // The compute queue (BeginAsyncCompute): a slot's allocator is free when the slot's frame fence is
+  // reached, the frame's list having waited for the compute list.
+  ComPtr<ID3D12CommandQueue> m_pComputeQueue;
+  ComPtr<ID3D12CommandAllocator> m_pComputeAllocators[D3D12_FRAMES];
+  ComPtr<ID3D12GraphicsCommandList4> m_pComputeList;
+  ComPtr<ID3D12Fence> m_pUploadFence, m_pComputeFence;  //!< the uploads done (for the compute queue), the compute list done (for the direct one)
+  uint64 m_nUploadFence = 0, m_nComputeFence = 0;
+  bool m_bComputeAllocatorReset = false;            //!< the slot's compute allocator reset in this frame
+  bool m_bComputeTimed = false;                     //!< the open compute list has its first timestamp
 
   ComPtr<ID3D12DescriptorHeap> m_pRTVHeap;
   ComPtr<ID3D12DescriptorHeap> m_pDSVHeap;
@@ -379,6 +443,7 @@ private:
   ComPtr<ID3D12Resource> m_pHdrColor;               //!< SetHdrTarget
   bool m_bInHdr = false;                            //!< BeginHdr .. EndHdr
   D3D12_CPU_DESCRIPTOR_HANDLE m_hAmbientRTV = {};   //!< BindAmbient
+  bool m_bDepthReadOnly = false;                    //!< SetDepthReadOnly
 
   int m_nWidth = 0, m_nHeight = 0;
   int m_nFrameSlot = 0;
@@ -391,7 +456,16 @@ private:
   const char *m_GpuSections[D3D12_FRAMES][GPU_MARKS] = {};   //!< the section each timestamp starts
   int m_nGpuMarks[D3D12_FRAMES] = {};
   std::vector<std::pair<const char *, double>> m_GpuTimes;
+  ComPtr<ID3D12QueryHeap> m_pComputeTimestamps;     //!< COMPUTE_LISTS pairs per frame slot; NULL: the compute lists not timed
+  ComPtr<ID3D12Resource> m_pComputeTimestampReadback;
+  double m_fComputeTimestampMs = 0;
+  const char *m_ComputeSections[D3D12_FRAMES][COMPUTE_LISTS] = {};
+  int m_nComputeLists[D3D12_FRAMES] = {};
+  std::vector<std::pair<const char *, double>> m_ComputeGpuTimes;
   int m_nGpuTimedFrames = 0;
+  double m_fWaitMs = 0;                             //!< GetWaitMs
+  double m_fPresentMs = 0;                          //!< GetPresentMs
+  char m_szAdapter[128] = {};                       //!< GetAdapterName
 
   ComPtr<ID3D12QueryHeap> m_pOcclusion;             //!< OCCLUSION_QUERIES per frame slot; NULL: no queries
   ComPtr<ID3D12Resource> m_pOcclusionReadback;      //!< the resolved counts, in the same places

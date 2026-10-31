@@ -133,6 +133,31 @@ void GetSectorCorner(CLeafBuffer *pLB, float &x0, float &y0)
   y0 = floorf((vMin.y + 0.5f) / TERRAIN_SECTOR_SIZE) * TERRAIN_SECTOR_SIZE;
 }
 
+//! The box of the triangles of a leaf buffer's chunk (Geometry::GetTriangles, their vertices on the
+//! CPU) in its object's space; false without them.
+bool GetTrianglesBox(CLeafBuffer *pLB, const CMatInfo *pChunk, Vec3 &vMin, Vec3 &vMax)
+{
+  const std::span<const uint16> Inds = Geometry::GetTriangles(pLB, pChunk);
+  const CLeafBuffer *pVC = pLB->GetVertexContainer();
+  if (Inds.empty() || !pVC->m_pSecVertBuffer || !pVC->m_pSecVertBuffer->m_VS[VSF_GENERAL].m_VData)
+    return false;
+  const int nStride = CD3D12Pipeline::GetVertexSize(pVC->m_pSecVertBuffer->m_vertexformat);
+  const byte *pData = (const byte *)pVC->m_pSecVertBuffer->m_VS[VSF_GENERAL].m_VData;
+  if (nStride <= 0)
+    return false;
+  vMin = Vec3(1e30f, 1e30f, 1e30f);
+  vMax = Vec3(-1e30f, -1e30f, -1e30f);
+  for (const uint16 i : Inds)
+  {
+    if (i >= pVC->m_SecVertCount)
+      return false;
+    const Vec3 &p = *(const Vec3 *)(pData + (size_t)i * nStride);
+    vMin.CheckMin(p);
+    vMax.CheckMax(p);
+  }
+  return true;
+}
+
 uint8 CullOf(ECull eCull, bool bMirrored)
 {
   switch (eCull)
@@ -246,6 +271,13 @@ void CD3D12Renderer::BeginScene3D()
 
 void CD3D12Renderer::DrawItems(SRenderItem *pItems, int nItems, int eList)
 {
+  // The engine's frame profiler, a counter per list.
+  static CFrameProfiler s_Profilers[eRL_Num] = {
+    { iSystem, "CD3D12Renderer::DrawItems:Opaque", PROFILE_RENDERER },
+    { iSystem, "CD3D12Renderer::DrawItems:Nearest", PROFILE_RENDERER },
+    { iSystem, "CD3D12Renderer::DrawItems:Blended", PROFILE_RENDERER },
+  };
+  CFrameProfilerSection ProfilerSection(eList >= 0 && eList < eRL_Num ? &s_Profilers[eList] : nullptr);
   if (!m_pScene || !EnsureFrame())
     return;
   if (eList == eRL_Opaque)
@@ -255,8 +287,35 @@ void CD3D12Renderer::DrawItems(SRenderItem *pItems, int nItems, int eList)
   bool bSprites = eList != eRL_Blended;
   // The flares after the rest of the scene, before the elements over it.
   bool bFlares = eList != eRL_Blended;
-  if (eList == eRL_Blended)
-    m_bSceneCopied = false;
+  // A list copies the scene as drawn before it (the water, the flares, the glass of a scope).
+  m_bSceneCopied = false;
+  // d3d12_DepthPrepass: the main view's opaque surfaces that write the depth and discard nothing
+  // into the depth buffer first, without a pixel shader (DrawGeometry); the list then shades only
+  // the pixels it keeps, where at 4K it shaded each pixel 4 to 6 times outdoors. Its depth test
+  // is unchanged: whatever the order, a pixel ends with the nearest of the surfaces, and the same
+  // vertex shader, matrix and vertex streams give each surface the same depth in both (as the
+  // light passes' DEPTHFUNC_EQUAL needs), so the frames are the same.
+  if (CV_d3d12_DepthPrepass && eList == eRL_Opaque && (m_nSceneFlags & SHDF_ALLOWHDR) && m_nRecurseLevel <= 1 && !m_bReflectionPass &&
+      !m_bSpritePass && !m_bShadowMapPass && !m_bEnvCubePass && !m_bCascadePass)
+  {
+    GpuSection("depth prepass");
+    const float fDepthMin = m_fDepthMin, fDepthMax = m_fDepthMax;
+    const bool bItemScissor = m_bItemScissor;
+    const RECT ItemScissor = m_ItemScissor;
+    m_bDepthPrepass = true;
+    for (int i = 0; i < nItems; i++)
+    {
+      const SRenderItem &it = pItems[i];
+      if (it.pRE && it.pRE->m_Type == eDATA_OcLeaf &&
+          (it.eDrawClass == eDC_Opaque || it.eDrawClass == eDC_VColor || it.eDrawClass == eDC_Terrain || it.eDrawClass == eDC_WaterBottom))
+        DrawLeafItem(it);
+    }
+    m_bDepthPrepass = false;
+    m_fDepthMin = fDepthMin;
+    m_fDepthMax = fDepthMax;
+    m_bItemScissor = bItemScissor;
+    m_ItemScissor = ItemScissor;
+  }
   GpuSection(eList == eRL_Opaque ? "opaque" : eList == eRL_Nearest ? "nearest" : "water");
   if (m_pFrameDump)
     fprintf(m_pFrameDump.get(), "list %d: %d items, recursion %d, scene flags 0x%x\n", eList, nItems, m_nRecurseLevel, m_nSceneFlags);
@@ -280,6 +339,10 @@ void CD3D12Renderer::DrawItems(SRenderItem *pItems, int nItems, int eList)
       DrawFlares({ pItems, (size_t)nItems });
       bFlares = true;
     }
+    // A water surface is the water's time wherever the sort puts it (an alpha tested plant may come
+    // first), the rest of the list the blended list's (also after the flares).
+    if (eList == eRL_Blended)
+      GpuSection(it.eDrawClass == eDC_Water || it.eDrawClass == eDC_WaterBeach ? "water" : "blended");
     if (m_pFrameDump)
       DumpItem(i, it, eList);
     m_fDrawHeat = m_bHeatPass ? ItemHeat(it) : 0;
@@ -360,6 +423,9 @@ void CD3D12Renderer::DrawLeafItem(const SRenderItem &it)
   // sectors; under the water it is the volume's own, as in the other volumes.
   const bool bFogPass = eDC == eDC_FogLayer || it.bFogPass ||
                         (eDC != eDC_Caustics && ((it.nSort & ~EFSLIST_MASK) == eS_FogShader || (pObj->m_ObjFlags & FOB_FOGPASS)));
+  // The depth prepass: the first pass alone, which writes the depth.
+  if (m_bDepthPrepass && (bFogPass || (pObj->m_ObjFlags & FOB_LIGHTPASS)))
+    return;
   const SFogVolume *pFogVolume = bFogPass ? m_pScene->GetFogVolume(it.nFog) : nullptr;
   if (bFogPass && (!pFogVolume || (pFogVolume->bCaustics && (m_bReflectionPass || m_Camera.GetPos().z >= pFogVolume->fFogLayerZ)) ||
                    !IsVolumetricFogOn() || m_bShadowMapPass || m_bSpritePass))
@@ -398,7 +464,8 @@ void CD3D12Renderer::DrawLeafItem(const SRenderItem &it)
   SDrawConstants dc = DefaultDrawConstants();
   memcpy(dc.mWorld, World.data, sizeof(dc.mWorld));
   memcpy(dc.mWorldViewProj, WorldViewProj.data, sizeof(dc.mWorldViewProj));
-  SetObjectMotion(dc, pObj, World, bNearest);
+  if (!m_bDepthPrepass)
+    SetObjectMotion(dc, pObj, World, bNearest);
 
   // The diffuse texture; without one the texture the leaf buffer was given (terrain, grass).
   CTexture *pTex = GetDiffuseTexture(pRes);
@@ -471,16 +538,17 @@ void CD3D12Renderer::DrawLeafItem(const SRenderItem &it)
   const ELighting eLighting = bSelfIllum ? ELighting::None : Props.eLighting;
   Set4(dc.vAmbient, pObj->m_AmbColor.x, pObj->m_AmbColor.y, pObj->m_AmbColor.z, eLighting == ELighting::Vertex ? 1.0f : 2.0f);
   std::optional<D3D12_VERTEX_BUFFER_VIEW> TexCoord1, Tangents;
+  uint32 nInstances = 1;
 
   auto Draw = [&]()
   {
-    if (m_pFrameDump)
+    if (m_pFrameDump && !m_bDepthPrepass)
       DumpDraw(dc, Key, pTex);
     const D3D12_VERTEX_BUFFER_VIEW *pTC1 = TexCoord1 ? &*TexCoord1 : nullptr, *pTangents = Tangents ? &*Tangents : nullptr;
     if (Geom->IsIndexed())
-      DrawGeometry(Key, dc, Geom->Topology, Geom->VB, &Geom->IB, Geom->nNumIndices, Geom->nFirstIndex, Geom->nBaseVertex, pTC1, pTangents);
+      DrawGeometry(Key, dc, Geom->Topology, Geom->VB, &Geom->IB, Geom->nNumIndices, Geom->nFirstIndex, Geom->nBaseVertex, pTC1, pTangents, nInstances);
     else
-      DrawGeometry(Key, dc, Geom->Topology, Geom->VB, nullptr, Geom->nNumVertices, Geom->nFirstVertex, 0, pTC1, pTangents);
+      DrawGeometry(Key, dc, Geom->Topology, Geom->VB, nullptr, Geom->nNumVertices, Geom->nFirstVertex, 0, pTC1, pTangents, nInstances);
   };
   // An object lit in passes (FOB_ZPASS: the ambient and the light map; then for each light an
   // FOB_LIGHTPASS element with that light alone in m_DynLMMask and no ambient): the light passes
@@ -491,8 +559,23 @@ void CD3D12Renderer::DrawLeafItem(const SRenderItem &it)
   {
     if (bLightPass)
       return;
-    if (SetupShadowCasterDraw(Key, dc, it))
-      Draw();
+    if (!SetupShadowCasterDraw(Key, dc, it))
+      return;
+    // Into the slices of the sun's cascades it reaches, an instance each (DrawCascadeItems): the
+    // world to each slice as WorldViewProj would be with its matrix.
+    if (m_nCascadeInstances > 0)
+    {
+      for (int i = 0; i < m_nCascadeInstances; i++)
+      {
+        const int nSlice = m_CascadeInstances[i];
+        const Matrix44 WorldToSlice = World * m_Cascades[nSlice].WorldToMap * m_ProjMatrix;
+        memcpy(dc.mShadow[i], WorldToSlice.data, sizeof(dc.mShadow[i]));
+        dc.nShadowTex[i] = (uint32)nSlice;
+      }
+      Key.bCascadeInstances = 1;
+      nInstances = (uint32)m_nCascadeInstances;
+    }
+    Draw();
     return;
   }
 
@@ -566,7 +649,8 @@ void CD3D12Renderer::DrawLeafItem(const SRenderItem &it)
     else if (HasNormal(nFormat))
     {
       dc.nFlags |= DF_LIGHTING;
-      SetObjectLights(dc, pObj, World, pLB);
+      if (!m_bDepthPrepass)
+        SetObjectLights(dc, pObj, World, pLB);
     }
     else if (HasColor(nFormat))
       dc.nFlags |= DF_VCOLOR;
@@ -574,7 +658,8 @@ void CD3D12Renderer::DrawLeafItem(const SRenderItem &it)
     // light map does not have (no sun, no DLF_LM light; not one lit in passes, whose light passes
     // bring them), per pixel as the vertex lighting takes them and in place of the ambient under the
     // light map, as the original adds its vertex lighting there (DF2_LIGHTMAP_LIGHTS).
-    if (CV_d3d12_PixelLighting && TexCoord1 && !(pObj->m_ObjFlags & FOB_ZPASS) && Props.eEnvMap != EEnvMap::Auto && HasNormal(nFormat))
+    if (CV_d3d12_PixelLighting && TexCoord1 && !(pObj->m_ObjFlags & FOB_ZPASS) && Props.eEnvMap != EEnvMap::Auto && HasNormal(nFormat) &&
+        !m_bDepthPrepass)
     {
       const uint32 nFlags2 = dc.nFlags2;
       SetObjectLights(dc, pObj, World, pLB);
@@ -614,6 +699,11 @@ void CD3D12Renderer::DrawLeafItem(const SRenderItem &it)
       dc.nFlags |= DF_PIXEL_LIGHTING;
       dc.nFlags2 |= DF2_VERTEX_LIGHTS | (pObj->m_pCharInstance ? 0 : DF2_SMOOTH_FALLOFF);
     }
+    // The depth prepass: the vertex streams as above, without the lights. The draw's input layout
+    // is the main pass's: in a pipeline without an object's tangents the GPU's compiler put some
+    // of its pixels a step nearer than with them (fish under Steam's water).
+    if (m_bDepthPrepass)
+      return;
     // The sun hidden by the shadow maps of the object's casters; by the sun's cascades where they
     // reach (a light map by the live casters only: it has the shadows of the rest).
     if (dc.nFlags & (DF_LIGHTING | DF_TEX1_LIGHTMAP))
@@ -888,7 +978,8 @@ void CD3D12Renderer::DrawLeafItem(const SRenderItem &it)
     // terrain draws it (twice the world colour) times the object's colour (the terrain in the
     // shadow), blended over the terrain where the casters' maps hide the sun, the more weakly the
     // farther behind its casters (by the depth across the map's range); no depth writes, before
-    // the detail layers.
+    // the detail layers. Where the sun's cascades shadow the terrain the pass leaves it (alpha 0):
+    // not drawn where all its triangles are there.
     const float *pCustom = (const float *)pLeaf->m_CustomData;
     if (!pTex || !pCustom || !SetupShadowReceiver(dc, pObj))
       return;
@@ -896,6 +987,10 @@ void CD3D12Renderer::DrawLeafItem(const SRenderItem &it)
     dc.fAlphaRef = 1.0f / 255.0f;
     dc.vShadowParams[1] = 1;
     dc.nFlags2 |= CascadeReceiverFlags(false);
+    Vec3 vMin, vMax;
+    if ((dc.nFlags2 & DF2_SUN_CASCADES) && !(dc.nFlags & DF_SHADOW_DEBUG) && GetTrianglesBox(pLB, pLeaf->m_pChunk, vMin, vMax) &&
+        IsWithinCascades(World, vMin, vMax))
+      return;
     Set4(dc.vTexGenU, 0, pCustom[2], 0, pCustom[0]);
     Set4(dc.vTexGenV, pCustom[2], 0, 0, pCustom[1]);
     Set4(dc.vColor, 2 * m_WorldColor[0] * pObj->m_Color.r, 2 * m_WorldColor[1] * pObj->m_Color.g, 2 * m_WorldColor[2] * pObj->m_Color.b, 1);
@@ -949,7 +1044,7 @@ void CD3D12Renderer::DrawLeafItem(const SRenderItem &it)
     pTex = nullptr;
     break;
   case eDC_ScopeLens:
-    if (!SetupScopeLensDraw(Key, dc))
+    if (!SetupScopeLensDraw(Key, dc, it, WorldViewProj))
       return;
     pTex = nullptr;
     break;
@@ -987,6 +1082,8 @@ void CD3D12Renderer::DrawLeafItem(const SRenderItem &it)
   }
   if (bFirstPass)
     Draw();
+  if (m_bDepthPrepass)
+    return;
   // The beach: the other waves and the wet sand.
   for (int nPass = 1; eDC == eDC_WaterBeach && nPass <= BEACH_WAVES && SetupBeachDraw(Key, dc, nPass); nPass++)
   {
@@ -1327,13 +1424,7 @@ CTexture *CD3D12Renderer::GetDetailTexture()
 
 CTexture *CD3D12Renderer::GetNormalMap(SRenderShaderResources *pRes)
 {
-  if (!pRes || !m_pShaders)
-    return nullptr;
-  auto Usable = [](CTexture *p) { return p && !p->IsCube() && !(p->GetFlags() & FT_NOTFOUND) && p->IsTextureLoaded(); };
-  CTexture *pMap = m_pShaders->LoadResourceTexture(pRes, EFTT_NORMALMAP);
-  if (!Usable(pMap))
-    pMap = m_pShaders->LoadResourceTexture(pRes, EFTT_BUMP);
-  return Usable(pMap) ? pMap : nullptr;
+  return pRes && m_pShaders ? m_pShaders->LoadNormalMap(pRes) : nullptr;
 }
 
 CTexture *CD3D12Renderer::GetGlowMap(SRenderShaderResources *pRes)

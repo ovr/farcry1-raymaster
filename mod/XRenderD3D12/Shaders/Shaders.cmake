@@ -10,6 +10,9 @@ xrender_d3d12_shader(General_PS General.hlsl ps_6_0 PSMain)
 # (SPipelineKey::nTarget 3).
 xrender_d3d12_shader(General_Velocity_VS General.hlsl vs_6_0 VSMain XR_VELOCITY)
 xrender_d3d12_shader(General_Velocity_PS General.hlsl ps_6_0 PSMain XR_VELOCITY)
+# The vertex shader of the full set of the sun's cascades: a caster drawn once into all the slices it
+# reaches, an instance each (SPipelineKey::bCascadeInstances, Cascades.cpp).
+xrender_d3d12_shader(General_CascadeInstances_VS General.hlsl vs_6_0 VSMain XR_CASCADE_INSTANCES)
 # Their pixel shaders with the steps of the HDR targets (XR_HDR: DF2_SKY_GLOW, DF2_HDR_CORE), for the
 # draws into D3D12_HDR_FORMAT (SPipelineKey::nColorFormat PIPELINE_COLOR_HDR); without them the others are
 # the programs without HDR, instruction for instruction.
@@ -65,7 +68,8 @@ xrender_d3d12_shader(RayDebug_VS RayDebug.hlsl vs_6_5 VSMain)
 xrender_d3d12_shader(RayDebug_PS RayDebug.hlsl ps_6_5 PSMain)
 
 # The compute kernels (D3D12Compute.h, ED3D12Kernel): Intel XeGTAO's passes (XeGtao.hlsl, one per
-# compile) and the ambient occlusion's resolve.
+# compile), the ambient occlusion's resolve, the HDR meter's first level, the bloom's levels and the
+# depth tiles of the water's depth copy.
 xrender_d3d12_shader(Gtao_PrefilterDepths_CS XeGtao.hlsl cs_6_0 CSMain XR_GTAO_PREFILTER)
 xrender_d3d12_shader(Gtao_Normals_CS XeGtao.hlsl cs_6_0 CSMain XR_GTAO_NORMALS)
 xrender_d3d12_shader(Gtao_Low_CS XeGtao.hlsl cs_6_0 CSMain XR_GTAO_MAIN XR_GTAO_SLICES=1 XR_GTAO_STEPS=2)
@@ -75,3 +79,7 @@ xrender_d3d12_shader(Gtao_Ultra_CS XeGtao.hlsl cs_6_0 CSMain XR_GTAO_MAIN XR_GTA
 xrender_d3d12_shader(Gtao_Denoise_CS XeGtao.hlsl cs_6_0 CSMain XR_GTAO_DENOISE)
 xrender_d3d12_shader(Gtao_DenoiseLast_CS XeGtao.hlsl cs_6_0 CSMain XR_GTAO_DENOISE XR_GTAO_LAST)
 xrender_d3d12_shader(AoResolve_CS AoResolve.hlsl cs_6_0 CSMain)
+xrender_d3d12_shader(Meter_CS Meter.hlsl cs_6_0 CSMain)
+xrender_d3d12_shader(Bloom_CS Bloom.hlsl cs_6_0 CSMain)
+xrender_d3d12_shader(DepthTiles_CS DepthTiles.hlsl cs_6_0 CSMain)
+xrender_d3d12_shader(DepthTilesUp_CS DepthTiles.hlsl cs_6_0 CSMain XR_TILES_UP)

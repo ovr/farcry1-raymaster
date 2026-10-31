@@ -42,6 +42,9 @@ set(XRENDERD3D12_SOURCES
     ColorGrading.cpp
     HdrOutput.cpp
     Flares.cpp
+    Stats.cpp
+    CpuSampler.h
+    CpuSampler.cpp
     D3D12Device.h
     D3D12Device.cpp
     D3D12Upload.h

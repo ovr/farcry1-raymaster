@@ -21,7 +21,7 @@
 //! What a backend works on, fixed while it lives (made again when it changes).
 struct SAOTargets
 {
-  ID3D12Resource *pDepth = nullptr;     //!< the main view's depth buffer (0 near, 1 far), NON_PIXEL_SHADER_RESOURCE | DEPTH_READ in Dispatch
+  ID3D12Resource *pDepth = nullptr;     //!< the main view's depth buffer (0 near, 1 far), NON_PIXEL_SHADER_RESOURCE | DEPTH_READ (with d3d12_AOApply 1 also PIXEL_SHADER_RESOURCE) in Dispatch
   DXGI_FORMAT DepthFormat = DXGI_FORMAT_UNKNOWN;  //!< the format it is read in (R24_UNORM_X8_TYPELESS, R32_FLOAT)
   ID3D12Resource *pOutput = nullptr;    //!< the visibility, R8_TYPELESS of the depth's size (1: open); UNORDERED_ACCESS before and after Dispatch
   int nWidth = 0, nHeight = 0;

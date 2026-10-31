@@ -33,6 +33,12 @@
 //	(lightmap coordinates, VERTEX_FORMAT_TEX2F), the tangent frame from
 //	slot 3 (SPipTangents).
 //
+//	The keys of the pipeline states made are kept in a file of the working
+//	directory (XRenderD3D12_pipelines.bin), and Init makes those of the
+//	runs before on several threads: a pipeline state made in the frame that
+//	first draws with it holds that frame up (a tenth of a millisecond and
+//	more each, tens of them where a level shows something new).
+//
 //////////////////////////////////////////////////////////////////////
 
 #pragma once
@@ -88,7 +94,11 @@ struct SPipelineKey
   uint8 nBlendOp;         //!< 0 the colour blends add, 1 subtract the source from the target (REV_SUBTRACT)
   uint8 bRayTrace;        //!< the water program with rays (XR_RAYTRACE, Shader Model 6.5; DrawGeometry clears it without a scene
                           //!< for rays in the frame)
-  uint8 nPad[3];
+  uint8 bCascadeInstances;  //!< nTarget 2: the general program's vertex shader of the full set of the sun's cascades, a slice
+                            //!< per instance (XR_CASCADE_INSTANCES: mShadow[i] into slice nShadowTex[i]; Cascades.cpp)
+  uint8 bDepthOnly;       //!< no pixel shader and no colour writes (DrawGeometry sets it for a shadow map's caster that
+                          //!< discards nothing and for the main view's depth prepass)
+  uint8 nPad[1];
 };
 
 //! SPipelineKey::nColorFormat.
@@ -113,6 +123,11 @@ public:
   ID3D12PipelineState *GetPSO(const SPipelineKey &Key);
   //! Binds input slot 1, the default values of the attributes a vertex format lacks.
   void BindDefaultStream(ID3D12GraphicsCommandList *pList);
+  //! The keys asked for so far (each made once).
+  size_t GetPSOCount() const { return m_PSOs.size(); }
+  //! After each frame: appends the keys made since the last write to the file of keys, once a frame
+  //! made none (the game may be ended without a shutdown).
+  void SaveKeys();
 
   //! Size in bytes of a vertex of the format (m_VertexSize of VertexFormats.h, also for the
   //! formats gBufInfoTable leaves out).
@@ -134,8 +149,12 @@ private:
 
   bool CreateRootSignature();
   bool CreateDefaultStream();
-  //! nullptr when the key can't be drawn or the device refuses it.
-  Microsoft::WRL::ComPtr<ID3D12PipelineState> CreatePSO(const SPipelineKey &Key);
+  //! Makes the pipeline states of the file's keys, then writes it again without those the device
+  //! refused and the repeats.
+  void LoadKeys();
+  //! nullptr when the key can't be drawn or the device refuses it; bLog false: no error logged (the
+  //! file's keys, made on other threads).
+  Microsoft::WRL::ComPtr<ID3D12PipelineState> CreatePSO(const SPipelineKey &Key, bool bLog);
 
   ID3D12Device *m_pDevice = nullptr;
   Microsoft::WRL::ComPtr<ID3D12RootSignature> m_pRootSignature;
@@ -143,4 +162,6 @@ private:
   D3D12_VERTEX_BUFFER_VIEW m_DefaultStreamView = {};
   //! Every key asked for, with nullptr for the keys that failed (logged once).
   std::unordered_map<SPipelineKey, Microsoft::WRL::ComPtr<ID3D12PipelineState>, SKeyHash, SKeyEqual> m_PSOs;
+  std::vector<SPipelineKey> m_NewKeys;  //!< made and not yet in the file
+  size_t m_nNewKeysBefore = 0;          //!< m_NewKeys.size() at the last SaveKeys
 };

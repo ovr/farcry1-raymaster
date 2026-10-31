@@ -144,7 +144,7 @@ void CD3D12Renderer::SetHighlightConstants(SDrawConstants &dc) const
 {
   if (!m_pDevice->HasLayer())
     return;
-  // The peak in paper whites, and its display value (HdrEncode, Common.hlsli).
+  // The peak in paper whites, and its display value (HdrEncode, HdrLight.hlsli).
   const float fPeak = m_HdrOut.fPeak / m_HdrOut.fPaperWhite;
   Set4(dc.vParams3, fPeak > 1 ? 1 + (fPeak - 1) / 2.2f : 1.0f, fPeak, 0, 0);
 }
@@ -162,6 +162,7 @@ SDrawConstants CD3D12Renderer::HdrOutputConstants(EDisplayOutput Output) const
 
 void CD3D12Renderer::DrawHdrOutput()
 {
+  FUNCTION_PROFILER(iSystem, PROFILE_RENDERER);
   const EDisplayOutput Output = m_pDevice->GetOutput();
   if (Output == EDisplayOutput::Sdr || !m_pDevice->HasLayer() || !UpdateLayerSRVs())
     return;

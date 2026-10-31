@@ -66,18 +66,39 @@ enum ESpecial
 
 struct SHookedVTable;
 
+//! Return addresses of the calls of a slot that are only counted (VCall_Fast).
+static const int nFastSites = 2;
+
 struct SVSlot
 {
+  // Read by VCall_Fast (VCallThunk_x64.asm). A call from pFastReturn[i] on thread nFastThread,
+  // while xrt_Trace is nFastTrace and g_nVCallFastEpoch nFastEpoch, adds 1 to *pFastCount[i] and goes
+  // straight to the original function: the rest of VCall_Enter would do nothing else for it.
+  void *pOrig;
+  void *pFastReturn[nFastSites];
+  LONG *pFastCount[nFastSites];
+  int nFastTrace;
+  LONG nFastEpoch;
+  DWORD nFastThread;
+  //! The next pFastReturn entry to replace.
+  int nFastNext;
+  //! Ends with a jump to another hooked function (seen as a call of it from VCall_ThunkReturn),
+  //! or may (Release, the destructor): always through VCall_Thunk, so that the other one is
+  //! counted and written as its call.
+  bool bTailCalls;
+
   SHookedVTable *pTable;
   int nSlot;
   const char *szMethod;
-  void *pOrig;
   ESpecial eSpecial;
   //! CRendElement::mfDraw: the element is the one being drawn until it returns.
   bool bDraw;
   //! Listed in XRENDERTRACED_TRACE_METHODS: nLogListed calls are written out.
   bool bListed;
+  //! Calls from the other threads than the one that loaded the renderer; nMainCalls, from it
+  //! (counted without a locked instruction: nearly all calls are made there).
   volatile LONG nCalls[CALLER_Num];
+  LONG nMainCalls[CALLER_Num];
   //! Bit i: called from module i of s_Modules.
   volatile LONG nEngineModules;
   volatile LONG nLogged;
@@ -118,7 +139,15 @@ struct SVCallFrame
 #ifdef _WIN64
 static_assert(offsetof(SVCallFrame, pSlot) == 0x60 && offsetof(SVCallFrame, nResult) == 0x70 && offsetof(SVCallFrame, XmmResult) == 0x80 &&
   offsetof(SVCallFrame, pReturn) == 0x98 && offsetof(SVCallFrame, StackArgs) == 0xC0, "SVCallFrame does not match VCallThunk_x64.asm");
+static_assert(nFastSites == 2 && offsetof(SVSlot, pOrig) == 0 && offsetof(SVSlot, pFastReturn) == 0x08 && offsetof(SVSlot, pFastCount) == 0x18 &&
+  offsetof(SVSlot, nFastTrace) == 0x28 && offsetof(SVSlot, nFastEpoch) == 0x2C && offsetof(SVSlot, nFastThread) == 0x30,
+  "SVSlot does not match VCallThunk_x64.asm");
 #endif
+
+//! Changes when the calls VCall_Fast counts may have to be written again (VCallHooks_RestartListed).
+extern "C" volatile LONG g_nVCallFastEpoch = 0;
+//! For VCall_Fast: xrt_Trace.
+extern "C" const int *const g_pVCallFastTrace = &CV_xrt_Trace;
 
 struct SModule
 {
@@ -188,7 +217,7 @@ static int AddModule(HMODULE hModule)
 }
 
 //! Index of the module holding the address in s_Modules, -1 if it is not in a module.
-static int ModuleIndex(const void *pAddr)
+static int FindModule(const void *pAddr)
 {
   const UINT_PTR nAddr = (UINT_PTR)pAddr;
   const LONG nModules = s_nModules;
@@ -204,6 +233,32 @@ static int ModuleIndex(const void *pAddr)
   int nRes = AddModule(hModule);
   ReleaseSRWLockExclusive(&s_Lock);
   return nRes;
+}
+
+#ifdef _WIN64
+//! The modules of the addresses found in one, as (address << 8) | index by a hash of the address:
+//! the calls come from a few hundred places. An entry stays right, as the first module of
+//! s_Modules holding an address does.
+static const int nModuleCache = 4096;
+static volatile UINT64 s_ModuleCache[nModuleCache];
+#endif
+
+//! FindModule, looked up in s_ModuleCache first.
+static int ModuleIndex(const void *pAddr)
+{
+#ifdef _WIN64
+  const UINT64 nAddr = (UINT_PTR)pAddr;
+  volatile UINT64 &Cached = s_ModuleCache[(nAddr ^ nAddr >> 12) & (nModuleCache - 1)];
+  const UINT64 nCached = Cached;
+  if (nAddr && nCached >> 8 == nAddr)
+    return (int)(nCached & 0xFF);
+  const int nRes = FindModule(pAddr);
+  if (nRes >= 0)
+    Cached = nAddr << 8 | (UINT64)nRes;
+  return nRes;
+#else
+  return FindModule(pAddr);
+#endif
 }
 
 void VCallHooks_SetRenderer(HMODULE hRenderer)
@@ -502,40 +557,12 @@ static void ObjectCall_Leave(SVCallFrame *pFrame)
 extern "C" void VCall_ThunkReturn();
 #endif
 
-extern "C" void VCall_Enter(SVCallFrame *pFrame)
+//! The rest of VCall_Enter for a call of the kind written out; out of line, so that VCall_Enter
+//! stays short for the calls it only counts.
+static __declspec(noinline) void VCall_EnterWritten(SVCallFrame *pFrame, bool bMainThread)
 {
   SVSlot *pSlot = pFrame->pSlot;
-  pFrame->pOrig = pSlot->pOrig;
-  pFrame->nFlags = 0;
-  if (pSlot->bDraw)
-  {
-    pFrame->nPad = (UINT_PTR)s_pDrawingRE;
-    s_pDrawingRE = (CRendElement *)pFrame->Args[0];
-    pFrame->nFlags = FRAME_DRAW;
-    D3DDraws_OnDrawRE();
-  }
-  const int nModule = ModuleIndex(pFrame->pReturn);
-  ECaller eCaller = nModule == s_nRenderer ? CALLER_Renderer : nModule == s_nSelf ? CALLER_Proxy : CALLER_Engine;
-#ifdef _WIN64
-  // A hooked function that ends with a jump to another one (e.g. Release to the destructor); in an
-  // engine interface the jump is made by the engine's own function (IConsole::Clear is reached so).
-  if (pFrame->pReturn == (void *)&VCall_ThunkReturn)
-    eCaller = pSlot->pTable->bEngine ? CALLER_Engine : CALLER_Renderer;
-#endif
-  InterlockedIncrement(&pSlot->nCalls[eCaller]);
-  if (eCaller == CALLER_Engine && nModule >= 0)
-    InterlockedOr(&pSlot->nEngineModules, 1 << nModule);
-  // The console variables every module looks up, the engine's modules as well.
-  if (pSlot->eSpecial == SPECIAL_ConsoleGetCVar)
-  {
-    if (eCaller != CALLER_Proxy)
-      ConsoleGetCVar_Enter(pFrame, nModule);
-    return;
-  }
-  // The engine's interfaces: the calls of the renderer into the engine are the ones to write.
-  if (eCaller != (pSlot->pTable->bEngine ? CALLER_Renderer : CALLER_Engine))
-    return;
-  if (GetCurrentThreadId() != Trace_MainThread() && InterlockedIncrement(&pSlot->nOtherThread) == 1)
+  if (!bMainThread && InterlockedIncrement(&pSlot->nOtherThread) == 1)
     Trace_Write("[thread] %s::%s called from thread %u (the renderer was loaded by thread %u), from %s", pSlot->pTable->szName,
       pSlot->szMethod, GetCurrentThreadId(), Trace_MainThread(), Trace_Addr(pFrame->pReturn));
   if (CV_xrt_Trace <= 0)
@@ -560,6 +587,83 @@ extern "C" void VCall_Enter(SVCallFrame *pFrame)
   ObjectCall_Enter(pFrame);
   ShaderCall_Enter(pFrame);
   EngineCall_Enter(pFrame);
+}
+
+#ifdef _WIN64
+//! A call of VCall_Enter that only counted it: the next ones from the same place go through
+//! VCall_Fast while what decided it stays the same (the thread, xrt_Trace, g_nVCallFastEpoch).
+static void SetFast(SVSlot *pSlot, void *pReturn, ECaller eCaller)
+{
+  if (pSlot->nFastTrace != CV_xrt_Trace || pSlot->nFastEpoch != g_nVCallFastEpoch || pSlot->nFastThread != GetCurrentThreadId())
+  {
+    for (int i = 0; i < nFastSites; i++)
+      pSlot->pFastReturn[i] = NULL;
+    pSlot->nFastTrace = CV_xrt_Trace;
+    pSlot->nFastEpoch = g_nVCallFastEpoch;
+    pSlot->nFastThread = GetCurrentThreadId();
+  }
+  const int i = pSlot->nFastNext;
+  pSlot->nFastNext = (i + 1) % nFastSites;
+  pSlot->pFastReturn[i] = NULL;
+  pSlot->pFastCount[i] = &pSlot->nMainCalls[eCaller];
+  pSlot->pFastReturn[i] = pReturn;
+}
+#endif
+
+extern "C" void VCall_Enter(SVCallFrame *pFrame)
+{
+  SVSlot *pSlot = pFrame->pSlot;
+  pFrame->pOrig = pSlot->pOrig;
+  pFrame->nFlags = 0;
+  if (pSlot->bDraw)
+  {
+    pFrame->nPad = (UINT_PTR)s_pDrawingRE;
+    s_pDrawingRE = (CRendElement *)pFrame->Args[0];
+    pFrame->nFlags = FRAME_DRAW;
+    D3DDraws_OnDrawRE();
+  }
+  const int nModule = ModuleIndex(pFrame->pReturn);
+  ECaller eCaller = nModule == s_nRenderer ? CALLER_Renderer : nModule == s_nSelf ? CALLER_Proxy : CALLER_Engine;
+#ifdef _WIN64
+  // A hooked function that ends with a jump to another one (e.g. Release to the destructor); in an
+  // engine interface the jump is made by the engine's own function (IConsole::Clear is reached so).
+  // The frame of the first one's VCall_Thunk is above the return address.
+  if (pFrame->pReturn == (void *)&VCall_ThunkReturn)
+  {
+    eCaller = pSlot->pTable->bEngine ? CALLER_Engine : CALLER_Renderer;
+    SVSlot *pOuter = ((SVCallFrame *)((BYTE *)&pFrame->pReturn + sizeof(void *) + 0x70))->pSlot;
+    if (!pOuter->bTailCalls)
+    {
+      pOuter->bTailCalls = true;
+      for (int i = 0; i < nFastSites; i++)
+        pOuter->pFastReturn[i] = NULL;
+    }
+  }
+#endif
+  const bool bMainThread = GetCurrentThreadId() == Trace_MainThread();
+  if (bMainThread)
+    pSlot->nMainCalls[eCaller]++;
+  else
+    InterlockedIncrement(&pSlot->nCalls[eCaller]);
+  if (eCaller == CALLER_Engine && nModule >= 0 && !(pSlot->nEngineModules & 1 << nModule))
+    InterlockedOr(&pSlot->nEngineModules, 1 << nModule);
+  // The console variables every module looks up, the engine's modules as well.
+  if (pSlot->eSpecial == SPECIAL_ConsoleGetCVar)
+  {
+    if (eCaller != CALLER_Proxy)
+      ConsoleGetCVar_Enter(pFrame, nModule);
+    return;
+  }
+  // The engine's interfaces: the calls of the renderer into the engine are the ones to write.
+  if (eCaller == (pSlot->pTable->bEngine ? CALLER_Renderer : CALLER_Engine) && (!bMainThread || CV_xrt_Trace > 0))
+    VCall_EnterWritten(pFrame, bMainThread);
+#ifdef _WIN64
+  // Written out no more (the slot's calls written, or the trace off): the others from here are
+  // only counted.
+  if (bMainThread && !pFrame->nFlags && pSlot->eSpecial == SPECIAL_None && !pSlot->bTailCalls &&
+      (nModule >= 0 || pFrame->pReturn == (void *)&VCall_ThunkReturn))
+    SetFast(pSlot, pFrame->pReturn, eCaller);
+#endif
 }
 
 extern "C" void VCall_Leave(SVCallFrame *pFrame)
@@ -590,12 +694,14 @@ extern "C" void VCall_Leave(SVCallFrame *pFrame)
 #ifdef _WIN64
 extern "C" void VCall_Thunk();
 
-//! mov r10, pSlot; jmp [rip]; VCall_Thunk
+extern "C" void VCall_Fast();
+
+//! mov r10, pSlot; jmp [rip]; VCall_Fast
 static const int nStubSize = 24;
 
 static void WriteStub(BYTE *pStub, SVSlot *pSlot)
 {
-  void *pThunk = (void *)&VCall_Thunk;
+  void *pThunk = (void *)&VCall_Fast;
   pStub[0] = 0x49;
   pStub[1] = 0xBA;
   memcpy(pStub + 2, &pSlot, 8);
@@ -760,6 +866,7 @@ static void InstallLocked(const char *szClass, void **pVTable, const char *szTag
     Slot.pOrig = pVTable[i];
     Slot.eSpecial = SpecialOf(szClass, Slot.szMethod);
     Slot.bDraw = !strcmp(Slot.szMethod, "mfDraw");
+    Slot.bTailCalls = !strcmp(Slot.szMethod, "Release") || !strcmp(Slot.szMethod, "{dtor}");
     char szName[128];
     _snprintf(szName, sizeof(szName) - 1, "%s::%s", Table.szName, Slot.szMethod);
     szName[sizeof(szName) - 1] = 0;
@@ -849,6 +956,7 @@ void VCallHooks_RestartListed()
     for (int j = 0; j < s_Tables[i].pInfo->nSlots; j++)
       if (s_Tables[i].Slots[j].bListed)
         s_Tables[i].Slots[j].nLogged = 0;
+  InterlockedIncrement(&g_nVCallFastEpoch);
   ReleaseSRWLockExclusive(&s_Lock);
 }
 
@@ -877,7 +985,10 @@ void VCallHooks_WriteSummary(const char *szReason)
     for (int i = 0; i < Table.pInfo->nSlots; i++)
     {
       const SVSlot &Slot = Table.Slots[i];
-      if (!Slot.nCalls[CALLER_Engine] && !Slot.nCalls[CALLER_Renderer] && !Slot.nCalls[CALLER_Proxy])
+      LONG nCalls[CALLER_Num];
+      for (int c = 0; c < CALLER_Num; c++)
+        nCalls[c] = Slot.nCalls[c] + Slot.nMainCalls[c];
+      if (!nCalls[CALLER_Engine] && !nCalls[CALLER_Renderer] && !nCalls[CALLER_Proxy])
         continue;
       char szModules[160] = "";
       int nLen = 0;
@@ -886,8 +997,8 @@ void VCallHooks_WriteSummary(const char *szReason)
         if (Slot.nEngineModules & (1 << m))
           nLen += _snprintf(szModules + nLen, sizeof(szModules) - nLen - 1, "%s%s", nLen ? ", " : "", s_Modules[m].szName);
       }
-      Trace_Write("    %2d %-28s %8d (%s) / %8d / %d", i, Slot.szMethod, Slot.nCalls[CALLER_Engine], szModules, Slot.nCalls[CALLER_Renderer],
-        Slot.nCalls[CALLER_Proxy]);
+      Trace_Write("    %2d %-28s %8d (%s) / %8d / %d", i, Slot.szMethod, nCalls[CALLER_Engine], szModules, nCalls[CALLER_Renderer],
+        nCalls[CALLER_Proxy]);
     }
   }
   if (!s_ScreenCalls.empty())

@@ -20,6 +20,7 @@
 #include "Texture.h"
 #include "Shader.h"
 #include "Scene.h"
+#include "CpuSampler.h"
 
 CD3D12Renderer *g_pRenderer = nullptr;
 
@@ -136,6 +137,7 @@ void CD3D12Renderer::RegisterVariables()
   iConsole->CreateVariable("r_DetailDefault", "Textures/Detail/rock", 0);
   iConsole->Register("r_VSync", &CV_r_vsync, 0, VF_DUMPTODISK);
   RegisterOtherVariables();
+  TakeDisplayInfo();
   iConsole->Register("d3d12_Debug", &CV_d3d12_debug, 0, VF_DUMPTODISK, "Direct3D 12 debug layer (read at start-up): 1 with GPU based validation, 2 without it");
   iConsole->Register("d3d12_DumpFrame", &CV_d3d12_DumpFrame, 0, 0, "Writes the render items and draws of the next frame to XRenderD3D12_frame.txt");
   iConsole->Register("d3d12_WaterDebug", &CV_d3d12_WaterDebug, 0, 0,
@@ -149,6 +151,16 @@ void CD3D12Renderer::RegisterVariables()
   iConsole->Register("d3d12_GpuTimes", &CV_d3d12_GpuTimes, 0, 0,
                      "N: every N frames, the average GPU time of the frame's sections (shadow maps, water reflection, opaque, "
                      "water, blended, ...) and the time between frames to the console and XRenderD3D12_gpu.txt; 0 off");
+  iConsole->Register("d3d12_FrameLog", &CV_d3d12_FrameLog, 0, 0,
+                     "1: a line per frame to XRenderD3D12_frames.txt: the time between frames, the CPU's waits and its time in the main "
+                     "view, the GPU time of each section, the draws, the triangles and the camera; 2 also the engine's frame profiler (collected "
+                     "without its overlay): the self time of each subsystem and of the profilers that took the most; 0 off");
+  iConsole->Register("d3d12_CpuSamples", &CV_d3d12_CpuSamples, 0, 0,
+                     "N: samples the stack of the thread that draws every N microseconds (a profiler of the wall clock: the engine's "
+                     "code, ours, the driver's); back to 0 writes the samples to XRenderD3D12_samples.txt (module and offset)");
+  iConsole->Register("r_Stats", &CV_r_Stats, 0, 0,
+                     "The renderer's statistics at the top left, averages of half a second: 1 the GPU time of each pass in the order they run "
+                     "(as d3d12_GpuTimes), the time between frames, the GPU's and the CPU's waits, the draws and triangles; 2 also the memory");
   iConsole->Register("d3d12_WaterReflectionScale", &CV_d3d12_WaterReflectionScale, 0.5f, VF_DUMPTODISK,
                      "Size of the water reflection (r_WaterReflections), a fraction of the screen's");
   iConsole->Register("d3d12_WaterReflectionBlur", &CV_d3d12_WaterReflectionBlur, 0.1f, 0,
@@ -177,6 +189,11 @@ void CD3D12Renderer::RegisterVariables()
   iConsole->Register("d3d12_ShadowDistance", &CV_d3d12_ShadowDistance, 120.0f, VF_DUMPTODISK,
                      "How far the sun's cascaded shadow maps reach from the camera (m); the shadow maps of the objects beyond");
   iConsole->Register("d3d12_ShadowCascadeSize", &CV_d3d12_ShadowCascadeSize, 2048, VF_DUMPTODISK, "The size of the sun's cascaded shadow maps, 512 to 4096");
+  iConsole->Register("d3d12_CascadeInstancing", &CV_d3d12_CascadeInstancing, 1, 0,
+                     "1: each caster of the sun's cascades drawn once into all the slices it reaches (instances); 0: once per slice");
+  iConsole->Register("d3d12_DepthPrepass", &CV_d3d12_DepthPrepass, 1, 0,
+                     "1: the main view's opaque surfaces that discard nothing drawn into the depth buffer before the opaque list, which "
+                     "then shades only the pixels it keeps; 0: the list alone");
   iConsole->Register("d3d12_ShadowSoftness", &CV_d3d12_ShadowSoftness, 0.05f, VF_DUMPTODISK,
                      "The softness of the sun's cascaded shadows: the radius of their filter (m; at least a texel and a half of each map)");
   iConsole->CreateVariable("d3d12_Upscaler", "none", VF_DUMPTODISK,
@@ -217,9 +234,12 @@ void CD3D12Renderer::RegisterVariables()
                      "the mask has all of its kinds (5: no alpha tested geometry)");
   iConsole->Register("d3d12_RTReflections", &CV_d3d12_RTReflections, 0, VF_DUMPTODISK,
                      "The water's reflection by rays: 0 off, 1 the rays in place of the screen space reflection, 2 both, the screen space "
-                     "reflection where it finds the scene and the rays elsewhere (a device with DXR 1.1)");
+                     "reflection where it finds the scene before it passes behind an object and the rays elsewhere (a device with DXR 1.1)");
   iConsole->Register("d3d12_RTShadows", &CV_d3d12_RTShadows, 1, VF_DUMPTODISK,
                      "1: the sun's shadow at the hits of the rays, by a ray towards the sun (the surfaces the sun's shadow falls on)");
+  iConsole->Register("d3d12_RTAsync", &CV_d3d12_RTAsync, 1, 0,
+                     "1: the acceleration structures for the rays built on the compute queue, beside the frame's shadows and opaque "
+                     "geometry; 0: in the frame's command list, after the ambient occlusion");
   // The HDR pipeline (r_HDRRendering, Hdr.cpp).
   iConsole->Register("d3d12_ToneMap", &CV_d3d12_ToneMap, 1, VF_DUMPTODISK,
                      "With r_HDRRendering, the tone map: 0 clamp, 1 soft shoulder (the game's look up to d3d12_ToneMapKnee, then each channel rolls off to 1), 2 ACES fitted, 3 AgX");
@@ -293,6 +313,11 @@ WIN_HWND CD3D12Renderer::Init(int x,int y,int width,int height,unsigned int cbpp
   {
     if (MakeDpiAware())
       iLog->Log("XRenderD3D12: the process is per monitor DPI aware");
+    // The engine names its keys with the keyboard layout its input starts with, after the
+    // renderer: with another one than English the bindings of W, A, S, D and the other letters
+    // find no key (none in the controls menu). English for the game, however it was started.
+    if (const HKL hEnglish = LoadKeyboardLayoutA("00000409", 0))
+      ActivateKeyboardLayout(hEnglish, KLF_SETFORPROCESS);
     // FarCry.exe registers the class (RetailRenderer.h, "Initialization"); without it (another host)
     // a class of our own.
     const char *szClass = RetailRenderer::szWindowClass;
@@ -334,6 +359,7 @@ WIN_HWND CD3D12Renderer::Init(int x,int y,int width,int height,unsigned int cbpp
   m_pTextures = std::make_unique<CTextureManager>();
   m_pShaders = std::make_unique<CShaderManager>();
   m_pScene = std::make_unique<CScene>();
+  StartWaterTextures();
   if (!m_pDevice->Init(m_hWnd, m_nWidth, m_nHeight, nDebug)
     || !m_pDescriptors->Init(m_pDevice->GetDevice())
     || !m_pUpload->Init(m_pDevice->GetDevice(), nFrameRingSize)
@@ -595,6 +621,10 @@ LRESULT CALLBACK CD3D12Renderer::WindowProc(HWND hWnd, UINT nMsg, WPARAM wParam,
 
 void CD3D12Renderer::Release()
 {
+  CpuSampler::Update(0, 0, "XRenderD3D12_samples.txt");
+  if (m_DisplayInfo.pVar && iConsole)
+    iConsole->RemoveConsoleVarSink(&m_DisplayInfo);
+  m_DisplayInfo.pVar = nullptr;
   // The engine still asks GetType while this runs.
   if (m_pDevice)
     m_pDevice->WaitForGPU();
@@ -603,6 +633,7 @@ void CD3D12Renderer::Release()
   Geometry::Shutdown();     // the leaf buffers the engine left, before the upload heap goes
   if (m_pShaders)
     m_pShaders->Shutdown();
+  EndWaterTextures();
   ReleaseWaterResources();
   ReleaseWaterReflection();
   ReleaseEnvCubes();
@@ -690,8 +721,9 @@ bool CD3D12Renderer::EnsureFrame()
     return false;
   if (!m_pDevice->IsInFrame())
   {
-    m_pDevice->SetGpuTiming(CV_d3d12_GpuTimes > 0);
+    m_pDevice->SetGpuTiming(CV_d3d12_GpuTimes > 0 || CV_r_Stats > 0 || CV_d3d12_FrameLog > 0);
     m_pDevice->BeginFrame();
+    m_pLastPSO = nullptr;         // a new command list
     InvalidateFrameConstants();   // the frame memory of the slot starts again
     ReadFlareTests();
   }
@@ -700,6 +732,7 @@ bool CD3D12Renderer::EnsureFrame()
 
 void CD3D12Renderer::BeginFrame (void)
 {
+  FUNCTION_PROFILER(iSystem, PROFILE_RENDERER);
   EnsureFrame();
   if (m_pScene)
     m_pScene->BeginFrame();
@@ -733,16 +766,26 @@ void CD3D12Renderer::BeginFrame (void)
 
 void CD3D12Renderer::Update (void)
 {
+  FUNCTION_PROFILER(iSystem, PROFILE_RENDERER);
   if (!m_pDevice)
     return;
   EnsureFrame();
   EndMainScene();               // a main view whose EF_EndEf3D did not end (none expected)
   DrawQueuedBoxes();
+  DrawStats();
+  m_fTopLeftText[1] = m_fTopLeftText[0];
+  m_fTopLeftText[0] = 0;
   DumpHdrOutput();
   // Shown only when swapping is on: the hidden frames of a level load are drawn but never seen.
   if (m_bSwapBuffers)
     DrawHdrOutput();
   m_pDevice->EndFrame(m_bSwapBuffers, m_bVSync || CV_r_vsync != 0);
+  m_pPipeline->SaveKeys();
+  // The game asks for the triangles after the frame is shown (the time demo's Tri/Frame).
+  m_nPolygons = m_nFramePolygons;
+  m_nFramePolygons = 0;
+  CollectStats();
+  m_nFrameSunLights = m_nFrameDynLights = 0;
   ReportGpuTimes();
   if (m_pFrameDump)
   {
@@ -769,7 +812,7 @@ void CD3D12Renderer::ReportGpuTimes()
   QueryPerformanceFrequency(&Frequency);
   if (CV_d3d12_GpuTimes <= 0)
   {
-    m_pDevice->ResetGpuTimes();
+    m_GpuReport.Reset();
     m_nTimedFrames = 0;
     m_fFrameMs = 0;
     m_nLastFrameTicks = 0;
@@ -782,19 +825,26 @@ void CD3D12Renderer::ReportGpuTimes()
     m_nTimedFrames++;
   }
   m_nLastFrameTicks = Now.QuadPart;
-  const int n = m_pDevice->GetGpuTimedFrames();
+  const int n = m_GpuReport.nFrames;
   if (n < CV_d3d12_GpuTimes)
     return;
   std::string Line = "frame " + std::to_string(m_nFrameID) + ", GPU ms per frame (" + std::to_string(n) + " frames):";
   double fTotal = 0;
   char sz[96];
-  for (const auto &[szSection, fMs] : m_pDevice->GetGpuTimes())
+  for (const auto &[szSection, fMs] : m_GpuReport.Sections)
   {
     snprintf(sz, sizeof(sz), " %s %.2f,", szSection, fMs / n);
     Line += sz;
     fTotal += fMs;
   }
-  snprintf(sz, sizeof(sz), " total %.2f; time between frames %.2f ms", fTotal / n, m_nTimedFrames ? m_fFrameMs / m_nTimedFrames : 0.0);
+  snprintf(sz, sizeof(sz), " total %.2f;", fTotal / n);
+  Line += sz;
+  for (const auto &[szSection, fMs] : m_GpuReport.Compute)
+  {
+    snprintf(sz, sizeof(sz), " beside it %s %.2f;", szSection, fMs / n);
+    Line += sz;
+  }
+  snprintf(sz, sizeof(sz), " time between frames %.2f ms", m_nTimedFrames ? m_fFrameMs / m_nTimedFrames : 0.0);
   Line += sz;
   iLog->LogToConsole("XRenderD3D12: %s", Line.c_str());
   if (!m_pGpuTimes)
@@ -804,7 +854,7 @@ void CD3D12Renderer::ReportGpuTimes()
     fprintf(m_pGpuTimes.get(), "%s\n", Line.c_str());
     fflush(m_pGpuTimes.get());
   }
-  m_pDevice->ResetGpuTimes();
+  m_GpuReport.Reset();
   m_nTimedFrames = 0;
   m_fFrameMs = 0;
 }
@@ -1182,6 +1232,9 @@ void CD3D12Renderer::ReadFrameBuffer(unsigned char * pRGB, int nSizeX, int nSize
   // nScaledX x nScaledY (point sampled) when given.
   if (!m_pDevice || !pRGB || nSizeX <= 0 || nSizeY <= 0)
     return;
+  // A frame read before Update (a demo's) has the statistics Update would draw.
+  if (m_pDevice->IsInFrame())
+    DrawStats();
   const int w = m_pDevice->GetWidth(), h = m_pDevice->GetHeight();
   std::vector<uint8> Pixels((size_t)w * h * 4);
   if (!m_pDevice->ReadBackBuffer(Pixels.data(), w, h))
@@ -1237,12 +1290,13 @@ void *CD3D12Renderer::EF_Query(int Query, int Param)
 
 int CD3D12Renderer::GetPolyCount()
 {
-  return 0;
+  return m_nPolygons;
 }
 
 void CD3D12Renderer::GetPolyCount(int &nPolygons,int &nShadowVolPolys)
 {
-  nPolygons = 0;
+  // No stencil shadow volumes are drawn (CRETriMeshShadow).
+  nPolygons = m_nPolygons;
   nShadowVolPolys = 0;
 }
 

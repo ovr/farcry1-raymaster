@@ -148,6 +148,7 @@ std::vector<SPoint2> ConvexHull(std::vector<SPoint2> Points)
 
 void CD3D12Renderer::DrawFlares(std::span<const SRenderItem> Items)
 {
+  FUNCTION_PROFILER(iSystem, PROFILE_RENDERER);
   if (m_bReflectionPass || m_bShadowMapPass || m_bSpritePass || m_nRecurseLevel > 1 || m_pDevice->IsOffscreen() || !m_pScene || !m_pTextures)
     return;
   if (CVarFloat(m_pCoronas, "r_Coronas", 0) == 0)

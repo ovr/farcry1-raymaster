@@ -1122,18 +1122,25 @@ void D3DDraws_WatchRenderTargets(IRenderer *pRenderer, int nFrame)
     Trace_Write("d3d vs register: c%d at the indexed draws of device %p", s_nVSReg, pDev);
 }
 
-void D3DDraws_CaptureOnShader(IShader *pShader, const char *szWhere)
+static int s_nCaptureOnShaderMax = -1;
+static int s_nCaptureOnShaderDone = 0;
+
+bool D3DDraws_CapturesOnShader()
 {
-  static int s_nMax = -1;
-  static int s_nDone = 0;
-  if (s_nMax < 0)
+  if (s_nCaptureOnShaderMax < 0)
   {
     char szEnv[8] = "";
-    s_nMax = GetEnvironmentVariableA("XRENDERTRACED_CAPTURE_SHADER", szEnv, sizeof(szEnv)) ? 1 : 0;
-    if (s_nMax && GetEnvironmentVariableA("XRENDERTRACED_CAPTURE_SHADER_MAX", szEnv, sizeof(szEnv)) && szEnv[0] >= '0' && szEnv[0] <= '9')
-      s_nMax = atoi(szEnv);
+    s_nCaptureOnShaderMax = GetEnvironmentVariableA("XRENDERTRACED_CAPTURE_SHADER", szEnv, sizeof(szEnv)) ? 1 : 0;
+    if (s_nCaptureOnShaderMax && GetEnvironmentVariableA("XRENDERTRACED_CAPTURE_SHADER_MAX", szEnv, sizeof(szEnv)) && szEnv[0] >= '0' &&
+        szEnv[0] <= '9')
+      s_nCaptureOnShaderMax = atoi(szEnv);
   }
-  if (s_nDone >= s_nMax || !pShader || !s_pFrameRenderer || Trace_IsCapturing())
+  return s_nCaptureOnShaderDone < s_nCaptureOnShaderMax;
+}
+
+void D3DDraws_CaptureOnShader(IShader *pShader, const char *szWhere)
+{
+  if (!D3DDraws_CapturesOnShader() || !pShader || !s_pFrameRenderer || Trace_IsCapturing())
     return;
   const char *szName = pShader->GetName();
   const char *szHit = szName && Trace_IsListed("XRENDERTRACED_CAPTURE_SHADER", szName) ? szName : NULL;
@@ -1145,7 +1152,7 @@ void D3DDraws_CaptureOnShader(IShader *pShader, const char *szWhere)
   }
   if (!szHit)
     return;
-  s_nDone++;
+  s_nCaptureOnShaderDone++;
   char szReason[192];
   _snprintf_s(szReason, sizeof(szReason), _TRUNCATE, "capture of the rest of frame %d from %s with shader '%s' ('%s')", s_nRTFrame,
     szWhere, szName ? szName : "", szHit);

@@ -33,6 +33,20 @@ void Barrier(ID3D12GraphicsCommandList *pList, ID3D12Resource *pRes, D3D12_RESOU
 //! The scene targets outside BeginScene .. EndScene: read by an upscaler's compute or pixel shaders.
 constexpr D3D12_RESOURCE_STATES SCENE_READ = D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE | D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE;
 
+//! The CPU's clock in milliseconds.
+double NowMs()
+{
+  static const double fMsPerTick = []
+  {
+    LARGE_INTEGER Frequency;
+    QueryPerformanceFrequency(&Frequency);
+    return 1000.0 / (double)Frequency.QuadPart;
+  }();
+  LARGE_INTEGER Now;
+  QueryPerformanceCounter(&Now);
+  return (double)Now.QuadPart * fMsPerTick;
+}
+
 //! Logs a failed call; true if hr failed.
 bool Failed(HRESULT hr, const char *szWhat)
 {
@@ -95,9 +109,8 @@ bool CD3D12Device::Init(HWND hWnd, int nWidth, int nHeight, int nDebug)
     if (SUCCEEDED(D3D12CreateDevice(pAdapter.Get(), D3D_FEATURE_LEVEL_11_0, IID_PPV_ARGS(&m_pDevice))))
     {
       m_pAdapter = pAdapter;
-      char szName[128];
-      WideCharToMultiByte(CP_UTF8, 0, Desc.Description, -1, szName, sizeof(szName), nullptr, nullptr);
-      iLog->Log("XRenderD3D12: adapter '%s', %u MB video memory", szName, (unsigned)(Desc.DedicatedVideoMemory >> 20));
+      WideCharToMultiByte(CP_UTF8, 0, Desc.Description, -1, m_szAdapter, sizeof(m_szAdapter), nullptr, nullptr);
+      iLog->Log("XRenderD3D12: adapter '%s', %u MB video memory", m_szAdapter, (unsigned)(Desc.DedicatedVideoMemory >> 20));
     }
   }
   if (!m_pDevice)
@@ -120,6 +133,12 @@ bool CD3D12Device::Init(HWND hWnd, int nWidth, int nHeight, int nDebug)
     Filter.DenyList.NumIDs = (UINT)std::size(DenyIDs);
     Filter.DenyList.pIDList = DenyIDs;
     m_pInfoQueue->AddStorageFilterEntries(&Filter);
+    m_pDebugLog.reset(fopen("XRenderD3D12_debug.txt", "w"));
+    if (m_pDebugLog)
+    {
+      fprintf(m_pDebugLog.get(), "# the Direct3D 12 debug layer's errors and warnings\n");
+      fflush(m_pDebugLog.get());
+    }
   }
 
   D3D12_COMMAND_QUEUE_DESC QueueDesc = {};
@@ -158,7 +177,8 @@ bool CD3D12Device::Init(HWND hWnd, int nWidth, int nHeight, int nDebug)
   D3D12_DESCRIPTOR_HEAP_DESC HeapDesc = {};
   // The back buffers' views, then the scene targets' (colour, motion vectors, the upscaler's
   // depth; the depth buffer's after the back buffers' in the DSV heap), the HDR target's, the
-  // frame target's, the highlight layer's and two null ones (SceneRTV).
+  // frame target's, the highlight layer's and two null ones (SceneRTV). The DSV heap: the depth
+  // buffer's, the scene's, then the same read only (ReadOnlyDSV).
   HeapDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_RTV;
   HeapDesc.NumDescriptors = D3D12_BACKBUFFERS + 8;
   if (Failed(m_pDevice->CreateDescriptorHeap(&HeapDesc, IID_PPV_ARGS(&m_pRTVHeap)), "CreateDescriptorHeap (RTV)"))
@@ -173,7 +193,7 @@ bool CD3D12Device::Init(HWND hWnd, int nWidth, int nHeight, int nDebug)
   NullView.Format = D3D12_UPSCALE_DEPTH_FORMAT;
   m_pDevice->CreateRenderTargetView(nullptr, &NullView, SceneRTV(7));
   HeapDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_DSV;
-  HeapDesc.NumDescriptors = 2;
+  HeapDesc.NumDescriptors = 4;
   if (Failed(m_pDevice->CreateDescriptorHeap(&HeapDesc, IID_PPV_ARGS(&m_pDSVHeap)), "CreateDescriptorHeap (DSV)"))
     return false;
 
@@ -188,6 +208,49 @@ bool CD3D12Device::Init(HWND hWnd, int nWidth, int nHeight, int nDebug)
   if (Failed(m_pDevice->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&m_pFence)), "CreateFence"))
     return false;
   m_hFenceEvent = CreateEventA(nullptr, FALSE, FALSE, nullptr);
+  // The compute queue for work beside the frame's (without it, that work is in the frame's list).
+  QueueDesc.Type = D3D12_COMMAND_LIST_TYPE_COMPUTE;
+  bool bCompute = SUCCEEDED(m_pDevice->CreateCommandQueue(&QueueDesc, IID_PPV_ARGS(&m_pComputeQueue)));
+  for (auto &pAllocator : m_pComputeAllocators)
+    bCompute = bCompute && SUCCEEDED(m_pDevice->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_COMPUTE, IID_PPV_ARGS(&pAllocator)));
+  bCompute = bCompute &&
+    SUCCEEDED(m_pDevice->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_COMPUTE, m_pComputeAllocators[0].Get(), nullptr, IID_PPV_ARGS(&m_pComputeList))) &&
+    SUCCEEDED(m_pComputeList->Close()) && SUCCEEDED(m_pDevice->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&m_pUploadFence))) &&
+    SUCCEEDED(m_pDevice->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&m_pComputeFence)));
+  if (bCompute)
+  {
+    m_pComputeQueue->SetName(L"XRenderD3D12 compute");
+    m_pComputeList->SetName(L"XRenderD3D12 compute");
+    uint64 nComputeFrequency = 0;
+    D3D12_QUERY_HEAP_DESC QueryDesc = {};
+    QueryDesc.Type = D3D12_QUERY_HEAP_TYPE_TIMESTAMP;
+    QueryDesc.Count = D3D12_FRAMES * COMPUTE_LISTS * 2;
+    D3D12_HEAP_PROPERTIES Heap = {};
+    Heap.Type = D3D12_HEAP_TYPE_READBACK;
+    D3D12_RESOURCE_DESC Desc = {};
+    Desc.Dimension = D3D12_RESOURCE_DIMENSION_BUFFER;
+    Desc.Width = sizeof(uint64) * QueryDesc.Count;
+    Desc.Height = 1;
+    Desc.DepthOrArraySize = 1;
+    Desc.MipLevels = 1;
+    Desc.SampleDesc.Count = 1;
+    Desc.Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
+    if (FAILED(m_pComputeQueue->GetTimestampFrequency(&nComputeFrequency)) || !nComputeFrequency ||
+        FAILED(m_pDevice->CreateQueryHeap(&QueryDesc, IID_PPV_ARGS(&m_pComputeTimestamps))) ||
+        FAILED(m_pDevice->CreateCommittedResource(&Heap, D3D12_HEAP_FLAG_NONE, &Desc, D3D12_RESOURCE_STATE_COPY_DEST, nullptr,
+                                                  IID_PPV_ARGS(&m_pComputeTimestampReadback))))
+      m_pComputeTimestamps.Reset();
+    else
+      m_fComputeTimestampMs = 1000.0 / (double)nComputeFrequency;
+  }
+  else
+  {
+    iLog->Log("XRenderD3D12: no compute queue; the work beside the frame's goes in the frame's command list");
+    m_pComputeQueue.Reset();
+    m_pComputeList.Reset();
+    for (auto &p : m_pComputeAllocators)
+      p.Reset();
+  }
 
   // GPU timing: a timestamp query heap and its readback buffer (none: no timing).
   uint64 nFrequency = 0;
@@ -268,6 +331,8 @@ bool CD3D12Device::CreateSwapChainBuffers()
   View.Format = D3D12_DEPTH_FORMAT;
   View.ViewDimension = D3D12_DSV_DIMENSION_TEXTURE2D;
   m_pDevice->CreateDepthStencilView(m_pDepth.Get(), &View, m_pDSVHeap->GetCPUDescriptorHandleForHeapStart());
+  View.Flags = D3D12_DSV_FLAG_READ_ONLY_DEPTH | D3D12_DSV_FLAG_READ_ONLY_STENCIL;
+  m_pDevice->CreateDepthStencilView(m_pDepth.Get(), &View, ReadOnlyDSV(false));
   m_nBackBuffer = m_pSwapChain->GetCurrentBackBufferIndex();
   return !m_bLayer || CreateLayer();
 }
@@ -293,6 +358,14 @@ void CD3D12Device::Shutdown()
   m_pCmdList.Reset();
   for (auto &p : m_pAllocators)
     p.Reset();
+  m_pComputeList.Reset();
+  for (auto &p : m_pComputeAllocators)
+    p.Reset();
+  m_pComputeQueue.Reset();
+  m_pUploadFence.Reset();
+  m_pComputeFence.Reset();
+  m_pComputeTimestamps.Reset();
+  m_pComputeTimestampReadback.Reset();
   m_pTimestamps.Reset();
   m_pTimestampReadback.Reset();
   m_pOcclusion.Reset();
@@ -505,6 +578,7 @@ void CD3D12Device::SetOffscreenTargets(ID3D12Resource *pColor, D3D12_CPU_DESCRIP
 {
   if (!m_bInFrame || !pColor)
     return;
+  m_nStateEpoch++;
   EndOffscreen();
   Barrier(m_pCmdList.Get(), pColor, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, D3D12_RESOURCE_STATE_RENDER_TARGET, nSubresource);
   m_pOffscreen = pColor;
@@ -521,12 +595,10 @@ void CD3D12Device::SetOffscreenTargets(ID3D12Resource *pColor, D3D12_CPU_DESCRIP
   m_pCmdList->RSSetScissorRects(1, &rc);
 }
 
-bool CD3D12Device::CreateShadowMap(int nSize, ComPtr<ID3D12Resource> &pDepth, D3D12_CPU_DESCRIPTOR_HANDLE hDSV)
+bool CD3D12Device::CreateShadowMap(int nSize, ComPtr<ID3D12Resource> &pDepth, SD3D12Placement &Place, D3D12_CPU_DESCRIPTOR_HANDLE hDSV)
 {
-  if (!m_pDevice || nSize <= 0 || !hDSV.ptr)
+  if (!m_pDevice || nSize <= 0 || !hDSV.ptr || !g_pRenderer->m_pUpload)
     return false;
-  D3D12_HEAP_PROPERTIES Heap = {};
-  Heap.Type = D3D12_HEAP_TYPE_DEFAULT;
   D3D12_RESOURCE_DESC Desc = {};
   Desc.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
   Desc.Width = nSize;
@@ -539,8 +611,7 @@ bool CD3D12Device::CreateShadowMap(int nSize, ComPtr<ID3D12Resource> &pDepth, D3
   D3D12_CLEAR_VALUE Clear = {};
   Clear.Format = D3D12_SHADOW_MAP_FORMAT;
   Clear.DepthStencil.Depth = 1.0f;
-  if (Failed(m_pDevice->CreateCommittedResource(&Heap, D3D12_HEAP_FLAG_NONE, &Desc, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, &Clear,
-    IID_PPV_ARGS(&pDepth)), "CreateCommittedResource (shadow map)"))
+  if (Failed(g_pRenderer->m_pUpload->CreateDepthTarget(Desc, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, Clear, pDepth, Place), "CreateDepthTarget (shadow map)"))
     return false;
   D3D12_DEPTH_STENCIL_VIEW_DESC View = {};
   View.Format = D3D12_SHADOW_MAP_FORMAT;
@@ -581,6 +652,13 @@ bool CD3D12Device::CreateShadowMapArray(int nSize, int nSlices, ComPtr<ID3D12Res
     View.Texture2DArray.ArraySize = 1;
     m_pDevice->CreateDepthStencilView(pDepth.Get(), &View, phDSV[i]);
   }
+  if (!phDSV[nSlices].ptr)
+    return false;
+  D3D12_DEPTH_STENCIL_VIEW_DESC View = {};
+  View.Format = D3D12_SHADOW_MAP_FORMAT;
+  View.ViewDimension = D3D12_DSV_DIMENSION_TEXTURE2DARRAY;
+  View.Texture2DArray.ArraySize = nSlices;
+  m_pDevice->CreateDepthStencilView(pDepth.Get(), &View, phDSV[nSlices]);
   return true;
 }
 
@@ -588,6 +666,7 @@ void CD3D12Device::SetShadowMapTarget(ID3D12Resource *pDepth, D3D12_CPU_DESCRIPT
 {
   if (!m_bInFrame || !pDepth)
     return;
+  m_nStateEpoch++;
   if (m_pOffscreen != pDepth || !m_bOffscreenShadowMap)
   {
     EndOffscreen();
@@ -620,16 +699,18 @@ void CD3D12Device::EndOffscreen()
 
 void CD3D12Device::SetBackBufferTargets()
 {
+  m_nStateEpoch++;
   EndOffscreen();
   if (m_bInScene)
   {
-    const D3D12_CPU_DESCRIPTOR_HANDLE hRTV[4] = { SceneRTV(0), SceneRTV(1), SceneRTV(2), m_hAmbientRTV }, hDSV = SceneDSV();
+    const D3D12_CPU_DESCRIPTOR_HANDLE hRTV[4] = { SceneRTV(0), SceneRTV(1), SceneRTV(2), m_hAmbientRTV };
+    const D3D12_CPU_DESCRIPTOR_HANDLE hDSV = m_bDepthReadOnly ? ReadOnlyDSV(true) : SceneDSV();
     m_pCmdList->OMSetRenderTargets(m_hAmbientRTV.ptr ? 4 : 3, hRTV, FALSE, &hDSV);
   }
   else
   {
     const D3D12_CPU_DESCRIPTOR_HANDLE hRTV[4] = { m_bInHdr ? SceneRTV(3) : GetBackBufferRTV(), SceneRTV(6), SceneRTV(7), m_hAmbientRTV };
-    const D3D12_CPU_DESCRIPTOR_HANDLE hDSV = GetDSV();
+    const D3D12_CPU_DESCRIPTOR_HANDLE hDSV = m_bDepthReadOnly ? ReadOnlyDSV(false) : GetDSV();
     m_pCmdList->OMSetRenderTargets(m_hAmbientRTV.ptr ? 4 : 1, hRTV, FALSE, &hDSV);
   }
   const int w = GetMainWidth(), h = GetMainHeight();
@@ -646,10 +727,18 @@ void CD3D12Device::BindAmbient(D3D12_CPU_DESCRIPTOR_HANDLE hRTV)
     SetBackBufferTargets();
 }
 
+void CD3D12Device::SetDepthReadOnly(bool bReadOnly)
+{
+  m_bDepthReadOnly = bReadOnly;
+  if (m_bInFrame && !m_pOffscreen)
+    SetBackBufferTargets();
+}
+
 void CD3D12Device::BindRootSignature()
 {
   if (!m_bInFrame || !g_pRenderer->m_pDescriptors || !g_pRenderer->m_pPipeline)
     return;
+  m_nStateEpoch++;
   ID3D12DescriptorHeap *pHeap = g_pRenderer->m_pDescriptors->GetHeap();
   m_pCmdList->SetDescriptorHeaps(1, &pHeap);
   m_pCmdList->SetGraphicsRootSignature(g_pRenderer->m_pPipeline->GetRootSignature());
@@ -683,6 +772,13 @@ D3D12_CPU_DESCRIPTOR_HANDLE CD3D12Device::SceneDSV() const
 {
   D3D12_CPU_DESCRIPTOR_HANDLE h = m_pDSVHeap->GetCPUDescriptorHandleForHeapStart();
   h.ptr += m_pDevice->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_DSV);
+  return h;
+}
+
+D3D12_CPU_DESCRIPTOR_HANDLE CD3D12Device::ReadOnlyDSV(bool bScene) const
+{
+  D3D12_CPU_DESCRIPTOR_HANDLE h = m_pDSVHeap->GetCPUDescriptorHandleForHeapStart();
+  h.ptr += (bScene ? 3 : 2) * m_pDevice->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_DSV);
   return h;
 }
 
@@ -745,6 +841,8 @@ bool CD3D12Device::SetSceneSize(int nWidth, int nHeight, DXGI_FORMAT ColorFormat
   View.Format = D3D12_SCENE_DEPTH_FORMAT;
   View.ViewDimension = D3D12_DSV_DIMENSION_TEXTURE2D;
   m_pDevice->CreateDepthStencilView(m_pSceneDepth.Get(), &View, SceneDSV());
+  View.Flags = D3D12_DSV_FLAG_READ_ONLY_DEPTH;
+  m_pDevice->CreateDepthStencilView(m_pSceneDepth.Get(), &View, ReadOnlyDSV(true));
   m_nSceneWidth = nWidth;
   m_nSceneHeight = nHeight;
   m_nSceneOutputWidth = m_nWidth;
@@ -899,6 +997,7 @@ void CD3D12Device::BindHighlight(bool bOn)
 {
   if (!m_bInFrame || !m_pHighlight || bOn == m_bHighlightBound)
     return;
+  m_nStateEpoch++;
   m_bHighlightBound = bOn;
   if (!bOn)
   {
@@ -926,6 +1025,7 @@ void CD3D12Device::BeginOutput()
 {
   if (!m_bInFrame || !m_pFrame || m_bOutput)
     return;
+  m_nStateEpoch++;
   EndScene();
   EndHdr();
   EndOffscreen();
@@ -1102,13 +1202,20 @@ void CD3D12Device::OpenCmdList()
 {
   m_pAllocators[m_nFrameSlot]->Reset();
   m_pCmdList->Reset(m_pAllocators[m_nFrameSlot].Get(), nullptr);
+  m_nStateEpoch++;
 }
 
 void CD3D12Device::BeginFrame()
 {
   if (m_bInFrame || !m_pDevice)
     return;
-  WaitForFence(m_nFrameFence[m_nFrameSlot]);
+  {
+    // The GPU still drawing the frame D3D12_FRAMES back.
+    FRAME_PROFILER("CD3D12Device::BeginFrame:WaitForGpu", iSystem, PROFILE_RENDERER);
+    const double fStart = NowMs();
+    WaitForFence(m_nFrameFence[m_nFrameSlot]);
+    m_fWaitMs = NowMs() - fStart;
+  }
   ReadGpuTimes();
   ReadOcclusionResults();
   CollectGarbage();
@@ -1116,6 +1223,7 @@ void CD3D12Device::BeginFrame()
     g_pRenderer->m_pUpload->BeginFrame(m_nFrameSlot);
   m_nBackBuffer = m_pSwapChain->GetCurrentBackBufferIndex();
   m_bInFrame = true;
+  m_bComputeAllocatorReset = false;
   OpenCmdList();
   GpuSection("other");
   if (m_pFrame)
@@ -1136,6 +1244,7 @@ void CD3D12Device::BeginFrame()
 
 void CD3D12Device::EndFrame(bool bPresent, bool bVSync)
 {
+  FUNCTION_PROFILER(iSystem, PROFILE_RENDERER);
   if (!m_bInFrame)
     return;
   EndScene();
@@ -1151,6 +1260,13 @@ void CD3D12Device::EndFrame(bool bPresent, bool bVSync)
     m_GpuSections[m_nFrameSlot][n] = nullptr;
     m_nGpuMarks[m_nFrameSlot] = n + 1;
     m_pCmdList->ResolveQueryData(m_pTimestamps.Get(), D3D12_QUERY_TYPE_TIMESTAMP, nFirst, n + 1, m_pTimestampReadback.Get(), sizeof(uint64) * nFirst);
+  }
+  // The compute lists' (the frame's list waited for them).
+  if (const int n = m_nComputeLists[m_nFrameSlot]; n > 0)
+  {
+    const uint32 nFirst = m_nFrameSlot * COMPUTE_LISTS * 2;
+    m_pCmdList->ResolveQueryData(m_pComputeTimestamps.Get(), D3D12_QUERY_TYPE_TIMESTAMP, nFirst, n * 2, m_pComputeTimestampReadback.Get(),
+                                 sizeof(uint64) * nFirst);
   }
   if (const int n = m_nOcclusions[m_nFrameSlot]; n > 0)
   {
@@ -1177,8 +1293,14 @@ void CD3D12Device::EndFrame(bool bPresent, bool bVSync)
   ID3D12CommandList *pList = m_pCmdList.Get();
   m_pQueue->ExecuteCommandLists(1, &pList);
   HRESULT hr = S_OK;
+  m_fPresentMs = 0;
   if (bPresent)
+  {
+    FRAME_PROFILER("CD3D12Device::EndFrame:Present", iSystem, PROFILE_RENDERER);
+    const double fStart = NowMs();
     hr = m_pSwapChain->Present(bVSync ? 1 : 0, !bVSync && m_bTearing ? DXGI_PRESENT_ALLOW_TEARING : 0);
+    m_fPresentMs = NowMs() - fStart;
+  }
   // A removed device, once, whether the frame was presented or not (a demo's frames need not be).
   static bool s_bLogged = false;
   if (!s_bLogged)
@@ -1196,10 +1318,71 @@ void CD3D12Device::EndFrame(bool bPresent, bool bVSync)
   LogDebugMessages();
 }
 
+ID3D12GraphicsCommandList4 *CD3D12Device::BeginAsyncCompute(const char *szSection)
+{
+  if (!m_bInFrame || !m_pComputeList)
+    return nullptr;
+  // The slot's allocator once a frame: its earlier lists in this frame may still run.
+  if (!m_bComputeAllocatorReset)
+  {
+    m_pComputeAllocators[m_nFrameSlot]->Reset();
+    m_bComputeAllocatorReset = true;
+  }
+  m_pComputeList->Reset(m_pComputeAllocators[m_nFrameSlot].Get(), nullptr);
+  int &n = m_nComputeLists[m_nFrameSlot];
+  m_bComputeTimed = m_bGpuTiming && m_pComputeTimestamps && n < COMPUTE_LISTS;
+  if (m_bComputeTimed)
+  {
+    m_pComputeList->EndQuery(m_pComputeTimestamps.Get(), D3D12_QUERY_TYPE_TIMESTAMP, (m_nFrameSlot * COMPUTE_LISTS + n) * 2);
+    m_ComputeSections[m_nFrameSlot][n] = szSection;
+  }
+  return m_pComputeList.Get();
+}
+
+void CD3D12Device::SubmitAsyncCompute()
+{
+  FUNCTION_PROFILER(iSystem, PROFILE_RENDERER);
+  if (!m_bInFrame || !m_pComputeList)
+    return;
+  if (m_bComputeTimed)
+  {
+    int &n = m_nComputeLists[m_nFrameSlot];
+    m_pComputeList->EndQuery(m_pComputeTimestamps.Get(), D3D12_QUERY_TYPE_TIMESTAMP, (m_nFrameSlot * COMPUTE_LISTS + n) * 2 + 1);
+    n++;
+    m_bComputeTimed = false;
+  }
+  m_pComputeList->Close();
+  m_pCmdList->Close();
+  // The uploads, then the frame's list so far; the compute list once the uploads are done.
+  if (g_pRenderer->m_pUpload)
+    g_pRenderer->m_pUpload->Flush();
+  m_pQueue->Signal(m_pUploadFence.Get(), ++m_nUploadFence);
+  ID3D12CommandList *pList = m_pCmdList.Get();
+  m_pQueue->ExecuteCommandLists(1, &pList);
+  m_pComputeQueue->Wait(m_pUploadFence.Get(), m_nUploadFence);
+  ID3D12CommandList *pCompute = m_pComputeList.Get();
+  m_pComputeQueue->ExecuteCommandLists(1, &pCompute);
+  m_pComputeQueue->Signal(m_pComputeFence.Get(), ++m_nComputeFence);
+  m_pQueue->Wait(m_pComputeFence.Get(), m_nComputeFence);
+  // The frame goes on in the same allocator (its memory kept until the slot's fence).
+  m_pCmdList->Reset(m_pAllocators[m_nFrameSlot].Get(), nullptr);
+  m_nStateEpoch++;
+  BindRootSignature();
+  if (!m_pOffscreen)
+    SetBackBufferTargets();
+}
+
 void CD3D12Device::FlushFrame()
 {
+  FUNCTION_PROFILER(iSystem, PROFILE_RENDERER);
   if (!m_bInFrame)
     return;
+  // The GPU waits from the end of this list until the next one runs (at EndFrame or the next
+  // flush, after the CPU's work in between): that is a section of its own, then the one before
+  // goes on.
+  const int nMarks = m_nGpuMarks[m_nFrameSlot];
+  const char *szSection = nMarks > 0 ? m_GpuSections[m_nFrameSlot][nMarks - 1] : nullptr;
+  GpuSection("flush");
   // The back buffer stays a render target across the two lists.
   m_pCmdList->Close();
   if (g_pRenderer->m_pUpload)
@@ -1208,6 +1391,8 @@ void CD3D12Device::FlushFrame()
   m_pQueue->ExecuteCommandLists(1, &pList);
   WaitForFence(Signal());
   OpenCmdList();
+  if (szSection)
+    GpuSection(szSection);
   BindRootSignature();
   SetBackBufferTargets();
 }
@@ -1223,10 +1408,35 @@ void CD3D12Device::GpuSection(const char *szSection)
 
 void CD3D12Device::ReadGpuTimes()
 {
+  const int nCompute = m_nComputeLists[m_nFrameSlot];
+  m_nComputeLists[m_nFrameSlot] = 0;
   const int n = m_nGpuMarks[m_nFrameSlot];
   m_nGpuMarks[m_nFrameSlot] = 0;
   if (n < 2)
     return;
+  const auto Add = [](std::vector<std::pair<const char *, double>> &Times, const char *szSection, double fMs)
+  {
+    auto It = std::find_if(Times.begin(), Times.end(), [szSection](const auto &e) { return strcmp(e.first, szSection) == 0; });
+    if (It == Times.end())
+      Times.emplace_back(szSection, fMs);
+    else
+      It->second += fMs;
+  };
+  if (nCompute > 0)
+  {
+    const size_t nFirst = (size_t)m_nFrameSlot * COMPUTE_LISTS * 2;
+    const D3D12_RANGE Range = { sizeof(uint64) * nFirst, sizeof(uint64) * (nFirst + nCompute * 2) };
+    const uint64 *pTicks = nullptr;
+    if (SUCCEEDED(m_pComputeTimestampReadback->Map(0, &Range, (void **)&pTicks)))
+    {
+      pTicks += nFirst;
+      for (int i = 0; i < nCompute; i++)
+        Add(m_ComputeGpuTimes, m_ComputeSections[m_nFrameSlot][i],
+            pTicks[i * 2 + 1] > pTicks[i * 2] ? (double)(pTicks[i * 2 + 1] - pTicks[i * 2]) * m_fComputeTimestampMs : 0.0);
+      const D3D12_RANGE Written = {};
+      m_pComputeTimestampReadback->Unmap(0, &Written);
+    }
+  }
   const size_t nFirst = (size_t)m_nFrameSlot * GPU_MARKS;
   const D3D12_RANGE Range = { sizeof(uint64) * nFirst, sizeof(uint64) * (nFirst + n) };
   const uint64 *pTicks = nullptr;
@@ -1235,17 +1445,22 @@ void CD3D12Device::ReadGpuTimes()
   pTicks += nFirst;
   for (int i = 0; i + 1 < n; i++)
   {
-    const char *szSection = m_GpuSections[m_nFrameSlot][i];
-    const double fMs = pTicks[i + 1] > pTicks[i] ? (double)(pTicks[i + 1] - pTicks[i]) * m_fTimestampMs : 0.0;
-    auto It = std::find_if(m_GpuTimes.begin(), m_GpuTimes.end(), [szSection](const auto &e) { return strcmp(e.first, szSection) == 0; });
-    if (It == m_GpuTimes.end())
-      m_GpuTimes.emplace_back(szSection, fMs);
-    else
-      It->second += fMs;
+    Add(m_GpuTimes, m_GpuSections[m_nFrameSlot][i], pTicks[i + 1] > pTicks[i] ? (double)(pTicks[i + 1] - pTicks[i]) * m_fTimestampMs : 0.0);
   }
   const D3D12_RANGE Written = {};
   m_pTimestampReadback->Unmap(0, &Written);
   m_nGpuTimedFrames++;
+}
+
+bool CD3D12Device::GetVideoMemory(uint64 &nUsage, uint64 &nBudget) const
+{
+  ComPtr<IDXGIAdapter3> pAdapter3;
+  DXGI_QUERY_VIDEO_MEMORY_INFO Info;
+  if (!m_pAdapter || FAILED(m_pAdapter.As(&pAdapter3)) || FAILED(pAdapter3->QueryVideoMemoryInfo(0, DXGI_MEMORY_SEGMENT_GROUP_LOCAL, &Info)))
+    return false;
+  nUsage = Info.CurrentUsage;
+  nBudget = Info.Budget;
+  return true;
 }
 
 int CD3D12Device::BeginOcclusion()
@@ -1331,7 +1546,7 @@ bool CD3D12Device::CreateTargetCopies(ComPtr<ID3D12Resource> &pColor, ComPtr<ID3
   return true;
 }
 
-void CD3D12Device::CopyTargets(ID3D12Resource *pColor, ID3D12Resource *pDepth)
+void CD3D12Device::CopyTargets(ID3D12Resource *pColor, ID3D12Resource *pDepth, const D3D12_BOX *pBox)
 {
   if (!m_bInFrame || !pColor)
     return;
@@ -1360,7 +1575,17 @@ void CD3D12Device::CopyTargets(ID3D12Resource *pColor, ID3D12Resource *pDepth)
   Set(b[3], pDepth, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, D3D12_RESOURCE_STATE_COPY_DEST);
   const UINT nBarriers = pDepth ? 4 : 2;
   m_pCmdList->ResourceBarrier(nBarriers, b);
-  m_pCmdList->CopyResource(pColor, pMainColor);
+  if (pBox)
+  {
+    D3D12_TEXTURE_COPY_LOCATION Dst = {}, Src = {};
+    Dst.pResource = pColor;
+    Dst.Type = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
+    Src.pResource = pMainColor;
+    Src.Type = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
+    m_pCmdList->CopyTextureRegion(&Dst, pBox->left, pBox->top, 0, &Src, pBox);
+  }
+  else
+    m_pCmdList->CopyResource(pColor, pMainColor);
   if (pDepth)
     m_pCmdList->CopyResource(pDepth, pMainDepth);
   for (auto &r : b)
@@ -1458,10 +1683,15 @@ void CD3D12Device::LogDebugMessages()
     auto *pMsg = (D3D12_MESSAGE *)Buffer.data();
     if (FAILED(m_pInfoQueue->GetMessage(i, pMsg, &nSize)))
       continue;
-    if (pMsg->Severity <= D3D12_MESSAGE_SEVERITY_ERROR)
+    const bool bError = pMsg->Severity <= D3D12_MESSAGE_SEVERITY_ERROR;
+    if (bError)
       iLog->LogError("[D3D12] %s", pMsg->pDescription);
     else if (pMsg->Severity == D3D12_MESSAGE_SEVERITY_WARNING)
       iLog->LogWarning("[D3D12] %s", pMsg->pDescription);
+    if (m_pDebugLog && (bError || pMsg->Severity == D3D12_MESSAGE_SEVERITY_WARNING))
+      fprintf(m_pDebugLog.get(), "%s %s\n", bError ? "error" : "warning", pMsg->pDescription);
   }
+  if (m_pDebugLog && n)
+    fflush(m_pDebugLog.get());
   m_pInfoQueue->ClearStoredMessages();
 }

@@ -147,6 +147,10 @@
 //	the factor; the rest 0 (the unlit, the light passes, the fog volumes,
 //	the scope's glass). Without an upscaler SV_Target1 and 2 are null
 //	targets.
+//	Compiled with XR_CASCADE_INSTANCES (the vertex shader of the full set of
+//	the sun's cascades, Cascades.cpp) instance i is drawn with mShadow[i] in
+//	place of mWorldViewProj into slice nShadowTex[i] of the array
+//	(SV_RenderTargetArrayIndex).
 //
 //////////////////////////////////////////////////////////////////////
 
@@ -168,6 +172,9 @@ struct SVertexOutput
 #ifdef XR_VELOCITY
   float4 vCurClip : TEXCOORD9;  //!< the clip position without the jitter
   float4 vPrevClip : TEXCOORD10; //!< the same in the frame before
+#endif
+#ifdef XR_CASCADE_INSTANCES
+  uint nSlice : SV_RenderTargetArrayIndex;  //!< the slice of the cascades' array (last: the pixel shaders' inputs stay where they are)
 #endif
 };
 
@@ -320,7 +327,8 @@ float FogVolumeAlpha(float3 vPos)
 //! from the middle of the glass times vParams0.x from there. The middle of the glass is uv0 (0.5,
 //! 0.5); the offset in pixels comes from uv0 through its screen derivatives, so the picture stands
 //! upright whichever way the glass's texture coordinates run. The wave slopes (tex1, unit RMS) times
-//! vParams0.y move it in uv0: the glass is not quite even. rgb times vColor.rgb; alpha vColor.a *
+//! vParams0.y move it in uv0: the glass is not quite even. The samples stay in the part of the
+//! screen copied (vParams1: xy to zw in uv). rgb times vColor.rgb; alpha vColor.a *
 //! 2^-(r / vParams0.z)^4, r = |uv0 - 0.5|.
 float4 ScopeLens(SVertexOutput In)
 {
@@ -333,14 +341,21 @@ float4 ScopeLens(SVertexOutput In)
   float2 a = ddx(vUV), b = ddy(vUV);
   float fDet = a.x * b.y - b.x * a.y;
   float2 vPixels = abs(fDet) > 1e-12 ? float2(vOffset.x * b.y - b.x * vOffset.y, a.x * vOffset.y - vOffset.x * a.y) / fDet : 0;
-  float3 vScene = g_Textures[g_Draw.nTex0].SampleLevel(g_SamplerLinearClamp, (vMiddle + vPixels * g_Draw.vParams0.x) * g_Frame.vScreen.zw, 0).rgb;
+  float2 vAt = clamp((vMiddle + vPixels * g_Draw.vParams0.x) * g_Frame.vScreen.zw, g_Draw.vParams1.xy, g_Draw.vParams1.zw);
+  float3 vScene = g_Textures[g_Draw.nTex0].SampleLevel(g_SamplerLinearClamp, vAt, 0).rgb;
 
   float2 d = (vUV - 0.5) / g_Draw.vParams0.z;
   float r2 = dot(d, d);
   return float4(vScene * g_Draw.vColor.rgb, g_Draw.vColor.a * exp2(-r2 * r2));
 }
 
+#ifdef XR_CASCADE_INSTANCES
+//! A caster of the full set of the sun's cascades into all the slices it reaches at once, an
+//! instance each: mShadow[i] the world to slice nShadowTex[i] in place of mWorldViewProj.
+SVertexOutput VSMain(SVertexInput In, uint nInstance : SV_InstanceID)
+#else
 SVertexOutput VSMain(SVertexInput In)
+#endif
 {
   SVertexOutput Out;
 
@@ -357,7 +372,12 @@ SVertexOutput VSMain(SVertexInput In)
   else
   {
     float4 vPos = float4(In.vPos.xyz, 1);
+#ifdef XR_CASCADE_INSTANCES
+    Out.vPos = mul(vPos, g_Draw.mShadow[nInstance]);
+    Out.nSlice = g_Draw.nShadowTex[nInstance];
+#else
     Out.vPos = mul(vPos, g_Draw.mWorldViewProj);
+#endif
     vWorldPos = mul(vPos, g_Draw.mWorld).xyz;
 #ifdef XR_VELOCITY
     Out.vCurClip = Out.vPos;

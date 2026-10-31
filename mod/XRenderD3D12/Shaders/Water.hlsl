@@ -55,7 +55,9 @@
 //	length, shaded where it hits and fogged as the planar reflection is
 //	(by the whole path from the camera), fading out over the last quarter
 //	of the length. Mode 1 puts it in place of the screen space reflection,
-//	mode 2 where the screen space one finds nothing; sharp as that one is,
+//	mode 2 where the screen space one finds nothing (which there gives up
+//	where its ray passes behind an object: the ray tracing sees what is
+//	behind, and the march on would mostly find nothing); sharp as that one is,
 //	it gives way to the blurred planar reflection where the ripple finer
 //	than a pixel blurs it. The ray cone starts as wide as the pixel on the
 //	surface and spreads by the pixel's angle and the ripple's RMS slope
@@ -91,6 +93,10 @@
 //	  vTexGenV  XR_RAYTRACE: x the mode (1, 2), y the rays' length (m), z the
 //	            instance mask (bits 0-7) and bit 8 the sun's shadow at the
 //	            hits
+//	  nShadowTex  x the depth tiles of the depth copy (Water.cpp, the ocean's;
+//	            R32_FLOAT: at level 0 the least depth of each XR_DEPTH_TILE x
+//	            XR_DEPTH_TILE pixels, at each next one of 2 x 2 texels of the
+//	            one before), y their levels (0: none)
 //
 //////////////////////////////////////////////////////////////////////
 
@@ -291,53 +297,126 @@ float3 BlurredPlanarReflection(float3 P, float3 R, float fReach, float fVar, flo
   return vSum / (2 * (Weights[0] + Weights[1] + Weights[2]));
 }
 
+//! Whether the steps of ScreenReflection's march from t ta to tb can all go by without a look at the
+//! copies: none of them gets nearer than 0.3 m to the camera, and under each on the screen the depth
+//! copy holds the sky or what is farther than the step (the march ends at the first off it, a miss,
+//! and the steps after it are off it too: their path on the screen is a straight line). Their clip
+//! positions are on the line vC0 + t vCR (w above 0 all along it: their path on the screen is the
+//! line between its ends'), fError at most off it either way; the depth tiles of the level whose
+//! 2 x 2 texels cover that path, widened by the error (divided by w) and two texels (the sampler's)
+//! and cut to the screen, give the least depth under it. vSize: the copies' size in texels.
+bool MarchClear(float4 vC0, float4 vCR, float ta, float tb, float fError, float2 vViewToBuffer, float2 vSize)
+{
+  const float4 a = vC0 + vCR * ta, b = vC0 + vCR * tb;
+  const float wMin = min(a.w, b.w) - 2 * fError;
+  if (wMin <= 0.31)
+    return false;
+  const float2 vView = vViewToBuffer * vSize;
+  const float2 ua = ClipToUV(a, vViewToBuffer) * vSize, ub = ClipToUV(b, vViewToBuffer) * vSize;
+  const float2 vWiden = 2 * vView * fError / wMin + 2;
+  const float2 vLow = max(min(ua, ub) - vWiden, 0), vHigh = min(max(ua, ub) + vWiden, vView - 1);
+  if (any(vLow > vHigh))
+    return true;
+  const uint2 t0 = (uint2)vLow / XR_DEPTH_TILE, t1 = (uint2)vHigh / XR_DEPTH_TILE;
+  // A level where the tiles of the two corners are the same or next to each other: that of the
+  // highest bit they differ in, or the first whose texels are wider than the path (the tile of its
+  // low corner and the next then cover it), whichever is lower.
+  const uint2 vDiffer = t0 ^ t1, vSpan = t1 - t0;
+  const uint nLevel = (uint)max(min((int)firstbithigh(max(vDiffer.x, vDiffer.y)), (int)firstbithigh(max(vSpan.x, vSpan.y)) + 1), 0);
+  if (nLevel >= g_Draw.nShadowTex.y)
+    return false;
+  const uint2 p0 = t0 >> nLevel, p1 = t1 >> nLevel;
+  const uint nTiles = g_Draw.nShadowTex.x;
+  const float d = min(min(g_Textures[nTiles].Load(int3(p0, nLevel)).r, g_Textures[nTiles].Load(int3(p1.x, p0.y, nLevel)).r),
+                      min(g_Textures[nTiles].Load(int3(p0.x, p1.y, nLevel)).r, g_Textures[nTiles].Load(int3(p1, nLevel)).r));
+  // The march's test of a step: fDepth < 0.99999 (not the sky) and w > LinearDepth(fDepth).
+  return d >= 0.99999 || LinearDepth(d) * 0.999 > max(a.w, b.w) + 2 * fError;
+}
+
 //! The scene in direction R from P where the frame's copies show it: the ray marches in steps
 //! that grow with the distance; when it gets behind the depth buffer the crossing is refined, and
 //! it is a hit if the ray is then no more than a few centimetres behind the surface there (more
-//! means it passed behind an object, whose back the copies do not show: it goes on). Never hits
-//! the sky (the far plane) or the first person weapon (nearer than 0.5 m). w: how much to trust
-//! it, 0 on a miss, fading towards the screen's edges.
-float4 ScreenReflection(float3 P, float3 R, float2 vViewToBuffer)
+//! means it passed behind an object, whose back the copies do not show: it goes on, or with
+//! bRaysAfter it ends there, a miss, for the rays to find what is behind). Never hits the sky (the
+//! far plane) or the first person weapon (nearer than 0.5 m). w: how much to trust it, 0 on a
+//! miss, fading towards the screen's edges. The steps go in fours, their depths read at once: the
+//! same steps as one at a time, with fewer waits for the reads. Four steps that the depth tiles
+//! show cannot end the march (MarchClear) go by without being worked out: the same result.
+//! vSize: the copies' size in texels.
+float4 ScreenReflection(float3 P, float3 R, float2 vViewToBuffer, float2 vSize, bool bRaysAfter)
 {
+  // The steps' clip positions are on the line vC0 + t vCR but for rounding: at most 4e-6 of the
+  // largest of their sums and products (several times their rounding, at either end), those of the
+  // world position (no coordinate larger than fLargest + t) by the matrix's rows of x, y and z, and
+  // the row of the translation.
+  const float4 vC0 = mul(float4(P, 1), g_Frame.mViewProj), vCR = mul(float4(R, 0), g_Frame.mViewProj);
+  const float4 vTurn = abs(g_Frame.mViewProj[0]) + abs(g_Frame.mViewProj[1]) + abs(g_Frame.mViewProj[2]);
+  const float4 vMove = abs(g_Frame.mViewProj[3]);
+  const float fTurn = 4e-6 * max(vTurn.x, max(vTurn.y, vTurn.w)), fMove = 4e-6 * max(vMove.x, max(vMove.y, vMove.w));
+  const float fLargest = max(abs(P.x), max(abs(P.y), abs(P.z)));
+  const bool bTiles = g_Draw.nShadowTex.y != 0;
   float tPrev = 0, t = 0.4;
   [loop]
-  for (int i = 0; i < 40; i++)
+  for (int i = 0; i < 40; i += 4)
   {
-    float4 vClip = mul(float4(P + R * t, 1), g_Frame.mViewProj);
-    if (vClip.w < 0.3)
-      break;
-    float2 vUV = ClipToUV(vClip, vViewToBuffer);
-    if (any(vUV <= 0) || any(vUV >= vViewToBuffer))
-      break;
-    float fDepth = g_Textures[g_Draw.nTex1].SampleLevel(g_SamplerPointClamp, vUV, 0).r;
-    float fScene = LinearDepth(fDepth);
-    if (vClip.w > fScene && fScene > 0.5 && fDepth < 0.99999)
+    float4 vClip[4];
+    float2 vUV[4];
+    float fDepth[4], tStep[4];
+    [unroll]
+    for (int j = 0; j < 4; j++)
     {
-      float a = tPrev, b = t, fBehind = vClip.w - fScene;
-      [unroll]
-      for (int k = 0; k < 6; k++)
-      {
-        float m = (a + b) * 0.5;
-        float4 vClipM = mul(float4(P + R * m, 1), g_Frame.mViewProj);
-        float fSceneM = LinearDepth(g_Textures[g_Draw.nTex1].SampleLevel(g_SamplerPointClamp, ClipToUV(vClipM, vViewToBuffer), 0).r);
-        if (vClipM.w > fSceneM)
-        {
-          b = m;
-          fBehind = vClipM.w - fSceneM;
-        }
-        else
-          a = m;
-      }
-      if (fBehind < 0.05 + 0.01 * vClip.w)
-      {
-        float2 vHit = ClipToUV(mul(float4(P + R * b, 1), g_Frame.mViewProj), vViewToBuffer);
-        float2 vEdge = min(vHit, vViewToBuffer - vHit) / vViewToBuffer;
-        float fTrust = saturate(min(vEdge.x, vEdge.y) * 12);
-        return float4(g_Textures[g_Draw.nTex0].SampleLevel(g_SamplerLinearClamp, vHit, 0).rgb, fTrust);
-      }
+      tStep[j] = t;
+      t = t * 1.18 + 0.15;
     }
-    tPrev = t;
-    t = t * 1.18 + 0.15;
+    if (bTiles && MarchClear(vC0, vCR, tStep[0], tStep[3], fTurn * (fLargest + tStep[3]) + fMove, vViewToBuffer, vSize))
+    {
+      tPrev = tStep[3];
+      continue;
+    }
+    [unroll]
+    for (int j = 0; j < 4; j++)
+    {
+      vClip[j] = mul(float4(P + R * tStep[j], 1), g_Frame.mViewProj);
+      vUV[j] = ClipToUV(vClip[j], vViewToBuffer);
+      fDepth[j] = g_Textures[g_Draw.nTex1].SampleLevel(g_SamplerPointClamp, vUV[j], 0).r;
+    }
+    [unroll]
+    for (int j = 0; j < 4; j++)
+    {
+      if (vClip[j].w < 0.3)
+        return 0;
+      if (any(vUV[j] <= 0) || any(vUV[j] >= vViewToBuffer))
+        return 0;
+      float fScene = LinearDepth(fDepth[j]);
+      if (vClip[j].w > fScene && fScene > 0.5 && fDepth[j] < 0.99999)
+      {
+        float a = tPrev, b = tStep[j], fBehind = vClip[j].w - fScene;
+        [unroll]
+        for (int k = 0; k < 6; k++)
+        {
+          float m = (a + b) * 0.5;
+          float4 vClipM = mul(float4(P + R * m, 1), g_Frame.mViewProj);
+          float fSceneM = LinearDepth(g_Textures[g_Draw.nTex1].SampleLevel(g_SamplerPointClamp, ClipToUV(vClipM, vViewToBuffer), 0).r);
+          if (vClipM.w > fSceneM)
+          {
+            b = m;
+            fBehind = vClipM.w - fSceneM;
+          }
+          else
+            a = m;
+        }
+        if (fBehind < 0.05 + 0.01 * vClip[j].w)
+        {
+          float2 vHit = ClipToUV(mul(float4(P + R * b, 1), g_Frame.mViewProj), vViewToBuffer);
+          float2 vEdge = min(vHit, vViewToBuffer - vHit) / vViewToBuffer;
+          float fTrust = saturate(min(vEdge.x, vEdge.y) * 12);
+          return float4(g_Textures[g_Draw.nTex0].SampleLevel(g_SamplerLinearClamp, vHit, 0).rgb, fTrust);
+        }
+        if (bRaysAfter)
+          return 0;
+      }
+      tPrev = tStep[j];
+    }
   }
   return 0;
 }
@@ -494,24 +573,26 @@ float4 ShadeWater(SWaterOutput In)
       vReflected = vPlanar;
     }
     // The screen's copy is sharp: it gives way to the blurred planar reflection where the blur up
-    // and down is wider than 4 pixels on the screen, all of it from 8.
+    // and down is wider than 4 pixels on the screen, all of it from 8. None where nothing of it
+    // would be seen (no reflection, or blurred away: open water away from the camera), but in the
+    // debug views.
+    const float fSharp = fBlur > 0 ? saturate(2 - fBlur * g_Frame.vScreen.y / 4) : 1;
+    const bool bSharp = (F != 0 && fSharp > 0) || g_Draw.vParams0.z != 0;
 #ifdef XR_RAYTRACE
-    float4 vSSR = g_Draw.vTexGenV.x >= 2 ? ScreenReflection(In.vWorldPos, Rs, g_Frame.vScreen.xy * vInvSize) : 0;
+    float4 vSSR = g_Draw.vTexGenV.x >= 2 && bSharp ? ScreenReflection(In.vWorldPos, Rs, g_Frame.vScreen.xy * vInvSize, float2(nW, nH), true) : 0;
 #else
-    float4 vSSR = ScreenReflection(In.vWorldPos, Rs, g_Frame.vScreen.xy * vInvSize);
+    float4 vSSR = bSharp ? ScreenReflection(In.vWorldPos, Rs, g_Frame.vScreen.xy * vInvSize, float2(nW, nH), false) : 0;
 #endif
-    if (fBlur > 0)
-      vSSR.w *= saturate(2 - fBlur * g_Frame.vScreen.y / 4);
+    vSSR.w *= fSharp;
 #ifdef XR_RAYTRACE
     // The rays: in place of the screen's reflection (mode 1), or where it finds nothing (2, none where
     // it is sure); as sharp, they give way to the blurred planar reflection as it does.
-    // No ray where nothing of it would be seen (no reflection, or blurred away), but in the debug views.
+    // No ray where nothing of it would be seen, but in the debug views.
     float fRayT = g_Draw.vTexGenV.y;
     float4 vRay = 0;
-    const float fRayFade = fBlur > 0 ? saturate(2 - fBlur * g_Frame.vScreen.y / 4) : 1;
-    if ((g_Draw.vTexGenV.x < 2 || vSSR.w < 1) && ((F > 0 && fRayFade > 0) || g_Draw.vParams0.z >= 13))
+    if ((g_Draw.vTexGenV.x < 2 || vSSR.w < 1) && ((F > 0 && fSharp > 0) || g_Draw.vParams0.z >= 13))
       vRay = RayReflection(In.vWorldPos, Rs, fDistance, fPixelAngle, fVar, fRayT);
-    vRay.w *= fRayFade;
+    vRay.w *= fSharp;
     vReflected = lerp(vReflected, vRay.rgb, vRay.w);
 #endif
     vReflected = lerp(vReflected, vSSR.rgb, vSSR.w);

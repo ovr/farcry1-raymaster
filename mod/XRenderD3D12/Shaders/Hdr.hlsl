@@ -9,7 +9,7 @@
 //
 //	The scene's colours are the game's own (gamma encoded, as the original
 //	draws them) without the clamp at 1; light is Decode(colour) = colour ^
-//	2.2 up to 1 and linear above (HdrDecode, Common.hlsli: what the game
+//	2.2 up to 1 and linear above (HdrDecode, HdrLight.hlsli: what the game
 //	adds up above white is light added up), the display's colour
 //	Encode(light) its inverse. The
 //	exposure is in EV (log2 of the factor of the light); its 1 x 1 target
@@ -64,6 +64,8 @@
 //////////////////////////////////////////////////////////////////////
 
 #include "Common.hlsli"
+// Decode, Luminance, Max3, MeterTapUV, MeterTexel, BloomDownTaps
+#include "HdrShared.hlsli"
 
 struct SHdrOutput
 {
@@ -77,20 +79,9 @@ SHdrOutput VSMain(SVertexInput In)
   return Out;
 }
 
-static const float3 LUMINANCE = float3(0.2126, 0.7152, 0.0722);   //!< of linear light (Rec. 709)
-static const float HALF_MAX = 65000;
-
 float4 SampleClamp(uint nTex, float2 vUV)
 {
   return g_Textures[nTex].SampleLevel(g_SamplerLinearClamp, vUV, 0);
-}
-
-//! A colour of the scene as light (HdrDecode, Common.hlsli): never negative, never more than a
-//! half float holds, 0 for NaN.
-float3 Decode(float3 c)
-{
-  c = min(max(c, 0), HALF_MAX);
-  return float3(HdrDecode(c.r), HdrDecode(c.g), HdrDecode(c.b));
 }
 
 float3 Encode(float3 vLight)
@@ -102,16 +93,6 @@ float3 Encode(float3 vLight)
 float Exposure(uint nTex, float fCompensation, bool bAuto)
 {
   return exp2(fCompensation + (bAuto ? g_Textures[nTex].Load(int3(0, 0, 0)).r : 0));
-}
-
-float Luminance(float3 vLight)
-{
-  return dot(vLight, LUMINANCE);
-}
-
-float Max3(float3 v)
-{
-  return max(v.r, max(v.g, v.b));
 }
 
 //////////////////////////////////////////////////////////////////////////
@@ -126,13 +107,9 @@ float4 MeterLuminance(float2 vPixel)
   for (int y = 0; y < n; y++)
   {
     for (int x = 0; x < n; x++)
-      vSum += Decode(SampleClamp(g_Draw.nTex0, vUV + ((float2(x, y) + 0.5) / n - 0.5) * vTexel).rgb);
+      vSum += Decode(SampleClamp(g_Draw.nTex0, MeterTapUV(vUV, vTexel, x, y, n)).rgb);
   }
-  float L = clamp(Luminance(vSum / (n * n)), exp2(-12.0), exp2(8.0));
-  // The middle of the screen counts most: by the distance from it in half heights.
-  float2 d = (vUV - 0.5) * float2(vTexel.y / vTexel.x, 1) * 2;
-  float w = exp(-0.75 * dot(d, d));
-  return float4(w * log2(L), w, 0, 0);
+  return MeterTexel(vSum, n, vUV, vTexel);
 }
 
 float4 Reduce(float2 vPixel)
@@ -189,29 +166,7 @@ float4 BloomDown(float2 vPixel)
   float3 k = BloomTap(vUV + t * float2(-2, 2), bScene, fExposure);
   float3 l = BloomTap(vUV + t * float2(0, 2), bScene, fExposure);
   float3 m = BloomTap(vUV + t * float2(2, 2), bScene, fExposure);
-  // The inner box counts half, the four outer ones an eighth each.
-  float3 vBox[5] = { (d + e + i + j) / 4, (a + b + f + g) / 4, (b + c + g + h) / 4, (f + g + k + l) / 4, (g + h + l + m) / 4 };
-  float fWeight[5] = { 0.5, 0.125, 0.125, 0.125, 0.125 };
-  float3 vSum = 0;
-  float fSum = 0;
-  [unroll]
-  for (int n = 0; n < 5; n++)
-  {
-    float w = fWeight[n] * (bScene ? 1 / (1 + Luminance(vBox[n])) : 1);
-    vSum += vBox[n] * w;
-    fSum += w;
-  }
-  float3 vLight = vSum / fSum;
-  if (bScene)
-  {
-    // What is above the threshold, with a soft knee (quadratic) below it.
-    float fThreshold = g_Draw.vParams1.z, fKnee = max(g_Draw.vParams1.w, 1e-4);
-    float fBright = Max3(vLight);
-    float fSoft = clamp(fBright - fThreshold + fKnee, 0, 2 * fKnee);
-    fSoft = fSoft * fSoft / (4 * fKnee);
-    vLight *= max(fSoft, fBright - fThreshold) / max(fBright, 1e-4);
-  }
-  return float4(vLight, 1);
+  return float4(BloomDownTaps(a, b, c, d, e, f, g, h, i, j, k, l, m, bScene, g_Draw.vParams1.z, g_Draw.vParams1.w), 1);
 }
 
 float4 BloomUp(float2 vPixel)

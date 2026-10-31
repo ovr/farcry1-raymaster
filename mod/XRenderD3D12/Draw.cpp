@@ -33,6 +33,20 @@ D3D12_PRIMITIVE_TOPOLOGY_TYPE GetTopologyType(D3D_PRIMITIVE_TOPOLOGY eTopology)
   }
 }
 
+//! The triangles a draw of nCount vertices or indices makes (GetPolyCount).
+int CountTriangles(D3D_PRIMITIVE_TOPOLOGY eTopology, uint32 nCount)
+{
+  switch (eTopology)
+  {
+  case D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST:
+    return (int)(nCount / 3);
+  case D3D_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP:
+    return nCount > 2 ? (int)(nCount - 2) : 0;
+  default:
+    return 0;
+  }
+}
+
 //! A copy of the constants in this frame's memory.
 template<class T> D3D12_GPU_VIRTUAL_ADDRESS UploadConstants(CD3D12Upload &Upload, const T &Data)
 {
@@ -120,14 +134,20 @@ void CD3D12Renderer::MakeFrameConstants(SFrameConstants &fc, bool bScene) const
 
 void CD3D12Renderer::DrawGeometry(const SPipelineKey &Key, const SDrawConstants &dc, D3D_PRIMITIVE_TOPOLOGY eTopology, const D3D12_VERTEX_BUFFER_VIEW &VB,
   const D3D12_INDEX_BUFFER_VIEW *pIB, uint32 nCount, uint32 nFirst, int nBaseVertex, const D3D12_VERTEX_BUFFER_VIEW *pTexCoord1,
-  const D3D12_VERTEX_BUFFER_VIEW *pTangents)
+  const D3D12_VERTEX_BUFFER_VIEW *pTangents, uint32 nInstances)
 {
-  if (!nCount || !m_pPipeline || !m_pUpload || !EnsureFrame())
+  if (!nCount || !nInstances || !m_pPipeline || !m_pUpload || !EnsureFrame())
+    return;
+  // The depth prepass (DrawItems): the general program's draws that write the depth with LESS_EQUAL
+  // and discard nothing.
+  if (m_bDepthPrepass && (Key.nProgram != eD3D12P_General || Key.nTarget != 0 || Key.bWireframe || !(Key.nState & GS_DEPTHWRITE) ||
+                          (Key.nState & (GS_BLSRC_MASK | GS_BLDST_MASK | GS_NODEPTHTEST | GS_DEPTHFUNC_EQUAL | GS_DEPTHFUNC_GREAT)) ||
+                          (dc.nFlags & DF_ALPHATEST)))
     return;
   const bool bOffscreen = m_pDevice->IsOffscreen();
   const bool bScene = m_pDevice->IsSceneBound();
   // The main view's opaque draws and the water reflection's for the scene for rays (RayTracing.h).
-  if (m_pRayScene && ((m_pRayScene->IsCapturing() && !bOffscreen) || m_pRayScene->IsCapturingReflection()))
+  if (m_pRayScene && !m_bDepthPrepass && ((m_pRayScene->IsCapturing() && !bOffscreen) || m_pRayScene->IsCapturingReflection()))
     m_pRayScene->CaptureDraw(Key, dc, eTopology, VB, pIB, nCount, nFirst, nBaseVertex, pTexCoord1);
   // A program with rays needs this frame's scene; the water goes without them when there is none.
   const bool bRays = Key.nProgram == eD3D12P_RayDebug || (Key.nProgram == eD3D12P_Water && Key.bRayTrace);
@@ -146,6 +166,12 @@ void CD3D12Renderer::DrawGeometry(const SPipelineKey &Key, const SDrawConstants 
     FullKey.nColorFormat = PIPELINE_COLOR_HDR;
   // The sun's cascades in the general program's pixel shader that has them.
   FullKey.bCascades = Key.nProgram == eD3D12P_General && (dc.nFlags2 & (DF2_SUN_CASCADES | DF2_CASCADE_CASTER)) ? 1 : 0;
+  // A shadow map's caster without the alpha test or the live cascades' comparison with the full set
+  // (the general program's discards): without a pixel shader. One that can discard keeps the depth
+  // test and write after it for all its pixels.
+  // The depth prepass: the depth alone too.
+  FullKey.bDepthOnly = (FullKey.nTarget == 2 && Key.nProgram == eD3D12P_General && !(dc.nFlags & DF_ALPHATEST) &&
+                        !(dc.nFlags2 & (DF2_CASCADE_CASTER | DF2_SCOPE_LENS))) || m_bDepthPrepass ? 1 : 0;
   // The ambient occlusion's target bound to the main view (AmbientOcclusion.cpp).
   FullKey.bAmbient = (FullKey.nTarget == 0 || FullKey.nTarget == 3) && m_pDevice->IsAmbientBound() ? 1 : 0;
   ID3D12PipelineState *pPSO = m_pPipeline->GetPSO(FullKey);
@@ -184,22 +210,55 @@ void CD3D12Renderer::DrawGeometry(const SPipelineKey &Key, const SDrawConstants 
     }
     memcpy(LocalDC.mPrevWorldViewProj, LocalDC.mWorldViewProj, sizeof(LocalDC.mPrevWorldViewProj));
   }
-  ID3D12GraphicsCommandList *pList = m_pDevice->GetCmdList();
-  pList->SetPipelineState(pPSO);
-  pList->SetGraphicsRootConstantBufferView(0, m_nFrameCB);
+  // The state the draw before set stays while nothing else touched the command list.
+  ID3D12GraphicsCommandList *pList = m_pDevice->GetDrawCmdList();
+  SDrawState &Set = m_DrawState;
+  if (Set.nEpoch != m_pDevice->GetStateEpoch())
+  {
+    Set = {};
+    Set.nEpoch = m_pDevice->GetStateEpoch();
+  }
+  if (pPSO != Set.pPSO)
+  {
+    pList->SetPipelineState(pPSO);
+    Set.pPSO = pPSO;
+  }
+  m_nFramePSOChanges += pPSO != m_pLastPSO;
+  m_pLastPSO = pPSO;
+  if (m_nFrameCB != Set.nFrameCB)
+  {
+    pList->SetGraphicsRootConstantBufferView(0, m_nFrameCB);
+    Set.nFrameCB = m_nFrameCB;
+  }
   pList->SetGraphicsRootConstantBufferView(1, UploadConstants(*m_pUpload, *pDC));
   if (nRayScene)
   {
     pList->SetGraphicsRootShaderResourceView(ROOT_RAY_SCENE, nRayScene);
     pList->SetGraphicsRootShaderResourceView(ROOT_RAY_INSTANCES, m_pRayScene->GetInstances());
   }
-  pList->IASetVertexBuffers(0, 1, &VB);
-  m_pPipeline->BindDefaultStream(pList);
+  const auto SetVB = [&](UINT nSlot, const D3D12_VERTEX_BUFFER_VIEW &View)
+  {
+    if (memcmp(&View, &Set.VB[nSlot], sizeof(View)))
+    {
+      pList->IASetVertexBuffers(nSlot, 1, &View);
+      Set.VB[nSlot] = View;
+    }
+  };
+  SetVB(0, VB);
+  if (!Set.bDefaultStream)
+  {
+    m_pPipeline->BindDefaultStream(pList);
+    Set.bDefaultStream = true;
+  }
   if (pTexCoord1)
-    pList->IASetVertexBuffers(2, 1, pTexCoord1);
+    SetVB(2, *pTexCoord1);
   if (pTangents)
-    pList->IASetVertexBuffers(3, 1, pTangents);
-  pList->IASetPrimitiveTopology(eTopology);
+    SetVB(3, *pTangents);
+  if (eTopology != Set.eTopology)
+  {
+    pList->IASetPrimitiveTopology(eTopology);
+    Set.eTopology = eTopology;
+  }
 
   // The viewport inside the back buffer (an off screen target: all of it, or m_TargetRect); the
   // scissor rectangle inside the viewport (the scissors are the back buffer's). In an upscaler's
@@ -229,7 +288,11 @@ void CD3D12Renderer::DrawGeometry(const SPipelineKey &Key, const SDrawConstants 
   if (vw <= 0 || vh <= 0)
     return;
   const D3D12_VIEWPORT Viewport = { (float)vx, (float)vy, (float)vw, (float)vh, m_fDepthMin, m_fDepthMax };
-  pList->RSSetViewports(1, &Viewport);
+  if (memcmp(&Viewport, &Set.Viewport, sizeof(Viewport)))
+  {
+    pList->RSSetViewports(1, &Viewport);
+    Set.Viewport = Viewport;
+  }
   RECT Scissor = { vx, vy, vx + vw, vy + vh };
   if (m_bItemScissor && !bOffscreen)
   {
@@ -247,15 +310,25 @@ void CD3D12Renderer::DrawGeometry(const SPipelineKey &Key, const SDrawConstants 
   }
   if (Scissor.right <= Scissor.left || Scissor.bottom <= Scissor.top)
     return;
-  pList->RSSetScissorRects(1, &Scissor);
+  if (memcmp(&Scissor, &Set.Scissor, sizeof(Scissor)))
+  {
+    pList->RSSetScissorRects(1, &Scissor);
+    Set.Scissor = Scissor;
+  }
 
+  m_nFramePolygons += CountTriangles(eTopology, nCount) * nInstances;
+  m_nFrameDraws++;
   if (pIB)
   {
-    pList->IASetIndexBuffer(pIB);
-    pList->DrawIndexedInstanced(nCount, 1, nFirst, nBaseVertex, 0);
+    if (memcmp(pIB, &Set.IB, sizeof(*pIB)))
+    {
+      pList->IASetIndexBuffer(pIB);
+      Set.IB = *pIB;
+    }
+    pList->DrawIndexedInstanced(nCount, nInstances, nFirst, nBaseVertex, 0);
   }
   else
-    pList->DrawInstanced(nCount, 1, nFirst, 0);
+    pList->DrawInstanced(nCount, nInstances, nFirst, 0);
 }
 
 void CD3D12Renderer::DrawImmediate(const SPipelineKey &Key, const SDrawConstants &dc, D3D_PRIMITIVE_TOPOLOGY eTopology, int nVertexFormat,

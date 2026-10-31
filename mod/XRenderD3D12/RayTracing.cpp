@@ -16,7 +16,7 @@
 
 #include "StdAfx.h"
 #include <algorithm>
-#include <unordered_set>
+#include <bit>
 #include "Renderer.h"
 #include "D3D12Device.h"
 #include "D3D12Descriptors.h"
@@ -32,7 +32,13 @@ namespace
   constexpr uint64 AS_ALIGN = D3D12_RAYTRACING_ACCELERATION_STRUCTURE_BYTE_ALIGNMENT;
   constexpr uint64 BUFFER_ALIGN = 64 * 1024;
   constexpr uint64 POOL_SIZE = 64ull << 20;                   //!< the static BLAS' pools
-  constexpr uint64 MIN_SLOT_BUFFER = 1ull << 20;              //!< the frame slots' buffers start this big
+  //! The frame slots' buffers start this big (made in the first frame with rays, while a level loads) and
+  //! grow to the next power of two: a new buffer holds its frame up 0.5-1 ms however small, and the
+  //! scene's first look at a new place needed up to 7.2 MB of scratch, 1.6 MB of frame BLAS and 1.3 MB of
+  //! TLAS in the sweeps (each slot growing on its own, by a quarter at a time, 6-8 new buffers a level).
+  constexpr uint64 MIN_SCRATCH = 16ull << 20;
+  constexpr uint64 MIN_FRAME_BLAS = 4ull << 20;
+  constexpr uint64 MIN_TLAS = 4ull << 20;
   constexpr uint32 MAX_STATIC_BUILD_TRIANGLES = 1u << 20;     //!< the new static BLAS of a frame (one bigger alone)
   constexpr uint32 MAX_FRAME_TRIANGLES = 2u << 20;            //!< the BLAS of a frame
   constexpr int EVICT_FRAMES = 300;                           //!< a static BLAS not used for so many frames goes
@@ -63,20 +69,49 @@ namespace
   }
 
   const float s_FullScreen[3][3] = { { -1, -1, 0 }, { -1, 3, 0 }, { 3, -1, 0 } };
+
+  //! A hash of whole 64 bit words: MurmurHash3's mixing of each word and its final mix (a
+  //! multiply a word on the chain, where a hash of the bytes takes one a byte).
+  class CWordHash
+  {
+  public:
+    template <class T> void Add(const T &Data)
+    {
+      static_assert(sizeof(T) % 8 == 0 && std::is_trivially_copyable_v<T>, "hashed as whole words");
+      const uint8 *p = (const uint8 *)&Data;
+      for (size_t i = 0; i < sizeof(T); i += 8)
+      {
+        uint64 k;
+        memcpy(&k, p + i, 8);
+        k *= 0x87c37b91114253d5ull;
+        k = _rotl64(k, 31);
+        k *= 0x4cf5ad432745937full;
+        m_nHash ^= k;
+        m_nHash = _rotl64(m_nHash, 27) * 5 + 0x52dce729;
+      }
+    }
+    uint64 Get() const
+    {
+      uint64 h = m_nHash;
+      h ^= h >> 33;
+      h *= 0xff51afd7ed558ccdull;
+      h ^= h >> 33;
+      h *= 0xc4ceb9fe1a85ec53ull;
+      h ^= h >> 33;
+      return h;
+    }
+
+  private:
+    uint64 m_nHash = 0;
+  };
 }
 
 size_t CD3D12RayScene::SBlasKeyHash::operator()(const SBlasKey &Key) const
 {
-  // FNV-1a over the bytes (SBlasKey has no padding).
   static_assert(sizeof(SBlasKey) == 48, "SBlasKey is hashed and compared as bytes");
-  const uint8 *p = (const uint8 *)&Key;
-  uint64 nHash = 14695981039346656037ull;
-  for (size_t i = 0; i < sizeof(Key); i++)
-  {
-    nHash ^= p[i];
-    nHash *= 1099511628211ull;
-  }
-  return (size_t)nHash;
+  CWordHash Hash;
+  Hash.Add(Key);
+  return (size_t)Hash.Get();
 }
 
 CD3D12RayScene::CD3D12RayScene() = default;
@@ -227,20 +262,28 @@ bool CD3D12RayScene::IsAlive(const SDraw &d)
 uint64 CD3D12RayScene::DrawHash(const SDraw &d)
 {
   // The static buffers by id and version (Key), per frame memory by address (the triangles' desc).
-  uint64 nHash = SBlasKeyHash()(d.Key);
-  const auto Add = [&nHash](const void *pData, size_t nSize)
-  {
-    const uint8 *p = (const uint8 *)pData;
-    for (size_t i = 0; i < nSize; i++)
-    {
-      nHash ^= p[i];
-      nHash *= 1099511628211ull;
-    }
-  };
   static_assert(sizeof(D3D12_RAYTRACING_GEOMETRY_TRIANGLES_DESC) == 48, "the triangles' desc is hashed as bytes");
-  Add(&d.Geom.Triangles, sizeof(d.Geom.Triangles));
-  Add(d.Transform, sizeof(d.Transform));
-  return nHash;
+  CWordHash Hash;
+  Hash.Add(d.Key);
+  Hash.Add(d.Geom.Triangles);
+  Hash.Add(d.Transform);
+  return Hash.Get();
+}
+
+bool CD3D12RayScene::InsertSeen(uint64 nHash)
+{
+  nHash += !nHash;
+  const size_t nMask = m_Seen.size() - 1;
+  for (size_t i = (size_t)nHash & nMask;; i = (i + 1) & nMask)
+  {
+    if (m_Seen[i] == nHash)
+      return false;
+    if (!m_Seen[i])
+    {
+      m_Seen[i] = nHash;
+      return true;
+    }
+  }
 }
 
 void CD3D12RayScene::CaptureDraw(const SPipelineKey &Key, const SDrawConstants &dc, D3D_PRIMITIVE_TOPOLOGY eTopology, const D3D12_VERTEX_BUFFER_VIEW &VB,
@@ -458,7 +501,7 @@ bool CD3D12RayScene::Reserve(SSlotBuffer &Buf, uint64 nSize, D3D12_RESOURCE_STAT
 {
   if (Buf.pBuffer && nSize <= Buf.nSize)
     return true;
-  const uint64 nNew = AlignUp(std::max(nSize + nSize / 4, MIN_SLOT_BUFFER), BUFFER_ALIGN);
+  const uint64 nNew = AlignUp(std::bit_ceil(nSize), BUFFER_ALIGN);
   ComPtr<ID3D12Resource> pBuffer = CreateBuffer(nNew, State, szName);
   if (!pBuffer)
     return false;
@@ -599,7 +642,7 @@ void CD3D12RayScene::Evict(uint64 nBudget)
 //////////////////////////////////////////////////////////////////////////
 // Builds
 
-void CD3D12RayScene::Build(FILE *pDump)
+void CD3D12RayScene::Build(FILE *pDump, bool bTop)
 {
   m_bCapturing = false;
   m_nBuiltFrame = -1;
@@ -613,20 +656,26 @@ void CD3D12RayScene::Build(FILE *pDump)
   CollectPools();
   const int nSlot = Device.GetFrameSlot();
   SFrameSlot &Slot = m_Slots[nSlot];
+  for (SFrameSlot &Each : m_Slots)
+  {
+    Reserve(Each.Scratch, MIN_SCRATCH, D3D12_RESOURCE_STATE_UNORDERED_ACCESS, L"XRenderD3D12 ray scene scratch");
+    Reserve(Each.Blas, MIN_FRAME_BLAS, D3D12_RESOURCE_STATE_RAYTRACING_ACCELERATION_STRUCTURE, L"XRenderD3D12 ray scene frame BLAS");
+    Reserve(Each.Tlas, MIN_TLAS, D3D12_RESOURCE_STATE_RAYTRACING_ACCELERATION_STRUCTURE, L"XRenderD3D12 ray scene TLAS");
+  }
 
   // The kinds d3d12_RTMask has all of; of the draws with the same geometry and transform (passes over one
   // another) the first; then the water reflection's draws the main view does not have, as long as their
   // buffers and textures are there.
   const uint32 nKinds = (uint32)g_pRenderer->CV_d3d12_RTMask & 0xff;
-  std::unordered_set<uint64> Seen;
   const size_t nCaptured = m_Draws.size();
+  m_Seen.assign(std::bit_ceil(std::max<size_t>(64, (nCaptured + m_ReflectionDraws.size()) * 2)), 0);
   m_Draws.erase(std::remove_if(m_Draws.begin(), m_Draws.end(),
-    [&](const SDraw &d) { return (d.nKind & ~nKinds) != 0 || !Seen.insert(DrawHash(d)).second; }), m_Draws.end());
+    [&](const SDraw &d) { return (d.nKind & ~nKinds) != 0 || !InsertSeen(DrawHash(d)); }), m_Draws.end());
   const int nLeftOut = (int)(nCaptured - m_Draws.size());
   int nReflection = 0;
   for (const SDraw &d : m_ReflectionDraws)
   {
-    if (!(d.nKind & ~nKinds) && IsAlive(d) && Seen.insert(DrawHash(d)).second)
+    if (!(d.nKind & ~nKinds) && IsAlive(d) && InsertSeen(DrawHash(d)))
     {
       m_Draws.push_back(d);
       nReflection++;
@@ -691,6 +740,8 @@ void CD3D12RayScene::Build(FILE *pDump)
     }
     else
     {
+      if (!bTop)
+        continue;
       if (nFrameTris + nTri > MAX_FRAME_TRIANGLES)
       {
         nOver++;
@@ -709,8 +760,8 @@ void CD3D12RayScene::Build(FILE *pDump)
     }
     nTris += nTri;
   }
-  const UINT nInstances = (UINT)std::count_if(m_Draws.begin(), m_Draws.end(), [](const SDraw &d) { return d.nBlas != 0; }) +
-                          (UINT)nFrame;
+  const UINT nInstances =
+    bTop ? (UINT)std::count_if(m_Draws.begin(), m_Draws.end(), [](const SDraw &d) { return d.nBlas != 0; }) + (UINT)nFrame : 0;
 
   // The TLAS, its scratch at the start of the slot's (after the barrier behind the BLAS).
   D3D12_BUILD_RAYTRACING_ACCELERATION_STRUCTURE_INPUTS TopInputs = {};
@@ -721,12 +772,14 @@ void CD3D12RayScene::Build(FILE *pDump)
   D3D12_RAYTRACING_ACCELERATION_STRUCTURE_PREBUILD_INFO TopInfo = {};
   if (nInstances)
     m_pDevice5->GetRaytracingAccelerationStructurePrebuildInfo(&TopInputs, &TopInfo);
-  const bool bMemory = nInstances &&
+  const bool bWork = nInstances || !Builds.empty();
+  const bool bMemory = bWork &&
     Reserve(Slot.Scratch, std::max(nScratch, AlignUp(TopInfo.ScratchDataSizeInBytes, AS_ALIGN)), D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
             L"XRenderD3D12 ray scene scratch") &&
     (!nFrameBlas || Reserve(Slot.Blas, nFrameBlas, D3D12_RESOURCE_STATE_RAYTRACING_ACCELERATION_STRUCTURE, L"XRenderD3D12 ray scene frame BLAS")) &&
-    Reserve(Slot.Tlas, TopInfo.ResultDataMaxSizeInBytes, D3D12_RESOURCE_STATE_RAYTRACING_ACCELERATION_STRUCTURE, L"XRenderD3D12 ray scene TLAS");
-  if (!bMemory)
+    (!nInstances ||
+     Reserve(Slot.Tlas, TopInfo.ResultDataMaxSizeInBytes, D3D12_RESOURCE_STATE_RAYTRACING_ACCELERATION_STRUCTURE, L"XRenderD3D12 ray scene TLAS"));
+  if (bWork && !bMemory)
   {
     // The static ones made ready above are not built: they wait.
     for (const SBuild &b : Builds)
@@ -741,7 +794,12 @@ void CD3D12RayScene::Build(FILE *pDump)
     return;
   }
 
-  const D3D12_GPU_VIRTUAL_ADDRESS nScratchGPU = Slot.Scratch.pBuffer->GetGPUVirtualAddress();
+  const D3D12_GPU_VIRTUAL_ADDRESS nScratchGPU = bWork ? Slot.Scratch.pBuffer->GetGPUVirtualAddress() : 0;
+  // On the compute queue: it reads the vertices and the indices only (uploaded, or written by the
+  // CPU), the frame's list waits for it from here on.
+  ID3D12GraphicsCommandList4 *pAsync = bWork && g_pRenderer->CV_d3d12_RTAsync ? Device.BeginAsyncCompute("ray scene (compute queue)") : nullptr;
+  if (pAsync)
+    pList = pAsync;
   for (const SBuild &b : Builds)
   {
     if (!b.pStatic)
@@ -762,37 +820,43 @@ void CD3D12RayScene::Build(FILE *pDump)
   if (!Builds.empty())
     pList->ResourceBarrier(1, &Barrier);
 
-  const SD3D12FrameAlloc InstanceMem = g_pRenderer->m_pUpload->AllocFrame(nInstances * (uint32)sizeof(D3D12_RAYTRACING_INSTANCE_DESC),
-    D3D12_RAYTRACING_INSTANCE_DESCS_BYTE_ALIGNMENT);
-  D3D12_RAYTRACING_INSTANCE_DESC *pInstances = (D3D12_RAYTRACING_INSTANCE_DESC *)InstanceMem.pCPU;
-  const SD3D12FrameAlloc RayInstanceMem = g_pRenderer->m_pUpload->AllocFrame(std::max(nInstances, 1u) * (uint32)sizeof(SRayInstance), 256);
-  SRayInstance *pRayInstances = (SRayInstance *)RayInstanceMem.pCPU;
+  // The TLAS, in a frame that traces rays.
   UINT nInstance = 0;
-  for (const SDraw &d : m_Draws)
+  if (nInstances)
   {
-    if (!d.nBlas || nInstance >= nInstances)
-      continue;
-    D3D12_RAYTRACING_INSTANCE_DESC Instance = {};
-    memcpy(Instance.Transform, d.Transform, sizeof(Instance.Transform));
-    Instance.InstanceID = nInstance;
-    Instance.InstanceMask = d.nKind;
-    Instance.InstanceContributionToHitGroupIndex = d.nKind;
-    Instance.Flags = D3D12_RAYTRACING_INSTANCE_FLAG_TRIANGLE_CULL_DISABLE;
-    Instance.AccelerationStructure = d.nBlas;
-    pRayInstances[nInstance] = d.Inst;
-    pInstances[nInstance++] = Instance;
+    const SD3D12FrameAlloc InstanceMem = g_pRenderer->m_pUpload->AllocFrame(nInstances * (uint32)sizeof(D3D12_RAYTRACING_INSTANCE_DESC),
+      D3D12_RAYTRACING_INSTANCE_DESCS_BYTE_ALIGNMENT);
+    D3D12_RAYTRACING_INSTANCE_DESC *pInstances = (D3D12_RAYTRACING_INSTANCE_DESC *)InstanceMem.pCPU;
+    const SD3D12FrameAlloc RayInstanceMem = g_pRenderer->m_pUpload->AllocFrame(std::max(nInstances, 1u) * (uint32)sizeof(SRayInstance), 256);
+    SRayInstance *pRayInstances = (SRayInstance *)RayInstanceMem.pCPU;
+    for (const SDraw &d : m_Draws)
+    {
+      if (!d.nBlas || nInstance >= nInstances)
+        continue;
+      D3D12_RAYTRACING_INSTANCE_DESC Instance = {};
+      memcpy(Instance.Transform, d.Transform, sizeof(Instance.Transform));
+      Instance.InstanceID = nInstance;
+      Instance.InstanceMask = d.nKind;
+      Instance.InstanceContributionToHitGroupIndex = d.nKind;
+      Instance.Flags = D3D12_RAYTRACING_INSTANCE_FLAG_TRIANGLE_CULL_DISABLE;
+      Instance.AccelerationStructure = d.nBlas;
+      pRayInstances[nInstance] = d.Inst;
+      pInstances[nInstance++] = Instance;
+    }
+    TopInputs.NumDescs = nInstance;
+    TopInputs.InstanceDescs = InstanceMem.nGPU;
+    D3D12_BUILD_RAYTRACING_ACCELERATION_STRUCTURE_DESC TopDesc = {};
+    TopDesc.DestAccelerationStructureData = Slot.Tlas.pBuffer->GetGPUVirtualAddress();
+    TopDesc.Inputs = TopInputs;
+    TopDesc.ScratchAccelerationStructureData = nScratchGPU;
+    pList->BuildRaytracingAccelerationStructure(&TopDesc, 0, nullptr);
+    pList->ResourceBarrier(1, &Barrier);
+    m_nBuiltFrame = g_pRenderer->m_nFrames;
+    m_nBuiltSlot = nSlot;
+    m_nInstances = RayInstanceMem.nGPU;
   }
-  TopInputs.NumDescs = nInstance;
-  TopInputs.InstanceDescs = InstanceMem.nGPU;
-  D3D12_BUILD_RAYTRACING_ACCELERATION_STRUCTURE_DESC TopDesc = {};
-  TopDesc.DestAccelerationStructureData = Slot.Tlas.pBuffer->GetGPUVirtualAddress();
-  TopDesc.Inputs = TopInputs;
-  TopDesc.ScratchAccelerationStructureData = nScratchGPU;
-  pList->BuildRaytracingAccelerationStructure(&TopDesc, 0, nullptr);
-  pList->ResourceBarrier(1, &Barrier);
-  m_nBuiltFrame = g_pRenderer->m_nFrames;
-  m_nBuiltSlot = nSlot;
-  m_nInstances = RayInstanceMem.nGPU;
+  if (pAsync)
+    Device.SubmitAsyncCompute();
 
   Evict((uint64)std::max(g_pRenderer->CV_d3d12_RTMemory, 16) << 20);
   if (pDump)
@@ -801,10 +865,10 @@ void CD3D12RayScene::Build(FILE *pDump)
     for (const auto &p : m_Pools)
       nPools += p->nSize;
     fprintf(pDump,
-      "ray scene: %u instances of %d draws (%d of the water reflection; %d left out by their transforms, %d by d3d12_RTMask or as passes "
+      "ray scene: %s%u instances of %d draws (%d of the water reflection; %d left out by their transforms, %d by d3d12_RTMask or as passes "
       "over others), %u triangles; static BLAS %d kept, %d built (%u triangles), %d waiting; %d of this frame (%u triangles), %d over the "
       "limit; static BLAS %.1f MB (%d, pools %.1f MB), frame BLAS %.1f MB, TLAS %.1f KB, scratch %.1f MB\n",
-      nInstance, (int)m_Draws.size(), nReflection, m_nSkippedTransform, nLeftOut, nTris, nCached, nNewStatic, nNewStaticTris, nWaiting, nFrame,
+      bTop ? "" : "no TLAS (nothing in the frame traces rays), ", nInstance, (int)m_Draws.size(), nReflection, m_nSkippedTransform, nLeftOut, nTris, nCached, nNewStatic, nNewStaticTris, nWaiting, nFrame,
       nFrameTris, nOver,
       m_nStaticBytes / 1048576.0, (int)m_Static.size(), nPools / 1048576.0, nFrameBlas / 1048576.0, TopInfo.ResultDataMaxSizeInBytes / 1024.0,
       Slot.Scratch.nSize / 1048576.0);
@@ -833,7 +897,7 @@ uint32 CD3D12Renderer::RayMask() const
   return ((uint32)CV_d3d12_RTMask & 0xff) | (CV_d3d12_RTShadows ? 0x100u : 0u);
 }
 
-void CD3D12Renderer::BeginRayCapture()
+void CD3D12Renderer::BeginRayCapture(bool bTraced)
 {
   if (!m_pRayScene)
     return;
@@ -845,11 +909,13 @@ void CD3D12Renderer::BeginRayCapture()
   // One scene a frame: rebuilt for another top level view, it would change under the draws of the first.
   if (!IsAOView() || m_pRayScene->GetBuiltFrame() == m_nFrames)
     return;
+  m_bRayTlas = bTraced || CV_d3d12_RTDebug != 0;
   m_pRayScene->BeginCapture(m_CameraView * m_ProjMatrix, m_Camera.GetPos());
 }
 
 void CD3D12Renderer::BuildRayScene()
 {
+  FUNCTION_PROFILER(iSystem, PROFILE_RENDERER);
   if (!m_pRayScene || !m_pRayScene->IsCapturing())
     return;
   m_pRayScene->EndCapture();
@@ -857,7 +923,7 @@ void CD3D12Renderer::BuildRayScene()
   if (!m_bReflectionValid)
     m_pRayScene->ClearReflection();
   GpuSection("ray scene");
-  m_pRayScene->Build(m_pFrameDump.get());
+  m_pRayScene->Build(m_pFrameDump.get(), m_bRayTlas);
 }
 
 void CD3D12Renderer::DrawRayDebug()
