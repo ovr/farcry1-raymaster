@@ -56,6 +56,9 @@ enum ED3D12Kernel
   eD3D12K_RaySunTrace,              //!< the sun's shadow by rays: the rays (Shaders/RaySun.hlsl; with rays)
   eD3D12K_RaySunTemporal,           //!< their visibility blended into the history
   eD3D12K_RaySunFilter,             //!< the history over the soft edges, into the mask
+  eD3D12K_RayAOTrace,               //!< the ambient occlusion by rays: the rays (Shaders/RayAO.hlsl; with rays)
+  eD3D12K_RayAOTemporal,            //!< their visibility blended into the history
+  eD3D12K_RayAOFilter,              //!< the history filtered into the visibility
   eD3D12K_Num
 };
 

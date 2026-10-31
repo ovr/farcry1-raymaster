@@ -111,3 +111,7 @@ xrender_d3d12_shader(VolumetricIntegrate_CS Volumetric.hlsl cs_6_0 CSIntegrate)
 xrender_d3d12_shader(RaySunTrace_CS RaySun.hlsl cs_6_5 CSTrace)
 xrender_d3d12_shader(RaySunTemporal_CS RaySun.hlsl cs_6_5 CSTemporal)
 xrender_d3d12_shader(RaySunFilter_CS RaySun.hlsl cs_6_5 CSFilter)
+# The ambient occlusion by rays (d3d12_AO rt, RayAO.cpp), as the sun's shadow's.
+xrender_d3d12_shader(RayAOTrace_CS RayAO.hlsl cs_6_5 CSTrace)
+xrender_d3d12_shader(RayAOTemporal_CS RayAO.hlsl cs_6_5 CSTemporal)
+xrender_d3d12_shader(RayAOFilter_CS RayAO.hlsl cs_6_5 CSFilter)

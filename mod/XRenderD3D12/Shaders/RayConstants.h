@@ -95,4 +95,28 @@ struct SRaySunConstants
                                   //!< the casters (RayMask, the low 8 bits) and 0x100 when the scene has live casters
 };
 
+// The threads a side of a group of the ambient occlusion by rays' kernels (RayAO.hlsl, RayAO.cpp)
+#define XR_RAY_AO_GROUP 8
+
+//! b2 of the ambient occlusion by rays' kernels (RayAO.hlsl, RayAO.cpp); the view's fields as
+//! SRaySunConstants' (RayView.hlsli).
+struct SRayAOConstants
+{
+  XR_FLOAT4X4(mPrevViewProj);     //!< world to clip in the frame before, without its jitter: where a point was in the history
+  XR_FLOAT4(vCameraPos);          //!< xyz the camera
+  XR_FLOAT4(vRayX);               //!< the world position at the view depth d and x, y -1..1 across the view (y up), the jitter
+  XR_FLOAT4(vRayY);               //!< taken off: vCameraPos + d (vRayO + x vRayX + y vRayY)
+  XR_FLOAT4(vRayO);
+  XR_FLOAT4(vSize);               //!< x width, y height, z 1 / width, w 1 / height (the depth buffer's pixels)
+  XR_FLOAT4(vJitter);             //!< xy this frame's jitter (SFrameConstants::vJitter.xy), zw the frame before's
+  XR_FLOAT4(vParams);             //!< x the rays' length (d3d12_AORadius, m), y the view depth beyond which all is open, z a
+                                  //!< pixel's size at a view depth of 1 m, w the frames a history holds at most
+  XR_UINT4(nTextures);            //!< texture table indices: x the depth buffer, y CSTrace's rays, z the history of the frame
+                                  //!< before (CSTemporal), w this frame's (CSFilter)
+  XR_UINT4(nTrace);               //!< the rays' grid: x the pixels a side of a cell (1 or 2), y z the pixel of a cell traced in
+                                  //!< this frame
+  XR_UINT4(nFlags);               //!< x 1: a history to blend into, y the frame (the noise), z 1: denoised (the history and the
+                                  //!< filter), w the mask of the instances the rays see (RayMask, the low 8 bits)
+};
+
 #endif
