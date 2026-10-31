@@ -560,7 +560,10 @@ the first run's behaviour back; the pictures are the same either way.
   the engine's block: the game's version and level, the view's camera position, angles and
   distance, the frame rate of the half second with its slowest and fastest frames', the triangles
   per frame and per second, the main view's lights (the sun, the others; counted at its
-  `EF_EndEf3D`), the anti-aliasing (the upscaler's: FSR, temporal, also in Native AA; the
+  `EF_EndEf3D`), the ambient occlusion's backend as it is made (XeGTAO, CACAO, by rays, GI by rays,
+  none), ray tracing (not supported, off, or the last scene for rays' instances and triangles; then
+  the shadows by rays, sun and lamps, the reflections by rays, the water's and the cube map
+  surfaces', and `d3d12_RTDebug`'s view, those that are on), the anti-aliasing (the upscaler's: FSR, temporal, also in Native AA; the
   renderer has no multisampling, so the game's Anti-Aliasing list has None alone), the upscaler
   with its version and mode, and the 3D scene's size before and after it (`2560x1440 to
   3840x2160`, or `, native`). The renderer takes the variable over (`TakeDisplayInfo`, an `IConsoleVarSink`): it keeps the console's value at 0, so

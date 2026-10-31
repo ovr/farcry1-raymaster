@@ -450,6 +450,42 @@ void CD3D12Renderer::DrawStats()
     }
     // The main view's (none yet in a frame read before its EF_EndEf3D).
     Value("Lights", m_nFrameSunLights ? Format("sun, %d dynamic", m_nFrameDynLights) : Format("%d dynamic", m_nFrameDynLights));
+    // The ambient occlusion's backend as it is made (UpdateAO), the rays' GI in its place.
+    static const struct { const char *szCvar, *szName; } s_AONames[] = { { "gtao", "XeGTAO" }, { "cacao", "CACAO" }, { "rt", "by rays" } };
+    std::string AO = "none";
+    if (m_pAO && m_bAOGI)
+      AO = CV_d3d12_RTGI >= 2 ? "GI by rays (a ray a pixel)" : "GI by rays";
+    else if (m_pAO)
+    {
+      AO = m_AOName;
+      for (const auto &n : s_AONames)
+        if (!_stricmp(m_AOName.c_str(), n.szCvar))
+          AO = n.szName;
+    }
+    Value("Ambient occlusion", AO);
+    // The effects by rays (as their variables ask; each needs the device's DXR 1.1) and the last scene for them.
+    if (!m_pRayScene || !m_pRayScene->IsSupported())
+      Value("Ray tracing", "not supported");
+    else if (!WantsRays())
+      Value("Ray tracing", "off");
+    else
+    {
+      const bool bScene = m_pRayScene->GetBuiltFrame() >= m_nFrames - 1 && m_pRayScene->GetSceneInstances();
+      Value("Ray tracing", bScene ? Format("%s instances, %s triangles", Thousands(m_pRayScene->GetSceneInstances()).c_str(),
+                                           Thousands(m_pRayScene->GetSceneTriangles()).c_str())
+                                  : std::string("on, no scene now"));
+      std::string Shadows;
+      if (WantsRaySun())
+        Shadows = CV_d3d12_RTSunShadows >= 2 ? "sun (a ray a pixel)" : "sun";
+      if (WantsRayLights())
+        Shadows += Shadows.empty() ? "lamps" : ", lamps";
+      if (!Shadows.empty())
+        Value("RT shadows", Shadows);
+      if (CV_d3d12_RTReflections > 0)
+        Value("RT reflections", std::string(CV_d3d12_RTReflections >= 2 ? "water (hybrid)" : "water") + (WantsRaySurfaces() ? ", cube map surfaces" : ""));
+      if (CV_d3d12_RTDebug != 0)
+        Value("RT debug view", Format("%d", CV_d3d12_RTDebug));
+    }
     // The anti-aliasing (the upscaler's alone: no multisampling, EnumAAFormats), the upscaler and
     // the 3D scene's size before and after it.
     const SUpscaleInfo Up = UpscaleInfo();
