@@ -25,7 +25,10 @@
 //	casters, each part once. The live set holds the casters the engine
 //	names for its own shadows in the frame (characters, vehicles, the
 //	vegetation that casts: AddLiveCasters), each only where nothing in the
-//	full set is nearer to the sun (DF2_CASCADE_CASTER).
+//	full set is nearer to the sun (DF2_CASCADE_CASTER). A part of either
+//	set goes into a slice only where its shadow falls on the slice's
+//	receivers (the view's points that take their shadow from it): the
+//	slice is not read elsewhere.
 //
 //	The receivers (SunCascades, Common.hlsli): the lit objects take the
 //	sun's visibility from the full set; the light maps and the terrain,
@@ -85,6 +88,14 @@ Matrix44 GetWorldMatrix(const CCObject *pObj)
   m.data[14] = pObj->m_Matrix.data[14];
   return m;
 }
+
+//! The texels around the outline of a cascade's receivers that a caster may still reach them in
+//! (CascadeSample: the point moved off the surface by a texel and a half, the filter's bilinear
+//! taps), besides the filter's radius.
+constexpr float CASCADE_RECEIVER_TEXELS = 5.0f;
+//! Around the camera in the first cascade's outline (m): the weapon in the hands, drawn with a
+//! projection of its own.
+constexpr float CASCADE_NEAR_MARGIN_M = 1.0f;
 
 //! The frame of the sun's view: z towards the sun, x across, y up the map.
 void SunBasis(const Vec3 &vToSun, Vec3 &x, Vec3 &y, Vec3 &z)
@@ -146,7 +157,13 @@ bool CD3D12Renderer::SetupCascades(int nCascades)
   vDir.Normalize();
   const Vec3 vPos = Cam.GetPos();
   const int nSize = m_nCascadeSize;
-  float fStart = fNear;
+  // The frustum's sides at depth d: d times (1 + the off-centre term) over the scale, across and up.
+  Vec3 vRight(m_CameraView.data[0], m_CameraView.data[4], m_CameraView.data[8]), vUp(m_CameraView.data[1], m_CameraView.data[5], m_CameraView.data[9]);
+  vRight.Normalize();
+  vUp.Normalize();
+  const float fSideX = m_ProjMatrix.data[0] != 0 ? (1 + fabsf(m_ProjMatrix.data[8])) / fabsf(m_ProjMatrix.data[0]) * 1.01f : 1e3f;
+  const float fSideY = m_ProjMatrix.data[5] != 0 ? (1 + fabsf(m_ProjMatrix.data[9])) / fabsf(m_ProjMatrix.data[5]) * 1.01f : 1e3f;
+  float fStart = fNear, fBlendFrom = 0;
   for (int i = 0; i < nCascades; i++)
   {
     const float t = (float)(i + 1) / nCascades;
@@ -179,6 +196,53 @@ bool CD3D12Renderer::SetupCascades(int nCascades)
       M[12 + k] = Offsets[k];
     }
     M[15] = 1;
+
+    // Its receivers (SunCascades): the view's points from where the cascade before blends into it
+    // (CascadeOf: over the last CASCADE_BLEND of that one, counted from 0 for the first) to its end;
+    // the first one's from the camera. Seen from the sun, the outline of the corners of that part of
+    // the frustum (counter-clockwise).
+    struct SPoint
+    {
+      float x, y;
+    };
+    const float fFrom = i ? fStart - (fStart - fBlendFrom) * CASCADE_BLEND : 0;
+    SPoint Points[8];
+    for (int k = 0; k < 8; k++)
+    {
+      const float d = (k & 4) ? fEnd : fFrom;
+      const Vec3 p = vPos + vDir * d + vRight * ((k & 1 ? 1 : -1) * d * fSideX) + vUp * ((k & 2 ? 1 : -1) * d * fSideY);
+      Points[k] = { p.Dot(X), p.Dot(Y) };
+    }
+    std::sort(std::begin(Points), std::end(Points), [](const SPoint &a, const SPoint &b) { return a.x < b.x || (a.x == b.x && a.y < b.y); });
+    const auto Turn = [](const SPoint &o, const SPoint &a, const SPoint &b) { return (a.x - o.x) * (b.y - o.y) - (a.y - o.y) * (b.x - o.x); };
+    SPoint Hull[16];
+    int nHull = 0;
+    for (int k = 0; k < 8; k++)
+    {
+      while (nHull >= 2 && Turn(Hull[nHull - 2], Hull[nHull - 1], Points[k]) <= 0)
+        nHull--;
+      Hull[nHull++] = Points[k];
+    }
+    for (int k = 6, nLower = nHull + 1; k >= 0; k--)
+    {
+      while (nHull >= nLower && Turn(Hull[nHull - 2], Hull[nHull - 1], Points[k]) <= 0)
+        nHull--;
+      Hull[nHull++] = Points[k];
+    }
+    nHull--;
+    for (int k = 0; k < nHull && Cas.nEdges < 8; k++)
+    {
+      const SPoint &a = Hull[k], &b = Hull[(k + 1) % nHull];
+      const float nx = b.y - a.y, ny = a.x - b.x, l = sqrtf(nx * nx + ny * ny);
+      if (l <= 0)
+        continue;
+      float *e = Cas.Edges[Cas.nEdges++];
+      e[0] = nx / l;
+      e[1] = ny / l;
+      e[2] = e[0] * a.x + e[1] * a.y;
+    }
+    Cas.fMargin = std::max(CV_d3d12_ShadowSoftness, 1.5f * Cas.fTexel) + CASCADE_RECEIVER_TEXELS * Cas.fTexel + (i ? 0 : CASCADE_NEAR_MARGIN_M);
+    fBlendFrom = i ? fStart : 0;
     fStart = fEnd;
   }
   return fFar > fNear;
@@ -380,14 +444,22 @@ void CD3D12Renderer::DrawCascadeItems(std::span<const SRenderItem> Items, std::u
     Parts.push_back(p);
   }
 
-  // Into each slice that a part's sphere reaches: across the square, and not all of it farther
-  // from the sun than the slice's range.
+  // Into each slice that a part's sphere reaches: across the square, not all of it farther from the
+  // sun than the slice's range, and its shadow (the sphere drawn out away from the sun) over the
+  // outline of the slice's receivers: elsewhere the slice is not read.
   const SCascadeMaps &Maps = m_CascadeMaps[m_nCascadeSet];
   const Vec3 &X = m_vCascadeAxes[0], &Y = m_vCascadeAxes[1], &Z = m_vCascadeAxes[2];
   auto Reaches = [&](const SPart &p, const SCascade &Cas)
   {
-    return !(p.r >= 0 && (fabsf(p.c.Dot(X) - Cas.fCenter[0]) > Cas.fHalfSize + p.r || fabsf(p.c.Dot(Y) - Cas.fCenter[1]) > Cas.fHalfSize + p.r ||
-                          p.c.Dot(Z) + p.r < Cas.fZMin));
+    if (p.r < 0)
+      return true;
+    const float x = p.c.Dot(X), y = p.c.Dot(Y);
+    if (fabsf(x - Cas.fCenter[0]) > Cas.fHalfSize + p.r || fabsf(y - Cas.fCenter[1]) > Cas.fHalfSize + p.r || p.c.Dot(Z) + p.r < Cas.fZMin)
+      return false;
+    for (int e = 0; e < Cas.nEdges; e++)
+      if (Cas.Edges[e][0] * x + Cas.Edges[e][1] * y - Cas.Edges[e][2] > p.r + Cas.fMargin)
+        return false;
+    return true;
   };
   auto SetSlice = [&](int i, D3D12_CPU_DESCRIPTOR_HANDLE hDSV)
   {

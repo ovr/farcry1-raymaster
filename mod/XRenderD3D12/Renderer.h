@@ -860,6 +860,12 @@ public:
     float fHalfSize = 0;      //!< half the width of its square (m)
     float fTexel = 0;         //!< the width of a texel (m)
     float fZMin = 0, fZMax = 0; //!< its range along the sun's z axis (towards the sun): depth 1 at fZMin, 0 at fZMax
+    //! Where its receivers are seen from the sun: the edges of the outline (the sun's x, y) of the
+    //! view's points that take their shadow from it, each its outward normal and its distance along
+    //! it; and how far around it the receivers read the slice (m).
+    float Edges[8][3] = {};
+    int nEdges = 0;
+    float fMargin = 0;
     int nCasters[2] = {};     //!< parts drawn into the full and the live slice
   };
   //! A set of cascades' maps: a texture array of a slice per cascade.

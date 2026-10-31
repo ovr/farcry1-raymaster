@@ -179,7 +179,12 @@ reference of its features and console variables.
   with `d3d12_CascadeInstancing 0`, which draws slice by slice, and 1: DemoCompare difference 0;
   elsewhere only what the game animates differently from run to run) with far fewer draws
   (Training's time demo, frame 2600: 1,677 in the frame instead of 3,120). The live set is
-  drawn slice by slice, each compared with the full set's.
+  drawn slice by slice, each compared with the full set's. A part goes only into the slices
+  where its shadow (its sphere drawn out away from the sun) falls on the slice's receivers: seen
+  from the sun, the outline of the part of the view's frustum that takes its shadow from the
+  slice, with the filter's reach around it; elsewhere a slice is not read, so the frames are the
+  same (Regulator's time demo outdoors: some 400 draws and 0.11 ms of the GPU less a frame, 301
+  to 311 FPS; `d3d12_ShadowDebug 1` shows the slices without the casters outside).
 
   Lit objects take the sun from the full set. Light maps and the terrain, whose light has the
   static world's shadows already, take it from the live set; the terrain is darkened to the
