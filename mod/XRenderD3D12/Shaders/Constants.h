@@ -111,6 +111,7 @@ typedef float float4x4_t[16];
 // (XR_AMBIENT, General.hlsl; set only while it is bound)
 #define DF2_AO_BAKED        0x01000000  //!< the terrain, the vegetation: the colour (before DF2_SHADOW_TINT) times vMipBias.yzw, the share of the light the shadow leaves
 #define DF2_AO_ALL          0x02000000  //!< the templates lit by the ambient colour alone, the terrain's shadow: all of the colour
+#define DF2_FOLIAGE         0x04000000  //!< the leaves and the grass, seen against the sun (XR_FOLIAGE): rgb += tex0 rgb * vColor.rgb * FoliageLight (General.hlsl, vFoliage)
 
 // SDrawConstants::nFlags of the post program (Post.hlsl): one mode, with POST_EFFECTS the effects drawn
 #define POST_DOWNSAMPLE     0x00000001  //!< the mean of tex0 over the target's pixel: vParams0.z x vParams0.z bilinear taps
@@ -169,6 +170,8 @@ struct SFrameConstants
   XR_FLOAT4(vCascadeParams);      //!< x the number of cascades (0: none), y the filter's radius (m), z the part of a cascade blended into the next one, w the depth bias (m)
   XR_UINT4(nCascadeTex);          //!< x the full set's maps, y the live set's (texture table indices of the arrays)
   XR_FLOAT4(vShadowTint);         //!< rgb: the terrain in the shadow of a live caster (DF2_SHADOW_TINT); w d3d12_ShadowDebug
+  XR_FLOAT4(vFoliage);            //!< DF2_FOLIAGE: x the strength (d3d12_FoliageTranslucency), y the power of the cosine of the angle
+                                  //!< to the sun, z the distance where it ends (m), w 2 / that distance (all of it up to half of it)
 };
 
 //! b1: per draw.

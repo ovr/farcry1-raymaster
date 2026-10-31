@@ -1408,6 +1408,9 @@ public:
   float CV_d3d12_VolumetricLightAnisotropy = 0.3f;   //!< the phase's g: 0 the same all round, towards 1 forwards
   float CV_d3d12_VolumetricLightDistance = 60;       //!< the far end of its froxels (m)
   float CV_d3d12_VolumetricLightHeight = 40;         //!< the height above the water over which the air thins to half (0: the same everywhere)
+  float CV_d3d12_FoliageTranslucency = 1.5f;  //!< the sun through the leaves and the grass (DF2_FOLIAGE): its strength, 0 off
+  float CV_d3d12_FoliageTranslucencyPower = 4;       //!< the power of the cosine of the angle between the view and the sun
+  float CV_d3d12_FoliageTranslucencyDistance = 60;   //!< where it ends (m), all of it up to half of that
 };
 
 extern CD3D12Renderer *g_pRenderer;

@@ -130,6 +130,8 @@ void CD3D12Renderer::MakeFrameConstants(SFrameConstants &fc, bool bScene) const
   Set4(fc.vDepthParams, m_ProjMatrix.data[10], m_ProjMatrix.data[14], 0, 0);
   Set4(fc.vHdr, HdrSkyGlow(), 0, 0, 0);
   SetCascadeConstants(fc);
+  const float fFoliageEnd = std::max(CV_d3d12_FoliageTranslucencyDistance, 1.0f);
+  Set4(fc.vFoliage, std::max(CV_d3d12_FoliageTranslucency, 0.0f), std::max(CV_d3d12_FoliageTranslucencyPower, 0.1f), fFoliageEnd, 2 / fFoliageEnd);
 }
 
 void CD3D12Renderer::DrawGeometry(const SPipelineKey &Key, const SDrawConstants &dc, D3D_PRIMITIVE_TOPOLOGY eTopology, const D3D12_VERTEX_BUFFER_VIEW &VB,
@@ -164,8 +166,11 @@ void CD3D12Renderer::DrawGeometry(const SPipelineKey &Key, const SDrawConstants 
   // the environment cubes with r_HDRRendering.
   if ((FullKey.nTarget == 0 || FullKey.nTarget == 3) && m_pDevice->GetTargetColorFormat() == D3D12_HDR_FORMAT)
     FullKey.nColorFormat = PIPELINE_COLOR_HDR;
-  // The sun's cascades in the general program's pixel shader that has them.
-  FullKey.bCascades = Key.nProgram == eD3D12P_General && (dc.nFlags2 & (DF2_SUN_CASCADES | DF2_CASCADE_CASTER)) ? 1 : 0;
+  // The sun's cascades in the general program's pixel shader that has them; the leaves letting the sun
+  // through in their own.
+  FullKey.bCascades = 0;
+  if (Key.nProgram == eD3D12P_General)
+    FullKey.bCascades = (dc.nFlags2 & DF2_FOLIAGE) ? 2 : (dc.nFlags2 & (DF2_SUN_CASCADES | DF2_CASCADE_CASTER)) ? 1 : 0;
   // A shadow map's caster without the alpha test or the live cascades' comparison with the full set
   // (the general program's discards): without a pixel shader. One that can discard keeps the depth
   // test and write after it for all its pixels.

@@ -87,7 +87,8 @@ struct SPipelineKey
   uint8 bWireframe;       //!< fill mode wireframe (SetPolygonMode R_WIREFRAME_MODE)
   uint8 nColorFormat;     //!< the format of colour target 0: PIPELINE_COLOR_* (DrawGeometry sets it for the main view's target)
   uint8 bCascades;        //!< the general program's pixel shader with the sun's cascades (XR_CASCADES; DrawGeometry sets it
-                          //!< for the draws with DF2_SUN_CASCADES or DF2_CASCADE_CASTER)
+                          //!< for the draws with DF2_SUN_CASCADES or DF2_CASCADE_CASTER); 2 with the sun through the leaves
+                          //!< (XR_FOLIAGE, DF2_FOLIAGE)
   uint8 bAmbient;         //!< nTarget 0 and 3 with the ambient occlusion's target bound (D3D12_AMBIENT_FORMAT, the fourth;
                           //!< without an upscaler after the null second and third): the general program writes the ambient
                           //!< light's part of its colour there (XR_AMBIENT), blended as the colour; DrawGeometry sets it

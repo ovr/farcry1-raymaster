@@ -301,6 +301,15 @@ void CD3D12Renderer::RegisterVariables()
                      "With d3d12_VolumetricLight, how far it reaches (m; beyond the sun's cascades, d3d12_ShadowDistance, it has no shadows)");
   iConsole->Register("d3d12_VolumetricLightHeight", &CV_d3d12_VolumetricLightHeight, 40.0f, VF_DUMPTODISK,
                      "With d3d12_VolumetricLight, the height above the water over which the air thins to half (m; 0: the same everywhere)");
+  // The sun through the leaves and the grass (General.hlsl, DF2_FOLIAGE).
+  iConsole->Register("d3d12_FoliageTranslucency", &CV_d3d12_FoliageTranslucency, 1.5f, VF_DUMPTODISK,
+                     "The sun's light through the leaves and the grass seen against it, where the sun's cascades show the sun, times the "
+                     "sun's colour and the leaf's (0: off)");
+  iConsole->Register("d3d12_FoliageTranslucencyPower", &CV_d3d12_FoliageTranslucencyPower, 4.0f, VF_DUMPTODISK,
+                     "With d3d12_FoliageTranslucency, how narrow the light around the sun is: the power of the cosine of the angle "
+                     "between the view and the sun");
+  iConsole->Register("d3d12_FoliageTranslucencyDistance", &CV_d3d12_FoliageTranslucencyDistance, 60.0f, VF_DUMPTODISK,
+                     "With d3d12_FoliageTranslucency, where it ends (m; all of it up to half of that)");
 }
 
 //////////////////////////////////////////////////////////////////////////
