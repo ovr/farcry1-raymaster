@@ -558,6 +558,9 @@ void CD3D12Renderer::DrawText800(float x, float y, float fSize, const float *pRG
   // GetTextSize is in the screen's pixels (as the game's dialogs scale it).
   if (bCenter)
     x -= pFont->GetTextSize(szText).x * 800.0f / (float)std::max(m_nWidth, 1) * 0.5f;
+  // r_Stats goes below the text at the top left (the time demo's lines).
+  if (x < 400 && y < 150)
+    m_fTopLeftText[0] = std::max(m_fTopLeftText[0], y + fPixels);
   pFont->DrawString(x, y, szText);
 }
 

@@ -68,6 +68,8 @@ struct SFrameStats
   SGpuTimes Gpu;
   int nFrames = 0;
   double fFrameMs = 0;            //!< the time between frames
+  double fMinFrameMs = 0;         //!< the shortest and the longest of them
+  double fMaxFrameMs = 0;
   double fWaitMs = 0;             //!< waiting for the GPU at the start of the frame (CD3D12Device::BeginFrame)
   double fPresentMs = 0;          //!< Present
   double fDraws = 0;              //!< DrawGeometry's draws
@@ -375,8 +377,11 @@ public:
   //! report and to r_Stats, the frame's numbers to m_StatsSum, every half second to m_Stats.
   void CollectStats();
   //! The statistics over the frame, once a frame: at Update, or when the frame is read before it
-  //! (ReadFrameBuffer: a demo's frames).
+  //! (ReadFrameBuffer: a demo's frames); with r_DisplayInfo also the view's at the top right.
   void DrawStats();
+  //! r_DisplayInfo: its value from now on is the console's to the renderer (m_DisplayInfo), the
+  //! variable itself stays 0, so that the engine does not draw its own block.
+  void TakeDisplayInfo();
   //! The projection of the main view from the camera.
   static Matrix44 MakeProjection(const CCamera &cam);
 
@@ -1112,6 +1117,8 @@ public:
   int m_nPolygons = 0;                //!< GetPolyCount: the triangles of the frame the last Update ended
   int m_nFrameDraws = 0;              //!< the draws since the last Update (DrawGeometry)
   int m_nFramePSOChanges = 0;         //!< of them, those with another pipeline state than the draw before
+  int m_nFrameSunLights = 0;          //!< r_DisplayInfo: the main view's sun (DLF_SUN) and other lights in this
+  int m_nFrameDynLights = 0;          //!< frame (CScene::EndEf3D), 0 again after Update
   ID3D12PipelineState *m_pLastPSO = nullptr;  //!< the pipeline state of the last draw (counted only)
   int64 m_nLastFrameTicks = 0;        //!< ReportGpuTimes: when the last frame ended (0: timing off)
   double m_fFrameMs = 0;              //!< ReportGpuTimes: the time between frames added up
@@ -1122,6 +1129,16 @@ public:
   double m_fStatsStart = 0;           //!< r_Stats: when m_StatsSum started (ms of the CPU's clock; 0: off)
   double m_fStatsLastFrame = 0;       //!< r_Stats: when the last frame ended
   int m_nStatsDrawnFrame = -1;        //!< r_Stats: the m_nFrameID they were drawn into
+  float m_fTopLeftText[2] = {};       //!< r_Stats: the bottom of the text at the top left (DrawText800: the time
+                                      //!< demo's lines) in this frame and the last, in the 800 x 600 screen
+  //! r_DisplayInfo as the console sets it (TakeDisplayInfo).
+  struct SDisplayInfoSink : IConsoleVarSink
+  {
+    ICVar *pVar = nullptr;
+    int nValue = 0;
+    bool OnBeforeVarChange(ICVar *pChanged, const char *szNewValue) override;
+  };
+  SDisplayInfoSink m_DisplayInfo;
   int m_nRecurseLevel = 1;            //!< EFQ_RecurseLevel: 1 for the main view
   int m_nDeviceLost = 0;              //!< EFQ_DeviceLost
   int m_nPolygonMode = R_SOLID_MODE;

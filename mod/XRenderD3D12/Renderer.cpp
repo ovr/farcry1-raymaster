@@ -136,6 +136,7 @@ void CD3D12Renderer::RegisterVariables()
   iConsole->CreateVariable("r_DetailDefault", "Textures/Detail/rock", 0);
   iConsole->Register("r_VSync", &CV_r_vsync, 0, VF_DUMPTODISK);
   RegisterOtherVariables();
+  TakeDisplayInfo();
   iConsole->Register("d3d12_Debug", &CV_d3d12_debug, 0, VF_DUMPTODISK, "Direct3D 12 debug layer (read at start-up): 1 with GPU based validation, 2 without it");
   iConsole->Register("d3d12_DumpFrame", &CV_d3d12_DumpFrame, 0, 0, "Writes the render items and draws of the next frame to XRenderD3D12_frame.txt");
   iConsole->Register("d3d12_WaterDebug", &CV_d3d12_WaterDebug, 0, 0,
@@ -298,6 +299,11 @@ WIN_HWND CD3D12Renderer::Init(int x,int y,int width,int height,unsigned int cbpp
   {
     if (MakeDpiAware())
       iLog->Log("XRenderD3D12: the process is per monitor DPI aware");
+    // The engine names its keys with the keyboard layout its input starts with, after the
+    // renderer: with another one than English the bindings of W, A, S, D and the other letters
+    // find no key (none in the controls menu). English for the game, however it was started.
+    if (const HKL hEnglish = LoadKeyboardLayoutA("00000409", 0))
+      ActivateKeyboardLayout(hEnglish, KLF_SETFORPROCESS);
     // FarCry.exe registers the class (RetailRenderer.h, "Initialization"); without it (another host)
     // a class of our own.
     const char *szClass = RetailRenderer::szWindowClass;
@@ -600,6 +606,9 @@ LRESULT CALLBACK CD3D12Renderer::WindowProc(HWND hWnd, UINT nMsg, WPARAM wParam,
 
 void CD3D12Renderer::Release()
 {
+  if (m_DisplayInfo.pVar && iConsole)
+    iConsole->RemoveConsoleVarSink(&m_DisplayInfo);
+  m_DisplayInfo.pVar = nullptr;
   // The engine still asks GetType while this runs.
   if (m_pDevice)
     m_pDevice->WaitForGPU();
@@ -747,6 +756,9 @@ void CD3D12Renderer::Update (void)
   EndMainScene();               // a main view whose EF_EndEf3D did not end (none expected)
   DrawQueuedBoxes();
   DrawStats();
+  m_fTopLeftText[1] = m_fTopLeftText[0];
+  m_fTopLeftText[0] = 0;
+  m_nFrameSunLights = m_nFrameDynLights = 0;
   DumpHdrOutput();
   // Shown only when swapping is on: the hidden frames of a level load are drawn but never seen.
   if (m_bSwapBuffers)

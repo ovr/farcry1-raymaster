@@ -583,6 +583,9 @@ void CScene::EndEf3D(int nFlags)
   }
   if (m_nDrawing == 1)
   {
+    g_pRenderer->m_nFrameSunLights = g_pRenderer->m_nFrameDynLights = 0;
+    for (const CDLight *pLight : s.Lights)
+      ++(pLight->m_Flags & DLF_SUN ? g_pRenderer->m_nFrameSunLights : g_pRenderer->m_nFrameDynLights);
     g_pRenderer->EndMainScene();
     g_pRenderer->DrawScreenEffects();
     g_pRenderer->DrawAODebug();

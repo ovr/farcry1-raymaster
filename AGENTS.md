@@ -66,7 +66,9 @@ it as well: it holds local, machine-specific instructions and is not committed (
   default key bindings (W, S, A, D, crouch Left Ctrl, prone V, from `Profiles/defaults`). The
   player profile (`Profiles/player/<name>_system.cfg`, `<name>_game.cfg`) gets the same. A run to
   play starts with `farcry1_testing1/Far Cry.cmd`, which switches the keyboard to English before
-  the game names its keys (with another layout the letter keys do not work).
+  the game names its keys (with another layout the letter keys do not work and the controls menu
+  has none). `XRenderD3D12` makes English the process' layout in `Init` as well, before the
+  engine's input starts, so a run started any other way has its keys too.
 - Run `farcry1_testing1/Bin64/FarCry.exe` with `farcry1_testing1` as the working directory.
   `XRENDERTRACED_EXEC="map training"` (and `XRENDERTRACED_EXEC_FRAME`) loads a level without
   input; `XRENDERTRACED_CAPTURE=300` writes every call of the 300th frame after the level load.
@@ -616,7 +618,8 @@ it as well: it holds local, machine-specific instructions and is not committed (
   ended (every draw into every target; no shadow volumes), which the game asks for after the frame
   is shown: the time demo's `Tri/Frame`, `Tri/Sec` and ratio to the recording in
   `Levels/<level>/<level>.log`, and the `Polygons` and `P/Sec` of the engine's `r_DisplayInfo` block
-  (the engine draws that block at the top right itself).
+  (the engine draws that block at the top right itself, with its own font, when the variable is not
+  0; with `XRenderD3D12` it is the renderer's, below).
   The renderer's work is in the engine's frame profiler under the subsystem Renderer
   (`FUNCTION_PROFILER(iSystem, PROFILE_RENDERER)`, `FrameProfiler.h`; `profile 1` shows it, the
   tracer's `profilers CD3D12` writes it): `CD3D12Renderer::BeginFrame` with
@@ -627,8 +630,9 @@ it as well: it holds local, machine-specific instructions and is not committed (
   (`EF_LoadTexture`, `DownLoadToVideoMemory`, `EF_LoadShaderItem`, `CD3D12Pipeline::CreatePSO`, ...).
   They are CPU times; the GPU's are `d3d12_GpuTimes` (a section `flush` is the GPU waiting for
   the CPU after a `FlushFrame`, e.g. a demo reading every frame for its clip).
-- `r_Stats` shows the renderer's statistics at the top left, below the time demo's lines, averaged
-  over half a second (`Stats.cpp`): `1` the GPU time of each pass in the order they run (the
+- `r_Stats` shows the renderer's statistics at the top left (below the time demo's lines while it
+  plays, measured in `DrawText800`, else at the top), averaged over half a second (`Stats.cpp`):
+  `1` the GPU time of each pass in the order they run (the
   sections of `d3d12_GpuTimes`, with a bar of each one's share of the GPU's frame), the time
   between frames, the CPU's wait for the GPU at the start of a frame and in `Present`, the draws,
   how many of them changed the pipeline state, and the triangles; `2` (and more) also the memory:
@@ -636,6 +640,14 @@ it as well: it holds local, machine-specific instructions and is not committed (
   geometry's acceleration structures, the frame memory and the pipeline states made. A frame read
   before `Update` (a demo's frames and clips) has them too. It turns the GPU's timestamps on, as
   `d3d12_GpuTimes` does; both get the same times.
+- `r_DisplayInfo` is drawn by `XRenderD3D12` in the same way, a panel at the top right in place of
+  the engine's block: the game's version and level, the view's camera position, angles and
+  distance, the frame rate of the half second with its slowest and fastest frames', the triangles
+  per frame and per second, and the main view's lights (the sun, the others; counted at its
+  `EF_EndEf3D`). The renderer takes
+  the variable over (`TakeDisplayInfo`, an `IConsoleVarSink`): it keeps the console's value at 0, so
+  the engine draws nothing, and the value set (the console, `system.cfg`) is the renderer's.
+  Typing `r_DisplayInfo` alone therefore prints 0, and the game saves 0 in its `system.cfg`.
 - `d3d12_DumpFrame 1` writes the render items of the next frame to
   `farcry1_testing1/XRenderD3D12_frame.txt` (never committed): the camera (position, angles,
   field of view, near and far plane, view and projection matrices), then for each item its list, sort
