@@ -24,7 +24,9 @@
 //	engine draws its block when it is not), its value is the renderer's
 //	(TakeDisplayInfo). The game's version and level, the view's camera,
 //	angles and distance, the frame rate (half a second's, and of its
-//	slowest and fastest frames), the triangles and the lights of the frame.
+//	slowest and fastest frames), the triangles and the lights of the frame,
+//	the anti-aliasing, the upscaler and the 3D scene's size before and
+//	after it.
 //
 //////////////////////////////////////////////////////////////////////
 
@@ -448,6 +450,24 @@ void CD3D12Renderer::DrawStats()
     }
     // The main view's (none yet in a frame read before its EF_EndEf3D).
     Value("Lights", m_nFrameSunLights ? Format("sun, %d dynamic", m_nFrameDynLights) : Format("%d dynamic", m_nFrameDynLights));
+    // The anti-aliasing (the upscaler's alone: no multisampling, EnumAAFormats), the upscaler and
+    // the 3D scene's size before and after it.
+    const SUpscaleInfo Up = UpscaleInfo();
+    const int nWidth = m_pDevice->GetWidth(), nHeight = m_pDevice->GetHeight();
+    if (Up.szName)
+    {
+      Value("Anti-aliasing", Up.bThisFrame ? "FSR, temporal" : "FSR, temporal (no 3D scene now)");
+      Value("Upscaler", Format("%s, %s", Up.szName, Up.szMode));
+      Value("Resolution", Up.nRenderWidth == nWidth && Up.nRenderHeight == nHeight
+                            ? Format("%dx%d, native", nWidth, nHeight)
+                            : Format("%dx%d to %dx%d", Up.nRenderWidth, Up.nRenderHeight, nWidth, nHeight));
+    }
+    else
+    {
+      Value("Anti-aliasing", "none");
+      Value("Upscaler", _stricmp(Up.szWanted, "none") != 0 && Up.szWanted[0] ? Format("none (%s is not available)", Up.szWanted) : "none");
+      Value("Resolution", Format("%dx%d", nWidth, nHeight));
+    }
     float fNameWidth = 0, fValueWidth = 0;
     for (const SStatsLine &Line : Lines)
     {

@@ -153,6 +153,24 @@ bool CD3D12Renderer::UpdateUpscaler()
   return true;
 }
 
+CD3D12Renderer::SUpscaleInfo CD3D12Renderer::UpscaleInfo() const
+{
+  SUpscaleInfo Info;
+  ICVar *pVar = m_pUpscalerVar ? m_pUpscalerVar : (iConsole ? iConsole->GetCVar("d3d12_Upscaler") : nullptr);
+  if (pVar && pVar->GetString())
+    Info.szWanted = pVar->GetString();
+  if (m_pUpscaler && m_nUpscaleMode >= 0 && m_pDevice)
+  {
+    Info.szName = m_pUpscaler->GetName();
+    Info.szMode = s_ModeNames[m_nUpscaleMode];
+    Info.nRenderWidth = m_pDevice->GetSceneWidth();
+    Info.nRenderHeight = m_pDevice->GetSceneHeight();
+    // DrawStats runs before Update counts the frame.
+    Info.bThisFrame = m_nUpscaledFrame == m_nFrames;
+  }
+  return Info;
+}
+
 void CD3D12Renderer::ReleaseUpscaler()
 {
   // The context may be in use by the frames in flight.
