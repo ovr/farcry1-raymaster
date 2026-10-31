@@ -12,7 +12,9 @@ reference of the rest.
 
 - The x64 build also hooks the vtables of the shaders, textures and render elements of the
   original renderer (`VCallHooks.h`): the summary after the captured frame lists which virtual
-  functions the engine calls. A command `screenfx Effect 1`, `screenfx Effect.Param 0.5` or
+  functions the engine calls. A call that is not written out is only counted: its module comes from
+  a cache of the return addresses, and the thread that loaded the renderer counts it without a
+  locked instruction. A command `screenfx Effect 1`, `screenfx Effect.Param 0.5` or
   `screenfx ?Effect` in `XRENDERTRACED_EXEC`/`XRENDERTRACED_EXEC_LEVEL` calls the screen effect
   functions of `I3DEngine`; `particles [count] [blend type] [size]` spawns particles around the
   camera (`I3DEngine::SpawnParticles`); `cvars [prefix]` writes the console variables whose names
