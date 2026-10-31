@@ -421,6 +421,14 @@ the first run's behaviour back; the pictures are the same either way.
   variance (0.1; 0.25 matches the halved slopes of the calmer normal the reflection is looked up
   along, but already washes the reflections of the bay in PierWalk out; 0 gives exactly the frames
   of the mirror before it; not saved).
+- The march of the ocean's screen space reflection skips each batch of 4 steps whose stretch of the
+  ray the depth tiles of the scene's copy show to pass in front of the scene: 7 levels of the
+  copy's least depth (level 0 the least of 8 x 8 texels, each next one of 2 x 2 tiles of the one
+  before), made once a frame by two compute kernels (`Shaders/DepthTiles.hlsl`, about 0.03 ms at
+  3840 x 2160) when the frame draws an ocean. A batch it doesn't skip takes the same steps as
+  before, so the frames stay the same bit for bit (Carrier's sweep: the water 1.74 -> 1.53 ms in
+  its worst 100 frames, 0.67 -> 0.61 on average). The water volumes go without them: their
+  reflection meets the banks near the water, where the tiles cost more than they save.
 - The glass of the scopes (`r_ScopeLens_fx`, the AG36's, the OICW's, the AW50's and the rocket
   launcher's) shows the scene around the middle of the screen through the same copy of the scene
   when its list has one; else (the weapon's list) a copy of only the part of the target it shows

@@ -45,7 +45,9 @@
 #include "StdAfx.h"
 #include "Renderer.h"
 #include "D3D12Device.h"
+#include "D3D12Upload.h"
 #include "D3D12Descriptors.h"
+#include "D3D12Compute.h"
 #include "D3D12Pipeline.h"
 #include "Texture.h"
 #include "Scene.h"
@@ -539,13 +541,107 @@ bool CD3D12Renderer::CopySceneForWater(const int *pRect)
   m_nSceneColorSRV = Copy.nColorSRV;
   m_nSceneDepthSRV = Copy.nDepthSRV;
   m_bSceneCopied = !pRect;
+  m_pSceneCopy = pRect ? nullptr : &Copy;
+  m_nSceneTileSRV = -1;
   return true;
+}
+
+bool CD3D12Renderer::BuildDepthTiles()
+{
+  SSceneCopy *pCopy = m_pSceneCopy;
+  if (!pCopy || !pCopy->pDepth || !m_pDevice || !m_pDescriptors || !m_pUpload || !m_pCompute)
+    return false;
+  // Level 0 a multiple of 2^(DEPTH_TILE_LEVELS - 1) texels a side, so that each next level is half the
+  // one before (its texels past the copy's those of its edge).
+  constexpr int ALIGN = 1 << (DEPTH_TILE_LEVELS - 1);
+  constexpr int TABLE = CD3D12Compute::COMPUTE_SRVS + CD3D12Compute::COMPUTE_UAVS;
+  const int w = ((pCopy->nWidth + XR_DEPTH_TILE - 1) / XR_DEPTH_TILE + ALIGN - 1) & ~(ALIGN - 1);
+  const int h = ((pCopy->nHeight + XR_DEPTH_TILE - 1) / XR_DEPTH_TILE + ALIGN - 1) & ~(ALIGN - 1);
+  if (!pCopy->pTiles)
+  {
+    pCopy->pTiles = m_pUpload->CreateComputeTarget(w, h, DEPTH_TILE_LEVELS, DXGI_FORMAT_R32_FLOAT, L"water depth tiles");
+    if (pCopy->pTiles)
+    {
+      pCopy->pTiles->m_nSRV = m_pDescriptors->AllocSRV(pCopy->pTiles->m_pResource, nullptr);
+      pCopy->nTileTables = m_pDescriptors->AllocRange(2 * TABLE);
+    }
+    if (!pCopy->pTiles || pCopy->pTiles->m_nSRV < 0 || pCopy->nTileTables < 0)
+    {
+      FreeDepthTiles(*pCopy);
+      return false;
+    }
+    // The first kernel's table: t0 the depth copy; u0..u4 levels 0..4. The second's: u0 level 4, u1
+    // and u2 levels 5 and 6.
+    D3D12_SHADER_RESOURCE_VIEW_DESC SRV = {};
+    SRV.Format = pCopy->DepthFormat;
+    SRV.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
+    SRV.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+    SRV.Texture2D.MipLevels = 1;
+    D3D12_UNORDERED_ACCESS_VIEW_DESC UAV = {};
+    UAV.Format = DXGI_FORMAT_R32_FLOAT;
+    UAV.ViewDimension = D3D12_UAV_DIMENSION_TEXTURE2D;
+    ID3D12Resource *pTiles = pCopy->pTiles->m_pResource;
+    for (int t = 0; t < 2; t++)
+    {
+      const int nTable = pCopy->nTileTables + t * TABLE;
+      for (int i = 0; i < CD3D12Compute::COMPUTE_SRVS; i++)
+        m_pDescriptors->WriteSRV(nTable + i, t == 0 && i == 0 ? pCopy->pDepth.Get() : nullptr, &SRV);
+      for (int i = 0; i < CD3D12Compute::COMPUTE_UAVS; i++)
+      {
+        const int nLevel = t == 0 ? i : 4 + i;
+        UAV.Texture2D.MipSlice = (UINT)std::min(nLevel, DEPTH_TILE_LEVELS - 1);
+        m_pDescriptors->WriteUAV(nTable + CD3D12Compute::COMPUTE_SRVS + i, t == 0 || i < 3 ? pTiles : nullptr, &UAV);
+      }
+    }
+    // Made in UNORDERED_ACCESS (called in a frame).
+    m_pDevice->Transition(pTiles, D3D12_RESOURCE_STATE_UNORDERED_ACCESS, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+    pCopy->nTileWidth = w;
+    pCopy->nTileHeight = h;
+  }
+
+  // A group 16 x 16 texels of level 0 and those under them up to level 4, then a group 16 x 16 of
+  // level 5 and level 6 from them.
+  static_assert(DEPTH_TILE_LEVELS == 7, "the kernels make levels 0..6");
+  SDepthTileConstants tc = {};
+  Set4(tc.vSize, 1.0f / pCopy->nWidth, 1.0f / pCopy->nHeight, (float)(w >> 5), (float)(h >> 5));
+  const SD3D12FrameAlloc CB = m_pUpload->AllocFrame(sizeof(tc), 256);
+  memcpy(CB.pCPU, &tc, sizeof(tc));
+  constexpr D3D12_RESOURCE_STATES READ = D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE | D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE;
+  ID3D12Resource *pTiles = pCopy->pTiles->m_pResource;
+  ID3D12GraphicsCommandList *pList = m_pDevice->GetCmdList();
+  m_pDevice->Transition(pCopy->pDepth.Get(), D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, READ);
+  m_pDevice->Transition(pTiles, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+  m_pCompute->Dispatch(pList, eD3D12K_DepthTiles, CB.nGPU, pCopy->nTileTables, pCopy->nTileTables + CD3D12Compute::COMPUTE_SRVS,
+                       (UINT)w / 16, (UINT)h / 16);
+  m_pDevice->UavBarrier(pTiles);
+  m_pCompute->Dispatch(pList, eD3D12K_DepthTilesUp, CB.nGPU, pCopy->nTileTables + TABLE, pCopy->nTileTables + TABLE + CD3D12Compute::COMPUTE_SRVS,
+                       (UINT)((w >> 5) + 15) / 16, (UINT)((h >> 5) + 15) / 16);
+  m_pDevice->Transition(pTiles, D3D12_RESOURCE_STATE_UNORDERED_ACCESS, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+  m_pDevice->Transition(pCopy->pDepth.Get(), READ, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+  m_nSceneTileSRV = pCopy->pTiles->m_nSRV;
+  return true;
+}
+
+void CD3D12Renderer::FreeDepthTiles(SSceneCopy &Copy)
+{
+  if (m_pSceneCopy == &Copy)
+    m_nSceneTileSRV = -1;
+  if (Copy.nTileTables >= 0 && m_pDescriptors)
+    m_pDescriptors->FreeRange(Copy.nTileTables, 2 * (CD3D12Compute::COMPUTE_SRVS + CD3D12Compute::COMPUTE_UAVS));
+  Copy.nTileTables = -1;
+  if (Copy.pTiles && m_pUpload)
+    m_pUpload->ReleaseTexture(Copy.pTiles);
+  Copy.pTiles = nullptr;
+  Copy.nTileWidth = Copy.nTileHeight = 0;
 }
 
 void CD3D12Renderer::FreeSceneCopy(SSceneCopy &Copy)
 {
   if (m_nSceneColorSRV == Copy.nColorSRV)
     m_nSceneColorSRV = m_nSceneDepthSRV = -1;
+  FreeDepthTiles(Copy);
+  if (m_pSceneCopy == &Copy)
+    m_pSceneCopy = nullptr;
   if (m_pDescriptors)
   {
     if (Copy.nColorSRV >= 0)
@@ -811,6 +907,14 @@ bool CD3D12Renderer::SetupWaterDraw(SPipelineKey &Key, SDrawConstants &dc, const
   dc.nFlags = 0;
   dc.nTex0 = m_bEnvCubePass ? D3D12_SRV_WHITE : (uint32)m_nSceneColorSRV;
   dc.nTex1 = m_bEnvCubePass ? D3D12_SRV_WHITE : (uint32)m_nSceneDepthSRV;
+  // The depth tiles of the copy for the march of the ocean's screen space reflection (a lake's or a
+  // river's meets its banks near the water: the tiles would cost more than they save).
+  dc.nShadowTex[0] = dc.nShadowTex[1] = 0;
+  if (!m_bEnvCubePass && IsOcean(it) && (m_nSceneTileSRV >= 0 || BuildDepthTiles()))
+  {
+    dc.nShadowTex[0] = (uint32)m_nSceneTileSRV;
+    dc.nShadowTex[1] = DEPTH_TILE_LEVELS;
+  }
 
   // Waves as steep as the bump amounts of the object; how much of the sky it reflects.
   const CCObject *pObj = it.pObj;

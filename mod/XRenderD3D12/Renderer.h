@@ -698,6 +698,8 @@ public:
   //! under the water is drawn into the reflection.
   void ClipProjectionToWater(Matrix44 &Proj, const Matrix44 &View) const;
 
+  //! The levels of a copy's depth tiles (BuildDepthTiles).
+  static constexpr int DEPTH_TILE_LEVELS = 7;
   //! A copy of the main view's target and of its depth buffer (CopySceneForWater).
   struct SSceneCopy
   {
@@ -706,12 +708,27 @@ public:
     int nWidth = 0, nHeight = 0;
     DXGI_FORMAT ColorFormat = DXGI_FORMAT_UNKNOWN;
     DXGI_FORMAT DepthFormat = DXGI_FORMAT_UNKNOWN;    //!< how the depth copy is read (CD3D12Device::GetMainDepthSRVFormat)
+    //! The depth tiles of the depth copy (R32_FLOAT, DEPTH_TILE_LEVELS mip levels, its SRV of all of
+    //! them; made on first use) and the descriptor tables of their two kernels.
+    CD3D12Texture *pTiles = nullptr;
+    int nTileTables = -1;
+    int nTileWidth = 0, nTileHeight = 0;    //!< level 0's size
   };
   void FreeSceneCopy(SSceneCopy &Copy);
+  //! The depth tiles of the copy made last (whole, not m_bSceneCopied's rectangle): level 0 the least
+  //! depth of each XR_DEPTH_TILE x XR_DEPTH_TILE pixels of the depth copy, each next level the least
+  //! of 2 x 2 texels of the one before, made in the copy's pTiles by two compute kernels
+  //! (DepthTiles.hlsl); m_nSceneTileSRV. The march of the ocean's reflection through the copies goes
+  //! past the steps they show cannot meet the scene (Water.hlsl). False: none (no copy, or the
+  //! tiles could not be made).
+  bool BuildDepthTiles();
+  void FreeDepthTiles(SSceneCopy &Copy);
   //! [0] of the back buffer (the screen effects), [1] of the HDR target or an upscaler's scene (the
   //! water, in the scene): apart, so that a frame with both does not make them again.
   SSceneCopy m_SceneCopies[2];
+  SSceneCopy *m_pSceneCopy = nullptr;       //!< the copy made last, whole
   int m_nSceneColorSRV = -1, m_nSceneDepthSRV = -1;   //!< the texture table indices of the copy made last
+  int m_nSceneTileSRV = -1;                 //!< the depth tiles of m_pSceneCopy, -1 until built for it
   bool m_bSceneCopied = false;              //!< the copies hold the current list's scene
   CTexture *m_pBeachTexture = nullptr;      //!< textures/wave1 (one reference)
   CTexture *m_pBeachWetTexture = nullptr;   //!< textures/water2 (one reference)

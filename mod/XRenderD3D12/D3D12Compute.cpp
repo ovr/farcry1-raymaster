@@ -24,6 +24,8 @@
 #include "AoResolve_CS.h"
 #include "Meter_CS.h"
 #include "Bloom_CS.h"
+#include "DepthTiles_CS.h"
+#include "DepthTilesUp_CS.h"
 
 using Microsoft::WRL::ComPtr;
 
@@ -49,6 +51,8 @@ const SKernel s_Kernels[eD3D12K_Num] =
   { "AO resolve", g_AoResolve_CS, sizeof(g_AoResolve_CS) },
   { "HDR meter", g_Meter_CS, sizeof(g_Meter_CS) },
   { "bloom", g_Bloom_CS, sizeof(g_Bloom_CS) },
+  { "depth tiles", g_DepthTiles_CS, sizeof(g_DepthTiles_CS) },
+  { "depth tiles (levels 5, 6)", g_DepthTilesUp_CS, sizeof(g_DepthTilesUp_CS) },
 };
 
 D3D12_STATIC_SAMPLER_DESC StaticSampler(UINT nRegister, D3D12_FILTER Filter)

@@ -232,6 +232,15 @@ struct SMeterConstants
   XR_UINT4(vTaps);                //!< x the taps a side of a texel (as HDR_LUMINANCE's vParams0.z)
 };
 
+// The texels a side of the water's depth copy in a texel of level 0 of its depth tiles (DepthTiles.hlsl, Water.hlsl)
+#define XR_DEPTH_TILE       8
+
+//! b0 of the depth tiles of the water's depth copy (DepthTiles.hlsl, Water.cpp).
+struct SDepthTileConstants
+{
+  XR_FLOAT4(vSize);               //!< x 1 / the copy's width, y 1 / its height (texels), zw the size of level 5
+};
+
 //! b0 of a level of the bloom from one twice its size (Bloom.hlsl, Hdr.cpp).
 struct SBloomConstants
 {
