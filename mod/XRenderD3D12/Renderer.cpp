@@ -258,6 +258,11 @@ void CD3D12Renderer::RegisterVariables()
   iConsole->Register("d3d12_RTAsync", &CV_d3d12_RTAsync, 1, 0,
                      "1: the acceleration structures for the rays built on the compute queue, beside the frame's shadows, opaque "
                      "geometry and ambient occlusion; 0: in the frame's command list, before the opaque geometry");
+  iConsole->Register("d3d12_RTOffscreen", &CV_d3d12_RTOffscreen, 1, VF_DUMPTODISK,
+                     "What is out of the main view in the scene for rays: the parts of the sun's cascades (the static objects "
+                     "and entities towards the sun, the live casters). 1 for the effects that trace rays from the main view's "
+                     "surfaces (d3d12_RTDebug; not the water's reflection), 2 always, 0 never (the main view's and the water "
+                     "reflection's draws alone)");
   // The HDR pipeline (r_HDRRendering, Hdr.cpp).
   iConsole->Register("d3d12_ToneMap", &CV_d3d12_ToneMap, 1, VF_DUMPTODISK,
                      "With r_HDRRendering, the tone map: 0 clamp, 1 soft shoulder (the game's look up to d3d12_ToneMapKnee, then each channel rolls off to 1), 2 ACES fitted, 3 AgX");

@@ -68,6 +68,9 @@ struct SRenderItem
   bool bFogPass = false;                    //!< the fog volume pass the renderer adds itself (see CScene::AddEf)
 };
 
+//! A leaf item's part at its place: its render element and its object's position (Cascades.cpp).
+uint64 PartKey(const SRenderItem &it);
+
 //! A particle sprite of EF_AddSpriteToScene (camera facing quads in world space).
 struct SSceneSprite
 {

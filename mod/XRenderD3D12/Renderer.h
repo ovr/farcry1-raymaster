@@ -651,6 +651,8 @@ public:
 
   //! The device has rays and a cvar wants them.
   bool WantsRays() const;
+  //! The scene for rays has what is out of the main view too (d3d12_RTOffscreen).
+  bool WantsOffscreenRays() const;
   //! The rays' mask for the shaders: d3d12_RTMask's kinds, 0x100 with d3d12_RTShadows.
   uint32 RayMask() const;
   //! Before the main view's opaque list is drawn (not its reflection, sprites, shadow maps, cubes or
@@ -662,6 +664,12 @@ public:
   //! (a water surface), else only the static BLAS are built. Without a cvar that wants rays the
   //! scene's memory goes.
   void BuildRayScene(std::span<const SRenderItem> Opaque, bool bTraced);
+  //! The sun's cascades draw the scene of a camera towards the sun or the live casters (Items): with
+  //! d3d12_RTOffscreen their parts join the scene for rays, walked by BuildRayScene after the main
+  //! view's (those it has too left out).
+  void NoteRayOffscreenItems(std::span<const SRenderItem> Items);
+  //! A leaf item of a class that BuildRayScene walks (not the weapon in the hands, not a light pass).
+  static bool IsRayWalked(const SRenderItem &it);
   //! This frame's TLAS for a draw or pass that traces rays, the frame's list from here on after its
   //! builds; 0 when there is none.
   D3D12_GPU_VIRTUAL_ADDRESS UseRayScene();
@@ -1334,6 +1342,8 @@ public:
   bool m_bHeatPass = false;                 //!< the main view's items are drawn in heat vision (DF2_HEAT)
   bool m_bDepthPrepass = false;             //!< d3d12_DepthPrepass: the main view's opaque list into the depth alone (DrawItems)
   bool m_bRayCaptureWalk = false;           //!< the main view's opaque list set up for the scene for rays, not drawn (BuildRayScene)
+  std::vector<SRenderItem> m_RayOffscreenItems;   //!< NoteRayOffscreenItems' of the frame m_nRayOffscreenFrame
+  int m_nRayOffscreenFrame = -1;
   float m_fDrawHeat = 0;                    //!< the heat of the item being drawn (vHeat.x)
   float m_fLineWidth = 1;
 
@@ -1400,6 +1410,7 @@ public:
   int CV_d3d12_RTMask = 31;                 //!< the kinds of instances the rays see (XR_RAY_* bits)
   int CV_d3d12_RTShadows = 1;               //!< the sun's shadow at the hits (a ray towards it, RayShade.hlsli)
   int CV_d3d12_RTAsync = 1;                 //!< the ray scene's builds on the compute queue beside the frame
+  int CV_d3d12_RTOffscreen = 1;             //!< what is out of the main view in the scene for rays: 1 for the effects that need it, 2 always
   int CV_d3d12_RTReflections = 0;           //!< the water's reflection by rays: 1 in place of the screen space one, 2 where it misses
   int CV_d3d12_ToneMap = 1;                 //!< the HDR pipeline's tone map: 0 clamp, 1 soft shoulder, 2 ACES fitted, 3 AgX
   float CV_d3d12_ToneMapKnee = 0.85f;       //!< where the soft shoulder starts (a display value)

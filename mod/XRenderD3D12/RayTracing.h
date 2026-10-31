@@ -25,6 +25,11 @@
 //	  EndReflectionCapture) are kept until it is drawn again and join every
 //	  Build, those whose buffers or textures are gone or changed and those
 //	  the main view has too (the same geometry and transform) left out.
+//	  Out of the main view (d3d12_RTOffscreen): the parts of the sun's
+//	  cascades (the scene of the camera towards the sun at the view's
+//	  position, whose detail the engine picks as for the view, and the live
+//	  casters; CD3D12Renderer::NoteRayOffscreenItems) are walked after the
+//	  main view's in the same way, those it has too left out.
 //	- One scene a frame: the first main view's (another top level view in
 //	  the same frame draws with it). Without a cvar that wants rays, its
 //	  memory goes (Release).
@@ -94,9 +99,19 @@ public:
   //! Bytes of the static geometry's acceleration structures (d3d12_RTMemory).
   uint64 GetStaticBytes() const { return m_nStaticBytes; }
 
+  //! Where the draws captured from here on come from (CaptureDraw).
+  enum ESource : uint8
+  {
+    SOURCE_VIEW,          //!< the main view's opaque list
+    SOURCE_OFFSCREEN,     //!< out of the main view: the parts of the sun's cascades it does not have
+    SOURCE_REFLECTION,    //!< the water's planar reflection (BeginReflectionCapture)
+  };
+
   //! The main view's opaque list starts: its draws until EndCapture make this frame's scene.
   //! ViewProj: its camera's world to clip (the draws' mWorld times it is their mWorldViewProj).
   void BeginCapture(const Matrix44 &ViewProj, const Vec3 &vCamera);
+  //! Where the draws captured from here on come from.
+  void SetCaptureSource(ESource eSource) { m_eCaptureSource = eSource; }
   void EndCapture() { m_bCapturing = false; }
   bool IsCapturing() const { return m_bCapturing; }
   //! The water's planar reflection is drawn: its static draws until EndReflectionCapture replace those
@@ -168,6 +183,8 @@ private:
     D3D12_GPU_VIRTUAL_ADDRESS nTexCoord1;   //!< the second stream's first vertex (0: none)
     uint64 nTexCoord1Id;            //!< its static buffer's CD3D12Buffer::m_nId (0: per frame memory)
     uint32 nTexGeneration[4];       //!< CD3D12Descriptors::GetGeneration of Inst's textures (GetTextureSlots)
+    uint64 nHash;                   //!< DrawHash
+    ESource eSource;
   };
   //! A buffer of a frame slot that grows (RAYTRACING_ACCELERATION_STRUCTURE or UNORDERED_ACCESS).
   struct SSlotBuffer
@@ -212,6 +229,7 @@ private:
   Matrix44 m_ViewProj;
   Matrix44 m_ReflectionViewProj;
   std::vector<SDraw> m_ReflectionDraws;   //!< the static draws of the last water reflection
+  ESource m_eCaptureSource = SOURCE_VIEW;
   Vec3 m_vCamera = Vec3(0, 0, 0);
   int m_nFrame = 0;                 //!< counts BeginCapture
   int m_nBuiltFrame = -1;           //!< the renderer's m_nFrames of the last Build (GetTLAS)

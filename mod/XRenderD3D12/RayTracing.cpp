@@ -216,6 +216,7 @@ void CD3D12RayScene::BeginCapture(const Matrix44 &ViewProj, const Vec3 &vCamera)
   m_vCamera = vCamera;
   m_nFrame++;
   m_bCapturing = m_pDevice5 != nullptr;
+  SetCaptureSource(SOURCE_VIEW);
 }
 
 void CD3D12RayScene::BeginReflectionCapture(const Matrix44 &ViewProj)
@@ -417,6 +418,8 @@ void CD3D12RayScene::CaptureDraw(const SPipelineKey &Key, const SDrawConstants &
     for (int c = 0; c < 4; c++)
       d.Transform[r][c] = w[c * 4 + r];
   }
+  d.nHash = DrawHash(d);
+  d.eSource = bReflection ? SOURCE_REFLECTION : m_eCaptureSource;
   (bReflection ? m_ReflectionDraws : m_Draws).push_back(d);
 }
 
@@ -667,18 +670,19 @@ void CD3D12RayScene::Build(FILE *pDump, bool bTop)
   }
 
   // The kinds d3d12_RTMask has all of; of the draws with the same geometry and transform (passes over one
-  // another) the first; then the water reflection's draws the main view does not have, as long as their
-  // buffers and textures are there.
+  // another, a part in the main view and in the sun's cascades) the first; then the water reflection's
+  // draws the main view does not have, as long as their buffers and textures are there.
   const uint32 nKinds = (uint32)g_pRenderer->CV_d3d12_RTMask & 0xff;
   const size_t nCaptured = m_Draws.size();
   m_Seen.assign(std::bit_ceil(std::max<size_t>(64, (nCaptured + m_ReflectionDraws.size()) * 2)), 0);
   m_Draws.erase(std::remove_if(m_Draws.begin(), m_Draws.end(),
-    [&](const SDraw &d) { return (d.nKind & ~nKinds) != 0 || !InsertSeen(DrawHash(d)); }), m_Draws.end());
+    [&](const SDraw &d) { return (d.nKind & ~nKinds) != 0 || !InsertSeen(d.nHash); }), m_Draws.end());
   const int nLeftOut = (int)(nCaptured - m_Draws.size());
+  const int nOffscreen = (int)std::count_if(m_Draws.begin(), m_Draws.end(), [](const SDraw &d) { return d.eSource == SOURCE_OFFSCREEN; });
   int nReflection = 0;
   for (const SDraw &d : m_ReflectionDraws)
   {
-    if (!(d.nKind & ~nKinds) && IsAlive(d) && InsertSeen(DrawHash(d)))
+    if (!(d.nKind & ~nKinds) && IsAlive(d) && InsertSeen(d.nHash))
     {
       m_Draws.push_back(d);
       nReflection++;
@@ -868,10 +872,12 @@ void CD3D12RayScene::Build(FILE *pDump, bool bTop)
     for (const auto &p : m_Pools)
       nPools += p->nSize;
     fprintf(pDump,
-      "ray scene: %s%u instances of %d draws (%d of the water reflection; %d left out by their transforms, %d by d3d12_RTMask or as passes "
-      "over others), %u triangles; static BLAS %d kept, %d built (%u triangles), %d waiting; %d of this frame (%u triangles), %d over the "
-      "limit; static BLAS %.1f MB (%d, pools %.1f MB), frame BLAS %.1f MB, TLAS %.1f KB, scratch %.1f MB\n",
-      bTop ? "" : "no TLAS (nothing in the frame traces rays), ", nInstance, (int)m_Draws.size(), nReflection, m_nSkippedTransform, nLeftOut, nTris, nCached, nNewStatic, nNewStaticTris, nWaiting, nFrame,
+      "ray scene: %s%u instances of %d draws (%d out of the main view from the sun's cascades, %d of the water reflection; %d left out "
+      "by their transforms, %d by d3d12_RTMask or as passes over others), %u triangles; static BLAS %d kept, %d built (%u triangles), %d "
+      "waiting; %d of this frame (%u triangles), %d over the limit; static BLAS %.1f MB (%d, pools %.1f MB), frame BLAS %.1f MB, TLAS "
+      "%.1f KB, scratch %.1f MB\n",
+      bTop ? "" : "no TLAS (nothing in the frame traces rays), ", nInstance, (int)m_Draws.size(), nOffscreen, nReflection, m_nSkippedTransform,
+      nLeftOut, nTris, nCached, nNewStatic, nNewStaticTris, nWaiting, nFrame,
       nFrameTris, nOver,
       m_nStaticBytes / 1048576.0, (int)m_Static.size(), nPools / 1048576.0, nFrameBlas / 1048576.0, TopInfo.ResultDataMaxSizeInBytes / 1024.0,
       Slot.Scratch.nSize / 1048576.0);
@@ -926,23 +932,28 @@ void CD3D12Renderer::BuildRayScene(std::span<const SRenderItem> Opaque, bool bTr
       continue;
     if (it.pRE->m_Type == eDATA_FarTreeSprites)
       it.pRE->mfDraw(RE_ShaderArg(it.pShader), nullptr);
-    if (it.pRE->m_Type != eDATA_OcLeaf)
-      continue;
-    // The classes drawn with depth writes and no blending (the others CaptureDraw leaves out).
-    switch (it.eDrawClass)
-    {
-    case eDC_Opaque:
-    case eDC_AlphaTest:
-    case eDC_VColor:
-    case eDC_AlphaTestVColor:
-    case eDC_Terrain:
-    case eDC_WaterBottom:
+    if (IsRayWalked(it))
       DrawLeafItem(it);
-      break;
-    default:
-      break;
+  }
+  // The parts of the sun's cascades out of the main view (their objects are the frame's): set up as
+  // the main view would draw them.
+  if (WantsOffscreenRays() && m_nRayOffscreenFrame == m_nFrames && !m_RayOffscreenItems.empty())
+  {
+    std::unordered_set<uint64> Parts;
+    Parts.reserve((Opaque.size() + m_RayOffscreenItems.size()) * 2);
+    for (const SRenderItem &it : Opaque)
+    {
+      if (IsRayWalked(it))
+        Parts.insert(PartKey(it));
+    }
+    m_pRayScene->SetCaptureSource(CD3D12RayScene::SOURCE_OFFSCREEN);
+    for (const SRenderItem &it : m_RayOffscreenItems)
+    {
+      if (Parts.insert(PartKey(it)).second)
+        DrawLeafItem(it);
     }
   }
+  m_RayOffscreenItems.clear();
   m_bRayCaptureWalk = false;
   m_fDepthMin = fDepthMin;
   m_fDepthMax = fDepthMax;
@@ -956,6 +967,48 @@ void CD3D12Renderer::BuildRayScene(std::span<const SRenderItem> Opaque, bool bTr
   if (!CV_d3d12_RTAsync)
     GpuSection("ray scene");
   m_pRayScene->Build(m_pFrameDump.get(), m_bRayTlas);
+}
+
+bool CD3D12Renderer::IsRayWalked(const SRenderItem &it)
+{
+  if (!it.pRE || it.pRE->m_Type != eDATA_OcLeaf || !it.pObj || (it.pObj->m_ObjFlags & (FOB_NEAREST | FOB_LIGHTPASS)))
+    return false;
+  // The classes drawn with depth writes and no blending (the others CaptureDraw leaves out).
+  switch (it.eDrawClass)
+  {
+  case eDC_Opaque:
+  case eDC_AlphaTest:
+  case eDC_VColor:
+  case eDC_AlphaTestVColor:
+  case eDC_Terrain:
+  case eDC_WaterBottom:
+    return true;
+  default:
+    return false;
+  }
+}
+
+bool CD3D12Renderer::WantsOffscreenRays() const
+{
+  // 1: for what traces rays from the surfaces of the main view (not the water's reflection, which
+  // sees what is in front of the camera and has the planar reflection's draws).
+  return WantsRays() && (CV_d3d12_RTOffscreen >= 2 || (CV_d3d12_RTOffscreen == 1 && CV_d3d12_RTDebug != 0));
+}
+
+void CD3D12Renderer::NoteRayOffscreenItems(std::span<const SRenderItem> Items)
+{
+  if (!WantsOffscreenRays())
+    return;
+  if (m_nRayOffscreenFrame != m_nFrames)
+  {
+    m_RayOffscreenItems.clear();
+    m_nRayOffscreenFrame = m_nFrames;
+  }
+  for (const SRenderItem &it : Items)
+  {
+    if (IsRayWalked(it))
+      m_RayOffscreenItems.push_back(it);
+  }
 }
 
 D3D12_GPU_VIRTUAL_ADDRESS CD3D12Renderer::UseRayScene()
