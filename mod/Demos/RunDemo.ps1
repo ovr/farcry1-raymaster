@@ -18,9 +18,10 @@ killed. -Resolution sets the size of the frames (XRENDERTRACED_RESOLUTION: the r
 it, also when it is larger than the screen). -Quality writes the game's quality settings into
 system.cfg before each run: by default the most the Advanced Video Options offer (the very high
 preset and anisotropic filtering level 8), so every demo runs at the maximum quality; the values of
-the presets are read from DemoQuality.cpp. system.cfg is put back as it was after each run (a game
-closed by hand, with --hold, writes it). -GameArgs passes arguments to FarCry.exe, e.g. -DEVMODE,
-the game's dev mode, in which its own recorder plays its time demos (DemoReplay).
+the presets are read from DemoQuality.cpp. system.cfg and the player profiles (Profiles\player) are
+put back as they were after each run (a game closed by hand, with --hold, writes them). -GameArgs
+passes arguments to FarCry.exe, e.g. -DEVMODE, the game's dev mode, in which its own recorder
+plays its time demos (DemoReplay).
 
 .EXAMPLE
 mod\Demos\RunDemo.ps1 DemoTextures
@@ -133,6 +134,13 @@ function Invoke-Demo([string] $Name) {
     Remove-Item $HostLog -ErrorAction SilentlyContinue
     Write-Host "FarCry.exe$(if ($GameArgs) { " $GameArgs" }): demo $Name, renderer $($Info.EnvironmentVariables['XRENDERTRACED_DLL']), arguments '$DemoArgs'$(if ($Resolution) { ", $Resolution" }), quality $Quality"
     $Config = [System.IO.File]::ReadAllBytes($SystemCfg)
+    # The player profiles too: the game writes the current one's settings during the run, with
+    # what the run set (--exec-at), and a game started later loads them over system.cfg.
+    $Profiles = @{}
+    $ProfileDir = Join-Path $GameDir 'Profiles\player'
+    if (Test-Path $ProfileDir) {
+        Get-ChildItem -LiteralPath $ProfileDir -File | ForEach-Object { $Profiles[$_.FullName] = [System.IO.File]::ReadAllBytes($_.FullName) }
+    }
     if ($QualitySettings) {
         $Text = Set-ConfigValues ([System.Text.Encoding]::ASCII.GetString($Config)) $QualitySettings
         [System.IO.File]::WriteAllBytes($SystemCfg, [System.Text.Encoding]::ASCII.GetBytes($Text))
@@ -149,6 +157,9 @@ function Invoke-Demo([string] $Name) {
         $ExitCode = 4
     }
     [System.IO.File]::WriteAllBytes($SystemCfg, $Config)
+    foreach ($File in $Profiles.Keys) {
+        [System.IO.File]::WriteAllBytes($File, $Profiles[$File])
+    }
     if (Test-Path $HostLog) {
         Get-Content $HostLog | Write-Host
     }
