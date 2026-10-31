@@ -888,6 +888,9 @@ public:
   //! The flags of a receiver of the cascades for a draw of the main view (0 elsewhere or without
   //! them): DF2_SUN_CASCADES, with bLive DF2_CASCADES_LIVE.
   uint32 CascadeReceiverFlags(bool bLive) const;
+  //! Whether a box of an object's space (World) lies nearer to the view than where the last cascade
+  //! blends into the shadow maps: the cascades alone shadow it there (SunCascades).
+  bool IsWithinCascades(const Matrix44 &World, const Vec3 &vMin, const Vec3 &vMax) const;
   //! MakeFrameConstants: the cascades' constants where the receivers get them (else left 0).
   void SetCascadeConstants(SFrameConstants &fc) const;
   //! d3d12_ShadowDebug 1: the slices of the frame below the shadow maps.

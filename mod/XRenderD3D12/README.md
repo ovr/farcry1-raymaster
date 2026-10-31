@@ -184,7 +184,9 @@ reference of its features and console variables.
   Lit objects take the sun from the full set. Light maps and the terrain, whose light has the
   static world's shadows already, take it from the live set; the terrain is darkened to the
   colour of the engine's shadows on it (`EntityShadowOnTerrain`, which fade out where the
-  cascades reach). Beyond the cascades the objects' shadow maps work as before.
+  cascades reach; a pass whose triangles all lie before the last cascade's blend is not drawn:
+  Dam's spawn, where the bushes around the camera have shadow maps, 1 ms of the GPU less).
+  Beyond the cascades the objects' shadow maps work as before.
   `d3d12_ShadowSoftness` (0.05 m) is the filter's radius (at least a texel and a half).
   `d3d12_ShadowDebug` 1 also shows the slices, 3 colours the cascades, 4 shows the full set's
   shadow in red and the live set's in green. With `d3d12_ShadowCascades 0` (from the start,

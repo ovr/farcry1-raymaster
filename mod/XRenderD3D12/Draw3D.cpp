@@ -133,6 +133,31 @@ void GetSectorCorner(CLeafBuffer *pLB, float &x0, float &y0)
   y0 = floorf((vMin.y + 0.5f) / TERRAIN_SECTOR_SIZE) * TERRAIN_SECTOR_SIZE;
 }
 
+//! The box of the triangles of a leaf buffer's chunk (Geometry::GetTriangles, their vertices on the
+//! CPU) in its object's space; false without them.
+bool GetTrianglesBox(CLeafBuffer *pLB, const CMatInfo *pChunk, Vec3 &vMin, Vec3 &vMax)
+{
+  const std::span<const uint16> Inds = Geometry::GetTriangles(pLB, pChunk);
+  const CLeafBuffer *pVC = pLB->GetVertexContainer();
+  if (Inds.empty() || !pVC->m_pSecVertBuffer || !pVC->m_pSecVertBuffer->m_VS[VSF_GENERAL].m_VData)
+    return false;
+  const int nStride = CD3D12Pipeline::GetVertexSize(pVC->m_pSecVertBuffer->m_vertexformat);
+  const byte *pData = (const byte *)pVC->m_pSecVertBuffer->m_VS[VSF_GENERAL].m_VData;
+  if (nStride <= 0)
+    return false;
+  vMin = Vec3(1e30f, 1e30f, 1e30f);
+  vMax = Vec3(-1e30f, -1e30f, -1e30f);
+  for (const uint16 i : Inds)
+  {
+    if (i >= pVC->m_SecVertCount)
+      return false;
+    const Vec3 &p = *(const Vec3 *)(pData + (size_t)i * nStride);
+    vMin.CheckMin(p);
+    vMax.CheckMax(p);
+  }
+  return true;
+}
+
 uint8 CullOf(ECull eCull, bool bMirrored)
 {
   switch (eCull)
@@ -911,7 +936,8 @@ void CD3D12Renderer::DrawLeafItem(const SRenderItem &it)
     // terrain draws it (twice the world colour) times the object's colour (the terrain in the
     // shadow), blended over the terrain where the casters' maps hide the sun, the more weakly the
     // farther behind its casters (by the depth across the map's range); no depth writes, before
-    // the detail layers.
+    // the detail layers. Where the sun's cascades shadow the terrain the pass leaves it (alpha 0):
+    // not drawn where all its triangles are there.
     const float *pCustom = (const float *)pLeaf->m_CustomData;
     if (!pTex || !pCustom || !SetupShadowReceiver(dc, pObj))
       return;
@@ -919,6 +945,10 @@ void CD3D12Renderer::DrawLeafItem(const SRenderItem &it)
     dc.fAlphaRef = 1.0f / 255.0f;
     dc.vShadowParams[1] = 1;
     dc.nFlags2 |= CascadeReceiverFlags(false);
+    Vec3 vMin, vMax;
+    if ((dc.nFlags2 & DF2_SUN_CASCADES) && !(dc.nFlags & DF_SHADOW_DEBUG) && GetTrianglesBox(pLB, pLeaf->m_pChunk, vMin, vMax) &&
+        IsWithinCascades(World, vMin, vMax))
+      return;
     Set4(dc.vTexGenU, 0, pCustom[2], 0, pCustom[0]);
     Set4(dc.vTexGenV, pCustom[2], 0, 0, pCustom[1]);
     Set4(dc.vColor, 2 * m_WorldColor[0] * pObj->m_Color.r, 2 * m_WorldColor[1] * pObj->m_Color.g, 2 * m_WorldColor[2] * pObj->m_Color.b, 1);

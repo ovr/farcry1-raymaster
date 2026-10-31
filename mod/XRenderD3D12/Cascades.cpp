@@ -476,6 +476,25 @@ uint32 CD3D12Renderer::CascadeReceiverFlags(bool bLive) const
   return DF2_SUN_CASCADES | (bLive ? DF2_CASCADES_LIVE : 0);
 }
 
+bool CD3D12Renderer::IsWithinCascades(const Matrix44 &World, const Vec3 &vMin, const Vec3 &vMax) const
+{
+  if (!m_nCascades)
+    return false;
+  // The view depth (ViewDepth: |z| in the view) of the box's corners before the band over which
+  // the last cascade gives way (CascadeOf); the depth is linear, so the box's is between theirs.
+  const float fEnd = m_Cascades[m_nCascades - 1].fEnd, fStart = m_nCascades > 1 ? m_Cascades[m_nCascades - 2].fEnd : 0;
+  const float fFull = fEnd - (fEnd - fStart) * CASCADE_BLEND;
+  const Matrix44 WorldView = World * m_CameraView;
+  for (int c = 0; c < 8; c++)
+  {
+    const Vec3 p((c & 1) ? vMax.x : vMin.x, (c & 2) ? vMax.y : vMin.y, (c & 4) ? vMax.z : vMin.z);
+    const float z = p.x * WorldView.data[2] + p.y * WorldView.data[6] + p.z * WorldView.data[10] + WorldView.data[14];
+    if (!(fabsf(z) < fFull))
+      return false;
+  }
+  return true;
+}
+
 void CD3D12Renderer::SetCascadeConstants(SFrameConstants &fc) const
 {
   if (!CascadeReceiverFlags(false))
