@@ -14,7 +14,9 @@ reference of the rest.
   original renderer (`VCallHooks.h`): the summary after the captured frame lists which virtual
   functions the engine calls. A call that is not written out is only counted: its module comes from
   a cache of the return addresses, and the thread that loaded the renderer counts it without a
-  locked instruction. A command `screenfx Effect 1`, `screenfx Effect.Param 0.5` or
+  locked instruction. The next calls from the last two places of such a call (on that thread,
+  with the same `xrt_Trace`) go from the slot's stub straight to the original function after
+  adding 1 to their count (`VCall_Fast`). A command `screenfx Effect 1`, `screenfx Effect.Param 0.5` or
   `screenfx ?Effect` in `XRENDERTRACED_EXEC`/`XRENDERTRACED_EXEC_LEVEL` calls the screen effect
   functions of `I3DEngine`; `particles [count] [blend type] [size]` spawns particles around the
   camera (`I3DEngine::SpawnParticles`); `cvars [prefix]` writes the console variables whose names
