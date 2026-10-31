@@ -53,26 +53,34 @@ xrender_d3d12_shader(General_Ambient_RaySun_PS General.hlsl ps_6_0 PSMain XR_AMB
 xrender_d3d12_shader(General_Ambient_RaySun_Velocity_PS General.hlsl ps_6_0 PSMain XR_AMBIENT XR_CASCADES XR_RAY_SUN XR_VELOCITY)
 xrender_d3d12_shader(General_Ambient_RaySun_Hdr_PS General.hlsl ps_6_0 PSMain XR_AMBIENT XR_CASCADES XR_RAY_SUN XR_HDR)
 xrender_d3d12_shader(General_Ambient_RaySun_Hdr_Velocity_PS General.hlsl ps_6_0 PSMain XR_AMBIENT XR_CASCADES XR_RAY_SUN XR_VELOCITY XR_HDR)
-# The draws reflecting a cube map (DF_CUBE0) tracing rays in its place (XR_RAY_REFL, d3d12_RTReflections with
-# d3d12_RTReflectionSurfaces, SPipelineKey::bRayTrace): Shader Model 6.5 (inline RayQuery), with and without the
-# cascades (the mask of the sun's shadow by rays they leave to the cascades), the ambient light's part, HDR and
-# velocity.
-xrender_d3d12_shader(General_RayRefl_PS General.hlsl ps_6_5 PSMain XR_RAY_REFL)
-xrender_d3d12_shader(General_RayRefl_Velocity_PS General.hlsl ps_6_5 PSMain XR_RAY_REFL XR_VELOCITY)
-xrender_d3d12_shader(General_RayRefl_Hdr_PS General.hlsl ps_6_5 PSMain XR_RAY_REFL XR_HDR)
-xrender_d3d12_shader(General_RayRefl_Hdr_Velocity_PS General.hlsl ps_6_5 PSMain XR_RAY_REFL XR_VELOCITY XR_HDR)
-xrender_d3d12_shader(General_Cascades_RayRefl_PS General.hlsl ps_6_5 PSMain XR_CASCADES XR_RAY_REFL)
-xrender_d3d12_shader(General_Cascades_RayRefl_Velocity_PS General.hlsl ps_6_5 PSMain XR_CASCADES XR_RAY_REFL XR_VELOCITY)
-xrender_d3d12_shader(General_Cascades_RayRefl_Hdr_PS General.hlsl ps_6_5 PSMain XR_CASCADES XR_RAY_REFL XR_HDR)
-xrender_d3d12_shader(General_Cascades_RayRefl_Hdr_Velocity_PS General.hlsl ps_6_5 PSMain XR_CASCADES XR_RAY_REFL XR_VELOCITY XR_HDR)
-xrender_d3d12_shader(General_Ambient_RayRefl_PS General.hlsl ps_6_5 PSMain XR_AMBIENT XR_RAY_REFL)
-xrender_d3d12_shader(General_Ambient_RayRefl_Velocity_PS General.hlsl ps_6_5 PSMain XR_AMBIENT XR_RAY_REFL XR_VELOCITY)
-xrender_d3d12_shader(General_Ambient_RayRefl_Hdr_PS General.hlsl ps_6_5 PSMain XR_AMBIENT XR_RAY_REFL XR_HDR)
-xrender_d3d12_shader(General_Ambient_RayRefl_Hdr_Velocity_PS General.hlsl ps_6_5 PSMain XR_AMBIENT XR_RAY_REFL XR_VELOCITY XR_HDR)
-xrender_d3d12_shader(General_Ambient_Cascades_RayRefl_PS General.hlsl ps_6_5 PSMain XR_AMBIENT XR_CASCADES XR_RAY_REFL)
-xrender_d3d12_shader(General_Ambient_Cascades_RayRefl_Velocity_PS General.hlsl ps_6_5 PSMain XR_AMBIENT XR_CASCADES XR_RAY_REFL XR_VELOCITY)
-xrender_d3d12_shader(General_Ambient_Cascades_RayRefl_Hdr_PS General.hlsl ps_6_5 PSMain XR_AMBIENT XR_CASCADES XR_RAY_REFL XR_HDR)
-xrender_d3d12_shader(General_Ambient_Cascades_RayRefl_Hdr_Velocity_PS General.hlsl ps_6_5 PSMain XR_AMBIENT XR_CASCADES XR_RAY_REFL XR_VELOCITY XR_HDR)
+# The draws tracing rays (SPipelineKey::bRayTrace; Shader Model 6.5, inline RayQuery): those reflecting a cube map
+# (DF_CUBE0) with rays in its place (XR_RAY_REFL, d3d12_RTReflections with d3d12_RTReflectionSurfaces) and those
+# lit by lamps with rays towards them (XR_RAY_LIGHT, d3d12_RTLightShadows); without the cascades, with them and
+# with the mask of the sun's shadow by rays (XR_RAY_SUN), the ambient light's part, HDR and velocity.
+xrender_d3d12_shader(General_Rays_PS General.hlsl ps_6_5 PSMain XR_RAY_REFL XR_RAY_LIGHT)
+xrender_d3d12_shader(General_Rays_Velocity_PS General.hlsl ps_6_5 PSMain XR_RAY_REFL XR_RAY_LIGHT XR_VELOCITY)
+xrender_d3d12_shader(General_Rays_Hdr_PS General.hlsl ps_6_5 PSMain XR_RAY_REFL XR_RAY_LIGHT XR_HDR)
+xrender_d3d12_shader(General_Rays_Hdr_Velocity_PS General.hlsl ps_6_5 PSMain XR_RAY_REFL XR_RAY_LIGHT XR_VELOCITY XR_HDR)
+xrender_d3d12_shader(General_Cascades_Rays_PS General.hlsl ps_6_5 PSMain XR_CASCADES XR_RAY_REFL XR_RAY_LIGHT)
+xrender_d3d12_shader(General_Cascades_Rays_Velocity_PS General.hlsl ps_6_5 PSMain XR_CASCADES XR_RAY_REFL XR_RAY_LIGHT XR_VELOCITY)
+xrender_d3d12_shader(General_Cascades_Rays_Hdr_PS General.hlsl ps_6_5 PSMain XR_CASCADES XR_RAY_REFL XR_RAY_LIGHT XR_HDR)
+xrender_d3d12_shader(General_Cascades_Rays_Hdr_Velocity_PS General.hlsl ps_6_5 PSMain XR_CASCADES XR_RAY_REFL XR_RAY_LIGHT XR_VELOCITY XR_HDR)
+xrender_d3d12_shader(General_RaySun_Rays_PS General.hlsl ps_6_5 PSMain XR_CASCADES XR_RAY_SUN XR_RAY_REFL XR_RAY_LIGHT)
+xrender_d3d12_shader(General_RaySun_Rays_Velocity_PS General.hlsl ps_6_5 PSMain XR_CASCADES XR_RAY_SUN XR_RAY_REFL XR_RAY_LIGHT XR_VELOCITY)
+xrender_d3d12_shader(General_RaySun_Rays_Hdr_PS General.hlsl ps_6_5 PSMain XR_CASCADES XR_RAY_SUN XR_RAY_REFL XR_RAY_LIGHT XR_HDR)
+xrender_d3d12_shader(General_RaySun_Rays_Hdr_Velocity_PS General.hlsl ps_6_5 PSMain XR_CASCADES XR_RAY_SUN XR_RAY_REFL XR_RAY_LIGHT XR_VELOCITY XR_HDR)
+xrender_d3d12_shader(General_Ambient_Rays_PS General.hlsl ps_6_5 PSMain XR_AMBIENT XR_RAY_REFL XR_RAY_LIGHT)
+xrender_d3d12_shader(General_Ambient_Rays_Velocity_PS General.hlsl ps_6_5 PSMain XR_AMBIENT XR_RAY_REFL XR_RAY_LIGHT XR_VELOCITY)
+xrender_d3d12_shader(General_Ambient_Rays_Hdr_PS General.hlsl ps_6_5 PSMain XR_AMBIENT XR_RAY_REFL XR_RAY_LIGHT XR_HDR)
+xrender_d3d12_shader(General_Ambient_Rays_Hdr_Velocity_PS General.hlsl ps_6_5 PSMain XR_AMBIENT XR_RAY_REFL XR_RAY_LIGHT XR_VELOCITY XR_HDR)
+xrender_d3d12_shader(General_Ambient_Cascades_Rays_PS General.hlsl ps_6_5 PSMain XR_AMBIENT XR_CASCADES XR_RAY_REFL XR_RAY_LIGHT)
+xrender_d3d12_shader(General_Ambient_Cascades_Rays_Velocity_PS General.hlsl ps_6_5 PSMain XR_AMBIENT XR_CASCADES XR_RAY_REFL XR_RAY_LIGHT XR_VELOCITY)
+xrender_d3d12_shader(General_Ambient_Cascades_Rays_Hdr_PS General.hlsl ps_6_5 PSMain XR_AMBIENT XR_CASCADES XR_RAY_REFL XR_RAY_LIGHT XR_HDR)
+xrender_d3d12_shader(General_Ambient_Cascades_Rays_Hdr_Velocity_PS General.hlsl ps_6_5 PSMain XR_AMBIENT XR_CASCADES XR_RAY_REFL XR_RAY_LIGHT XR_VELOCITY XR_HDR)
+xrender_d3d12_shader(General_Ambient_RaySun_Rays_PS General.hlsl ps_6_5 PSMain XR_AMBIENT XR_CASCADES XR_RAY_SUN XR_RAY_REFL XR_RAY_LIGHT)
+xrender_d3d12_shader(General_Ambient_RaySun_Rays_Velocity_PS General.hlsl ps_6_5 PSMain XR_AMBIENT XR_CASCADES XR_RAY_SUN XR_RAY_REFL XR_RAY_LIGHT XR_VELOCITY)
+xrender_d3d12_shader(General_Ambient_RaySun_Rays_Hdr_PS General.hlsl ps_6_5 PSMain XR_AMBIENT XR_CASCADES XR_RAY_SUN XR_RAY_REFL XR_RAY_LIGHT XR_HDR)
+xrender_d3d12_shader(General_Ambient_RaySun_Rays_Hdr_Velocity_PS General.hlsl ps_6_5 PSMain XR_AMBIENT XR_CASCADES XR_RAY_SUN XR_RAY_REFL XR_RAY_LIGHT XR_VELOCITY XR_HDR)
 
 # Water surfaces (eD3D12P_Water).
 xrender_d3d12_shader(Water_VS Water.hlsl vs_6_0 VSMain)

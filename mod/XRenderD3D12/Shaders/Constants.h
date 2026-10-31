@@ -173,6 +173,9 @@ struct SFrameConstants
   XR_FLOAT4(vFoliage);            //!< DF2_FOLIAGE: x the strength (d3d12_FoliageTranslucency), y the power of the cosine of the angle
                                   //!< to the sun, z the distance where it ends (m), w 2 / that distance (all of it up to half of it)
   XR_UINT4(nRaySun);              //!< x the texture table index of the mask of the sun's shadow by rays (XR_RAY_SUN, RaySun.cpp)
+                                  //!< y z w the general program's rays (XR_RAY_REFL, XR_RAY_LIGHT; Draw.cpp): y their length, z RayMask with
+                                  //!< the cube maps' mode in bits 16-23, the lamps' in 24-25, their number a pixel in 28-31 and their rays' gap at
+                                  //!< the lamp in 9-15 (2 cm steps), w the ocean's level
 };
 
 //! b1: per draw.

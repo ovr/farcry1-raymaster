@@ -467,8 +467,8 @@ reference of its features and console variables.
   the glass of `TemplGlassCM`, the environment cubes of `TemplReflEnvCM`) the scene by rays where
   they look the cube up: in the main view's draws (the opaque list, the weapon in the hands and the
   blended glass) the general program's pixel shaders with `XR_RAY_REFL` (Shader Model 6.5, programs
-  of their own: `SPipelineKey::bRayTrace` for the general program; with the cascades, not with the
-  mask of the sun's shadow by rays, which such a draw leaves to them) trace a ray from the pixel's
+  of their own, `General_*Rays_*PS`: `SPipelineKey::bRayTrace` for the general program; with the
+  cascades or the mask of the sun's shadow by rays, as the draw's other programs) trace a ray from the pixel's
   point, a little off its face, `d3d12_RTDistance` long, the reflected one and the glass's one
   through it, among the scene for rays (`SurfaceRay`: `TraceScene`, `RayShade`, fogged by the path
   from the camera as the water's). What it hits takes the cube's place; where it hits nothing (the
@@ -485,6 +485,24 @@ reference of its features and console variables.
   orbiting, 3.96 -> 4.83: the frame's list now waits for the build of the scene for rays at the
   opaque list in place of the water, up to 3 ms in the frames where new objects come in. The sweeps
   over Pier, River and Swamp, with next to no such surfaces, stay within their noise.
+  `d3d12_RTLightShadows` (0 by default, read every frame; not registered without rays) gives the lamps
+  hard shadows: the main view's draws lit per pixel by point lights (the draw's lights of
+  `DF_PIXEL_LIGHTING` and `DF2_MATERIAL_LIGHT`, the dynamic lights over a light map,
+  `DF2_LIGHTMAP_LIGHTS`, the light passes, the projectors such as the flashlight)
+  take the same programs, also compiled with `XR_RAY_LIGHT`: `DrawLighting` and `MaterialLighting` in
+  the pixel shader trace a ray from the pixel's point, a little off its face on the lamp's side,
+  towards each point light that lights it (`TraceLight`, the first hit ends it, 4 alpha tests), up to
+  `d3d12_RTLightShadowsMax` (4) of them a pixel, ending `d3d12_RTLightShadowGap` (0.1 m) short of the
+  lamp (not its own fitting); where it hits, the light and its specular are left out. Directional
+  lights, the per vertex lighting and the vegetation are as they were. 2 shows the light taken away
+  in red, 3 by where the ray hits (green next to the surface, red next to the lamp). The frame
+  constants' `nRaySun.z` carries the mode, the number and the gap beside the cube maps' mode; a frame
+  whose scene has a light besides the sun builds the scene for rays (with what is out of the view
+  while such draws were there the frame before). In the game's light the lamps light the characters
+  through the walls; with it they are in the shade of what stands between, and of their own arms.
+  At 3840 x 2160 under 8 lamps (DemoMultiLight with `DemoMultiLightTeapot.ini`: `main_view = 1`
+  draws it as the main view) the opaque list takes 0.05 -> 0.23 ms, the GPU 0.96 -> 1.18; in
+  Research's hall 1.05 -> 1.23 (the opaque list waits for the scene for rays).
   `d3d12_RTDebug` views the scene for rays from the camera: 1 instances, 2 shaded hits on the right
   half, 3 distance, 4 mip level, 5 kind, 6 alpha tests, 7 shaded hits over the whole picture;
   `d3d12_WaterDebug` 13, 14, 15 the water rays' colour, distance and weight. With the rays off the

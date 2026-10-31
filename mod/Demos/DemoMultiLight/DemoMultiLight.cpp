@@ -28,6 +28,8 @@
 //	  object = <file>   the object (default: the first .cgf under objects/)
 //	  floor = <file>    the floor tile, laid out by its box (default: the object)
 //	  lights = <n>      the number of point lights, 1 to 16 (default 6)
+//	  main_view = 1     the scene drawn as the game's main view (DemoHost's
+//	                    EndScene; the renderer's rays see it)
 //	  image = <file>    the picture of the projected light (default: the first
 //	                    .dds under textures/lights/)
 //

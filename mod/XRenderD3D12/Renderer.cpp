@@ -266,6 +266,16 @@ void CD3D12Renderer::RegisterVariables()
                      "sun's disc from the surfaces of the depth prepass up to the end of the cascades, in place of the cascades' "
                      "shadow (the other surfaces, alpha tested, leaves, blended, keep the cascades): 1 a ray for each 2 x 2 pixels, "
                      "from each of them in turn; 2 a ray a pixel");
+  iConsole->Register("d3d12_RTLightShadows", &CV_d3d12_RTLightShadows, 0, VF_DUMPTODISK,
+                     "The lamps' shadows by rays (a device with DXR 1.1): the main view's surfaces lit per pixel by point lights "
+                     "(the draws' lights, the light passes, the projectors such as the flashlight) trace a ray towards each and "
+                     "leave out the light of those it does not reach; 0 off, 1 on, 2 the light taken away red, 3 the light taken away "
+                     "by where the ray hits: green next to the surface, red next to the lamp");
+  iConsole->Register("d3d12_RTLightShadowsMax", &CV_d3d12_RTLightShadowsMax, 4, VF_DUMPTODISK,
+                     "With d3d12_RTLightShadows, the lamps a pixel traces rays towards (1-15); those past them light it unshadowed");
+  iConsole->Register("d3d12_RTLightShadowGap", &CV_d3d12_RTLightShadowGap, 0.1f, VF_DUMPTODISK,
+                     "With d3d12_RTLightShadows, how far short of a lamp its rays end (m, 0-2.5): what is nearer to it, its own "
+                     "fitting, casts no shadow");
   iConsole->Register("d3d12_RTSunAngle", &CV_d3d12_RTSunAngle, 0.53f, VF_DUMPTODISK,
                      "With d3d12_RTSunShadows, the sun's disc in degrees across (0.53 as the sun's; 0: hard shadows): the soft edges "
                      "of the shadow widen with the distance to what casts it");
@@ -459,6 +469,10 @@ WIN_HWND CD3D12Renderer::Init(int x,int y,int width,int height,unsigned int cbpp
     CV_d3d12_RTReflectionSurfaces = 0;
     iConsole->UnregisterVariable("d3d12_RTSunShadows", true);
     CV_d3d12_RTSunShadows = 0;
+    iConsole->UnregisterVariable("d3d12_RTLightShadows", true);
+    CV_d3d12_RTLightShadows = 0;
+    iConsole->UnregisterVariable("d3d12_RTLightShadowsMax", true);
+    iConsole->UnregisterVariable("d3d12_RTLightShadowGap", true);
     iConsole->UnregisterVariable("d3d12_RTGI", true);
     CV_d3d12_RTGI = 0;
   }

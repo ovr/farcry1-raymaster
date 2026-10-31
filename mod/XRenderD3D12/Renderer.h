@@ -663,6 +663,9 @@ public:
   //! d3d12_RTReflections with d3d12_RTReflectionSurfaces on a device with rays: the draws that reflect a cube map
   //! (DF_CUBE0) trace rays in its place (General.hlsl's XR_RAY_REFL).
   bool WantsRaySurfaces() const;
+  //! d3d12_RTLightShadows on a device with rays: the main view's draws lit by point lights trace rays towards
+  //! them (General.hlsl's XR_RAY_LIGHT).
+  bool WantsRayLights() const;
   //! The view's fields of a compute pass with rays over the main view's depth buffer (RayView.hlsli):
   //! the camera and the world positions at a view depth across the view (the jitter apart).
   void GetRayView(float vCameraPos[4], float vRayX[4], float vRayY[4], float vRayO[4]) const;
@@ -1390,6 +1393,7 @@ public:
   std::unordered_set<uint64> m_RayLiveParts;       //!< the PartKeys of the live casters of that frame (d3d12_RTSunShadows: XR_RAY_LIVE)
   int m_nRayOffscreenFrame = -1;
   int m_nRaySurfaceFrame = -2;              //!< the last frame with a draw that traced rays in place of its cube map
+  int m_nRayLightFrame = -2;                //!< the last frame with a draw that traced rays towards its lamps
   float m_fDrawHeat = 0;                    //!< the heat of the item being drawn (vHeat.x)
   float m_fLineWidth = 1;
 
@@ -1460,6 +1464,9 @@ public:
   int CV_d3d12_RTReflections = 0;           //!< the water's reflection by rays: 1 in place of the screen space one, 2 where it misses
   int CV_d3d12_RTReflectionSurfaces = 1;    //!< with d3d12_RTReflections, the cube maps' reflections by rays (XR_RAY_REFL); 2 tinted
   int CV_d3d12_RTSunShadows = 0;            //!< the sun's shadow by rays in place of the cascades' (RaySun.cpp)
+  int CV_d3d12_RTLightShadows = 0;          //!< the lamps' shadows by rays (XR_RAY_LIGHT); 2 the light they take away red
+  int CV_d3d12_RTLightShadowsMax = 4;       //!< the lamps a pixel traces rays towards
+  float CV_d3d12_RTLightShadowGap = 0.1f;   //!< how far short of a lamp its rays end (m): not its own fitting
   float CV_d3d12_RTSunAngle = 0.53f;        //!< the sun's disc, degrees across (the soft edges of its shadow)
   int CV_d3d12_RTSunDenoise = 1;            //!< the sun's shadow by rays blended over the frames and its soft edges filtered
   int CV_d3d12_RTGI = 0;                    //!< the ambient light by rays, a bounce (RayAO.cpp): 1 a ray for each 2 x 2 pixels, 2 a pixel

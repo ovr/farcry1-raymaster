@@ -170,7 +170,8 @@ public:
   //! Starts a 3D scene the way the game's menu draws its model: SetCamera, EF_StartEf, the lights
   //! (EF_ClearLightsList, EF_ADDDlight, EF_UpdateDLight; Params.nDLightMask gets all of them).
   void BeginScene(const CCamera &Cam, SRendParams &Params, CDLight *pLights, int nLights);
-  //! Draws the scene: EF_EndEf3D(SHDF_SORT).
+  //! Draws the scene: EF_EndEf3D(SHDF_SORT); with the scene value main_view = 1 also SHDF_ALLOWHDR, as the
+  //! game draws its main view (a renderer's effects of the main view, such as its rays, take it as such).
   void EndScene();
   //! A scene of one static object: BeginScene, IStatObj::Render, EndScene.
   void RenderObject(const CCamera &Cam, IStatObj *pObj, SRendParams &Params, CDLight *pLights, int nLights);
