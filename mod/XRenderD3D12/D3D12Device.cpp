@@ -133,6 +133,12 @@ bool CD3D12Device::Init(HWND hWnd, int nWidth, int nHeight, int nDebug)
     Filter.DenyList.NumIDs = (UINT)std::size(DenyIDs);
     Filter.DenyList.pIDList = DenyIDs;
     m_pInfoQueue->AddStorageFilterEntries(&Filter);
+    m_pDebugLog.reset(fopen("XRenderD3D12_debug.txt", "w"));
+    if (m_pDebugLog)
+    {
+      fprintf(m_pDebugLog.get(), "# the Direct3D 12 debug layer's errors and warnings\n");
+      fflush(m_pDebugLog.get());
+    }
   }
 
   D3D12_COMMAND_QUEUE_DESC QueueDesc = {};
@@ -1511,10 +1517,15 @@ void CD3D12Device::LogDebugMessages()
     auto *pMsg = (D3D12_MESSAGE *)Buffer.data();
     if (FAILED(m_pInfoQueue->GetMessage(i, pMsg, &nSize)))
       continue;
-    if (pMsg->Severity <= D3D12_MESSAGE_SEVERITY_ERROR)
+    const bool bError = pMsg->Severity <= D3D12_MESSAGE_SEVERITY_ERROR;
+    if (bError)
       iLog->LogError("[D3D12] %s", pMsg->pDescription);
     else if (pMsg->Severity == D3D12_MESSAGE_SEVERITY_WARNING)
       iLog->LogWarning("[D3D12] %s", pMsg->pDescription);
+    if (m_pDebugLog && (bError || pMsg->Severity == D3D12_MESSAGE_SEVERITY_WARNING))
+      fprintf(m_pDebugLog.get(), "%s %s\n", bError ? "error" : "warning", pMsg->pDescription);
   }
+  if (m_pDebugLog && n)
+    fflush(m_pDebugLog.get());
   m_pInfoQueue->ClearStoredMessages();
 }

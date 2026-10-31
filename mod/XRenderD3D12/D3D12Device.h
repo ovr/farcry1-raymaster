@@ -272,7 +272,8 @@ public:
   //! buffer again.
   bool ReadBackTexture(ID3D12Resource *pTexture, D3D12_RESOURCE_STATES State, uint8 *pDst, int nWidth, int nHeight);
 
-  //! The debug layer's messages to the engine's log.
+  //! The debug layer's messages to the engine's log and to XRenderD3D12_debug.txt (the engine's
+  //! log loses its last lines when the game ends a time demo).
   void LogDebugMessages();
 
   //! GPU timing (d3d12_GpuTimes): while on, the GPU time of each frame is split into sections,
@@ -347,6 +348,7 @@ private:
   ComPtr<ID3D12CommandQueue> m_pQueue;
   ComPtr<IDXGISwapChain3> m_pSwapChain;
   ComPtr<ID3D12InfoQueue> m_pInfoQueue;
+  std::unique_ptr<FILE, int (*)(FILE *)> m_pDebugLog{ nullptr, &fclose };  //!< XRenderD3D12_debug.txt, with the debug layer
   bool m_bTearing = false;
   HWND m_hWnd = nullptr;
 

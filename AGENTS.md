@@ -195,7 +195,9 @@ instructions and is not committed (git-ignored). The references of the modules a
   `RunDemo.ps1 -Renderer XRenderD3D12.dll`.
 - `XRENDERD3D12_DEBUG=1` (or `d3d12_Debug 1`, read at start-up) turns on the debug layer and GPU
   based validation, `2` the debug layer alone; their messages go to the engine log, starting with
-  `[D3D12]`. A device that is removed is logged too (`device removed`). With GPU based validation
+  `[D3D12]`, and the errors and warnings to `farcry1_testing1/XRenderD3D12_debug.txt` as well (the
+  engine's log loses its last lines when a time demo ends the game). A device that is removed is
+  logged too (`device removed`). With GPU based validation
   the frames of the water's rays (`d3d12_RTReflections`) come out black, with no message; check
   them with `2`.
 - Each feature that changes the picture has a switch, and with it off the frames are those of the

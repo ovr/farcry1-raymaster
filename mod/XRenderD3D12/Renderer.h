@@ -824,11 +824,17 @@ public:
   //! The same when the map holds what the frustum shows now (nullptr: it has to be drawn).
   SShadowMap *FindDrawnShadowMap(const void *pFrustum);
   void FreeShadowMap(SShadowMap &Map);
+  //! A map no longer used goes to m_SpareShadowMaps (the oldest spare is freed past the limit).
+  void SpareShadowMap(SShadowMap &Map);
   void ReleaseShadowMaps();
   //! d3d12_ShadowDebug: the maps of the frame over the main view.
   void DrawShadowMapDebug();
 
   std::unordered_map<int, SShadowMap> m_ShadowMaps;   //!< by the ID written into the frustum
+  //! Maps no longer used, with their depth texture and views, for the next map of their size: an
+  //! entity's map goes when its caster is out of view for a frame and comes back with it, and a
+  //! new depth texture costs the kernel as much as a frame.
+  std::vector<SShadowMap> m_SpareShadowMaps;
   std::vector<const void *> m_ShadowCasterLists;      //!< NoteShadowCasters: the list2<ShadowMapLightSourceInstance> of the frame
   std::vector<const void *> m_FrameCasterLists;       //!< the same, taken by UpdateShadowMaps for the rest of the frame
   int m_nNextShadowMapID = 0x40000000;                //!< the maps' IDs, apart from the texture IDs

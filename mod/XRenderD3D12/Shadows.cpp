@@ -52,6 +52,8 @@ namespace
 
 //! A static object's map not used for this many frames is freed.
 constexpr int SHADOW_MAP_KEEP_FRAMES = 600;
+//! Maps kept for reuse (SpareShadowMap).
+constexpr size_t SHADOW_MAP_SPARES = 8;
 //! The sizes d3d12_ShadowMapSize may give.
 constexpr int SHADOW_MAP_MIN_SIZE = 128, SHADOW_MAP_MAX_SIZE = 4096;
 //! The receivers' comparison: a depth bias in metres, the filter's radius in texels and the
@@ -218,7 +220,7 @@ void CD3D12Renderer::UpdateShadowMaps()
   {
     if (m_nFrames - It->second.nLastUsedFrame > (It->second.bEntities ? 1 : SHADOW_MAP_KEEP_FRAMES))
     {
-      FreeShadowMap(It->second);
+      SpareShadowMap(It->second);
       It = m_ShadowMaps.erase(It);
     }
     else
@@ -295,9 +297,22 @@ bool CD3D12Renderer::DrawShadowMap(void *pFrustum, const Vec3 &vOrigin)
   SShadowMap *pMap = FindShadowMap(pFrustum);
   if (pMap && pMap->nSize != nSize)
   {
-    FreeShadowMap(*pMap);
+    SpareShadowMap(*pMap);
     m_ShadowMaps.erase(nID);
     pMap = nullptr;
+  }
+  // A spare map of the size (cleared below like any other), else a new one.
+  if (!pMap)
+  {
+    auto Spare = std::find_if(m_SpareShadowMaps.begin(), m_SpareShadowMaps.end(), [nSize](const SShadowMap &m) { return m.nSize == nSize; });
+    if (Spare != m_SpareShadowMaps.end())
+    {
+      SShadowMap Map = std::move(*Spare);
+      m_SpareShadowMaps.erase(Spare);
+      Map.pFrustum = pFrustum;
+      nID = m_nNextShadowMapID++;
+      pMap = &(m_ShadowMaps[nID] = std::move(Map));
+    }
   }
   if (!pMap)
   {
@@ -623,11 +638,25 @@ void CD3D12Renderer::FreeShadowMap(SShadowMap &Map)
   Map.pDepth.Reset();
 }
 
+void CD3D12Renderer::SpareShadowMap(SShadowMap &Map)
+{
+  if (m_SpareShadowMaps.size() >= SHADOW_MAP_SPARES)
+  {
+    FreeShadowMap(m_SpareShadowMaps.front());
+    m_SpareShadowMaps.erase(m_SpareShadowMaps.begin());
+  }
+  m_SpareShadowMaps.push_back(std::move(Map));
+  Map = SShadowMap();
+}
+
 void CD3D12Renderer::ReleaseShadowMaps()
 {
   for (auto &[nID, Map] : m_ShadowMaps)
     FreeShadowMap(Map);
   m_ShadowMaps.clear();
+  for (SShadowMap &Map : m_SpareShadowMaps)
+    FreeShadowMap(Map);
+  m_SpareShadowMaps.clear();
   m_ShadowCasterLists.clear();
   m_FrameCasterLists.clear();
 }

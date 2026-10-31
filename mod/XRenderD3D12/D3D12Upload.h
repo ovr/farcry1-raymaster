@@ -49,7 +49,7 @@ public:
   uint64 m_nId;                       //!< never the same for two buffers (FindBuffer's callers tell them apart by it)
   uint32 m_nVersion;                  //!< counts the UpdateBuffer calls
   int m_nRawSRV;                      //!< its raw SRV in the texture table (GetRawSRV), -1 none yet
-  int m_nHeap;                        //!< the buffer heap it is placed in (CD3D12Upload), -1 a committed resource
+  int m_nHeap;                        //!< the heap of POOL_BUFFERS it is placed in (CD3D12Upload), -1 a committed resource
   uint64 m_nHeapOffset;               //!< where in that heap
   uint64 m_nHeapBytes;                //!< the bytes it takes there
 
@@ -69,9 +69,12 @@ public:
   bool m_bRenderTarget;
   int m_nSRV;                         //!< index in the texture table (D3D12Descriptors.h), -1 none
   D3D12_CPU_DESCRIPTOR_HANDLE m_RTV;  //!< render targets only
+  int m_nHeap;                        //!< the heap of POOL_TEXTURES it is placed in (CD3D12Upload), -1 a committed resource
+  uint64 m_nHeapOffset;               //!< where in that heap
+  uint64 m_nHeapBytes;                //!< the bytes it takes there
 
   CD3D12Texture() : m_pResource(NULL), m_Format(DXGI_FORMAT_UNKNOWN), m_nWidth(0), m_nHeight(0), m_nMips(0),
-    m_bCube(false), m_nArraySize(1), m_bRenderTarget(false), m_nSRV(-1) { m_RTV.ptr = 0; }
+    m_bCube(false), m_nArraySize(1), m_bRenderTarget(false), m_nSRV(-1), m_nHeap(-1), m_nHeapOffset(0), m_nHeapBytes(0) { m_RTV.ptr = 0; }
 };
 
 //! The data of one sub resource for CreateTexture / UpdateTexture: rows from the top, nPitch bytes
@@ -183,13 +186,20 @@ private:
   uint64 GetAllocationSize(ID3D12Resource *pResource) const;
   void AddVideoMemory(ID3D12Resource *pResource);
   void SubVideoMemory(ID3D12Resource *pResource);
-  //! A range of nBytes (a multiple of the placement alignment) in a buffer heap, made when none has
-  //! room; false when the device refuses a heap.
-  bool PlaceRange(uint64 nBytes, int &nHeap, uint64 &nOffset);
+  //! A range of nBytes (a multiple of the placement alignment) in a heap of the pool, made when
+  //! none has room; false when the device refuses a heap.
+  bool PlaceRange(int nPool, uint64 nBytes, int &nHeap, uint64 &nOffset);
   //! Gives the range back, joined with the free ranges next to it.
-  void FreeRange(int nHeap, uint64 nOffset, uint64 nBytes);
-  //! Gives back the ranges of the released buffers the GPU is done with.
+  void FreeRange(int nPool, int nHeap, uint64 nOffset, uint64 nBytes);
+  //! Gives back the ranges of the released buffers and textures the GPU is done with.
   void RetireRanges();
+  //! Takes over a reference of a released resource of CreatePooled: a placed one goes with its
+  //! range (m_PendingRanges), a committed one to DeferredRelease.
+  void ReleasePooled(int nPool, ID3D12Resource *pResource, int nHeap, uint64 nHeapOffset, uint64 nHeapBytes);
+  //! A placed resource in the pool when it takes up to POOL_PLACE_MAX bytes, else a committed one
+  //! (nHeap -1); D3D12 error codes.
+  HRESULT CreatePooled(int nPool, const D3D12_RESOURCE_DESC &Desc, D3D12_RESOURCE_STATES eState, ID3D12Resource **ppResource, int &nHeap,
+    uint64 &nHeapOffset, uint64 &nHeapBytes);
   //! A raw SRV of all of pResource (nSize bytes), -1 when refused.
   int CreateRawSRV(ID3D12Resource *pResource, uint64 nSize);
   void FreeRawSRV(int &nSlot);
@@ -220,19 +230,29 @@ private:
 
   // Static buffers
   std::map<D3D12_GPU_VIRTUAL_ADDRESS, CD3D12Buffer *> m_Buffers;   //!< by their GPU address
-  //! The heaps the buffers of up to BUFFER_HEAP_MAX bytes are placed in: a committed resource
-  //! costs the kernel a few hundred microseconds to make and as much to free (the terrain's index
-  //! buffers change with its detail, a few every frame outdoors), a placed one hardly anything.
-  static constexpr uint64 BUFFER_HEAP_SIZE = 64ull << 20;
-  static constexpr uint64 BUFFER_HEAP_MAX = 8ull << 20;
-  std::vector<Microsoft::WRL::ComPtr<ID3D12Heap>> m_BufferHeaps;
-  std::map<std::pair<int, uint64>, uint64> m_FreeRanges;     //!< (heap, offset) -> bytes of the free ranges
-  std::set<std::tuple<uint64, int, uint64>> m_FreeBySize;    //!< the same as (bytes, heap, offset), for the best fit
-  //! The ranges of the released buffers, free once the GPU passed nFence.
+  //! The heaps the buffers and textures of up to POOL_PLACE_MAX bytes are placed in: a committed
+  //! resource costs the kernel a few hundred microseconds to make and as much to free (the
+  //! terrain's index buffers change with its detail, a few every frame outdoors; the textures of a
+  //! place load when it comes into view), a placed one hardly anything. Buffers and textures each
+  //! have heaps of their own (resource heap tier 1).
+  static constexpr uint64 POOL_HEAP_SIZE = 64ull << 20;
+  static constexpr uint64 POOL_PLACE_MAX = 8ull << 20;
+  enum { POOL_BUFFERS, POOL_TEXTURES, POOL_NUM };
+  struct SHeapPool
+  {
+    std::vector<Microsoft::WRL::ComPtr<ID3D12Heap>> Heaps;
+    std::map<std::pair<int, uint64>, uint64> FreeRanges;     //!< (heap, offset) -> bytes of the free ranges
+    std::set<std::tuple<uint64, int, uint64>> FreeBySize;    //!< the same as (bytes, heap, offset), for the best fit
+  };
+  SHeapPool m_Pools[POOL_NUM];
+  //! The ranges of the released buffers and textures, free once the GPU passed nFence. The
+  //! resource goes with its range (not DeferredRelease): one placed in the range after it would
+  //! share its addresses while it lives, which the debug layer warns of on every use.
   struct SPendingRange
   {
-    int nHeap;
+    int nPool, nHeap;
     uint64 nOffset, nBytes, nFence;
+    Microsoft::WRL::ComPtr<ID3D12Resource> pResource;
   };
   std::vector<SPendingRange> m_PendingRanges;
   uint64 m_nNextBufferId = 1;
