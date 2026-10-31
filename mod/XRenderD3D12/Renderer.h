@@ -1026,6 +1026,42 @@ public:
   bool m_bHdrScene = false;                 //!< BeginMainScene .. EndMainScene: the main scene draws in D3D12_HDR_FORMAT
 
   //////////////////////////////////////////////////////////////////////////
+  // Volumetric.cpp: the volumetric light of the main view (d3d12_VolumetricLight)
+
+  //! Its froxels.
+  struct SVolumetricState
+  {
+    CD3D12Texture *pFroxels[2] = {};        //!< the light scattered and the extinction (RGBA16F): this frame's and the frame before's
+    int nFroxels = 0;                       //!< pFroxels' current one
+    CD3D12Texture *pIntegrated = nullptr;   //!< the light scattered towards the camera up to each froxel's far end, the transmittance
+    int nIntegratedSRV = -1;                //!< its Texture3D SRV in the texture table
+    std::vector<int> Tables;                //!< the kernels' tables, D3D12_FRAMES each: the injection's, the integration's
+    int nWidth = 0, nHeight = 0;            //!< the froxels across and down the view
+    ComPtr<ID3D12Resource> pDepth;          //!< the depth buffer nDepthSRV is of (kept: a new one is never at its address)
+    int nDepthSRV = -1;
+    float PrevViewProj[16] = {};            //!< the view's world to clip of the last update
+    int nFrame = -1;                        //!< m_nFrames of the last update
+    float fNear = 0, fFar = 0;              //!< the volume's depths in it
+    float fM22 = 0, fM32 = 0;               //!< its projection's terms of the depth (SFrameConstants::vDepthParams)
+    float fOutdoor = 0;                     //!< how much of the air there is: 0 indoors where the outdoor lights do not reach, 1 elsewhere
+    int nOutdoorFrame = -1;                 //!< m_nFrames of fOutdoor's last step
+  };
+
+  //! Before the HDR resolve of the main view (EndMainScene, not with an upscaler, not in heat vision
+  //! or under water): the froxels for this frame (Shaders/Volumetric.hlsl). False: none.
+  bool UpdateVolumetricLight();
+  //! The resolve's constants of this frame's froxels (HDR_VOLUMETRIC). False: none this frame.
+  bool SetVolumetricConstants(SDrawConstants &dc) const;
+  //! true: the main view's depth buffer readable by the resolve (DEPTH_READ, bound read only); false:
+  //! writable again.
+  void SetVolumetricDepthRead(bool bRead);
+  //! m_Volumetric's targets and tables for nWidth x nHeight froxels, made when it changes. False: none.
+  bool EnsureVolumetricTargets(int nWidth, int nHeight);
+  void ReleaseVolumetricLight();
+
+  SVolumetricState m_Volumetric;
+
+  //////////////////////////////////////////////////////////////////////////
   // HdrOutput.cpp: the HDR output to the display (d3d12_HDROutput)
 
   //! XRenderD3D12_ReadFrameHdr10 (HdrOutput.cpp): the current frame through the output pass in
@@ -1365,6 +1401,13 @@ public:
   float CV_d3d12_Temperature = 0;
   float CV_d3d12_Tint = 0;
   float CV_d3d12_ColorLutAmount = 1;        //!< how much of the .cube file d3d12_ColorLut (a string) is mixed in
+  int CV_d3d12_VolumetricLight = 1;         //!< the volumetric light (Volumetric.cpp): 0 off, 1 on
+  float CV_d3d12_VolumetricLightDensity = 0.002f;    //!< the air's extinction (1 / m)
+  float CV_d3d12_VolumetricLightSun = 1;    //!< the sun's light it scatters, times the sun's
+  float CV_d3d12_VolumetricLightAmbient = 1;         //!< the light from all round it scatters, times the fog's colour
+  float CV_d3d12_VolumetricLightAnisotropy = 0.3f;   //!< the phase's g: 0 the same all round, towards 1 forwards
+  float CV_d3d12_VolumetricLightDistance = 60;       //!< the far end of its froxels (m)
+  float CV_d3d12_VolumetricLightHeight = 40;         //!< the height above the water over which the air thins to half (0: the same everywhere)
 };
 
 extern CD3D12Renderer *g_pRenderer;

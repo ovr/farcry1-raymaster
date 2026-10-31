@@ -11,6 +11,7 @@
 //	  b1  SDrawConstants, per draw
 //	  t0, space1: Texture2D   g_Textures[]  (the texture table, D3D12Descriptors.h)
 //	  t0, space2: TextureCube g_Cubes[]     (the same table)
+//	  t0, space6: Texture3D   g_Volumes[]   (the same table)
 //	  s0 linear wrap (anisotropic), s1 linear clamp, s2 point wrap, s3 point clamp (static)
 //	  s4 the shadow maps' comparison sampler (LESS_EQUAL, bilinear, white border: lit outside)
 //	Matrices are row major and multiply row vectors (v * M), as Matrix44 of the engine; dxc
@@ -134,6 +135,7 @@ typedef float float4x4_t[16];
 #define HDR_BLOOM_UP        0x00000020  //!< the smaller level tex0 through a 3x3 tent, added to the target
 #define HDR_RESOLVE         0x00000040  //!< the scene tex0 exposed, with the bloom tex1, tone mapped to the display
 #define HDR_OUTPUT          0x00000080  //!< the frame tex0 with the highlight layer tex1 for an HDR swap chain (HdrOutput.cpp)
+#define HDR_VOLUMETRIC      0x00000100  //!< with HDR_RESOLVE: the scene's light through the volumetric light (Volumetric.cpp): tex4 its froxels, tex5 the depth
 #define HDR_COLOR_LUT_SIZE  32          //!< the colour grading's table (ColorGrading.cpp): points along each axis
 
 #define XR_SAMPLER_LINEAR_WRAP  0
@@ -248,6 +250,34 @@ struct SBloomConstants
   XR_FLOAT4(vParams);             //!< as HDR_BLOOM_DOWN's vParams1 (Hdr.hlsl): x the compensation, y 1 with the adapted EV, z the threshold,
                                   //!< w its soft knee
   XR_UINT4(vFlags);               //!< x 1: from the scene, its light exposed (HDR_BLOOM_PREFILTER)
+};
+
+// The threads a side of a group of the volumetric light's kernels (Volumetric.hlsl, Volumetric.cpp): 8 x 8 froxels
+// of a slice (the injection), or 8 x 8 columns of them (the integration)
+#define XR_VOLUMETRIC_GROUP 8
+
+//! b0 of the volumetric light's kernels (Volumetric.hlsl, Volumetric.cpp). A froxel (x, y, z) of the volume covers
+//! the view from x / width to (x + 1) / width across (left to right) and y / height to (y + 1) / height down, and the
+//! view depths from Depth(z / slices) to Depth((z + 1) / slices), Depth(w) = near * 2^(w log2(far / near)).
+struct SVolumetricConstants
+{
+  XR_FLOAT4X4_ARRAY(mCascade, XR_MAX_CASCADES);  //!< as SFrameConstants'
+  XR_FLOAT4X4(mPrevViewProj);     //!< world to clip in the frame before: where a froxel was in the history
+  XR_FLOAT4(vCameraPos);          //!< xyz the camera
+  XR_FLOAT4(vRayX);               //!< the world position at the view depth d and x, y -1..1 across the view (y up):
+  XR_FLOAT4(vRayY);               //!< vCameraPos + d (vRayO + x vRayX + y vRayY)
+  XR_FLOAT4(vRayO);
+  XR_FLOAT4(vSize);               //!< x width, y height, z the slices (froxels), w 1 / the slices
+  XR_FLOAT4(vSlices);             //!< x near (m), y log2(far / near), z 1 / y, w far (m)
+  XR_FLOAT4(vJitter);             //!< xyz: this frame's point in its froxels (0..1 each way)
+  XR_FLOAT4(vSunDir);             //!< xyz: the direction to the sun; w the phase's anisotropy g (Henyey-Greenstein)
+  XR_FLOAT4(vSunLight);           //!< rgb: the sun's light scattered (d3d12_VolumetricLightSun), 0 without a sun
+  XR_FLOAT4(vAmbientLight);       //!< rgb: the light scattered from all round (the fog's colour, d3d12_VolumetricLightAmbient), w the part of it in the sun's shadow
+  XR_FLOAT4(vDensity);            //!< x the extinction (1 / m) up to the height y (m), z 1 / the height over which it falls to half above
+                                  //!< (0: the same everywhere), w the history's weight (0: none)
+  XR_FLOAT4(vCascadeEnd);         //!< as SFrameConstants'
+  XR_FLOAT4(vCascadeDepth);       //!< as SFrameConstants'
+  XR_FLOAT4(vCascadeParams);      //!< x the number of cascades (0: the sun reaches everywhere), w the depth bias (m)
 };
 
 #endif

@@ -10,7 +10,8 @@
 //	  0: root CBV b0 (the pass's constants, CD3D12Upload::AllocFrame)
 //	  1: descriptor table t0..t3 (COMPUTE_SRVS SRVs)
 //	  2: descriptor table u0..u4 (COMPUTE_UAVS UAVs)
-//	  static samplers s0 point clamp, s1 linear clamp
+//	  static samplers s0 point clamp, s1 linear clamp, s2 the shadow maps'
+//	  comparison (LESS_EQUAL, bilinear, white border: lit outside)
 //	The tables are runs of CD3D12Descriptors::AllocRange of exactly that
 //	many slots, the unused ones holding null views. The compute root
 //	signature is separate from the draws' one, so a dispatch leaves the
@@ -38,6 +39,8 @@ enum ED3D12Kernel
   eD3D12K_Bloom,                    //!< a level of the bloom from one twice its size (Shaders/Bloom.hlsl)
   eD3D12K_DepthTiles,               //!< levels 0..4 of the depth tiles of the water's depth copy (Shaders/DepthTiles.hlsl)
   eD3D12K_DepthTilesUp,             //!< their levels 5 and 6 from level 4
+  eD3D12K_VolumetricInject,         //!< the volumetric light's froxels (Shaders/Volumetric.hlsl)
+  eD3D12K_VolumetricIntegrate,      //!< the light they scatter towards the camera, integrated
   eD3D12K_Num
 };
 
@@ -53,11 +56,11 @@ public:
   bool Init(ID3D12Device *pDevice);
   void Shutdown();
 
-  //! Records a dispatch of nGroupsX x nGroupsY groups into pList: the kernel, b0 at CB, the SRV table
-  //! from slot nSRVs and the UAV table from slot nUAVs (runs of AllocRange; -1 leaves a table unset).
-  //! The descriptor heap of CD3D12Descriptors must be bound.
+  //! Records a dispatch of nGroupsX x nGroupsY x nGroupsZ groups into pList: the kernel, b0 at CB, the
+  //! SRV table from slot nSRVs and the UAV table from slot nUAVs (runs of AllocRange; -1 leaves a table
+  //! unset). The descriptor heap of CD3D12Descriptors must be bound.
   void Dispatch(ID3D12GraphicsCommandList *pList, ED3D12Kernel eKernel, D3D12_GPU_VIRTUAL_ADDRESS CB, int nSRVs, int nUAVs,
-                UINT nGroupsX, UINT nGroupsY);
+                UINT nGroupsX, UINT nGroupsY, UINT nGroupsZ = 1);
 
 private:
   bool CreateRootSignature();

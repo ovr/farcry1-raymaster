@@ -37,6 +37,7 @@ ConstantBuffer<SDrawConstants> g_Draw : register(b1);
 Texture2D g_Textures[] : register(t0, space1);
 TextureCube g_Cubes[] : register(t0, space2);
 Texture2DArray g_TextureArrays[] : register(t0, space3);
+Texture3D g_Volumes[] : register(t0, space6);
 
 SamplerState g_SamplerLinearWrap : register(s0);    // anisotropic
 SamplerState g_SamplerLinearClamp : register(s1);

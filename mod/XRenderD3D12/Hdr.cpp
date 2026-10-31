@@ -23,7 +23,8 @@
 //	    (a 3 x 3 tent), each added to the one above; a level from one twice
 //	    its size by a kernel (Shaders/Bloom.hlsl), which reads each of the
 //	    taps it shares with its neighbours once;
-//	  - the resolve: the light exposed (plus d3d12_Exposure), with the
+//	  - the resolve: the light (through the volumetric light without an
+//	    upscaler, Volumetric.cpp) exposed (plus d3d12_Exposure), with the
 //	    bloom, tone mapped (d3d12_ToneMap), colour graded (ColorGrading.cpp)
 //	    into the back buffer, or for an upscaler into an LDR target of the
 //	    scene's size, which it upscales as it would the scene (its flags
@@ -135,6 +136,9 @@ void CD3D12Renderer::EndMainScene()
     GpuSection("hdr");
     m_pDevice->EndHdr();
     InvalidateFrameConstants();
+    // The volumetric light's froxels (Volumetric.cpp), which the resolve takes.
+    if (UpdateVolumetricLight())
+      GpuSection("hdr");
     ResolveHdr(m_Hdr.nHdrColorSRV, m_Hdr.pHdrColor.Get(), m_pDevice->GetWidth(), m_pDevice->GetHeight(), false);
   }
   if (m_bHdrScene && m_pFrameDump)
@@ -250,7 +254,13 @@ CD3D12Texture *CD3D12Renderer::ResolveHdr(int nSceneSRV, ID3D12Resource *pScene,
     m_pDevice->SetBackBufferTargets();
     return m_Hdr.pLdr;
   }
+  // The volumetric light, this frame's froxels at the depth buffer's depth (Volumetric.cpp).
+  const bool bVolumetric = !bHeat && SetVolumetricConstants(dc);
+  if (bVolumetric)
+    SetVolumetricDepthRead(true);
   DrawHdrToBackBuffer(dc);
+  if (bVolumetric)
+    SetVolumetricDepthRead(false);
   return nullptr;
 }
 

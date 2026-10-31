@@ -39,6 +39,7 @@ set(XRENDERD3D12_SOURCES
     Cascades.cpp
     PostFx.cpp
     Hdr.cpp
+    Volumetric.cpp
     ColorGrading.cpp
     HdrOutput.cpp
     Flares.cpp

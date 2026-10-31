@@ -285,6 +285,22 @@ void CD3D12Renderer::RegisterVariables()
                            "With r_HDRRendering, a 3D LUT of display colours (a .cube file, as DaVinci Resolve or Photoshop write it; a path in the "
                            "game's folder or its paks) the picture goes through; empty: none");
   iConsole->Register("d3d12_ColorLutAmount", &CV_d3d12_ColorLutAmount, 1.0f, VF_DUMPTODISK, "With r_HDRRendering, how much of d3d12_ColorLut, 0 to 1");
+  // The volumetric light of the HDR pipeline's resolve (Volumetric.cpp).
+  iConsole->Register("d3d12_VolumetricLight", &CV_d3d12_VolumetricLight, 1, VF_DUMPTODISK,
+                     "With r_HDRRendering, the volumetric light: the air scatters the sun's light, in the shadows of the sun's cascades "
+                     "(shafts of light), and the light from all round towards the camera, and hides what is behind it; none indoors where the outdoor lights do not reach (0: off)");
+  iConsole->Register("d3d12_VolumetricLightDensity", &CV_d3d12_VolumetricLightDensity, 0.002f, VF_DUMPTODISK,
+                     "With d3d12_VolumetricLight, the air's extinction near the water (1 / m: a part of the light it takes away and scatters a metre)");
+  iConsole->Register("d3d12_VolumetricLightSun", &CV_d3d12_VolumetricLightSun, 1.0f, VF_DUMPTODISK,
+                     "With d3d12_VolumetricLight, the sun's light the air scatters, times the sun's (0: none)");
+  iConsole->Register("d3d12_VolumetricLightAmbient", &CV_d3d12_VolumetricLightAmbient, 1.0f, VF_DUMPTODISK,
+                     "With d3d12_VolumetricLight, the light from all round the air scatters, times the fog's colour (a quarter of it in the sun's shadow; 0: none)");
+  iConsole->Register("d3d12_VolumetricLightAnisotropy", &CV_d3d12_VolumetricLightAnisotropy, 0.3f, VF_DUMPTODISK,
+                     "With d3d12_VolumetricLight, how much more of the sun's light the air scatters forwards: 0 the same all round, up to 0.95");
+  iConsole->Register("d3d12_VolumetricLightDistance", &CV_d3d12_VolumetricLightDistance, 60.0f, VF_DUMPTODISK,
+                     "With d3d12_VolumetricLight, how far it reaches (m; beyond the sun's cascades, d3d12_ShadowDistance, it has no shadows)");
+  iConsole->Register("d3d12_VolumetricLightHeight", &CV_d3d12_VolumetricLightHeight, 40.0f, VF_DUMPTODISK,
+                     "With d3d12_VolumetricLight, the height above the water over which the air thins to half (m; 0: the same everywhere)");
 }
 
 //////////////////////////////////////////////////////////////////////////
@@ -645,6 +661,7 @@ void CD3D12Renderer::Release()
   ReleaseAO();
   ReleaseUpscaler();
   ReleaseHdr();
+  ReleaseVolumetricLight();
   ReleaseHdrOutput();
   m_pDetailTexture = nullptr;   // released with every texture
   m_pDefaultCube = nullptr;
