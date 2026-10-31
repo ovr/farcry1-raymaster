@@ -24,6 +24,7 @@ struct SAOTargets
   ID3D12Resource *pDepth = nullptr;     //!< the main view's depth buffer (0 near, 1 far), NON_PIXEL_SHADER_RESOURCE | DEPTH_READ (with d3d12_AOApply 1 also PIXEL_SHADER_RESOURCE) in Dispatch
   DXGI_FORMAT DepthFormat = DXGI_FORMAT_UNKNOWN;  //!< the format it is read in (R24_UNORM_X8_TYPELESS, R32_FLOAT)
   ID3D12Resource *pOutput = nullptr;    //!< the visibility, R8_TYPELESS of the depth's size (1: open); UNORDERED_ACCESS before and after Dispatch
+                                        //!< (the rays' GI: the ambient light's factor, R16G16B16A16_FLOAT, rgb; 1 as it was)
   int nWidth = 0, nHeight = 0;
 };
 
@@ -37,6 +38,11 @@ struct SAOFrame
   int nDenoise = 2;                     //!< XeGTAO's denoise passes (0 to 3), CACAO's blur passes (1 to 8)
   int nNoiseIndex = 0;                  //!< the frame's noise: 0, or counting up while an upscaler gathers the frames
   float fFadeStart = 0, fFadeEnd = 0;   //!< the distance (m) over which it fades out (CACAO; the resolve fades it with the fog)
+  // The rays' GI (d3d12_RTGI) alone:
+  int nGI = 0;                          //!< 1 a ray for each 2 x 2 pixels, 2 a pixel
+  float fGIDistance = 4;                //!< how far its rays look (m)
+  float fGIBounce = 1;                  //!< how much light what they find gives back
+  float vOutdoorAmbient[3] = {};        //!< the 3D engine's outdoor ambient colour: the light of a hit without an ambient colour of its own
 };
 
 class IAmbientOcclusion
@@ -58,3 +64,5 @@ std::unique_ptr<IAmbientOcclusion> CreateAOXeGtao();
 std::unique_ptr<IAmbientOcclusion> CreateAOCacao();
 //! Rays among the scene for rays (RayAO.cpp, a device with DXR 1.1).
 std::unique_ptr<IAmbientOcclusion> CreateAORays();
+//! The rays' GI (d3d12_RTGI, RayAO.cpp): the factor of the ambient light by what the rays find and how it is lit.
+std::unique_ptr<IAmbientOcclusion> CreateGIRays();

@@ -285,8 +285,8 @@ bool RayAlphaPasses(uint nInstance, SRaySurface S, float3 vRayDir)
 }
 
 //! The nearest hit of Ray among the instances of nMask; the ray cone fConeWidth wide at its origin,
-//! widening by fConeSpread per metre (the alpha tests' mip levels).
-SRayHit TraceScene(RayDesc Ray, uint nMask, float fConeWidth, float fConeSpread)
+//! widening by fConeSpread per metre (the alpha tests' mip levels); nMaxTests alpha tests at most.
+SRayHit TraceScene(RayDesc Ray, uint nMask, float fConeWidth, float fConeSpread, uint nMaxTests = XR_RAY_MAX_ALPHA_TESTS)
 {
   RayQuery<RAY_FLAG_SKIP_PROCEDURAL_PRIMITIVES> Query;
   Query.TraceRayInline(g_RayScene, RAY_FLAG_NONE, nMask, Ray);
@@ -295,7 +295,7 @@ SRayHit TraceScene(RayDesc Ray, uint nMask, float fConeWidth, float fConeSpread)
   {
     if (Query.CandidateType() != CANDIDATE_NON_OPAQUE_TRIANGLE)
       continue;
-    bool bHit = nTests >= XR_RAY_MAX_ALPHA_TESTS;
+    bool bHit = nTests >= nMaxTests;
     if (!bHit)
     {
       nTests++;
@@ -320,7 +320,7 @@ SRayHit TraceScene(RayDesc Ray, uint nMask, float fConeWidth, float fConeSpread)
 
 //! How much of the sun reaches vPos (0 or 1): a ray towards it among the instances of nMask, from
 //! a little off the surface along vNormal (the side the ray came from), alpha tested as TraceScene.
-float TraceSun(float3 vPos, float3 vNormal, uint nMask, float fConeWidth)
+float TraceSun(float3 vPos, float3 vNormal, uint nMask, float fConeWidth, uint nMaxTests = XR_RAY_MAX_ALPHA_TESTS)
 {
   RayDesc Ray;
   Ray.Origin = vPos + vNormal * (0.02 + 0.5 * fConeWidth);
@@ -334,7 +334,7 @@ float TraceSun(float3 vPos, float3 vNormal, uint nMask, float fConeWidth)
   {
     if (Query.CandidateType() != CANDIDATE_NON_OPAQUE_TRIANGLE)
       continue;
-    bool bHit = nTests >= XR_RAY_MAX_ALPHA_TESTS;
+    bool bHit = nTests >= nMaxTests;
     if (!bHit)
     {
       nTests++;
@@ -350,8 +350,9 @@ float TraceSun(float3 vPos, float3 vNormal, uint nMask, float fConeWidth)
 
 //! The colour of the hit's draw there (see the head of the file), not fogged; bFog: the draw is
 //! fogged (DF_FOG). fConeWidth: the ray cone's width at the hit; bShadows: the sun's visibility by a
-//! ray (TraceSun among nMask), else lit.
-float4 RayShade(SRayHit Hit, float3 vRayDir, float fConeWidth, bool bShadows, uint nMask, out bool bFog)
+//! ray (TraceSun among nMask, nMaxTests alpha tests at most), else lit.
+float4 RayShade(SRayHit Hit, float3 vRayDir, float fConeWidth, bool bShadows, uint nMask, out bool bFog,
+  uint nMaxTests = XR_RAY_MAX_ALPHA_TESTS)
 {
   const SRayInstance I = g_RayInstances[Hit.nInstance];
   const SRaySurface S = RaySurface(Hit.nInstance, Hit.nPrimitive, Hit.vBary, Hit.mObjectToWorld, vRayDir, fConeWidth);
@@ -363,7 +364,7 @@ float4 RayShade(SRayHit Hit, float3 vRayDir, float fConeWidth, bool bShadows, ui
   float fSun = 1;
   const uint nCasters = (nFlags2 & DF2_CASCADES_LIVE) ? nMask & XR_RAY_DYNAMIC : nMask;
   if (bShadows && ((nFlags & DF_SHADOWS) || (nFlags2 & DF2_SUN_CASCADES)) && nCasters && dot(S.vNormal, g_Frame.vSunDir.xyz) > 0)
-    fSun = TraceSun(S.vPos, S.vFaceNormal, nCasters, fConeWidth);
+    fSun = TraceSun(S.vPos, S.vFaceNormal, nCasters, fConeWidth, nMaxTests);
 
   float4 vVertexColor = RayVertexColor(I, S);
   if (nFlags & DF_LIGHTING)

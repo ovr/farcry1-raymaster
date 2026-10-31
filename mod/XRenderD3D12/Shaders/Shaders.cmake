@@ -115,3 +115,7 @@ xrender_d3d12_shader(RaySunFilter_CS RaySun.hlsl cs_6_5 CSFilter)
 xrender_d3d12_shader(RayAOTrace_CS RayAO.hlsl cs_6_5 CSTrace)
 xrender_d3d12_shader(RayAOTemporal_CS RayAO.hlsl cs_6_5 CSTemporal)
 xrender_d3d12_shader(RayAOFilter_CS RayAO.hlsl cs_6_5 CSFilter)
+# The ambient light by rays, a bounce (d3d12_RTGI, RayAO.cpp).
+xrender_d3d12_shader(RayGITrace_CS RayAO.hlsl cs_6_5 CSTrace RAY_GI)
+xrender_d3d12_shader(RayGITemporal_CS RayAO.hlsl cs_6_5 CSTemporal RAY_GI)
+xrender_d3d12_shader(RayGIFilter_CS RayAO.hlsl cs_6_5 CSFilter RAY_GI)

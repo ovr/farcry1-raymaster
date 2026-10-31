@@ -244,7 +244,8 @@ reference of its features and console variables.
   descriptor heap and root signatures of its own; the build compiles its shaders with our dxc; at 3840 x 2160
   with its quality 2 some 0.65 to 0.85 ms of the GPU, outdoors and in) or `rt` (by rays among the
   scene, not from the screen: see Ray tracing; on a device without DXR 1.1 it acts as `none`). An
-  unknown one is logged once and acts as `none`. After the opaque list (`AmbientOcclusion.cpp`),
+  unknown one is logged once and acts as `none`. `d3d12_RTGI` (see Ray tracing) puts the ambient
+  light by rays in place of any of them. After the opaque list (`AmbientOcclusion.cpp`),
   before the weapon and the water (which then refracts the occluded bottom), the backend computes
   the visibility from the depth buffer (the back buffer's depth is `R24G8_TYPELESS` for that; both
   make the normals from the depth), `Shaders/AoResolve.hlsl` turns it into a factor (1 for the
@@ -351,8 +352,8 @@ reference of its features and console variables.
   opaque draws and the static ones of the water's planar reflection become acceleration
   structures (a `ray scene:` line in the frame dump), once a frame and only while something wants
   rays (else their memory goes). The top level one and those of the frame's geometry are built
-  only in a frame with a water surface (or with `d3d12_RTDebug`, `d3d12_RTSunShadows` or
-  `d3d12_AO rt`); in
+  only in a frame with a water surface (or with `d3d12_RTDebug`, `d3d12_RTSunShadows`,
+  `d3d12_AO rt` or `d3d12_RTGI`); in
   another one only the new static geometry's, ready for when the water shows.
   The scene is made before the opaque list is drawn (`BuildRayScene`): a walk over the list sets
   each item up as it will be drawn, without its lights, and hands its draws to the scene instead of
@@ -383,7 +384,7 @@ reference of its features and console variables.
   sun's cascades (what the 3D engine gives the camera towards the sun at the view's position, with
   the detail it picks for the view, and the live casters), set up as the main view would draw them,
   those it has too left out (a `ray scene:` count). 1 for the effects that trace rays from the main
-  view's surfaces (`d3d12_RTSunShadows`, `d3d12_AO rt`, `d3d12_RTDebug`; not the water's
+  view's surfaces (`d3d12_RTSunShadows`, `d3d12_AO rt`, `d3d12_RTGI`, `d3d12_RTDebug`; not the water's
   reflection, which sees what is in front of the camera and has the planar reflection's draws), 2
   always, 0 never; only with the sun's cascades on. On the sweeps it adds 180 to 360 instances to
   about 300 of the main view, 0.05 to 0.07 ms of the CPU and 0.04 ms of the compute queue's builds.
@@ -436,6 +437,29 @@ reference of its features and console variables.
   in all), the GPU 2.45 -> 2.84 ms a frame; the sweeps over Pier, River and Swamp 520, 493, 487 ->
   446, 416, 411 frames a second. In a palm's crown, the view full of alpha tested leaves, the rays
   take up to 3.6 ms.
+  `d3d12_RTGI` (0 by default, read every frame; not registered without rays) is the ambient light by rays,
+  one bounce, in the ambient occlusion's place (whatever `d3d12_AO` says; it needs `d3d12_AOApply 1`, the
+  ambient light's target): the rays of `d3d12_AO rt` (`RayAO.cpp`, `Shaders/RayAO.hlsl` with `RAY_GI`),
+  `d3d12_RTGIDistance` (4 m) long, and what they find is shaded as the water's rays shade it (`RayShade`:
+  textures, light maps, the sun with its shadow by a ray towards it, the ambient colour). The light a hit
+  gives back over its own ambient colour (the 3D engine's outdoor ambient where it has none; at most 4
+  times it, times `d3d12_RTGIBounce`, 1) stands for the ambient light from there: a ray that finds nothing
+  brings 1, the ambient light as it was. Their mean, with the same falloff, history (at most 24 frames,
+  the frames in a texture of their own) and filter as the AO's, in rgb, is the factor of the pixel's
+  ambient light (`R16G16B16A16_FLOAT`): under 1 in a corner, under a roof, by a dark wall, over 1 by a lit
+  one, its colour the colour of what is there. Two draws take the ambient light times what it is under 1
+  from the scene (`REV_SUBTRACT`) and add it times what it is over 1 (`ADD`), each only where there is
+  something (`discard`), so that in the open the frame is as it was. 1 a ray for each 2 x 2 pixels, from
+  each of them in turn, 2 a ray for each pixel; `d3d12_AODenoise`, `d3d12_AOStrength` (the factor's
+  exponent) as for the AO; `d3d12_AODebug 1` shows the factor's half in colour (grey 0.5 as it was), 3 the
+  light taken. GPU sections `rt gi`, `rt gi history`, `rt gi filter`; the frame dump an `rt gi:` line
+  (with the outdoor ambient colour). Off, nothing of it runs and the frames are those of the AO. At 3840 x
+  2160 in the hut (DemoShadowsHut) its rays take 1.32 ms, the history 0.38, the filter 0.36, the resolve
+  and the two draws 0.28: the GPU 2.43 ms a frame with CACAO, 2.78 with the AO by rays, 3.81 with it
+  (inside the hut 2.08, 2.60, 3.84; with 2 its rays 5.1 ms); the sweeps over Pier, River and Swamp 509,
+  488, 467 -> 372, 341, 323 frames a second. Its rays alpha test at most 4 of the triangles they pass
+  (`TraceScene`'s, `TraceSun`'s and `RayShade`'s `nMaxTests`, 16 for the others; what is past them counts
+  as hit): in a palm's crown they take up to 4.9 ms, with 16 up to 6.
   `d3d12_RTDebug` views the scene for rays from the camera: 1 instances, 2 shaded hits on the right
   half, 3 distance, 4 mip level, 5 kind, 6 alpha tests, 7 shaded hits over the whole picture;
   `d3d12_WaterDebug` 13, 14, 15 the water rays' colour, distance and weight. With the rays off the

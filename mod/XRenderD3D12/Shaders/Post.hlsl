@@ -45,7 +45,11 @@
 //	                   for a draw that subtracts it (AmbientOcclusion.cpp): the
 //	                   ambient light tex2 times 1 - the visibility tex0 to the
 //	                   power vParams1.x, 0 where the depth tex1 is the far
-//	                   plane; at float16 precision, as AoResolve.hlsl's
+//	                   plane; at float16 precision, as AoResolve.hlsl's.
+//	                   vParams1.y: the rays' GI (d3d12_RTGI), tex0 the factor
+//	                   of the ambient light (rgb): 1 the light taken where
+//	                   it is under 1 (for the draw that subtracts it), 2 the
+//	                   light given where it is over 1 (for one that adds it)
 //
 //////////////////////////////////////////////////////////////////////
 
@@ -205,6 +209,15 @@ float4 AoTaken(float2 vPixel)
 {
   float2 vUV = vPixel * g_Draw.vParams0.xy;
   float fDepth = g_Textures[g_Draw.nTex1].SampleLevel(g_SamplerPointClamp, vUV, 0).r;
+  if (g_Draw.vParams1.y != 0)
+  {
+    const float3 f = fDepth < 1 ? pow(max(g_Textures[g_Draw.nTex0].SampleLevel(g_SamplerPointClamp, vUV, 0).rgb, 0), g_Draw.vParams1.x) : 1;
+    const float3 d = g_Draw.vParams1.y < 1.5 ? saturate(1 - f) : max(f - 1, 0);
+    // (nothing to blend: the pixel left as it is)
+    if (all(d <= 0))
+      discard;
+    return float4(f16tof32(f32tof16(d * g_Textures[g_Draw.nTex2].SampleLevel(g_SamplerPointClamp, vUV, 0).rgb)), 0);
+  }
   float v = fDepth < 1 ? pow(saturate(g_Textures[g_Draw.nTex0].SampleLevel(g_SamplerPointClamp, vUV, 0).r), g_Draw.vParams1.x) : 1;
   return float4(f16tof32(f32tof16((1 - v) * g_Textures[g_Draw.nTex2].SampleLevel(g_SamplerPointClamp, vUV, 0).rgb)), 0);
 }

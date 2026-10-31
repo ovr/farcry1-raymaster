@@ -59,6 +59,9 @@ enum ED3D12Kernel
   eD3D12K_RayAOTrace,               //!< the ambient occlusion by rays: the rays (Shaders/RayAO.hlsl; with rays)
   eD3D12K_RayAOTemporal,            //!< their visibility blended into the history
   eD3D12K_RayAOFilter,              //!< the history filtered into the visibility
+  eD3D12K_RayGITrace,               //!< the ambient light by rays (d3d12_RTGI): the rays, what they find shaded (RAY_GI)
+  eD3D12K_RayGITemporal,            //!< their factor blended into the history
+  eD3D12K_RayGIFilter,              //!< the history filtered into the factor
   eD3D12K_Num
 };
 

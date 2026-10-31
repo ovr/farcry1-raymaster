@@ -630,11 +630,12 @@ public:
   void ReleaseAO(bool bForget = true);
 
   std::unique_ptr<IAmbientOcclusion> m_pAO;
-  std::string m_AOName;                     //!< the d3d12_AO m_pAO was made for (or not)
+  std::string m_AOName;                     //!< the d3d12_AO m_pAO was made for (or not; AO_NAME_GI: the rays' GI)
   ComPtr<ID3D12Resource> m_pAODepth;        //!< the depth buffer it reads (held, so that a new one is never at its address)
   int m_nAOWidth = 0, m_nAOHeight = 0;
   int m_nAOApply = 0;                       //!< the d3d12_AOApply it was made for (0 or 1)
-  CD3D12Texture *m_pAOOutput = nullptr;     //!< the backend's visibility (R8_TYPELESS)
+  bool m_bAOGI = false;                     //!< m_pAO is the rays' GI (d3d12_RTGI): m_pAOOutput the ambient light's factor
+  CD3D12Texture *m_pAOOutput = nullptr;     //!< the backend's visibility (R8_TYPELESS), with m_bAOGI the factor (R16G16B16A16_FLOAT)
   CD3D12Texture *m_pAOFactor = nullptr;     //!< the resolve's factor (R8G8B8A8_UNORM, an SRV in the texture table)
   CD3D12Texture *m_pAOAmbient = nullptr;    //!< d3d12_AOApply 1: the ambient light (D3D12_AMBIENT_FORMAT, a render target;
                                             //!< PIXEL_SHADER_RESOURCE | NON_PIXEL_SHADER_RESOURCE outside BeginAOTarget .. DrawAmbientOcclusion)
@@ -657,6 +658,8 @@ public:
   uint32 RayMask() const;
   //! d3d12_AO rt on a device with rays (RayAO.cpp).
   bool WantsRayAO() const;
+  //! d3d12_RTGI on a device with rays, with d3d12_AOApply 1 (RayAO.cpp, in place of d3d12_AO).
+  bool WantsRayGI() const;
   //! The view's fields of a compute pass with rays over the main view's depth buffer (RayView.hlsli):
   //! the camera and the world positions at a view depth across the view (the jitter apart).
   void GetRayView(float vCameraPos[4], float vRayX[4], float vRayY[4], float vRayO[4]) const;
@@ -1454,6 +1457,9 @@ public:
   int CV_d3d12_RTSunShadows = 0;            //!< the sun's shadow by rays in place of the cascades' (RaySun.cpp)
   float CV_d3d12_RTSunAngle = 0.53f;        //!< the sun's disc, degrees across (the soft edges of its shadow)
   int CV_d3d12_RTSunDenoise = 1;            //!< the sun's shadow by rays blended over the frames and its soft edges filtered
+  int CV_d3d12_RTGI = 0;                    //!< the ambient light by rays, a bounce (RayAO.cpp): 1 a ray for each 2 x 2 pixels, 2 a pixel
+  float CV_d3d12_RTGIDistance = 4.0f;       //!< how far its rays look (m)
+  float CV_d3d12_RTGIBounce = 1.0f;         //!< how much light what they find gives back (0: it only occludes)
   int CV_d3d12_ToneMap = 1;                 //!< the HDR pipeline's tone map: 0 clamp, 1 soft shoulder, 2 ACES fitted, 3 AgX
   float CV_d3d12_ToneMapKnee = 0.85f;       //!< where the soft shoulder starts (a display value)
   float CV_d3d12_Exposure = 0;              //!< the exposure's compensation, EV
