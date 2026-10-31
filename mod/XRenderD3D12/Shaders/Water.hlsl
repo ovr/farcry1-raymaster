@@ -512,24 +512,26 @@ float4 ShadeWater(SWaterOutput In)
       vReflected = vPlanar;
     }
     // The screen's copy is sharp: it gives way to the blurred planar reflection where the blur up
-    // and down is wider than 4 pixels on the screen, all of it from 8.
+    // and down is wider than 4 pixels on the screen, all of it from 8. None where nothing of it
+    // would be seen (no reflection, or blurred away: open water away from the camera), but in the
+    // debug views.
+    const float fSharp = fBlur > 0 ? saturate(2 - fBlur * g_Frame.vScreen.y / 4) : 1;
+    const bool bSharp = (F != 0 && fSharp > 0) || g_Draw.vParams0.z != 0;
 #ifdef XR_RAYTRACE
-    float4 vSSR = g_Draw.vTexGenV.x >= 2 ? ScreenReflection(In.vWorldPos, Rs, g_Frame.vScreen.xy * vInvSize, true) : 0;
+    float4 vSSR = g_Draw.vTexGenV.x >= 2 && bSharp ? ScreenReflection(In.vWorldPos, Rs, g_Frame.vScreen.xy * vInvSize, true) : 0;
 #else
-    float4 vSSR = ScreenReflection(In.vWorldPos, Rs, g_Frame.vScreen.xy * vInvSize, false);
+    float4 vSSR = bSharp ? ScreenReflection(In.vWorldPos, Rs, g_Frame.vScreen.xy * vInvSize, false) : 0;
 #endif
-    if (fBlur > 0)
-      vSSR.w *= saturate(2 - fBlur * g_Frame.vScreen.y / 4);
+    vSSR.w *= fSharp;
 #ifdef XR_RAYTRACE
     // The rays: in place of the screen's reflection (mode 1), or where it finds nothing (2, none where
     // it is sure); as sharp, they give way to the blurred planar reflection as it does.
-    // No ray where nothing of it would be seen (no reflection, or blurred away), but in the debug views.
+    // No ray where nothing of it would be seen, but in the debug views.
     float fRayT = g_Draw.vTexGenV.y;
     float4 vRay = 0;
-    const float fRayFade = fBlur > 0 ? saturate(2 - fBlur * g_Frame.vScreen.y / 4) : 1;
-    if ((g_Draw.vTexGenV.x < 2 || vSSR.w < 1) && ((F > 0 && fRayFade > 0) || g_Draw.vParams0.z >= 13))
+    if ((g_Draw.vTexGenV.x < 2 || vSSR.w < 1) && ((F > 0 && fSharp > 0) || g_Draw.vParams0.z >= 13))
       vRay = RayReflection(In.vWorldPos, Rs, fDistance, fPixelAngle, fVar, fRayT);
-    vRay.w *= fRayFade;
+    vRay.w *= fSharp;
     vReflected = lerp(vReflected, vRay.rgb, vRay.w);
 #endif
     vReflected = lerp(vReflected, vSSR.rgb, vSSR.w);

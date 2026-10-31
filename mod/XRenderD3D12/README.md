@@ -265,8 +265,9 @@ reference of its features and console variables.
   `d3d12_RTDebug`); in another one only the new static geometry's, ready for when the water
   shows.
   `XRENDERD3D12_NORT=1` (or a device without tier 1.1) turns them off; the log says why.
-  `Shaders/RayShade.hlsli` traces (`TraceScene`, alpha tested triangles tested) and shades the
-  hits as the general program does without the draw's lights:
+  `Shaders/RayShade.hlsli` traces (`TraceScene`, alpha tested triangles tested: of the triangle
+  only what the test reads, the normal only for a cube map, the vertex colour not where the alpha
+  is the texture's) and shades the hits as the general program does without the draw's lights:
   textures, vertex colour, light maps (dot3 ones too), the sun with its shadow by a ray
   (`d3d12_RTShadows`, default 1). `d3d12_RTReflections` (0 by default, read every frame): 1 the
   water's reflection by rays in place of the screen space reflection, 2 hybrid (the screen space
@@ -373,7 +374,10 @@ reference of its features and console variables.
   the wave texture's alpha holds the squared slope, and its mean less the square of the mean slope
   is the variance the mip levels smoothed out of the normal. That turns the reflected rays up and
   down most (vertical streaks towards the horizon); the screen space reflection gives way to the
-  blurred one where the blur is wider than 4 to 8 pixels. `d3d12_WaterReflectionBlur` scales that
+  blurred one where the blur is wider than 4 to 8 pixels. Where it would be blurred away entirely
+  (or the water reflects nothing) neither it nor the rays are traced, the frames the same: most of
+  open water seen from afar (Fort's sweep: the water 0.91 -> 0.44 ms on average at 3840 x 2160,
+  1.6 -> 0.75 over the open sea). `d3d12_WaterReflectionBlur` scales that
   variance (0.1; 0.25 matches the halved slopes of the calmer normal the reflection is looked up
   along, but already washes the reflections of the bay in PierWalk out; 0 gives exactly the frames
   of the mirror before it; not saved).

@@ -121,8 +121,11 @@ float2 RayTexGen(SRayInstance I, float2 vUV, float3 vWorld)
 }
 
 //! The point at barycentrics vBary of triangle nPrimitive of instance nInstance, its texture's mip
-//! level under a ray cone fConeWidth wide there along vRayDir.
-SRaySurface RaySurface(uint nInstance, uint nPrimitive, float2 vBary, float3x4 mObjectToWorld, float3 vRayDir, float fConeWidth)
+//! level under a ray cone fConeWidth wide there along vRayDir. bAlphaTest: only what the alpha test
+//! reads (RayAlphaPasses): the normal only for DF_CUBE0, the vertex colour not with
+//! DF_ALPHA_FROM_TEX.
+SRaySurface RaySurface(uint nInstance, uint nPrimitive, float2 vBary, float3x4 mObjectToWorld, float3 vRayDir, float fConeWidth,
+                       bool bAlphaTest = false)
 {
   const SRayInstance I = g_RayInstances[nInstance];
   SRaySurface S;
@@ -163,14 +166,18 @@ SRaySurface RaySurface(uint nInstance, uint nPrimitive, float2 vBary, float3x4 m
     else if (nTex1 != 0xff)
       vUV1[j] = RayLoad2(I.nGeom.x, vByte[j] + nTex1);
   }
-  if (nNormal != 0xff)
-    vN = RayLoad3(I.nGeom.x, vByte.x + nNormal) * vW.x + RayLoad3(I.nGeom.x, vByte.y + nNormal) * vW.y + RayLoad3(I.nGeom.x, vByte.z + nNormal) * vW.z;
-  if (nColor != 0xff)
+  if (nColor != 0xff && !(bAlphaTest && (I.nMaterial.x & DF_ALPHA_FROM_TEX)))
     vColor = RayColor(RayLoad(I.nGeom.x, vByte.x + nColor)) * vW.x + RayColor(RayLoad(I.nGeom.x, vByte.y + nColor)) * vW.y +
       RayColor(RayLoad(I.nGeom.x, vByte.z + nColor)) * vW.z;
-  S.vNormal = SafeNormalize(mul((float3x3)mObjectToWorld, vN));
-  if (dot(S.vNormal, S.vNormal) == 0)
-    S.vNormal = S.vFaceNormal;
+  S.vNormal = S.vFaceNormal;
+  if (!bAlphaTest || (I.nMaterial.x & DF_CUBE0))
+  {
+    if (nNormal != 0xff)
+      vN = RayLoad3(I.nGeom.x, vByte.x + nNormal) * vW.x + RayLoad3(I.nGeom.x, vByte.y + nNormal) * vW.y + RayLoad3(I.nGeom.x, vByte.z + nNormal) * vW.z;
+    S.vNormal = SafeNormalize(mul((float3x3)mObjectToWorld, vN));
+    if (dot(S.vNormal, S.vNormal) == 0)
+      S.vNormal = S.vFaceNormal;
+  }
   S.vColor = vColor;
   S.vTex0 = vUV0[0] * vW.x + vUV0[1] * vW.y + vUV0[2] * vW.z;
   S.vTex1 = vUV1[0] * vW.x + vUV1[1] * vW.y + vUV1[2] * vW.z;
@@ -294,7 +301,7 @@ SRayHit TraceScene(RayDesc Ray, uint nMask, float fConeWidth, float fConeSpread)
       nTests++;
       const float fT = Query.CandidateTriangleRayT();
       const SRaySurface S = RaySurface(Query.CandidateInstanceID(), Query.CandidatePrimitiveIndex(), Query.CandidateTriangleBarycentrics(),
-        Query.CandidateObjectToWorld3x4(), Ray.Direction, fConeWidth + fT * fConeSpread);
+        Query.CandidateObjectToWorld3x4(), Ray.Direction, fConeWidth + fT * fConeSpread, true);
       bHit = RayAlphaPasses(Query.CandidateInstanceID(), S, Ray.Direction);
     }
     if (bHit)
@@ -332,7 +339,7 @@ float TraceSun(float3 vPos, float3 vNormal, uint nMask, float fConeWidth)
     {
       nTests++;
       const SRaySurface S = RaySurface(Query.CandidateInstanceID(), Query.CandidatePrimitiveIndex(), Query.CandidateTriangleBarycentrics(),
-        Query.CandidateObjectToWorld3x4(), Ray.Direction, fConeWidth);
+        Query.CandidateObjectToWorld3x4(), Ray.Direction, fConeWidth, true);
       bHit = RayAlphaPasses(Query.CandidateInstanceID(), S, Ray.Direction);
     }
     if (bHit)
