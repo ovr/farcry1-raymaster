@@ -42,6 +42,9 @@ Mods for Far Cry, built with the CryENGINE MOD SDK for Far Cry:
     Upscaling of XRenderD3D12 (auto: the version FSR picks for the graphics card); and Upscaler
     Mode, Native AA, Quality, Balanced, Performance or Ultra Performance, which sets
     `d3d12_UpscaleMode`, the size the 3D scene is rendered at.
+  - `06-video-vsync.patch` - Vertical Sync in Video Options stays on in a game, and Apply sets it
+    without a relaunch: XRenderD3D12 takes `r_VSync` every frame (the game greys it out there, as
+    its Direct3D 9 renderer had to reset its device for it; with another renderer it still does).
 
 How to build and run them: `AGENTS.md`.
 
