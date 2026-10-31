@@ -54,22 +54,30 @@
 #include "General_Ambient_RaySun_Velocity_PS.h"
 #include "General_Ambient_RaySun_Hdr_PS.h"
 #include "General_Ambient_RaySun_Hdr_Velocity_PS.h"
-#include "General_RayRefl_PS.h"
-#include "General_RayRefl_Velocity_PS.h"
-#include "General_RayRefl_Hdr_PS.h"
-#include "General_RayRefl_Hdr_Velocity_PS.h"
-#include "General_Cascades_RayRefl_PS.h"
-#include "General_Cascades_RayRefl_Velocity_PS.h"
-#include "General_Cascades_RayRefl_Hdr_PS.h"
-#include "General_Cascades_RayRefl_Hdr_Velocity_PS.h"
-#include "General_Ambient_RayRefl_PS.h"
-#include "General_Ambient_RayRefl_Velocity_PS.h"
-#include "General_Ambient_RayRefl_Hdr_PS.h"
-#include "General_Ambient_RayRefl_Hdr_Velocity_PS.h"
-#include "General_Ambient_Cascades_RayRefl_PS.h"
-#include "General_Ambient_Cascades_RayRefl_Velocity_PS.h"
-#include "General_Ambient_Cascades_RayRefl_Hdr_PS.h"
-#include "General_Ambient_Cascades_RayRefl_Hdr_Velocity_PS.h"
+#include "General_Rays_PS.h"
+#include "General_Rays_Velocity_PS.h"
+#include "General_Rays_Hdr_PS.h"
+#include "General_Rays_Hdr_Velocity_PS.h"
+#include "General_Cascades_Rays_PS.h"
+#include "General_Cascades_Rays_Velocity_PS.h"
+#include "General_Cascades_Rays_Hdr_PS.h"
+#include "General_Cascades_Rays_Hdr_Velocity_PS.h"
+#include "General_RaySun_Rays_PS.h"
+#include "General_RaySun_Rays_Velocity_PS.h"
+#include "General_RaySun_Rays_Hdr_PS.h"
+#include "General_RaySun_Rays_Hdr_Velocity_PS.h"
+#include "General_Ambient_Rays_PS.h"
+#include "General_Ambient_Rays_Velocity_PS.h"
+#include "General_Ambient_Rays_Hdr_PS.h"
+#include "General_Ambient_Rays_Hdr_Velocity_PS.h"
+#include "General_Ambient_Cascades_Rays_PS.h"
+#include "General_Ambient_Cascades_Rays_Velocity_PS.h"
+#include "General_Ambient_Cascades_Rays_Hdr_PS.h"
+#include "General_Ambient_Cascades_Rays_Hdr_Velocity_PS.h"
+#include "General_Ambient_RaySun_Rays_PS.h"
+#include "General_Ambient_RaySun_Rays_Velocity_PS.h"
+#include "General_Ambient_RaySun_Rays_Hdr_PS.h"
+#include "General_Ambient_RaySun_Rays_Hdr_Velocity_PS.h"
 #include "Water_VS.h"
 #include "Water_PS.h"
 #include "Water_Velocity_VS.h"
@@ -183,26 +191,35 @@ namespace
       { { g_General_Ambient_RaySun_Hdr_PS, sizeof(g_General_Ambient_RaySun_Hdr_PS) },
         { g_General_Ambient_RaySun_Hdr_Velocity_PS, sizeof(g_General_Ambient_RaySun_Hdr_Velocity_PS) } } },
   };
-  //! The general program's pixel shaders tracing rays in place of a cube map (XR_RAY_REFL, SPipelineKey::bRayTrace),
-  //! by [ambient][cascades][HDR][velocity].
-  const D3D12_SHADER_BYTECODE s_RayReflPS[2][2][2][2] =
+  //! The general program's pixel shaders tracing rays (SPipelineKey::bRayTrace): in place of a cube map (XR_RAY_REFL) and
+  //! towards the lamps (XR_RAY_LIGHT), by [ambient][cascades: none, the cascades, with the mask of the sun's shadow by
+  //! rays][HDR][velocity].
+  const D3D12_SHADER_BYTECODE s_RaysPS[2][3][2][2] =
   {
-    { { { { g_General_RayRefl_PS, sizeof(g_General_RayRefl_PS) },
-          { g_General_RayRefl_Velocity_PS, sizeof(g_General_RayRefl_Velocity_PS) } },
-        { { g_General_RayRefl_Hdr_PS, sizeof(g_General_RayRefl_Hdr_PS) },
-          { g_General_RayRefl_Hdr_Velocity_PS, sizeof(g_General_RayRefl_Hdr_Velocity_PS) } } },
-      { { { g_General_Cascades_RayRefl_PS, sizeof(g_General_Cascades_RayRefl_PS) },
-          { g_General_Cascades_RayRefl_Velocity_PS, sizeof(g_General_Cascades_RayRefl_Velocity_PS) } },
-        { { g_General_Cascades_RayRefl_Hdr_PS, sizeof(g_General_Cascades_RayRefl_Hdr_PS) },
-          { g_General_Cascades_RayRefl_Hdr_Velocity_PS, sizeof(g_General_Cascades_RayRefl_Hdr_Velocity_PS) } } } },
-    { { { { g_General_Ambient_RayRefl_PS, sizeof(g_General_Ambient_RayRefl_PS) },
-          { g_General_Ambient_RayRefl_Velocity_PS, sizeof(g_General_Ambient_RayRefl_Velocity_PS) } },
-        { { g_General_Ambient_RayRefl_Hdr_PS, sizeof(g_General_Ambient_RayRefl_Hdr_PS) },
-          { g_General_Ambient_RayRefl_Hdr_Velocity_PS, sizeof(g_General_Ambient_RayRefl_Hdr_Velocity_PS) } } },
-      { { { g_General_Ambient_Cascades_RayRefl_PS, sizeof(g_General_Ambient_Cascades_RayRefl_PS) },
-          { g_General_Ambient_Cascades_RayRefl_Velocity_PS, sizeof(g_General_Ambient_Cascades_RayRefl_Velocity_PS) } },
-        { { g_General_Ambient_Cascades_RayRefl_Hdr_PS, sizeof(g_General_Ambient_Cascades_RayRefl_Hdr_PS) },
-          { g_General_Ambient_Cascades_RayRefl_Hdr_Velocity_PS, sizeof(g_General_Ambient_Cascades_RayRefl_Hdr_Velocity_PS) } } } },
+    { { { { g_General_Rays_PS, sizeof(g_General_Rays_PS) },
+          { g_General_Rays_Velocity_PS, sizeof(g_General_Rays_Velocity_PS) } },
+        { { g_General_Rays_Hdr_PS, sizeof(g_General_Rays_Hdr_PS) },
+          { g_General_Rays_Hdr_Velocity_PS, sizeof(g_General_Rays_Hdr_Velocity_PS) } } },
+      { { { g_General_Cascades_Rays_PS, sizeof(g_General_Cascades_Rays_PS) },
+          { g_General_Cascades_Rays_Velocity_PS, sizeof(g_General_Cascades_Rays_Velocity_PS) } },
+        { { g_General_Cascades_Rays_Hdr_PS, sizeof(g_General_Cascades_Rays_Hdr_PS) },
+          { g_General_Cascades_Rays_Hdr_Velocity_PS, sizeof(g_General_Cascades_Rays_Hdr_Velocity_PS) } } },
+      { { { g_General_RaySun_Rays_PS, sizeof(g_General_RaySun_Rays_PS) },
+          { g_General_RaySun_Rays_Velocity_PS, sizeof(g_General_RaySun_Rays_Velocity_PS) } },
+        { { g_General_RaySun_Rays_Hdr_PS, sizeof(g_General_RaySun_Rays_Hdr_PS) },
+          { g_General_RaySun_Rays_Hdr_Velocity_PS, sizeof(g_General_RaySun_Rays_Hdr_Velocity_PS) } } } },
+    { { { { g_General_Ambient_Rays_PS, sizeof(g_General_Ambient_Rays_PS) },
+          { g_General_Ambient_Rays_Velocity_PS, sizeof(g_General_Ambient_Rays_Velocity_PS) } },
+        { { g_General_Ambient_Rays_Hdr_PS, sizeof(g_General_Ambient_Rays_Hdr_PS) },
+          { g_General_Ambient_Rays_Hdr_Velocity_PS, sizeof(g_General_Ambient_Rays_Hdr_Velocity_PS) } } },
+      { { { g_General_Ambient_Cascades_Rays_PS, sizeof(g_General_Ambient_Cascades_Rays_PS) },
+          { g_General_Ambient_Cascades_Rays_Velocity_PS, sizeof(g_General_Ambient_Cascades_Rays_Velocity_PS) } },
+        { { g_General_Ambient_Cascades_Rays_Hdr_PS, sizeof(g_General_Ambient_Cascades_Rays_Hdr_PS) },
+          { g_General_Ambient_Cascades_Rays_Hdr_Velocity_PS, sizeof(g_General_Ambient_Cascades_Rays_Hdr_Velocity_PS) } } },
+      { { { g_General_Ambient_RaySun_Rays_PS, sizeof(g_General_Ambient_RaySun_Rays_PS) },
+          { g_General_Ambient_RaySun_Rays_Velocity_PS, sizeof(g_General_Ambient_RaySun_Rays_Velocity_PS) } },
+        { { g_General_Ambient_RaySun_Rays_Hdr_PS, sizeof(g_General_Ambient_RaySun_Rays_Hdr_PS) },
+          { g_General_Ambient_RaySun_Rays_Hdr_Velocity_PS, sizeof(g_General_Ambient_RaySun_Rays_Hdr_Velocity_PS) } } } },
   };
 
   //! Input slot 1: what a vertex format lacks, read with stride 0 by every vertex.
@@ -815,9 +832,9 @@ ComPtr<ID3D12PipelineState> CD3D12Pipeline::CreatePSO(const SPipelineKey &Key, b
   // The cascades' with the mask of the sun's shadow by rays (their vertex shaders those of the cascades' above).
   if (bGeneral && Key.bCascades == 3)
     Desc.PS = s_RaySunPS[bAmbient ? 1 : 0][bHdr ? 1 : 0][bVelocity || bUpscaleDepth ? 1 : 0];
-  // Rays in place of a cube map (their vertex shaders those above).
-  if (bGeneral && Key.bRayTrace && (Key.bCascades == 0 || Key.bCascades == 1))
-    Desc.PS = s_RayReflPS[bAmbient ? 1 : 0][Key.bCascades][bHdr ? 1 : 0][bVelocity || bUpscaleDepth ? 1 : 0];
+  // Rays in place of a cube map and towards the lamps (their vertex shaders those above).
+  if (bGeneral && Key.bRayTrace && Key.bCascades != 2)
+    Desc.PS = s_RaysPS[bAmbient ? 1 : 0][Key.bCascades == 3 ? 2 : Key.bCascades][bHdr ? 1 : 0][bVelocity || bUpscaleDepth ? 1 : 0];
   // A caster of the sun's cascades into all its slices at once.
   if (bGeneral && bShadowMap && Key.bCascadeInstances)
     Desc.VS = { g_General_CascadeInstances_VS, sizeof(g_General_CascadeInstances_VS) };

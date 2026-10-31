@@ -348,6 +348,46 @@ float TraceSun(float3 vPos, float3 vNormal, uint nMask, float fConeWidth, uint n
   return Query.CommittedStatus() == COMMITTED_TRIANGLE_HIT ? 0 : 1;
 }
 
+//! How much of a lamp fDistance away along vToLight (normalised) reaches vPos (0 or 1): a ray towards
+//! it among the instances of nMask from a little off the surface along vFace (the face's normal, the
+//! side the lamp is on), ending fGap short of the lamp (not its own bulb or fitting), alpha tested as
+//! TraceScene; fHit: where a hit is, of the way to the lamp (0 at vPos, 1 at the lamp).
+float TraceLight(float3 vPos, float3 vFace, float3 vToLight, float fDistance, float fGap, uint nMask, float fConeWidth, out float fHit,
+                 uint nMaxTests = XR_RAY_MAX_ALPHA_TESTS)
+{
+  fHit = 1;
+  RayDesc Ray;
+  const float fOffset = 0.02 + 0.5 * fConeWidth;
+  Ray.Origin = vPos + (dot(vToLight, vFace) >= 0 ? vFace : -vFace) * fOffset;
+  Ray.Direction = vToLight;
+  Ray.TMin = 0.01;
+  Ray.TMax = fDistance - fOffset - fGap;
+  if (Ray.TMax <= Ray.TMin)
+    return 1;
+  RayQuery<RAY_FLAG_SKIP_PROCEDURAL_PRIMITIVES | RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH> Query;
+  Query.TraceRayInline(g_RayScene, RAY_FLAG_NONE, nMask, Ray);
+  uint nTests = 0;
+  while (Query.Proceed())
+  {
+    if (Query.CandidateType() != CANDIDATE_NON_OPAQUE_TRIANGLE)
+      continue;
+    bool bHit = nTests >= nMaxTests;
+    if (!bHit)
+    {
+      nTests++;
+      const SRaySurface S = RaySurface(Query.CandidateInstanceID(), Query.CandidatePrimitiveIndex(), Query.CandidateTriangleBarycentrics(),
+        Query.CandidateObjectToWorld3x4(), Ray.Direction, fConeWidth, true);
+      bHit = RayAlphaPasses(Query.CandidateInstanceID(), S, Ray.Direction);
+    }
+    if (bHit)
+      Query.CommitNonOpaqueTriangleHit();
+  }
+  if (Query.CommittedStatus() != COMMITTED_TRIANGLE_HIT)
+    return 1;
+  fHit = Query.CommittedRayT() / fDistance;
+  return 0;
+}
+
 //! The colour of the hit's draw there (see the head of the file), not fogged; bFog: the draw is
 //! fogged (DF_FOG). fConeWidth: the ray cone's width at the hit; bShadows: the sun's visibility by a
 //! ray (TraceSun among nMask, nMaxTests alpha tests at most), else lit.

@@ -168,12 +168,22 @@
 //	stays where it hits nothing (the sky, the far) or the ocean first (not in
 //	the scene for rays: from above the ocean's level, nRaySun.w, a ray down
 //	ends there) and takes over again over the last quarter of its length.
-//	nRaySun.z >> 16 2 tints the hits red, the misses blue.
+//	nRaySun.z >> 16 & 0xff 2 tints the hits red, the misses blue, 0 traces
+//	none (the cube alone: a draw here for its lamps).
+//	Compiled with XR_RAY_LIGHT too (the same programs, the main view's draws
+//	lit by lamps while d3d12_RTLightShadows is on) DrawLighting and
+//	MaterialLighting in the pixel shader trace a ray from the pixel's point
+//	towards each point light that lights it (TraceLight), up to nRaySun.z >>
+//	28 of them a pixel, and leave out the light of those it does not reach:
+//	the lamps' hard shadows, ending nRaySun.z >> 9 & 127 times 2 cm short of
+//	the lamp. nRaySun.z >> 24 & 3: 0 none, 2 the light taken away red, 3 the
+//	light taken away green where the ray hits next to the surface to red next
+//	to the lamp.
 //
 //////////////////////////////////////////////////////////////////////
 
 #include "Common.hlsli"
-#ifdef XR_RAY_REFL
+#if defined(XR_RAY_REFL) || defined(XR_RAY_LIGHT)
 #include "RayShade.hlsli"
 #endif
 
@@ -203,6 +213,26 @@ struct SVertexOutput
 //! The ambient colour's part of DrawLighting's last light and of its vNoSunLight, or of
 //! MaterialLighting's last vDiffuse (s_vAmbientLight); A of ShadePixel.
 static float3 s_vAmbientLight, s_vAmbientNoSun, s_vAmbient;
+#endif
+
+#ifdef XR_RAY_LIGHT
+//! The pixel shader's rays towards the lamps (the vertex shader's lighting has none): their origin's
+//! face, their cone's width there, how many more there may be.
+static bool s_bRayLights = false;
+static float3 s_vRayFace;
+static float s_fRayWidth;
+static uint s_nRayLightsLeft;
+
+//! Whether a point light fDistance away along vToLight reaches vPos (TraceLight; 1 past the pixel's
+//! rays); fHit: where its ray hits, of the way to the lamp.
+float LightVisible(float3 vPos, float3 vToLight, float fDistance, out float fHit)
+{
+  fHit = 1;
+  if (!s_bRayLights || s_nRayLightsLeft == 0)
+    return 1;
+  s_nRayLightsLeft--;
+  return TraceLight(vPos, s_vRayFace, vToLight, fDistance, ((g_Frame.nRaySun.z >> 9) & 127) * 0.02, g_Frame.nRaySun.z & 0xff, s_fRayWidth, fHit, 4);
+}
 #endif
 
 //! The light of the sun, the ambient colour and the draw's lights at world position vPos with the
@@ -242,6 +272,9 @@ float3 DrawLighting(float3 vPos, float3 vN, bool bPerPixel, out float3 vNoSunLig
     float4 vAtten = g_Draw.vLightAtten[i];
     float3 vToLight = vLightPos.xyz;
     float fAtten = 1;
+#ifdef XR_RAY_LIGHT
+    float fLightDist = 0;
+#endif
     if (vLightPos.w == 1)
     {
       vToLight = vLightPos.xyz - vPos;
@@ -256,11 +289,26 @@ float3 DrawLighting(float3 vPos, float3 vN, bool bPerPixel, out float3 vNoSunLig
       else
         fAtten = fDist < vAtten.z ? 1 / (vAtten.x + vAtten.y * fDist) : 0;
       vToLight /= max(fDist, 1e-4);
+#ifdef XR_RAY_LIGHT
+      fLightDist = fDist;
+#endif
     }
     float3 vColor = g_Draw.vLightColor[i].rgb;
     if (bClamp)
       vColor = saturate(vColor);
     float3 vThis = vColor * saturate(dot(vN, vToLight)) * fAtten;
+#ifdef XR_RAY_LIGHT
+    // A point light the pixel's ray does not reach: none of its light, nor its highlight.
+    float fHit;
+    if (vLightPos.w == 1 && any(vThis > 0) && LightVisible(vPos, vToLight, fLightDist, fHit) == 0)
+    {
+      // d3d12_RTLightShadows 2: what it takes away red; 3: by where the ray hits, green at the surface to red at the lamp.
+      const uint nMode = (g_Frame.nRaySun.z >> 24) & 3;
+      const float fMax = max(vThis.r, max(vThis.g, vThis.b));
+      vThis = nMode == 2 ? float3(fMax, 0, 0) : nMode == 3 ? fMax * float3(fHit, 1 - fHit, 0) : 0;
+      fAtten = 0;
+    }
+#endif
     if (bSpecular)
       vOtherSpec += saturate(g_Draw.vLightSpec[i].rgb) * (fAtten * Specular(vN, vToLight, vToEye));
     if (i == 0)
@@ -304,14 +352,25 @@ void MaterialLighting(float3 vPos, float3 vN, float fSun, out float3 vDiffuse, o
     float4 vAtten = g_Draw.vLightAtten[i];
     float3 vToLight = vLightPos.xyz;
     float fAtten = 1;
+#ifdef XR_RAY_LIGHT
+    float fLightDist = 0;
+#endif
     if (vLightPos.w == 1)
     {
       vToLight = vLightPos.xyz - vPos;
       float fDist = length(vToLight);
       fAtten = fDist < vAtten.z ? 1 / (vAtten.x + vAtten.y * fDist) : 0;
       vToLight /= max(fDist, 1e-4);
+#ifdef XR_RAY_LIGHT
+      fLightDist = fDist;
+#endif
     }
     float fNL = dot(vN, vToLight);
+#ifdef XR_RAY_LIGHT
+    float fHit;
+    if (vLightPos.w == 1 && fNL > 0 && fAtten > 0)
+      fAtten *= LightVisible(vPos, vToLight, fLightDist, fHit);
+#endif
     vLight += g_Draw.vLightColor[i].rgb * saturate(fNL) * fAtten;
     if (fNL > 0)
       vSpec += g_Draw.vLightSpec[i].rgb * pow(saturate(dot(vN, SafeNormalize(vToLight + vToEye))), fPower) * fAtten;
@@ -512,7 +571,7 @@ float3 SurfaceRay(float3 vCube, float3 P, float3 vFace, float3 R, float fDistanc
     Ray.TMax = min(Ray.TMax, (fWater - Ray.Origin.z) / R.z);
   const uint nMask = g_Frame.nRaySun.z;
   const SRayHit Hit = TraceScene(Ray, nMask & 0xff, fWidth, fPixelAngle);
-  const bool bDebug = (nMask >> 16) == 2;
+  const bool bDebug = ((nMask >> 16) & 0xff) == 2;
   if (!Hit.bHit)
     return bDebug ? vCube * float3(0.25, 0.25, 1) : vCube;
   bool bFog;
@@ -532,7 +591,7 @@ float4 ShadePixel(SVertexOutput In)
 #ifdef XR_AMBIENT
   s_vAmbient = 0;
 #endif
-#ifdef XR_RAY_REFL
+#if defined(XR_RAY_REFL) || defined(XR_RAY_LIGHT)
   // The rays' cone and their origin's face (before any branch or discard: derivatives).
   const float3 vRayView = In.vWorldPos - g_Frame.vCameraPos.xyz;
   const float fRayDistance = length(vRayView);
@@ -542,6 +601,12 @@ float4 ShadePixel(SVertexOutput In)
   vRayFace = dot(vRayFace, vRayFace) > 1e-20 ? normalize(vRayFace) : SafeNormalize(In.vNormal);
   if (dot(vRayFace, vRayDir) > 0)
     vRayFace = -vRayFace;
+#endif
+#ifdef XR_RAY_LIGHT
+  s_bRayLights = ((g_Frame.nRaySun.z >> 24) & 3) != 0;
+  s_vRayFace = vRayFace;
+  s_fRayWidth = fRayDistance * fPixelAngle;
+  s_nRayLightsLeft = g_Frame.nRaySun.z >> 28;
 #endif
   if (HasFlag2(DF2_SCOPE_LENS))
     return ScopeLens(In);
@@ -570,13 +635,15 @@ float4 ShadePixel(SVertexOutput In)
     float3 vN = HasFlag(DF_BUMP) ? vBumpN : SafeNormalize(In.vNormal);
     vTex = SampleCube(g_Draw.nTex0, nSampler0, reflect(vView, vN));
 #ifdef XR_RAY_REFL
-    vTex.rgb = SurfaceRay(vTex.rgb, In.vWorldPos, vRayFace, reflect(vView, vN), fRayDistance, fPixelAngle);
+    if (((g_Frame.nRaySun.z >> 16) & 0xff) != 0)
+      vTex.rgb = SurfaceRay(vTex.rgb, In.vWorldPos, vRayFace, reflect(vView, vN), fRayDistance, fPixelAngle);
 #endif
     if (HasFlag2(DF2_GLASS))
     {
       float4 vThrough = SampleCube(g_Draw.nTex0, nSampler0, refract(vView, vN, g_Draw.vParams2.w));
 #ifdef XR_RAY_REFL
-      vThrough.rgb = SurfaceRay(vThrough.rgb, In.vWorldPos, vRayFace, refract(vView, vN, g_Draw.vParams2.w), fRayDistance, fPixelAngle);
+      if (((g_Frame.nRaySun.z >> 16) & 0xff) != 0)
+        vThrough.rgb = SurfaceRay(vThrough.rgb, In.vWorldPos, vRayFace, refract(vView, vN, g_Draw.vParams2.w), fRayDistance, fPixelAngle);
 #endif
       float fFresnel = saturate(g_Draw.vParams2.z + g_Draw.vParams2.x * pow(1 - saturate(-dot(vView, vN)), g_Draw.vParams2.y));
       vTex = lerp(vThrough, vTex, fFresnel);

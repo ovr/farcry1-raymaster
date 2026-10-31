@@ -903,7 +903,13 @@ D3D12_GPU_VIRTUAL_ADDRESS CD3D12RayScene::GetTLAS() const
 
 bool CD3D12Renderer::WantsRays() const
 {
-  return m_pRayScene && m_pRayScene->IsSupported() && (CV_d3d12_RTDebug != 0 || CV_d3d12_RTReflections > 0 || WantsRaySun() || WantsRayAO() || WantsRayGI());
+  return m_pRayScene && m_pRayScene->IsSupported() &&
+         (CV_d3d12_RTDebug != 0 || CV_d3d12_RTReflections > 0 || WantsRaySun() || WantsRayAO() || WantsRayGI() || WantsRayLights());
+}
+
+bool CD3D12Renderer::WantsRayLights() const
+{
+  return m_pRayScene && m_pRayScene->IsSupported() && CV_d3d12_RTLightShadows > 0;
 }
 
 bool CD3D12Renderer::WantsRaySurfaces() const
@@ -1046,8 +1052,10 @@ bool CD3D12Renderer::WantsOffscreenRays() const
   // sees what is in front of the camera and has the planar reflection's draws).
   // The surfaces that reflect a cube map by rays, while there were some the frame before.
   const bool bSurfaces = WantsRaySurfaces() && m_nRaySurfaceFrame + 1 >= m_nFrames;
-  return WantsRays() &&
-         (CV_d3d12_RTOffscreen >= 2 || (CV_d3d12_RTOffscreen == 1 && (CV_d3d12_RTDebug != 0 || WantsRaySun() || WantsRayAO() || WantsRayGI() || bSurfaces)));
+  // The lamps' shadows by rays, the same.
+  const bool bLights = WantsRayLights() && m_nRayLightFrame + 1 >= m_nFrames;
+  return WantsRays() && (CV_d3d12_RTOffscreen >= 2 ||
+                         (CV_d3d12_RTOffscreen == 1 && (CV_d3d12_RTDebug != 0 || WantsRaySun() || WantsRayAO() || WantsRayGI() || bSurfaces || bLights)));
 }
 
 void CD3D12Renderer::NoteRayOffscreenItems(std::span<const SRenderItem> Items)

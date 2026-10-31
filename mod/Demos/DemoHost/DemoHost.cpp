@@ -215,7 +215,7 @@ void CDemoHost::BeginScene(const CCamera &Cam, SRendParams &Params, CDLight *pLi
 
 void CDemoHost::EndScene()
 {
-  m_pRenderer->EF_EndEf3D(SHDF_SORT);
+  m_pRenderer->EF_EndEf3D(SHDF_SORT | (m_Scene.GetInt("main_view", 0) ? SHDF_ALLOWHDR : 0));
 }
 
 void CDemoHost::RenderObject(const CCamera &Cam, IStatObj *pObj, SRendParams &Params, CDLight *pLights, int nLights)

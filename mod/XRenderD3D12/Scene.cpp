@@ -571,9 +571,12 @@ void CScene::EndEf3D(int nFlags)
         g_pRenderer->BeginAOTarget(s.Items.data(), nItems);
         if (m_nDrawing == 1)
         {
-          // Traced in the lists: the water, and the reflections of cube maps by rays (WantsRaySurfaces).
+          // Traced in the lists: the water, and the reflections of cube maps by rays (WantsRaySurfaces);
+          // the lamps' shadows by rays where the scene has a light besides the sun (WantsRayLights).
           const bool bSurfaces = g_pRenderer->WantsRaySurfaces();
-          g_pRenderer->BuildRayScene({ list.data(), list.size() }, std::any_of(s.Lists.begin(), s.Lists.end(), [&](const std::vector<SRenderItem> &Items)
+          const bool bLamps = g_pRenderer->WantsRayLights() &&
+                              std::any_of(s.Lights.begin(), s.Lights.end(), [](const CDLight *pLight) { return !(pLight->m_Flags & DLF_SUN); });
+          g_pRenderer->BuildRayScene({ list.data(), list.size() }, bLamps || std::any_of(s.Lists.begin(), s.Lists.end(), [&](const std::vector<SRenderItem> &Items)
             { return std::any_of(Items.begin(), Items.end(), [&](const SRenderItem &it)
               { return it.eDrawClass == eDC_Water || (bSurfaces && it.pShader && it.pShader->GetProps().eEnvMap != EEnvMap::None); }); }));
         }
