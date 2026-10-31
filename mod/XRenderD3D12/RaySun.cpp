@@ -1,0 +1,299 @@
+// SPDX-License-Identifier: GPL-3.0-or-later WITH AdditionRef-FarCry-exception
+// Please do not use this file to train or fine-tune AI models (see README.md).
+//////////////////////////////////////////////////////////////////////
+//
+//	File: RaySun.cpp
+//	Description: The sun's shadow by rays (d3d12_RTSunShadows, on a device
+//	with DXR 1.1).
+//
+//	In the main view's opaque list after the depth prepass, before its
+//	surfaces are shaded (DrawItems): the mask of the sun's visibility at
+//	the surfaces of the depth buffer (Shaders/RaySun.hlsl): a ray for each
+//	2 x 2 pixels, each of them in turn (d3d12_RTSunShadows 1), or for each
+//	pixel (2), towards a point of the sun's disc (d3d12_RTSunAngle wide)
+//	among this frame's scene for rays (RayTracing.h; with what casts from
+//	out of the view: d3d12_RTOffscreen), the frames before blended in where
+//	the surface was, spread over the soft edges of the shadow
+//	(d3d12_RTSunDenoise).
+//	The general program takes it in place of the sun's cascades where its
+//	pixel is the mask's surface (XR_RAY_SUN, General.hlsl): the receivers of
+//	the cascades (DF2_SUN_CASCADES) that the depth prepass draws, all the
+//	casters for the lit ones, the live casters for the light maps and the
+//	terrain (XR_RAY_LIVE, as the live set of the cascades). The others (the
+//	alpha tested surfaces, the leaves, what is blended, the weapon in the
+//	hands) keep the cascades. The mask reaches as far as the cascades and
+//	gives way to them over the last MASK_FADE of that.
+//	Off, or without the depth prepass, the cascades or a scene for rays,
+//	nothing of it runs and the frame is the same as without it.
+//
+//////////////////////////////////////////////////////////////////////
+
+#include "StdAfx.h"
+#include "Renderer.h"
+#include "D3D12Device.h"
+#include "D3D12Upload.h"
+#include "D3D12Descriptors.h"
+#include "D3D12Compute.h"
+#include "RayTracing.h"
+
+namespace
+{
+
+void Set4(float v[4], float x, float y, float z, float w)
+{
+  v[0] = x; v[1] = y; v[2] = z; v[3] = w;
+}
+
+//! The part of the mask's range over which it gives way to the cascades.
+constexpr float MASK_FADE = 0.1f;
+//! CSTrace's rays: the distances to what hides the sun, of all the casters and of the live ones (-1: no
+//! surface), and the view depth of the pixel traced.
+constexpr DXGI_FORMAT RAYS_FORMAT = DXGI_FORMAT_R16G16B16A16_FLOAT;
+//! The history: the visibility of both, the frames in it, the view depth.
+constexpr DXGI_FORMAT HISTORY_FORMAT = DXGI_FORMAT_R16G16B16A16_FLOAT;
+//! The mask: the view depth, the visibilities and the mask's weight packed (RaySun.hlsl).
+constexpr DXGI_FORMAT MASK_FORMAT = DXGI_FORMAT_R32G32_FLOAT;
+constexpr D3D12_RESOURCE_STATES SHADER_READ = D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE;
+constexpr D3D12_RESOURCE_STATES DEPTH_READ = D3D12_RESOURCE_STATE_DEPTH_READ | D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE;
+//! The kernels' UAV tables (D3D12Compute.h): the rays', the history's of each texture, the mask's.
+enum { TABLE_TRACE, TABLE_TEMPORAL0, TABLE_TEMPORAL1, TABLE_FILTER, TABLE_COUNT };
+
+D3D12_SHADER_RESOURCE_VIEW_DESC TextureSRV(DXGI_FORMAT Format)
+{
+  D3D12_SHADER_RESOURCE_VIEW_DESC SRV = {};
+  SRV.Format = Format;
+  SRV.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
+  SRV.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+  SRV.Texture2D.MipLevels = 1;
+  return SRV;
+}
+
+}
+
+bool CD3D12Renderer::WantsRaySun() const
+{
+  return CV_d3d12_RTSunShadows > 0 && m_pRayScene && m_pRayScene->IsSupported() && CV_d3d12_DepthPrepass && CV_d3d12_ShadowCascades > 0;
+}
+
+bool CD3D12Renderer::EnsureRaySunTargets(int nWidth, int nHeight)
+{
+  if (m_RaySun.pMask && nWidth == m_RaySun.nWidth && nHeight == m_RaySun.nHeight)
+    return true;
+  ReleaseRaySun();
+  ID3D12GraphicsCommandList *pList = m_pDevice->GetCmdList();
+  m_RaySun.pRays = m_pUpload->CreateComputeTarget(nWidth, nHeight, 1, RAYS_FORMAT, L"XRenderD3D12 sun's shadow rays");
+  for (CD3D12Texture *&pTex : m_RaySun.pHistory)
+  {
+    pTex = m_pUpload->CreateComputeTarget(nWidth, nHeight, 1, HISTORY_FORMAT, L"XRenderD3D12 sun's shadow history");
+    if (pTex && pList)
+      m_pDevice->Transition(pTex->m_pResource, D3D12_RESOURCE_STATE_UNORDERED_ACCESS, SHADER_READ);
+  }
+  m_RaySun.pMask = m_pUpload->CreateComputeTarget(nWidth, nHeight, 1, MASK_FORMAT, L"XRenderD3D12 sun's shadow mask");
+  if (m_RaySun.pMask && pList)
+    m_pDevice->Transition(m_RaySun.pMask->m_pResource, D3D12_RESOURCE_STATE_UNORDERED_ACCESS, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+  m_RaySun.nWidth = nWidth;
+  m_RaySun.nHeight = nHeight;
+  m_RaySun.nFrame = -1;
+  if (!pList || !m_RaySun.pRays || !m_RaySun.pHistory[0] || !m_RaySun.pHistory[1] || !m_RaySun.pMask)
+  {
+    iLog->LogError("XRenderD3D12: no targets for the sun's shadow by rays at %d x %d", nWidth, nHeight);
+    ReleaseRaySun();
+    return false;
+  }
+  // The views in the texture table, the kernels' UAV tables (the slots they do not use null).
+  D3D12_SHADER_RESOURCE_VIEW_DESC SRV = TextureSRV(RAYS_FORMAT);
+  m_RaySun.pRays->m_nSRV = m_pDescriptors->AllocSRV(m_RaySun.pRays->m_pResource, &SRV);
+  SRV = TextureSRV(HISTORY_FORMAT);
+  for (CD3D12Texture *pTex : m_RaySun.pHistory)
+    pTex->m_nSRV = m_pDescriptors->AllocSRV(pTex->m_pResource, &SRV);
+  SRV = TextureSRV(MASK_FORMAT);
+  m_RaySun.pMask->m_nSRV = m_pDescriptors->AllocSRV(m_RaySun.pMask->m_pResource, &SRV);
+  CD3D12Texture *const Outputs[TABLE_COUNT] = { m_RaySun.pRays, m_RaySun.pHistory[0], m_RaySun.pHistory[1], m_RaySun.pMask };
+  for (int t = 0; t < TABLE_COUNT; t++)
+  {
+    int &nTable = m_RaySun.nTables[t];
+    if ((nTable = m_pDescriptors->AllocRange(CD3D12Compute::COMPUTE_UAVS)) < 0)
+      break;
+    D3D12_UNORDERED_ACCESS_VIEW_DESC UAV = {};
+    UAV.ViewDimension = D3D12_UAV_DIMENSION_TEXTURE2D;
+    for (int i = 0; i < CD3D12Compute::COMPUTE_UAVS; i++)
+    {
+      UAV.Format = i == 0 ? Outputs[t]->m_Format : RAYS_FORMAT;
+      m_pDescriptors->WriteUAV(nTable + i, i == 0 ? Outputs[t]->m_pResource : nullptr, &UAV);
+    }
+  }
+  if (m_RaySun.pRays->m_nSRV < 0 || m_RaySun.pHistory[0]->m_nSRV < 0 || m_RaySun.pHistory[1]->m_nSRV < 0 || m_RaySun.pMask->m_nSRV < 0 ||
+      std::any_of(std::begin(m_RaySun.nTables), std::end(m_RaySun.nTables), [](int n) { return n < 0; }))
+  {
+    iLog->LogError("XRenderD3D12: no views for the sun's shadow by rays");
+    ReleaseRaySun();
+    return false;
+  }
+  iLog->Log("XRenderD3D12: the sun's shadow by rays: %d x %d", nWidth, nHeight);
+  return true;
+}
+
+void CD3D12Renderer::ReleaseRaySun()
+{
+  if (m_RaySun.bActive)
+    InvalidateFrameConstants();
+  if (m_pDescriptors)
+  {
+    for (CD3D12Texture *pTex : { m_RaySun.pRays, m_RaySun.pHistory[0], m_RaySun.pHistory[1], m_RaySun.pMask })
+      if (pTex && pTex->m_nSRV >= 0)
+      {
+        m_pDescriptors->FreeSRV(pTex->m_nSRV);
+        pTex->m_nSRV = -1;
+      }
+    for (int nTable : m_RaySun.nTables)
+      if (nTable >= 0)
+        m_pDescriptors->FreeRange(nTable, CD3D12Compute::COMPUTE_UAVS);
+    if (m_RaySun.nDepthSRV >= 0)
+      m_pDescriptors->FreeSRV(m_RaySun.nDepthSRV);
+  }
+  if (m_pUpload)
+  {
+    for (CD3D12Texture *pTex : { m_RaySun.pRays, m_RaySun.pHistory[0], m_RaySun.pHistory[1], m_RaySun.pMask })
+      if (pTex)
+        m_pUpload->ReleaseTexture(pTex);
+  }
+  m_RaySun = SRaySunState();
+}
+
+void CD3D12Renderer::DrawRaySunMask()
+{
+  m_RaySun.bActive = false;
+  if (!WantsRaySun())
+  {
+    if (m_RaySun.pMask)
+      ReleaseRaySun();
+    return;
+  }
+  // The scene for rays of this frame and the cascades of the main view, whose receivers take the mask.
+  if (!m_pCompute || !m_pUpload || !m_pDescriptors || !m_pDevice || !m_pRayScene || m_pRayScene->GetBuiltFrame() != m_nFrames ||
+      !m_pRayScene->GetTLAS() || !m_nCascades || m_nCascadeFrame != m_nFrames || !CascadeReceiverFlags(false) || m_pDevice->IsOffscreen())
+    return;
+  ID3D12Resource *pDepth = m_pDevice->GetMainDepth();
+  const int w = m_pDevice->GetMainWidth(), h = m_pDevice->GetMainHeight();
+  // The view over the whole depth buffer (the pixels' positions from it).
+  const bool bScene = m_pDevice->IsSceneBound();
+  float sx = 1, sy = 1;
+  if (bScene)
+    GetSceneScale(sx, sy);
+  if (!pDepth || w <= 0 || h <= 0 || m_Viewport[0] != 0 || m_Viewport[1] != 0 || fabsf(m_Viewport[2] * sx - w) > 1 || fabsf(m_Viewport[3] * sy - h) > 1 ||
+      !EnsureRaySunTargets(w, h))
+    return;
+  if (pDepth != m_RaySun.pDepth.Get())
+  {
+    if (m_RaySun.nDepthSRV >= 0)
+      m_pDescriptors->FreeSRV(m_RaySun.nDepthSRV);
+    m_RaySun.pDepth = pDepth;
+    const D3D12_SHADER_RESOURCE_VIEW_DESC SRV = TextureSRV(m_pDevice->GetMainDepthSRVFormat());
+    m_RaySun.nDepthSRV = m_pDescriptors->AllocSRV(pDepth, &SRV);
+    m_RaySun.nFrame = -1;
+  }
+  if (m_RaySun.nDepthSRV < 0)
+    return;
+
+  GpuSection("rt sun shadows");
+  // The builds of the scene done (the frame's list goes on after them).
+  const D3D12_GPU_VIRTUAL_ADDRESS nTlas = UseRayScene();
+  if (!nTlas)
+    return;
+  SFrameConstants fc;
+  MakeFrameConstants(fc, bScene);
+  const SD3D12FrameAlloc FrameCB = m_pUpload->AllocFrame(sizeof(fc), 256);
+  memcpy(FrameCB.pCPU, &fc, sizeof(fc));
+
+  SRaySunConstants rc = {};
+  memcpy(rc.mPrevViewProj, m_RaySun.PrevViewProj, sizeof(rc.mPrevViewProj));
+  // The pixels' world positions from the view: its axes in the world (the columns of the view
+  // matrix) and the projection's terms of x, y and w.
+  const float *V = m_CameraView.data, *P = m_ProjMatrix.data;
+  const Vec3 vRight(V[0], V[4], V[8]), vUp(V[1], V[5], V[9]), vAxis(V[2], V[6], V[10]);
+  const float fW = P[11] != 0 ? P[11] : -1.0f;
+  const Vec3 vRayX = vRight / P[0], vRayY = vUp / P[5];
+  const Vec3 vRayO = vAxis / fW - vRayX * (P[8] / fW) - vRayY * (P[9] / fW);
+  const Vec3 vCamera = m_Camera.GetPos();
+  Set4(rc.vCameraPos, vCamera.x, vCamera.y, vCamera.z, 1);
+  Set4(rc.vRayX, vRayX.x, vRayX.y, vRayX.z, 0);
+  Set4(rc.vRayY, vRayY.x, vRayY.y, vRayY.z, 0);
+  Set4(rc.vRayO, vRayO.x, vRayO.y, vRayO.z, 0);
+  Set4(rc.vSize, (float)w, (float)h, 1.0f / w, 1.0f / h);
+  Set4(rc.vJitter, fc.vJitter[0], fc.vJitter[1], m_RaySun.PrevJitter[0], m_RaySun.PrevJitter[1]);
+  // The sun's disc: its direction and two across it.
+  Vec3 vSun(fc.vSunDir[0], fc.vSunDir[1], fc.vSunDir[2]);
+  Vec3 vSunX = Vec3(0, 0, 1).Cross(vSun);
+  if (vSunX.GetLength() < 1e-4f)
+    vSunX = Vec3(0, 1, 0).Cross(vSun);
+  vSunX.Normalize();
+  const Vec3 vSunY = vSun.Cross(vSunX);
+  const float fHalfAngle = DEG2RAD(std::clamp(CV_d3d12_RTSunAngle, 0.0f, 10.0f)) * 0.5f;
+  Set4(rc.vSun, vSun.x, vSun.y, vSun.z, tanf(fHalfAngle));
+  Set4(rc.vSunX, vSunX.x, vSunX.y, vSunX.z, 0);
+  Set4(rc.vSunY, vSunY.x, vSunY.y, vSunY.z, 0);
+  const float fRange = m_Cascades[m_nCascades - 1].fEnd;
+  Set4(rc.vParams, fRange, fRange * (1 - MASK_FADE), std::max(CV_d3d12_RTDistance, 1.0f), 2 / (fabsf(P[5]) * h));
+  const bool bDenoise = CV_d3d12_RTSunDenoise != 0;
+  const bool bHistory = bDenoise && m_RaySun.nFrame == m_nFrames - 1;
+  const int nCur = m_RaySun.nHistory ^= 1;
+  CD3D12Texture *pHistory = m_RaySun.pHistory[nCur], *pPrevHistory = m_RaySun.pHistory[nCur ^ 1];
+  rc.nTextures[0] = (uint32)m_RaySun.nDepthSRV;
+  rc.nTextures[1] = (uint32)m_RaySun.pRays->m_nSRV;
+  rc.nTextures[2] = (uint32)pPrevHistory->m_nSRV;
+  rc.nTextures[3] = (uint32)pHistory->m_nSRV;
+  rc.nFlags[0] = bHistory ? 1 : 0;
+  rc.nFlags[1] = (uint32)m_nFrames;
+  rc.nFlags[2] = bDenoise ? 1 : 0;
+  rc.nFlags[3] = (RayMask() & 0xff) | (m_pRayScene->GetLiveInstances() ? 0x100 : 0);
+  // A ray for each 2 x 2 pixels, from each of them in turn over 4 frames (the history has them all), or for each pixel.
+  const int nStep = CV_d3d12_RTSunShadows >= 2 ? 1 : 2;
+  static constexpr uint32 CellPixels[4][2] = { { 0, 0 }, { 1, 1 }, { 1, 0 }, { 0, 1 } };
+  rc.nTrace[0] = (uint32)nStep;
+  rc.nTrace[1] = nStep == 2 ? CellPixels[m_nFrames & 3][0] : 0;
+  rc.nTrace[2] = nStep == 2 ? CellPixels[m_nFrames & 3][1] : 0;
+  const SD3D12FrameAlloc PassCB = m_pUpload->AllocFrame(sizeof(rc), 256);
+  memcpy(PassCB.pCPU, &rc, sizeof(rc));
+
+  ID3D12GraphicsCommandList *pList = m_pDevice->GetCmdList();
+  const D3D12_GPU_VIRTUAL_ADDRESS nInstances = m_pRayScene->GetInstances();
+  const UINT nGroupsX = (UINT)(w + XR_RAY_SUN_GROUP - 1) / XR_RAY_SUN_GROUP, nGroupsY = (UINT)(h + XR_RAY_SUN_GROUP - 1) / XR_RAY_SUN_GROUP;
+  const int nCellsX = (w + nStep - 1) / nStep, nCellsY = (h + nStep - 1) / nStep;
+  m_pDevice->Transition(pDepth, D3D12_RESOURCE_STATE_DEPTH_WRITE, DEPTH_READ);
+  m_pCompute->DispatchRays(pList, eD3D12K_RaySunTrace, FrameCB.nGPU, PassCB.nGPU, nTlas, nInstances, m_RaySun.nTables[TABLE_TRACE],
+                           (UINT)(nCellsX + XR_RAY_SUN_GROUP - 1) / XR_RAY_SUN_GROUP, (UINT)(nCellsY + XR_RAY_SUN_GROUP - 1) / XR_RAY_SUN_GROUP);
+  m_pDevice->Transition(m_RaySun.pRays->m_pResource, D3D12_RESOURCE_STATE_UNORDERED_ACCESS, SHADER_READ);
+  // Each pixel's ray (and with the denoise its history), then the mask.
+  GpuSection("rt sun shadows history");
+  m_pDevice->Transition(pHistory->m_pResource, SHADER_READ, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+  m_pCompute->DispatchRays(pList, eD3D12K_RaySunTemporal, FrameCB.nGPU, PassCB.nGPU, 0, 0, m_RaySun.nTables[TABLE_TEMPORAL0 + nCur], nGroupsX, nGroupsY);
+  m_pDevice->Transition(pHistory->m_pResource, D3D12_RESOURCE_STATE_UNORDERED_ACCESS, SHADER_READ);
+  GpuSection("rt sun shadows filter");
+  m_pDevice->Transition(m_RaySun.pMask->m_pResource, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+  m_pCompute->DispatchRays(pList, eD3D12K_RaySunFilter, FrameCB.nGPU, PassCB.nGPU, 0, 0, m_RaySun.nTables[TABLE_FILTER], nGroupsX, nGroupsY);
+  m_pDevice->Transition(m_RaySun.pMask->m_pResource, D3D12_RESOURCE_STATE_UNORDERED_ACCESS, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+  m_pDevice->Transition(m_RaySun.pRays->m_pResource, SHADER_READ, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+  m_pDevice->Transition(pDepth, DEPTH_READ, D3D12_RESOURCE_STATE_DEPTH_WRITE);
+
+  // The camera of this frame for the next one's history.
+  const Matrix44 ViewProj = m_CameraView * m_ProjMatrix;
+  memcpy(m_RaySun.PrevViewProj, ViewProj.data, sizeof(m_RaySun.PrevViewProj));
+  m_RaySun.PrevJitter[0] = fc.vJitter[0];
+  m_RaySun.PrevJitter[1] = fc.vJitter[1];
+  m_RaySun.nFrame = bDenoise ? m_nFrames : -1;
+  // The opaque list's receivers read it from here on (the frame constants' nRaySun).
+  m_RaySun.bActive = true;
+  InvalidateFrameConstants();
+  if (m_pFrameDump)
+    fprintf(m_pFrameDump.get(), "rt sun shadows: %d x %d, a ray for each %d x %d pixels (%d %d of them), sun's disc %g degrees, to %.1f m (giving way from %.1f m), "
+            "rays %g m, %s live casters, denoise %d, history %d\n", w, h, nStep, nStep, (int)rc.nTrace[1], (int)rc.nTrace[2], 2 * RAD2DEG(fHalfAngle),
+            rc.vParams[0], rc.vParams[1], rc.vParams[2], (rc.nFlags[3] & 0x100) ? "with" : "without", bDenoise ? 1 : 0, bHistory ? 1 : 0);
+}
+
+void CD3D12Renderer::EndRaySunMask()
+{
+  if (!m_RaySun.bActive)
+    return;
+  m_RaySun.bActive = false;
+  InvalidateFrameConstants();
+}

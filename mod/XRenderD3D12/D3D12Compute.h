@@ -17,6 +17,18 @@
 //	signature is separate from the draws' one, so a dispatch leaves the
 //	draws' bindings as they are; the next draw sets its own pipeline state.
 //
+//	The kernels with rays (Shader Model 6.5, Shaders/RayShade.hlsli) have a
+//	root signature of their own, the draws' with the pass's constants in
+//	place of the draw's (DispatchRays):
+//	  0: root CBV b0 (SFrameConstants)
+//	  1: root CBV b2 (the pass's constants)
+//	  2: the texture table (D3D12Pipeline.h: spaces 1, 2, 3, 4 and 6)
+//	  3: root SRV t0 space5, the scene for rays (ROOT_RAY_SCENE)
+//	  4: root SRV t1 space5, its instances (ROOT_RAY_INSTANCES)
+//	  5: descriptor table u0..u4 (COMPUTE_UAVS UAVs)
+//	  static samplers s0..s4 as the draws' (XR_SAMPLER_*, the shadow maps'
+//	  comparison)
+//
 //////////////////////////////////////////////////////////////////////
 
 #pragma once
@@ -41,6 +53,9 @@ enum ED3D12Kernel
   eD3D12K_DepthTilesUp,             //!< their levels 5 and 6 from level 4
   eD3D12K_VolumetricInject,         //!< the volumetric light's froxels (Shaders/Volumetric.hlsl)
   eD3D12K_VolumetricIntegrate,      //!< the light they scatter towards the camera, integrated
+  eD3D12K_RaySunTrace,              //!< the sun's shadow by rays: the rays (Shaders/RaySun.hlsl; with rays)
+  eD3D12K_RaySunTemporal,           //!< their visibility blended into the history
+  eD3D12K_RaySunFilter,             //!< the history over the soft edges, into the mask
   eD3D12K_Num
 };
 
@@ -61,14 +76,20 @@ public:
   //! unset). The descriptor heap of CD3D12Descriptors must be bound.
   void Dispatch(ID3D12GraphicsCommandList *pList, ED3D12Kernel eKernel, D3D12_GPU_VIRTUAL_ADDRESS CB, int nSRVs, int nUAVs,
                 UINT nGroupsX, UINT nGroupsY, UINT nGroupsZ = 1);
+  //! The same for a kernel with rays: b0 at FrameCB, b2 at PassCB, the texture table, the scene for rays
+  //! nRayScene and its instances nRayInstances (0: unset), the UAV table from slot nUAVs.
+  void DispatchRays(ID3D12GraphicsCommandList *pList, ED3D12Kernel eKernel, D3D12_GPU_VIRTUAL_ADDRESS FrameCB, D3D12_GPU_VIRTUAL_ADDRESS PassCB,
+                    D3D12_GPU_VIRTUAL_ADDRESS nRayScene, D3D12_GPU_VIRTUAL_ADDRESS nRayInstances, int nUAVs, UINT nGroupsX, UINT nGroupsY);
 
 private:
   bool CreateRootSignature();
+  bool CreateRayRootSignature();
   //! nullptr when the device refuses it (logged once).
   ID3D12PipelineState *GetPSO(ED3D12Kernel eKernel);
 
   ID3D12Device *m_pDevice = nullptr;
   Microsoft::WRL::ComPtr<ID3D12RootSignature> m_pRootSignature;
+  Microsoft::WRL::ComPtr<ID3D12RootSignature> m_pRayRootSignature;
   Microsoft::WRL::ComPtr<ID3D12PipelineState> m_pPSOs[eD3D12K_Num];
   bool m_bFailed[eD3D12K_Num] = {};
 };
