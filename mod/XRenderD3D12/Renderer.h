@@ -641,9 +641,10 @@ public:
   //! The rays' mask for the shaders: d3d12_RTMask's kinds, 0x100 with d3d12_RTShadows.
   uint32 RayMask() const;
   //! Before the main view's opaque list (not its reflection, sprites, shadow maps, cubes or heat
-  //! vision): its draws go into the scene for rays, the first such view of a frame. Without a cvar
-  //! that wants rays the scene's memory goes.
-  void BeginRayCapture();
+  //! vision): its draws go into the scene for rays, the first such view of a frame; bTraced: the view
+  //! draws with rays (a water surface), else only the static BLAS are built. Without a cvar that
+  //! wants rays the scene's memory goes.
+  void BeginRayCapture(bool bTraced);
   //! After the main view's opaque list: the builds of the scene, for the draws after it.
   void BuildRayScene();
   //! d3d12_RTDebug: the scene for rays seen from the main view's camera, over the whole picture
@@ -1131,6 +1132,7 @@ public:
   std::unique_ptr<CD3D12Pipeline> m_pPipeline;
   std::unique_ptr<CD3D12Compute> m_pCompute;
   std::unique_ptr<CD3D12RayScene> m_pRayScene;
+  bool m_bRayTlas = false;                  //!< the scene being captured gets a TLAS (BeginRayCapture)
   std::unique_ptr<CTextureManager> m_pTextures;
   std::unique_ptr<CShaderManager> m_pShaders;
   std::unique_ptr<CScene> m_pScene;

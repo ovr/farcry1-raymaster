@@ -35,10 +35,15 @@
 //	  BLAS of the frame (built fast) in the frame slot's memory. The builds
 //	  of a frame are limited (MAX_*_TRIANGLES); what is over waits for the
 //	  next frames.
-//	- TLAS: built every frame after the opaque list (Build), one instance
-//	  per draw whose kinds d3d12_RTMask has all of, the instance's transform
-//	  its mWorld, its mask and InstanceContributionToHitGroupIndex its kind
-//	  (Shaders/RayConstants.h), culling off.
+//	- TLAS: built after the opaque list (Build) in a frame that traces rays
+//	  (a water surface in the main view's lists, or d3d12_RTDebug), one
+//	  instance per draw whose kinds d3d12_RTMask has all of, the instance's
+//	  transform its mWorld, its mask and InstanceContributionToHitGroupIndex
+//	  its kind (Shaders/RayConstants.h), culling off. In another frame only
+//	  the missing static BLAS are built (for when the water shows), not the
+//	  frame's nor the TLAS: away from the water 0.2 ms of the GPU and 0.1 ms
+//	  of the CPU less (the time demos of Volcano 340 -> 361 FPS, Research
+//	  446 -> 485).
 //	- Instances: an SRayInstance per instance of the TLAS (its InstanceID),
 //	  in per frame memory: the raw views of its vertices, indices and second
 //	  stream (CD3D12Upload::GetRawSRV) and the part of its draw's constants
@@ -99,8 +104,9 @@ public:
   void CaptureDraw(const SPipelineKey &Key, const SDrawConstants &dc, D3D_PRIMITIVE_TOPOLOGY eTopology, const D3D12_VERTEX_BUFFER_VIEW &VB,
     const D3D12_INDEX_BUFFER_VIEW *pIB, uint32 nCount, uint32 nFirst, int nBaseVertex, const D3D12_VERTEX_BUFFER_VIEW *pTexCoord1);
   //! Records the builds of the missing BLAS and of the TLAS of the captured draws into the frame's
-  //! command list; pDump: a line about them (d3d12_DumpFrame).
-  void Build(FILE *pDump);
+  //! command list; without bTop (nothing in the frame traces rays) only those of the missing static
+  //! BLAS. pDump: a line about them (d3d12_DumpFrame).
+  void Build(FILE *pDump, bool bTop);
   //! The TLAS built in this frame, 0 when there is none.
   D3D12_GPU_VIRTUAL_ADDRESS GetTLAS() const;
   //! Its instances (SRayInstance, by InstanceID), with GetTLAS.

@@ -244,8 +244,11 @@ reference of its features and console variables.
 
 - Ray tracing (`RayTracing.h`, DXR 1.1 with inline `RayQuery`, Shader Model 6.5): the main view's
   opaque draws and the static ones of the water's planar reflection become acceleration
-  structures every frame (the `ray scene` section of the GPU times, a `ray scene:` line in the
-  frame dump), once a frame and only while something wants rays (else their memory goes).
+  structures (the `ray scene` section of the GPU times, a `ray scene:` line in the frame dump),
+  once a frame and only while something wants rays (else their memory goes). The top level one
+  and those of the frame's geometry are built only in a frame with a water surface (or with
+  `d3d12_RTDebug`); in another one only the new static geometry's, ready for when the water
+  shows.
   `XRENDERD3D12_NORT=1` (or a device without tier 1.1) turns them off; the log says why.
   `Shaders/RayShade.hlsli` traces (`TraceScene`, alpha tested triangles tested) and shades the
   hits as the general program does without the draw's lights:
