@@ -376,6 +376,19 @@ public:
   //! After each frame (Update): the device's GPU times since the last call to d3d12_GpuTimes'
   //! report and to r_Stats, the frame's numbers to m_StatsSum, every half second to m_Stats.
   void CollectStats();
+  //! d3d12_FrameLog: a line per frame to XRenderD3D12_frames.txt (from CollectStats, before the
+  //! GPU times are taken).
+  void LogFrame();
+  //! The CPU's clock in milliseconds (QueryPerformanceCounter).
+  static double CpuMs();
+  //! Adds the CPU time of its scope to a counter (d3d12_FrameLog).
+  struct SCpuTime
+  {
+    double &fMs;
+    const double fStart = CpuMs();
+    explicit SCpuTime(double &fCounter) : fMs(fCounter) {}
+    ~SCpuTime() { fMs += CpuMs() - fStart; }
+  };
   //! The statistics over the frame, once a frame: at Update, or when the frame is read before it
   //! (ReadFrameBuffer: a demo's frames); with r_DisplayInfo also the view's at the top right.
   void DrawStats();
@@ -491,6 +504,14 @@ public:
   };
   std::unique_ptr<FILE, SFileClose> m_pFrameDump; //!< open for the frame being dumped (d3d12_DumpFrame)
   std::unique_ptr<FILE, SFileClose> m_pGpuTimes;  //!< XRenderD3D12_gpu.txt, open while d3d12_GpuTimes is on
+  std::unique_ptr<FILE, SFileClose> m_pFrameLog;  //!< XRenderD3D12_frames.txt, open while d3d12_FrameLog is on
+  double m_fFrameLogLast = 0;               //!< d3d12_FrameLog: when the last frame ended (CpuMs; 0: none yet)
+  bool m_bFrameLogProfiles = false;         //!< d3d12_FrameLog 2 turned the engine's frame profiler on
+  double m_fFrameEndEf3DMs = 0;             //!< d3d12_FrameLog: the CPU's time in the main view's EF_EndEf3D
+  //! Of it, in the engine's DrawLowDetail: for the water's reflection, the sun's cascades, the
+  //! environment cubes.
+  enum { LD_WATER, LD_CASCADES, LD_ENVCUBES, LD_NUM };
+  double m_fFrameLowDetailMs[LD_NUM] = {};
 
   int m_nSceneFlags = 0;                    //!< SHDF_* of the EF_EndEf3D being drawn
   CTexture *m_pDetailTexture = nullptr;     //!< GetDetailTexture (one reference)
@@ -1118,7 +1139,7 @@ public:
   int m_nFrameDraws = 0;              //!< the draws since the last Update (DrawGeometry)
   int m_nFramePSOChanges = 0;         //!< of them, those with another pipeline state than the draw before
   int m_nFrameSunLights = 0;          //!< r_DisplayInfo: the main view's sun (DLF_SUN) and other lights in this
-  int m_nFrameDynLights = 0;          //!< frame (CScene::EndEf3D), 0 again after Update
+  int m_nFrameDynLights = 0;          //!< frame (CScene::EndEf3D), 0 again at the end of Update
   ID3D12PipelineState *m_pLastPSO = nullptr;  //!< the pipeline state of the last draw (counted only)
   int64 m_nLastFrameTicks = 0;        //!< ReportGpuTimes: when the last frame ended (0: timing off)
   double m_fFrameMs = 0;              //!< ReportGpuTimes: the time between frames added up
@@ -1208,6 +1229,8 @@ public:
   int CV_d3d12_Caustics = 1;          //!< 0: no caustics under the ocean
   float CV_d3d12_WaterSunGlint = 0;   //!< strength of the sun's highlight on water (0: none)
   int CV_d3d12_GpuTimes = 0;          //!< N: the GPU time of the frame's sections to the log every N frames
+  int CV_d3d12_FrameLog = 0;          //!< 1: a line per frame to XRenderD3D12_frames.txt (LogFrame), 2 with the engine's profilers
+  int CV_d3d12_CpuSamples = 0;        //!< N: the render thread's stack every N microseconds, to XRenderD3D12_samples.txt at 0 (CpuSampler)
   int CV_r_Stats = 0;                 //!< the statistics on the screen: 1 the GPU time of the passes, 2 also the memory
   float CV_d3d12_WaterReflectionScale = 0.5f;   //!< size of the water reflection, a fraction of the screen's
   float CV_d3d12_WaterReflectionBlur = 0.1f; //!< how much the ripple finer than a pixel blurs the water's reflection (0: none)

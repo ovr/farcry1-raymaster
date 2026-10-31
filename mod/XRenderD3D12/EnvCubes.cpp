@@ -259,7 +259,10 @@ void CD3D12Renderer::DrawEnvCubeFace(SEnvCube &Cube, int nFace)
   // The 3D engine renders the scene (a frame of its own, nested in this one).
   m_bEnvCubePass = true;
   iSystem->SetViewCamera(Cam);
-  p3D->DrawLowDetail(kEnvCubeDrawFlags);
+  {
+    SCpuTime Time(m_fFrameLowDetailMs[LD_ENVCUBES]);
+    p3D->DrawLowDetail(kEnvCubeDrawFlags);
+  }
   m_bEnvCubePass = false;
 }
 

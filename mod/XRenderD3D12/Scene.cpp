@@ -914,7 +914,12 @@ void CD3D12Renderer::EF_EndEf3D(int nFlags)
     return;
   const int nSavedFlags = m_nSceneFlags;
   m_nSceneFlags = nFlags;
-  m_pScene->EndEf3D(nFlags);
+  {
+    double fMs = 0;
+    const bool bOuter = !m_pScene->IsDrawing();
+    SCpuTime Time(bOuter ? m_fFrameEndEf3DMs : fMs);
+    m_pScene->EndEf3D(nFlags);
+  }
   m_nSceneFlags = nSavedFlags;
 }
 

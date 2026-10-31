@@ -299,6 +299,23 @@ reference of its features and console variables.
   the variable over (`TakeDisplayInfo`, an `IConsoleVarSink`): it keeps the console's value at 0, so
   the engine draws nothing, and the value set (the console, `system.cfg`) is the renderer's.
   Typing `r_DisplayInfo` alone therefore prints 0, and the game saves 0 in its `system.cfg`.
+- `d3d12_FrameLog 1` writes a line per frame to `farcry1_testing1/XRenderD3D12_frames.txt` (never
+  committed; `Stats.cpp`, `LogFrame`): the time since the last frame, the CPU's wait for the GPU at
+  the start of the frame and in `Present`, the CPU's time in the main view's `EF_EndEf3D` and, of
+  it, in the engine's `DrawLowDetail` for the water's reflection, the sun's cascades and the
+  environment cubes, the GPU's time (of the frame `D3D12_FRAMES` earlier) and its sections, the
+  draws, the pipeline changes, the triangles, the dynamic lights, the camera's position and angles.
+  `2` also turns the engine's frame profiler on (collecting, without its overlay) and adds the self
+  time of each subsystem and of the 8 profilers that took the most in the engine's last frame; the
+  profiler's numbers add up to about 12 times the frame's milliseconds, so only their shares mean
+  something.
+- `d3d12_CpuSamples N` samples the stack of the thread that draws every N microseconds
+  (`CpuSampler.cpp`: a thread of its own stops it and walks its stack with the modules' unwind
+  data, a profiler of the wall clock that sees the engine's code, ours, the tracer's and the
+  driver's alike). Set back to 0, or at the end, it writes the modules and the samples (module and
+  offset, leaf first) to `farcry1_testing1/XRenderD3D12_samples.txt`; with 250 a time demo runs
+  about 5 % slower. In DemoReplay's arguments `--exec-at 60 "d3d12_CpuSamples 250" --exec-at 2800
+  "d3d12_CpuSamples 0"` samples a part of a run.
 - `d3d12_DumpFrame 1` writes the render items of the next frame to
   `farcry1_testing1/XRenderD3D12_frame.txt` (never committed): the camera (position, angles,
   field of view, near and far plane, view and projection matrices), then for each item its list, sort

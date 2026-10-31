@@ -290,7 +290,10 @@ void CD3D12Renderer::UpdateSunCascades(std::span<const SRenderItem> MainItems)
   SunCam.Update();
   iSystem->SetViewCamera(SunCam);
   p3D->SetCamera(SunCam, false);
-  p3D->DrawLowDetail(CASCADE_CAMERA_FLAGS);
+  {
+    SCpuTime Time(m_fFrameLowDetailMs[LD_CASCADES]);
+    p3D->DrawLowDetail(CASCADE_CAMERA_FLAGS);
+  }
   iSystem->SetViewCamera(ViewCamera);
   p3D->SetCamera(Camera, false);
   m_Camera = Camera;

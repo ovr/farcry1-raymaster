@@ -20,6 +20,7 @@
 #include "Texture.h"
 #include "Shader.h"
 #include "Scene.h"
+#include "CpuSampler.h"
 
 CD3D12Renderer *g_pRenderer = nullptr;
 
@@ -150,6 +151,13 @@ void CD3D12Renderer::RegisterVariables()
   iConsole->Register("d3d12_GpuTimes", &CV_d3d12_GpuTimes, 0, 0,
                      "N: every N frames, the average GPU time of the frame's sections (shadow maps, water reflection, opaque, "
                      "water, blended, ...) and the time between frames to the console and XRenderD3D12_gpu.txt; 0 off");
+  iConsole->Register("d3d12_FrameLog", &CV_d3d12_FrameLog, 0, 0,
+                     "1: a line per frame to XRenderD3D12_frames.txt: the time between frames, the CPU's waits and its time in the main "
+                     "view, the GPU time of each section, the draws, the triangles and the camera; 2 also the engine's frame profiler (collected "
+                     "without its overlay): the self time of each subsystem and of the profilers that took the most; 0 off");
+  iConsole->Register("d3d12_CpuSamples", &CV_d3d12_CpuSamples, 0, 0,
+                     "N: samples the stack of the thread that draws every N microseconds (a profiler of the wall clock: the engine's "
+                     "code, ours, the driver's); back to 0 writes the samples to XRenderD3D12_samples.txt (module and offset)");
   iConsole->Register("r_Stats", &CV_r_Stats, 0, 0,
                      "The renderer's statistics at the top left, averages of half a second: 1 the GPU time of each pass in the order they run "
                      "(as d3d12_GpuTimes), the time between frames, the GPU's and the CPU's waits, the draws and triangles; 2 also the memory");
@@ -606,6 +614,7 @@ LRESULT CALLBACK CD3D12Renderer::WindowProc(HWND hWnd, UINT nMsg, WPARAM wParam,
 
 void CD3D12Renderer::Release()
 {
+  CpuSampler::Update(0, 0, "XRenderD3D12_samples.txt");
   if (m_DisplayInfo.pVar && iConsole)
     iConsole->RemoveConsoleVarSink(&m_DisplayInfo);
   m_DisplayInfo.pVar = nullptr;
@@ -704,7 +713,7 @@ bool CD3D12Renderer::EnsureFrame()
     return false;
   if (!m_pDevice->IsInFrame())
   {
-    m_pDevice->SetGpuTiming(CV_d3d12_GpuTimes > 0 || CV_r_Stats > 0);
+    m_pDevice->SetGpuTiming(CV_d3d12_GpuTimes > 0 || CV_r_Stats > 0 || CV_d3d12_FrameLog > 0);
     m_pDevice->BeginFrame();
     m_pLastPSO = nullptr;         // a new command list
     InvalidateFrameConstants();   // the frame memory of the slot starts again
@@ -758,7 +767,6 @@ void CD3D12Renderer::Update (void)
   DrawStats();
   m_fTopLeftText[1] = m_fTopLeftText[0];
   m_fTopLeftText[0] = 0;
-  m_nFrameSunLights = m_nFrameDynLights = 0;
   DumpHdrOutput();
   // Shown only when swapping is on: the hidden frames of a level load are drawn but never seen.
   if (m_bSwapBuffers)
@@ -768,6 +776,7 @@ void CD3D12Renderer::Update (void)
   m_nPolygons = m_nFramePolygons;
   m_nFramePolygons = 0;
   CollectStats();
+  m_nFrameSunLights = m_nFrameDynLights = 0;
   ReportGpuTimes();
   if (m_pFrameDump)
   {

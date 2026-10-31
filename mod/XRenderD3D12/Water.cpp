@@ -572,7 +572,10 @@ void CD3D12Renderer::UpdateWaterReflection(std::span<const SRenderItem> Items)
   const bool bRayCapture = WantsRays();
   if (bRayCapture)
     m_pRayScene->BeginReflectionCapture(m_CameraView * m_ProjMatrix);
-  p3D->DrawLowDetail(CV_d3d12_WaterReflectionFlags);
+  {
+    SCpuTime Time(m_fFrameLowDetailMs[LD_WATER]);
+    p3D->DrawLowDetail(CV_d3d12_WaterReflectionFlags);
+  }
   if (bRayCapture)
     m_pRayScene->EndReflectionCapture();
   m_bReflectionPass = false;

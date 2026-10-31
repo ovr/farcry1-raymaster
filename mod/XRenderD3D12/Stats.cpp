@@ -34,6 +34,7 @@
 #include "D3D12Upload.h"
 #include "D3D12Pipeline.h"
 #include "RayTracing.h"
+#include "CpuSampler.h"
 #include <CryVersion.h>
 
 namespace
@@ -130,8 +131,98 @@ void CD3D12Renderer::TakeDisplayInfo()
   iConsole->AddConsoleVarSink(&m_DisplayInfo);
 }
 
+double CD3D12Renderer::CpuMs()
+{
+  return NowMs();
+}
+
+void CD3D12Renderer::LogFrame()
+{
+  CpuSampler::Update(CV_d3d12_CpuSamples, m_nFrameID, "XRenderD3D12_samples.txt");
+  const double fNow = NowMs();
+  IFrameProfileSystem *pProfiles = iSystem ? iSystem->GetIProfileSystem() : nullptr;
+  if (pProfiles && m_bFrameLogProfiles != (CV_d3d12_FrameLog >= 2))
+  {
+    m_bFrameLogProfiles = CV_d3d12_FrameLog >= 2;
+    pProfiles->Enable(m_bFrameLogProfiles, false);
+  }
+  if (CV_d3d12_FrameLog <= 0)
+  {
+    m_pFrameLog.reset();
+    m_fFrameLogLast = 0;
+  }
+  else
+  {
+    if (!m_pFrameLog)
+    {
+      m_pFrameLog.reset(fopen("XRenderD3D12_frames.txt", "w"));
+      if (m_pFrameLog)
+        fprintf(m_pFrameLog.get(),
+                "# frame, ms since the last frame, the CPU's wait for the GPU, Present, the main view's EF_EndEf3D, of it the engine's "
+                "DrawLowDetail for the water's reflection, the sun's cascades, the environment cubes; the GPU's ms (of the frame %d "
+                "earlier), draws, PSO changes, triangles, dynamic lights, camera x y z, angles x y z, the GPU's sections; with 2 the self ms of the "
+                "engine's last frame by subsystem, and its profilers that took the most\n",
+                D3D12_FRAMES);
+    }
+    if (m_pFrameLog && m_fFrameLogLast > 0)
+    {
+      const int nGpuFrames = m_pDevice->GetGpuTimedFrames();
+      double fGpuMs = 0;
+      std::string Sections;
+      for (const auto &[szSection, fMs] : m_pDevice->GetGpuTimes())
+      {
+        fGpuMs += fMs;
+        Sections += Format("%s%s=%.3f", Sections.empty() ? "" : ";", szSection, nGpuFrames ? fMs / nGpuFrames : 0.0);
+      }
+      // The engine's frame profiler: the self time of its last frame by subsystem, then the
+      // profilers that took the most.
+      std::string Profiles;
+      if (pProfiles && m_bFrameLogProfiles)
+      {
+        static const char *const szSubsystems[] = { "any", "renderer", "3dengine", "ai", "animation", "movie", "entity", "font",
+                                                    "network", "physics", "script", "sound", "editor", "system", "game" };
+        static_assert(std::size(szSubsystems) == PROFILE_NETWORK_TRAFFIC);
+        float fSubsystem[PROFILE_NETWORK_TRAFFIC] = {};
+        std::vector<std::pair<float, const char *>> Self;
+        for (int i = 0; i < pProfiles->GetProfilerCount(); i++)
+        {
+          CFrameProfiler *pProfiler = pProfiles->GetProfiler(i);
+          if (!pProfiler || pProfiler->m_subsystem < 0 || pProfiler->m_subsystem >= PROFILE_NETWORK_TRAFFIC)
+            continue;
+          const float fMs = pProfiler->m_selfTimeHistory.GetLast();
+          fSubsystem[pProfiler->m_subsystem] += fMs;
+          Self.emplace_back(fMs, pProfiler->m_name);
+        }
+        for (int i = 0; i < PROFILE_NETWORK_TRAFFIC; i++)
+          Profiles += Format("%s%s=%.3f", i ? ";" : ",", szSubsystems[i], fSubsystem[i]);
+        const size_t nTop = std::min<size_t>(Self.size(), 8);
+        std::partial_sort(Self.begin(), Self.begin() + nTop, Self.end(), [](const auto &a, const auto &b) { return a.first > b.first; });
+        for (size_t i = 0; i < nTop; i++)
+        {
+          std::string Name = Self[i].second ? Self[i].second : "?";
+          std::replace_if(Name.begin(), Name.end(), [](char c) { return c == ',' || c == ';' || c == '='; }, ' ');
+          Profiles += Format("%s%s=%.3f", i ? ";" : ",", Name.c_str(), Self[i].first);
+        }
+      }
+      const CCamera &Camera = iSystem->GetViewCamera();
+      const Vec3 &vPos = Camera.GetPos();
+      const Ang3 vAngles = Camera.GetAngles();
+      fprintf(m_pFrameLog.get(), "%d,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%d,%d,%d,%d,%.1f,%.1f,%.1f,%.0f,%.0f,%.0f,%s%s\n", m_nFrameID,
+              fNow - m_fFrameLogLast, m_pDevice->GetWaitMs(), m_pDevice->GetPresentMs(), m_fFrameEndEf3DMs, m_fFrameLowDetailMs[LD_WATER],
+              m_fFrameLowDetailMs[LD_CASCADES], m_fFrameLowDetailMs[LD_ENVCUBES], nGpuFrames ? fGpuMs / nGpuFrames : -1.0, m_nFrameDraws,
+              m_nFramePSOChanges, m_nPolygons, m_nFrameDynLights, vPos.x, vPos.y, vPos.z, vAngles.x, vAngles.y, vAngles.z, Sections.c_str(),
+              Profiles.c_str());
+    }
+    m_fFrameLogLast = fNow;
+  }
+  m_fFrameEndEf3DMs = 0;
+  for (double &fMs : m_fFrameLowDetailMs)
+    fMs = 0;
+}
+
 void CD3D12Renderer::CollectStats()
 {
+  LogFrame();
   // The device's GPU times since the last frame (a frame's come D3D12_FRAMES frames later).
   if (const int n = m_pDevice->GetGpuTimedFrames())
   {

@@ -162,12 +162,14 @@ instructions and is not committed (git-ignored). The references of the modules a
   materials, glass among them, on a beach and in its shallow water under a moving light, handed to
   the engine's scene through `I3DEngine::SetRenderCallback`: the engine calls it for the main view
   only, not for the water's reflection).
-- Frame rates: with XRenderD3D12 a run of DemoReplay's Training is at about 260 FPS or at about
-  140 (with `profile 1` about 225 or 130), where some frames take 20 ms and more while the renderer
-  waits for nothing. Which one repeats for one renderer DLL with the same arguments and environment
-  and changes with any of them, for a build before a change as for the one after it, so frame rates
-  are compared over several runs and launches, and a change's cost is better measured with the
-  engine's frame profiler (`mod/XRenderD3D12/README.md`, statistics).
+- Frame rates: with XRenderD3D12 a run of DemoReplay's Training (3840 x 2160, very high) is at
+  about 315 FPS and repeats within a few FPS for other builds and environments. It used to be at
+  about 260 or at about 140, decided by the build and the environment: XRenderD3D9Traced checked
+  the material of every `CLeafBuffer::Render` with `VirtualQuery`, whose time grows with the size of
+  the memory region the object lies in, so the layout of the process' memory decided it (indoors up
+  to 90 % of a frame; `mod/XRenderD3D9Traced/README.md`, `XRENDERTRACED_CAPTURE_SHADER`). Where a
+  frame's time goes: `d3d12_FrameLog` and `d3d12_CpuSamples`, the engine's frame profiler for the
+  CPU time by subsystem (`mod/XRenderD3D12/README.md`, statistics).
 - The keys of each scene file are in the head comment of the demo's source (a line starting with
   `#` or `;` is a comment; `exec` keys take console commands separated by `;` or `|`); `--scene`
   picks another scene file, e.g. a second one for DemoLevel.
@@ -205,7 +207,8 @@ instructions and is not committed (git-ignored). The references of the modules a
   the HDR output `d3d12_HDROutput`); per pixel lighting (`d3d12_PixelLighting`); the sun's shadow
   cascades (`d3d12_ShadowCascades`, `d3d12_CascadeInstancing`); ambient occlusion (`d3d12_AO`:
   XeGTAO or CACAO); ray tracing (`d3d12_RTReflections`, `XRENDERD3D12_NORT`); the statistics
-  (`r_Stats`, `r_DisplayInfo`, the engine's frame profiler, `d3d12_GpuTimes`, `d3d12_DumpFrame`);
+  (`r_Stats`, `r_DisplayInfo`, the engine's frame profiler, `d3d12_GpuTimes`, `d3d12_FrameLog`,
+  `d3d12_CpuSamples`, `d3d12_DumpFrame`);
   the water (`d3d12_WaterDebug`, `r_WaterReflections`); the far vegetation sprites and the
   terrain's detail layers. The game's menu gets the renderer's options from the patches in
   `assets/scripts` (HDR, ambient occlusion, ray traced reflections in Advanced Video Options),
