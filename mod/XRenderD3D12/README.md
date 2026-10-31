@@ -34,6 +34,11 @@ reference of its features and console variables.
   weight of the history at the top right), and `d3d12_UpscaleDebug 2` the depth it gets (near
   black, far white, log scale). All of them change at run time, and the frame dump names the
   upscaler, its render size and the frame's jitter.
+  The game's menu gets them from `assets/scripts/05-video-upscaler.patch`: in Video Options under
+  Resolution, Upscaler, None / FSR (auto) / FSR 3.1 / FSR 4 (`d3d12_Upscaler` and
+  `d3d12_UpscaleVersion` 0, 3 or 4), and Upscaler Mode, Native AA to Ultra Performance
+  (`d3d12_UpscaleMode` 0 to 4, greyed out while the upscaler is None); Apply sets them without a
+  restart, and both are greyed out without `d3d12_Upscaler`.
   - With an upscaler, the main view's scene (`BeginScene3D` to `UpscaleScene` before the screen
     effects, `Upscale.cpp`) draws into render-size targets: colour, a depth buffer, motion vectors
     (R16G16, written by the general program's opaque draws and the water) and the depth the
@@ -143,7 +148,7 @@ reference of its features and console variables.
     `XRenderD3D12_ReadFrameHdr10` (exported, for DemoHost's `--video-hdr`) runs the output pass
     in HDR10 into a target of its own and reads it; from its first call the layer is kept
     whatever the display and `d3d12_HDROutput`.
-  - The game's menu gets entries from `assets/scripts/hdr-options.patch` in Advanced Video
+  - The game's menu gets entries from `assets/scripts/02-hdr-options.patch` in Advanced Video
     Options: HDR, None / Soft / ACES / AgX for `r_HDRRendering` 0 or 1 with `d3d12_ToneMap` 1 to 3,
     and next to the Basic Video Options button HDR output, SDR / HDR10 / scRGB for
     `d3d12_HDROutput` (choosing HDR10 or scRGB with HDR at None sets it to Soft); both greyed out
@@ -274,9 +279,9 @@ reference of its features and console variables.
   `ao:` line (with the baked share) and the GPU times an `ao` section. For comparisons, DemoLevel
   with `--scene Demos\DemoLevelPierWalk.ini` and `-DemoArgs '--exec-at 1 "d3d12_AO gtao"'` (or
   `cacao`, and `d3d12_AOApply 0` for the old way) against the same run without it.
-  The game's menu gets it from `assets/scripts/video-ambient-occlusion.patch`: Ambient Occlusion,
+  The game's menu gets it from `assets/scripts/03-video-ambient-occlusion.patch`: Ambient Occlusion,
   None / GTAO / CACAO in Advanced Video Options, in the row of the Basic Video Options button
-  (which moves to the bar of Apply; `video-ray-tracing.patch` moves it up a row), greyed out
+  (which moves to the bar of Apply; `04-video-ray-tracing.patch` moves it up a row), greyed out
   without `d3d12_AO`.
 
 ## Volumetric light
@@ -371,7 +376,7 @@ reference of its features and console variables.
   `d3d12_WaterDebug` 13, 14, 15 the water rays' colour, distance and weight. With the rays off the
   frames are the same as without the code (WaterMove, bit for bit). Check the rays under the debug
   layer with `XRENDERD3D12_DEBUG=2`: GPU based validation turns the water rays' frames black.
-  The game's menu gets it from `assets/scripts/video-ray-tracing.patch`: Ray Traced Reflections,
+  The game's menu gets it from `assets/scripts/04-video-ray-tracing.patch`: Ray Traced Reflections,
   None / Rays / Hybrid in Advanced Video Options; the rows of the page move closer together to make
   room for it, greyed out without `d3d12_RTReflections`.
 
@@ -421,9 +426,11 @@ the first run's behaviour back; the pictures are the same either way.
 - `r_DisplayInfo` is drawn by `XRenderD3D12` in the same way, a panel at the top right in place of
   the engine's block: the game's version and level, the view's camera position, angles and
   distance, the frame rate of the half second with its slowest and fastest frames', the triangles
-  per frame and per second, and the main view's lights (the sun, the others; counted at its
-  `EF_EndEf3D`). The renderer takes
-  the variable over (`TakeDisplayInfo`, an `IConsoleVarSink`): it keeps the console's value at 0, so
+  per frame and per second, the main view's lights (the sun, the others; counted at its
+  `EF_EndEf3D`), the anti-aliasing (the upscaler's: FSR, temporal, also in Native AA; the
+  renderer has no multisampling, so the game's Anti-Aliasing list has None alone), the upscaler
+  with its version and mode, and the 3D scene's size before and after it (`2560x1440 to
+  3840x2160`, or `, native`). The renderer takes the variable over (`TakeDisplayInfo`, an `IConsoleVarSink`): it keeps the console's value at 0, so
   the engine draws nothing, and the value set (the console, `system.cfg`) is the renderer's.
   Typing `r_DisplayInfo` alone therefore prints 0, and the game saves 0 in its `system.cfg`.
 - `d3d12_FrameLog 1` writes a line per frame to `farcry1_testing1/XRenderD3D12_frames.txt` (never

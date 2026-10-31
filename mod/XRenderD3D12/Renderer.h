@@ -546,6 +546,16 @@ public:
   //! d3d12_UpscaleMode, made when they changed; false: none.
   bool UpdateUpscaler();
   void ReleaseUpscaler();
+  //! The main view's upscaler for r_DisplayInfo (UpscaleInfo).
+  struct SUpscaleInfo
+  {
+    const char *szWanted = "none";      //!< d3d12_Upscaler
+    const char *szName = nullptr;       //!< the upscaler and its version, nullptr without one
+    const char *szMode = nullptr;       //!< its d3d12_UpscaleMode
+    int nRenderWidth = 0, nRenderHeight = 0;   //!< the size the 3D scene is drawn at
+    bool bThisFrame = false;            //!< it made this frame's picture (a frame with the 3D scene)
+  };
+  SUpscaleInfo UpscaleInfo() const;
   //! The scene's pixels per pixel of the back buffer while the main view draws into the scene
   //! targets, else 1.
   void GetSceneScale(float &sx, float &sy) const;
