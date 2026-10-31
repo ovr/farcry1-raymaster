@@ -687,7 +687,7 @@ void CD3D12Renderer::DrawObjSprites(list2<CStatObjInst*> *pList, float fMaxViewD
         Inds.push_back((ushort)(nBase + k));
     }
     dc.nTex0 = m_SpriteQuads[nFirst].nSRV;
-    if (m_pFrameDump)
+    if (m_pFrameDump && !m_bRayCaptureWalk)
       fprintf(m_pFrameDump.get(), "    far sprites: %d quads, texture table %d\n", (int)(nEnd - nFirst), dc.nTex0);
     DrawImmediate(Key, dc, D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST, VERTEX_FORMAT_P3F_COL4UB_TEX2F, Verts.data(), (int)Verts.size(), Inds.data(), (int)Inds.size());
     nFirst = nEnd;

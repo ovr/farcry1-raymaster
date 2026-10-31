@@ -256,8 +256,8 @@ void CD3D12Renderer::RegisterVariables()
   iConsole->Register("d3d12_RTShadows", &CV_d3d12_RTShadows, 1, VF_DUMPTODISK,
                      "1: the sun's shadow at the hits of the rays, by a ray towards the sun (the surfaces the sun's shadow falls on)");
   iConsole->Register("d3d12_RTAsync", &CV_d3d12_RTAsync, 1, 0,
-                     "1: the acceleration structures for the rays built on the compute queue, beside the frame's shadows and opaque "
-                     "geometry; 0: in the frame's command list, after the ambient occlusion");
+                     "1: the acceleration structures for the rays built on the compute queue, beside the frame's shadows, opaque "
+                     "geometry and ambient occlusion; 0: in the frame's command list, before the opaque geometry");
   // The HDR pipeline (r_HDRRendering, Hdr.cpp).
   iConsole->Register("d3d12_ToneMap", &CV_d3d12_ToneMap, 1, VF_DUMPTODISK,
                      "With r_HDRRendering, the tone map: 0 clamp, 1 soft shoulder (the game's look up to d3d12_ToneMapKnee, then each channel rolls off to 1), 2 ACES fitted, 3 AgX");

@@ -564,22 +564,18 @@ void CScene::EndEf3D(int nFlags)
       std::vector<SRenderItem> &list = s.Lists[l];
       // The main view's ambient occlusion over what the opaque list drew (its ambient light with
       // d3d12_AOApply 1).
-      // Its draws make the scene for rays (RayTracing.h), built after the ambient occlusion for the
-      // draws after it: those of the water, which alone trace rays.
+      // Its draws make the scene for rays (RayTracing.h), built before it is drawn: the GPU builds it
+      // beside the list until a draw or pass that traces rays (those of the water) waits for it.
       if (l == eRL_Opaque)
       {
         g_pRenderer->BeginAOTarget(s.Items.data(), nItems);
         if (m_nDrawing == 1)
-          g_pRenderer->BeginRayCapture(std::any_of(s.Lists.begin(), s.Lists.end(), [](const std::vector<SRenderItem> &Items)
+          g_pRenderer->BuildRayScene({ list.data(), list.size() }, std::any_of(s.Lists.begin(), s.Lists.end(), [](const std::vector<SRenderItem> &Items)
             { return std::any_of(Items.begin(), Items.end(), [](const SRenderItem &it) { return it.eDrawClass == eDC_Water; }); }));
       }
       g_pRenderer->DrawItems(list.data(), (int)list.size(), l);
       if (l == eRL_Opaque)
-      {
         g_pRenderer->DrawAmbientOcclusion();
-        if (m_nDrawing == 1)
-          g_pRenderer->BuildRayScene();
-      }
     }
   }
   if (m_nDrawing == 1)
