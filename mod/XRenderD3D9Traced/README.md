@@ -213,7 +213,11 @@ reference of the rest.
   `XRENDERTRACED_CAPTURE_SHADER=s_m_fa,templmuzzleflash_auto_fp` (names of shaders or of their
   templates) captures the rest of the first frame in which an object with one of them is handed
   over (`EF_AddEf`, `CLeafBuffer::Render` / `AddRenderElements`), `XRENDERTRACED_CAPTURE_SHADER_MAX`
-  times (default 1). Templates are shared: `templmuzzleflash` is also the flares' template.
+  times (default 1). Templates are shared: `templmuzzleflash` is also the flares' template. The
+  leaf buffer hooks look at the materials only while it is set and has captures left: checking
+  that a material is one takes `VirtualQuery` calls, whose time grows with the size of the memory
+  region the object is in, and done for every `CLeafBuffer::Render` it took up to 90 % of a frame
+  of the time demos (indoors in Training, 17 ms of 18).
   `XRENDERTRACED_DISPLAY=1` writes a line `[display] frame N: ...` (device, back buffer, window
   client area and DPI, `GetWidth` / `GetHeight`) whenever one of them changes, e.g. after
   `r_Width 1280`.

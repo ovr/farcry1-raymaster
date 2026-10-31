@@ -41,6 +41,10 @@ void D3DDraws_Begin(IRenderer *pRenderer);
 //! shader of a chunk or of the material) starts a capture of the rest of that frame, with its D3D
 //! draws, XRENDERTRACED_CAPTURE_SHADER_MAX times at most (1 by default).
 void D3DDraws_CaptureOnShader(IShader *pShader, const char *szWhere);
+//! XRENDERTRACED_CAPTURE_SHADER is set and has captures left: the callers check this before they
+//! look at an object's shaders (checking that a material is one takes VirtualQuery calls, too
+//! slow for every draw call of the engine).
+bool D3DDraws_CapturesOnShader();
 //! XRENDERTRACED_D3D_RT=1: from the first call on, the first SetRenderTarget of every frame to a
 //! surface other than the back buffer writes a line "[d3d rt] frame N: ..." (64 at most, counted
 //! again after each level load), to find the frames that render into textures (shadow maps).

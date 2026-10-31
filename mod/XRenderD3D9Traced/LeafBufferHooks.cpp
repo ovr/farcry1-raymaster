@@ -397,6 +397,8 @@ void CLeafBufferHooks::ReleaseShaders()
 //! XRENDERTRACED_CAPTURE_SHADER: the shaders of the material and of the chunks.
 static void CaptureOnShaders(CLeafBuffer *pLB, IMatInfo *pMaterial, const char *szWhere)
 {
+  if (!D3DDraws_CapturesOnShader())
+    return;
   if (pMaterial && Trace_IsMatInfo(pMaterial))
     D3DDraws_CaptureOnShader(pMaterial->GetShaderItem().m_pShader, szWhere);
   if (!pLB->m_pMats)
