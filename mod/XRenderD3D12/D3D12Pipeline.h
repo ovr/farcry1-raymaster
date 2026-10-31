@@ -90,7 +90,8 @@ struct SPipelineKey
                           //!< for rays in the frame)
   uint8 bCascadeInstances;  //!< nTarget 2: the general program's vertex shader of the full set of the sun's cascades, a slice
                             //!< per instance (XR_CASCADE_INSTANCES: mShadow[i] into slice nShadowTex[i]; Cascades.cpp)
-  uint8 nPad[2];
+  uint8 bDepthOnly;       //!< nTarget 2: no pixel shader (DrawGeometry sets it for a caster that discards nothing)
+  uint8 nPad[1];
 };
 
 //! SPipelineKey::nColorFormat.

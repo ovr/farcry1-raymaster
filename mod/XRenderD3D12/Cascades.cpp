@@ -418,6 +418,7 @@ void CD3D12Renderer::DrawCascadeItems(std::span<const SRenderItem> Items, std::u
     const SRenderItem *pItem;
     Vec3 c;
     float r;
+    bool bDiscards;   //!< alpha tested (SetupShadowCasterDraw): its depth tested after its pixel shader
   };
   std::vector<SPart> Parts;
   Parts.reserve(Items.size());
@@ -441,8 +442,14 @@ void CD3D12Renderer::DrawCascadeItems(std::span<const SRenderItem> Items, std::u
       continue;
     SPart p = { &it, Vec3(0, 0, 0), -1 };
     PartSphere(it, p.c, p.r);
+    p.bDiscards = it.eDrawClass == eDC_AlphaTest || it.eDrawClass == eDC_AlphaTestVColor || GetAlphaRef(it.pShader, it.pRes) > 0;
     Parts.push_back(p);
   }
+  // Those that discard after the others (each kind in the order given, which keeps the draws of a
+  // shader together): the pixels of a part that discards are tested for depth after its pixel
+  // shader, so the fewer reach it the better (the hierarchical depth drops those behind what is
+  // drawn already). The maps are the same in any order: the nearest depth of each texel.
+  std::stable_partition(Parts.begin(), Parts.end(), [](const SPart &p) { return !p.bDiscards; });
 
   // Into each slice that a part's sphere reaches: across the square, not all of it farther from the
   // sun than the slice's range, and its shadow (the sphere drawn out away from the sun) over the

@@ -630,6 +630,9 @@ ComPtr<ID3D12PipelineState> CD3D12Pipeline::CreatePSO(const SPipelineKey &Key)
   // A caster of the sun's cascades into all its slices at once.
   if (bGeneral && bShadowMap && Key.bCascadeInstances)
     Desc.VS = { g_General_CascadeInstances_VS, sizeof(g_General_CascadeInstances_VS) };
+  // A caster's depth alone: the rasterizer's, as with the pixel shader that discards nothing.
+  if (bShadowMap && Key.bDepthOnly)
+    Desc.PS = {};
 
   // Blending: off when neither factor is set.
   D3D12_RENDER_TARGET_BLEND_DESC &Blend = Desc.BlendState.RenderTarget[0];
