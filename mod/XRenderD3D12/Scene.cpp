@@ -570,8 +570,13 @@ void CScene::EndEf3D(int nFlags)
       {
         g_pRenderer->BeginAOTarget(s.Items.data(), nItems);
         if (m_nDrawing == 1)
-          g_pRenderer->BuildRayScene({ list.data(), list.size() }, std::any_of(s.Lists.begin(), s.Lists.end(), [](const std::vector<SRenderItem> &Items)
-            { return std::any_of(Items.begin(), Items.end(), [](const SRenderItem &it) { return it.eDrawClass == eDC_Water; }); }));
+        {
+          // Traced in the lists: the water, and the reflections of cube maps by rays (WantsRaySurfaces).
+          const bool bSurfaces = g_pRenderer->WantsRaySurfaces();
+          g_pRenderer->BuildRayScene({ list.data(), list.size() }, std::any_of(s.Lists.begin(), s.Lists.end(), [&](const std::vector<SRenderItem> &Items)
+            { return std::any_of(Items.begin(), Items.end(), [&](const SRenderItem &it)
+              { return it.eDrawClass == eDC_Water || (bSurfaces && it.pShader && it.pShader->GetProps().eEnvMap != EEnvMap::None); }); }));
+        }
       }
       g_pRenderer->DrawItems(list.data(), (int)list.size(), l);
       if (l == eRL_Opaque)

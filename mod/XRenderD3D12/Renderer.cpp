@@ -254,8 +254,13 @@ void CD3D12Renderer::RegisterVariables()
                      "The kinds of geometry the rays see, bits: 1 static, 2 alpha tested, 4 changing every frame; a draw is seen when "
                      "the mask has all of its kinds (5: no alpha tested geometry)");
   iConsole->Register("d3d12_RTReflections", &CV_d3d12_RTReflections, 0, VF_DUMPTODISK,
-                     "The water's reflection by rays: 0 off, 1 the rays in place of the screen space reflection, 2 both, the screen space "
-                     "reflection where it finds the scene before it passes behind an object and the rays elsewhere (a device with DXR 1.1)");
+                     "The reflections by rays (a device with DXR 1.1): the water's, 0 off, 1 the rays in place of the screen space "
+                     "reflection, 2 both, the screen space reflection where it finds the scene before it passes behind an object and the "
+                     "rays elsewhere; with 1 or 2 also those of the surfaces that reflect a cube map (d3d12_RTReflectionSurfaces)");
+  iConsole->Register("d3d12_RTReflectionSurfaces", &CV_d3d12_RTReflectionSurfaces, 1, VF_DUMPTODISK,
+                     "With d3d12_RTReflections, the surfaces that reflect a cube map (chrome, glass, screens, env cubes) trace rays "
+                     "in its place, the cube where they hit nothing: 0 the cube alone, 1 rays, 2 rays with the hits tinted red and "
+                     "the misses blue");
   iConsole->Register("d3d12_RTSunShadows", &CV_d3d12_RTSunShadows, 0, VF_DUMPTODISK,
                      "The sun's shadow by rays (a device with DXR 1.1, d3d12_DepthPrepass and d3d12_ShadowCascades), towards the "
                      "sun's disc from the surfaces of the depth prepass up to the end of the cascades, in place of the cascades' "
@@ -450,6 +455,8 @@ WIN_HWND CD3D12Renderer::Init(int x,int y,int width,int height,unsigned int cbpp
   {
     iConsole->UnregisterVariable("d3d12_RTReflections", true);
     CV_d3d12_RTReflections = 0;
+    iConsole->UnregisterVariable("d3d12_RTReflectionSurfaces", true);
+    CV_d3d12_RTReflectionSurfaces = 0;
     iConsole->UnregisterVariable("d3d12_RTSunShadows", true);
     CV_d3d12_RTSunShadows = 0;
     iConsole->UnregisterVariable("d3d12_RTGI", true);
