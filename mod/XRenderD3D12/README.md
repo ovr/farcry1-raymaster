@@ -457,6 +457,33 @@ the first run's behaviour back; the pictures are the same either way.
   `XRENDERTRACED_EXEC_LEVEL="d3d12_DumpFrame 1"` and `XRENDERTRACED_EXEC_LEVEL_FRAME=<n - 1>` it
   is the frame that `XRENDERTRACED_CAPTURE=<n>` captures of the original.
 
+## Device removal (DRED)
+
+When the device is removed (a GPU hang, a page fault, a driver reset) the renderer logs the
+reason once (`XRenderD3D12: device removed (...)`) and, with DRED (Device Removed Extended Data,
+the Direct3D 12 runtime's, no debug layer needed), what the GPU did: a summary in the engine's
+log and all of it in `farcry1_testing1/XRenderD3D12_dred.txt` (`D3D12Dred.cpp`; never
+committed). The report has the device's state (hung, fault, page fault), the command lists in
+flight (done with their last section, not begun, or stopped part way with the commands about the
+place) and, for a page fault, its GPU address with the objects whose memory it is in and those
+freed lately, by name: the engine's textures carry their names, the renderer's targets, buffers
+and lists theirs (`NamesObjects`).
+
+- `d3d12_DRED` (read at start-up; `XRENDERD3D12_DRED` before it): `1` (the default) the page
+  faults and the renderer's sections as markers (those of `d3d12_GpuTimes`, in the PIX event
+  runtime's format, the one DRED takes as a breadcrumb's context; PIX shows them too), `2` also
+  every command (`DrawIndexedInstanced`, `Dispatch`, ...), `0` off. At 3840 x 2160 on the Pier,
+  Swamp and River sweeps `1` costs nothing measurable (0 to 0.5 %, frames bit for bit the same),
+  `2` about 1 to 2 %.
+- A page fault does not stop the list that makes it (the GPU goes on to the end and the device is
+  removed after): look at the address, the freed objects and the last section of the frame's
+  last list done.
+- `d3d12_DredTest` tests the report in the next frame: `1` removes the device
+  (`ID3D12Device5::RemoveDevice`; the report has the reason, DRED no lists for a removal the GPU
+  did not cause), `2` writes to the address of a buffer just freed (`XRenderD3D12 DRED test`, in
+  the section `dred test`): a real page fault, the driver resets the GPU (the screen goes black
+  for a second or two). The renderer draws nothing after either; restart the game.
+
 ## Water
 
 - `d3d12_WaterDebug <n>` shows one term of the water's colour instead of the whole: 1 refraction,
