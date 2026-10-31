@@ -23,6 +23,8 @@
 
 #include <wrl/client.h>
 #include <map>
+#include <set>
+#include <tuple>
 #include <vector>
 #include "D3D12Device.h"
 
@@ -47,8 +49,11 @@ public:
   uint64 m_nId;                       //!< never the same for two buffers (FindBuffer's callers tell them apart by it)
   uint32 m_nVersion;                  //!< counts the UpdateBuffer calls
   int m_nRawSRV;                      //!< its raw SRV in the texture table (GetRawSRV), -1 none yet
+  int m_nHeap;                        //!< the buffer heap it is placed in (CD3D12Upload), -1 a committed resource
+  uint64 m_nHeapOffset;               //!< where in that heap
+  uint64 m_nHeapBytes;                //!< the bytes it takes there
 
-  CD3D12Buffer() : m_pResource(NULL), m_nGPU(0), m_nSize(0), m_nId(0), m_nVersion(0), m_nRawSRV(-1) {}
+  CD3D12Buffer() : m_pResource(NULL), m_nGPU(0), m_nSize(0), m_nId(0), m_nVersion(0), m_nRawSRV(-1), m_nHeap(-1), m_nHeapOffset(0), m_nHeapBytes(0) {}
 };
 
 //! A texture in the default heap, in the state PIXEL_SHADER_RESOURCE between uploads (render
@@ -178,6 +183,13 @@ private:
   uint64 GetAllocationSize(ID3D12Resource *pResource) const;
   void AddVideoMemory(ID3D12Resource *pResource);
   void SubVideoMemory(ID3D12Resource *pResource);
+  //! A range of nBytes (a multiple of the placement alignment) in a buffer heap, made when none has
+  //! room; false when the device refuses a heap.
+  bool PlaceRange(uint64 nBytes, int &nHeap, uint64 &nOffset);
+  //! Gives the range back, joined with the free ranges next to it.
+  void FreeRange(int nHeap, uint64 nOffset, uint64 nBytes);
+  //! Gives back the ranges of the released buffers the GPU is done with.
+  void RetireRanges();
   //! A raw SRV of all of pResource (nSize bytes), -1 when refused.
   int CreateRawSRV(ID3D12Resource *pResource, uint64 nSize);
   void FreeRawSRV(int &nSlot);
@@ -208,6 +220,21 @@ private:
 
   // Static buffers
   std::map<D3D12_GPU_VIRTUAL_ADDRESS, CD3D12Buffer *> m_Buffers;   //!< by their GPU address
+  //! The heaps the buffers of up to BUFFER_HEAP_MAX bytes are placed in: a committed resource
+  //! costs the kernel a few hundred microseconds to make and as much to free (the terrain's index
+  //! buffers change with its detail, a few every frame outdoors), a placed one hardly anything.
+  static constexpr uint64 BUFFER_HEAP_SIZE = 64ull << 20;
+  static constexpr uint64 BUFFER_HEAP_MAX = 8ull << 20;
+  std::vector<Microsoft::WRL::ComPtr<ID3D12Heap>> m_BufferHeaps;
+  std::map<std::pair<int, uint64>, uint64> m_FreeRanges;     //!< (heap, offset) -> bytes of the free ranges
+  std::set<std::tuple<uint64, int, uint64>> m_FreeBySize;    //!< the same as (bytes, heap, offset), for the best fit
+  //! The ranges of the released buffers, free once the GPU passed nFence.
+  struct SPendingRange
+  {
+    int nHeap;
+    uint64 nOffset, nBytes, nFence;
+  };
+  std::vector<SPendingRange> m_PendingRanges;
   uint64 m_nNextBufferId = 1;
   int m_nRawSRVs = 0;                 //!< GetRawSRV's views alive
 };

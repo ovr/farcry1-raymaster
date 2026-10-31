@@ -20,6 +20,11 @@
 //	(their draws' states and the shader resource states of the rays),
 //	textures in PIXEL_SHADER_RESOURCE.
 //
+//	Static buffers: placed resources in heaps of 64 MB (best fit, the free
+//	ranges joined again), a committed resource each above 8 MB. A released
+//	buffer's range is free again once the GPU passed the frame that last
+//	used it.
+//
 //////////////////////////////////////////////////////////////////////
 
 #include "StdAfx.h"
@@ -184,6 +189,10 @@ void CD3D12Upload::Shutdown()
   m_nCurBlock = -1;
   m_nCurOffset = 0;
   m_Buffers.clear();
+  m_PendingRanges.clear();
+  m_FreeRanges.clear();
+  m_FreeBySize.clear();
+  m_BufferHeaps.clear();
   m_nRawSRVs = 0;
   m_pDevice = nullptr;
 }
@@ -497,17 +506,106 @@ uint64 CD3D12Upload::GetVideoMemory() const
 //////////////////////////////////////////////////////////////////////////
 // Buffers
 
+bool CD3D12Upload::PlaceRange(uint64 nBytes, int &nHeap, uint64 &nOffset)
+{
+  RetireRanges();
+  auto it = m_FreeBySize.lower_bound({ nBytes, INT_MIN, 0 });
+  if (it == m_FreeBySize.end())
+  {
+    D3D12_HEAP_DESC Desc = {};
+    Desc.SizeInBytes = BUFFER_HEAP_SIZE;
+    Desc.Properties = HeapProps(D3D12_HEAP_TYPE_DEFAULT);
+    Desc.Alignment = D3D12_DEFAULT_RESOURCE_PLACEMENT_ALIGNMENT;
+    Desc.Flags = D3D12_HEAP_FLAG_ALLOW_ONLY_BUFFERS;
+    ComPtr<ID3D12Heap> pHeap;
+    if (FAILED(m_pDevice->CreateHeap(&Desc, IID_PPV_ARGS(&pHeap))))
+      return false;
+    m_BufferHeaps.push_back(pHeap);
+    FreeRange((int)m_BufferHeaps.size() - 1, 0, BUFFER_HEAP_SIZE);
+    it = m_FreeBySize.lower_bound({ nBytes, INT_MIN, 0 });
+    if (it == m_FreeBySize.end())
+      return false;
+  }
+  const auto [nFree, nFreeHeap, nFreeOffset] = *it;
+  m_FreeBySize.erase(it);
+  m_FreeRanges.erase({ nFreeHeap, nFreeOffset });
+  nHeap = nFreeHeap;
+  nOffset = nFreeOffset;
+  if (nFree > nBytes)
+  {
+    m_FreeRanges[{ nHeap, nOffset + nBytes }] = nFree - nBytes;
+    m_FreeBySize.insert({ nFree - nBytes, nHeap, nOffset + nBytes });
+  }
+  return true;
+}
+
+void CD3D12Upload::FreeRange(int nHeap, uint64 nOffset, uint64 nBytes)
+{
+  auto itNext = m_FreeRanges.lower_bound({ nHeap, nOffset });
+  if (itNext != m_FreeRanges.end() && itNext->first.first == nHeap && itNext->first.second == nOffset + nBytes)
+  {
+    nBytes += itNext->second;
+    m_FreeBySize.erase({ itNext->second, nHeap, itNext->first.second });
+    itNext = m_FreeRanges.erase(itNext);
+  }
+  if (itNext != m_FreeRanges.begin())
+  {
+    auto itPrev = std::prev(itNext);
+    if (itPrev->first.first == nHeap && itPrev->first.second + itPrev->second == nOffset)
+    {
+      nOffset = itPrev->first.second;
+      nBytes += itPrev->second;
+      m_FreeBySize.erase({ itPrev->second, nHeap, nOffset });
+      m_FreeRanges.erase(itPrev);
+    }
+  }
+  m_FreeRanges[{ nHeap, nOffset }] = nBytes;
+  m_FreeBySize.insert({ nBytes, nHeap, nOffset });
+}
+
+void CD3D12Upload::RetireRanges()
+{
+  if (m_PendingRanges.empty() || !g_pRenderer->m_pDevice)
+    return;
+  const uint64 nDone = g_pRenderer->m_pDevice->GetCompletedFence();
+  std::erase_if(m_PendingRanges, [&](const SPendingRange &r)
+  {
+    if (r.nFence > nDone)
+      return false;
+    FreeRange(r.nHeap, r.nOffset, r.nBytes);
+    return true;
+  });
+}
+
 CD3D12Buffer *CD3D12Upload::CreateBuffer(const void *pData, uint32 nSize)
 {
   if (!m_pDevice)
     return nullptr;
-  const D3D12_HEAP_PROPERTIES Heap = HeapProps(D3D12_HEAP_TYPE_DEFAULT);
   // Whole words: a raw view (GetRawSRV) reaches the last bytes.
   const D3D12_RESOURCE_DESC Desc = BufferDesc(AlignUp(std::max<uint64>(nSize, 16), 4));
   ComPtr<ID3D12Resource> pResource;
-  // Buffers start in COMMON whatever the initial state says.
-  HRESULT hr = m_pDevice->CreateCommittedResource(&Heap, D3D12_HEAP_FLAG_NONE, &Desc, D3D12_RESOURCE_STATE_COMMON,
-    nullptr, IID_PPV_ARGS(&pResource));
+  // Placed in a buffer heap when it fits, else committed; buffers start in COMMON whatever the
+  // initial state says.
+  int nHeap = -1;
+  uint64 nHeapOffset = 0;
+  const uint64 nHeapBytes = AlignUp(Desc.Width, (uint64)D3D12_DEFAULT_RESOURCE_PLACEMENT_ALIGNMENT);
+  HRESULT hr = E_FAIL;
+  if (nHeapBytes <= BUFFER_HEAP_MAX && PlaceRange(nHeapBytes, nHeap, nHeapOffset))
+  {
+    hr = m_pDevice->CreatePlacedResource(m_BufferHeaps[nHeap].Get(), nHeapOffset, &Desc, D3D12_RESOURCE_STATE_COMMON, nullptr,
+      IID_PPV_ARGS(&pResource));
+    if (FAILED(hr))
+    {
+      FreeRange(nHeap, nHeapOffset, nHeapBytes);
+      nHeap = -1;
+    }
+  }
+  if (nHeap < 0)
+  {
+    const D3D12_HEAP_PROPERTIES Heap = HeapProps(D3D12_HEAP_TYPE_DEFAULT);
+    hr = m_pDevice->CreateCommittedResource(&Heap, D3D12_HEAP_FLAG_NONE, &Desc, D3D12_RESOURCE_STATE_COMMON, nullptr,
+      IID_PPV_ARGS(&pResource));
+  }
   if (FAILED(hr))
   {
     iLog->LogError("XRenderD3D12: CreateCommittedResource (buffer, %u bytes) failed (0x%08X)", nSize, (unsigned)hr);
@@ -530,6 +628,9 @@ CD3D12Buffer *CD3D12Upload::CreateBuffer(const void *pData, uint32 nSize)
   pBuf->m_nGPU = pBuf->m_pResource->GetGPUVirtualAddress();
   pBuf->m_nSize = nSize;
   pBuf->m_nId = m_nNextBufferId++;
+  pBuf->m_nHeap = nHeap;
+  pBuf->m_nHeapOffset = nHeapOffset;
+  pBuf->m_nHeapBytes = nHeap >= 0 ? nHeapBytes : 0;
   m_Buffers[pBuf->m_nGPU] = pBuf;
   AddVideoMemory(pBuf->m_pResource);
   return pBuf;
@@ -562,6 +663,8 @@ void CD3D12Upload::ReleaseBuffer(CD3D12Buffer *pBuf)
     SubVideoMemory(pBuf->m_pResource);
     g_pRenderer->m_pDevice->DeferredRelease(pBuf->m_pResource);
   }
+  if (pBuf->m_nHeap >= 0)
+    m_PendingRanges.push_back({ pBuf->m_nHeap, pBuf->m_nHeapOffset, pBuf->m_nHeapBytes, g_pRenderer->m_pDevice->GetFrameFence() });
   auto it = m_Buffers.find(pBuf->m_nGPU);
   if (it != m_Buffers.end() && it->second == pBuf)
     m_Buffers.erase(it);
