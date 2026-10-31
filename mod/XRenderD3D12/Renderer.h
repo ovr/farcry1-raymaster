@@ -1340,6 +1340,8 @@ public:
   float CV_r_DetailScale = 8;         //!< metres per repeat of the detail texture
   float CV_r_DetailDistance = 4;      //!< the terrain's detail layers fade out from here to twice this far
   int CV_d3d12_debug = 0;             //!< debug layer, 1 with GPU based validation, 2 without (also XRENDERD3D12_DEBUG); only read at Init
+  int CV_d3d12_DRED = 1;              //!< DRED, 1 the page faults and our markers, 2 and every command (XRENDERD3D12_DRED before it); only read at Init
+  int CV_d3d12_DredTest = 0;          //!< 1 removes the device, 2 makes a GPU page fault (CD3D12Device::DredTest), then 0
   int CV_d3d12_DumpFrame = 0;         //!< non-zero: the next frame's 3D draws go to XRenderD3D12_frame.txt, then 0
   ICVar *m_pVolumetricFog = nullptr;  //!< r_VolumetricFog, looked up on first use
   ICVar *m_pScopeLens = nullptr;      //!< r_ScopeLens_fx, looked up on first use

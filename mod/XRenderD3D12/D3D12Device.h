@@ -71,8 +71,10 @@ public:
   CD3D12Device &operator=(const CD3D12Device &) = delete;
 
   //! Creates the device and a swap chain for hWnd. nDebug: 1 the debug layer and GPU based
-  //! validation, 2 the debug layer alone.
-  bool Init(HWND hWnd, int nWidth, int nHeight, int nDebug);
+  //! validation, 2 the debug layer alone. nDred: DRED (what the GPU did when the device is
+  //! removed, ReportDeviceRemoved), 1 the page faults and our markers (GpuSection), 2 the page
+  //! faults and every command.
+  bool Init(HWND hWnd, int nWidth, int nHeight, int nDebug, int nDred);
   //! Waits for the GPU and releases everything.
   void Shutdown();
   //! New back buffer size (waits for the GPU).
@@ -319,6 +321,24 @@ public:
   //! log loses its last lines when the game ends a time demo).
   void LogDebugMessages();
 
+  //! Once, when the device is removed (hr: what failed, from szWhere): the reason to the
+  //! engine's log, and with DRED what the GPU did, a summary to the log and all of it to
+  //! XRenderD3D12_dred.txt: the command lists in flight (done, not begun, or stopped at a
+  //! command, with our last marker), the page fault's address and the objects there, existing
+  //! and freed (D3D12Dred.cpp). Nothing while the device is not removed.
+  void ReportDeviceRemoved(HRESULT hr, const char *szWhere);
+  //! DRED's level (Init's nDred; 0 off).
+  int GetDred() const { return m_nDred; }
+  //! The objects are named for DRED's or the debug layer's reports (SetName costs time).
+  bool NamesObjects() const { return m_nDred != 0 || m_pInfoQueue; }
+  //! With DRED: szSection (a string with static storage) as a marker in pList (in the PIX event
+  //! runtime's format, which PIX shows too), DRED's breadcrumb context; nothing without.
+  void DredMarker(ID3D12GraphicsCommandList *pList, const char *szSection);
+  //! d3d12_DredTest, in a frame: 1 removes the device (ID3D12Device5::RemoveDevice), 2 makes a
+  //! GPU page fault (a write to the address of a buffer just freed, named "XRenderD3D12 DRED
+  //! test", in the section "dred test"; the driver resets the GPU).
+  void DredTest(int nMode);
+
   //! GPU timing (d3d12_GpuTimes): while on, the GPU time of each frame is split into sections,
   //! each from its GpuSection call to the next one or the end of the frame (the first one of a
   //! frame is "other"; from a FlushFrame until its second list runs it is "flush", the GPU waiting
@@ -397,6 +417,10 @@ private:
   ComPtr<IDXGISwapChain3> m_pSwapChain;
   ComPtr<ID3D12InfoQueue> m_pInfoQueue;
   std::unique_ptr<FILE, int (*)(FILE *)> m_pDebugLog{ nullptr, &fclose };  //!< XRenderD3D12_debug.txt, with the debug layer
+  int m_nDred = 0;                                  //!< GetDred
+  bool m_bRemovedReported = false;                  //!< ReportDeviceRemoved done
+  const char *m_szDredSection = nullptr;            //!< the frame list's last marker (DredMarker)
+  std::vector<std::pair<const char *, std::vector<uint64>>> m_DredMarkers;   //!< the markers' encoded blobs (DredMarker)
   bool m_bTearing = false;
   HWND m_hWnd = nullptr;
 

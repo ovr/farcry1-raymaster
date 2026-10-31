@@ -48,6 +48,7 @@ set(XRENDERD3D12_SOURCES
     CpuSampler.cpp
     D3D12Device.h
     D3D12Device.cpp
+    D3D12Dred.cpp
     D3D12Upload.h
     D3D12Upload.cpp
     D3D12Descriptors.h

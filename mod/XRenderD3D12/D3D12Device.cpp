@@ -64,8 +64,30 @@ CD3D12Device::~CD3D12Device()
   Shutdown();
 }
 
-bool CD3D12Device::Init(HWND hWnd, int nWidth, int nHeight, int nDebug)
+bool CD3D12Device::Init(HWND hWnd, int nWidth, int nHeight, int nDebug, int nDred)
 {
+  // DRED is the runtime's (no debug layer needed); set before the device is made.
+  m_nDred = 0;
+  if (nDred)
+  {
+    ComPtr<ID3D12DeviceRemovedExtendedDataSettings1> pDred;
+    if (SUCCEEDED(D3D12GetDebugInterface(IID_PPV_ARGS(&pDred))))
+    {
+      pDred->SetAutoBreadcrumbsEnablement(D3D12_DRED_ENABLEMENT_FORCED_ON);
+      pDred->SetPageFaultEnablement(D3D12_DRED_ENABLEMENT_FORCED_ON);
+      pDred->SetBreadcrumbContextEnablement(D3D12_DRED_ENABLEMENT_FORCED_ON);
+      // Level 1: only the markers are breadcrumbs, not every command (cheaper).
+      ComPtr<ID3D12DeviceRemovedExtendedDataSettings2> pDred2;
+      const bool bMarkers = nDred == 1 && SUCCEEDED(pDred.As(&pDred2));
+      if (bMarkers)
+        pDred2->UseMarkersOnlyAutoBreadcrumbs(TRUE);
+      m_nDred = bMarkers ? 1 : 2;
+      iLog->Log("XRenderD3D12: DRED on (page faults, breadcrumbs of %s)", bMarkers ? "the markers" : "every command");
+    }
+    else
+      iLog->LogWarning("XRenderD3D12: no DRED settings (ID3D12DeviceRemovedExtendedDataSettings1)");
+  }
+
   const bool bDebug = nDebug != 0;
   UINT nFactoryFlags = 0;
   if (bDebug)
@@ -145,6 +167,7 @@ bool CD3D12Device::Init(HWND hWnd, int nWidth, int nHeight, int nDebug)
   QueueDesc.Type = D3D12_COMMAND_LIST_TYPE_DIRECT;
   if (Failed(m_pDevice->CreateCommandQueue(&QueueDesc, IID_PPV_ARGS(&m_pQueue)), "CreateCommandQueue"))
     return false;
+  m_pQueue->SetName(L"XRenderD3D12 frame");
 
   ComPtr<IDXGIFactory5> pFactory5;
   if (SUCCEEDED(m_pFactory.As(&pFactory5)))
@@ -204,6 +227,7 @@ bool CD3D12Device::Init(HWND hWnd, int nWidth, int nHeight, int nDebug)
   }
   if (Failed(m_pDevice->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, m_pAllocators[0].Get(), nullptr, IID_PPV_ARGS(&m_pCmdList)), "CreateCommandList"))
     return false;
+  m_pCmdList->SetName(L"XRenderD3D12 frame");
   m_pCmdList->Close();
   if (Failed(m_pDevice->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&m_pFence)), "CreateFence") ||
       Failed(m_pDevice->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&m_pFlushFence)), "CreateFence (flush)"))
@@ -328,6 +352,7 @@ bool CD3D12Device::CreateSwapChainBuffers()
   if (Failed(m_pDevice->CreateCommittedResource(&Heap, D3D12_HEAP_FLAG_NONE, &Desc, D3D12_RESOURCE_STATE_DEPTH_WRITE, &Clear, IID_PPV_ARGS(&m_pDepth)),
     "CreateCommittedResource (depth)"))
     return false;
+  m_pDepth->SetName(L"XRenderD3D12 depth");
   D3D12_DEPTH_STENCIL_VIEW_DESC View = {};
   View.Format = D3D12_DEPTH_FORMAT;
   View.ViewDimension = D3D12_DSV_DIMENSION_TEXTURE2D;
@@ -440,7 +465,10 @@ void CD3D12Device::WaitForValue(ID3D12Fence *pFence, uint64 nValue)
     return;
   pFence->SetEventOnCompletion(nValue, m_hFenceEvent);
   if (WaitForSingleObject(m_hFenceEvent, 10000) == WAIT_TIMEOUT)
+  {
     iLog->LogError("XRenderD3D12: the GPU did not finish within 10 s (device removed reason 0x%08X)", (unsigned)m_pDevice->GetDeviceRemovedReason());
+    ReportDeviceRemoved(S_OK, "a wait for the GPU");
+  }
 }
 
 void CD3D12Device::WaitForGPU()
@@ -851,6 +879,11 @@ bool CD3D12Device::SetSceneSize(int nWidth, int nHeight, DXGI_FORMAT ColorFormat
     ReleaseSceneTargets();
     return false;
   }
+  m_pSceneColor->SetName(L"XRenderD3D12 scene colour");
+  m_pSceneVelocity->SetName(L"XRenderD3D12 scene motion vectors");
+  m_pUpscaleDepth->SetName(L"XRenderD3D12 upscaler depth");
+  m_pSceneDepth->SetName(L"XRenderD3D12 scene depth");
+  m_pSceneOutput->SetName(L"XRenderD3D12 upscaler output");
   m_pDevice->CreateRenderTargetView(m_pSceneColor.Get(), nullptr, SceneRTV(0));
   m_pDevice->CreateRenderTargetView(m_pSceneVelocity.Get(), nullptr, SceneRTV(1));
   m_pDevice->CreateRenderTargetView(m_pUpscaleDepth.Get(), nullptr, SceneRTV(2));
@@ -942,6 +975,7 @@ bool CD3D12Device::SetHdrTarget(bool bOn)
   if (Failed(m_pDevice->CreateCommittedResource(&Heap, D3D12_HEAP_FLAG_NONE, &Desc, SCENE_READ, &Clear, IID_PPV_ARGS(&m_pHdrColor)),
     "CreateCommittedResource (HDR colour)"))
     return false;
+  m_pHdrColor->SetName(L"XRenderD3D12 HDR colour");
   m_pDevice->CreateRenderTargetView(m_pHdrColor.Get(), nullptr, SceneRTV(3));
   return true;
 }
@@ -996,6 +1030,8 @@ bool CD3D12Device::CreateLayer()
     m_pFrame.Reset();
     return false;
   }
+  m_pFrame->SetName(L"XRenderD3D12 frame target");
+  m_pHighlight->SetName(L"XRenderD3D12 highlight layer");
   m_pDevice->CreateRenderTargetView(m_pFrame.Get(), nullptr, SceneRTV(4));
   m_pDevice->CreateRenderTargetView(m_pHighlight.Get(), nullptr, SceneRTV(5));
   m_FrameState = D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE;
@@ -1220,6 +1256,7 @@ void CD3D12Device::OpenCmdList()
   m_pAllocators[m_nFrameSlot]->Reset();
   m_pCmdList->Reset(m_pAllocators[m_nFrameSlot].Get(), nullptr);
   m_nStateEpoch++;
+  m_szDredSection = nullptr;
 }
 
 void CD3D12Device::BeginFrame()
@@ -1318,17 +1355,8 @@ void CD3D12Device::EndFrame(bool bPresent, bool bVSync)
     hr = m_pSwapChain->Present(bVSync ? 1 : 0, !bVSync && m_bTearing ? DXGI_PRESENT_ALLOW_TEARING : 0);
     m_fPresentMs = NowMs() - fStart;
   }
-  // A removed device, once, whether the frame was presented or not (a demo's frames need not be).
-  static bool s_bLogged = false;
-  if (!s_bLogged)
-  {
-    const HRESULT hrReason = m_pDevice->GetDeviceRemovedReason();
-    if (hr == DXGI_ERROR_DEVICE_REMOVED || hr == DXGI_ERROR_DEVICE_RESET || FAILED(hrReason))
-    {
-      s_bLogged = true;
-      iLog->LogError("XRenderD3D12: device removed (0x%08X, reason 0x%08X)", (unsigned)hr, (unsigned)hrReason);
-    }
-  }
+  // A removed device, whether the frame was presented or not (a demo's frames need not be).
+  ReportDeviceRemoved(hr, "the frame's end");
   m_nFrameFence[m_nFrameSlot] = Signal();
   m_nFrameSlot = (m_nFrameSlot + 1) % D3D12_FRAMES;
   m_bInFrame = false;
@@ -1346,6 +1374,8 @@ ID3D12GraphicsCommandList4 *CD3D12Device::BeginAsyncCompute(const char *szSectio
     m_bComputeAllocatorReset = true;
   }
   m_pComputeList->Reset(m_pComputeAllocators[m_nFrameSlot].Get(), nullptr);
+  if (m_nDred && szSection)
+    DredMarker(m_pComputeList.Get(), szSection);
   int &n = m_nComputeLists[m_nFrameSlot];
   m_bComputeTimed = m_bGpuTiming && m_pComputeTimestamps && n < COMPUTE_LISTS;
   if (m_bComputeTimed)
@@ -1416,6 +1446,11 @@ void CD3D12Device::FlushFrame()
 
 void CD3D12Device::GpuSection(const char *szSection)
 {
+  if (m_nDred && m_bInFrame && szSection != m_szDredSection)
+  {
+    DredMarker(m_pCmdList.Get(), szSection);
+    m_szDredSection = szSection;
+  }
   int &n = m_nGpuMarks[m_nFrameSlot];
   if (!m_bInFrame || !m_bGpuTiming || !m_pTimestamps || n >= GPU_MARKS - 1 || (n > 0 && m_GpuSections[m_nFrameSlot][n - 1] == szSection))
     return;

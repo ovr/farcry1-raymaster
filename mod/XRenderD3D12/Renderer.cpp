@@ -42,6 +42,16 @@ int DebugEnv()
   return strcmp(szValue, "2") == 0 ? 2 : 1;
 }
 
+//! XRENDERD3D12_DRED: 0, 1 or 2 (d3d12_DRED's values); -1 when it is not set.
+int DredEnv()
+{
+  char szValue[16];
+  const DWORD nLen = GetEnvironmentVariableA("XRENDERD3D12_DRED", szValue, sizeof(szValue));
+  if (!nLen || nLen >= sizeof(szValue))
+    return -1;
+  return std::clamp(atoi(szValue), 0, 2);
+}
+
 int GetCVarInt(const char *szName, int nDefault)
 {
   ICVar *pVar = iConsole ? iConsole->GetCVar(szName) : nullptr;
@@ -139,6 +149,12 @@ void CD3D12Renderer::RegisterVariables()
   RegisterOtherVariables();
   TakeDisplayInfo();
   iConsole->Register("d3d12_Debug", &CV_d3d12_debug, 0, VF_DUMPTODISK, "Direct3D 12 debug layer (read at start-up): 1 with GPU based validation, 2 without it");
+  iConsole->Register("d3d12_DRED", &CV_d3d12_DRED, 1, VF_DUMPTODISK,
+                     "DRED, what the GPU did when the device is removed, in XRenderD3D12_dred.txt (read at start-up): 0 off, "
+                     "1 the page faults and the renderer's sections, 2 also every command (slower)");
+  iConsole->Register("d3d12_DredTest", &CV_d3d12_DredTest, 0, 0,
+                     "Tests DRED's report in the next frame: 1 removes the device, 2 makes a GPU page fault (the driver resets the GPU); "
+                     "the renderer draws nothing after either");
   iConsole->Register("d3d12_DumpFrame", &CV_d3d12_DumpFrame, 0, 0, "Writes the render items and draws of the next frame to XRenderD3D12_frame.txt");
   iConsole->Register("d3d12_WaterDebug", &CV_d3d12_WaterDebug, 0, 0,
                      "Water surfaces show one term: 1 refraction, 2 reflection, 3 water thickness (0-2 m: black-white), 4 normal, 5 screen space reflection hits, 6 their colour, 7 the planar reflection, "
@@ -377,6 +393,8 @@ WIN_HWND CD3D12Renderer::Init(int x,int y,int width,int height,unsigned int cbpp
   }
 
   const int nDebug = CV_d3d12_debug != 0 ? (CV_d3d12_debug == 2 ? 2 : 1) : DebugEnv();
+  const int nDredEnv = DredEnv();
+  const int nDred = nDredEnv >= 0 ? nDredEnv : std::clamp(CV_d3d12_DRED, 0, 2);
   m_pDevice = std::make_unique<CD3D12Device>();
   m_pDescriptors = std::make_unique<CD3D12Descriptors>();
   m_pUpload = std::make_unique<CD3D12Upload>();
@@ -387,7 +405,7 @@ WIN_HWND CD3D12Renderer::Init(int x,int y,int width,int height,unsigned int cbpp
   m_pShaders = std::make_unique<CShaderManager>();
   m_pScene = std::make_unique<CScene>();
   StartWaterTextures();
-  if (!m_pDevice->Init(m_hWnd, m_nWidth, m_nHeight, nDebug)
+  if (!m_pDevice->Init(m_hWnd, m_nWidth, m_nHeight, nDebug, nDred)
     || !m_pDescriptors->Init(m_pDevice->GetDevice())
     || !m_pUpload->Init(m_pDevice->GetDevice(), nFrameRingSize)
     || !m_pPipeline->Init(m_pDevice->GetDevice())
@@ -807,6 +825,11 @@ void CD3D12Renderer::Update (void)
   // Shown only when swapping is on: the hidden frames of a level load are drawn but never seen.
   if (m_bSwapBuffers)
     DrawHdrOutput();
+  if (CV_d3d12_DredTest)
+  {
+    m_pDevice->DredTest(CV_d3d12_DredTest);
+    CV_d3d12_DredTest = 0;
+  }
   m_pDevice->EndFrame(m_bSwapBuffers, m_bVSync || CV_r_vsync != 0);
   m_pPipeline->SaveKeys();
   // The game asks for the triangles after the frame is shown (the time demo's Tri/Frame).

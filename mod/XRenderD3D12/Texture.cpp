@@ -665,6 +665,13 @@ bool CTextureManager::Upload(CTexture *pTex, const SImage &Image)
                                                Image.bArray ? Image.nFaces : 1);
   if (!pGPU)
     return false;
+  // The engine's name, for DRED's page faults and the debug layer.
+  if (g_pRenderer->m_pDevice->NamesObjects() && !pTex->m_Name.empty())
+  {
+    wchar_t szName[MAX_PATH];
+    if (MultiByteToWideChar(CP_ACP, 0, pTex->m_Name.c_str(), -1, szName, MAX_PATH) > 0)
+      pGPU->m_pResource->SetName(szName);
+  }
   if (pTex->m_pGPU)
     pUpload->ReleaseTexture(pTex->m_pGPU);
   pTex->m_pGPU = pGPU;

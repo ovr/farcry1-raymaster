@@ -393,6 +393,7 @@ bool CD3D12Upload::OpenBatch()
       return false;
     }
   }
+  g_pRenderer->m_pDevice->DredMarker(m_pCmdList.Get(), "uploads");
   Allocator.nFence = UINT64_MAX;      // until the batch is executed
   m_nOpenAllocator = nAllocator;
   m_bOpen = true;
@@ -631,6 +632,12 @@ HRESULT CD3D12Upload::CreatePooled(int nPool, const D3D12_RESOURCE_DESC &Desc, D
     nHeapOffset = nHeapBytes = 0;
     const D3D12_HEAP_PROPERTIES Heap = HeapProps(D3D12_HEAP_TYPE_DEFAULT);
     hr = m_pDevice->CreateCommittedResource(&Heap, D3D12_HEAP_FLAG_NONE, &Desc, eState, pClear, IID_PPV_ARGS(ppResource));
+  }
+  // A name for DRED's page faults (the textures get theirs, CTextureManager::Upload).
+  if (SUCCEEDED(hr) && g_pRenderer->m_pDevice->NamesObjects())
+  {
+    static const wchar_t *const s_szNames[POOL_NUM] = { L"XRenderD3D12 buffer", L"XRenderD3D12 texture", L"XRenderD3D12 depth target" };
+    (*ppResource)->SetName(s_szNames[nPool]);
   }
   return hr;
 }
@@ -911,6 +918,12 @@ CD3D12Texture *CD3D12Upload::CreateRenderTarget(int nWidth, int nHeight, DXGI_FO
     iLog->LogError("XRenderD3D12: CreateCommittedResource (render target %dx%d, format %d) failed (0x%08X)",
       nWidth, nHeight, (int)Format, (unsigned)hr);
     return nullptr;
+  }
+  if (g_pRenderer->m_pDevice->NamesObjects())
+  {
+    wchar_t szName[64];
+    swprintf_s(szName, L"XRenderD3D12 render target %dx%d, format %d", nWidth, nHeight, (int)Format);
+    pResource->SetName(szName);
   }
   const D3D12_CPU_DESCRIPTOR_HANDLE RTV = g_pRenderer->m_pDescriptors->AllocRTV();
   if (!RTV.ptr)
