@@ -55,7 +55,7 @@ public:
       FreeLibrary(m_hLoader);
   }
 
-  bool Create(ID3D12Device *pDevice, int nWidth, int nHeight, bool bDebug) override
+  bool Create(ID3D12Device *pDevice, int nWidth, int nHeight, bool bDebug, int nVersion) override
   {
     const std::wstring Loader = GetModuleFolder() + L"amd_fidelityfx_loader_dx12.dll";
     m_hLoader = LoadLibraryExW(Loader.c_str(), nullptr, LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR | LOAD_LIBRARY_SEARCH_DEFAULT_DIRS);
@@ -87,6 +87,52 @@ public:
     Version.version = FFX_UPSCALER_VERSION;
     Desc.header.pNext = &Backend.header;
     Backend.header.pNext = &Version.header;
+    // A major version asked for: the newest of it among the upscaler's versions (their names are
+    // "4.1.2", "3.1.5", ...).
+    ffxOverrideVersion Override = {};
+    if (nVersion > 0)
+    {
+      uint64_t nCount = 0;
+      ffxQueryDescGetVersions Versions = {};
+      Versions.header.type = FFX_API_QUERY_DESC_TYPE_GET_VERSIONS;
+      Versions.createDescType = FFX_API_CREATE_CONTEXT_DESC_TYPE_UPSCALE;
+      Versions.device = pDevice;
+      Versions.outputCount = &nCount;
+      std::vector<uint64_t> Ids;
+      std::vector<const char *> Names;
+      if (m_Ffx.Query(nullptr, &Versions.header) == FFX_API_RETURN_OK && nCount > 0)
+      {
+        Ids.resize((size_t)nCount);
+        Names.resize((size_t)nCount);
+        Versions.versionIds = Ids.data();
+        Versions.versionNames = Names.data();
+        if (m_Ffx.Query(nullptr, &Versions.header) != FFX_API_RETURN_OK)
+          nCount = 0;
+      }
+      std::string List;
+      int nBest[2] = { -1, -1 };
+      for (size_t i = 0; i < (size_t)nCount; i++)
+      {
+        const char *szName = Names[i] ? Names[i] : "";
+        List += (i ? ", " : "") + std::string(szName);
+        int nMajor = 0, nMinor = 0, nPatch = 0;
+        if (sscanf_s(szName, "%d.%d.%d", &nMajor, &nMinor, &nPatch) < 1 || nMajor != nVersion)
+          continue;
+        if (nMinor > nBest[0] || (nMinor == nBest[0] && nPatch > nBest[1]))
+        {
+          nBest[0] = nMinor;
+          nBest[1] = nPatch;
+          Override.versionId = Ids[i];
+        }
+      }
+      if (Override.versionId)
+      {
+        Override.header.type = FFX_API_DESC_TYPE_OVERRIDE_VERSION;
+        Version.header.pNext = &Override.header;
+      }
+      else
+        iLog->LogWarning("XRenderD3D12: AMD FSR: no version %d (%s); the default", nVersion, List.empty() ? "none listed" : List.c_str());
+    }
     if (const ffxReturnCode_t nCode = m_Ffx.CreateContext(&m_Context, &Desc.header, nullptr); nCode != FFX_API_RETURN_OK)
     {
       iLog->LogWarning("XRenderD3D12: AMD FSR: no upscaling context (error %u)", (unsigned)nCode);

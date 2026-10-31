@@ -203,8 +203,10 @@ void CD3D12Renderer::RegisterVariables()
                      "3 Performance (1/2), 4 Ultra Performance (1/3)");
   iConsole->Register("d3d12_UpscaleSharpness", &CV_d3d12_UpscaleSharpness, 0.5f, VF_DUMPTODISK, "The upscaler's sharpening, 0 (none) to 1");
   iConsole->Register("d3d12_UpscaleDebug", &CV_d3d12_UpscaleDebug, 0, 0, "1: the upscaler's debug view; 2: the depth it gets (near black, far white)");
+  iConsole->Register("d3d12_UpscaleVersion", &CV_d3d12_UpscaleVersion, 0, VF_DUMPTODISK,
+                     "The upscaler's major version: 0 its own choice for the GPU, 3 or 4 (AMD FSR 3.1 or FSR 4)");
   // The ambient occlusion (AmbientOcclusion.cpp).
-  iConsole->CreateVariable("d3d12_AO", "none", VF_DUMPTODISK,
+  iConsole->CreateVariable("d3d12_AO", "cacao", VF_DUMPTODISK,
                            "Screen space ambient occlusion of the 3D scene: none, gtao (Intel XeGTAO) or cacao (AMD FidelityFX CACAO)");
   iConsole->Register("d3d12_AOQuality", &CV_d3d12_AOQuality, 2, VF_DUMPTODISK,
                      "The ambient occlusion's quality, 0 (low) to 3 (XeGTAO ultra, CACAO highest)");

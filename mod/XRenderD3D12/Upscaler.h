@@ -52,8 +52,10 @@ class IUpscaler
 public:
   virtual ~IUpscaler() = default;
   //! A context for a display of nWidth x nHeight; false when the upscaler is not there or refuses
-  //! the device (logged). bDebug: the upscaler checks what it gets (d3d12_Debug).
-  virtual bool Create(ID3D12Device *pDevice, int nWidth, int nHeight, bool bDebug) = 0;
+  //! the device (logged). bDebug: the upscaler checks what it gets (d3d12_Debug). nVersion
+  //! (d3d12_UpscaleVersion): the major version of the upscaler wanted, its newest of that major; 0
+  //! the one the upscaler picks for the GPU; one it does not have acts as 0 (logged).
+  virtual bool Create(ID3D12Device *pDevice, int nWidth, int nHeight, bool bDebug, int nVersion) = 0;
   //! The render size of a mode (EUpscaleMode) for the display of Create.
   virtual void GetRenderSize(int nMode, int &nWidth, int &nHeight) = 0;
   //! The jitter of the nFrame-th frame (counting up from 0) at the render width: x and y in render

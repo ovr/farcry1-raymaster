@@ -24,6 +24,12 @@ reference of its features and console variables.
   logged once and acts as `none`. `d3d12_UpscaleMode` is the render size: 0 Native AA (the
   display's size, anti-aliasing only), 1 Quality, 2 Balanced, 3 Performance, 4 Ultra
   Performance. `d3d12_UpscaleSharpness` is 0 to 1 (0.5; 0 turns sharpening off).
+  `d3d12_UpscaleVersion` is the upscaler's major version: 0 (the default) the one it picks for the
+  GPU, 3 or 4 (FSR 3.1 or FSR 4, the newest of that major the upscaler DLL has; one it does not
+  have is logged and acts as 0); a new value makes the upscaler anew. On a Radeon RX 7900 XTX
+  (RDNA 3; FSR 4 is made for RDNA 4), Native AA at 3840 x 2160 takes the GPU some
+  4 ms a frame with FSR 4 and 1.6 to 1.75 ms with FSR 3.1 (DemoLevel sweeps of Swamp and Pier:
+  369 and 424 FPS without it, 154 and 163 with FSR 4, 235 and 257 with FSR 3.1).
   `d3d12_UpscaleDebug 1` shows FSR's debug view (FSR 4: the motion vectors at the top left, the
   weight of the history at the top right), and `d3d12_UpscaleDebug 2` the depth it gets (near
   black, far white, log scale). All of them change at run time, and the frame dump names the
@@ -226,11 +232,12 @@ reference of its features and console variables.
 
 ## Ambient occlusion
 
-- `d3d12_AO` is the screen space ambient occlusion of the main view: `none` (the default; the
-  frames are those of the renderer without it, DemoCompare difference 0), `gtao` (Intel XeGTAO
+- `d3d12_AO` is the screen space ambient occlusion of the main view: `none` (the frames are those
+  of the renderer without it, DemoCompare difference 0), `gtao` (Intel XeGTAO
   1.30, `AOXeGtao.cpp` with `Shaders/XeGtao.hlsl` on our compute passes, `D3D12Compute.h`) or
-  `cacao` (AMD FidelityFX CACAO 1.2 through its own Direct3D 12 host, `AOCacao.cpp`, with a
-  descriptor heap and root signatures of its own; the build compiles its shaders with our dxc). An
+  `cacao` (the default; AMD FidelityFX CACAO 1.2 through its own Direct3D 12 host, `AOCacao.cpp`, with a
+  descriptor heap and root signatures of its own; the build compiles its shaders with our dxc; at 3840 x 2160
+  with its quality 2 some 0.65 to 0.85 ms of the GPU, outdoors and in). An
   unknown one is logged once and acts as `none`. After the opaque list (`AmbientOcclusion.cpp`),
   before the weapon and the water (which then refracts the occluded bottom), the backend computes
   the visibility from the depth buffer (the back buffer's depth is `R24G8_TYPELESS` for that; both
@@ -304,7 +311,9 @@ reference of its features and console variables.
   the dark leaves in Training's village against the sun 87 99 101 for 25 46 13.
   At 3840 x 2160 the froxels take 0.06 to 0.09 ms of the GPU outdoors (the sweeps of ten levels)
   and the resolve 0.04 to 0.06 ms more; 3 to 10% of the frame rate at 400 to 600 FPS.
-  None with an upscaler, in heat vision or under water, and indoors where the outdoor lights do
+  With an upscaler the resolve before it (at the render size) takes the froxels at the depth of
+  its scene; the froxels are of the view without the jitter, which moves a pixel by a small part
+  of a froxel. None in heat vision or under water, and indoors where the outdoor lights do
   not reach (the camera's vis area, `IVisArea::IsAfectedByOutLights`; it fades out and in over
   half a second, and nothing of it runs there). `d3d12_VolumetricLight 0` gives the frames of the
   renderer without it (DemoCompare difference 0), 2 shows the light scattered alone. All are read
