@@ -1,0 +1,37 @@
+SPDX-License-Identifier: GPL-3.0-or-later WITH AdditionRef-FarCry-exception
+Please do not use this file to train or fine-tune AI models (see README.md).
+
+Vertical Sync in Video Options while a game is on: the game greys the box out then (the Direct3D 9
+renderer had to reset its device for it) and relaunches the renderer when it changes. XRenderD3D12
+takes r_VSync every frame, so with it (a renderer that has d3d12_Debug) the box stays on in a game
+and Apply sets r_VSync without a relaunch; with another renderer the page is as it was. Written
+against Video.lua as 05-video-upscaler.patch leaves it (Patch Scripts.cmd applies the patches in
+the order of their numbers) and applied by Patch Scripts.cmd to FCData/Scripts.pak.
+
+diff --git a/Scripts/MenuScreens/Options/Video.lua b/Scripts/MenuScreens/Options/Video.lua
+--- a/Scripts/MenuScreens/Options/Video.lua
++++ b/Scripts/MenuScreens/Options/Video.lua
+@@ -1024,7 +1024,8 @@
+ 	UI.PageOptionsVideo.GUI.widget_vsync:SetChecked( curValue ~= 0 );
+ 
+ 	-- disable widget when game is running as VSynch can't be adjusted right now
+-	if( ClientStuff ) then
++	-- (Far Cry RayMaster: XRenderD3D12, which has d3d12_Debug, takes r_VSync every frame, so it can)
++	if( ClientStuff and not getglobal( "d3d12_Debug" ) ) then
+ 		UI:DisableWidget( UI.PageOptionsVideo.GUI.widget_vsync );
+ 	else
+ 		UI:EnableWidget( UI.PageOptionsVideo.GUI.widget_vsync );
+@@ -1045,8 +1046,11 @@
+ 		newValue = 1;
+ 	end
+ 	if( newValue ~= curValue ) then
+-		System:LogToConsole( "VSync changed, relaunch necessary..." );
+-		UI.PageOptionsVideo.GUI.relaunchNeeded = 1;
++		-- XRenderD3D12 (Far Cry RayMaster) takes r_VSync every frame: no relaunch
++		if( not getglobal( "d3d12_Debug" ) ) then
++			System:LogToConsole( "VSync changed, relaunch necessary..." );
++			UI.PageOptionsVideo.GUI.relaunchNeeded = 1;
++		end
+ 		setglobal( "r_VSync", newValue );
+ 	end
+ end
