@@ -188,8 +188,9 @@ private:
   bool CreateUploadBlock(uint64 nSize, SUploadBlock &Block, const wchar_t *szName);
   //! Opens the upload batch (when it isn't); false when the device refuses.
   bool OpenBatch();
-  //! Gives back the staging memory of the batches the GPU finished (the batch must be closed).
-  void RetireStaging();
+  //! Gives back the staging memory of the batches the GPU finished: those of a fence up to
+  //! nCompleted (the batch must be closed).
+  void RetireStaging(uint64 nCompleted);
   //! Staging memory in the open batch (opened, or flushed first when it grew too big).
   bool AllocStaging(uint64 nSize, uint64 nAlign, SD3D12FrameAlloc &Out);
   void Barrier(ID3D12Resource *pResource, UINT nSubresource, D3D12_RESOURCE_STATES Before, D3D12_RESOURCE_STATES After);
