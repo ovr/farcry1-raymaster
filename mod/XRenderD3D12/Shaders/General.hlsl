@@ -61,7 +61,8 @@
 //	      stays as the game's, whatever its colour and fade
 //	    DF_ALPHATEST: discard when a < fAlphaRef (DF_ALPHATEST_LESS: when a >= fAlphaRef);
 //	      then DF_ALPHA_ONE: a = 1
-//	    DF_DETAIL_LAYER (a terrain detail layer, multiplied in twice): rgb =
+//	    DF_DETAIL_LAYER (a terrain detail layer, multiplied in twice; its vertices 5 cm
+//	      out along the normal, its clip w + 0.005, as the original's): rgb =
 //	      lerp(0.5, tex0, a * the fade by the distance), a = 1; DF_DETAIL_BUMP
 //	      (bump mapped layer) first scales tex0 by 1 + (sun N'.L - sun N.L) /
 //	      (vParams1.x + saturate(N.L)), clamped to 0..2: N the vertex normal, N'
@@ -477,6 +478,14 @@ SVertexOutput VSMain(SVertexInput In)
   else
   {
     float4 vPos = float4(In.vPos.xyz, 1);
+    // A terrain detail layer lies over the terrain as the original's (its position script
+    // PosTerrainLayerOverlay): 5 cm out along the normal, and its clip w 0.005 further, which
+    // brings its depth nearer the more the farther it is. The engine builds the layers' vertices
+    // a few centimetres off the sectors' (2.6 cm along -x and -y, 1 cm up), so without it a
+    // layer is behind its sector wherever the ground falls towards +x and +y.
+    const bool bOverlay = HasFlag(DF_DETAIL_LAYER);
+    if (bOverlay)
+      vPos.xyz += In.vNormal * 0.05;
 #ifdef XR_CASCADE_INSTANCES
     Out.vPos = mul(vPos, g_Draw.mShadow[nInstance]);
     Out.nSlice = g_Draw.nShadowTex[nInstance];
@@ -488,6 +497,8 @@ SVertexOutput VSMain(SVertexInput In)
     Out.vCurClip = Out.vPos;
     Out.vPrevClip = mul(vPos, g_Draw.mPrevWorldViewProj);
 #endif
+    if (bOverlay)
+      Out.vPos.w += 0.005;
   }
   Out.vPos = Jitter(Out.vPos);
   float3 vNormal = mul(float4(In.vNormal, 0), g_Draw.mWorld).xyz;

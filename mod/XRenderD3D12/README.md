@@ -835,7 +835,10 @@ and lists theirs (`NamesObjects`).
   the layer's custom data and that distance (13 and 52 m on Training, whatever `r_DetailDistance`
   is); a layer with a material of its own (the cliffs, projected on a vertical plane) is drawn with
   the material's diffuse texture, bump mapped with its normal map, and fades out linearly to the
-  distance in its custom data (156 m). With the layers on, the
+  distance in its custom data (156 m). A layer lies 5 cm out along the terrain's normal with its
+  clip w 0.005 further, as the original draws it: the engine builds the layers' vertices a few
+  centimetres off the sectors' grid, and without it they lose the depth test to their own sector
+  in whole triangles wherever the ground falls the wrong way. With the layers on, the
   sectors (shader "terrain") get no detail texture, only their cliff texture where the engine
   marks cliffs; without them (shader "terrainwithdefaultdetailtexture") the detail texture
   everywhere.
