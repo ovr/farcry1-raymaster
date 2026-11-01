@@ -334,6 +334,10 @@ void CD3D12Renderer::RegisterVariables()
                      "With d3d12_PathTracing 1, its radiance cache: a grid over the world of the light the paths bring to a point, "
                      "kept up to date by paths from a pixel of 8 x 8, which the paths' last bounce takes for the light beyond it "
                      "(the bounces after it; 0: none)");
+  iConsole->Register("d3d12_PTBehind", &CV_d3d12_PTBehind, 40.0f, VF_DUMPTODISK,
+                     "With d3d12_PathTracing, how far (m, at most d3d12_RTDistance) what is behind the camera is in its scene "
+                     "for rays: the static objects and entities the 3D engine gives a camera at the view looking back (0: only "
+                     "what the view and the sun's cascades have)");
   iConsole->Register("d3d12_PTReferenceBounces", &CV_d3d12_PTReferenceBounces, 8, VF_DUMPTODISK,
                      "With d3d12_PathTracing 2 (the reference), the bounces of its paths at most");
   iConsole->Register("d3d12_PTAmbient", &CV_d3d12_PTAmbient, 1.0f, VF_DUMPTODISK,
@@ -537,6 +541,7 @@ WIN_HWND CD3D12Renderer::Init(int x,int y,int width,int height,unsigned int cbpp
     iConsole->UnregisterVariable("d3d12_PTSky", true);
     iConsole->UnregisterVariable("d3d12_PTBounces", true);
     iConsole->UnregisterVariable("d3d12_PTCache", true);
+    iConsole->UnregisterVariable("d3d12_PTBehind", true);
     iConsole->UnregisterVariable("d3d12_PTReferenceBounces", true);
     iConsole->UnregisterVariable("d3d12_PTAmbient", true);
     iConsole->UnregisterVariable("d3d12_PTAmbientRange", true);

@@ -521,7 +521,12 @@ reference of its features and console variables.
   `d3d12_PathTracing` (0 by default, read every frame; not registered without rays; nothing without
   `r_HDRRendering` 1, once in the log) is the path tracer
   of the main view's lighting (`PathTrace.cpp`): 1 in real time, 2 the reference. It has the scene for
-  rays, with what is out of the view (as `d3d12_RTOffscreen` 1 does for the effects), the motion
+  rays, with what is out of the view (as `d3d12_RTOffscreen` 1 does for the effects) and what is
+  behind the camera (`d3d12_PTBehind`, 40 m: the static objects and entities the 3D engine gives a
+  camera at the view looking back, 170 degrees wide, as far as that, noted as the cascades' parts,
+  `UpdateRayBehind`; the cascades have only what is towards the sun, a room without the sun none of
+  it: Research's hall has 42 instances without it, 259 with it; 0.1 to 0.3 ms of the CPU, 0.1 to
+  0.2 ms more of the GPU's builds on the sweeps), the motion
   vectors (the scene targets without an upscaler, Upscaler), and the lights for its kernels and the
   programs with rays:
   `SPTLight` (`Shaders/RayConstants.h`), the root SRV t2 space5, the point lights, the directional
