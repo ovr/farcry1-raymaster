@@ -14,12 +14,13 @@
 //	    distance of their first bounce (nTextures3.w) and the G-buffer's
 //	    normal: u0 IN_DIFF_RADIANCE_HITDIST (the light, its hit distance
 //	    normalized by vNrd.xyz), u1 IN_NORMAL_ROUGHNESS (the normal on the
-//	    camera's side, roughness 1: the light is diffuse), u2 IN_VIEWZ
-//	    (the view depth; vNrd.w where there is no surface, beyond NRD's
-//	    denoising range), u3 IN_MV (the uv where the pixel's point was in
-//	    the frame before, less its own: the scene's motion vectors,
-//	    nTextures3.z, which have the characters' and the objects' own
-//	    motion; without them the camera's alone, from mPrevViewProj).
+//	    side of its triangle the camera sees, roughness 1: the light is
+//	    diffuse), u2 IN_VIEWZ (the view depth; vNrd.w where there is no
+//	    surface, beyond NRD's denoising range), u3 IN_MV (the uv where the
+//	    pixel's point was in the frame before, less its own: the scene's
+//	    motion vectors, nTextures3.z, which have the characters' and the
+//	    objects' own motion; without them the camera's alone, from
+//	    mPrevViewProj).
 //	    With the checkerboard a pixel CSTrace left out takes its
 //	    neighbours' light (PathCheckerboard.hlsli).
 //	  CSResolve: NRD's OUT_DIFF_RADIANCE_HITDIST (nTextures3.y) as a
@@ -61,7 +62,7 @@ void CSPack(uint3 vId : SV_DispatchThreadID)
   const float d = r.w;
   const float3 vPos = PixelPos(p + 0.5, d);
   g_Radiance[p] = REBLUR_FrontEnd_PackRadianceAndNormHitDist(r.rgb, REBLUR_FrontEnd_GetNormHitDist(fHit, d, g_PT.vNrd.xyz, 1), true);
-  g_NormalRoughness[p] = NRD_FrontEnd_PackNormalAndRoughness(PathNormalAt(p, vPos), 1, 0);
+  g_NormalRoughness[p] = NRD_FrontEnd_PackNormalAndRoughness(PathNormalAt(p), 1, 0);
   g_ViewZ[p] = d;
   float2 vMotion = 0;
   if (g_PT.nTextures3.z != XR_RAY_NONE)

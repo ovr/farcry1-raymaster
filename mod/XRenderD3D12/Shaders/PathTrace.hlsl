@@ -117,11 +117,11 @@ float4 GBufferNormalAt(int2 p)
   return g_Textures[g_PT.nTextures2.x].Load(int3(p, 0));
 }
 
-//! The G-buffer's normal (texel vGBuffer) of the surface at vPos on the camera's side (the leaves' two sides).
-float3 PixelNormal(float4 vGBuffer, float3 vPos)
+//! The G-buffer's normal (texel vGBuffer): on the side of its triangle the camera sees (the leaves' two sides), as
+//! General.hlsl wrote it.
+float3 PixelNormal(float4 vGBuffer)
 {
-  const float3 vN = PathOctDecode(vGBuffer.rg);
-  return dot(vN, g_PT.vCameraPos.xyz - vPos) < 0 ? -vN : vN;
+  return PathOctDecode(vGBuffer.rg);
 }
 
 //! A direction of the hemisphere about vN as the cosine spreads them, from two random numbers u, v of 0..1.
@@ -171,7 +171,7 @@ void CSTrace(uint3 vId : SV_DispatchThreadID)
   }
   const float3 vPos = PixelPos(p + 0.5, d);
   const float3 vFace = FaceNormal(p, vPos, d);
-  const float3 vN = PixelNormal(vGBuffer, vPos);
+  const float3 vN = PixelNormal(vGBuffer);
   const float fPixel = d * g_PT.vParams.y;
   float fHitDistance = 0;
   // Each pixel's own numbers, others each frame.
@@ -326,7 +326,7 @@ void CSFilter(uint3 vId : SV_DispatchThreadID)
   const float d = c.w;
   const float4 vGBuffer = GBufferNormalAt(p);
   const float3 vPos = PixelPos(p + 0.5, d);
-  const float3 vN = PixelNormal(vGBuffer, vPos);
+  const float3 vN = PixelNormal(vGBuffer);
   const float3 vFace = FaceNormal(p, vPos, d);
   float3 vLight = c.rgb;
   if (g_PT.nFlags.z)
@@ -350,7 +350,7 @@ void CSFilter(uint3 vId : SV_DispatchThreadID)
       if (h.w <= 0)
         continue;
       const float3 vQ = PixelPos(q + 0.5, h.w);
-      const float fNormal = saturate(dot(PixelNormal(GBufferNormalAt(q), vQ), vN));
+      const float fNormal = saturate(dot(PixelNormal(GBufferNormalAt(q)), vN));
       const float w = exp(-2 * r * r) * saturate(1 - abs(dot(vQ - vPos, vFace)) * fPlane) * pow(fNormal, 8);
       vSum += w * float4(h.rgb, 1);
     }
@@ -390,7 +390,7 @@ void CSSpecular(uint3 vId : SV_DispatchThreadID)
   }
   const float3 vPos = PixelPos(p + 0.5, d);
   const float3 vFace = FaceNormal(p, vPos, d);
-  const float3 vN = PixelNormal(vGBuffer, vPos);
+  const float3 vN = PixelNormal(vGBuffer);
   const float3 vToEye = normalize(g_PT.vCameraPos.xyz - vPos);
   // The sun's, with the visibility the raster found.
   float3 vSpecular = g_PT.vSpecular.rgb * (g_Textures[g_PT.nTextures2.w].Load(int3(p, 0)).r * PathPhong(vN, g_Frame.vSunDir.xyz, vToEye));
@@ -451,7 +451,7 @@ void CSCacheUpdate(uint3 vId : SV_DispatchThreadID)
   float3 Direct[CACHE_BOUNCES], Gives[CACHE_BOUNCES], Albedo[CACHE_BOUNCES];
   bool Valid[CACHE_BOUNCES];
   uint nPoints = 0;
-  float3 vOrigin = vPos, vNormal = PixelNormal(vGBuffer, vPos), vFaceNormal = FaceNormal(p, vPos, d);
+  float3 vOrigin = vPos, vNormal = PixelNormal(vGBuffer), vFaceNormal = FaceNormal(p, vPos, d);
   float3 vFill = PathAmbientLight(g_Textures[g_PT.nTextures2.w].Load(int3(p, 0)).gba) * g_PT.vFill.x;
   float fWidth = d * g_PT.vParams.y;
   float3 vDirect = PathSun(vOrigin, vNormal, vFaceNormal, P, fWidth) + PathSampleLamp(vOrigin, vNormal, vFaceNormal, P, nSeed, fWidth);

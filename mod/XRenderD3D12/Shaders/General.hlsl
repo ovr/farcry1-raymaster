@@ -1005,7 +1005,12 @@ SPixelOutput PSMain(SVertexOutput In)
   Out.fDepth = In.vPos.z;
 #endif
   Out.vAlbedo = float4(max(s_vPTAlbedo, 0), Out.vColor.a);
-  Out.vNormal = PathGBufferNormal(s_vPTNormal, g_Frame.vCameraPos.xyz - In.vWorldPos, s_fPTFog, (g_Draw.nFlags2 & DF2_PT_MASK) >> DF2_PT_SHIFT);
+  // The normal on the side of the triangle the camera sees (the leaves' two sides), as the rays' hits take it
+  // (PathSurface): by the view's direction instead, a crown's normals turned over where the view passes their
+  // perpendicular, a line that crossed the leaves as the camera moved.
+  float3 vFace = cross(ddx(In.vWorldPos), ddy(In.vWorldPos));
+  vFace = dot(vFace, g_Frame.vCameraPos.xyz - In.vWorldPos) < 0 ? -vFace : vFace;
+  Out.vNormal = PathGBufferNormal(s_vPTNormal, vFace, s_fPTFog, (g_Draw.nFlags2 & DF2_PT_MASK) >> DF2_PT_SHIFT);
   Out.vSun = float4(s_fPTSun, saturate(0.5 * g_Draw.vAmbient.rgb));
   Out.vSpecular = float4(saturate(s_vPTSpecular), Out.vColor.a);
   return Out;
