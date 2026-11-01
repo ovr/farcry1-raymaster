@@ -519,9 +519,12 @@ reference of its features and console variables.
   draws it as the main view) the opaque list takes 0.05 -> 0.23 ms, the GPU 0.96 -> 1.18; in
   Research's hall 1.05 -> 1.23 (the opaque list waits for the scene for rays).
   `d3d12_PathTracing`, the path tracer of the main view's lighting, has its own section (Path tracing).
-  `d3d12_RTDebug` views the scene for rays from the camera: 1 instances, 2 shaded hits on the right
+  `d3d12_RTDebug` views the scene for rays from the camera: 1 instances (a colour of the mesh and
+  where it is to 0.25 m, the same from frame to frame), 2 shaded hits on the right
   half, 3 distance, 4 mip level, 5 kind, 6 alpha tests, 7 shaded hits over the whole picture; the path
-  tracer's: 8 the albedo of the hits, 9 their emission, 10 them lit by the sun and the lamps;
+  tracer's: 8 the albedo of the hits, 9 their emission, 10 them lit by the sun and the lamps; 11 a
+  colour per material the rays take of the hit's instance (the same while it is: to see the rays'
+  materials steady);
   `d3d12_WaterDebug` 13, 14, 15 the water rays' colour, distance and weight. With the rays off the
   frames are the same as without the code (WaterMove, bit for bit). Check the rays under the debug
   layer with `XRENDERD3D12_DEBUG=2`: GPU based validation turns the water rays' frames black.

@@ -244,11 +244,13 @@ void CD3D12Renderer::RegisterVariables()
                      "1: the ambient occlusion's factor in grey over the whole picture; with d3d12_AOApply 1, 2: the ambient light, 3: the light it takes away");
   // The scene for rays (RayTracing.cpp), on a device with DXR 1.1.
   iConsole->Register("d3d12_RTDebug", &CV_d3d12_RTDebug, 0, 0,
-                     "The scene for rays seen from the camera, one ray per pixel over the whole picture: 1 its instances in colours, "
+                     "The scene for rays seen from the camera, one ray per pixel over the whole picture: 1 its instances in colours "
+                     "(of the mesh and where it is to 0.25 m, the same from frame to frame), "
                      "2 the hits shaded on the right half (the picture on the left), 3 the distance to the hit (blue near, red far), "
                      "4 the mip level of the hit's texture (blue 0, red 8), 5 the kind of BLAS (static green, of the frame red, alpha tested "
                      "lighter), 6 the alpha tests along the ray, 7 the hits shaded over the whole picture; the path tracer's: 8 the albedo "
-                     "of the hits, 9 their emission, 10 them lit by the sun and the lamps");
+                     "of the hits, 9 their emission, 10 them lit by the sun and the lamps; 11 a colour per material the rays take "
+                     "of the hits' instances (the same while it is)");
   iConsole->Register("d3d12_RTDistance", &CV_d3d12_RTDistance, 150.0f, VF_DUMPTODISK, "The rays' length (m)");
   iConsole->Register("d3d12_RTMemory", &CV_d3d12_RTMemory, 384, VF_DUMPTODISK,
                      "The memory of the static geometry's acceleration structures (MB) beyond which the least recently used go");
