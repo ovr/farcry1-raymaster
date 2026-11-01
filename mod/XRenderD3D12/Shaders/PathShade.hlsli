@@ -24,19 +24,29 @@
 //	    SPathShade::fEmission.
 //	PathDirect: the light of the sun and of the frame's lamps (g_PTLights)
 //	on the hit, each by a ray towards it among the instances of
-//	SPathShade::nMask (TraceSun, TraceLight):
+//	SPathShade::nMask (TraceSun, TraceLight; PathSun, PathLampLight):
 //	  - the sun: vSun * N.L;
-//	  - a lamp: HdrDecode(2 * its colour) * fLamps * N.L * (1 -
-//	    smoothstep(0, 0.9, d / radius))^2.2, the falloff the raster fits
-//	    the lamps of the static objects to (2 * (1 - smoothstep) in the
-//	    game's colour, SetPointLight), in light; directional ones without
-//	    the falloff; a projector times the picture of its cube (2 * colour
-//	    * cube before HdrDecode, as its pass).
+//	  - a lamp: (2 * its colour)^2.2 * fLamps * N.L * (1 - smoothstep(0,
+//	    0.9, d / radius))^2.2, the falloff the raster fits the lamps of the
+//	    static objects to (2 * (1 - smoothstep) in the game's colour,
+//	    SetPointLight), in light; directional ones without the falloff; a
+//	    projector times the picture of its cube (2 * colour * cube before
+//	    the power, as its pass).
+//	The game's lights multiply its colours (the raster's colour * light):
+//	in light, colour^2.2 * light^2.2 is that product's light below 1
+//	(PathMultiplier), what most of the picture is.
+//	PathSampleLamp: the lamps' light by one ray, towards a lamp picked among
+//	PT_LAMP_CANDIDATES of them by how much each gives without its shadow
+//	(resampled importance sampling: all of them where there are no more).
 //	TerrainBakedLight: the light the editor baked into a sector's texture
-//	at a point, the game's colour: fBakeLight * (1 + (r - 1) N.L V) / r, r
-//	= d3d12_PTTerrainDelight (the lit over the shadowed of a face towards
-//	the sun), V the sun's visibility over the terrain alone (XR_RAY_TERRAIN:
-//	its own shadows are in the texture, those of the objects not).
+//	at a point, as light: fBakeLight * ((1 + (r - 1) N.L V) / r)^2.2, r =
+//	d3d12_PTTerrainDelight (the lit over the shadowed of a face towards
+//	the sun, the game's colours), V the sun's visibility over the terrain
+//	alone (XR_RAY_TERRAIN: its own shadows are in the texture, those of the
+//	objects not), fBakeLight the path tracer's own light on an open face
+//	towards the sun (the sun and the sky): the texture's colour as light
+//	divided by it is the albedo (a lit face as bright as the editor had
+//	it).
 //
 //////////////////////////////////////////////////////////////////////
 
@@ -48,6 +58,9 @@
 
 StructuredBuffer<SPTLight> g_PTLights : register(t2, space5);
 
+//! The lamps PathSampleLamp weighs against each other at most.
+static const uint PT_LAMP_CANDIDATES = 16;
+
 //! What the path tracer's shading takes (from its constants, or a program's).
 struct SPathShade
 {
@@ -55,7 +68,7 @@ struct SPathShade
   float fLamps;         //!< d3d12_PTLamps
   float fEmission;      //!< d3d12_PTEmission
   float fDelight;       //!< d3d12_PTTerrainDelight (at most 1: the sector's colour is the albedo)
-  float fBakeLight;     //!< the light baked into the terrain on a lit face towards the sun, the game's colour
+  float fBakeLight;     //!< the light baked into the terrain on a lit face towards the sun (the path tracer's sun and sky)
   float fLightGap;      //!< how far short of a lamp its ray ends (d3d12_RTLightShadowGap)
   uint nLights;         //!< the lamps in g_PTLights
   uint nMask;           //!< the instances the rays towards the sun and the lamps see
@@ -81,17 +94,32 @@ float3 PathLight(float3 c)
   return float3(HdrDecode(c.r), HdrDecode(c.g), HdrDecode(c.b));
 }
 
+//! The game's light (what its colours are multiplied by) as light.
+float3 PathMultiplier(float3 c)
+{
+  return pow(max(c, 0), HDR_GAMMA);
+}
+
 float PathLuminance(float3 c)
 {
   return dot(c, float3(0.2126, 0.7152, 0.0722));
 }
 
-//! The light baked into a terrain sector's texture at S (the game's colour; see the head of the file).
-float TerrainBakedLight(SRaySurface S, float3 vNormal, float3 vFace, SPathShade P, float fConeWidth)
+//! A random number of 0..1 (24 bits) from the state nSeed, which it moves on (PCG).
+float PathRandom(inout uint nSeed)
+{
+  nSeed = nSeed * 747796405u + 2891336453u;
+  uint n = ((nSeed >> ((nSeed >> 28u) + 4u)) ^ nSeed) * 277803737u;
+  n = (n >> 22u) ^ n;
+  return (float)(n >> 8) * (1.0 / 16777216.0);
+}
+
+//! The light baked into a terrain sector's texture at vPos (the game's colour; see the head of the file).
+float TerrainBakedLight(float3 vPos, float3 vNormal, float3 vFace, SPathShade P, float fConeWidth)
 {
   const float fNL = saturate(dot(vNormal, g_Frame.vSunDir.xyz));
-  const float fVis = fNL > 0 ? TraceSun(S.vPos, vFace, XR_RAY_TERRAIN, fConeWidth, 0) : 0;
-  return P.fBakeLight * (1 + (P.fDelight - 1) * fNL * fVis) / P.fDelight;
+  const float fVis = fNL > 0 ? TraceSun(vPos, vFace, XR_RAY_TERRAIN, fConeWidth, 0) : 0;
+  return P.fBakeLight * pow((1 + (P.fDelight - 1) * fNL * fVis) / P.fDelight, HDR_GAMMA);
 }
 
 //! The material at the hit (see the head of the file); fConeWidth the ray cone's width there.
@@ -144,54 +172,105 @@ SPathSurface PathSurface(SRayHit Hit, float3 vRayDir, float fConeWidth, SPathSha
     vEmission += vAlbedo;
     vAlbedo = 0;
   }
-  else if (O.nMaterial == XR_PT_MAT_TERRAIN && P.fDelight > 1)
-    vAlbedo /= max(TerrainBakedLight(S, O.vNormal, O.vFaceNormal, P, fConeWidth), 0.05);
   O.vAlbedo = pow(saturate(vAlbedo), HDR_GAMMA);
+  if (O.nMaterial == XR_PT_MAT_TERRAIN && P.fDelight > 1)
+    O.vAlbedo = saturate(O.vAlbedo / max(TerrainBakedLight(S.vPos, O.vNormal, O.vFaceNormal, P, fConeWidth), 0.01));
   O.vEmission = PathLight(max(vEmission, 0)) * P.fEmission;
   return O;
+}
+
+//! The sun's light on a point at vPos (normal vN, face vFace) by a ray towards it; fConeWidth the ray cone's width there.
+float3 PathSun(float3 vPos, float3 vN, float3 vFace, SPathShade P, float fConeWidth)
+{
+  const float fNL = dot(vN, g_Frame.vSunDir.xyz);
+  if (fNL <= 0 || all(P.vSun <= 0))
+    return 0;
+  return P.vSun * fNL * TraceSun(vPos, vFace, P.nMask, fConeWidth, P.nMaxTests);
+}
+
+//! Lamp i's light on a point at vPos with the normal vN without its shadow (see the head of the file), 0 where it does
+//! not reach; vToLight the direction towards it, fDistance how far it is.
+float3 PathLampLight(uint i, float3 vPos, float3 vN, SPathShade P, out float3 vToLight, out float fDistance)
+{
+  const SPTLight L = g_PTLights[i];
+  float fFalloff = 1;
+  if (L.nParams.x == XR_PT_LIGHT_DIRECTIONAL)
+  {
+    vToLight = L.vPos.xyz;
+    fDistance = 2000;
+  }
+  else
+  {
+    vToLight = L.vPos.xyz - vPos;
+    fDistance = length(vToLight);
+    const float x = fDistance / L.vPos.w;
+    if (x >= 0.9)
+      return 0;
+    vToLight /= max(fDistance, 1e-4);
+    fFalloff = pow(1 - smoothstep(0, 0.9, x), HDR_GAMMA);
+  }
+  const float fNL = dot(vN, vToLight);
+  if (fNL <= 0)
+    return 0;
+  float3 vColor = 2 * L.vColor.rgb;
+  if (L.nParams.x == XR_PT_LIGHT_PROJECTOR && L.nParams.z != XR_RAY_NONE)
+    vColor *= g_Cubes[NonUniformResourceIndex(L.nParams.z)].SampleLevel(g_SamplerLinearClamp, mul(float4(vPos, 1), L.mProject).xyz, 0).rgb;
+  return PathMultiplier(vColor) * (P.fLamps * fFalloff * fNL);
 }
 
 //! The light of the sun and the frame's lamps on the surface (see the head of the file); fConeWidth the ray cone's width there.
 float3 PathDirect(SPathSurface H, SPathShade P, float fConeWidth)
 {
-  float3 vLight = 0;
-  const float fSunNL = dot(H.vNormal, g_Frame.vSunDir.xyz);
-  if (fSunNL > 0 && any(P.vSun > 0))
-    vLight += P.vSun * fSunNL * TraceSun(H.vPos, H.vFaceNormal, P.nMask, fConeWidth, P.nMaxTests);
+  float3 vLight = PathSun(H.vPos, H.vNormal, H.vFaceNormal, P, fConeWidth);
   [loop]
   for (uint i = 0; i < P.nLights; i++)
   {
-    const SPTLight L = g_PTLights[i];
     float3 vToLight;
-    float fDistance, fFalloff = 1;
-    if (L.nParams.x == XR_PT_LIGHT_DIRECTIONAL)
-    {
-      vToLight = L.vPos.xyz;
-      fDistance = 2000;
-    }
-    else
-    {
-      vToLight = L.vPos.xyz - H.vPos;
-      fDistance = length(vToLight);
-      const float x = fDistance / L.vPos.w;
-      if (x >= 0.9)
-        continue;
-      vToLight /= max(fDistance, 1e-4);
-      fFalloff = pow(1 - smoothstep(0, 0.9, x), HDR_GAMMA);
-    }
-    const float fNL = dot(H.vNormal, vToLight);
-    if (fNL <= 0)
-      continue;
-    float3 vColor = 2 * L.vColor.rgb;
-    if (L.nParams.x == XR_PT_LIGHT_PROJECTOR && L.nParams.z != XR_RAY_NONE)
-      vColor *= g_Cubes[NonUniformResourceIndex(L.nParams.z)].SampleLevel(g_SamplerLinearClamp, mul(float4(H.vPos, 1), L.mProject).xyz, 0).rgb;
-    const float3 vLamp = PathLight(vColor) * (P.fLamps * fFalloff * fNL);
+    float fDistance;
+    const float3 vLamp = PathLampLight(i, H.vPos, H.vNormal, P, vToLight, fDistance);
     if (all(vLamp <= 0))
       continue;
     float fHit;
     vLight += vLamp * TraceLight(H.vPos, H.vFaceNormal, vToLight, fDistance, P.fLightGap, P.nMask, fConeWidth, fHit, P.nMaxTests);
   }
   return vLight;
+}
+
+//! The lamps' light on a point at vPos (normal vN, face vFace) by one ray (see the head of the file); nSeed the random
+//! numbers' state, fConeWidth the ray cone's width there.
+float3 PathSampleLamp(float3 vPos, float3 vN, float3 vFace, SPathShade P, inout uint nSeed, float fConeWidth)
+{
+  if (P.nLights == 0)
+    return 0;
+  const bool bAll = P.nLights <= PT_LAMP_CANDIDATES;
+  const uint nCandidates = bAll ? P.nLights : PT_LAMP_CANDIDATES;
+  float fSum = 0, fPicked = 0, fPickedDistance = 0;
+  float3 vPicked = 0, vPickedDir = 0;
+  [loop]
+  for (uint k = 0; k < nCandidates; k++)
+  {
+    const uint i = bAll ? k : min((uint)(PathRandom(nSeed) * P.nLights), P.nLights - 1);
+    float3 vToLight;
+    float fDistance;
+    const float3 vLamp = PathLampLight(i, vPos, vN, P, vToLight, fDistance);
+    const float w = PathLuminance(vLamp);
+    if (w <= 0)
+      continue;
+    fSum += w;
+    if (PathRandom(nSeed) * fSum < w)
+    {
+      fPicked = w;
+      vPicked = vLamp;
+      vPickedDir = vToLight;
+      fPickedDistance = fDistance;
+    }
+  }
+  if (fPicked <= 0)
+    return 0;
+  // The picked one's light over its chance: fSum / fPicked among the candidates, they nCandidates of all the lamps.
+  const float fScale = fSum / fPicked * (bAll ? 1 : (float)P.nLights / nCandidates);
+  float fHit;
+  return vPicked * fScale * TraceLight(vPos, vFace, vPickedDir, fPickedDistance, P.fLightGap, P.nMask, fConeWidth, fHit, P.nMaxTests);
 }
 
 #endif

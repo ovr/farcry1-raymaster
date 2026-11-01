@@ -22,9 +22,13 @@
 //	    surface's colour the fog leaves (SceneFog; 1 without fog), a the
 //	    path material plus 1 (XR_PT_MAT_* + 1 & 3: 0 none or unlit, 1 lit,
 //	    2 the terrain, 3 the vegetation; DF2_PT_MASK). The blended draws do
-//	    not write it.
+//	    not write it;
+//	  - the sun's visibility (D3D12_PT_SUN_FORMAT, SV_Target5) at the opaque
+//	    surface, as the raster finds it (its shadow maps, the sun's
+//	    cascades, the mask of the sun's shadow by rays; all the casters).
+//	    The blended draws do not write it.
 //	The picture is then the colour plus the fog's share of the albedo's
-//	surfaces lit by the path tracer.
+//	surfaces lit by the path tracer (PathComposite.hlsl).
 //
 //////////////////////////////////////////////////////////////////////
 

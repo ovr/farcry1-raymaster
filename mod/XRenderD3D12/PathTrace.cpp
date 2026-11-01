@@ -32,14 +32,24 @@
 //	permutation (BeginPathTargets .. EndPathTargets; DrawLeafItem takes the
 //	light off its lit draws, D3D12Pipeline the programs and the blending of
 //	the targets), at the scene's size; d3d12_PTDebug shows it.
+//	DrawPathTrace, after the opaque list: the kernels of
+//	Shaders/PathTrace.hlsl (CSTrace the paths, CSTemporal their history,
+//	CSFilter the denoise) with the depth buffer and the G-buffer, then the
+//	composite (Shaders/PathComposite.hlsl) adds their light and the sun's to
+//	the colour. d3d12_PathTracing 2, the reference, adds up its frames
+//	while the view and the settings stay.
 //	All of it waits for r_HDRRendering: its light is beyond an LDR target.
 //
 //////////////////////////////////////////////////////////////////////
 
 #include "StdAfx.h"
 #include "Renderer.h"
+#include "D3D12Device.h"
 #include "D3D12Upload.h"
+#include "D3D12Descriptors.h"
+#include "D3D12Compute.h"
 #include "RayTracing.h"
+#include "Scene.h"
 #include "Texture.h"
 #include "Geometry.h"
 #include <list2.h>
@@ -58,6 +68,12 @@ float HdrDecode(float c)
   return c > 1 ? 1 + 2.2f * (c - 1) : powf(std::max(c, 0.0f), 2.2f);
 }
 
+//! As PathMultiplier of Shaders/PathShade.hlsli: the game's light (what its colours are multiplied by) as light.
+float PathMultiplier(float c)
+{
+  return powf(std::max(c, 0.0f), 2.2f);
+}
+
 float Luminance(float r, float g, float b)
 {
   return 0.2126f * r + 0.7152f * g + 0.0722f * b;
@@ -65,6 +81,31 @@ float Luminance(float r, float g, float b)
 
 //! The G-buffer between the main view's opaque list and the next one: read by the pixel shaders and the kernels.
 constexpr D3D12_RESOURCE_STATES PATH_READ = D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE | D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE;
+//! The kernels' textures between their dispatches; the depth buffer while they read it.
+constexpr D3D12_RESOURCE_STATES PATH_KERNEL_READ = D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE;
+constexpr D3D12_RESOURCE_STATES PATH_DEPTH_READ = D3D12_RESOURCE_STATE_DEPTH_READ | D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE;
+//! The paths' light and the composite's (rgb, w the view depth or the terrain's baked light), the history (the reference
+//! adds up thousands of frames), its frames (/ 65535).
+constexpr DXGI_FORMAT PATH_LIGHT_FORMAT = DXGI_FORMAT_R16G16B16A16_FLOAT;
+constexpr DXGI_FORMAT PATH_HISTORY_FORMAT = DXGI_FORMAT_R32G32B32A32_FLOAT;
+constexpr DXGI_FORMAT PATH_FRAMES_FORMAT = DXGI_FORMAT_R16_UNORM;
+//! The frames the real time history holds at most; a sample's luminance at most (its light, linear) in real time.
+constexpr float PATH_HISTORY_FRAMES = 32;
+constexpr float PATH_SAMPLE_MAX = 16;
+//! A bounce's alpha tests at most in real time (the reference: XR_RAY_MAX_ALPHA_TESTS).
+constexpr uint32 PATH_BOUNCE_TESTS = 4;
+//! The kernels' UAV tables (D3D12Compute.h): the paths', the history's of each texture, the composite's light.
+enum { PATH_TABLE_TRACE, PATH_TABLE_TEMPORAL0, PATH_TABLE_TEMPORAL1, PATH_TABLE_FILTER, PATH_TABLES };
+
+D3D12_SHADER_RESOURCE_VIEW_DESC PathTextureSRV(DXGI_FORMAT Format)
+{
+  D3D12_SHADER_RESOURCE_VIEW_DESC SRV = {};
+  SRV.Format = Format;
+  SRV.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
+  SRV.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+  SRV.Texture2D.MipLevels = 1;
+  return SRV;
+}
 
 const char *LightKind(uint32 nKind)
 {
@@ -95,17 +136,23 @@ bool CD3D12Renderer::WantsPathDebug() const
 
 void CD3D12Renderer::GetPathShade(SPathShadeParams &P) const
 {
-  const float fSun = std::max(CV_d3d12_PTSun, 0.0f);
+  // The sun: twice its colour on a face towards it, as the raster lights; the sky: the level's outdoor ambient. Neither
+  // where the frame has no sun (indoors: what keeps the sky out is beyond the scene for rays, as the roof above).
+  const bool bOutdoors = m_pScene && m_pScene->GetSun();
+  const float fSun = bOutdoors ? std::max(CV_d3d12_PTSun, 0.0f) : 0.0f, fSky = bOutdoors ? std::max(CV_d3d12_PTSky, 0.0f) : 0.0f;
+  I3DEngine *p3D = iSystem ? iSystem->GetI3DEngine() : nullptr;
+  const Vec3 vOutdoor = p3D ? p3D->GetOutdoorAmbientColor() : Vec3(0.5f, 0.5f, 0.5f);
   for (int c = 0; c < 3; c++)
-    P.vSun[c] = HdrDecode(2 * m_SunColor[c]) * fSun;
+  {
+    P.vSun[c] = PathMultiplier(2 * m_SunColor[c]) * fSun;
+    P.vSky[c] = HdrDecode((&vOutdoor.x)[c]) * fSky;
+  }
   P.fLamps = std::max(CV_d3d12_PTLamps, 0.0f);
   P.fEmission = std::max(CV_d3d12_PTEmission, 0.0f);
   P.fDelight = CV_d3d12_PTTerrainDelight;
-  // The editor's light on a lit face of the terrain towards the sun, as the game's other lights take it: the ambient plus
-  // twice the sun.
-  I3DEngine *p3D = iSystem ? iSystem->GetI3DEngine() : nullptr;
-  const Vec3 vOutdoor = p3D ? p3D->GetOutdoorAmbientColor() : Vec3(0.5f, 0.5f, 0.5f);
-  P.fBakeLight = std::max(Luminance(vOutdoor.x + 2 * m_SunColor[0], vOutdoor.y + 2 * m_SunColor[1], vOutdoor.z + 2 * m_SunColor[2]), 0.05f);
+  // The editor's light on a lit face of the terrain towards the sun, as the path tracer's own: the sun and the open sky
+  // (its texture there lit as the path tracer lights it).
+  P.fBakeLight = std::max(Luminance(P.vSun[0], P.vSun[1], P.vSun[2]) + Luminance(P.vSky[0], P.vSky[1], P.vSky[2]), 0.05f);
   P.fLightGap = std::max(CV_d3d12_RTLightShadowGap, 0.0f);
   P.nLights = m_PathTrace.nLightsFrame == m_nFrames ? m_PathTrace.nLightCount : 0;
 }
@@ -296,14 +343,16 @@ bool CD3D12Renderer::UpdatePathTargets()
   ReleasePathTargets();
   m_PathTrace.pAlbedo = m_pUpload->CreateRenderTarget(w, h, D3D12_PT_ALBEDO_FORMAT);
   m_PathTrace.pNormal = m_pUpload->CreateRenderTarget(w, h, D3D12_PT_NORMAL_FORMAT);
-  if (!m_PathTrace.pAlbedo || !m_PathTrace.pNormal || m_PathTrace.pAlbedo->m_nSRV < 0 || m_PathTrace.pNormal->m_nSRV < 0)
+  m_PathTrace.pSun = m_pUpload->CreateRenderTarget(w, h, D3D12_PT_SUN_FORMAT);
+  if (!m_PathTrace.pAlbedo || !m_PathTrace.pNormal || !m_PathTrace.pSun || m_PathTrace.pAlbedo->m_nSRV < 0 || m_PathTrace.pNormal->m_nSRV < 0 ||
+      m_PathTrace.pSun->m_nSRV < 0)
   {
     iLog->LogWarning("XRenderD3D12: the path tracer's G-buffer is not available at %d x %d", w, h);
     ReleasePathTargets();
     return false;
   }
   // Made in PIXEL_SHADER_RESOURCE (in a frame).
-  for (CD3D12Texture *pTex : { m_PathTrace.pAlbedo, m_PathTrace.pNormal })
+  for (CD3D12Texture *pTex : { m_PathTrace.pAlbedo, m_PathTrace.pNormal, m_PathTrace.pSun })
     m_pDevice->Transition(pTex->m_pResource, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, PATH_READ);
   iLog->Log("XRenderD3D12: the path tracer's G-buffer, %d x %d", w, h);
   return true;
@@ -312,16 +361,17 @@ bool CD3D12Renderer::UpdatePathTargets()
 void CD3D12Renderer::ReleasePathTargets()
 {
   if (m_PathTrace.bBound && m_pDevice)
-    m_pDevice->BindPathTargets({}, {});
+    m_pDevice->BindPathTargets({}, {}, {});
   m_PathTrace.bBound = false;
   if (m_pUpload)
   {
-    for (CD3D12Texture *pTex : { m_PathTrace.pAlbedo, m_PathTrace.pNormal })
+    for (CD3D12Texture *pTex : { m_PathTrace.pAlbedo, m_PathTrace.pNormal, m_PathTrace.pSun })
       if (pTex)
         m_pUpload->ReleaseTexture(pTex);
   }
-  m_PathTrace.pAlbedo = m_PathTrace.pNormal = nullptr;
+  m_PathTrace.pAlbedo = m_PathTrace.pNormal = m_PathTrace.pSun = nullptr;
   m_PathTrace.nGBufferFrame = -1;
+  ReleasePathKernels();
 }
 
 void CD3D12Renderer::BeginPathTargets()
@@ -330,12 +380,12 @@ void CD3D12Renderer::BeginPathTargets()
     return;
   // Cleared to no surface (material 0) and no albedo: the sky and the far stay as the colour has them.
   static const float Zero[4] = {};
-  for (CD3D12Texture *pTex : { m_PathTrace.pAlbedo, m_PathTrace.pNormal })
+  for (CD3D12Texture *pTex : { m_PathTrace.pAlbedo, m_PathTrace.pNormal, m_PathTrace.pSun })
   {
     m_pDevice->Transition(pTex->m_pResource, PATH_READ, D3D12_RESOURCE_STATE_RENDER_TARGET);
     m_pDevice->GetCmdList()->ClearRenderTargetView(pTex->m_RTV, Zero, 0, nullptr);
   }
-  m_pDevice->BindPathTargets(m_PathTrace.pAlbedo->m_RTV, m_PathTrace.pNormal->m_RTV);
+  m_pDevice->BindPathTargets(m_PathTrace.pAlbedo->m_RTV, m_PathTrace.pNormal->m_RTV, m_PathTrace.pSun->m_RTV);
   m_PathTrace.bBound = true;
 }
 
@@ -344,19 +394,260 @@ void CD3D12Renderer::EndPathTargets()
   if (!m_PathTrace.bBound)
     return;
   m_PathTrace.bBound = false;
-  m_pDevice->BindPathTargets({}, {});
-  for (CD3D12Texture *pTex : { m_PathTrace.pAlbedo, m_PathTrace.pNormal })
+  m_pDevice->BindPathTargets({}, {}, {});
+  for (CD3D12Texture *pTex : { m_PathTrace.pAlbedo, m_PathTrace.pNormal, m_PathTrace.pSun })
     m_pDevice->Transition(pTex->m_pResource, D3D12_RESOURCE_STATE_RENDER_TARGET, PATH_READ);
   m_PathTrace.nGBufferFrame = m_nFrames;
+  m_PathTrace.bTraceDue = true;
   if (m_pFrameDump)
     fprintf(m_pFrameDump.get(), "pt g-buffer: %d x %d, written by the opaque list\n", m_PathTrace.pAlbedo->m_nWidth, m_PathTrace.pAlbedo->m_nHeight);
 }
 
+bool CD3D12Renderer::UpdatePathKernels(int w, int h)
+{
+  SPathTraceState &s = m_PathTrace;
+  if (s.pRays && s.pRays->m_nWidth == w && s.pRays->m_nHeight == h)
+    return true;
+  ReleasePathKernels();
+  s.pRays = m_pUpload->CreateComputeTarget(w, h, 1, PATH_LIGHT_FORMAT, L"XRenderD3D12 path tracer's paths");
+  for (int i = 0; i < 2; i++)
+  {
+    s.pHistory[i] = m_pUpload->CreateComputeTarget(w, h, 1, PATH_HISTORY_FORMAT, L"XRenderD3D12 path tracer's history");
+    s.pFrames[i] = m_pUpload->CreateComputeTarget(w, h, 1, PATH_FRAMES_FORMAT, L"XRenderD3D12 path tracer's history frames");
+  }
+  s.pLight = m_pUpload->CreateComputeTarget(w, h, 1, PATH_LIGHT_FORMAT, L"XRenderD3D12 path tracer's light");
+  bool bOk = s.pRays && s.pHistory[0] && s.pHistory[1] && s.pFrames[0] && s.pFrames[1] && s.pLight;
+  if (bOk)
+  {
+    D3D12_SHADER_RESOURCE_VIEW_DESC SRV = PathTextureSRV(PATH_LIGHT_FORMAT);
+    for (CD3D12Texture *pTex : { s.pRays, s.pLight })
+      bOk &= (pTex->m_nSRV = m_pDescriptors->AllocSRV(pTex->m_pResource, &SRV)) >= 0;
+    SRV = PathTextureSRV(PATH_HISTORY_FORMAT);
+    for (CD3D12Texture *pTex : { s.pHistory[0], s.pHistory[1] })
+      bOk &= (pTex->m_nSRV = m_pDescriptors->AllocSRV(pTex->m_pResource, &SRV)) >= 0;
+    SRV = PathTextureSRV(PATH_FRAMES_FORMAT);
+    for (CD3D12Texture *pTex : s.pFrames)
+      bOk &= (pTex->m_nSRV = m_pDescriptors->AllocSRV(pTex->m_pResource, &SRV)) >= 0;
+    // The kernels' UAV tables: u0 the paths, a history or the light, u1 the history's frames (the slots they do not use null).
+    ID3D12Resource *const Outputs[PATH_TABLES] = { s.pRays->m_pResource, s.pHistory[0]->m_pResource, s.pHistory[1]->m_pResource,
+                                                   s.pLight->m_pResource };
+    for (int t = 0; t < PATH_TABLES && bOk; t++)
+    {
+      if ((s.nTables[t] = m_pDescriptors->AllocRange(CD3D12Compute::COMPUTE_UAVS)) < 0)
+      {
+        bOk = false;
+        break;
+      }
+      D3D12_UNORDERED_ACCESS_VIEW_DESC View = {};
+      View.ViewDimension = D3D12_UAV_DIMENSION_TEXTURE2D;
+      const bool bTemporal = t == PATH_TABLE_TEMPORAL0 || t == PATH_TABLE_TEMPORAL1;
+      for (int i = 0; i < CD3D12Compute::COMPUTE_UAVS; i++)
+      {
+        View.Format = i == 1 ? PATH_FRAMES_FORMAT : bTemporal ? PATH_HISTORY_FORMAT : PATH_LIGHT_FORMAT;
+        ID3D12Resource *pUAV = i == 0 ? Outputs[t] : i == 1 && bTemporal ? s.pFrames[t - PATH_TABLE_TEMPORAL0]->m_pResource : nullptr;
+        m_pDescriptors->WriteUAV(s.nTables[t] + i, pUAV, &View);
+      }
+    }
+  }
+  if (!bOk)
+  {
+    iLog->LogWarning("XRenderD3D12: the path tracer's kernels have no targets at %d x %d", w, h);
+    ReleasePathKernels();
+    return false;
+  }
+  s.nHistoryFrame = -1;
+  return true;
+}
+
+void CD3D12Renderer::ReleasePathKernels()
+{
+  SPathTraceState &s = m_PathTrace;
+  for (CD3D12Texture **pp : { &s.pRays, &s.pHistory[0], &s.pHistory[1], &s.pFrames[0], &s.pFrames[1], &s.pLight })
+  {
+    if (*pp && m_pUpload)
+      m_pUpload->ReleaseTexture(*pp);
+    *pp = nullptr;
+  }
+  if (m_pDescriptors)
+  {
+    for (int &nTable : s.nTables)
+      if (nTable >= 0)
+        m_pDescriptors->FreeRange(nTable, CD3D12Compute::COMPUTE_UAVS);
+    if (s.nDepthSRV >= 0)
+      m_pDescriptors->FreeSRV(s.nDepthSRV);
+  }
+  std::fill(std::begin(s.nTables), std::end(s.nTables), -1);
+  s.nDepthSRV = -1;
+  s.pDepth.Reset();
+  s.nHistoryFrame = -1;
+  s.nLightFrame = -1;
+}
+
+void CD3D12Renderer::DrawPathTrace()
+{
+  SPathTraceState &s = m_PathTrace;
+  const bool bDue = s.bTraceDue;
+  s.bTraceDue = false;
+  if (!bDue || s.nGBufferFrame != m_nFrames || !s.pAlbedo || !m_pCompute || !m_pRayScene || m_pRayScene->GetBuiltFrame() != m_nFrames ||
+      !m_pRayScene->GetTLAS() || !m_pDevice->IsSceneBound())
+    return;
+  const int w = s.pAlbedo->m_nWidth, h = s.pAlbedo->m_nHeight;
+  ID3D12Resource *pDepth = m_pDevice->GetMainDepth();
+  // The view over the whole depth buffer (the pixels' positions from it), as the G-buffer's.
+  float sx = 1, sy = 1;
+  GetSceneScale(sx, sy);
+  if (!pDepth || w != m_pDevice->GetMainWidth() || h != m_pDevice->GetMainHeight() || m_Viewport[0] != 0 || m_Viewport[1] != 0 ||
+      fabsf(m_Viewport[2] * sx - w) > 1 || fabsf(m_Viewport[3] * sy - h) > 1 || !UpdatePathKernels(w, h))
+    return;
+  if (pDepth != s.pDepth.Get())
+  {
+    if (s.nDepthSRV >= 0)
+      m_pDescriptors->FreeSRV(s.nDepthSRV);
+    s.pDepth = pDepth;
+    const D3D12_SHADER_RESOURCE_VIEW_DESC SRV = PathTextureSRV(m_pDevice->GetMainDepthSRVFormat());
+    s.nDepthSRV = m_pDescriptors->AllocSRV(pDepth, &SRV);
+    s.nHistoryFrame = -1;
+  }
+  if (s.nDepthSRV < 0)
+    return;
+  GpuSection("pt");
+  const D3D12_GPU_VIRTUAL_ADDRESS nTlas = UseRayScene();
+  if (!nTlas)
+    return;
+  SFrameConstants fc;
+  MakeFrameConstants(fc, true);
+  const SD3D12FrameAlloc FrameCB = m_pUpload->AllocFrame(sizeof(fc), 256);
+  memcpy(FrameCB.pCPU, &fc, sizeof(fc));
+
+  // The reference starts again where the view or the path tracer's settings change.
+  const bool bReference = CV_d3d12_PathTracing >= 2;
+  const Matrix44 ViewProj = m_CameraView * m_ProjMatrix;
+  SPathShadeParams P;
+  GetPathShade(P);
+  const int nBounces = std::clamp(bReference ? CV_d3d12_PTReferenceBounces : CV_d3d12_PTBounces, 0, 64);
+  const float *vSky = P.vSky;
+  const char *szDenoiser = m_pPTDenoiserVar && m_pPTDenoiserVar->GetString() ? m_pPTDenoiserVar->GetString() : "simple";
+  const bool bDenoise = !bReference && _stricmp(szDenoiser, "none") != 0;
+  uint32 nKey = (uint32)nBounces * 0x9e3779b1u;
+  for (float f : { P.vSun[0], P.vSun[1], P.vSun[2], P.fLamps, P.fEmission, P.fDelight, vSky[0], vSky[1], vSky[2] })
+  {
+    uint32 n;
+    memcpy(&n, &f, sizeof(n));
+    nKey = (nKey ^ n) * 16777619u;
+  }
+  const bool bSameView = !memcmp(ViewProj.data, s.PrevViewProj, sizeof(s.PrevViewProj)) && nKey == s.nSettingsKey;
+  const bool bHistory = s.nHistoryFrame == m_nFrames - 1 && (bReference ? bSameView && s.bReference : !s.bReference);
+  s.nAccumulated = bHistory ? s.nAccumulated + 1 : 1;
+
+  SPathTraceConstants pc = {};
+  memcpy(pc.mPrevViewProj, s.PrevViewProj, sizeof(pc.mPrevViewProj));
+  GetRayView(pc.vCameraPos, pc.vRayX, pc.vRayY, pc.vRayO);
+  Set4(pc.vSize, (float)w, (float)h, 1.0f / w, 1.0f / h);
+  Set4(pc.vJitter, fc.vJitter[0], fc.vJitter[1], s.PrevJitter[0], s.PrevJitter[1]);
+  Set4(pc.vParams, std::max(CV_d3d12_RTDistance, 1.0f), 2 / (fabsf(m_ProjMatrix.data[5]) * h), bReference ? 65535.0f : PATH_HISTORY_FRAMES,
+       bReference ? 0.0f : PATH_SAMPLE_MAX);
+  Set4(pc.vSun, P.vSun[0], P.vSun[1], P.vSun[2], P.fLamps);
+  Set4(pc.vSky, vSky[0], vSky[1], vSky[2], P.fEmission);
+  Set4(pc.vShade, P.fDelight, P.fBakeLight, P.fLightGap, 0);
+  const int nCur = s.nHistory ^= 1;
+  CD3D12Texture *pHistory = s.pHistory[nCur], *pPrevHistory = s.pHistory[nCur ^ 1];
+  CD3D12Texture *pFrames = s.pFrames[nCur], *pPrevFrames = s.pFrames[nCur ^ 1];
+  pc.nTextures[0] = (uint32)s.nDepthSRV;
+  pc.nTextures[1] = (uint32)s.pRays->m_nSRV;
+  pc.nTextures[2] = (uint32)pPrevHistory->m_nSRV;
+  pc.nTextures[3] = (uint32)pHistory->m_nSRV;
+  pc.nTextures2[0] = (uint32)s.pNormal->m_nSRV;
+  pc.nTextures2[1] = (uint32)pPrevFrames->m_nSRV;
+  pc.nTextures2[2] = (uint32)pFrames->m_nSRV;
+  pc.nTrace[0] = 1;
+  pc.nFlags[0] = bHistory ? 1 : 0;
+  pc.nFlags[1] = (uint32)m_nFrames;
+  pc.nFlags[2] = bDenoise ? 1 : 0;
+  pc.nFlags[3] = RayMask() & 0xff;
+  pc.nPath[0] = P.nLights;
+  pc.nPath[1] = (uint32)nBounces;
+  pc.nPath[2] = bReference ? XR_RAY_MAX_ALPHA_TESTS : PATH_BOUNCE_TESTS;
+  pc.nPath[3] = bReference ? 1 : 0;
+  const SD3D12FrameAlloc PassCB = m_pUpload->AllocFrame(sizeof(pc), 256);
+  memcpy(PassCB.pCPU, &pc, sizeof(pc));
+
+  // The depth buffer readable, the paths and the histories UAVs between the dispatches; the light read by the composite.
+  ID3D12GraphicsCommandList *pList = m_pDevice->GetCmdList();
+  const D3D12_GPU_VIRTUAL_ADDRESS nInstances = m_pRayScene->GetInstances();
+  const D3D12_GPU_VIRTUAL_ADDRESS nLights = s.nLightsFrame == m_nFrames ? s.nLights : 0;
+  const UINT gx = (UINT)(w + XR_PT_GROUP - 1) / XR_PT_GROUP, gy = (UINT)(h + XR_PT_GROUP - 1) / XR_PT_GROUP;
+  m_pDevice->Transition(pDepth, D3D12_RESOURCE_STATE_DEPTH_WRITE, PATH_DEPTH_READ);
+  m_pCompute->DispatchRays(pList, eD3D12K_PathTrace, FrameCB.nGPU, PassCB.nGPU, nTlas, nInstances, s.nTables[PATH_TABLE_TRACE], gx, gy, nLights);
+  m_pDevice->Transition(s.pRays->m_pResource, D3D12_RESOURCE_STATE_UNORDERED_ACCESS, PATH_KERNEL_READ);
+  m_pDevice->Transition(pPrevHistory->m_pResource, D3D12_RESOURCE_STATE_UNORDERED_ACCESS, PATH_KERNEL_READ);
+  m_pDevice->Transition(pPrevFrames->m_pResource, D3D12_RESOURCE_STATE_UNORDERED_ACCESS, PATH_KERNEL_READ);
+  GpuSection("pt history");
+  m_pCompute->DispatchRays(pList, eD3D12K_PathTemporal, FrameCB.nGPU, PassCB.nGPU, nTlas, nInstances, s.nTables[PATH_TABLE_TEMPORAL0 + nCur],
+                           gx, gy, nLights);
+  m_pDevice->Transition(pHistory->m_pResource, D3D12_RESOURCE_STATE_UNORDERED_ACCESS, PATH_KERNEL_READ);
+  m_pDevice->Transition(pFrames->m_pResource, D3D12_RESOURCE_STATE_UNORDERED_ACCESS, PATH_KERNEL_READ);
+  GpuSection("pt filter");
+  m_pCompute->DispatchRays(pList, eD3D12K_PathFilter, FrameCB.nGPU, PassCB.nGPU, nTlas, nInstances, s.nTables[PATH_TABLE_FILTER], gx, gy, nLights);
+  m_pDevice->Transition(s.pLight->m_pResource, D3D12_RESOURCE_STATE_UNORDERED_ACCESS, PATH_READ);
+  for (CD3D12Texture *pTex : { s.pRays, pPrevHistory, pPrevFrames, pHistory, pFrames })
+    m_pDevice->Transition(pTex->m_pResource, PATH_KERNEL_READ, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+  m_pDevice->Transition(pDepth, PATH_DEPTH_READ, D3D12_RESOURCE_STATE_DEPTH_WRITE);
+  m_pDevice->BindRootSignature();
+  InvalidateFrameConstants();
+
+  // The composite: the light added to the scene's colour where the G-buffer has a surface the path tracer lights (the
+  // viewport in the back buffer's pixels, scaled to the scene's by the draw).
+  GpuSection("pt composite");
+  int Viewport[4];
+  memcpy(Viewport, m_Viewport, sizeof(Viewport));
+  const bool bScissor = m_bScissor, bItemScissor = m_bItemScissor;
+  m_Viewport[0] = m_Viewport[1] = 0;
+  m_Viewport[2] = m_pDevice->GetWidth();
+  m_Viewport[3] = m_pDevice->GetHeight();
+  m_bScissor = m_bItemScissor = false;
+  SPipelineKey Key = {};
+  Key.nProgram = eD3D12P_PathComposite;
+  Key.nState = GS_NODEPTHTEST | GS_COLMASKONLYRGB | GS_BLSRC_ONE | GS_BLDST_ONE;
+  Key.nCull = R_CULL_NONE;
+  SDrawConstants dc = DefaultDrawConstants();
+  Set4(dc.vParams0, P.vSun[0], P.vSun[1], P.vSun[2], 0);
+  dc.nTex0 = (uint32)s.pAlbedo->m_nSRV;
+  dc.nTex1 = (uint32)s.pNormal->m_nSRV;
+  dc.nTex2 = (uint32)s.pSun->m_nSRV;
+  dc.nTex3 = (uint32)s.pLight->m_nSRV;
+  static const float s_Triangle[3][3] = { { -1, -1, 0 }, { -1, 3, 0 }, { 3, -1, 0 } };
+  DrawImmediate(Key, dc, D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST, VERTEX_FORMAT_P3F, s_Triangle, 3);
+  memcpy(m_Viewport, Viewport, sizeof(Viewport));
+  m_bScissor = bScissor;
+  m_bItemScissor = bItemScissor;
+  m_pDevice->Transition(s.pLight->m_pResource, PATH_READ, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+
+  // This frame for the next one's history.
+  memcpy(s.PrevViewProj, ViewProj.data, sizeof(s.PrevViewProj));
+  s.PrevJitter[0] = fc.vJitter[0];
+  s.PrevJitter[1] = fc.vJitter[1];
+  s.nSettingsKey = nKey;
+  s.bReference = bReference;
+  s.nHistoryFrame = m_nFrames;
+  s.nLightFrame = m_nFrames;
+  if (m_pFrameDump)
+    fprintf(m_pFrameDump.get(), "pt: %s, %d x %d, %d bounces, %u lamps, sky %.3f %.3f %.3f, sun %.3f %.3f %.3f%s, terrain's baked light %.3f, "
+            "denoiser %s, history %d (%d frames)\n", bReference ? "reference" : "real time", w, h, nBounces, P.nLights, vSky[0], vSky[1], vSky[2],
+            P.vSun[0], P.vSun[1], P.vSun[2], m_pScene && m_pScene->GetSun() ? "" : " (indoors: no sun in the frame)", P.fBakeLight,
+            bDenoise ? "simple" : "none", bHistory ? 1 : 0, s.nAccumulated);
+}
+
 void CD3D12Renderer::DrawPathDebug()
 {
-  if (CV_d3d12_PTDebug <= 0 || CV_d3d12_PTDebug > 4 || m_PathTrace.nGBufferFrame != m_nFrames || !m_PathTrace.pAlbedo || !m_pDevice ||
+  if (CV_d3d12_PTDebug <= 0 || CV_d3d12_PTDebug > 7 || m_PathTrace.nGBufferFrame != m_nFrames || !m_PathTrace.pAlbedo || !m_pDevice ||
       m_pDevice->IsOffscreen() || !m_pRayScene || !m_pRayScene->GetTLAS())
     return;
+  // The paths' light: of this frame's.
+  CD3D12Texture *pLight = CV_d3d12_PTDebug == 5 ? m_PathTrace.pLight : CV_d3d12_PTDebug == 6 ? m_PathTrace.pRays : nullptr;
+  if ((CV_d3d12_PTDebug == 5 || CV_d3d12_PTDebug == 6) && (!pLight || m_PathTrace.nLightFrame != m_nFrames))
+    return;
+  if (pLight)
+    m_pDevice->Transition(pLight->m_pResource, D3D12_RESOURCE_STATE_UNORDERED_ACCESS, PATH_READ);
   // Over the whole back buffer (the ray debug program, which reads the G-buffer for these views).
   const int w = m_pDevice->GetWidth(), h = m_pDevice->GetHeight();
   int Viewport[4];
@@ -375,9 +666,12 @@ void CD3D12Renderer::DrawPathDebug()
   Set4(dc.vParams2, (float)m_PathTrace.pAlbedo->m_nWidth, (float)m_PathTrace.pAlbedo->m_nHeight, 0, 0);
   dc.nTex0 = (uint32)m_PathTrace.pAlbedo->m_nSRV;
   dc.nTex1 = (uint32)m_PathTrace.pNormal->m_nSRV;
+  dc.nTex2 = pLight ? (uint32)pLight->m_nSRV : (uint32)m_PathTrace.pSun->m_nSRV;
   static const float s_Triangle[3][3] = { { -1, -1, 0 }, { -1, 3, 0 }, { 3, -1, 0 } };
   DrawImmediate(Key, dc, D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST, VERTEX_FORMAT_P3F, s_Triangle, 3);
   memcpy(m_Viewport, Viewport, sizeof(Viewport));
   m_bScissor = bScissor;
   m_bItemScissor = bItemScissor;
+  if (pLight)
+    m_pDevice->Transition(pLight->m_pResource, PATH_READ, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
 }

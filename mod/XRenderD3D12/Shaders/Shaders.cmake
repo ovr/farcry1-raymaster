@@ -82,9 +82,14 @@ xrender_d3d12_shader(General_Ambient_RaySun_Rays_Velocity_PS General.hlsl ps_6_5
 xrender_d3d12_shader(General_Ambient_RaySun_Rays_Hdr_PS General.hlsl ps_6_5 PSMain XR_AMBIENT XR_CASCADES XR_RAY_SUN XR_RAY_REFL XR_RAY_LIGHT XR_HDR)
 xrender_d3d12_shader(General_Ambient_RaySun_Rays_Hdr_Velocity_PS General.hlsl ps_6_5 PSMain XR_AMBIENT XR_CASCADES XR_RAY_SUN XR_RAY_REFL XR_RAY_LIGHT XR_VELOCITY XR_HDR)
 # The main view's opaque list into the path tracer's G-buffer (SPipelineKey::bPathTrace, XR_PT, PathGBuffer.hlsli; the
-# HDR scene targets), without and with velocity.
+# HDR scene targets): without the sun's cascades, with them, with the mask of the sun's shadow by rays too; without and
+# with velocity.
 xrender_d3d12_shader(General_PT_Hdr_PS General.hlsl ps_6_0 PSMain XR_PT XR_HDR)
 xrender_d3d12_shader(General_PT_Hdr_Velocity_PS General.hlsl ps_6_0 PSMain XR_PT XR_VELOCITY XR_HDR)
+xrender_d3d12_shader(General_PT_Cascades_Hdr_PS General.hlsl ps_6_0 PSMain XR_PT XR_CASCADES XR_HDR)
+xrender_d3d12_shader(General_PT_Cascades_Hdr_Velocity_PS General.hlsl ps_6_0 PSMain XR_PT XR_CASCADES XR_VELOCITY XR_HDR)
+xrender_d3d12_shader(General_PT_RaySun_Hdr_PS General.hlsl ps_6_0 PSMain XR_PT XR_CASCADES XR_RAY_SUN XR_HDR)
+xrender_d3d12_shader(General_PT_RaySun_Hdr_Velocity_PS General.hlsl ps_6_0 PSMain XR_PT XR_CASCADES XR_RAY_SUN XR_VELOCITY XR_HDR)
 
 # Water surfaces (eD3D12P_Water).
 xrender_d3d12_shader(Water_VS Water.hlsl vs_6_0 VSMain)
@@ -119,6 +124,9 @@ xrender_d3d12_shader(Hdr_Highlight_PS Hdr.hlsl ps_6_0 PSHighlight)
 # (inline RayQuery), drawn only on a device with DXR 1.1 (RayTracing.h).
 xrender_d3d12_shader(RayDebug_VS RayDebug.hlsl vs_6_5 VSMain)
 xrender_d3d12_shader(RayDebug_PS RayDebug.hlsl ps_6_5 PSMain)
+# The path tracer's light into the picture (eD3D12P_PathComposite, d3d12_PathTracing): no rays.
+xrender_d3d12_shader(PathComposite_VS PathComposite.hlsl vs_6_0 VSMain)
+xrender_d3d12_shader(PathComposite_PS PathComposite.hlsl ps_6_0 PSMain)
 
 # The compute kernels (D3D12Compute.h, ED3D12Kernel): Intel XeGTAO's passes (XeGtao.hlsl, one per
 # compile), the ambient occlusion's resolve, the HDR meter's first level, the bloom's levels, the
@@ -151,3 +159,7 @@ xrender_d3d12_shader(RayAOFilter_CS RayAO.hlsl cs_6_5 CSFilter)
 xrender_d3d12_shader(RayGITrace_CS RayAO.hlsl cs_6_5 CSTrace RAY_GI)
 xrender_d3d12_shader(RayGITemporal_CS RayAO.hlsl cs_6_5 CSTemporal RAY_GI)
 xrender_d3d12_shader(RayGIFilter_CS RayAO.hlsl cs_6_5 CSFilter RAY_GI)
+# The path tracer (d3d12_PathTracing, PathTrace.cpp): its paths, their history, its filter.
+xrender_d3d12_shader(PathTraceTrace_CS PathTrace.hlsl cs_6_5 CSTrace)
+xrender_d3d12_shader(PathTraceTemporal_CS PathTrace.hlsl cs_6_5 CSTemporal)
+xrender_d3d12_shader(PathTraceFilter_CS PathTrace.hlsl cs_6_5 CSFilter)

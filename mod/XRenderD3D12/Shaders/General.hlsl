@@ -181,8 +181,10 @@
 //	to the lamp.
 //	Compiled with XR_PT (the main view's opaque list into the path tracer's
 //	G-buffer, PathGBuffer.hlsli; the HDR scene targets) the pixel shader
-//	also writes the albedo to SV_Target3 and the normal, the fog's share and
-//	the path material to SV_Target4. A surface the path tracer lights
+//	also writes the albedo to SV_Target3, the normal, the fog's share and
+//	the path material to SV_Target4 and the sun's visibility (the shadow
+//	maps', the cascades', the mask by rays) to SV_Target5 (with XR_CASCADES
+//	and XR_RAY_SUN as the draw has them). A surface the path tracer lights
 //	(DF2_PT_MASK; its light flags are off, its colour its albedo times
 //	vColor) writes its colour less what it adds unlit (DF2_ADD_TEX4, times
 //	tex1, and DF2_ALPHA_GLOW) as the albedo, that as its colour; a pass that
@@ -227,9 +229,9 @@ static float3 s_vAmbientLight, s_vAmbientNoSun, s_vAmbient;
 #endif
 #ifdef XR_PT
 //! The path tracer's G-buffer of the pixel (PathGBuffer.hlsli): what the colour adds unlit, the albedo, the normal
-//! (N' with DF_BUMP), the fog's share.
+//! (N' with DF_BUMP), the fog's share, the sun's visibility.
 static float3 s_vPTEmission, s_vPTAlbedo, s_vPTNormal;
-static float s_fPTFog;
+static float s_fPTFog, s_fPTSun;
 #endif
 
 #ifdef XR_RAY_LIGHT
@@ -613,6 +615,7 @@ float4 ShadePixel(SVertexOutput In)
   s_vPTAlbedo = 0;
   s_vPTNormal = In.vNormal;
   s_fPTFog = 1;
+  s_fPTSun = 1;
 #endif
 #if defined(XR_RAY_REFL) || defined(XR_RAY_LIGHT)
   // The rays' cone and their origin's face (before any branch or discard: derivatives).
@@ -707,6 +710,9 @@ float4 ShadePixel(SVertexOutput In)
 #elif defined(XR_CASCADES)
   if (HasFlag2(DF2_SUN_CASCADES))
     fSun = SunCascades(In.vWorldPos, In.vNormal, In.vPos.xy, fSun);
+#endif
+#ifdef XR_PT
+  s_fPTSun = HasFlag2(DF2_NO_SUN) ? 0 : fSun;
 #endif
   float4 vVertexColor = In.vColor;
   float3 vSpecular = 0;
@@ -979,6 +985,7 @@ struct SPixelOutput
 #endif
   float4 vAlbedo : SV_Target3;    //!< the albedo, with the colour's alpha for the blend
   float4 vNormal : SV_Target4;    //!< the normal, the fog's share, the path material (PathGBufferNormal)
+  float fSun : SV_Target5;        //!< the sun's visibility
 };
 
 SPixelOutput PSMain(SVertexOutput In)
@@ -991,6 +998,7 @@ SPixelOutput PSMain(SVertexOutput In)
 #endif
   Out.vAlbedo = float4(max(s_vPTAlbedo, 0), Out.vColor.a);
   Out.vNormal = PathGBufferNormal(s_vPTNormal, g_Frame.vCameraPos.xyz - In.vWorldPos, s_fPTFog, (g_Draw.nFlags2 & DF2_PT_MASK) >> DF2_PT_SHIFT);
+  Out.fSun = s_fPTSun;
   return Out;
 }
 #elif defined(XR_VELOCITY)

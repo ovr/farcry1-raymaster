@@ -511,9 +511,10 @@ reference of its features and console variables.
   Research's hall 1.05 -> 1.23 (the opaque list waits for the scene for rays).
   `d3d12_PathTracing` (0 by default, read every frame; not registered without rays; nothing without
   `r_HDRRendering` 1, once in the log) is the path tracer
-  of the lighting, being built (`PathTrace.cpp`). So far 1 and 2 give it the scene for rays, with what
-  is out of the view (as `d3d12_RTOffscreen` 1 does for the effects), the motion vectors (the scene
-  targets without an upscaler, Upscaler), and the lights for its kernels and the programs with rays:
+  of the main view's lighting (`PathTrace.cpp`): 1 in real time, 2 the reference. It has the scene for
+  rays, with what is out of the view (as `d3d12_RTOffscreen` 1 does for the effects), the motion
+  vectors (the scene targets without an upscaler, Upscaler), and the lights for its kernels and the
+  programs with rays:
   `SPTLight` (`Shaders/RayConstants.h`), the root SRV t2 space5, the point lights, the directional
   ones and the projectors with their cube. They are the frame's lights and the level's static ones
   (`I3DEngine::GetStaticLightSources`, the lamps the light maps were baked with: the frame has only
@@ -527,21 +528,49 @@ reference of its features and console variables.
   sun; the templates lit by the ambient colour alone take the object's colour), what glows (glow maps,
   alpha glow, the templates without lights) is its emission, and the sun and the frame's lamps light it
   by a ray towards each (`d3d12_PTSun`, `d3d12_PTLamps`, `d3d12_PTEmission`: times twice their colour,
-  the lamps falling off as the raster fits the static objects' to). The terrain's texture has the sun
-  and the terrain's own shadows baked in: its albedo is divided by that light, the sun's N.L and its
-  visibility over the terrain alone (`d3d12_PTTerrainDelight`: a lit face over a shadowed one). While
-  the path tracer is on the vegetation's vertex colours are baked without the light (the engine's
-  values again on a change).
+  the lamps falling off as the raster fits the static objects' to). The game's lights multiply its
+  colours, so in light they are to the power 2.2 (a colour times a light below 1 is the same picture
+  as the raster's); a colour that glows is `HdrDecode`d. The terrain's texture has the sun and the
+  terrain's own shadows baked in: its albedo (as light) is divided by that light, the path tracer's
+  own sun and sky on an open face towards the sun times ((1 + (r - 1) N.L V) / r)^2.2, V the sun's
+  visibility over the terrain alone, r `d3d12_PTTerrainDelight` (a lit face over a shadowed one): a lit
+  face is as bright as the editor had it. While the path tracer is on the vegetation's vertex colours
+  are baked without the light (the engine's values again on a change), and the grass that fades in or
+  out is alpha tested among the opaque surfaces (its alpha times the fade: it thins out), not blended
+  after them.
   Its G-buffer (`Shaders/PathGBuffer.hlsli`) is what the main view's opaque list writes with the
   general program's `XR_PT` permutation (`General_PT_*`, `SPipelineKey::bPathTrace`): the colour gets
   only what the path tracer does not light (glow maps, alpha glow, the unlit templates, the fog), a
   second target the albedo (RGBA16F, the game's colour without its light, unfogged; decals and the
   terrain's layers blend into it as into the colour), a third the normal (R10G10B10A2: octahedral,
-  the fog's share, the path material: lit, terrain, vegetation). Its lit draws lose their light (the
-  light maps, the sun and its cascades, the lamps and their passes, the ambient and the baked AO);
-  the screen space AO, the rays' GI and the projectors' passes are not drawn. `d3d12_PTDebug` shows
-  it: 1 the albedo, 2 the normal, 3 the fog's share, 4 the material. Until its kernels light the
-  albedo the lit surfaces are dark.
+  the fog's share, the path material: lit, terrain, vegetation), a fourth the sun's visibility as the
+  raster finds it (R8: its shadow maps, the sun's cascades and their mask by rays, which the path
+  tracer turns on, from all the casters; 0 where the raster has no sun). Its lit draws lose their
+  light (the light maps, the sun, the lamps and their passes, the ambient and the baked AO); the
+  screen space AO, the rays' GI and the projectors' passes are not drawn.
+  After the opaque list its kernels (`Shaders/PathTrace.hlsl`, compute with rays, at the scene's size)
+  light it. `CSTrace`, a path from each pixel's surface: a lamp picked among 16 of them by how much each
+  gives (resampled importance sampling) with a ray towards it, then `d3d12_PTBounces` (1) bounces in
+  directions the cosine spreads; a hit gives its emission and its albedo times the sun and a lamp
+  there, a path that leaves the scene the sky (`d3d12_PTSky` times the outdoor ambient as light); in
+  real time a sample is at most 16 (as light) and a bounce's ray takes 4 alpha tests. `CSTemporal`
+  blends it into the history where the surface was in the frame before (32 frames at most),
+  `CSFilter` filters that on the pixel's plane and normal, wider where the history is young
+  (`d3d12_PTDenoiser simple`; `none` the history alone). The composite (`Shaders/PathComposite.hlsl`)
+  adds the fog's share times `HdrEncode`(albedo times (the sun's light times N.L times its visibility
+  + the paths' light)) to the colour, before the blended surfaces, the weapon, the water and the
+  particles, which stay the raster's. Where the frame has no sun (indoors) there is no sun or sky
+  either: what keeps the sky out (a roof above the view) is not in the scene for rays. The reference
+  (`d3d12_PathTracing 2`) adds up its frames while the view and the path tracer's settings stay,
+  `d3d12_PTReferenceBounces` (8) bounces with Russian roulette, every alpha test, no clamp or filter.
+  `d3d12_PTDebug` shows it: 1 the albedo, 2 the normal, 3 the fog's share, 4 the material, 5 the
+  paths' light on the game's grey 0.5, 6 one frame's paths, 7 the sun's visibility. Open places are as
+  bright as the raster; a hut or a tunnel lit through an opening, and a hall's walls away from its
+  lamps, are far darker than the light maps' flat ambient had them (the reference too), what a lamp
+  lights is as the raster has it. On a Radeon RX 7900
+  XTX at 3840x2160 with FSR Quality the flights over Pier, River and Swamp run at 103, 93 and 85 FPS
+  (1 % lows 67, 52 and 54; the raster 201, 193 and 193): the paths take 0.7 to 9 ms, most among the
+  grass and the palms' crowns.
   `d3d12_RTDebug` views the scene for rays from the camera: 1 instances, 2 shaded hits on the right
   half, 3 distance, 4 mip level, 5 kind, 6 alpha tests, 7 shaded hits over the whole picture; the path
   tracer's: 8 the albedo of the hits, 9 their emission, 10 them lit by the sun and the lamps;

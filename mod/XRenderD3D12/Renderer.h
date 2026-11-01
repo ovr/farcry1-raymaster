@@ -741,6 +741,7 @@ public:
   struct SPathShadeParams
   {
     float vSun[3];
+    float vSky[3];      //!< the sky's light where a path leaves the scene
     float fLamps, fEmission, fDelight, fBakeLight, fLightGap;
     uint32 nLights;
   };
@@ -756,19 +757,43 @@ public:
   //! The G-buffer for the scene's size (made again when it changes); false: none.
   bool UpdatePathTargets();
   void ReleasePathTargets();
-  //! d3d12_PTDebug: the G-buffer over the whole back buffer (RayDebug.hlsl, XR_RAY_DEBUG_GB_*).
+  //! d3d12_PTDebug: the G-buffer or the paths' light over the whole back buffer (RayDebug.hlsl, XR_RAY_DEBUG_GB_*).
   void DrawPathDebug();
+  //! After the main view's opaque list wrote the G-buffer (Scene.cpp): the paths (Shaders/PathTrace.hlsl: CSTrace,
+  //! CSTemporal, CSFilter), then their light and the sun's added to the scene's colour (Shaders/PathComposite.hlsl).
+  void DrawPathTrace();
+  //! The kernels' textures for w x h (made again when it changes); false: none.
+  bool UpdatePathKernels(int w, int h);
+  void ReleasePathKernels();
 
   struct SPathTraceState
   {
     D3D12_GPU_VIRTUAL_ADDRESS nLights = 0;  //!< this frame's SPTLight array (per frame memory; 0: none made)
     uint32 nLightCount = 0;                 //!< its lights
     int nLightsFrame = -1;                  //!< m_nFrames it was made in
-    CD3D12Texture *pAlbedo = nullptr;       //!< the G-buffer (D3D12_PT_ALBEDO_FORMAT, D3D12_PT_NORMAL_FORMAT; render targets)
-    CD3D12Texture *pNormal = nullptr;
+    CD3D12Texture *pAlbedo = nullptr;       //!< the G-buffer (D3D12_PT_ALBEDO_FORMAT, D3D12_PT_NORMAL_FORMAT, D3D12_PT_SUN_FORMAT;
+    CD3D12Texture *pNormal = nullptr;       //!< render targets)
+    CD3D12Texture *pSun = nullptr;
     bool bBound = false;                    //!< BeginPathTargets .. EndPathTargets
     int nGBufferFrame = -1;                 //!< m_nFrames the main view's opaque list wrote it in
+    bool bTraceDue = false;                 //!< EndPathTargets .. DrawPathTrace (once after the list that wrote it)
     bool bNoHdrLogged = false;              //!< the log has it that d3d12_PathTracing waits for r_HDRRendering
+    // DrawPathTrace's (UNORDERED_ACCESS between the frames; with their views in the texture table)
+    CD3D12Texture *pRays = nullptr;         //!< CSTrace's paths
+    CD3D12Texture *pHistory[2] = {};        //!< this frame's history and the frame before's
+    CD3D12Texture *pFrames[2] = {};         //!< the frames in them
+    CD3D12Texture *pLight = nullptr;        //!< CSFilter's light, the composite's
+    int nHistory = 0;                       //!< pHistory's current one
+    int nTables[4] = { -1, -1, -1, -1 };    //!< the kernels' UAV tables
+    int nDepthSRV = -1;                     //!< the depth buffer in the texture table
+    ComPtr<ID3D12Resource> pDepth;          //!< and the buffer it views
+    float PrevViewProj[16] = {};            //!< the view's world to clip of the last frame traced
+    float PrevJitter[2] = {};               //!< and its jitter
+    int nHistoryFrame = -1;                 //!< m_nFrames of the last frame traced (-1: no history)
+    int nLightFrame = -1;                   //!< m_nFrames pLight was made in
+    int nAccumulated = 0;                   //!< the frames in the history (the reference's, while the view stays)
+    uint32 nSettingsKey = 0;                //!< the settings the history was traced with
+    bool bReference = false;                //!< it was the reference's
   };
   SPathTraceState m_PathTrace;
 
@@ -1527,7 +1552,12 @@ public:
   float CV_d3d12_PTLamps = 1.0f;            //!< its lamps
   float CV_d3d12_PTEmission = 1.0f;         //!< what glows
   float CV_d3d12_PTTerrainDelight = 2.0f;   //!< the light baked into the terrain's texture: lit over shadowed (<= 1: none taken off)
-  int CV_d3d12_PTDebug = 0;                 //!< the path tracer's G-buffer over the picture: 1 albedo, 2 normal, 3 fog, 4 material
+  int CV_d3d12_PTDebug = 0;                 //!< the path tracer's G-buffer over the picture: 1 albedo, 2 normal, 3 fog, 4 material,
+                                            //!< 5 the paths' light, 6 one frame's paths
+  float CV_d3d12_PTSky = 1.0f;              //!< the path tracer's sky: times the outdoor ambient (as light)
+  int CV_d3d12_PTBounces = 1;               //!< its bounces in real time
+  int CV_d3d12_PTReferenceBounces = 8;      //!< and in the reference (d3d12_PathTracing 2)
+  ICVar *m_pPTDenoiserVar = nullptr;        //!< d3d12_PTDenoiser (simple, none)
   int CV_d3d12_ToneMap = 1;                 //!< the HDR pipeline's tone map: 0 clamp, 1 soft shoulder, 2 ACES fitted, 3 AgX
   float CV_d3d12_ToneMapKnee = 0.85f;       //!< where the soft shoulder starts (a display value)
   float CV_d3d12_Exposure = 0;              //!< the exposure's compensation, EV
