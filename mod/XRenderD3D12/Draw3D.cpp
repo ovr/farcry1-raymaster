@@ -1148,16 +1148,25 @@ void CD3D12Renderer::DrawLeafItem(const SRenderItem &it)
   // Into the G-buffer: a surface the path tracer lights without its light (no sun, ambient, lamps or light map), its
   // colour the albedo (General.hlsl, XR_PT); the sun's visibility from all the casters (its shadow maps, the sun's
   // cascades, the mask by rays), which the composite takes (none where the raster has no sun, DF2_NO_SUN); the game's
-  // ambient light on it in vAmbient.rgb (unused once its light is off), which the paths fill in with.
+  // ambient light on it in vAmbient.rgb (unused once its light is off), which the paths fill in with; the colour of its
+  // highlights in vSpecular (rgb, w > 0: times texture 0's alpha), which CSSpecular lights: the raster's 2 * vSpecular *
+  // gloss of DF_SPECULAR lit per pixel, the fixed function's material light about as much (vSpecular, its power taken
+  // as the raster's), half of it.
   if (bPathMaterial && nMaterial != XR_PT_MAT_UNLIT)
   {
     const uint32 nNoSun = dc.nFlags2 & DF2_NO_SUN;
+    float vPathSpecular[4] = {};
+    if ((dc.nFlags & (DF_LIGHTING | DF_PIXEL_LIGHTING | DF_SPECULAR)) == (DF_LIGHTING | DF_PIXEL_LIGHTING | DF_SPECULAR))
+      memcpy(vPathSpecular, dc.vSpecular, sizeof(vPathSpecular));
+    else if ((dc.nFlags & DF_LIGHTING) && (dc.nFlags2 & DF2_MATERIAL_LIGHT))
+      Set4(vPathSpecular, dc.vSpecular[0] / 2, dc.vSpecular[1] / 2, dc.vSpecular[2] / 2, 0);
     dc.nFlags &= ~(DF_LIGHTING | DF_PIXEL_LIGHTING | DF_SPECULAR | DF_SHADOW_DEBUG | DF_TEX1_LIGHTMAP | DF_LIGHTMAP_DIR);
     dc.nFlags2 &= ~(DF2_MATERIAL_LIGHT | DF2_VERTEX_LIGHTS | DF2_SMOOTH_FALLOFF | DF2_LIGHTMAP_LIGHTS | DF2_SUN_CASCADES | DF2_CASCADES_LIVE |
                     DF2_SHADOW_TINT | DF2_FOLIAGE | DF2_AO_BAKED | DF2_AO_ALL | DF2_NO_SUN);
     dc.nFlags2 |= (nNoSun ? nNoSun : CascadeReceiverFlags(false)) | (((nMaterial + 1) & 3) << DF2_PT_SHIFT);
     memcpy(dc.vColor, vAlbedo, 3 * sizeof(float));
     memcpy(dc.vAmbient, vPathAmbient, sizeof(vPathAmbient));
+    memcpy(dc.vSpecular, vPathSpecular, sizeof(vPathSpecular));
     dc.nLights = 0;
   }
   if (bFirstPass)

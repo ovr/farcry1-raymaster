@@ -159,7 +159,8 @@ xrender_d3d12_shader(RayAOFilter_CS RayAO.hlsl cs_6_5 CSFilter)
 xrender_d3d12_shader(RayGITrace_CS RayAO.hlsl cs_6_5 CSTrace RAY_GI)
 xrender_d3d12_shader(RayGITemporal_CS RayAO.hlsl cs_6_5 CSTemporal RAY_GI)
 xrender_d3d12_shader(RayGIFilter_CS RayAO.hlsl cs_6_5 CSFilter RAY_GI)
-# The path tracer (d3d12_PathTracing, PathTrace.cpp): its paths, their history, its filter.
+# The path tracer (d3d12_PathTracing, PathTrace.cpp): its paths, their history, its filter, the highlights.
 xrender_d3d12_shader(PathTraceTrace_CS PathTrace.hlsl cs_6_5 CSTrace)
 xrender_d3d12_shader(PathTraceTemporal_CS PathTrace.hlsl cs_6_5 CSTemporal)
 xrender_d3d12_shader(PathTraceFilter_CS PathTrace.hlsl cs_6_5 CSFilter)
+xrender_d3d12_shader(PathTraceSpecular_CS PathTrace.hlsl cs_6_5 CSSpecular)

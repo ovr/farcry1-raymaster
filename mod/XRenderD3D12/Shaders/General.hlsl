@@ -188,8 +188,12 @@
 //	which Draw3D.cpp sets so) to SV_Target5. A surface the path tracer lights
 //	(DF2_PT_MASK; its light flags are off, its colour its albedo times
 //	vColor) writes its colour less what it adds unlit (DF2_ADD_TEX4, times
-//	tex1, and DF2_ALPHA_GLOW) as the albedo, that as its colour; a pass that
-//	multiplies the picture its factor (unfogged) to both; the rest no albedo.
+//	tex1, and DF2_ALPHA_GLOW) as the albedo, that as its colour, and its
+//	highlights' colour to SV_Target6 (half of the raster's 2 * vSpecular *
+//	gloss: vSpecular.rgb, times texture 0's alpha where vSpecular.w > 0,
+//	which Draw3D.cpp sets so); a pass that multiplies the picture its
+//	factor (unfogged) to the albedo, the highlights' colour and the colour;
+//	the rest no albedo and no highlights.
 //
 //////////////////////////////////////////////////////////////////////
 
@@ -230,8 +234,8 @@ static float3 s_vAmbientLight, s_vAmbientNoSun, s_vAmbient;
 #endif
 #ifdef XR_PT
 //! The path tracer's G-buffer of the pixel (PathGBuffer.hlsli): what the colour adds unlit, the albedo, the normal
-//! (N' with DF_BUMP), the fog's share, the sun's visibility.
-static float3 s_vPTEmission, s_vPTAlbedo, s_vPTNormal;
+//! (N' with DF_BUMP), the highlights' colour / 2, the fog's share, the sun's visibility.
+static float3 s_vPTEmission, s_vPTAlbedo, s_vPTNormal, s_vPTSpecular;
 static float s_fPTFog, s_fPTSun;
 #endif
 
@@ -614,6 +618,7 @@ float4 ShadePixel(SVertexOutput In)
 #ifdef XR_PT
   s_vPTEmission = 0;
   s_vPTAlbedo = 0;
+  s_vPTSpecular = 0;
   s_vPTNormal = In.vNormal;
   s_fPTFog = 1;
   s_fPTSun = 1;
@@ -894,6 +899,7 @@ float4 ShadePixel(SVertexOutput In)
   if (g_Draw.nFlags2 & DF2_PT_MASK)
   {
     s_vPTAlbedo = max(vColor.rgb - s_vPTEmission, 0);
+    s_vPTSpecular = saturate(g_Draw.vSpecular.rgb * (g_Draw.vSpecular.w > 0 ? vTex.a : 1));
     vColor.rgb = s_vPTEmission;
   }
 #endif
@@ -934,9 +940,9 @@ float4 ShadePixel(SVertexOutput In)
     vFogColor = 0.5;
   }
 #ifdef XR_PT
-  // A pass that multiplies the picture multiplies the albedo as much (not fogged).
+  // A pass that multiplies the picture multiplies the albedo and the highlights as much (not fogged).
   if (HasFlag(DF_DETAIL_LAYER | DF_CAUSTICS) || HasFlag2(DF2_MODULATE))
-    s_vPTAlbedo = vColor.rgb;
+    s_vPTAlbedo = s_vPTSpecular = vColor.rgb;
 #endif
 
   if (HasFlag2(DF2_HEAT))
@@ -987,6 +993,7 @@ struct SPixelOutput
   float4 vAlbedo : SV_Target3;    //!< the albedo, with the colour's alpha for the blend
   float4 vNormal : SV_Target4;    //!< the normal, the fog's share, the path material (PathGBufferNormal)
   float4 vSun : SV_Target5;       //!< r the sun's visibility, gba the game's ambient light / 2 (the draw's vAmbient)
+  float4 vSpecular : SV_Target6;  //!< the highlights' colour / 2, with the colour's alpha for the blend
 };
 
 SPixelOutput PSMain(SVertexOutput In)
@@ -1000,6 +1007,7 @@ SPixelOutput PSMain(SVertexOutput In)
   Out.vAlbedo = float4(max(s_vPTAlbedo, 0), Out.vColor.a);
   Out.vNormal = PathGBufferNormal(s_vPTNormal, g_Frame.vCameraPos.xyz - In.vWorldPos, s_fPTFog, (g_Draw.nFlags2 & DF2_PT_MASK) >> DF2_PT_SHIFT);
   Out.vSun = float4(s_fPTSun, saturate(0.5 * g_Draw.vAmbient.rgb));
+  Out.vSpecular = float4(saturate(s_vPTSpecular), Out.vColor.a);
   return Out;
 }
 #elif defined(XR_VELOCITY)

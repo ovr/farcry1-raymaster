@@ -30,6 +30,16 @@
 //	    its normal), wider where it is young; rgb the composite's light, w
 //	    the light baked into the terrain's texture there (TerrainBakedLight;
 //	    1 elsewhere), which the composite takes out of its albedo.
+//	  CSSpecular: the highlights of the sun and the lamps, as the raster
+//	    makes them (General.hlsl, DF_SPECULAR), in the game's colour: the
+//	    G-buffer's highlights' colour (2 * vSpecular * gloss) times the
+//	    sum of the sun's (vSpecular.rgb times the visibility the raster
+//	    found) and each lamp's specular colour (times vSpecular.w;
+//	    saturate(1 - d / radius) of its sphere, a projector's cube) times
+//	    saturate(R.V)^32, R the light reflected about the normal; a lamp's
+//	    where its ray reaches it, SPECULAR_RAYS of them at most (the
+//	    nearest), only where it gives SPECULAR_MIN or more. The same in the
+//	    reference: one frame has it all.
 //
 //////////////////////////////////////////////////////////////////////
 
@@ -50,6 +60,9 @@ static const uint FILTER_TAPS_OLD = 12;
 static const float FILTER_RADIUS_YOUNG = 24;
 static const float FILTER_RADIUS_OLD = 8;
 static const float FILTER_OLD = 16;
+//! CSSpecular's rays towards the lamps a pixel at most, and the least highlight of a lamp it traces one for (the game's colour).
+static const uint SPECULAR_RAYS = 4;
+static const float SPECULAR_MIN = 1.0 / 512;
 
 //! A 32 bit hash.
 uint Hash(uint x)
@@ -285,4 +298,66 @@ void CSFilter(uint3 vId : SV_DispatchThreadID)
   if (PathGBufferMaterial(vGBuffer) == XR_PT_MAT_TERRAIN + 1 && g_PT.vShade.x > 1)
     fBaked = max(TerrainBakedLight(vPos, vN, vFace, PathShadeParams(0), d * g_PT.vParams.y), 0.01);
   g_Out[p] = float4(max(vLight, 0), fBaked);
+}
+
+//! The raster's highlight (General.hlsl Specular): saturate(R.V)^32, R the light vToLight reflected about vN, 0 where N.L <= 0.
+float PathPhong(float3 vN, float3 vToLight, float3 vToEye)
+{
+  const float fNL = dot(vN, vToLight);
+  const float fRV = saturate(dot(2 * fNL * vN - vToLight, vToEye));
+  const float f2 = fRV * fRV, f4 = f2 * f2, f8 = f4 * f4, f16 = f8 * f8;
+  return fNL > 0 ? f16 * f16 : 0;
+}
+
+[numthreads(XR_PT_GROUP, XR_PT_GROUP, 1)]
+void CSSpecular(uint3 vId : SV_DispatchThreadID)
+{
+  const int2 p = (int2)vId.xy;
+  if (any(p >= (int2)g_PT.vSize.xy))
+    return;
+  const float4 vGBuffer = GBufferNormalAt(p);
+  // The raster's 2 * vSpecular * gloss: the G-buffer has half of it.
+  const float3 vColor = 2 * g_Textures[g_PT.nTextures3.x].Load(int3(p, 0)).rgb;
+  const float z = DepthAt(p);
+  const float d = ViewDepthOf(z);
+  if (PathGBufferMaterial(vGBuffer) == 0 || all(vColor <= 0) || (all(g_PT.vSpecular <= 0)) || z >= 1 || d <= 0)
+  {
+    g_Out[p] = 0;
+    return;
+  }
+  const float3 vPos = PixelPos(p + 0.5, d);
+  const float3 vFace = FaceNormal(p, vPos, d);
+  const float3 vN = PixelNormal(vGBuffer, vPos);
+  const float3 vToEye = normalize(g_PT.vCameraPos.xyz - vPos);
+  // The sun's, with the visibility the raster found.
+  float3 vSpecular = g_PT.vSpecular.rgb * (g_Textures[g_PT.nTextures2.w].Load(int3(p, 0)).r * PathPhong(vN, g_Frame.vSunDir.xyz, vToEye));
+  // The lamps', each by a ray towards it.
+  const SPathShade P = PathShadeParams(g_PT.nPath.z);
+  uint nRays = 0;
+  [loop]
+  for (uint i = 0; i < P.nLights && g_PT.vSpecular.w > 0 && nRays < SPECULAR_RAYS; i++)
+  {
+    const SPTLight L = g_PTLights[i];
+    float3 vToLight = L.vPos.xyz;
+    float fDistance = 2000, fFalloff = 1;
+    if (L.nParams.x != XR_PT_LIGHT_DIRECTIONAL)
+    {
+      vToLight = L.vPos.xyz - vPos;
+      fDistance = length(vToLight);
+      fFalloff = saturate(1 - fDistance / L.vPos.w);
+      vToLight /= max(fDistance, 1e-4);
+    }
+    if (fFalloff <= 0)
+      continue;
+    float3 vLamp = saturate(L.vSpecular.rgb) * (g_PT.vSpecular.w * fFalloff * PathPhong(vN, vToLight, vToEye));
+    if (L.nParams.x == XR_PT_LIGHT_PROJECTOR && L.nParams.z != XR_RAY_NONE && any(vLamp > 0))
+      vLamp *= g_Cubes[NonUniformResourceIndex(L.nParams.z)].SampleLevel(g_SamplerLinearClamp, mul(float4(vPos, 1), L.mProject).xyz, 0).rgb;
+    const float3 vGives = vColor * vLamp;
+    if (max(vGives.r, max(vGives.g, vGives.b)) < SPECULAR_MIN)
+      continue;
+    float fHit;
+    vSpecular += vLamp * TraceLight(vPos, vFace, vToLight, fDistance, P.fLightGap, P.nMask, d * g_PT.vParams.y, fHit, P.nMaxTests);
+    nRays++;
+  }
+  g_Out[p] = float4(vColor * vSpecular, 0);
 }

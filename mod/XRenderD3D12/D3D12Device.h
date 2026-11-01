@@ -45,6 +45,7 @@ constexpr DXGI_FORMAT D3D12_AMBIENT_FORMAT = DXGI_FORMAT_R11G11B10_FLOAT; //!< t
 constexpr DXGI_FORMAT D3D12_PT_ALBEDO_FORMAT = DXGI_FORMAT_R16G16B16A16_FLOAT; //!< the path tracer's G-buffer: the albedo (BindPathTargets)
 constexpr DXGI_FORMAT D3D12_PT_NORMAL_FORMAT = DXGI_FORMAT_R10G10B10A2_UNORM;  //!< its normal, the fog's share and the material
 constexpr DXGI_FORMAT D3D12_PT_SUN_FORMAT = DXGI_FORMAT_R8G8B8A8_UNORM;        //!< the sun's visibility, the ambient light / 2
+constexpr DXGI_FORMAT D3D12_PT_SPECULAR_FORMAT = DXGI_FORMAT_R8G8B8A8_UNORM;   //!< the highlights' colour / 2
 
 //! What the swap chain shows (d3d12_HDROutput, HdrOutput.cpp).
 enum class EDisplayOutput
@@ -249,10 +250,11 @@ public:
   bool IsAmbientBound() const { return m_hAmbientRTV.ptr && !m_pOffscreen; }
   //! The path tracer's G-buffer (PathTrace.cpp, Shaders/PathGBuffer.hlsli), targets of the scene's size: from here
   //! (in a frame, in the scene) SetBackBufferTargets binds hAlbedo (D3D12_PT_ALBEDO_FORMAT), hNormal
-  //! (D3D12_PT_NORMAL_FORMAT) and hSun (D3D12_PT_SUN_FORMAT) as the scene's fourth to sixth colour targets (SV_Target3
-  //! to 5, SPipelineKey::bPathTrace) in place of the ambient light's; empty handles unbind them. The caller makes its
-  //! transitions.
-  void BindPathTargets(D3D12_CPU_DESCRIPTOR_HANDLE hAlbedo, D3D12_CPU_DESCRIPTOR_HANDLE hNormal, D3D12_CPU_DESCRIPTOR_HANDLE hSun);
+  //! (D3D12_PT_NORMAL_FORMAT), hSun (D3D12_PT_SUN_FORMAT) and hSpecular (D3D12_PT_SPECULAR_FORMAT) as the scene's fourth
+  //! to seventh colour targets (SV_Target3 to 6, SPipelineKey::bPathTrace) in place of the ambient light's; empty handles
+  //! unbind them. The caller makes its transitions.
+  void BindPathTargets(D3D12_CPU_DESCRIPTOR_HANDLE hAlbedo, D3D12_CPU_DESCRIPTOR_HANDLE hNormal, D3D12_CPU_DESCRIPTOR_HANDLE hSun,
+                       D3D12_CPU_DESCRIPTOR_HANDLE hSpecular);
   //! The main view's draws write the path tracer's G-buffer too (bound, in the scene, not off screen).
   bool IsPathBound() const { return m_hPathRTV[0].ptr && m_bInScene && !m_pOffscreen; }
   //! true: from here (in a frame) SetBackBufferTargets binds the main view's depth buffer read only
@@ -498,7 +500,7 @@ private:
   ComPtr<ID3D12Resource> m_pHdrColor;               //!< SetHdrTarget
   bool m_bInHdr = false;                            //!< BeginHdr .. EndHdr
   D3D12_CPU_DESCRIPTOR_HANDLE m_hAmbientRTV = {};   //!< BindAmbient
-  D3D12_CPU_DESCRIPTOR_HANDLE m_hPathRTV[3] = {};   //!< BindPathTargets
+  D3D12_CPU_DESCRIPTOR_HANDLE m_hPathRTV[4] = {};   //!< BindPathTargets
   bool m_bDepthReadOnly = false;                    //!< SetDepthReadOnly
 
   int m_nWidth = 0, m_nHeight = 0;

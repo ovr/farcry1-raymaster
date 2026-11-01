@@ -67,6 +67,7 @@ enum ED3D12Kernel
   eD3D12K_PathTrace,                //!< the path tracer (d3d12_PathTracing): its paths (Shaders/PathTrace.hlsl; with rays)
   eD3D12K_PathTemporal,             //!< their light blended into the history
   eD3D12K_PathFilter,               //!< the history filtered into the composite's light
+  eD3D12K_PathSpecular,             //!< the highlights of the sun and the lamps (with rays)
   eD3D12K_Num
 };
 

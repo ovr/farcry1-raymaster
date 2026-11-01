@@ -8,15 +8,17 @@
 //	over the scene's targets after the opaque list, added (ONE, ONE) to the
 //	colour that has what the path tracer does not light and the fog
 //	(General.hlsl, XR_PT). Where the G-buffer has a surface it lights:
-//	  the fog's share * HdrEncode(albedo * (sun + paths)),
+//	  the fog's share * (HdrEncode(albedo * (sun + paths)) + highlights),
 //	the albedo the G-buffer's (the game's colour as light, divided by the
 //	light baked into the terrain's texture there), the sun its
 //	light (vParams0.rgb) times N.L and the visibility the raster found
 //	(the G-buffer's), the paths' light that of PathTrace.hlsl's CSFilter.
-//	The leaves let half of the sun through from behind them.
+//	The leaves let half of the sun through from behind them. The
+//	highlights (PathTrace.hlsl's CSSpecular) are the game's colour, added
+//	to it as the raster adds them.
 //	tex0 the albedo, tex1 the normal (PathGBuffer.hlsli), tex2 the sun's
-//	visibility, tex3 the paths' light (w the terrain's baked light), all
-//	of the scene's size, as the target.
+//	visibility, tex3 the paths' light (w the terrain's baked light), tex4
+//	the highlights, all of the scene's size, as the target.
 //
 //////////////////////////////////////////////////////////////////////
 
@@ -50,5 +52,6 @@ float4 PSMain(SCompositeOutput In) : SV_Target
   const float fSun = nMaterial == XR_PT_MAT_VEGETATION + 1 ? saturate(fNL) + 0.5 * saturate(-fNL) : saturate(fNL);
   const float3 vLight = g_Draw.vParams0.rgb * (fSun * fVisible) + vPaths.rgb;
   const float3 vLit = saturate(pow(saturate(vAlbedo), HDR_GAMMA) / max(vPaths.w, 0.01)) * vLight;
-  return float4(float3(HdrEncode(vLit.r), HdrEncode(vLit.g), HdrEncode(vLit.b)) * vGBuffer.b, 0);
+  const float3 vHighlights = g_Textures[g_Draw.nTex4].Load(vAt).rgb;
+  return float4((float3(HdrEncode(vLit.r), HdrEncode(vLit.g), HdrEncode(vLit.b)) + vHighlights) * vGBuffer.b, 0);
 }
