@@ -550,7 +550,10 @@ void CD3D12Renderer::UpdateRayBehind()
   const Vec3 vClearColor = m_vClearColor;
   const int nState = m_nState, nCullMode = m_nCullMode, nCascadeSet = m_nCascadeSet;
 
-  // The camera at the view looking back (pitch mirrored), as wide as the sun's (the engine stretches it across the screen).
+  // Cameras at the view as wide as the sun's (170 degrees each way; the engine stretches it across the screen): looking
+  // back (pitch mirrored), up and down. The view's and the one looking back alone left out what is above and below the
+  // view out of its frustum (up to 95 degrees over the view's direction, less its pitch down): a roof's parts there
+  // dropped out of the scene as the camera looked down a little, and the paths went out of the room through it.
   const size_t nBefore = m_nRayOffscreenFrame == m_nFrames ? m_RayOffscreenItems.size() : 0;
   m_bCascadePass = m_bRayBehindPass = true;
   m_nCascadeSet = 0;
@@ -560,11 +563,13 @@ void CD3D12Renderer::UpdateRayBehind()
   BackCam.Init(w, h, DEG2RAD(CASCADE_CAMERA_FOV_DEG) * w / h, fFar, (float)h / w, 0.25f);
   BackCam.SetPos(Camera.GetPos());
   const Ang3 a = Camera.GetAngles();
-  BackCam.SetAngle(Vec3(-a.x, a.y, a.z + 180.0f));
-  BackCam.Update();
-  iSystem->SetViewCamera(BackCam);
-  p3D->SetCamera(BackCam, false);
+  // The pitch: negative up; 89 degrees, not 90, where the yaw still turns the view.
+  for (const Vec3 &vAngles : { Vec3(-a.x, a.y, a.z + 180.0f), Vec3(-89.0f, 0.0f, a.z), Vec3(89.0f, 0.0f, a.z) })
   {
+    BackCam.SetAngle(vAngles);
+    BackCam.Update();
+    iSystem->SetViewCamera(BackCam);
+    p3D->SetCamera(BackCam, false);
     SCpuTime Time(m_fFrameLowDetailMs[LD_BEHIND]);
     p3D->DrawLowDetail(CASCADE_CAMERA_FLAGS);
   }
@@ -592,7 +597,7 @@ void CD3D12Renderer::UpdateRayBehind()
   m_nCascadeSet = nCascadeSet;
   InvalidateFrameConstants();
   if (m_pFrameDump)
-    fprintf(m_pFrameDump.get(), "rays behind the camera: %d parts from the 3D engine's camera looking back (%.0f degrees, to %.0f m), %.2f ms\n",
+    fprintf(m_pFrameDump.get(), "rays behind the camera: %d parts from the 3D engine's cameras looking back, up and down (%.0f degrees, to %.0f m), %.2f ms\n",
             m_nRayBehindParts, CASCADE_CAMERA_FOV_DEG, BackCam.GetZMax(), m_fFrameLowDetailMs[LD_BEHIND]);
 }
 
