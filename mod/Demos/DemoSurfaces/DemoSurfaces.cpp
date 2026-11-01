@@ -71,6 +71,10 @@
 //	                          above it (default: 12 0 15)
 //	  orbit = <degrees>       the turn of the view camera round the row per
 //	                          frame (default 0)
+//	  middle = x y z          the point the view camera and the light go round
+//	                          (default: the middle of the objects' boxes), so
+//	                          that rows of objects of other sizes are seen
+//	                          from the same place
 //	  labels = 0|1            the template over each object (default 1)
 //
 //////////////////////////////////////////////////////////////////////
@@ -354,6 +358,10 @@ private:
         Item.vBase.y, Item.vBase.z, fGround, fWater, Item.fScale);
     }
     m_vCenter = m_Items.empty() ? Game.GetPos() + vDir * 10.0f : vSum * (1.0f / m_Items.size());
+    // A middle of the scene's own: the same camera and light for rows of objects of other sizes.
+    const std::vector<float> Middle = Scene.GetFloats("middle");
+    if (Middle.size() >= 3)
+      m_vCenter = Vec3(Middle[0], Middle[1], Middle[2]);
 
     std::vector<float> Camera = Scene.GetFloats("camera"), View = Scene.GetFloats("view");
     m_bFixedCamera = Camera.size() >= 6;

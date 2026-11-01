@@ -52,20 +52,55 @@ struct STemplateEntry
   bool bLightmap = false;
   bool bNotFound = false;         //!< has the values of a template that does not exist
   bool bStealth = false;
+  float fFlareSize = 0.0f;        //!< eDC_ProcFlare: its FlareSize when the name has no number
 };
+
+//! The game's shader aliases (Shaders/Aliases.txt): a template named by an alias is the template it
+//! stands for, as if the material named that (lower case).
+struct SAlias
+{
+  std::string_view Name, Template;
+};
+
+constexpr SAlias s_Aliases[] =
+{
+  { "tbumpspec",                       "templbumpspec" },
+  { "tbumpspec_nocm",                  "templbumpspec_nocm" },
+  { "tbumpdiffuse_nocm",               "templbumpdiffuse_nocm" },
+  { "tbd",                             "templbumpdiffuse" },
+  { "tbs_hp",                          "templbumpspec_hp" },
+  { "tbd_nocm",                        "templbumpdiffuse_nocm" },
+  { "no_draw",                         "nodraw" },
+  { "tbs_ga_cm",                       "templbumpspec_glossalpha_envcmamb" },
+};
+
+//! The template a lower case name stands for: its alias's, or the name itself.
+std::string Unalias(std::string Name)
+{
+  for (const SAlias &A : s_Aliases)
+    if (A.Name == Name)
+      return std::string(A.Template);
+  return Name;
+}
 
 //! The templates. Exact names are matched before the '*' entries, which are tried in this order.
 constexpr STemplateEntry s_Templates[] =
 {
   // name                              template                         sort                      flags2                                  flags3          class                 cull        alpha ref     scroll v  lightmap
-  // Diffuse: texture * lighting, or the lightmap stages of lightmapped objects.
-  { "tbd",                             "templdiffuse_fp",               eS_Opaque,                kOpaque2,                               0,              eDC_Opaque,           eCULL_Back, 0.0f,         0.0f,     true },
+  // Diffuse: texture * lighting, or the lightmap stages of lightmapped objects (TBD is an alias of
+  // TemplBumpDiffuse: the templbump* entry below). TemplDiffuseSpec_FP adds the specular of projected
+  // lights only.
   { "templlightdiffuse",               "",                              eS_Opaque,                kOpaque2,                               0,              eDC_Opaque,           eCULL_Back, 0.0f,         0.0f,     true },
   { "templlightdiffuse_alphaglow",     "templdiffuse_fp",               eS_Opaque,                kOpaque2,                               0,              eDC_Opaque,           eCULL_Back, 0.0f,         0.0f,     true },
+  { "templdiffusespec_fp",             "",                              eS_Opaque,                kOpaque2,                               0,              eDC_Opaque,           eCULL_Back, 0.0f,         0.0f,     true },
   // Vegetation: no lighting; the leaves alpha tested (or blended by the object's colour), two-sided.
+  // TemplDecal_VColors (the bark's, also named by a model): the texture times the object's colour.
   { "templplantsbark",                 "templdecal_vcolors",            eS_Trees,                 EF2_OPAQUE,                             0,              eDC_VColor,           eCULL_Back },
-  // Kept as named, opaque.
+  { "templdecal_vcolors",              "",                              eS_Trees,                 EF2_OPAQUE,                             0,              eDC_VColor,           eCULL_Back },
+  // Kept as named, opaque (TemplDecal_HP, a template of the renderer's own as the _HP bump ones, the
+  // original draws as TemplDecal).
   { "templdecal",                      "",                              eS_Opaque,                kOpaque2,                               0,              eDC_Opaque,           eCULL_Back },
+  { "templdecal_hp",                   "templdecal",                    eS_Opaque,                kOpaque2,                               0,              eDC_Opaque,           eCULL_Back },
   { "templdecalalphatest",             "",                              eS_Opaque,                kOpaque2,                               0,              eDC_AlphaTest,        eCULL_Back, kAlphaRef128 },
   { "templdecalalphatestforshadows",   "",                              eS_Opaque,                kOpaque2,                               0,              eDC_AlphaTest,        eCULL_None, kAlphaRef128 },
   { "templdecalglow",                  "",                              eS_Opaque,                kOpaque2,                               0,              eDC_Opaque,           eCULL_Back },
@@ -93,11 +128,16 @@ constexpr STemplateEntry s_Templates[] =
   // Decals over surfaces, after the opaque ones: multiplied in, blended.
   { "templdecalmodulate",              "templdecalmodulate_fp",         eS_Decal,                 EF2_DONTSORTBYDIST,                     0,              eDC_Modulate,         eCULL_Back },
   { "templdecalalphablend",            "",                              eS_Decal,                 EF2_DONTSORTBYDIST,                     0,              eDC_AlphaBlend,       eCULL_Back },
-  // Blended (no depth writes).
+  // Blended (no depth writes). TemplDecalAlphaBlend_NoSort: lit, among the blended objects, no decal
+  // offset. The opacity shifts (waterfalls): the texture alone, its v running down.
   { "templalphablend",                 "",                              eS_Banner,                0,                                      0,              eDC_AlphaBlend,       eCULL_Back },
+  { "templdecalalphablend_nosort",     "",                              eS_Banner,                0,                                      0,              eDC_AlphaBlend,       eCULL_Back },
   { "templdecalopacity",               "",                              eS_Banner,                0,                                      0,              eDC_AlphaBlend,       eCULL_Back },
+  { "templdecalopacityshift",          "templdecalopacityshift_fp",     eS_Banner,                0,                                      0,              eDC_AlphaBlend,       eCULL_None, 0.0f,         -0.35f },
+  { "templdecalopacityshift1",         "templdecalopacityshift1_fp",    eS_Banner,                0,                                      0,              eDC_AlphaBlend,       eCULL_None, 0.0f,         -0.35f },
   { "templdecalopacityshift2",         "templdecalopacityshift2_fp",    eS_Banner,                0,                                      0,              eDC_AlphaBlend,       eCULL_None, 0.0f,         -0.35f },
   { "templdecalopacityshift3",         "templdecalopacityshift3_fp",    eS_Banner,                0,                                      0,              eDC_AlphaBlend,       eCULL_None, 0.0f,         -0.35f },
+  { "templdecalopacityshift4",         "templdecalopacityshift4_fp",    eS_Banner,                0,                                      0,              eDC_AlphaBlend,       eCULL_None, 0.0f,         -0.65f },
   { "templtexturev22rotate",           "",                              eS_Banner,                0,                                      0,              eDC_AlphaBlend,       eCULL_None, kAlphaRef2 },
   { "s_objectcolor",                   "",                              eS_Banner,                0,                                      0,              eDC_AlphaBlend,       eCULL_Back },
   { "templbeamproc",                   "",                              eS_Banner,                EF2_IGNORERESOURCESTATES,               0,              eDC_AlphaBlend,       eCULL_None },
@@ -110,11 +150,29 @@ constexpr STemplateEntry s_Templates[] =
   { "mutantstealth",                   "mutantstealth_fp",              eS_Banner,                0,                                      0,              eDC_Additive,         eCULL_Back, 0.0f,         0.0f,     false, false, true },
   // The terrain layers with a material of their own (bump mapped cliffs).
   { "terrainlayer",                    "terrainlayer(",                 eS_TerrainDetailTextures, EF2_FOGOVERLAY1 | EF2_DONTSORTBYDIST,   0,              eDC_TerrainLayer,     eCULL_Back },
-  // Procedural flares: a glow around the surface (FlareSize 1, or the number after the name).
+  // Procedural flares: a glow around the surface (FlareSize 1, or the number after the name; two of
+  // the scripts' named ones have their own).
   { "flareproc",                       "",                              eS_Banner,                0,                                      0,              eDC_ProcFlare,        eCULL_Back },
-  // Not drawn: invisible surfaces, heat haze.
+  { "flareproc_warmyellow2",           "",                              eS_Banner,                0,                                      0,              eDC_ProcFlare,        eCULL_Back, 0.0f,         0.0f,     false, false, false, 0.025f },
+  { "flareproc_025",                   "",                              eS_Banner,                0,                                      0,              eDC_ProcFlare,        eCULL_Back, 0.0f,         0.0f,     false, false, false, 0.25f },
+  // Not drawn: invisible surfaces (no_draw is an alias), heat haze.
   { "nodraw",                          "",                              eS_Opaque,                kOpaque2,                               EF3_NODRAW,     eDC_NoDraw,           eCULL_Back },
-  { "no_draw",                         "nodraw",                        eS_Opaque,                kOpaque2,                               EF3_NODRAW,     eDC_NoDraw,           eCULL_Back },
+  // Not drawn: the names of the game's models (and a swatch) that no script defines (typos), which the
+  // original draws nothing with (as the flareproc_* below; templdecalalphaglowselfillum is an alias only
+  // for NV1X). Exact, ahead of the prefixes templbump* and templmodel*.
+  { "templdecalglow_selfillum",        "",                              eS_Opaque,                kOpaque2,                               EF3_NOTEMPLATE, eDC_NoDraw,           eCULL_Back, 0.0f,         0.0f,     false, true },
+  { "templdecalglowseflillum",         "",                              eS_Opaque,                kOpaque2,                               EF3_NOTEMPLATE, eDC_NoDraw,           eCULL_Back, 0.0f,         0.0f,     false, true },
+  { "templdecalalphaglowselfillum",    "",                              eS_Opaque,                kOpaque2,                               EF3_NOTEMPLATE, eDC_NoDraw,           eCULL_Back, 0.0f,         0.0f,     false, true },
+  { "tempdecalalphablend",             "",                              eS_Opaque,                kOpaque2,                               EF3_NOTEMPLATE, eDC_NoDraw,           eCULL_Back, 0.0f,         0.0f,     false, true },
+  { "templbumpdefuse",                 "",                              eS_Opaque,                kOpaque2,                               EF3_NOTEMPLATE, eDC_NoDraw,           eCULL_Back, 0.0f,         0.0f,     false, true },
+  { "templbumpspechp",                 "",                              eS_Opaque,                kOpaque2,                               EF3_NOTEMPLATE, eDC_NoDraw,           eCULL_Back, 0.0f,         0.0f,     false, true },
+  { "templmodfelcommon",               "",                              eS_Opaque,                kOpaque2,                               EF3_NOTEMPLATE, eDC_NoDraw,           eCULL_Back, 0.0f,         0.0f,     false, true },
+  { "tempmodelcommon",                 "",                              eS_Opaque,                kOpaque2,                               EF3_NOTEMPLATE, eDC_NoDraw,           eCULL_Back, 0.0f,         0.0f,     false, true },
+  { "templdiffuse",                    "",                              eS_Opaque,                kOpaque2,                               EF3_NOTEMPLATE, eDC_NoDraw,           eCULL_Back, 0.0f,         0.0f,     false, true },
+  { "templbark",                       "",                              eS_Opaque,                kOpaque2,                               EF3_NOTEMPLATE, eDC_NoDraw,           eCULL_Back, 0.0f,         0.0f,     false, true },
+  { "templlightglow",                  "",                              eS_Opaque,                kOpaque2,                               EF3_NOTEMPLATE, eDC_NoDraw,           eCULL_Back, 0.0f,         0.0f,     false, true },
+  { "templbrushedmetal",               "",                              eS_Opaque,                kOpaque2,                               EF3_NOTEMPLATE, eDC_NoDraw,           eCULL_Back, 0.0f,         0.0f,     false, true },
+  { "wew",                             "",                              eS_Opaque,                kOpaque2,                               EF3_NOTEMPLATE, eDC_NoDraw,           eCULL_Back, 0.0f,         0.0f,     false, true },
   { "particleminheathaze",             "",                              eS_HeatVision,            0,                                      0,              eDC_NoDraw,           eCULL_None },
   { "particlemedheathaze",             "",                              eS_HeatVision,            0,                                      0,              eDC_NoDraw,           eCULL_None },
   { "particlemaxheathaze",             "",                              eS_HeatVision,            0,                                      0,              eDC_NoDraw,           eCULL_None },
@@ -151,6 +209,7 @@ constexpr STemplateLighting s_TemplateLighting[] =
 {
   // Texture * fixed function vertex lighting (ambient and lights), not modulated by 2.
   { "templdecal",                      ELighting::Vertex },
+  { "templdecal_hp",                   ELighting::Vertex },
   { "templdecalalphatest",             ELighting::Vertex },
   { "templdecalglow",                  ELighting::Vertex,   EGlow::Glow },
   { "templdecalglowselfillum",         ELighting::Vertex,   EGlow::SelfIllum },
@@ -179,9 +238,14 @@ constexpr STemplateLighting s_TemplateLighting[] =
   { "templdecalopacity",               ELighting::Ambient },
   { "templdecalalphatestforshadows",   ELighting::Ambient2 },
   { "templdecaladd_vlight",            ELighting::Ambient },
+  { "templdecalopacityshift",          ELighting::None },
+  { "templdecalopacityshift1",         ELighting::None },
   { "templdecalopacityshift2",         ELighting::None },
   { "templdecalopacityshift3",         ELighting::None },
+  { "templdecalopacityshift4",         ELighting::None },
   { "templtexturev22rotate",           ELighting::None },
+  // Texture * fixed function vertex lighting, blended.
+  { "templdecalalphablend_nosort",     ELighting::Vertex },
   // No lights: the texture times the vertex colour (also added by its alpha).
   { "templdecalalphablend",            ELighting::VColor },
   { "templdecalalphaadd",              ELighting::VColor },
@@ -322,8 +386,8 @@ SResolvedTemplate ResolveTemplate(const std::string &Name, uint64 nMaskGen)
   R.Props.bStealth = pE->bStealth;
   if (pE->eClass == eDC_ProcFlare)
   {
-    // "flareproc <size>"; 1 for "flareproc".
-    R.Props.fFlareSize = 1.0f;
+    // "flareproc <size>"; 1 for "flareproc", the entry's own for the named ones.
+    R.Props.fFlareSize = pE->fFlareSize > 0 ? pE->fFlareSize : 1.0f;
     if (const size_t nSpace = Name.find(' '); nSpace != std::string::npos)
     {
       float fSize = 0;
@@ -943,7 +1007,7 @@ CShader *CShaderManager::LoadShader(const char *szName, EShClass eClass, int nFl
 
 CShader *CShaderManager::GetTemplate(const char *szName, uint64 nMaskGen)
 {
-  std::string Name = Lower(szName);
+  std::string Name = Unalias(Lower(szName));
   std::string Key = Name + '\n' + Hex(nMaskGen);
   if (auto it = m_TemplateNames.find(Key); it != m_TemplateNames.end())
     return it->second;
@@ -965,7 +1029,8 @@ CShader *CShaderManager::LoadMaterial(const char *szName, const char *szTemplate
 {
   CShader *pTempl = GetTemplate(szTemplate, nMaskGen);
   std::string Name = Lower(szName);
-  std::string Templ = Lower(szTemplate);
+  // An alias (TBD, tbs_HP) as the template it stands for.
+  std::string Templ = Unalias(Lower(szTemplate));
   // The templates with vertex and pixel shaders when bump mapping is on: their names stay then
   // (GetTemplate(-1) is the template as named), each a shader of its own, so that materials of one
   // name keep their own lighting (all those of a level's material library are "MaterialContainer").
