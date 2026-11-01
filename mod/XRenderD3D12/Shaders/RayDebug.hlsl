@@ -41,7 +41,8 @@
 //	                          the lamps (PathDirect), fogged as the picture
 //	  XR_RAY_DEBUG_GB_*       the path tracer's G-buffer (PathGBuffer.hlsli:
 //	                          the albedo, the normal, the fog's share, the
-//	                          material, the sun's visibility) and the
+//	                          material, the sun's visibility, the ambient
+//	                          light the paths fill in with) and the
 //	                          light of its paths on a grey albedo (the
 //	                          game's 0.5), no rays: tex0 its albedo, tex1
 //	                          its normal, tex2 the light (PathTrace.hlsl's)
@@ -105,6 +106,8 @@ float4 GBufferView(uint nView, float2 vPixel)
     return float4(vNormal.bbb, 1);
   if (nView == XR_RAY_DEBUG_GB_SUN)
     return float4(g_Textures[g_Draw.nTex2].Load(vAt).rrr, 1);
+  if (nView == XR_RAY_DEBUG_GB_AMBIENT)
+    return float4(nMaterial ? saturate(2 * g_Textures[g_Draw.nTex2].Load(vAt).gba) : 0, 1);
   if (nMaterial == 0)
     return float4(0, 0, 0, 1);
   if (nView == XR_RAY_DEBUG_GB_NORMAL)

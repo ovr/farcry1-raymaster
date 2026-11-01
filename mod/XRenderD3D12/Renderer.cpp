@@ -321,13 +321,20 @@ void CD3D12Renderer::RegisterVariables()
   iConsole->Register("d3d12_PTDebug", &CV_d3d12_PTDebug, 0, 0,
                      "With d3d12_PathTracing, its G-buffer over the picture: 1 the albedo, 2 the normal, 3 the fog's share, "
                      "4 the material (lit grey, the terrain green, the vegetation yellow; none black); 5 the light of its paths "
-                     "(on grey), 6 one frame's paths, 7 the sun's visibility");
+                     "(on grey), 6 one frame's paths, 7 the sun's visibility, 8 the game's ambient light the paths fill in with");
   iConsole->Register("d3d12_PTSky", &CV_d3d12_PTSky, 1.0f, VF_DUMPTODISK,
                      "With d3d12_PathTracing, the sky's light where a path leaves the scene: times the level's outdoor ambient");
   iConsole->Register("d3d12_PTBounces", &CV_d3d12_PTBounces, 1, VF_DUMPTODISK,
                      "With d3d12_PathTracing 1, the bounces of its paths (0: the lamps and the sun on the surfaces alone)");
   iConsole->Register("d3d12_PTReferenceBounces", &CV_d3d12_PTReferenceBounces, 8, VF_DUMPTODISK,
                      "With d3d12_PathTracing 2 (the reference), the bounces of its paths at most");
+  iConsole->Register("d3d12_PTAmbient", &CV_d3d12_PTAmbient, 1.0f, VF_DUMPTODISK,
+                     "With d3d12_PathTracing, the game's ambient light (what the raster adds to its light maps and lights) its "
+                     "paths fill in with: a ray that finds nothing within d3d12_PTAmbientRange brings it, times this (0: the "
+                     "light of the lamps, the sun and the sky alone; rooms are dark)");
+  iConsole->Register("d3d12_PTAmbientRange", &CV_d3d12_PTAmbientRange, 2.0f, VF_DUMPTODISK,
+                     "With d3d12_PathTracing, how far a ray finds nothing before it brings the game's ambient light (m): its "
+                     "occlusion's reach");
   m_pPTDenoiserVar = iConsole->CreateVariable("d3d12_PTDenoiser", "simple", VF_DUMPTODISK,
                      "With d3d12_PathTracing 1, the denoiser of its light: simple (its own filter) or none (the history alone)");
   // The HDR pipeline (r_HDRRendering, Hdr.cpp).
@@ -518,6 +525,8 @@ WIN_HWND CD3D12Renderer::Init(int x,int y,int width,int height,unsigned int cbpp
     iConsole->UnregisterVariable("d3d12_PTSky", true);
     iConsole->UnregisterVariable("d3d12_PTBounces", true);
     iConsole->UnregisterVariable("d3d12_PTReferenceBounces", true);
+    iConsole->UnregisterVariable("d3d12_PTAmbient", true);
+    iConsole->UnregisterVariable("d3d12_PTAmbientRange", true);
     iConsole->UnregisterVariable("d3d12_PTDenoiser", true);
     m_pPTDenoiserVar = nullptr;
   }

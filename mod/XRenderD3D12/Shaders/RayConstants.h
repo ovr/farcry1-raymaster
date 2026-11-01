@@ -57,6 +57,7 @@
 #define XR_RAY_DEBUG_GB_LIGHT   20  //!< the light of the lamps and the bounces on the surfaces as the composite takes it (PathTrace.hlsl CSFilter), grey
 #define XR_RAY_DEBUG_GB_RAYS    21  //!< the same as the paths of the frame found it (CSTrace), no history or filter
 #define XR_RAY_DEBUG_GB_SUN     22  //!< the sun's visibility the raster found (the G-buffer's), grey
+#define XR_RAY_DEBUG_GB_AMBIENT 23  //!< the game's ambient light the paths fill in with (the G-buffer's), as the game's colour
 
 //! SRayInstance: no view, no stream.
 #define XR_RAY_NONE         0xffffffff
@@ -87,7 +88,8 @@ struct SRayInstance
   XR_FLOAT4(vAlbedo);     //!< rgb what the texture is multiplied by for the albedo: vColor without the light it has (the object's
                           //!< ambient colour of the templates lit by it alone)
   XR_FLOAT4(vSpecular);   //!< rgb the material's specular colour (0: none), w its shininess (the exponent of N.H)
-  XR_UINT4(nPath);        //!< x XR_PT_MAT_*, yzw unused
+  XR_UINT4(nPath);        //!< x XR_PT_MAT_*, y the game's ambient light on it (what its ambient colour adds to its albedo, the
+                          //!< game's colour) / 2, 8 bits a channel from the lowest (PathPackAmbient); zw unused
 };
 
 //! SRayInstance::nPath.x, how the path tracer takes the draw's colour.
@@ -196,10 +198,12 @@ struct SPathTraceConstants
   XR_FLOAT4(vSky);                //!< rgb the sky's light where a path finds nothing, w d3d12_PTEmission
   XR_FLOAT4(vShade);              //!< x d3d12_PTTerrainDelight, y the light baked into the terrain (SPathShade::fBakeLight), z the
                                   //!< lamps' rays' gap (d3d12_RTLightShadowGap)
+  XR_FLOAT4(vFill);               //!< x d3d12_PTAmbient (the game's ambient light a path's ray brings beyond y), y
+                                  //!< d3d12_PTAmbientRange (m)
   XR_UINT4(nTextures);            //!< texture table indices: x the depth buffer, y CSTrace's paths, z the history of the frame
                                   //!< before (CSTemporal), w this frame's (CSFilter)
   XR_UINT4(nTextures2);           //!< texture table indices: x the G-buffer's normal, y the frames of the history before, z this
-                                  //!< frame's
+                                  //!< frame's, w the G-buffer's sun and ambient light
   XR_UINT4(nTrace);               //!< RayView.hlsli's grid: x 1 (a path for each pixel), y z 0
   XR_UINT4(nFlags);               //!< x 1: a history to blend into, y the frame (the noise), z 1: filtered, w the mask of the
                                   //!< instances the rays see (RayMask)

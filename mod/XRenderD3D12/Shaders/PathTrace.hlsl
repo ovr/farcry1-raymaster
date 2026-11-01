@@ -14,8 +14,13 @@
 //	    hemisphere as the cosine spreads them: a hit gives its emission
 //	    and its albedo times the sun's light and a lamp's there, the next
 //	    bounce's light comes times its albedo; where a path finds nothing,
-//	    the sky's light (vSky). The sun's light on the pixel's own surface
-//	    is not in it: the composite takes the visibility the raster found
+//	    the sky's light (vSky). The game's ambient light fills in: a ray
+//	    that finds nothing nearer than vFill.y brings the ambient light of
+//	    the point it leaves (the G-buffer's, then the hit's) times vFill.x,
+//	    as the raster's ambient times its occlusion (where it finds nothing
+//	    at all, the brighter of that and the sky). The sun's light on the
+//	    pixel's own surface is not in it: the composite takes the
+//	    visibility the raster found
 //	    (the G-buffer's). rgb the light, w the pixel's view depth (0: no
 //	    surface the path tracer lights).
 //	  CSTemporal: blended into the history where the surface was in the
@@ -117,6 +122,8 @@ void CSTrace(uint3 vId : SV_DispatchThreadID)
   uint nSeed = Hash((uint)p.x | ((uint)p.y << 16)) ^ Hash(g_PT.nFlags.y * 0x9e3779b9u + 1);
   SPathShade P = PathShadeParams(XR_RAY_MAX_ALPHA_TESTS);
   float3 vLight = PathSampleLamp(vPos, vN, vFace, P, nSeed, fPixel);
+  // The game's ambient light the paths fill in with, at the point a ray leaves: the pixel's, then each hit's.
+  float3 vFill = PathAmbientLight(g_Textures[g_PT.nTextures2.w].Load(int3(p, 0)).gba) * g_PT.vFill.x;
 
   // The bounces.
   P.nMaxTests = g_PT.nPath.z;
@@ -139,9 +146,11 @@ void CSTrace(uint3 vId : SV_DispatchThreadID)
     const SRayHit Hit = TraceScene(Ray, P.nMask, fWidth, PT_CONE_SPREAD, P.nMaxTests);
     if (!Hit.bHit)
     {
-      vLight += vThrough * g_PT.vSky.rgb;
+      vLight += vThrough * max(g_PT.vSky.rgb, vFill);
       break;
     }
+    if (Hit.fT > g_PT.vFill.y)
+      vLight += vThrough * vFill;
     const float fHitWidth = fWidth + Hit.fT * PT_CONE_SPREAD;
     const SPathSurface H = PathSurface(Hit, vDir, fHitWidth, P);
     const float3 vHitLight = PathSun(H.vPos, H.vNormal, H.vFaceNormal, P, fHitWidth) +
@@ -158,6 +167,7 @@ void CSTrace(uint3 vId : SV_DispatchThreadID)
     }
     if (all(vThrough < 1e-3))
       break;
+    vFill = H.vAmbient * g_PT.vFill.x;
     vOrigin = H.vPos;
     vNormal = H.vNormal;
     vFaceNormal = H.vFaceNormal;

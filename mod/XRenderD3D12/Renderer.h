@@ -1553,10 +1553,12 @@ public:
   float CV_d3d12_PTEmission = 1.0f;         //!< what glows
   float CV_d3d12_PTTerrainDelight = 2.0f;   //!< the light baked into the terrain's texture: lit over shadowed (<= 1: none taken off)
   int CV_d3d12_PTDebug = 0;                 //!< the path tracer's G-buffer over the picture: 1 albedo, 2 normal, 3 fog, 4 material,
-                                            //!< 5 the paths' light, 6 one frame's paths
+                                            //!< 5 the paths' light, 6 one frame's paths, 7 the sun's visibility, 8 the ambient light
   float CV_d3d12_PTSky = 1.0f;              //!< the path tracer's sky: times the outdoor ambient (as light)
   int CV_d3d12_PTBounces = 1;               //!< its bounces in real time
   int CV_d3d12_PTReferenceBounces = 8;      //!< and in the reference (d3d12_PathTracing 2)
+  float CV_d3d12_PTAmbient = 1.0f;          //!< the game's ambient light its paths fill in with (times)
+  float CV_d3d12_PTAmbientRange = 2.0f;     //!< beyond this a ray brings it (m)
   ICVar *m_pPTDenoiserVar = nullptr;        //!< d3d12_PTDenoiser (simple, none)
   int CV_d3d12_ToneMap = 1;                 //!< the HDR pipeline's tone map: 0 clamp, 1 soft shoulder, 2 ACES fitted, 3 AgX
   float CV_d3d12_ToneMapKnee = 0.85f;       //!< where the soft shoulder starts (a display value)

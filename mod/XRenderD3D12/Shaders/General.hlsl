@@ -183,8 +183,9 @@
 //	G-buffer, PathGBuffer.hlsli; the HDR scene targets) the pixel shader
 //	also writes the albedo to SV_Target3, the normal, the fog's share and
 //	the path material to SV_Target4 and the sun's visibility (the shadow
-//	maps', the cascades', the mask by rays) to SV_Target5 (with XR_CASCADES
-//	and XR_RAY_SUN as the draw has them). A surface the path tracer lights
+//	maps', the cascades', the mask by rays; with XR_CASCADES and XR_RAY_SUN
+//	as the draw has them) and the game's ambient light on it (vAmbient.rgb,
+//	which Draw3D.cpp sets so) to SV_Target5. A surface the path tracer lights
 //	(DF2_PT_MASK; its light flags are off, its colour its albedo times
 //	vColor) writes its colour less what it adds unlit (DF2_ADD_TEX4, times
 //	tex1, and DF2_ALPHA_GLOW) as the albedo, that as its colour; a pass that
@@ -985,7 +986,7 @@ struct SPixelOutput
 #endif
   float4 vAlbedo : SV_Target3;    //!< the albedo, with the colour's alpha for the blend
   float4 vNormal : SV_Target4;    //!< the normal, the fog's share, the path material (PathGBufferNormal)
-  float fSun : SV_Target5;        //!< the sun's visibility
+  float4 vSun : SV_Target5;       //!< r the sun's visibility, gba the game's ambient light / 2 (the draw's vAmbient)
 };
 
 SPixelOutput PSMain(SVertexOutput In)
@@ -998,7 +999,7 @@ SPixelOutput PSMain(SVertexOutput In)
 #endif
   Out.vAlbedo = float4(max(s_vPTAlbedo, 0), Out.vColor.a);
   Out.vNormal = PathGBufferNormal(s_vPTNormal, g_Frame.vCameraPos.xyz - In.vWorldPos, s_fPTFog, (g_Draw.nFlags2 & DF2_PT_MASK) >> DF2_PT_SHIFT);
-  Out.fSun = s_fPTSun;
+  Out.vSun = float4(s_fPTSun, saturate(0.5 * g_Draw.vAmbient.rgb));
   return Out;
 }
 #elif defined(XR_VELOCITY)
