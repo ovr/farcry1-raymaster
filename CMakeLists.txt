@@ -4,6 +4,9 @@ cmake_minimum_required(VERSION 3.21)
 
 project(FarCrySDK LANGUAGES C CXX)
 
+# ctest from the build folder's root (mod/XRenderD3D12/Tests registers the tests).
+enable_testing()
+
 if(NOT MSVC)
     message(FATAL_ERROR "The Far Cry SDK can only be built with MSVC (Visual Studio 2022 or newer).")
 endif()

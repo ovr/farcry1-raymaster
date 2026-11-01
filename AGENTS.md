@@ -81,6 +81,9 @@ instructions and is not committed (git-ignored). The references of the modules a
 
 - Build: the x86 preset deploys `XRenderD3D8.dll` to `farcry1_testing1/Bin32`, the x64 preset to
   `farcry1_testing1/Bin64` (`XRENDER_OUTPUT_DIR`). The submodules first: `git submodule update --init`.
+- XRenderD3D12's unit tests (`mod/XRenderD3D12/Tests`, no game; its shader code on a D3D12 device of
+  their own, the GPU and WARP): `cmake --build --preset x64-release --target XRenderD3D12Tests`, then
+  `ctest --preset x64-release`. Building them neither builds nor deploys the renderer's DLL.
 - `farcry1_testing1/system.cfg` selects the proxy with `r_Driver = "Direct3D8"` and runs windowed
   (`r_Fullscreen = "0"`); the original is `farcry1_testing1/system.cfg.xrt-backup`.
 - Every run of the game (a trace, a demo, a benchmark, a run for the user to play) is at the
