@@ -1620,8 +1620,9 @@ public:
                                             //!< 5 the paths' light, 6 one frame's paths, 7 the sun's visibility, 8 the ambient light,
                                             //!< 9 the highlights' colour, 10 the highlights, 11 the radiance cache
   float CV_d3d12_PTSky = 1.0f;              //!< the path tracer's sky: times the outdoor ambient (as light)
-  int CV_d3d12_PTCache = 1;                 //!< its radiance cache in real time (the light beyond its last bounce)
+  int CV_d3d12_PTCache = 1;                 //!< its radiance cache in real time (all the light at its last bounce's hit)
   float CV_d3d12_PTBehind = 40;             //!< how far what is behind the camera is in its scene for rays (m, UpdateRayBehind)
+  int CV_d3d12_PTCheckerboard = 1;          //!< the paths of half the pixels each frame, the others from their neighbours
   int CV_d3d12_PTBounces = 1;               //!< its bounces in real time
   int CV_d3d12_PTReferenceBounces = 8;      //!< and in the reference (d3d12_PathTracing 2)
   float CV_d3d12_PTAmbient = 1.0f;          //!< the game's ambient light its paths fill in with (times)

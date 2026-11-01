@@ -4,9 +4,9 @@
 //
 //	File: PathCache.hlsli
 //	Description: The path tracer's radiance cache (d3d12_PTCache,
-//	PathTrace.cpp): a hash grid over the world of the light that comes
-//	to a point by its bounces (all but the sun's and the lamps' own rays
-//	to it), as PathTrace.hlsl's paths bring it: the mean, over the
+//	PathTrace.cpp): a hash grid over the world of all the light that
+//	comes to a point (the sun's and the lamps' straight to it, and by the
+//	bounces), as PathTrace.hlsl's paths bring it: the mean, over the
 //	directions of the hemisphere as the cosine spreads them, of what a
 //	ray finds. A cell is a cube, vCache.x m near the camera and twice
 //	as large each time the distance doubles past vCache.x / vCache.y,
@@ -18,7 +18,8 @@
 //	in it and the frames since its last sample; an entry without one for
 //	PATH_CACHE_MAX_AGE frames is free again).
 //	  CSCacheUpdate (PathTrace.hlsl) adds samples, CSCacheResolve blends
-//	them in, CSTrace reads the light where its last bounce ends.
+//	them in, CSTrace takes it for all the light at its last bounce's hit
+//	(no rays towards the sun and a lamp there).
 //
 //////////////////////////////////////////////////////////////////////
 

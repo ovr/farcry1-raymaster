@@ -331,9 +331,12 @@ void CD3D12Renderer::RegisterVariables()
   iConsole->Register("d3d12_PTBounces", &CV_d3d12_PTBounces, 1, VF_DUMPTODISK,
                      "With d3d12_PathTracing 1, the bounces of its paths (0: the lamps and the sun on the surfaces alone)");
   iConsole->Register("d3d12_PTCache", &CV_d3d12_PTCache, 1, VF_DUMPTODISK,
-                     "With d3d12_PathTracing 1, its radiance cache: a grid over the world of the light the paths bring to a point, "
-                     "kept up to date by paths from a pixel of 8 x 8, which the paths' last bounce takes for the light beyond it "
-                     "(the bounces after it; 0: none)");
+                     "With d3d12_PathTracing 1, its radiance cache: a grid over the world of all the light that comes to a point, "
+                     "kept up to date by paths from a pixel of 8 x 8, which the paths' last bounce takes for the light at its hit "
+                     "(the sun's, a lamp's and the bounces after it, no rays towards them; 0: none)");
+  iConsole->Register("d3d12_PTCheckerboard", &CV_d3d12_PTCheckerboard, 1, VF_DUMPTODISK,
+                     "With d3d12_PathTracing 1, the paths of half the pixels each frame, in a checkerboard, the others' light "
+                     "from their four neighbours (0: a path from each pixel)");
   iConsole->Register("d3d12_PTBehind", &CV_d3d12_PTBehind, 40.0f, VF_DUMPTODISK,
                      "With d3d12_PathTracing, how far (m, at most d3d12_RTDistance) what is behind the camera is in its scene "
                      "for rays: the static objects and entities the 3D engine gives a camera at the view looking back (0: only "
@@ -542,6 +545,7 @@ WIN_HWND CD3D12Renderer::Init(int x,int y,int width,int height,unsigned int cbpp
     iConsole->UnregisterVariable("d3d12_PTBounces", true);
     iConsole->UnregisterVariable("d3d12_PTCache", true);
     iConsole->UnregisterVariable("d3d12_PTBehind", true);
+    iConsole->UnregisterVariable("d3d12_PTCheckerboard", true);
     iConsole->UnregisterVariable("d3d12_PTReferenceBounces", true);
     iConsole->UnregisterVariable("d3d12_PTAmbient", true);
     iConsole->UnregisterVariable("d3d12_PTAmbientRange", true);
