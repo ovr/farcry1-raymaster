@@ -251,6 +251,8 @@ struct SPathTraceConstants
                                   //!< metre of distance, z the frames its light holds at most, w the jitter of a lookup (cells)
   XR_UINT4(nCache);               //!< x 1: CSTrace's last bounce takes it, y 1: its light starts again (CSCacheResolve), z 1:
                                   //!< CSTrace writes it at the pixels' surfaces (d3d12_PTDebug 11), w CSCacheUpdate's tile (pixels)
+  XR_UINT4(nCheckerboard);        //!< x 1: CSTrace traces half the pixels in a checkerboard (d3d12_PTCheckerboard; a thread
+                                  //!< for each two pixels of a row), y those it traces: ((x ^ y) & 1) == y
 };
 
 #endif

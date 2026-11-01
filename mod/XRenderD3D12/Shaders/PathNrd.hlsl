@@ -20,6 +20,8 @@
 //	    the frame before, less its own: the scene's motion vectors,
 //	    nTextures3.z, which have the characters' and the objects' own
 //	    motion; without them the camera's alone, from mPrevViewProj).
+//	    With the checkerboard a pixel CSTrace left out takes its
+//	    neighbours' light (PathCheckerboard.hlsli).
 //	  CSResolve: NRD's OUT_DIFF_RADIANCE_HITDIST (nTextures3.y) as a
 //	    history of CSTemporal's (u0: rgb the light, w the view depth), which
 //	    CSFilter takes as it is.
@@ -33,13 +35,7 @@
 ConstantBuffer<SPathTraceConstants> g_PT : register(b2);
 #define RAY_VIEW g_PT
 #include "RayView.hlsli"
-
-//! The G-buffer's normal of the surface at vPos on the camera's side (the leaves' two sides), as PathTrace.hlsl's.
-float3 PackNormal(int2 p, float3 vPos)
-{
-  const float3 vN = PathOctDecode(g_Textures[g_PT.nTextures2.x].Load(int3(p, 0)).rg);
-  return dot(vN, g_PT.vCameraPos.xyz - vPos) < 0 ? -vN : vN;
-}
+#include "PathCheckerboard.hlsli"
 
 RWTexture2D<float4> g_Radiance : register(u0);
 RWTexture2D<float4> g_NormalRoughness : register(u1);
@@ -52,7 +48,8 @@ void CSPack(uint3 vId : SV_DispatchThreadID)
   const int2 p = (int2)vId.xy;
   if (any(p >= (int2)g_PT.vSize.xy))
     return;
-  const float4 r = g_Textures[g_PT.nTextures.y].Load(int3(p, 0));
+  float fHit;
+  const float4 r = PathRaysAt(p, true, fHit);
   if (r.w <= 0)
   {
     g_Radiance[p] = 0;
@@ -63,9 +60,8 @@ void CSPack(uint3 vId : SV_DispatchThreadID)
   }
   const float d = r.w;
   const float3 vPos = PixelPos(p + 0.5, d);
-  const float fHit = g_Textures[g_PT.nTextures3.w].Load(int3(p, 0)).r;
   g_Radiance[p] = REBLUR_FrontEnd_PackRadianceAndNormHitDist(r.rgb, REBLUR_FrontEnd_GetNormHitDist(fHit, d, g_PT.vNrd.xyz, 1), true);
-  g_NormalRoughness[p] = NRD_FrontEnd_PackNormalAndRoughness(PackNormal(p, vPos), 1, 0);
+  g_NormalRoughness[p] = NRD_FrontEnd_PackNormalAndRoughness(PathNormalAt(p, vPos), 1, 0);
   g_ViewZ[p] = d;
   float2 vMotion = 0;
   if (g_PT.nTextures3.z != XR_RAY_NONE)
@@ -90,7 +86,7 @@ void CSResolve(uint3 vId : SV_DispatchThreadID)
   const int2 p = (int2)vId.xy;
   if (any(p >= (int2)g_PT.vSize.xy))
     return;
-  const float d = g_Textures[g_PT.nTextures.y].Load(int3(p, 0)).w;
+  const float d = PathSurfaceDepth(p);
   if (d <= 0)
   {
     g_Radiance[p] = 0;

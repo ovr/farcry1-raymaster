@@ -775,6 +775,11 @@ void CD3D12Renderer::DrawPathTrace()
   pc.nTextures2[2] = (uint32)pFrames->m_nSRV;
   pc.nTextures2[3] = (uint32)s.pSun->m_nSRV;
   pc.nTextures3[0] = (uint32)s.pSpecular->m_nSRV;
+  // The checkerboard: CSTrace traces half the pixels, the others each frame; the kernels after it fill those it left out
+  // from their neighbours. Not for the reference, which has a path from each pixel.
+  const bool bCheckerboard = !bReference && CV_d3d12_PTCheckerboard;
+  pc.nCheckerboard[0] = bCheckerboard ? 1 : 0;
+  pc.nCheckerboard[1] = bCheckerboard ? (uint32)(m_nFrames & 1) : 0;
   const SNrdSettings Nrd = CD3D12Nrd::GetDefaults();
   if (bNrd)
   {
@@ -818,7 +823,8 @@ void CD3D12Renderer::DrawPathTrace()
   }
   s.nCacheFrame = bCache ? m_nFrames : -1;
   GpuSection("pt paths");
-  m_pCompute->DispatchRays(pList, eD3D12K_PathTrace, FrameCB.nGPU, PassCB.nGPU, nTlas, nInstances, s.nTables[PATH_TABLE_TRACE], gx, gy, nLights);
+  const UINT tx = bCheckerboard ? (UINT)((w + 1) / 2 + XR_PT_GROUP - 1) / XR_PT_GROUP : gx;
+  m_pCompute->DispatchRays(pList, eD3D12K_PathTrace, FrameCB.nGPU, PassCB.nGPU, nTlas, nInstances, s.nTables[PATH_TABLE_TRACE], tx, gy, nLights);
   m_pDevice->Transition(s.pRays->m_pResource, D3D12_RESOURCE_STATE_UNORDERED_ACCESS, PATH_KERNEL_READ);
   bool bNrdDone = false;
   int nNrdPasses = 0;
@@ -922,9 +928,11 @@ void CD3D12Renderer::DrawPathTrace()
   s.nHistoryFrame = m_nFrames;
   s.nLightFrame = m_nFrames;
   if (m_pFrameDump)
-    fprintf(m_pFrameDump.get(), "pt: %s, %d x %d, %d bounces, %u lamps, sky %.3f %.3f %.3f, sun %.3f %.3f %.3f%s, terrain's baked light %.3f, "
+    fprintf(m_pFrameDump.get(), "pt: %s, %d x %d, %s, %d bounces, %u lamps, sky %.3f %.3f %.3f, sun %.3f %.3f %.3f%s, terrain's baked light %.3f, "
             "ambient %.2f beyond %.2f m, highlights: sun %.3f %.3f %.3f, lamps %.3f, denoiser %s, history %d (%d frames)\n",
-            bReference ? "reference" : "real time", w, h, nBounces, P.nLights, vSky[0], vSky[1], vSky[2], P.vSun[0], P.vSun[1], P.vSun[2],
+            bReference ? "reference" : "real time", w, h,
+            bCheckerboard ? (m_nFrames & 1 ? "paths of the odd checkerboard's pixels" : "paths of the even checkerboard's pixels") : "a path from each pixel",
+            nBounces, P.nLights, vSky[0], vSky[1], vSky[2], P.vSun[0], P.vSun[1], P.vSun[2],
             bOutdoors ? "" : " (indoors: no sun in the frame)", P.fBakeLight, fAmbient, fAmbientRange, pc.vSpecular[0], pc.vSpecular[1],
             pc.vSpecular[2], pc.vSpecular[3], bNrd ? "nrd" : bDenoise ? "simple" : "none", bHistory ? 1 : 0, s.nAccumulated);
   if (m_pFrameDump)
