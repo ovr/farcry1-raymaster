@@ -556,8 +556,11 @@ void CScene::EndEf3D(int nFlags)
   {
     g_pRenderer->GpuSection("sun shadows");
     g_pRenderer->UpdateSunCascades({ s.Items.data(), (size_t)nItems });
+    g_pRenderer->UpdateRayBehind();
   }
-  if (g_pRenderer->m_bCascadePass)
+  if (g_pRenderer->m_bRayBehindPass)
+    g_pRenderer->NoteRayOffscreenItems({ s.Items.data(), (size_t)nItems });
+  else if (g_pRenderer->m_bCascadePass)
     g_pRenderer->DrawCascadeCasters({ s.Items.data(), (size_t)nItems });
   else
   {

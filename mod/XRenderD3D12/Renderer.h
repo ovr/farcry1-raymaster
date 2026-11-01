@@ -518,7 +518,7 @@ public:
   double m_fFrameEndEf3DMs = 0;             //!< d3d12_FrameLog: the CPU's time in the main view's EF_EndEf3D
   //! Of it, in the engine's DrawLowDetail: for the water's reflection, the sun's cascades, the
   //! environment cubes.
-  enum { LD_WATER, LD_CASCADES, LD_ENVCUBES, LD_NUM };
+  enum { LD_WATER, LD_CASCADES, LD_ENVCUBES, LD_BEHIND, LD_NUM };
   double m_fFrameLowDetailMs[LD_NUM] = {};
 
   int m_nSceneFlags = 0;                    //!< SHDF_* of the EF_EndEf3D being drawn
@@ -1103,6 +1103,10 @@ public:
   //! Before the main view is drawn, its items prepared (MainItems): with d3d12_ShadowCascades and
   //! e_shadow_maps in a view with the sun, the cascades of the frame and their casters.
   void UpdateSunCascades(std::span<const SRenderItem> MainItems);
+  //! With the path tracer and d3d12_PTBehind, what is behind the camera for its rays: the scene the 3D engine gives a
+  //! camera at the view's position looking back (its static objects and entities, as far as the rays go), its parts
+  //! only noted for the scene for rays (NoteRayOffscreenItems), not drawn. After UpdateSunCascades.
+  void UpdateRayBehind();
   //! The cascades of the main view: the split, the squares, the matrices. False: none.
   bool SetupCascades(int nCascades);
   //! The maps of both sets in the size of d3d12_ShadowCascadeSize.
@@ -1138,6 +1142,8 @@ public:
   Vec3 m_vCascadeAxes[3] = { Vec3(1, 0, 0), Vec3(0, 1, 0), Vec3(0, 0, 1) };   //!< the sun's frame: x, y across the maps, z towards the sun
   float m_ShadowTint[3] = { 0.5f, 0.5f, 0.5f };       //!< the terrain in the shadow (the engine's terrain shadows' colour, the last seen)
   bool m_bCascadePass = false;                        //!< the casters of the cascades are being drawn
+  bool m_bRayBehindPass = false;                      //!< UpdateRayBehind's scene is being gathered (m_bCascadePass too)
+  int m_nRayBehindParts = 0;                          //!< the parts it noted in the frame
   int m_nCascadeSet = 0;                              //!< the set being drawn: 0 the full set, 1 the live set
   int m_nCascadeSlice = 0;                            //!< the slice being drawn
   int m_CascadeInstances[XR_MAX_CASCADES] = {};       //!< d3d12_CascadeInstancing: the slices the part being drawn reaches
@@ -1615,6 +1621,7 @@ public:
                                             //!< 9 the highlights' colour, 10 the highlights, 11 the radiance cache
   float CV_d3d12_PTSky = 1.0f;              //!< the path tracer's sky: times the outdoor ambient (as light)
   int CV_d3d12_PTCache = 1;                 //!< its radiance cache in real time (the light beyond its last bounce)
+  float CV_d3d12_PTBehind = 40;             //!< how far what is behind the camera is in its scene for rays (m, UpdateRayBehind)
   int CV_d3d12_PTBounces = 1;               //!< its bounces in real time
   int CV_d3d12_PTReferenceBounces = 8;      //!< and in the reference (d3d12_PathTracing 2)
   float CV_d3d12_PTAmbient = 1.0f;          //!< the game's ambient light its paths fill in with (times)

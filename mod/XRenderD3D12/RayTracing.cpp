@@ -922,7 +922,7 @@ void CD3D12RayScene::Build(FILE *pDump, bool bTop)
     for (const auto &p : m_Pools)
       nPools += p->nSize;
     fprintf(pDump,
-      "ray scene: %s%u instances (%u of live casters) of %d draws (%d out of the main view from the sun's cascades, %d of the water "
+      "ray scene: %s%u instances (%u of live casters) of %d draws (%d out of the main view from the sun's cascades and behind the camera, %d of the water "
       "reflection; %d left out "
       "by their transforms, %d by d3d12_RTMask or as passes over others), %u triangles; static BLAS %d kept, %d built (%u triangles), %d "
       "waiting; %d of this frame (%u triangles), %d over the limit; static BLAS %.1f MB (%d, pools %.1f MB), frame BLAS %.1f MB, TLAS "
@@ -1110,7 +1110,7 @@ bool CD3D12Renderer::WantsOffscreenRays() const
 
 void CD3D12Renderer::NoteRayOffscreenItems(std::span<const SRenderItem> Items)
 {
-  const bool bOffscreen = WantsOffscreenRays(), bLive = m_nCascadeSet == 1 && WantsRaySun();
+  const bool bOffscreen = WantsOffscreenRays(), bLive = !m_bRayBehindPass && m_nCascadeSet == 1 && WantsRaySun();
   if (!bOffscreen && !bLive)
     return;
   if (m_nRayOffscreenFrame != m_nFrames)

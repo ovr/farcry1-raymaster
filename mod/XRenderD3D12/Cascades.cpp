@@ -527,6 +527,75 @@ void CD3D12Renderer::DrawCascadeItems(std::span<const SRenderItem> Items, std::u
   m_fDepthMax = 1;
 }
 
+void CD3D12Renderer::UpdateRayBehind()
+{
+  FUNCTION_PROFILER(iSystem, PROFILE_RENDERER);
+  m_nRayBehindParts = 0;
+  I3DEngine *p3D = iSystem ? iSystem->GetI3DEngine() : nullptr;
+  if (CV_d3d12_PTBehind <= 0 || !WantsPathTracing() || !WantsOffscreenRays() || !(m_nSceneFlags & SHDF_ALLOWHDR) || m_nRecurseLevel > 1 ||
+      m_bReflectionPass || m_bEnvCubePass || m_bSpritePass || m_bShadowMapPass || m_bCascadePass || !p3D || !m_pDevice)
+    return;
+  // What the engine's scene changes, as UpdateSunCascades keeps it.
+  const CCamera Camera = m_Camera;
+  const Matrix44 CameraView = m_CameraView, ViewMatrix = m_ViewMatrix, ProjMatrix = m_ProjMatrix, SkyProjMatrix = m_SkyProjMatrix;
+  const int nMatrixDepth = m_nMatrixDepth;
+  CCamera ViewCamera = iSystem->GetViewCamera();
+  int Viewport[4];
+  memcpy(Viewport, m_Viewport, sizeof(Viewport));
+  const bool bFog = m_bFog;
+  const float fFogStart = m_fFogStart, fFogEnd = m_fFogEnd;
+  float FogColor[4], WorldColor[4];
+  memcpy(FogColor, m_FogColor, sizeof(FogColor));
+  memcpy(WorldColor, m_WorldColor, sizeof(WorldColor));
+  const Vec3 vClearColor = m_vClearColor;
+  const int nState = m_nState, nCullMode = m_nCullMode, nCascadeSet = m_nCascadeSet;
+
+  // The camera at the view looking back (pitch mirrored), as wide as the sun's (the engine stretches it across the screen).
+  const size_t nBefore = m_nRayOffscreenFrame == m_nFrames ? m_RayOffscreenItems.size() : 0;
+  m_bCascadePass = m_bRayBehindPass = true;
+  m_nCascadeSet = 0;
+  const int w = std::max(GetWidth(), 1), h = std::max(GetHeight(), 1);
+  CCamera BackCam = Camera;
+  const float fFar = std::max(std::min({ CV_d3d12_PTBehind, CV_d3d12_RTDistance, Camera.GetZMax() }), 1.0f);
+  BackCam.Init(w, h, DEG2RAD(CASCADE_CAMERA_FOV_DEG) * w / h, fFar, (float)h / w, 0.25f);
+  BackCam.SetPos(Camera.GetPos());
+  const Ang3 a = Camera.GetAngles();
+  BackCam.SetAngle(Vec3(-a.x, a.y, a.z + 180.0f));
+  BackCam.Update();
+  iSystem->SetViewCamera(BackCam);
+  p3D->SetCamera(BackCam, false);
+  {
+    SCpuTime Time(m_fFrameLowDetailMs[LD_BEHIND]);
+    p3D->DrawLowDetail(CASCADE_CAMERA_FLAGS);
+  }
+  iSystem->SetViewCamera(ViewCamera);
+  p3D->SetCamera(Camera, false);
+  m_bCascadePass = m_bRayBehindPass = false;
+  m_nRayBehindParts = m_nRayOffscreenFrame == m_nFrames ? (int)(m_RayOffscreenItems.size() - nBefore) : 0;
+
+  // The frame as it was.
+  m_Camera = Camera;
+  m_CameraView = CameraView;
+  m_ViewMatrix = ViewMatrix;
+  m_ProjMatrix = ProjMatrix;
+  m_SkyProjMatrix = SkyProjMatrix;
+  m_nMatrixDepth = nMatrixDepth;
+  memcpy(m_Viewport, Viewport, sizeof(Viewport));
+  m_bFog = bFog;
+  m_fFogStart = fFogStart;
+  m_fFogEnd = fFogEnd;
+  memcpy(m_FogColor, FogColor, sizeof(FogColor));
+  memcpy(m_WorldColor, WorldColor, sizeof(WorldColor));
+  m_vClearColor = vClearColor;
+  m_nState = nState;
+  m_nCullMode = nCullMode;
+  m_nCascadeSet = nCascadeSet;
+  InvalidateFrameConstants();
+  if (m_pFrameDump)
+    fprintf(m_pFrameDump.get(), "rays behind the camera: %d parts from the 3D engine's camera looking back (%.0f degrees, to %.0f m), %.2f ms\n",
+            m_nRayBehindParts, CASCADE_CAMERA_FOV_DEG, BackCam.GetZMax(), m_fFrameLowDetailMs[LD_BEHIND]);
+}
+
 void CD3D12Renderer::DrawCascadeCasters(std::span<const SRenderItem> Items)
 {
   FUNCTION_PROFILER(iSystem, PROFILE_RENDERER);
