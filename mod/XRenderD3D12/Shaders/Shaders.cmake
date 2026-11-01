@@ -81,6 +81,10 @@ xrender_d3d12_shader(General_Ambient_RaySun_Rays_PS General.hlsl ps_6_5 PSMain X
 xrender_d3d12_shader(General_Ambient_RaySun_Rays_Velocity_PS General.hlsl ps_6_5 PSMain XR_AMBIENT XR_CASCADES XR_RAY_SUN XR_RAY_REFL XR_RAY_LIGHT XR_VELOCITY)
 xrender_d3d12_shader(General_Ambient_RaySun_Rays_Hdr_PS General.hlsl ps_6_5 PSMain XR_AMBIENT XR_CASCADES XR_RAY_SUN XR_RAY_REFL XR_RAY_LIGHT XR_HDR)
 xrender_d3d12_shader(General_Ambient_RaySun_Rays_Hdr_Velocity_PS General.hlsl ps_6_5 PSMain XR_AMBIENT XR_CASCADES XR_RAY_SUN XR_RAY_REFL XR_RAY_LIGHT XR_VELOCITY XR_HDR)
+# The main view's opaque list into the path tracer's G-buffer (SPipelineKey::bPathTrace, XR_PT, PathGBuffer.hlsli; the
+# HDR scene targets), without and with velocity.
+xrender_d3d12_shader(General_PT_Hdr_PS General.hlsl ps_6_0 PSMain XR_PT XR_HDR)
+xrender_d3d12_shader(General_PT_Hdr_Velocity_PS General.hlsl ps_6_0 PSMain XR_PT XR_VELOCITY XR_HDR)
 
 # Water surfaces (eD3D12P_Water).
 xrender_d3d12_shader(Water_VS Water.hlsl vs_6_0 VSMain)

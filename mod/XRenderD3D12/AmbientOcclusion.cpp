@@ -200,7 +200,8 @@ void CD3D12Renderer::ReleaseAO(bool bForget)
 
 void CD3D12Renderer::BeginAOTarget(const SRenderItem *pItems, int nItems)
 {
-  if (!CV_d3d12_AOApply || m_bAOAmbientBound || !IsAOView() || !UpdateAO() || !m_pAOAmbient)
+  // None under the path tracer, which lights the opaque surfaces itself.
+  if (!CV_d3d12_AOApply || m_bAOAmbientBound || !IsAOView() || WantsPathTracing() || !UpdateAO() || !m_pAOAmbient)
     return;
   // The share of the ambient light in a baked light: the terrain in the shadow over the terrain in
   // the light, the colour of the engine's shadows on it (the mean of their objects'), else the
@@ -242,7 +243,7 @@ void CD3D12Renderer::DrawAmbientOcclusion()
     m_pDevice->Transition(pAmbient, D3D12_RESOURCE_STATE_RENDER_TARGET, AMBIENT_READ);
   }
   // With d3d12_AOApply 1 only over an opaque list that wrote the ambient light (made for it already).
-  if (!IsAOView() || (pAmbient ? !m_pAO : (!UpdateAO() || m_nAOApply)))
+  if (!IsAOView() || (!pAmbient && WantsPathTracing()) || (pAmbient ? !m_pAO : (!UpdateAO() || m_nAOApply)))
     return;
   GpuSection("ao");
   ID3D12GraphicsCommandList *pList = m_pDevice->GetCmdList();

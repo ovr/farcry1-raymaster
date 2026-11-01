@@ -129,6 +129,8 @@ void CD3D12Renderer::BeginMainScene()
 void CD3D12Renderer::EndMainScene()
 {
   FUNCTION_PROFILER(iSystem, PROFILE_RENDERER);
+  // The path tracer's G-buffer, if a list left it bound.
+  EndPathTargets();
   if (m_bUpscaling)
     UpscaleScene();
   else if (m_pDevice && m_pDevice->IsInHdr())

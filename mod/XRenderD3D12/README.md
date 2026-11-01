@@ -509,7 +509,8 @@ reference of its features and console variables.
   At 3840 x 2160 under 8 lamps (DemoMultiLight with `DemoMultiLightTeapot.ini`: `main_view = 1`
   draws it as the main view) the opaque list takes 0.05 -> 0.23 ms, the GPU 0.96 -> 1.18; in
   Research's hall 1.05 -> 1.23 (the opaque list waits for the scene for rays).
-  `d3d12_PathTracing` (0 by default, read every frame; not registered without rays) is the path tracer
+  `d3d12_PathTracing` (0 by default, read every frame; not registered without rays; nothing without
+  `r_HDRRendering` 1, once in the log) is the path tracer
   of the lighting, being built (`PathTrace.cpp`). So far 1 and 2 give it the scene for rays, with what
   is out of the view (as `d3d12_RTOffscreen` 1 does for the effects), the motion vectors (the scene
   targets without an upscaler, Upscaler), and the lights for its kernels and the programs with rays:
@@ -531,6 +532,16 @@ reference of its features and console variables.
   visibility over the terrain alone (`d3d12_PTTerrainDelight`: a lit face over a shadowed one). While
   the path tracer is on the vegetation's vertex colours are baked without the light (the engine's
   values again on a change).
+  Its G-buffer (`Shaders/PathGBuffer.hlsli`) is what the main view's opaque list writes with the
+  general program's `XR_PT` permutation (`General_PT_*`, `SPipelineKey::bPathTrace`): the colour gets
+  only what the path tracer does not light (glow maps, alpha glow, the unlit templates, the fog), a
+  second target the albedo (RGBA16F, the game's colour without its light, unfogged; decals and the
+  terrain's layers blend into it as into the colour), a third the normal (R10G10B10A2: octahedral,
+  the fog's share, the path material: lit, terrain, vegetation). Its lit draws lose their light (the
+  light maps, the sun and its cascades, the lamps and their passes, the ambient and the baked AO);
+  the screen space AO, the rays' GI and the projectors' passes are not drawn. `d3d12_PTDebug` shows
+  it: 1 the albedo, 2 the normal, 3 the fog's share, 4 the material. Until its kernels light the
+  albedo the lit surfaces are dark.
   `d3d12_RTDebug` views the scene for rays from the camera: 1 instances, 2 shaded hits on the right
   half, 3 distance, 4 mip level, 5 kind, 6 alpha tests, 7 shaded hits over the whole picture; the path
   tracer's: 8 the albedo of the hits, 9 their emission, 10 them lit by the sun and the lamps;

@@ -27,6 +27,12 @@
 //	shades its hits; while the path tracer is on the vegetation's vertex
 //	colours are baked without light (Geometry::SetUnlitVegetation).
 //	d3d12_RTDebug 8 to 10 show the hits as it takes them (RayDebug.hlsl).
+//	The G-buffer (Shaders/PathGBuffer.hlsli): the main view's opaque list
+//	writes it beside the colour with the general program's XR_PT
+//	permutation (BeginPathTargets .. EndPathTargets; DrawLeafItem takes the
+//	light off its lit draws, D3D12Pipeline the programs and the blending of
+//	the targets), at the scene's size; d3d12_PTDebug shows it.
+//	All of it waits for r_HDRRendering: its light is beyond an LDR target.
 //
 //////////////////////////////////////////////////////////////////////
 
@@ -57,6 +63,9 @@ float Luminance(float r, float g, float b)
   return 0.2126f * r + 0.7152f * g + 0.0722f * b;
 }
 
+//! The G-buffer between the main view's opaque list and the next one: read by the pixel shaders and the kernels.
+constexpr D3D12_RESOURCE_STATES PATH_READ = D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE | D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE;
+
 const char *LightKind(uint32 nKind)
 {
   switch (nKind)
@@ -76,7 +85,7 @@ const char *LightKind(uint32 nKind)
 
 bool CD3D12Renderer::WantsPathTracing() const
 {
-  return m_pRayScene && m_pRayScene->IsSupported() && CV_d3d12_PathTracing > 0;
+  return m_pRayScene && m_pRayScene->IsSupported() && CV_d3d12_PathTracing > 0 && IsHdrOn();
 }
 
 bool CD3D12Renderer::WantsPathDebug() const
@@ -103,6 +112,11 @@ void CD3D12Renderer::GetPathShade(SPathShadeParams &P) const
 
 void CD3D12Renderer::UpdatePathLights(std::span<CDLight *const> Lights)
 {
+  // Its light is beyond the colours of an LDR target: none without r_HDRRendering (once in the log).
+  const bool bNoHdr = m_pRayScene && m_pRayScene->IsSupported() && CV_d3d12_PathTracing > 0 && !IsHdrOn();
+  if (bNoHdr && !m_PathTrace.bNoHdrLogged)
+    iLog->LogWarning("XRenderD3D12: d3d12_PathTracing waits for r_HDRRendering 1");
+  m_PathTrace.bNoHdrLogged = bNoHdr;
   // The vegetation without the light baked into its vertex colours while the path tracer lights it.
   Geometry::SetUnlitVegetation(WantsPathTracing());
   if (!(WantsPathTracing() || WantsPathDebug()) || !m_pUpload || m_PathTrace.nLightsFrame == m_nFrames)
@@ -263,4 +277,107 @@ void CD3D12Renderer::UpdatePathLights(std::span<CDLight *const> Lights)
               (L.nParams[1] & XR_PT_LIGHT_STATIC) ? ", static" : "", Candidates[i].fKey, pLight->m_Name);
     }
   }
+}
+
+bool CD3D12Renderer::IsPathView()
+{
+  return WantsPathTracing() && (m_nSceneFlags & SHDF_ALLOWHDR) && m_nRecurseLevel <= 1 && !m_bReflectionPass && !m_bSpritePass &&
+         !m_bShadowMapPass && !m_bEnvCubePass && !m_bCascadePass && !m_bHeatVision && m_pDevice && EnsureFrame() && m_pDevice->IsSceneBound() &&
+         m_pDevice->GetTargetColorFormat() == D3D12_HDR_FORMAT;
+}
+
+bool CD3D12Renderer::UpdatePathTargets()
+{
+  if (!m_pDevice || !m_pUpload || !m_pDescriptors)
+    return false;
+  const int w = m_pDevice->GetMainWidth(), h = m_pDevice->GetMainHeight();
+  if (m_PathTrace.pAlbedo && m_PathTrace.pAlbedo->m_nWidth == w && m_PathTrace.pAlbedo->m_nHeight == h)
+    return true;
+  ReleasePathTargets();
+  m_PathTrace.pAlbedo = m_pUpload->CreateRenderTarget(w, h, D3D12_PT_ALBEDO_FORMAT);
+  m_PathTrace.pNormal = m_pUpload->CreateRenderTarget(w, h, D3D12_PT_NORMAL_FORMAT);
+  if (!m_PathTrace.pAlbedo || !m_PathTrace.pNormal || m_PathTrace.pAlbedo->m_nSRV < 0 || m_PathTrace.pNormal->m_nSRV < 0)
+  {
+    iLog->LogWarning("XRenderD3D12: the path tracer's G-buffer is not available at %d x %d", w, h);
+    ReleasePathTargets();
+    return false;
+  }
+  // Made in PIXEL_SHADER_RESOURCE (in a frame).
+  for (CD3D12Texture *pTex : { m_PathTrace.pAlbedo, m_PathTrace.pNormal })
+    m_pDevice->Transition(pTex->m_pResource, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, PATH_READ);
+  iLog->Log("XRenderD3D12: the path tracer's G-buffer, %d x %d", w, h);
+  return true;
+}
+
+void CD3D12Renderer::ReleasePathTargets()
+{
+  if (m_PathTrace.bBound && m_pDevice)
+    m_pDevice->BindPathTargets({}, {});
+  m_PathTrace.bBound = false;
+  if (m_pUpload)
+  {
+    for (CD3D12Texture *pTex : { m_PathTrace.pAlbedo, m_PathTrace.pNormal })
+      if (pTex)
+        m_pUpload->ReleaseTexture(pTex);
+  }
+  m_PathTrace.pAlbedo = m_PathTrace.pNormal = nullptr;
+  m_PathTrace.nGBufferFrame = -1;
+}
+
+void CD3D12Renderer::BeginPathTargets()
+{
+  if (m_PathTrace.bBound || !IsPathView() || !UpdatePathTargets())
+    return;
+  // Cleared to no surface (material 0) and no albedo: the sky and the far stay as the colour has them.
+  static const float Zero[4] = {};
+  for (CD3D12Texture *pTex : { m_PathTrace.pAlbedo, m_PathTrace.pNormal })
+  {
+    m_pDevice->Transition(pTex->m_pResource, PATH_READ, D3D12_RESOURCE_STATE_RENDER_TARGET);
+    m_pDevice->GetCmdList()->ClearRenderTargetView(pTex->m_RTV, Zero, 0, nullptr);
+  }
+  m_pDevice->BindPathTargets(m_PathTrace.pAlbedo->m_RTV, m_PathTrace.pNormal->m_RTV);
+  m_PathTrace.bBound = true;
+}
+
+void CD3D12Renderer::EndPathTargets()
+{
+  if (!m_PathTrace.bBound)
+    return;
+  m_PathTrace.bBound = false;
+  m_pDevice->BindPathTargets({}, {});
+  for (CD3D12Texture *pTex : { m_PathTrace.pAlbedo, m_PathTrace.pNormal })
+    m_pDevice->Transition(pTex->m_pResource, D3D12_RESOURCE_STATE_RENDER_TARGET, PATH_READ);
+  m_PathTrace.nGBufferFrame = m_nFrames;
+  if (m_pFrameDump)
+    fprintf(m_pFrameDump.get(), "pt g-buffer: %d x %d, written by the opaque list\n", m_PathTrace.pAlbedo->m_nWidth, m_PathTrace.pAlbedo->m_nHeight);
+}
+
+void CD3D12Renderer::DrawPathDebug()
+{
+  if (CV_d3d12_PTDebug <= 0 || CV_d3d12_PTDebug > 4 || m_PathTrace.nGBufferFrame != m_nFrames || !m_PathTrace.pAlbedo || !m_pDevice ||
+      m_pDevice->IsOffscreen() || !m_pRayScene || !m_pRayScene->GetTLAS())
+    return;
+  // Over the whole back buffer (the ray debug program, which reads the G-buffer for these views).
+  const int w = m_pDevice->GetWidth(), h = m_pDevice->GetHeight();
+  int Viewport[4];
+  memcpy(Viewport, m_Viewport, sizeof(Viewport));
+  const bool bScissor = m_bScissor, bItemScissor = m_bItemScissor;
+  m_Viewport[0] = m_Viewport[1] = 0;
+  m_Viewport[2] = w;
+  m_Viewport[3] = h;
+  m_bScissor = m_bItemScissor = false;
+  SPipelineKey Key = {};
+  Key.nProgram = eD3D12P_RayDebug;
+  Key.nState = GS_NODEPTHTEST;
+  Key.nCull = R_CULL_NONE;
+  SDrawConstants dc = DefaultDrawConstants();
+  Set4(dc.vParams0, 1.0f / w, 1.0f / h, (float)(XR_RAY_DEBUG_GB_ALBEDO + CV_d3d12_PTDebug - 1), 1);
+  Set4(dc.vParams2, (float)m_PathTrace.pAlbedo->m_nWidth, (float)m_PathTrace.pAlbedo->m_nHeight, 0, 0);
+  dc.nTex0 = (uint32)m_PathTrace.pAlbedo->m_nSRV;
+  dc.nTex1 = (uint32)m_PathTrace.pNormal->m_nSRV;
+  static const float s_Triangle[3][3] = { { -1, -1, 0 }, { -1, 3, 0 }, { 3, -1, 0 } };
+  DrawImmediate(Key, dc, D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST, VERTEX_FORMAT_P3F, s_Triangle, 3);
+  memcpy(m_Viewport, Viewport, sizeof(Viewport));
+  m_bScissor = bScissor;
+  m_bItemScissor = bItemScissor;
 }

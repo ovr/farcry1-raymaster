@@ -39,6 +39,10 @@
 //	  XR_RAY_DEBUG_PT_EMISSION its emission, as the game's colour
 //	  XR_RAY_DEBUG_PT_DIRECT  emission + albedo * the light of the sun and
 //	                          the lamps (PathDirect), fogged as the picture
+//	  XR_RAY_DEBUG_GB_*       the path tracer's G-buffer (PathGBuffer.hlsli:
+//	                          the albedo, the normal, the fog's share, the
+//	                          material), no rays: tex0 its albedo, tex1 its
+//	                          normal, vParams2.xy their size
 //	A ray that hits nothing is black (the shaded views: the fog's
 //	colour). The views of the instances, the distance and the kind take
 //	the alpha tested triangles as opaque.
@@ -46,6 +50,7 @@
 //////////////////////////////////////////////////////////////////////
 
 #include "PathShade.hlsli"
+#include "PathGBuffer.hlsli"
 
 struct SRayDebugOutput
 {
@@ -84,9 +89,30 @@ float3 Ramp(float f)
   return saturate(float3(2 * f - 1, 1 - abs(2 * f - 1), 1 - 2 * f));
 }
 
+//! The G-buffer's views (XR_RAY_DEBUG_GB_*) at the target's point vPixel.
+float4 GBufferView(uint nView, float2 vPixel)
+{
+  const int3 vAt = int3(min(vPixel * g_Draw.vParams0.xy * g_Draw.vParams2.xy, g_Draw.vParams2.xy - 1), 0);
+  const float3 vAlbedo = g_Textures[g_Draw.nTex0].Load(vAt).rgb;
+  const float4 vNormal = g_Textures[g_Draw.nTex1].Load(vAt);
+  const uint nMaterial = PathGBufferMaterial(vNormal);
+  if (nView == XR_RAY_DEBUG_GB_ALBEDO)
+    return float4(vAlbedo, 1);
+  if (nView == XR_RAY_DEBUG_GB_FOG)
+    return float4(vNormal.bbb, 1);
+  if (nMaterial == 0)
+    return float4(0, 0, 0, 1);
+  if (nView == XR_RAY_DEBUG_GB_NORMAL)
+    return float4(PathOctDecode(vNormal.rg) * 0.5 + 0.5, 1);
+  const float3 vColor = nMaterial == 2 ? float3(0.3, 0.9, 0.3) : nMaterial == 3 ? float3(0.9, 0.9, 0.2) : float3(0.8, 0.8, 0.8);
+  return float4(vColor * (0.4 + 0.6 * saturate(dot(vAlbedo, float3(0.299, 0.587, 0.114)))), 1);
+}
+
 float4 PSMain(SRayDebugOutput In) : SV_Target
 {
   const uint nView = (uint)g_Draw.vParams0.z;
+  if (nView >= XR_RAY_DEBUG_GB_ALBEDO)
+    return GBufferView(nView, In.vPos.xy);
   if (nView == XR_RAY_DEBUG_SHADED && In.vPos.x * g_Draw.vParams0.x < 0.5)
     discard;
   RayDesc Ray;

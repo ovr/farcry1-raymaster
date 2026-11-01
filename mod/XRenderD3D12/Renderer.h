@@ -101,7 +101,7 @@ public:
   //! r_ScopeLens_fx (one of them): the glass of the scopes is drawn.
   bool IsScopeLensOn();
   //! r_HDRRendering (one of them) not 0: the main view is drawn through the HDR pipeline (Hdr.cpp).
-  bool IsHdrOn();
+  bool IsHdrOn() const;
 
   //////////////////////////////////////////////////////////////////////////
   // Renderer.cpp
@@ -729,7 +729,8 @@ public:
   //////////////////////////////////////////////////////////////////////////
   // PathTrace.cpp: the path tracer of the main view's lighting (d3d12_PathTracing)
 
-  //! d3d12_PathTracing on a device with rays (it wants the scene for rays with what is out of the view).
+  //! d3d12_PathTracing on a device with rays and with r_HDRRendering (it wants the scene for rays with what is out of
+  //! the view).
   bool WantsPathTracing() const;
   //! The main view's lights for the path tracer (Lights, the scene's), once a frame before its opaque
   //! list: SPTLight in per frame memory (m_PathTrace.nLights); a "pt lights:" line in the frame dump.
@@ -744,12 +745,30 @@ public:
     uint32 nLights;
   };
   void GetPathShade(SPathShadeParams &P) const;
+  //! The view the path tracer lights: the main view's 3D scene in its HDR scene targets (no reflection, cube, sprite or
+  //! shadow map, no heat vision), with d3d12_PathTracing.
+  bool IsPathView();
+  //! Around the main view's opaque list (Scene.cpp): its G-buffer (Shaders/PathGBuffer.hlsli) made for the scene's size,
+  //! cleared and bound to its draws (CD3D12Device::BindPathTargets) in the path tracer's view; then unbound, readable
+  //! (PATH_READ). EndPathTargets also at the end of the main scene.
+  void BeginPathTargets();
+  void EndPathTargets();
+  //! The G-buffer for the scene's size (made again when it changes); false: none.
+  bool UpdatePathTargets();
+  void ReleasePathTargets();
+  //! d3d12_PTDebug: the G-buffer over the whole back buffer (RayDebug.hlsl, XR_RAY_DEBUG_GB_*).
+  void DrawPathDebug();
 
   struct SPathTraceState
   {
     D3D12_GPU_VIRTUAL_ADDRESS nLights = 0;  //!< this frame's SPTLight array (per frame memory; 0: none made)
     uint32 nLightCount = 0;                 //!< its lights
     int nLightsFrame = -1;                  //!< m_nFrames it was made in
+    CD3D12Texture *pAlbedo = nullptr;       //!< the G-buffer (D3D12_PT_ALBEDO_FORMAT, D3D12_PT_NORMAL_FORMAT; render targets)
+    CD3D12Texture *pNormal = nullptr;
+    bool bBound = false;                    //!< BeginPathTargets .. EndPathTargets
+    int nGBufferFrame = -1;                 //!< m_nFrames the main view's opaque list wrote it in
+    bool bNoHdrLogged = false;              //!< the log has it that d3d12_PathTracing waits for r_HDRRendering
   };
   SPathTraceState m_PathTrace;
 
@@ -1450,7 +1469,7 @@ public:
   int CV_d3d12_DumpFrame = 0;         //!< non-zero: the next frame's 3D draws go to XRenderD3D12_frame.txt, then 0
   ICVar *m_pVolumetricFog = nullptr;  //!< r_VolumetricFog, looked up on first use
   ICVar *m_pScopeLens = nullptr;      //!< r_ScopeLens_fx, looked up on first use
-  ICVar *m_pHdrRendering = nullptr;   //!< r_HDRRendering, looked up on first use
+  mutable ICVar *m_pHdrRendering = nullptr;  //!< r_HDRRendering, looked up on first use
   int CV_d3d12_WaterDebug = 0;        //!< non-zero: the water shows one term of its colour (Water.hlsl)
   int CV_d3d12_Caustics = 1;          //!< 0: no caustics under the ocean
   float CV_d3d12_WaterSunGlint = 0;   //!< strength of the sun's highlight on water (0: none)
@@ -1508,6 +1527,7 @@ public:
   float CV_d3d12_PTLamps = 1.0f;            //!< its lamps
   float CV_d3d12_PTEmission = 1.0f;         //!< what glows
   float CV_d3d12_PTTerrainDelight = 2.0f;   //!< the light baked into the terrain's texture: lit over shadowed (<= 1: none taken off)
+  int CV_d3d12_PTDebug = 0;                 //!< the path tracer's G-buffer over the picture: 1 albedo, 2 normal, 3 fog, 4 material
   int CV_d3d12_ToneMap = 1;                 //!< the HDR pipeline's tone map: 0 clamp, 1 soft shoulder, 2 ACES fitted, 3 AgX
   float CV_d3d12_ToneMapKnee = 0.85f;       //!< where the soft shoulder starts (a display value)
   float CV_d3d12_Exposure = 0;              //!< the exposure's compensation, EV

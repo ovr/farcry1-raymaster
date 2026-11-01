@@ -112,6 +112,9 @@ typedef float float4x4_t[16];
 #define DF2_AO_BAKED        0x01000000  //!< the terrain, the vegetation: the colour (before DF2_SHADOW_TINT) times vMipBias.yzw, the share of the light the shadow leaves
 #define DF2_AO_ALL          0x02000000  //!< the templates lit by the ambient colour alone, the terrain's shadow: all of the colour
 #define DF2_FOLIAGE         0x04000000  //!< the leaves and the grass, seen against the sun (XR_FOLIAGE): rgb += tex0 rgb * vColor.rgb * FoliageLight (General.hlsl, vFoliage)
+// The path tracer's G-buffer (XR_PT, General.hlsl; set only while it is bound, PathTrace.cpp)
+#define DF2_PT_MASK         0x18000000  //!< the surface's path material plus 1 (XR_PT_MAT_* + 1 & 3, RayConstants.h; 0 unlit): its light flags off, its colour less what it adds unlit (DF2_ADD_TEX4, DF2_ALPHA_GLOW) is its albedo
+#define DF2_PT_SHIFT        27
 
 // SDrawConstants::nFlags of the post program (Post.hlsl): one mode, with POST_EFFECTS the effects drawn
 #define POST_DOWNSAMPLE     0x00000001  //!< the mean of tex0 over the target's pixel: vParams0.z x vParams0.z bilinear taps

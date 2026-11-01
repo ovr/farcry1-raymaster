@@ -586,9 +586,15 @@ void CScene::EndEf3D(int nFlags)
           g_pRenderer->UpdatePathLights(s.Lights);
         }
       }
+      // The path tracer's G-buffer, which the opaque list writes in its view (PathTrace.cpp).
+      if (l == eRL_Opaque)
+        g_pRenderer->BeginPathTargets();
       g_pRenderer->DrawItems(list.data(), (int)list.size(), l);
       if (l == eRL_Opaque)
+      {
+        g_pRenderer->EndPathTargets();
         g_pRenderer->DrawAmbientOcclusion();
+      }
     }
   }
   if (m_nDrawing == 1)
@@ -600,6 +606,7 @@ void CScene::EndEf3D(int nFlags)
     g_pRenderer->DrawScreenEffects();
     g_pRenderer->DrawAODebug();
     g_pRenderer->DrawRayDebug();
+    g_pRenderer->DrawPathDebug();
     g_pRenderer->DrawShadowMapDebug();
     g_pRenderer->GpuSection("other");
   }

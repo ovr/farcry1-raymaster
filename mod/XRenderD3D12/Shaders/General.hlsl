@@ -179,12 +179,23 @@
 //	the lamp. nRaySun.z >> 24 & 3: 0 none, 2 the light taken away red, 3 the
 //	light taken away green where the ray hits next to the surface to red next
 //	to the lamp.
+//	Compiled with XR_PT (the main view's opaque list into the path tracer's
+//	G-buffer, PathGBuffer.hlsli; the HDR scene targets) the pixel shader
+//	also writes the albedo to SV_Target3 and the normal, the fog's share and
+//	the path material to SV_Target4. A surface the path tracer lights
+//	(DF2_PT_MASK; its light flags are off, its colour its albedo times
+//	vColor) writes its colour less what it adds unlit (DF2_ADD_TEX4, times
+//	tex1, and DF2_ALPHA_GLOW) as the albedo, that as its colour; a pass that
+//	multiplies the picture its factor (unfogged) to both; the rest no albedo.
 //
 //////////////////////////////////////////////////////////////////////
 
 #include "Common.hlsli"
 #if defined(XR_RAY_REFL) || defined(XR_RAY_LIGHT)
 #include "RayShade.hlsli"
+#endif
+#ifdef XR_PT
+#include "PathGBuffer.hlsli"
 #endif
 
 struct SVertexOutput
@@ -213,6 +224,12 @@ struct SVertexOutput
 //! The ambient colour's part of DrawLighting's last light and of its vNoSunLight, or of
 //! MaterialLighting's last vDiffuse (s_vAmbientLight); A of ShadePixel.
 static float3 s_vAmbientLight, s_vAmbientNoSun, s_vAmbient;
+#endif
+#ifdef XR_PT
+//! The path tracer's G-buffer of the pixel (PathGBuffer.hlsli): what the colour adds unlit, the albedo, the normal
+//! (N' with DF_BUMP), the fog's share.
+static float3 s_vPTEmission, s_vPTAlbedo, s_vPTNormal;
+static float s_fPTFog;
 #endif
 
 #ifdef XR_RAY_LIGHT
@@ -591,6 +608,12 @@ float4 ShadePixel(SVertexOutput In)
 #ifdef XR_AMBIENT
   s_vAmbient = 0;
 #endif
+#ifdef XR_PT
+  s_vPTEmission = 0;
+  s_vPTAlbedo = 0;
+  s_vPTNormal = In.vNormal;
+  s_fPTFog = 1;
+#endif
 #if defined(XR_RAY_REFL) || defined(XR_RAY_LIGHT)
   // The rays' cone and their origin's face (before any branch or discard: derivatives).
   const float3 vRayView = In.vWorldPos - g_Frame.vCameraPos.xyz;
@@ -626,6 +649,9 @@ float4 ShadePixel(SVertexOutput In)
     vMap = SafeNormalize(SampleTexture(g_Draw.nTex3, XR_SAMPLER_LINEAR_WRAP, In.vTex0).rgb * 2 - 1);
     vMap.y *= g_Draw.vParams1.y;
     vBumpN = SafeNormalize(vMap.x * In.vTangent + vMap.y * In.vBinormal + vMap.z * In.vTNormal);
+#ifdef XR_PT
+    s_vPTNormal = vBumpN;
+#endif
   }
 
   float4 vTex = float4(1, 1, 1, 1);
@@ -736,6 +762,9 @@ float4 ShadePixel(SVertexOutput In)
   {
     float4 vTex4 = SampleTexture(g_Draw.nTex4, XR_SAMPLER_LINEAR_WRAP, In.vTex0);
     vColor.rgb += vTex4.rgb * g_Draw.vAddColor.rgb + g_Draw.vAddColor.w;
+#ifdef XR_PT
+    s_vPTEmission += vTex4.rgb * g_Draw.vAddColor.rgb + g_Draw.vAddColor.w;
+#endif
     if (HasFlag2(DF2_GLASS))
       vColor.a *= vTex4.a;
   }
@@ -779,6 +808,10 @@ float4 ShadePixel(SVertexOutput In)
       vColor.rgb = 2 * vColor.rgb + vTex1.rgb - 0.5;
     else
       vColor *= vTex1;
+#ifdef XR_PT
+    if (!HasFlag(DF_TEX1_LIGHTMAP | DF_TEX1_DETAIL))
+      s_vPTEmission *= vTex1.rgb;
+#endif
 #ifdef XR_AMBIENT
     // The detail texture (the terrain's, DF2_AO_BAKED below) adds about nothing to the mean.
     if (HasFlag(DF_TEX1_DETAIL) && !HasFlag(DF_TEX1_LIGHTMAP))
@@ -789,6 +822,10 @@ float4 ShadePixel(SVertexOutput In)
   }
   if (HasFlag2(DF2_ALPHA_GLOW))
     vColor.rgb += vTex.rgb * vTex.a;
+#ifdef XR_PT
+  if (HasFlag2(DF2_ALPHA_GLOW))
+    s_vPTEmission += vTex.rgb * vTex.a;
+#endif
 
   if (HasFlag(DF_TERRAIN_CLIFF))
   {
@@ -845,6 +882,14 @@ float4 ShadePixel(SVertexOutput In)
     vAmb = vColor.rgb;
   vAmb = min(vAmb, max(vColor.rgb, 0));
 #endif
+#ifdef XR_PT
+  // A surface the path tracer lights: its albedo; what it adds unlit, its colour.
+  if (g_Draw.nFlags2 & DF2_PT_MASK)
+  {
+    s_vPTAlbedo = max(vColor.rgb - s_vPTEmission, 0);
+    vColor.rgb = s_vPTEmission;
+  }
+#endif
 
   float3 vFogColor = HasFlag2(DF2_FOG_BLACK) ? 0 : HasFlag2(DF2_MODULATE) ? 1 : g_Frame.vFogColor.rgb;
   if (HasFlag(DF_DETAIL_LAYER))
@@ -881,6 +926,11 @@ float4 ShadePixel(SVertexOutput In)
     vColor = float4(saturate(0.5 + 0.5 * g_Draw.vParams0.w * fFade * (fLight - 1)).xxx, 1);
     vFogColor = 0.5;
   }
+#ifdef XR_PT
+  // A pass that multiplies the picture multiplies the albedo as much (not fogged).
+  if (HasFlag(DF_DETAIL_LAYER | DF_CAUSTICS) || HasFlag2(DF2_MODULATE))
+    s_vPTAlbedo = vColor.rgb;
+#endif
 
   if (HasFlag2(DF2_HEAT))
   {
@@ -894,6 +944,9 @@ float4 ShadePixel(SVertexOutput In)
     vColor.rgb = lerp(vFogColor, vColor.rgb, SceneFog(In.vWorldPos));
 #ifdef XR_AMBIENT
     vAmb *= SceneFog(In.vWorldPos);
+#endif
+#ifdef XR_PT
+    s_fPTFog = SceneFog(In.vWorldPos);
 #endif
   }
 #ifdef XR_AMBIENT
@@ -916,7 +969,31 @@ float4 ShadePixel(SVertexOutput In)
   return vColor;
 }
 
+#ifdef XR_PT
+struct SPixelOutput
+{
+  float4 vColor : SV_Target0;
 #ifdef XR_VELOCITY
+  float2 vMotion : SV_Target1;
+  float fDepth : SV_Target2;
+#endif
+  float4 vAlbedo : SV_Target3;    //!< the albedo, with the colour's alpha for the blend
+  float4 vNormal : SV_Target4;    //!< the normal, the fog's share, the path material (PathGBufferNormal)
+};
+
+SPixelOutput PSMain(SVertexOutput In)
+{
+  SPixelOutput Out;
+  Out.vColor = SceneOutput(ShadePixel(In));
+#ifdef XR_VELOCITY
+  Out.vMotion = MotionVector(In.vCurClip, In.vPrevClip);
+  Out.fDepth = In.vPos.z;
+#endif
+  Out.vAlbedo = float4(max(s_vPTAlbedo, 0), Out.vColor.a);
+  Out.vNormal = PathGBufferNormal(s_vPTNormal, g_Frame.vCameraPos.xyz - In.vWorldPos, s_fPTFog, (g_Draw.nFlags2 & DF2_PT_MASK) >> DF2_PT_SHIFT);
+  return Out;
+}
+#elif defined(XR_VELOCITY)
 struct SPixelOutput
 {
   float4 vColor : SV_Target0;
