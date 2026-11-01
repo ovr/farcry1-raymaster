@@ -76,6 +76,8 @@ enum ED3D12Kernel
   eD3D12K_RaySunFfxClassify,        //!< its tile classification and history
   eD3D12K_RaySunFfxFilter,          //!< a pass of its filter
   eD3D12K_RaySunFfxPack,            //!< the denoised visibility into the mask
+  eD3D12K_PathCacheUpdate,          //!< the path tracer's radiance cache: its samples (Shaders/PathTrace.hlsl; with rays)
+  eD3D12K_PathCacheResolve,         //!< its samples blended into its light
   eD3D12K_Num
 };
 

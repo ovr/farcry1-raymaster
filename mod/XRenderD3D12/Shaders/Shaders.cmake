@@ -175,6 +175,9 @@ xrender_d3d12_shader(PathTraceTrace_CS PathTrace.hlsl cs_6_5 CSTrace)
 xrender_d3d12_shader(PathTraceTemporal_CS PathTrace.hlsl cs_6_5 CSTemporal)
 xrender_d3d12_shader(PathTraceFilter_CS PathTrace.hlsl cs_6_5 CSFilter)
 xrender_d3d12_shader(PathTraceSpecular_CS PathTrace.hlsl cs_6_5 CSSpecular)
+# Its radiance cache (d3d12_PTCache, PathCache.hlsli): its samples, their light.
+xrender_d3d12_shader(PathCacheUpdate_CS PathTrace.hlsl cs_6_5 CSCacheUpdate)
+xrender_d3d12_shader(PathCacheResolve_CS PathTrace.hlsl cs_6_5 CSCacheResolve)
 # Its kernels around NVIDIA NRD (d3d12_PTDenoiser nrd, NrdHost.cpp): what REBLUR takes and what it gives, with NRD's
 # NRD.hlsli; only when NRD is built in (XRENDERD3D12_NRD).
 if(XRENDERD3D12_NRD)

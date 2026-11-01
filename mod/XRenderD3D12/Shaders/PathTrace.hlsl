@@ -21,11 +21,23 @@
 //	    at all, the brighter of that and the sky). The sun's light on the
 //	    pixel's own surface is not in it: the composite takes the
 //	    visibility the raster found
-//	    (the G-buffer's). rgb the light, w the pixel's view depth (0: no
+//	    (the G-buffer's). With the radiance cache (nCache.x;
+//	    PathCache.hlsli) the last bounce's hit takes its light for the
+//	    bounces after it (a cell across its face picked at random: noise,
+//	    not edges). rgb the light, w the pixel's view depth (0: no
 //	    surface the path tracer lights); u2 the hit distance of the first
 //	    bounce (the rays' length where it finds nothing, 0 where the path
 //	    ends at once), which NRD weighs (PathNrd.hlsl; a null view without
-//	    it).
+//	    it). With nCache.z rgb is the cache's light at the pixel's surface
+//	    (d3d12_PTDebug 11).
+//	  CSCacheUpdate: the radiance cache's samples, from a pixel of each
+//	    nCache.w x nCache.w (another each frame): a path of CACHE_BOUNCES
+//	    bounces at most from its surface as CSTrace's, the cache's light
+//	    at the end; back from there, what comes to each of its points
+//	    (the pixel's surface, the hits) is a sample of the cell there.
+//	  CSCacheResolve: each entry of the cache: its samples of the frame
+//	    blended into its light (vCache.z frames at most), the entry free
+//	    again after PATH_CACHE_MAX_AGE frames without one.
 //	  CSTemporal: blended into the history where the surface was in the
 //	    frame before, vParams.z frames at most (the reference: all of them
 //	    while the view stays).
@@ -48,6 +60,7 @@
 
 #include "PathShade.hlsli"
 #include "PathGBuffer.hlsli"
+#include "PathCache.hlsli"
 
 ConstantBuffer<SPathTraceConstants> g_PT : register(b2);
 RWTexture2D<float4> g_Out : register(u0);
@@ -117,6 +130,21 @@ float3 CosineDirection(float3 vN, float u, float v)
   return normalize(r * cos(a) * vT + r * sin(a) * vB + sqrt(saturate(1 - u)) * vN);
 }
 
+//! The radiance cache's light (PathCache.hlsli) where a path's last bounce ends at vPos, the face's normal vN (0 where it
+//! has none yet): of a cell picked across the face at random (vCache.w cells at most from vPos).
+float3 PathCacheAt(float3 vPos, float3 vN, inout uint nSeed)
+{
+  const float fSize = PathCacheCellSize(vPos, g_PT.vCache, g_PT.vCameraPos.xyz);
+  const float3 vT = normalize(abs(vN.z) < 0.9 ? cross(vN, float3(0, 0, 1)) : cross(vN, float3(1, 0, 0)));
+  const float3 vB = cross(vN, vT);
+  const float u = PathRandom(nSeed) - 0.5, v = PathRandom(nSeed) - 0.5;
+  const float3 vAt = vPos + (u * vT + v * vB) * (fSize * g_PT.vCache.w);
+  uint nEntry;
+  if (!PathCacheFind(PathCacheCellOf(vAt, vN, g_PT.vCache, g_PT.vCameraPos.xyz), nEntry))
+    return 0;
+  return PathCacheLight(nEntry).rgb;
+}
+
 [numthreads(XR_PT_GROUP, XR_PT_GROUP, 1)]
 void CSTrace(uint3 vId : SV_DispatchThreadID)
 {
@@ -140,6 +168,15 @@ void CSTrace(uint3 vId : SV_DispatchThreadID)
   // Each pixel's own numbers, others each frame.
   uint nSeed = Hash((uint)p.x | ((uint)p.y << 16)) ^ Hash(g_PT.nFlags.y * 0x9e3779b9u + 1);
   SPathShade P = PathShadeParams(XR_RAY_MAX_ALPHA_TESTS);
+  // d3d12_PTDebug 11: the radiance cache's light at the pixel's surface.
+  if (g_PT.nCache.z)
+  {
+    uint nEntry;
+    const bool bFound = PathCacheFind(PathCacheCellOf(vPos, vN, g_PT.vCache, g_PT.vCameraPos.xyz), nEntry);
+    g_Out[p] = float4(bFound ? PathCacheLight(nEntry).rgb : 0, d);
+    g_HitDistance[p] = 0;
+    return;
+  }
   float3 vLight = PathSampleLamp(vPos, vN, vFace, P, nSeed, fPixel);
   // The game's ambient light the paths fill in with, at the point a ray leaves: the pixel's, then each hit's.
   float3 vFill = PathAmbientLight(g_Textures[g_PT.nTextures2.w].Load(int3(p, 0)).gba) * g_PT.vFill.x;
@@ -174,8 +211,11 @@ void CSTrace(uint3 vId : SV_DispatchThreadID)
       vLight += vThrough * vFill;
     const float fHitWidth = fWidth + Hit.fT * PT_CONE_SPREAD;
     const SPathSurface H = PathSurface(Hit, vDir, fHitWidth, P);
-    const float3 vHitLight = PathSun(H.vPos, H.vNormal, H.vFaceNormal, P, fHitWidth) +
-                             PathSampleLamp(H.vPos, H.vNormal, H.vFaceNormal, P, nSeed, fHitWidth);
+    float3 vHitLight = PathSun(H.vPos, H.vNormal, H.vFaceNormal, P, fHitWidth) +
+                       PathSampleLamp(H.vPos, H.vNormal, H.vFaceNormal, P, nSeed, fHitWidth);
+    // The last bounce: the light of the bounces after it from the radiance cache.
+    if (g_PT.nCache.x && b + 1 == g_PT.nPath.y)
+      vHitLight += PathCacheAt(H.vPos, H.vNormal, nSeed);
     vLight += vThrough * (H.vEmission + H.vAlbedo * vHitLight);
     vThrough *= H.vAlbedo;
     // The reference's long paths: on with the chance of their light, made up for by it (Russian roulette).
@@ -369,4 +409,120 @@ void CSSpecular(uint3 vId : SV_DispatchThreadID)
     nRays++;
   }
   g_Out[p] = float4(vColor * vSpecular, 0);
+}
+
+//! The bounces of a cache path at most (its points: the pixel's surface and its hits but the last).
+static const uint CACHE_BOUNCES = 3;
+
+[numthreads(XR_PT_GROUP, XR_PT_GROUP, 1)]
+void CSCacheUpdate(uint3 vId : SV_DispatchThreadID)
+{
+  // A pixel of each nCache.w x nCache.w, another each frame.
+  const uint nTile = g_PT.nCache.w;
+  uint nSeed = PathCacheHash(vId.x | (vId.y << 16)) ^ PathCacheHash(g_PT.nFlags.y * 0x9e3779b9u + 7);
+  const float fX = PathRandom(nSeed), fY = PathRandom(nSeed);
+  const int2 p = (int2)(vId.xy * nTile + min((uint2)(float2(fX, fY) * nTile), nTile - 1));
+  if (any(p >= (int2)g_PT.vSize.xy))
+    return;
+  const float4 vGBuffer = GBufferNormalAt(p);
+  const float z = DepthAt(p);
+  const float d = ViewDepthOf(z);
+  if (PathGBufferMaterial(vGBuffer) == 0 || z >= 1 || d <= 0)
+    return;
+  const float3 vPos = PixelPos(p + 0.5, d);
+  SPathShade P = PathShadeParams(g_PT.nPath.z);
+  // The path's points (each one's entry, the light its hit gives back, its albedo), then from the last back the light
+  // that comes to each.
+  uint Entries[CACHE_BOUNCES];
+  float3 Gives[CACHE_BOUNCES], Albedo[CACHE_BOUNCES];
+  bool Valid[CACHE_BOUNCES];
+  uint nPoints = 0;
+  float3 vOrigin = vPos, vNormal = PixelNormal(vGBuffer, vPos), vFaceNormal = FaceNormal(p, vPos, d);
+  float3 vFill = PathAmbientLight(g_Textures[g_PT.nTextures2.w].Load(int3(p, 0)).gba) * g_PT.vFill.x;
+  float fWidth = d * g_PT.vParams.y;
+  float3 vLast = 0;
+  [loop]
+  for (uint b = 0; b < CACHE_BOUNCES; b++)
+  {
+    const float u = PathRandom(nSeed), v = PathRandom(nSeed);
+    const float3 vDir = CosineDirection(vNormal, u, v);
+    // Under the face (a normal map's normal leaning over): the path ends at this point, the cache's light comes to it.
+    if (dot(vDir, vFaceNormal) <= 0)
+    {
+      vLast = PathCacheAt(vOrigin, vNormal, nSeed);
+      break;
+    }
+    Valid[b] = PathCacheInsert(PathCacheCellOf(vOrigin, vNormal, g_PT.vCache, g_PT.vCameraPos.xyz), Entries[b]);
+    nPoints = b + 1;
+    Gives[b] = 0;
+    Albedo[b] = 0;
+    RayDesc Ray;
+    Ray.Origin = vOrigin + vFaceNormal * (0.01 + fWidth);
+    Ray.Direction = vDir;
+    Ray.TMin = 0.005;
+    Ray.TMax = g_PT.vParams.x;
+    const SRayHit Hit = TraceScene(Ray, P.nMask, fWidth, PT_CONE_SPREAD, P.nMaxTests);
+    if (!Hit.bHit)
+    {
+      Gives[b] = max(g_PT.vSky.rgb, vFill);
+      break;
+    }
+    const float fHitWidth = fWidth + Hit.fT * PT_CONE_SPREAD;
+    const SPathSurface H = PathSurface(Hit, vDir, fHitWidth, P);
+    const float3 vHitLight = PathSun(H.vPos, H.vNormal, H.vFaceNormal, P, fHitWidth) +
+                             PathSampleLamp(H.vPos, H.vNormal, H.vFaceNormal, P, nSeed, fHitWidth);
+    Gives[b] = (Hit.fT > g_PT.vFill.y ? vFill : 0) + H.vEmission + H.vAlbedo * vHitLight;
+    Albedo[b] = H.vAlbedo;
+    if (b + 1 == CACHE_BOUNCES)
+      vLast = PathCacheAt(H.vPos, H.vNormal, nSeed);
+    vFill = H.vAmbient * g_PT.vFill.x;
+    vOrigin = H.vPos;
+    vNormal = H.vNormal;
+    vFaceNormal = H.vFaceNormal;
+    fWidth = fHitWidth;
+  }
+  // Back from the last point: what comes to point b is what its ray's hit gives back plus that hit's albedo times what
+  // comes to the hit.
+  float3 vIn = vLast;
+  [loop]
+  for (int i = (int)nPoints - 1; i >= 0; i--)
+  {
+    vIn = Gives[i] + Albedo[i] * vIn;
+    const float fLuminance = PathLuminance(vIn);
+    const float3 vSample = g_PT.vParams.w > 0 && fLuminance > g_PT.vParams.w ? vIn * (g_PT.vParams.w / fLuminance) : vIn;
+    if (Valid[i])
+      PathCacheAdd(Entries[i], max(vSample, 0));
+  }
+}
+
+[numthreads(256, 1, 1)]
+void CSCacheResolve(uint3 vId : SV_DispatchThreadID)
+{
+  const uint e = vId.x;
+  if (e >= PATH_CACHE_ENTRIES || g_PathCache.Load(e * 4) == 0)
+    return;
+  const uint nAt = PATH_CACHE_SAMPLES + e * 16;
+  const uint4 s = g_PathCache.Load4(nAt);
+  g_PathCache.Store4(nAt, uint4(0, 0, 0, 0));
+  const uint2 n = g_PathCache.Load2(PATH_CACHE_LIGHT + e * 8);
+  float3 vLight = float3(f16tof32(n.x), f16tof32(n.x >> 16), f16tof32(n.y));
+  // Starting again: the light of the frames before is not taken.
+  uint nFrames = g_PT.nCache.y ? 0 : (n.y >> 16) & 0xff, nAge = n.y >> 24;
+  if (g_PT.nCache.y)
+    vLight = 0;
+  const uint nSamples = min(s.w, PATH_CACHE_MAX_SAMPLES);
+  if (nSamples)
+  {
+    nFrames = min(nFrames + 1, (uint)g_PT.vCache.z);
+    vLight = lerp(vLight, (float3)s.rgb / (PATH_CACHE_SCALE * nSamples), 1.0 / nFrames);
+    nAge = 0;
+  }
+  else if (++nAge > PATH_CACHE_MAX_AGE)
+  {
+    // Not seen for long: the entry free again.
+    g_PathCache.Store(e * 4, 0);
+    g_PathCache.Store2(PATH_CACHE_LIGHT + e * 8, uint2(0, 0));
+    return;
+  }
+  g_PathCache.Store2(PATH_CACHE_LIGHT + e * 8, uint2(f32tof16(vLight.r) | (f32tof16(vLight.g) << 16), f32tof16(vLight.b) | (nFrames << 16) | (nAge << 24)));
 }

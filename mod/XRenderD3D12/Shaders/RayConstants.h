@@ -60,6 +60,7 @@
 #define XR_RAY_DEBUG_GB_AMBIENT 23  //!< the game's ambient light the paths fill in with (the G-buffer's), as the game's colour
 #define XR_RAY_DEBUG_GB_SPECULAR 24 //!< the highlights' colour (the G-buffer's: the material's specular colour times its gloss, times 2)
 #define XR_RAY_DEBUG_GB_HIGHLIGHTS 25 //!< the highlights of the sun and the lamps the composite adds (CSSpecular), the game's colour
+#define XR_RAY_DEBUG_GB_CACHE   26  //!< the radiance cache's light at the surfaces (CSTrace with SPathTraceConstants::nCache.z), grey
 
 //! SRayInstance: no view, no stream.
 #define XR_RAY_NONE         0xffffffff
@@ -104,6 +105,10 @@ struct SRayInstance
 //! The path tracer's lights (d3d12_PathTracing, PathTrace.cpp): the frame's lights besides the sun and the level's static ones,
 //! the nearest at most this many a frame.
 #define XR_PT_MAX_LIGHTS 128
+//! The path tracer's radiance cache (d3d12_PTCache, PathCache.hlsli): its entries (a power of 2) and its buffer's bytes (an
+//! entry's key, its samples' sums and count, its light).
+#define XR_PT_CACHE_ENTRIES (1u << 20)
+#define XR_PT_CACHE_BYTES (XR_PT_CACHE_ENTRIES * 28u)
 //! SPTLight::nParams.x, the kind of light.
 #define XR_PT_LIGHT_POINT        1   //!< from vPos over vPos.w metres (DLF_POINT)
 #define XR_PT_LIGHT_DIRECTIONAL  2   //!< from the direction vPos.xyz, unattenuated (DLF_DIRECTIONAL without DLF_SUN)
@@ -242,6 +247,10 @@ struct SPathTraceConstants
                                   //!< the reference (no limit to a sample's light)
   XR_FLOAT4(vNrd);                //!< NRD (PathNrd.hlsl): xyz its hit distances' normalization (A, B, C of REBLUR), w the view
                                   //!< depth it takes where there is no surface (beyond its denoising range)
+  XR_FLOAT4(vCache);              //!< the radiance cache (PathCache.hlsli): x its cells' size at the camera (m), y their size per
+                                  //!< metre of distance, z the frames its light holds at most, w the jitter of a lookup (cells)
+  XR_UINT4(nCache);               //!< x 1: CSTrace's last bounce takes it, y 1: its light starts again (CSCacheResolve), z 1:
+                                  //!< CSTrace writes it at the pixels' surfaces (d3d12_PTDebug 11), w CSCacheUpdate's tile (pixels)
 };
 
 #endif

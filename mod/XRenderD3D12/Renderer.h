@@ -802,6 +802,10 @@ public:
   //! NRD is not built in or not available.
   bool UpdatePathNrd(int w, int h);
   void ReleasePathNrd();
+  //! With d3d12_PTCache, the radiance cache's buffer (Shaders/PathCache.hlsli), u3 of CSTrace's table; false, logged once:
+  //! none (the paths without it).
+  bool UpdatePathCache();
+  void ReleasePathCache();
 
   struct SPathTraceState
   {
@@ -835,6 +839,11 @@ public:
     int nNrdTable = -1;                     //!< CSPack's UAV table
     int nNrdFrame = -1;                     //!< m_nFrames NRD last denoised (-1: never; its history starts again)
     bool bNrdFailed = false;                //!< NRD is not available at this size (logged)
+    // With d3d12_PTCache (UpdatePathCache; UNORDERED_ACCESS between the frames)
+    ComPtr<ID3D12Resource> pCache;          //!< the radiance cache (PathCache.hlsli: its keys, samples and light)
+    int nCacheTable = -1;                   //!< the table of CSTrace whose u3 views it
+    int nCacheFrame = -1;                   //!< m_nFrames it was last brought up to date in (-1: its light starts again)
+    bool bCacheFailed = false;              //!< not to be had (logged)
     float PrevViewProj[16] = {};            //!< the view's world to clip of the last frame traced
     float PrevJitter[2] = {};               //!< and its jitter
     int nHistoryFrame = -1;                 //!< m_nFrames of the last frame traced (-1: no history)
@@ -1603,8 +1612,9 @@ public:
   float CV_d3d12_PTTerrainDelight = 2.0f;   //!< the light baked into the terrain's texture: lit over shadowed (<= 1: none taken off)
   int CV_d3d12_PTDebug = 0;                 //!< the path tracer's G-buffer over the picture: 1 albedo, 2 normal, 3 fog, 4 material,
                                             //!< 5 the paths' light, 6 one frame's paths, 7 the sun's visibility, 8 the ambient light,
-                                            //!< 9 the highlights' colour, 10 the highlights
+                                            //!< 9 the highlights' colour, 10 the highlights, 11 the radiance cache
   float CV_d3d12_PTSky = 1.0f;              //!< the path tracer's sky: times the outdoor ambient (as light)
+  int CV_d3d12_PTCache = 1;                 //!< its radiance cache in real time (the light beyond its last bounce)
   int CV_d3d12_PTBounces = 1;               //!< its bounces in real time
   int CV_d3d12_PTReferenceBounces = 8;      //!< and in the reference (d3d12_PathTracing 2)
   float CV_d3d12_PTAmbient = 1.0f;          //!< the game's ambient light its paths fill in with (times)

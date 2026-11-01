@@ -49,6 +49,8 @@
 #include "PathTraceTemporal_CS.h"
 #include "PathTraceFilter_CS.h"
 #include "PathTraceSpecular_CS.h"
+#include "PathCacheUpdate_CS.h"
+#include "PathCacheResolve_CS.h"
 #if XRENDERD3D12_NRD
 #include "PathNrdPack_CS.h"
 #include "PathNrdResolve_CS.h"
@@ -118,6 +120,8 @@ const SKernel s_Kernels[eD3D12K_Num] =
   { "sun's shadow by rays (FidelityFX Denoiser's filter)", nullptr, 0, true },
   { "sun's shadow by rays (FidelityFX Denoiser's mask)", nullptr, 0, true },
 #endif
+  { "path tracer (radiance cache)", g_PathCacheUpdate_CS, sizeof(g_PathCacheUpdate_CS), true },
+  { "path tracer (radiance cache's light)", g_PathCacheResolve_CS, sizeof(g_PathCacheResolve_CS), true },
 };
 static_assert(sizeof(s_Kernels) / sizeof(s_Kernels[0]) == eD3D12K_Num, "a kernel for each ED3D12Kernel");
 

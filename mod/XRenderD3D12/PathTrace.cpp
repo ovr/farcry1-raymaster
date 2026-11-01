@@ -102,6 +102,13 @@ constexpr float PATH_HISTORY_FRAMES = 32;
 constexpr float PATH_SAMPLE_MAX = 16;
 //! A bounce's alpha tests at most in real time (the reference: XR_RAY_MAX_ALPHA_TESTS).
 constexpr uint32 PATH_BOUNCE_TESTS = 4;
+//! The radiance cache (Shaders/PathCache.hlsli): its cells' size near the camera (m) and per metre of distance, the frames
+//! its light holds at most, a lookup's jitter (cells), CSCacheUpdate's tile (a path for each of these x these pixels).
+constexpr float PATH_CACHE_CELL = 0.25f;
+constexpr float PATH_CACHE_CELL_PER_METRE = 0.02f;
+constexpr float PATH_CACHE_FRAMES = 32;
+constexpr float PATH_CACHE_JITTER = 1;
+constexpr uint32 PATH_CACHE_TILE = 8;
 //! The kernels' UAV tables (D3D12Compute.h): the paths', the history's of each texture, the composite's light, the
 //! highlights.
 enum { PATH_TABLE_TRACE, PATH_TABLE_TEMPORAL0, PATH_TABLE_TEMPORAL1, PATH_TABLE_FILTER, PATH_TABLE_SPECULAR, PATH_TABLES };
@@ -560,10 +567,74 @@ void CD3D12Renderer::ReleasePathNrd()
     m_pNrd->Release();
 }
 
+bool CD3D12Renderer::UpdatePathCache()
+{
+  SPathTraceState &s = m_PathTrace;
+  if (s.bCacheFailed || s.nTables[PATH_TABLE_TRACE] < 0)
+    return false;
+  if (!s.pCache)
+  {
+    // Zeroed as made: no keys, no light.
+    const D3D12_HEAP_PROPERTIES Heap = { D3D12_HEAP_TYPE_DEFAULT };
+    D3D12_RESOURCE_DESC Desc = {};
+    Desc.Dimension = D3D12_RESOURCE_DIMENSION_BUFFER;
+    Desc.Width = XR_PT_CACHE_BYTES;
+    Desc.Height = 1;
+    Desc.DepthOrArraySize = 1;
+    Desc.MipLevels = 1;
+    Desc.SampleDesc.Count = 1;
+    Desc.Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
+    Desc.Flags = D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS;
+    if (FAILED(m_pDevice->GetDevice()->CreateCommittedResource(&Heap, D3D12_HEAP_FLAG_NONE, &Desc, D3D12_RESOURCE_STATE_COMMON, nullptr,
+                                                               IID_PPV_ARGS(&s.pCache))))
+    {
+      iLog->LogWarning("XRenderD3D12: the path tracer's radiance cache (%u KB) is not available: its paths without it",
+                       XR_PT_CACHE_BYTES / 1024);
+      s.pCache.Reset();
+      s.bCacheFailed = true;
+      return false;
+    }
+    s.pCache->SetName(L"XRenderD3D12 path tracer's radiance cache");
+    s.nCacheTable = -1;
+    s.nCacheFrame = -1;
+  }
+  // u3 of CSTrace's table (which the cache's kernels take too), written again where the table is new.
+  if (s.nCacheTable != s.nTables[PATH_TABLE_TRACE])
+  {
+    D3D12_UNORDERED_ACCESS_VIEW_DESC View = {};
+    View.ViewDimension = D3D12_UAV_DIMENSION_BUFFER;
+    View.Format = DXGI_FORMAT_R32_TYPELESS;
+    View.Buffer.NumElements = XR_PT_CACHE_BYTES / 4;
+    View.Buffer.Flags = D3D12_BUFFER_UAV_FLAG_RAW;
+    m_pDescriptors->WriteUAV(s.nTables[PATH_TABLE_TRACE] + 3, s.pCache.Get(), &View);
+    s.nCacheTable = s.nTables[PATH_TABLE_TRACE];
+  }
+  return true;
+}
+
+void CD3D12Renderer::ReleasePathCache()
+{
+  SPathTraceState &s = m_PathTrace;
+  if (m_pDescriptors && s.nCacheTable >= 0 && s.nCacheTable == s.nTables[PATH_TABLE_TRACE])
+  {
+    D3D12_UNORDERED_ACCESS_VIEW_DESC View = {};
+    View.ViewDimension = D3D12_UAV_DIMENSION_TEXTURE2D;
+    View.Format = PATH_LIGHT_FORMAT;
+    m_pDescriptors->WriteUAV(s.nCacheTable + 3, nullptr, &View);
+  }
+  s.nCacheTable = -1;
+  s.nCacheFrame = -1;
+  if (s.pCache && m_pDevice)
+    m_pDevice->DeferredRelease(s.pCache);
+  s.pCache.Reset();
+}
+
 void CD3D12Renderer::ReleasePathKernels()
 {
   SPathTraceState &s = m_PathTrace;
   ReleasePathNrd();
+  ReleasePathCache();
+  s.bCacheFailed = false;
   s.bNrdFailed = false;
   for (CD3D12Texture **pp : { &s.pRays, &s.pHistory[0], &s.pHistory[1], &s.pFrames[0], &s.pFrames[1], &s.pLight, &s.pHighlights })
   {
@@ -651,6 +722,10 @@ void CD3D12Renderer::DrawPathTrace()
   const bool bDenoise = !bReference && _stricmp(szDenoiser, "none") != 0;
   // NRD in real time, where it is built in and available; otherwise simple.
   const bool bNrd = bDenoise && !_stricmp(szDenoiser, "nrd") && UpdatePathNrd(w, h);
+  // The radiance cache in real time, where the paths bounce (its buffer let go with d3d12_PTCache 0).
+  if (!CV_d3d12_PTCache && s.pCache)
+    ReleasePathCache();
+  const bool bCache = !bReference && CV_d3d12_PTCache && nBounces > 0 && UpdatePathCache();
   uint32 nKey = (uint32)nBounces * 0x9e3779b1u;
   const float fAmbient = std::max(CV_d3d12_PTAmbient, 0.0f), fAmbientRange = std::max(CV_d3d12_PTAmbientRange, 0.0f);
   for (float f : { P.vSun[0], P.vSun[1], P.vSun[2], P.fLamps, P.fEmission, P.fDelight, vSky[0], vSky[1], vSky[2], fAmbient, fAmbientRange })
@@ -674,6 +749,13 @@ void CD3D12Renderer::DrawPathTrace()
   Set4(pc.vSky, vSky[0], vSky[1], vSky[2], P.fEmission);
   Set4(pc.vShade, P.fDelight, P.fBakeLight, P.fLightGap, 0);
   Set4(pc.vFill, fAmbient, fAmbientRange, 0, 0);
+  // The cache's light starts again after a frame without it or where the settings change.
+  const bool bCacheRestart = bCache && (s.nCacheFrame != m_nFrames - 1 || nKey != s.nSettingsKey);
+  Set4(pc.vCache, PATH_CACHE_CELL, PATH_CACHE_CELL_PER_METRE, PATH_CACHE_FRAMES, PATH_CACHE_JITTER);
+  pc.nCache[0] = bCache ? 1 : 0;
+  pc.nCache[1] = bCacheRestart ? 1 : 0;
+  pc.nCache[2] = bCache && CV_d3d12_PTDebug == 11 ? 1 : 0;
+  pc.nCache[3] = PATH_CACHE_TILE;
   // The highlights in the game's colour, as the raster's (its sun's specular colour, the lamps'), the scales of the path
   // tracer's sun and lamps as such a colour; the sun's none indoors, as its light.
   const float fSpecular = std::max(CV_d3d12_PTSpecular, 0.0f);
@@ -720,6 +802,22 @@ void CD3D12Renderer::DrawPathTrace()
   const D3D12_GPU_VIRTUAL_ADDRESS nLights = s.nLightsFrame == m_nFrames ? s.nLights : 0;
   const UINT gx = (UINT)(w + XR_PT_GROUP - 1) / XR_PT_GROUP, gy = (UINT)(h + XR_PT_GROUP - 1) / XR_PT_GROUP;
   m_pDevice->Transition(pDepth, D3D12_RESOURCE_STATE_DEPTH_WRITE, PATH_DEPTH_READ);
+  if (bCache)
+  {
+    // The cache's samples from a path for each PATH_CACHE_TILE x PATH_CACHE_TILE pixels, blended into its light, which
+    // CSTrace reads.
+    GpuSection("pt cache");
+    const UINT cx = ((UINT)(w + PATH_CACHE_TILE - 1) / PATH_CACHE_TILE + XR_PT_GROUP - 1) / XR_PT_GROUP;
+    const UINT cy = ((UINT)(h + PATH_CACHE_TILE - 1) / PATH_CACHE_TILE + XR_PT_GROUP - 1) / XR_PT_GROUP;
+    m_pCompute->DispatchRays(pList, eD3D12K_PathCacheUpdate, FrameCB.nGPU, PassCB.nGPU, nTlas, nInstances, s.nTables[PATH_TABLE_TRACE], cx, cy,
+                             nLights);
+    m_pDevice->UavBarrier(s.pCache.Get());
+    m_pCompute->DispatchRays(pList, eD3D12K_PathCacheResolve, FrameCB.nGPU, PassCB.nGPU, nTlas, nInstances, s.nTables[PATH_TABLE_TRACE],
+                             XR_PT_CACHE_ENTRIES / 256, 1, nLights);
+    m_pDevice->UavBarrier(s.pCache.Get());
+  }
+  s.nCacheFrame = bCache ? m_nFrames : -1;
+  GpuSection("pt paths");
   m_pCompute->DispatchRays(pList, eD3D12K_PathTrace, FrameCB.nGPU, PassCB.nGPU, nTlas, nInstances, s.nTables[PATH_TABLE_TRACE], gx, gy, nLights);
   m_pDevice->Transition(s.pRays->m_pResource, D3D12_RESOURCE_STATE_UNORDERED_ACCESS, PATH_KERNEL_READ);
   bool bNrdDone = false;
@@ -829,6 +927,11 @@ void CD3D12Renderer::DrawPathTrace()
             bReference ? "reference" : "real time", w, h, nBounces, P.nLights, vSky[0], vSky[1], vSky[2], P.vSun[0], P.vSun[1], P.vSun[2],
             bOutdoors ? "" : " (indoors: no sun in the frame)", P.fBakeLight, fAmbient, fAmbientRange, pc.vSpecular[0], pc.vSpecular[1],
             pc.vSpecular[2], pc.vSpecular[3], bNrd ? "nrd" : bDenoise ? "simple" : "none", bHistory ? 1 : 0, s.nAccumulated);
+  if (m_pFrameDump)
+    fprintf(m_pFrameDump.get(), "pt cache: %s, %u entries (%u KB), cells %.2f m and %.3f m per metre, %.0f frames, a path for each %u x %u "
+            "pixels%s\n", bCache ? "on" : bReference ? "off (the reference)" : CV_d3d12_PTCache ? (nBounces > 0 ? "not available" : "off (no bounces)") : "off",
+            XR_PT_CACHE_ENTRIES, XR_PT_CACHE_BYTES / 1024, PATH_CACHE_CELL, PATH_CACHE_CELL_PER_METRE, PATH_CACHE_FRAMES, PATH_CACHE_TILE,
+            PATH_CACHE_TILE, bCacheRestart ? ", starting again" : "");
   if (m_pFrameDump && bNrd)
   {
     int nPasses = 0, nTables = 0, nTextures = 0;
@@ -841,13 +944,13 @@ void CD3D12Renderer::DrawPathTrace()
 
 void CD3D12Renderer::DrawPathDebug()
 {
-  if (CV_d3d12_PTDebug <= 0 || CV_d3d12_PTDebug > 10 || m_PathTrace.nGBufferFrame != m_nFrames || !m_PathTrace.pAlbedo || !m_pDevice ||
+  if (CV_d3d12_PTDebug <= 0 || CV_d3d12_PTDebug > 11 || m_PathTrace.nGBufferFrame != m_nFrames || !m_PathTrace.pAlbedo || !m_pDevice ||
       m_pDevice->IsOffscreen() || !m_pRayScene || !m_pRayScene->GetTLAS())
     return;
-  // The paths' light and the highlights: of this frame's.
-  CD3D12Texture *pLight = CV_d3d12_PTDebug == 5 ? m_PathTrace.pLight : CV_d3d12_PTDebug == 6 ? m_PathTrace.pRays :
+  // The paths' light and the highlights: of this frame's (the radiance cache's: CSTrace's output in the paths' place).
+  CD3D12Texture *pLight = CV_d3d12_PTDebug == 5 ? m_PathTrace.pLight : CV_d3d12_PTDebug == 6 || CV_d3d12_PTDebug == 11 ? m_PathTrace.pRays :
                           CV_d3d12_PTDebug == 10 ? m_PathTrace.pHighlights : nullptr;
-  const bool bKernel = CV_d3d12_PTDebug == 5 || CV_d3d12_PTDebug == 6 || CV_d3d12_PTDebug == 10;
+  const bool bKernel = CV_d3d12_PTDebug == 5 || CV_d3d12_PTDebug == 6 || CV_d3d12_PTDebug == 10 || CV_d3d12_PTDebug == 11;
   if (bKernel && (!pLight || m_PathTrace.nLightFrame != m_nFrames))
     return;
   if (pLight)

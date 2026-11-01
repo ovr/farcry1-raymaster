@@ -44,7 +44,8 @@
 //	                          material, the sun's visibility, the ambient
 //	                          light the paths fill in with, the
 //	                          highlights' colour), the light of its paths
-//	                          on a grey albedo (the game's 0.5) and the
+//	                          (or of its radiance cache) on a grey albedo
+//	                          (the game's 0.5) and the
 //	                          highlights, no rays: tex0 its albedo, tex1
 //	                          its normal, tex2 the light or the highlights
 //	                          (PathTrace.hlsl's), the visibility or the
@@ -118,7 +119,7 @@ float4 GBufferView(uint nView, float2 vPixel)
     return float4(0, 0, 0, 1);
   if (nView == XR_RAY_DEBUG_GB_NORMAL)
     return float4(PathOctDecode(vNormal.rg) * 0.5 + 0.5, 1);
-  if (nView == XR_RAY_DEBUG_GB_LIGHT || nView == XR_RAY_DEBUG_GB_RAYS)
+  if (nView == XR_RAY_DEBUG_GB_LIGHT || nView == XR_RAY_DEBUG_GB_RAYS || nView == XR_RAY_DEBUG_GB_CACHE)
     return float4(pow(saturate(pow(0.5, HDR_GAMMA) * g_Textures[g_Draw.nTex2].Load(vAt).rgb), 1 / HDR_GAMMA), 1);
   const float3 vColor = nMaterial == 2 ? float3(0.3, 0.9, 0.3) : nMaterial == 3 ? float3(0.9, 0.9, 0.2) : float3(0.8, 0.8, 0.8);
   return float4(vColor * (0.4 + 0.6 * saturate(dot(vAlbedo, float3(0.299, 0.587, 0.114)))), 1);
