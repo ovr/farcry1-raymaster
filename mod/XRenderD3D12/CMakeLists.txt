@@ -83,6 +83,8 @@ set(XRENDERD3D12_SOURCES
     RaySun.cpp
     RayAO.cpp
     PathTrace.cpp
+    NrdHost.h
+    NrdHost.cpp
     Cacao/base/UserMarkers.h
 )
 source_group("Source Files" FILES ${XRENDERD3D12_SOURCES})
@@ -106,6 +108,31 @@ set(XRENDERD3D12_SHADER_DIR "${CMAKE_CURRENT_BINARY_DIR}/Shaders")
 set(XRENDERD3D12_SHADER_HEADERS "")
 # The third_party shader sources that ours include: Intel XeGTAO (third_party/xegtao).
 set(XRENDERD3D12_XEGTAO_DIR "${CMAKE_SOURCE_DIR}/third_party/xegtao/Source/Rendering/Shaders")
+# More directories to include from, set around the xrender_d3d12_shader calls of the programs that want them (NRD.hlsli).
+set(XRENDERD3D12_SHADER_INCLUDES "")
+
+# NVIDIA NRD v4.18.0 (NVIDIA Real-time Denoisers, under the NVIDIA RTX SDKs License): the path
+# tracer's denoiser (d3d12_PTDenoiser nrd, NrdHost.cpp), with ShaderMake (the build tool of its
+# shaders) and MathLib (both MIT). The three are git submodules of NVIDIA's repositories:
+# third_party/nrd at the tag v4.18.0, third_party/shadermake and third_party/mathlib at the commits
+# that tag's CMake names. This repository has their links, not their files. NRD is built as a static
+# library with its shaders as DXIL, compiled by the Windows SDK's dxc; nothing is downloaded. Without
+# the submodules (a clone without --recurse-submodules) or with a CMake older than NRD's 3.30,
+# XRenderD3D12 is built without NRD.
+set(XRENDERD3D12_NRD_DIR "${CMAKE_SOURCE_DIR}/third_party/nrd")
+set(XRENDERD3D12_SHADERMAKE_DIR "${CMAKE_SOURCE_DIR}/third_party/shadermake")
+set(XRENDERD3D12_MATHLIB_DIR "${CMAKE_SOURCE_DIR}/third_party/mathlib")
+set(XRENDERD3D12_NRD OFF)
+if(NOT EXISTS "${XRENDERD3D12_NRD_DIR}/Include/NRD.h" OR NOT EXISTS "${XRENDERD3D12_SHADERMAKE_DIR}/CMakeLists.txt"
+        OR NOT EXISTS "${XRENDERD3D12_MATHLIB_DIR}/ml.h")
+    message(WARNING "third_party/nrd, third_party/shadermake or third_party/mathlib is empty "
+        "(git submodule update --init): XRenderD3D12 is built without NVIDIA NRD.")
+elseif(CMAKE_VERSION VERSION_LESS 3.30)
+    message(WARNING "NVIDIA NRD needs CMake 3.30 or later (this one is ${CMAKE_VERSION}): "
+        "XRenderD3D12 is built without it.")
+else()
+    set(XRENDERD3D12_NRD ON)
+endif()
 
 #! xrender_d3d12_shader(<name> <file.hlsl> <profile> <entry> [defines...]): compiles one program
 #! into Shaders/<name>.h (array g_<name>). Matrices are row major (-Zpr), as the engine's Matrix44.
@@ -114,14 +141,20 @@ function(xrender_d3d12_shader name file profile entry)
     foreach(d ${ARGN})
         list(APPEND defines "-D" "${d}")
     endforeach()
+    set(more "")
+    set(more_globs "")
+    foreach(dir ${XRENDERD3D12_SHADER_INCLUDES})
+        list(APPEND more "-I" "${dir}")
+        list(APPEND more_globs "${dir}/*.hlsli")
+    endforeach()
     set(out "${XRENDERD3D12_SHADER_DIR}/${name}.h")
     file(GLOB includes "${CMAKE_CURRENT_SOURCE_DIR}/Shaders/*.hlsli" "${CMAKE_CURRENT_SOURCE_DIR}/Shaders/*.h"
-        "${XRENDERD3D12_XEGTAO_DIR}/*.hlsli" "${XRENDERD3D12_XEGTAO_DIR}/*.h")
+        "${XRENDERD3D12_XEGTAO_DIR}/*.hlsli" "${XRENDERD3D12_XEGTAO_DIR}/*.h" ${more_globs})
     add_custom_command(
         OUTPUT "${out}"
         COMMAND "${CMAKE_COMMAND}" -E make_directory "${XRENDERD3D12_SHADER_DIR}"
         COMMAND "${XRENDERD3D12_DXC}" -nologo -T ${profile} -E ${entry} -Zpr -O3 -Qstrip_reflect
-                -I "${CMAKE_CURRENT_SOURCE_DIR}/Shaders" -I "${XRENDERD3D12_XEGTAO_DIR}" ${defines}
+                -I "${CMAKE_CURRENT_SOURCE_DIR}/Shaders" -I "${XRENDERD3D12_XEGTAO_DIR}" ${more} ${defines}
                 -Vn "g_${name}" -Fh "${out}" "${CMAKE_CURRENT_SOURCE_DIR}/Shaders/${file}"
         MAIN_DEPENDENCY "${CMAKE_CURRENT_SOURCE_DIR}/Shaders/${file}"
         DEPENDS ${includes}
@@ -263,6 +296,38 @@ target_compile_options(XRenderD3D12 PRIVATE
 )
 
 target_link_options(XRenderD3D12 PRIVATE /MAP)
+
+#! NRD (above) as its own CMake builds it, its options as variables of this function's scope: a static
+#! library with the DXIL shaders alone (the Windows SDK's dxc, not one ShaderMake would download), the
+#! submodules in place of the ShaderMake and MathLib it would fetch, the renderer's C runtime
+#! (MultiThreaded), its own C++ standard, its shaders' headers in the build directory. NRD writes
+#! Shaders/NRDConfig.hlsli into its folder, which its .gitignore leaves out.
+function(xrender_d3d12_add_nrd)
+    set(NRD_STATIC_LIBRARY ON)
+    set(NRD_EMBEDS_DXIL_SHADERS ON)
+    set(NRD_EMBEDS_SPIRV_SHADERS OFF)
+    set(NRD_EMBEDS_DXBC_SHADERS OFF)
+    set(NRD_SHADERS_PATH "${CMAKE_CURRENT_BINARY_DIR}/nrd-shaders")
+    set(SHADERMAKE_FIND_COMPILERS OFF)
+    set(SHADERMAKE_DXC_PATH "${XRENDERD3D12_DXC}")
+    set(FETCHCONTENT_SOURCE_DIR_SHADERMAKE "${XRENDERD3D12_SHADERMAKE_DIR}")
+    set(FETCHCONTENT_SOURCE_DIR_MATHLIB "${XRENDERD3D12_MATHLIB_DIR}")
+    set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded")
+    unset(CMAKE_CXX_STANDARD)
+    unset(CMAKE_CXX_STANDARD_REQUIRED)
+    add_subdirectory("${XRENDERD3D12_NRD_DIR}" "${CMAKE_CURRENT_BINARY_DIR}/nrd" EXCLUDE_FROM_ALL)
+    foreach(t NRD NRDShaders NRDIntegration ShaderMake ShaderMakeBlob)
+        if(TARGET ${t})
+            set_target_properties(${t} PROPERTIES FOLDER "Third Party/NRD")
+        endif()
+    endforeach()
+endfunction()
+
+if(XRENDERD3D12_NRD)
+    xrender_d3d12_add_nrd()
+    target_link_libraries(XRenderD3D12 PRIVATE NRD)
+    target_compile_definitions(XRenderD3D12 PRIVATE XRENDERD3D12_NRD=1)
+endif()
 
 # XRENDER_OUTPUT_DIR comes from XRenderD3D9Traced/CMakeLists.txt.
 if(XRENDER_OUTPUT_DIR)

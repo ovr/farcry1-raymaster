@@ -42,6 +42,10 @@
 #include "PathTraceTemporal_CS.h"
 #include "PathTraceFilter_CS.h"
 #include "PathTraceSpecular_CS.h"
+#if XRENDERD3D12_NRD
+#include "PathNrdPack_CS.h"
+#include "PathNrdResolve_CS.h"
+#endif
 
 using Microsoft::WRL::ComPtr;
 
@@ -85,6 +89,14 @@ const SKernel s_Kernels[eD3D12K_Num] =
   { "path tracer (history)", g_PathTraceTemporal_CS, sizeof(g_PathTraceTemporal_CS), true },
   { "path tracer (filter)", g_PathTraceFilter_CS, sizeof(g_PathTraceFilter_CS), true },
   { "path tracer (highlights)", g_PathTraceSpecular_CS, sizeof(g_PathTraceSpecular_CS), true },
+#if XRENDERD3D12_NRD
+  { "path tracer (NRD's inputs)", g_PathNrdPack_CS, sizeof(g_PathNrdPack_CS), true },
+  { "path tracer (NRD's light)", g_PathNrdResolve_CS, sizeof(g_PathNrdResolve_CS), true },
+#else
+  // Without NRD built in: no kernels (GetPSO has none).
+  { "path tracer (NRD's inputs)", nullptr, 0, true },
+  { "path tracer (NRD's light)", nullptr, 0, true },
+#endif
 };
 static_assert(sizeof(s_Kernels) / sizeof(s_Kernels[0]) == eD3D12K_Num, "a kernel for each ED3D12Kernel");
 
@@ -253,7 +265,7 @@ bool CD3D12Compute::CreateRayRootSignature()
 
 ID3D12PipelineState *CD3D12Compute::GetPSO(ED3D12Kernel eKernel)
 {
-  if (eKernel < 0 || eKernel >= eD3D12K_Num || m_bFailed[eKernel])
+  if (eKernel < 0 || eKernel >= eD3D12K_Num || m_bFailed[eKernel] || !s_Kernels[eKernel].pCS)
     return nullptr;
   ID3D12RootSignature *pRootSignature = s_Kernels[eKernel].bRays ? m_pRayRootSignature.Get() : m_pRootSignature.Get();
   if (!pRootSignature)

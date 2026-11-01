@@ -19,8 +19,10 @@ General Public License (`LICENSE`) for more details.
 If you modify this program, or any covered work, by linking or combining it with the game Far Cry
 (its executables and libraries, including its renderers), with the CryENGINE MOD SDK for Far Cry,
 or with the AMD FSR SDK (formerly AMD FidelityFX SDK, by Advanced Micro Devices, Inc., including
-its libraries such as `amd_fidelityfx_loader_dx12.dll` and `amd_fidelityfx_upscaler_dx12.dll`)
-(or modified versions of any of them), containing parts covered by the terms of their licenses,
-the licensors of this program grant you additional permission to convey the resulting work.
+its libraries such as `amd_fidelityfx_loader_dx12.dll` and `amd_fidelityfx_upscaler_dx12.dll`),
+or with NVIDIA Real-time Denoisers (NRD, by NVIDIA Corporation, including its library and its
+shaders) (or modified versions of any of them), containing parts covered by the terms of their
+licenses, the licensors of this program grant you additional permission to convey the resulting
+work.
 Corresponding Source for a non-source form of such a combination shall include the source code of
 the covered work, but need not include the source code of those parts.
