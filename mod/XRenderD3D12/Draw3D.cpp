@@ -854,7 +854,8 @@ void CD3D12Renderer::DrawLeafItem(const SRenderItem &it)
   {
     // The sector texture over the sector: u = y * s + u0, v = x * s + v0 from the element's custom
     // data (u0, v0, s): s = 1 / 64 and the sector's corner with its own texture; the far sectors and
-    // the low detail terrain get the texture of the whole terrain with s = 1 / terrain size and 0.
+    // the low detail terrain get the texture of the whole terrain with s = 1 / terrain size and 0 (the low detail
+    // terrain 1).
     // Without custom data: the corner of the sector's vertices. (m_nCountCustomData is not set for
     // the sectors.)
     const float *pCD = (const float *)pLeaf->m_CustomData;
@@ -864,6 +865,14 @@ void CD3D12Renderer::DrawLeafItem(const SRenderItem &it)
       fU0 = pCD[0];
       fV0 = pCD[1];
       fScale = pCD[2];
+      // The texture of the whole terrain: the low detail terrain's comes with 1 added to u and v (a whole texture
+      // further, which the original's wrapping sampler does not see); clamped to the edge as the sectors, it took the
+      // texture's corner, one flat colour for all the far land (the hills fogged flat behind the trees on them).
+      if (fScale < 1.0f / TERRAIN_SECTOR_SIZE)
+      {
+        fU0 -= floorf(fU0);
+        fV0 -= floorf(fV0);
+      }
     }
     else
     {
@@ -1460,6 +1469,9 @@ void CD3D12Renderer::DumpDraw(const SDrawConstants &dc, const SPipelineKey &Key,
           dc.fAlphaRef, dc.vColor[0], dc.vColor[1], dc.vColor[2], dc.vColor[3], dc.vAmbient[0], dc.vAmbient[1], dc.vAmbient[2], dc.vAmbient[3], dc.nLights);
   if (dc.nFlags & DF_SHADOWS)
     fprintf(f, " shadow maps %d", (int)dc.vShadowParams[0]);
+  if (dc.nFlags & DF_TEXGEN_WORLD)
+    fprintf(f, " texgen u (%g %g %g %g) v (%g %g %g %g)", dc.vTexGenU[0], dc.vTexGenU[1], dc.vTexGenU[2], dc.vTexGenU[3], dc.vTexGenV[0],
+            dc.vTexGenV[1], dc.vTexGenV[2], dc.vTexGenV[3]);
   for (uint32 i = 0; i < dc.nLights; i++)
     fprintf(f, " {(%.1f %.1f %.1f %.0f) col (%.2f %.2f %.2f) att (%.3f %.3f %.1f) 1/r %.4f}", dc.vLightPos[i][0], dc.vLightPos[i][1], dc.vLightPos[i][2],
             dc.vLightPos[i][3], dc.vLightColor[i][0], dc.vLightColor[i][1], dc.vLightColor[i][2], dc.vLightAtten[i][0], dc.vLightAtten[i][1], dc.vLightAtten[i][2],

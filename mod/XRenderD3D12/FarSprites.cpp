@@ -14,9 +14,11 @@
 //	reads the target back and makes a texture array of the 24 pictures
 //	(MakeSprite's IDs stay without a GPU texture): alpha is the part of a
 //	texel the object covers, the colour of the empty texels comes from
-//	their neighbours (so that filtering does not darken the edges), and the
-//	alpha of each mip level is scaled so that as much of it passes the
-//	alpha test as of level 0 (so that the far trees do not thin out).
+//	their neighbours (so that filtering does not darken the edges); a mip
+//	level's alpha is its texels' average, as the original's: what is thinner
+//	than a texel fades out (a scale that kept level 0's alpha test coverage
+//	made the vines of Pier's ancient trees short lines in the air, 600 m away,
+//	and changed nothing else to be seen).
 //	The object is drawn as the scene draws it, with half its colour and a
 //	white world colour; DrawObjSprites draws the texture times twice the
 //	world colour and the instance's brightness, as the vegetation shaders
@@ -95,14 +97,12 @@ struct SPixelF
 struct SSliceScratch
 {
   std::vector<std::vector<SPixelF>> Levels;  //!< the levels as floats
-  std::vector<float> Alphas;                 //!< a level's alphas, to sort
 
   void Resize(const SImage &Image)
   {
     Levels.resize(Image.nMips);
     for (int m = 0; m < Image.nMips; m++)
       Levels[m].resize((size_t)Image.MipWidth(m) * Image.MipHeight(m));
-    Alphas.resize(Levels[0].size());
   }
 };
 
@@ -189,31 +189,6 @@ void FillEmptyTexels(SPixelF *pImg, int w, int h, const SPixelF *pNext, int w2, 
     }
 }
 
-//! The part of the texels whose alpha passes the alpha test.
-float Coverage(const std::vector<SPixelF> &Img)
-{
-  size_t n = 0;
-  for (const SPixelF &p : Img)
-    n += p.a >= SPRITE_ALPHA_REF;
-  return Img.empty() ? 0.0f : (float)n / Img.size();
-}
-
-//! The scale of alpha that lets the part fCoverage of the texels pass the alpha test: the alpha
-//! test reference over the alpha at that place in the order of the texels' alphas (from 1/16 to 16).
-float CoverageScale(const std::vector<SPixelF> &Img, float fCoverage, std::vector<float> &Alphas)
-{
-  const size_t n = (size_t)std::lround(fCoverage * Img.size());
-  if (n == 0)
-    return 1.0f;
-  for (size_t i = 0; i < Img.size(); i++)
-    Alphas[i] = Img[i].a;
-  const auto End = Alphas.begin() + Img.size();
-  std::nth_element(Alphas.begin(), Alphas.begin() + (n - 1), End, std::greater<float>());
-  const float a = Alphas[n - 1];
-  // A little more, so that this texel still passes after the rounding to bytes.
-  return a > 0 ? std::clamp(SPRITE_ALPHA_REF / a * 1.01f, 1.0f / 16, 16.0f) : 16.0f;
-}
-
 //! Slice nSlice of a sprite array (B8G8R8A8, all levels) from its picture (SPRITE_SUPERSAMPLE
 //! times the slice's size a side at pSrc, rows nPitch bytes apart). Allocates nothing.
 void MakeSpriteSlice(const uint8 *pSrc, int nPitch, SImage &Out, int nSlice, SSliceScratch &S)
@@ -229,17 +204,15 @@ void MakeSpriteSlice(const uint8 *pSrc, int nPitch, SImage &Out, int nSlice, SSl
     FillEmptyTexels(Levels[m].data(), Out.MipWidth(m), Out.MipHeight(m), Levels[m + 1].data(), Out.MipWidth(m + 1),
                     Out.MipHeight(m + 1));
 
-  const float fCoverage = Coverage(Levels[0]);
   for (int m = 0; m < nMips; m++)
   {
-    const float fScale = m > 0 && fCoverage > 0 ? CoverageScale(Levels[m], fCoverage, S.Alphas) : 1.0f;
     uint8 *pDst = Out.Bits(nSlice, m);
     for (const SPixelF &p : Levels[m])
     {
       pDst[0] = ToByte(p.b);
       pDst[1] = ToByte(p.g);
       pDst[2] = ToByte(p.r);
-      pDst[3] = ToByte(p.a * fScale);
+      pDst[3] = ToByte(p.a);
       pDst += 4;
     }
   }
@@ -555,6 +528,22 @@ void CD3D12Renderer::DrawObjSprites(list2<CStatObjInst*> *pList, float fMaxViewD
     const SSpriteSet *pSet = nullptr;
     float fBrightness = 1;
     bool bFadeSize = true;
+    const char *szName = "";      //!< the object's file (the frame dump)
+  };
+  //! The frame dump's line of each texture array: the object, its quads' distances.
+  struct SDumpGroup
+  {
+    int nSRV = -1;
+    const char *szName = "";
+    float fMin = 1e30f, fMax = 0;
+  };
+  std::vector<SDumpGroup> DumpGroups;  // empty (nothing allocated) without the frame dump
+  const auto DumpGroup = [&DumpGroups](int nSRV) -> SDumpGroup & {
+    for (SDumpGroup &d : DumpGroups)
+      if (d.nSRV == nSRV)
+        return d;
+    DumpGroups.push_back({ nSRV });
+    return DumpGroups.back();
   };
   std::array<SGroup, 256> Groups;
   const uint8 *pGroupArray = nullptr;
@@ -590,6 +579,8 @@ void CD3D12Renderer::DrawObjSprites(list2<CStatObjInst*> *pList, float fMaxViewD
         if (!g.pSet && pLod)
           g.pSet = FindSet(Info.pStatObj);
         g.fBrightness = Info.fBrightness;
+        if (const char *szFile = Info.pStatObj->GetFileName())
+          g.szName = szFile;
       }
       if (pGroupArray && nGroup < nGroupCount)
         g.bFadeSize = pGroupArray[(size_t)nGroup * nBin64Size_StatInstGroup + nBin64Offset_StatInstGroup_FadeSize] != 0;
@@ -644,6 +635,13 @@ void CD3D12Renderer::DrawObjSprites(list2<CStatObjInst*> *pList, float fMaxViewD
     q.v[1] = { Vec3(cx + r * ex, cy + r * ey, z1), Color, { u + 1, 0 } };
     q.v[2] = { Vec3(cx - r * ex, cy - r * ey, z0), Color, { u, 1 } };
     q.v[3] = { Vec3(cx + r * ex, cy + r * ey, z0), Color, { u + 1, 1 } };
+    if (m_pFrameDump && !m_bRayCaptureWalk)
+    {
+      SDumpGroup &d = DumpGroup(q.nSRV);
+      d.szName = g.szName;
+      d.fMin = std::min(d.fMin, fLen);
+      d.fMax = std::max(d.fMax, fLen);
+    }
   }
   if (m_SpriteQuads.empty())
     return;
@@ -688,7 +686,11 @@ void CD3D12Renderer::DrawObjSprites(list2<CStatObjInst*> *pList, float fMaxViewD
     }
     dc.nTex0 = m_SpriteQuads[nFirst].nSRV;
     if (m_pFrameDump && !m_bRayCaptureWalk)
-      fprintf(m_pFrameDump.get(), "    far sprites: %d quads, texture table %d\n", (int)(nEnd - nFirst), dc.nTex0);
+    {
+      const SDumpGroup &d = DumpGroup(dc.nTex0);
+      fprintf(m_pFrameDump.get(), "    far sprites: %d quads, texture table %d, '%s' at %.0f to %.0f m\n", (int)(nEnd - nFirst), dc.nTex0,
+              d.szName, d.fMin, d.fMax);
+    }
     DrawImmediate(Key, dc, D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST, VERTEX_FORMAT_P3F_COL4UB_TEX2F, Verts.data(), (int)Verts.size(), Inds.data(), (int)Inds.size());
     nFirst = nEnd;
   }
