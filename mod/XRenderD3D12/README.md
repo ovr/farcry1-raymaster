@@ -512,13 +512,28 @@ reference of its features and console variables.
   `d3d12_PathTracing` (0 by default, read every frame; not registered without rays) is the path tracer
   of the lighting, being built (`PathTrace.cpp`). So far 1 and 2 give it the scene for rays, with what
   is out of the view (as `d3d12_RTOffscreen` 1 does for the effects), the motion vectors (the scene
-  targets without an upscaler, Upscaler), and the frame's lights for its kernels: `SPTLight`
-  (`Shaders/RayConstants.h`), the root SRV t2 space5 of the kernels with rays, at most 64 a frame:
-  the point lights, the directional ones and the projectors with their cube, those baked into the
-  light maps (`DLF_LM`) too; not the sun, a heat source that gives no light, the characters' fill
+  targets without an upscaler, Upscaler), and the lights for its kernels and the programs with rays:
+  `SPTLight` (`Shaders/RayConstants.h`), the root SRV t2 space5, the point lights, the directional
+  ones and the projectors with their cube. They are the frame's lights and the level's static ones
+  (`I3DEngine::GetStaticLightSources`, the lamps the light maps were baked with: the frame has only
+  those whose sphere reaches the view, one or two of the 85 of Research, and many are `DLF_FAKE |
+  DLF_LM`, never in a frame), the nearest 128 within `d3d12_PTLightDistance` (60 m); not the sun, a
+  fake light the light maps do not have, a heat source that gives no light, the characters' fill
   lights (`DLF_AMBIENT_LIGHT`) without `d3d12_PTFillLights`. The frame dump lists them (`pt lights:`).
+  The scene for rays has its materials (`SRayInstance` `vAlbedo`, `vSpecular`, `nPath`, set while the
+  opaque list is captured): its hits are shaded by `Shaders/PathShade.hlsli` in linear light (the HDR
+  target's, `HdrDecode`): the albedo is the draw's colour without its light (no light map, ambient or
+  sun; the templates lit by the ambient colour alone take the object's colour), what glows (glow maps,
+  alpha glow, the templates without lights) is its emission, and the sun and the frame's lamps light it
+  by a ray towards each (`d3d12_PTSun`, `d3d12_PTLamps`, `d3d12_PTEmission`: times twice their colour,
+  the lamps falling off as the raster fits the static objects' to). The terrain's texture has the sun
+  and the terrain's own shadows baked in: its albedo is divided by that light, the sun's N.L and its
+  visibility over the terrain alone (`d3d12_PTTerrainDelight`: a lit face over a shadowed one). While
+  the path tracer is on the vegetation's vertex colours are baked without the light (the engine's
+  values again on a change).
   `d3d12_RTDebug` views the scene for rays from the camera: 1 instances, 2 shaded hits on the right
-  half, 3 distance, 4 mip level, 5 kind, 6 alpha tests, 7 shaded hits over the whole picture;
+  half, 3 distance, 4 mip level, 5 kind, 6 alpha tests, 7 shaded hits over the whole picture; the path
+  tracer's: 8 the albedo of the hits, 9 their emission, 10 them lit by the sun and the lamps;
   `d3d12_WaterDebug` 13, 14, 15 the water rays' colour, distance and weight. With the rays off the
   frames are the same as without the code (WaterMove, bit for bit). Check the rays under the debug
   layer with `XRENDERD3D12_DEBUG=2`: GPU based validation turns the water rays' frames black.

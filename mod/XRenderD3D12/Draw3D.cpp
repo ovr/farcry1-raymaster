@@ -27,6 +27,7 @@
 #include "Texture.h"
 #include "Scene.h"
 #include "Geometry.h"
+#include "RayTracing.h"
 
 #include <bit>
 
@@ -1089,8 +1090,33 @@ void CD3D12Renderer::DrawLeafItem(const SRenderItem &it)
                                           (eLighting == ELighting::Ambient || eLighting == ELighting::Ambient2)))
       dc.nFlags2 |= DF2_AO_ALL;
   }
+  // The path tracer's material of the draw in the scene for rays (SRayInstance, Shaders/PathShade.hlsli): the
+  // terrain, the vegetation, the templates lit by the ambient colour alone with the object's colour as the albedo, those
+  // without lights unlit; the material's specular colour.
+  const bool bRayMaterial = bFirstPass && !bLightPass && m_pRayScene && (m_pRayScene->IsCapturing() || m_pRayScene->IsCapturingReflection());
+  if (bRayMaterial)
+  {
+    uint32 nMaterial = XR_PT_MAT_LIT;
+    float vAlbedo[4], vSpecular[4] = {};
+    memcpy(vAlbedo, dc.vColor, sizeof(vAlbedo));
+    if (eDC == eDC_Terrain)
+      nMaterial = XR_PT_MAT_TERRAIN;
+    else if (dc.nFlags & DF_VCOLOR_X2)
+      nMaterial = XR_PT_MAT_VEGETATION;
+    else if (eLighting == ELighting::Ambient || eLighting == ELighting::Ambient2)
+      Set4(vAlbedo, pObj->m_Color.r, pObj->m_Color.g, pObj->m_Color.b, dc.vColor[3]);
+    else if (!(dc.nFlags & (DF_LIGHTING | DF_TEX1_LIGHTMAP)))
+      nMaterial = XR_PT_MAT_UNLIT;
+    if (dc.nFlags & DF_SPECULAR)
+      Set4(vSpecular, dc.vSpecular[0], dc.vSpecular[1], dc.vSpecular[2], 32);
+    else if (dc.nFlags2 & DF2_MATERIAL_LIGHT)
+      Set4(vSpecular, dc.vSpecular[0], dc.vSpecular[1], dc.vSpecular[2], dc.vParams3[0]);
+    m_pRayScene->SetCaptureMaterial(nMaterial, vAlbedo, vSpecular);
+  }
   if (bFirstPass)
     Draw();
+  if (bRayMaterial)
+    m_pRayScene->ClearCaptureMaterial();
   if (m_bDepthPrepass || m_bRayCaptureWalk)
     return;
   // The beach: the other waves and the wet sand.

@@ -59,8 +59,9 @@
 //	- Instances: an SRayInstance per instance of the TLAS (its InstanceID),
 //	  in per frame memory: the raw views of its vertices, indices and second
 //	  stream (CD3D12Upload::GetRawSRV) and the part of its draw's constants
-//	  the hits are shaded with (Shaders/RayShade.hlsli). A draw whose
-//	  buffers have no view is shaded grey.
+//	  the hits are shaded with (Shaders/RayShade.hlsli), and the path
+//	  tracer's material (SetCaptureMaterial, DrawLeafItem; Shaders/
+//	  PathShade.hlsli). A draw whose buffers have no view is shaded grey.
 //	- Binding: root SRVs ROOT_RAY_SCENE and ROOT_RAY_INSTANCES
 //	  (D3D12Pipeline.h), for the programs with rays, from GetTLAS and
 //	  GetInstances in the same frame.
@@ -115,6 +116,11 @@ public:
   void SetCaptureSource(ESource eSource) { m_eCaptureSource = eSource; }
   //! The main view's draws captured from here on are of a live caster (XR_RAY_LIVE in their masks).
   void SetCaptureLive(bool bLive) { m_bCaptureLive = bLive; }
+  //! The path tracer's material of the draws captured until ClearCaptureMaterial (SRayInstance's vAlbedo,
+  //! vSpecular, nPath; XR_PT_MAT_TERRAIN also XR_RAY_TERRAIN in the masks). Without one CaptureDraw takes it from
+  //! the draw's flags (DefaultMaterial).
+  void SetCaptureMaterial(uint32 nMaterial, const float vAlbedo[4], const float vSpecular[4]);
+  void ClearCaptureMaterial() { m_bCaptureMaterial = false; }
   void EndCapture() { m_bCapturing = false; }
   bool IsCapturing() const { return m_bCapturing; }
   //! The water's planar reflection is drawn: its static draws until EndReflectionCapture replace those
@@ -194,6 +200,7 @@ private:
     uint64 nHash;                   //!< DrawHash
     ESource eSource;
     bool bLive;                     //!< SetCaptureLive
+    bool bTerrain;                  //!< a sector of the terrain (XR_RAY_TERRAIN)
   };
   //! A buffer of a frame slot that grows (RAYTRACING_ACCELERATION_STRUCTURE or UNORDERED_ACCESS).
   struct SSlotBuffer
@@ -219,6 +226,9 @@ private:
   //! none).
   static void FillInstance(SRayInstance &Inst, const SPipelineKey &Key, const SDrawConstants &dc, const D3D12_RAYTRACING_GEOMETRY_TRIANGLES_DESC &Tri,
     D3D12_GPU_VIRTUAL_ADDRESS nTexCoord1);
+  //! The path tracer's material of a draw from its flags: the vegetation (DF_VCOLOR_X2), lit (DF_LIGHTING, a light map)
+  //! with its colour as the albedo, else unlit.
+  static void DefaultMaterial(SRayInstance &Inst, const SDrawConstants &dc);
   //! A buffer of nSize bytes with unordered access in the default heap; NULL when refused (logged).
   Microsoft::WRL::ComPtr<ID3D12Resource> CreateBuffer(uint64 nSize, D3D12_RESOURCE_STATES State, const wchar_t *szName);
   //! At least nSize bytes in Buf (a new buffer of the next power of two, the old one released when the GPU
@@ -240,6 +250,9 @@ private:
   std::vector<SDraw> m_ReflectionDraws;   //!< the static draws of the last water reflection
   ESource m_eCaptureSource = SOURCE_VIEW;
   bool m_bCaptureLive = false;
+  bool m_bCaptureMaterial = false;  //!< SetCaptureMaterial
+  uint32 m_nCaptureMaterial = XR_PT_MAT_LIT;
+  float m_vCaptureAlbedo[4] = {}, m_vCaptureSpecular[4] = {};
   Vec3 m_vCamera = Vec3(0, 0, 0);
   int m_nFrame = 0;                 //!< counts BeginCapture
   int m_nBuiltFrame = -1;           //!< the renderer's m_nFrames of the last Build (GetTLAS)

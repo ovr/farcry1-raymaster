@@ -34,6 +34,9 @@
 //! live set of the sun's cascades (characters, vehicles, the vegetation that casts), which casts on
 //! the light maps and the terrain (the sun's shadow by rays, RaySun.hlsl).
 #define XR_RAY_LIVE       8
+//! In the masks only: the terrain's sectors (the path tracer's ray towards the sun over the terrain alone, the shadows
+//! its texture has baked in: PathShade.hlsli). The rays of d3d12_RTMask never have it (RayMask).
+#define XR_RAY_TERRAIN    16
 
 //! d3d12_RTDebug, the views of RayDebug.hlsl.
 #define XR_RAY_DEBUG_INSTANCES  1   //!< the instances in colours, their triangles' edges darker
@@ -43,6 +46,9 @@
 #define XR_RAY_DEBUG_KIND       5   //!< the kind of the BLAS
 #define XR_RAY_DEBUG_ALPHA      6   //!< the alpha tests along the ray
 #define XR_RAY_DEBUG_SHADED_ALL 7   //!< the hits shaded over the whole picture
+#define XR_RAY_DEBUG_PT_ALBEDO  8   //!< the path tracer's albedo of the hits (PathShade.hlsli)
+#define XR_RAY_DEBUG_PT_EMISSION 9  //!< its emission of the hits
+#define XR_RAY_DEBUG_PT_DIRECT  10  //!< the hits lit by the sun and the lamps as the path tracer lights them, with their emission
 
 //! SRayInstance: no view, no stream.
 #define XR_RAY_NONE         0xffffffff
@@ -69,11 +75,23 @@ struct SRayInstance
   XR_FLOAT4(vTexMat0);
   XR_FLOAT4(vTexMat1);
   XR_FLOAT4(vAddColor);
+  // The path tracer's material (d3d12_PathTracing, PathShade.hlsli):
+  XR_FLOAT4(vAlbedo);     //!< rgb what the texture is multiplied by for the albedo: vColor without the light it has (the object's
+                          //!< ambient colour of the templates lit by it alone)
+  XR_FLOAT4(vSpecular);   //!< rgb the material's specular colour (0: none), w its shininess (the exponent of N.H)
+  XR_UINT4(nPath);        //!< x XR_PT_MAT_*, yzw unused
 };
 
-//! The path tracer's lights (d3d12_PathTracing, PathTrace.cpp): the scene's lights besides the sun, at most this many a frame
-//! (the engine numbers 32 in an object's light mask).
-#define XR_PT_MAX_LIGHTS 64
+//! SRayInstance::nPath.x, how the path tracer takes the draw's colour.
+#define XR_PT_MAT_LIT         0   //!< lit by its lights (the sun, the ambient, the lamps, a light map): the albedo is its colour without them
+#define XR_PT_MAT_TERRAIN     1   //!< a sector of the terrain: its texture has the sun and the terrain's shadows in it (d3d12_PTTerrainDelight)
+#define XR_PT_MAT_VEGETATION  2   //!< the vegetation: the vertex colour times 2 (DF_VCOLOR_X2), the light the renderer bakes into it left
+                                  //!< out with d3d12_PathTracing (LeafBuffer.cpp)
+#define XR_PT_MAT_UNLIT       3   //!< drawn without light (the templates of no lights, the vertex colour alone): its colour is its emission
+
+//! The path tracer's lights (d3d12_PathTracing, PathTrace.cpp): the frame's lights besides the sun and the level's static ones,
+//! the nearest at most this many a frame.
+#define XR_PT_MAX_LIGHTS 128
 //! SPTLight::nParams.x, the kind of light.
 #define XR_PT_LIGHT_POINT        1   //!< from vPos over vPos.w metres (DLF_POINT)
 #define XR_PT_LIGHT_DIRECTIONAL  2   //!< from the direction vPos.xyz, unattenuated (DLF_DIRECTIONAL without DLF_SUN)
@@ -82,15 +100,17 @@ struct SRayInstance
 #define XR_PT_LIGHT_LM           1   //!< baked into the light maps (DLF_LM): the light maps are not read in its place
 #define XR_PT_LIGHT_FILL         2   //!< a fill light of the characters (DLF_AMBIENT_LIGHT)
 #define XR_PT_LIGHT_HEAT         4   //!< also a heat source (DLF_HEATSOURCE)
+#define XR_PT_LIGHT_STATIC       8   //!< a static light of the level the frame does not have (I3DEngine::GetStaticLightSources)
 
-//! A light of the frame for the path tracer (g_PTLights, root SRV t2 space5 of the kernels with rays), in the order of the
-//! scene's lights (EF_ADDDlight).
+//! A light of the frame for the path tracer (g_PTLights, root SRV t2 space5 of the kernels and the programs with rays), the
+//! nearest first.
 struct SPTLight
 {
   XR_FLOAT4(vPos);        //!< xyz the world position (point, projector) or the direction towards the light (directional), w its radius (m)
   XR_FLOAT4(vColor);      //!< rgb the game's colour (m_Color: the shaders linearise it), w the specular's scale (m_SpecColor's mean)
   XR_UINT4(nParams);      //!< x the kind (XR_PT_LIGHT_*), y XR_PT_LIGHT_* bits, z the projector's cube (texture table, XR_RAY_NONE none),
-                          //!< w the light's index in the scene (its bit in the objects' light masks)
+                          //!< w the light's index in the frame's lights (its bit in the objects' light masks; XR_RAY_NONE: a static
+                          //!< light alone)
   XR_FLOAT4X4(mProject);  //!< the projector's m_TextureMatrix (Direct3D style, the world point times it is its cube's lookup vector)
 };
 

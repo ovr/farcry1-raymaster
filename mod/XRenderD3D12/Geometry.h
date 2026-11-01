@@ -99,6 +99,12 @@ namespace Geometry
   //! Deletes every leaf buffer that is left (IRenderer::Release; the engine does not delete the
   //! terrain's). Call before CD3D12Upload::Shutdown.
   void Shutdown();
+
+  //! The vegetation's vertex colours (CLeafBuffer::UpdateCustomLighting) without the sun and the ambient
+  //! light baked in: the mesh's colours alone (halved, for the shaders' 2x), for the path tracer, which lights
+  //! them itself. A change bakes the vertex colours of every leaf buffer lit so far again, with the
+  //! engine's last values.
+  void SetUnlitVegetation(bool bUnlit);
 }
 
 //////////////////////////////////////////////////////////////////////////

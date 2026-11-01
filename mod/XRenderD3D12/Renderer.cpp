@@ -246,7 +246,8 @@ void CD3D12Renderer::RegisterVariables()
                      "The scene for rays seen from the camera, one ray per pixel over the whole picture: 1 its instances in colours, "
                      "2 the hits shaded on the right half (the picture on the left), 3 the distance to the hit (blue near, red far), "
                      "4 the mip level of the hit's texture (blue 0, red 8), 5 the kind of BLAS (static green, of the frame red, alpha tested "
-                     "lighter), 6 the alpha tests along the ray, 7 the hits shaded over the whole picture");
+                     "lighter), 6 the alpha tests along the ray, 7 the hits shaded over the whole picture; the path tracer's: 8 the albedo "
+                     "of the hits, 9 their emission, 10 them lit by the sun and the lamps");
   iConsole->Register("d3d12_RTDistance", &CV_d3d12_RTDistance, 150.0f, VF_DUMPTODISK, "The rays' length (m)");
   iConsole->Register("d3d12_RTMemory", &CV_d3d12_RTMemory, 384, VF_DUMPTODISK,
                      "The memory of the static geometry's acceleration structures (MB) beyond which the least recently used go");
@@ -307,6 +308,16 @@ void CD3D12Renderer::RegisterVariables()
                      "2 the reference (the paths of the frames added up while the view stays)");
   iConsole->Register("d3d12_PTFillLights", &CV_d3d12_PTFillLights, 0, VF_DUMPTODISK,
                      "With d3d12_PathTracing, 1: the characters' fill lights (DLF_AMBIENT_LIGHT) light the scene too");
+  iConsole->Register("d3d12_PTLightDistance", &CV_d3d12_PTLightDistance, 60.0f, VF_DUMPTODISK,
+                     "With d3d12_PathTracing, its lights (the frame's and the level's static ones) within this distance of the camera "
+                     "(to their sphere, m), the nearest 128 at most");
+  iConsole->Register("d3d12_PTSun", &CV_d3d12_PTSun, 1.0f, VF_DUMPTODISK,
+                     "With d3d12_PathTracing, the sun's light: times twice its colour (as light) on a face towards it");
+  iConsole->Register("d3d12_PTLamps", &CV_d3d12_PTLamps, 1.0f, VF_DUMPTODISK, "With d3d12_PathTracing, the lamps' light: times twice their colour");
+  iConsole->Register("d3d12_PTEmission", &CV_d3d12_PTEmission, 1.0f, VF_DUMPTODISK, "With d3d12_PathTracing, the light of what glows");
+  iConsole->Register("d3d12_PTTerrainDelight", &CV_d3d12_PTTerrainDelight, 2.0f, VF_DUMPTODISK,
+                     "With d3d12_PathTracing, the light the editor baked into the terrain's texture, taken off for its albedo: how "
+                     "much brighter a face towards the sun is than one in the terrain's shadow (1 or less: none taken off)");
   // The HDR pipeline (r_HDRRendering, Hdr.cpp).
   iConsole->Register("d3d12_ToneMap", &CV_d3d12_ToneMap, 1, VF_DUMPTODISK,
                      "With r_HDRRendering, the tone map: 0 clamp, 1 soft shoulder (the game's look up to d3d12_ToneMapKnee, then each channel rolls off to 1), 2 ACES fitted, 3 AgX");
@@ -485,6 +496,11 @@ WIN_HWND CD3D12Renderer::Init(int x,int y,int width,int height,unsigned int cbpp
     iConsole->UnregisterVariable("d3d12_PathTracing", true);
     CV_d3d12_PathTracing = 0;
     iConsole->UnregisterVariable("d3d12_PTFillLights", true);
+    iConsole->UnregisterVariable("d3d12_PTLightDistance", true);
+    iConsole->UnregisterVariable("d3d12_PTSun", true);
+    iConsole->UnregisterVariable("d3d12_PTLamps", true);
+    iConsole->UnregisterVariable("d3d12_PTEmission", true);
+    iConsole->UnregisterVariable("d3d12_PTTerrainDelight", true);
   }
   m_Viewport[0] = 0;
   m_Viewport[1] = 0;
