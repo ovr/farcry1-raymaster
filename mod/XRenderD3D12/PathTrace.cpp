@@ -39,6 +39,12 @@
 //	the composite (Shaders/PathComposite.hlsl) adds their light, the sun's
 //	and the highlights to the colour. d3d12_PathTracing 2, the reference,
 //	adds up its frames while the view and the settings stay.
+//	d3d12_PTDenoiser nrd (the default when NVIDIA NRD is built in,
+//	NrdHost.h): CSPack (Shaders/PathNrd.hlsl) makes NRD's inputs from the
+//	paths, the G-buffer's normal and the scene's motion vectors, NRD's
+//	REBLUR_DIFFUSE denoises them, CSResolve makes its light the history
+//	CSFilter takes without its own filter (it still finds the terrain's
+//	baked light). Without NRD, or when it fails, simple.
 //	All of it waits for r_HDRRendering: its light is beyond an LDR target.
 //
 //////////////////////////////////////////////////////////////////////
@@ -53,6 +59,7 @@
 #include "Scene.h"
 #include "Texture.h"
 #include "Geometry.h"
+#include "NrdHost.h"
 #include <list2.h>
 
 namespace
@@ -98,6 +105,16 @@ constexpr uint32 PATH_BOUNCE_TESTS = 4;
 //! The kernels' UAV tables (D3D12Compute.h): the paths', the history's of each texture, the composite's light, the
 //! highlights.
 enum { PATH_TABLE_TRACE, PATH_TABLE_TEMPORAL0, PATH_TABLE_TEMPORAL1, PATH_TABLE_FILTER, PATH_TABLE_SPECULAR, PATH_TABLES };
+//! The first bounce's hit distance (CSTrace's u2, NRD's), NRD's inputs (CSPack's u0..u3: IN_DIFF_RADIANCE_HITDIST,
+//! IN_NORMAL_ROUGHNESS, IN_VIEWZ, IN_MV) and its light.
+constexpr DXGI_FORMAT PATH_HIT_FORMAT = DXGI_FORMAT_R16_FLOAT;
+constexpr DXGI_FORMAT PATH_NRD_FORMATS[4] = { DXGI_FORMAT_R16G16B16A16_FLOAT, DXGI_FORMAT_R10G10B10A2_UNORM, DXGI_FORMAT_R32_FLOAT,
+                                              DXGI_FORMAT_R16G16_FLOAT };
+constexpr DXGI_FORMAT PATH_NRD_OUT_FORMAT = DXGI_FORMAT_R16G16B16A16_FLOAT;
+//! NRD's denoising range (m; beyond the view's far) and the view depth CSPack gives it where there is no surface: beyond
+//! it, within FP16.
+constexpr float PATH_NRD_RANGE = 30000;
+constexpr float PATH_NRD_NO_SURFACE = 60000;
 
 D3D12_SHADER_RESOURCE_VIEW_DESC PathTextureSRV(DXGI_FORMAT Format)
 {
@@ -450,7 +467,7 @@ bool CD3D12Renderer::UpdatePathKernels(int w, int h)
       const bool bTemporal = t == PATH_TABLE_TEMPORAL0 || t == PATH_TABLE_TEMPORAL1;
       for (int i = 0; i < CD3D12Compute::COMPUTE_UAVS; i++)
       {
-        View.Format = i == 1 ? PATH_FRAMES_FORMAT : bTemporal ? PATH_HISTORY_FORMAT : PATH_LIGHT_FORMAT;
+        View.Format = i == 1 ? PATH_FRAMES_FORMAT : i == 2 ? PATH_HIT_FORMAT : bTemporal ? PATH_HISTORY_FORMAT : PATH_LIGHT_FORMAT;
         ID3D12Resource *pUAV = i == 0 ? Outputs[t] : i == 1 && bTemporal ? s.pFrames[t - PATH_TABLE_TEMPORAL0]->m_pResource : nullptr;
         m_pDescriptors->WriteUAV(s.nTables[t] + i, pUAV, &View);
       }
@@ -466,9 +483,88 @@ bool CD3D12Renderer::UpdatePathKernels(int w, int h)
   return true;
 }
 
+bool CD3D12Renderer::UpdatePathNrd(int w, int h)
+{
+  SPathTraceState &s = m_PathTrace;
+  if (s.bNrdFailed || !CD3D12Nrd::IsBuilt() || s.nTables[PATH_TABLE_TRACE] < 0)
+    return false;
+  if (s.pNrdOut && m_pNrd && m_pNrd->IsReady() && m_pNrd->GetWidth() == w && m_pNrd->GetHeight() == h)
+    return true;
+  ReleasePathNrd();
+  bool bOk = true;
+  s.pHitDistance = m_pUpload->CreateComputeTarget(w, h, 1, PATH_HIT_FORMAT, L"XRenderD3D12 path tracer's hit distance");
+  static const wchar_t *const s_Names[4] = { L"XRenderD3D12 NRD's diffuse light", L"XRenderD3D12 NRD's normal and roughness",
+                                             L"XRenderD3D12 NRD's view depth", L"XRenderD3D12 NRD's motion" };
+  for (int i = 0; i < 4; i++)
+    bOk &= (s.pNrdIn[i] = m_pUpload->CreateComputeTarget(w, h, 1, PATH_NRD_FORMATS[i], s_Names[i])) != nullptr;
+  s.pNrdOut = m_pUpload->CreateComputeTarget(w, h, 1, PATH_NRD_OUT_FORMAT, L"XRenderD3D12 NRD's denoised light");
+  bOk &= s.pHitDistance && s.pNrdOut;
+  if (bOk)
+  {
+    D3D12_SHADER_RESOURCE_VIEW_DESC SRV = PathTextureSRV(PATH_HIT_FORMAT);
+    bOk &= (s.pHitDistance->m_nSRV = m_pDescriptors->AllocSRV(s.pHitDistance->m_pResource, &SRV)) >= 0;
+    SRV = PathTextureSRV(PATH_NRD_OUT_FORMAT);
+    bOk &= (s.pNrdOut->m_nSRV = m_pDescriptors->AllocSRV(s.pNrdOut->m_pResource, &SRV)) >= 0;
+    bOk &= (s.nNrdTable = m_pDescriptors->AllocRange(CD3D12Compute::COMPUTE_UAVS)) >= 0;
+  }
+  if (bOk)
+  {
+    D3D12_UNORDERED_ACCESS_VIEW_DESC View = {};
+    View.ViewDimension = D3D12_UAV_DIMENSION_TEXTURE2D;
+    for (int i = 0; i < CD3D12Compute::COMPUTE_UAVS; i++)
+    {
+      View.Format = i < 4 ? PATH_NRD_FORMATS[i] : PATH_LIGHT_FORMAT;
+      m_pDescriptors->WriteUAV(s.nNrdTable + i, i < 4 ? s.pNrdIn[i]->m_pResource : nullptr, &View);
+    }
+    if (!m_pNrd)
+      m_pNrd = std::make_unique<CD3D12Nrd>();
+    bOk = m_pNrd->Init(m_pDevice->GetDevice(), m_pDescriptors.get(), m_pUpload.get(), w, h);
+  }
+  if (!bOk)
+  {
+    iLog->LogWarning("XRenderD3D12: NVIDIA NRD is not available at %d x %d: the path tracer denoises with simple", w, h);
+    ReleasePathNrd();
+    s.bNrdFailed = true;
+    return false;
+  }
+  // CSTrace's hit distance: u2 of its table (a null view before).
+  D3D12_UNORDERED_ACCESS_VIEW_DESC View = {};
+  View.ViewDimension = D3D12_UAV_DIMENSION_TEXTURE2D;
+  View.Format = PATH_HIT_FORMAT;
+  m_pDescriptors->WriteUAV(s.nTables[PATH_TABLE_TRACE] + 2, s.pHitDistance->m_pResource, &View);
+  s.nNrdFrame = -1;
+  return true;
+}
+
+void CD3D12Renderer::ReleasePathNrd()
+{
+  SPathTraceState &s = m_PathTrace;
+  if (m_pDescriptors && s.nTables[PATH_TABLE_TRACE] >= 0 && s.pHitDistance)
+  {
+    D3D12_UNORDERED_ACCESS_VIEW_DESC View = {};
+    View.ViewDimension = D3D12_UAV_DIMENSION_TEXTURE2D;
+    View.Format = PATH_HIT_FORMAT;
+    m_pDescriptors->WriteUAV(s.nTables[PATH_TABLE_TRACE] + 2, nullptr, &View);
+  }
+  for (CD3D12Texture **pp : { &s.pHitDistance, &s.pNrdIn[0], &s.pNrdIn[1], &s.pNrdIn[2], &s.pNrdIn[3], &s.pNrdOut })
+  {
+    if (*pp && m_pUpload)
+      m_pUpload->ReleaseTexture(*pp);
+    *pp = nullptr;
+  }
+  if (s.nNrdTable >= 0 && m_pDescriptors)
+    m_pDescriptors->FreeRange(s.nNrdTable, CD3D12Compute::COMPUTE_UAVS);
+  s.nNrdTable = -1;
+  s.nNrdFrame = -1;
+  if (m_pNrd)
+    m_pNrd->Release();
+}
+
 void CD3D12Renderer::ReleasePathKernels()
 {
   SPathTraceState &s = m_PathTrace;
+  ReleasePathNrd();
+  s.bNrdFailed = false;
   for (CD3D12Texture **pp : { &s.pRays, &s.pHistory[0], &s.pHistory[1], &s.pFrames[0], &s.pFrames[1], &s.pLight, &s.pHighlights })
   {
     if (*pp && m_pUpload)
@@ -482,10 +578,14 @@ void CD3D12Renderer::ReleasePathKernels()
         m_pDescriptors->FreeRange(nTable, CD3D12Compute::COMPUTE_UAVS);
     if (s.nDepthSRV >= 0)
       m_pDescriptors->FreeSRV(s.nDepthSRV);
+    if (s.nVelocitySRV >= 0)
+      m_pDescriptors->FreeSRV(s.nVelocitySRV);
   }
   std::fill(std::begin(s.nTables), std::end(s.nTables), -1);
   s.nDepthSRV = -1;
   s.pDepth.Reset();
+  s.nVelocitySRV = -1;
+  s.pVelocity.Reset();
   s.nHistoryFrame = -1;
   s.nLightFrame = -1;
 }
@@ -517,6 +617,20 @@ void CD3D12Renderer::DrawPathTrace()
   }
   if (s.nDepthSRV < 0)
     return;
+  // The scene's motion vectors for NRD (none: the camera's motion alone).
+  ID3D12Resource *pVelocity = m_pDevice->GetSceneVelocity();
+  if (pVelocity != s.pVelocity.Get())
+  {
+    if (s.nVelocitySRV >= 0)
+      m_pDescriptors->FreeSRV(s.nVelocitySRV);
+    s.nVelocitySRV = -1;
+    s.pVelocity = pVelocity;
+    if (pVelocity && pVelocity->GetDesc().Width == (UINT64)w && pVelocity->GetDesc().Height == (UINT)h)
+    {
+      const D3D12_SHADER_RESOURCE_VIEW_DESC SRV = PathTextureSRV(D3D12_VELOCITY_FORMAT);
+      s.nVelocitySRV = m_pDescriptors->AllocSRV(pVelocity, &SRV);
+    }
+  }
   GpuSection("pt");
   const D3D12_GPU_VIRTUAL_ADDRESS nTlas = UseRayScene();
   if (!nTlas)
@@ -535,6 +649,8 @@ void CD3D12Renderer::DrawPathTrace()
   const float *vSky = P.vSky;
   const char *szDenoiser = m_pPTDenoiserVar && m_pPTDenoiserVar->GetString() ? m_pPTDenoiserVar->GetString() : "simple";
   const bool bDenoise = !bReference && _stricmp(szDenoiser, "none") != 0;
+  // NRD in real time, where it is built in and available; otherwise simple.
+  const bool bNrd = bDenoise && !_stricmp(szDenoiser, "nrd") && UpdatePathNrd(w, h);
   uint32 nKey = (uint32)nBounces * 0x9e3779b1u;
   const float fAmbient = std::max(CV_d3d12_PTAmbient, 0.0f), fAmbientRange = std::max(CV_d3d12_PTAmbientRange, 0.0f);
   for (float f : { P.vSun[0], P.vSun[1], P.vSun[2], P.fLamps, P.fEmission, P.fDelight, vSky[0], vSky[1], vSky[2], fAmbient, fAmbientRange })
@@ -577,10 +693,19 @@ void CD3D12Renderer::DrawPathTrace()
   pc.nTextures2[2] = (uint32)pFrames->m_nSRV;
   pc.nTextures2[3] = (uint32)s.pSun->m_nSRV;
   pc.nTextures3[0] = (uint32)s.pSpecular->m_nSRV;
+  const SNrdSettings Nrd = CD3D12Nrd::GetDefaults();
+  if (bNrd)
+  {
+    pc.nTextures3[1] = (uint32)s.pNrdOut->m_nSRV;
+    pc.nTextures3[2] = s.nVelocitySRV >= 0 ? (uint32)s.nVelocitySRV : XR_RAY_NONE;
+    pc.nTextures3[3] = (uint32)s.pHitDistance->m_nSRV;
+    Set4(pc.vNrd, Nrd.fHitDistance[0], Nrd.fHitDistance[1], Nrd.fHitDistance[2], PATH_NRD_NO_SURFACE);
+  }
   pc.nTrace[0] = 1;
   pc.nFlags[0] = bHistory ? 1 : 0;
   pc.nFlags[1] = (uint32)m_nFrames;
-  pc.nFlags[2] = bDenoise ? 1 : 0;
+  // CSFilter's own filter: not after NRD.
+  pc.nFlags[2] = bDenoise && !bNrd ? 1 : 0;
   pc.nFlags[3] = RayMask() & 0xff;
   pc.nPath[0] = P.nLights;
   pc.nPath[1] = (uint32)nBounces;
@@ -597,11 +722,52 @@ void CD3D12Renderer::DrawPathTrace()
   m_pDevice->Transition(pDepth, D3D12_RESOURCE_STATE_DEPTH_WRITE, PATH_DEPTH_READ);
   m_pCompute->DispatchRays(pList, eD3D12K_PathTrace, FrameCB.nGPU, PassCB.nGPU, nTlas, nInstances, s.nTables[PATH_TABLE_TRACE], gx, gy, nLights);
   m_pDevice->Transition(s.pRays->m_pResource, D3D12_RESOURCE_STATE_UNORDERED_ACCESS, PATH_KERNEL_READ);
-  m_pDevice->Transition(pPrevHistory->m_pResource, D3D12_RESOURCE_STATE_UNORDERED_ACCESS, PATH_KERNEL_READ);
-  m_pDevice->Transition(pPrevFrames->m_pResource, D3D12_RESOURCE_STATE_UNORDERED_ACCESS, PATH_KERNEL_READ);
-  GpuSection("pt history");
-  m_pCompute->DispatchRays(pList, eD3D12K_PathTemporal, FrameCB.nGPU, PassCB.nGPU, nTlas, nInstances, s.nTables[PATH_TABLE_TEMPORAL0 + nCur],
-                           gx, gy, nLights);
+  bool bNrdDone = false;
+  int nNrdPasses = 0;
+  if (bNrd)
+  {
+    // NRD's inputs from the paths (the motion vectors readable meanwhile), NRD, its light as this frame's history.
+    GpuSection("pt nrd");
+    m_pDevice->Transition(s.pHitDistance->m_pResource, D3D12_RESOURCE_STATE_UNORDERED_ACCESS, PATH_KERNEL_READ);
+    if (s.nVelocitySRV >= 0)
+      m_pDevice->Transition(pVelocity, D3D12_RESOURCE_STATE_RENDER_TARGET, PATH_KERNEL_READ);
+    m_pCompute->DispatchRays(pList, eD3D12K_PathNrdPack, FrameCB.nGPU, PassCB.nGPU, nTlas, nInstances, s.nNrdTable, gx, gy, nLights);
+    if (s.nVelocitySRV >= 0)
+      m_pDevice->Transition(pVelocity, PATH_KERNEL_READ, D3D12_RESOURCE_STATE_RENDER_TARGET);
+    m_pDevice->Transition(s.pHitDistance->m_pResource, PATH_KERNEL_READ, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+    SNrdView View = {};
+    memcpy(View.mWorldToView, m_CameraView.data, sizeof(View.mWorldToView));
+    memcpy(View.mViewToClip, m_ProjMatrix.data, sizeof(View.mViewToClip));
+    // NRD's jitter is where a pixel's sample is (pixels); the engine's moves the picture.
+    View.vJitter[0] = -m_UpscaleJitter[0];
+    View.vJitter[1] = -m_UpscaleJitter[1];
+    View.fDenoisingRange = PATH_NRD_RANGE;
+    View.bRestart = !bHistory || s.nNrdFrame != m_nFrames - 1;
+    const SNrdTextures Textures = { s.pNrdIn[3], s.pNrdIn[1], s.pNrdIn[2], s.pNrdIn[0], s.pNrdOut };
+    bNrdDone = m_pNrd->Denoise(pList, View, Nrd, Textures);
+    if (!bNrdDone)
+    {
+      // Simple from the next frame on (this one has NRD's light of the frame before).
+      iLog->LogWarning("XRenderD3D12: NVIDIA NRD failed at %d x %d: the path tracer denoises with simple", w, h);
+      s.bNrdFailed = true;
+    }
+    int nTables = 0, nTextures = 0;
+    m_pNrd->GetStats(nNrdPasses, nTables, nTextures);
+    m_pDevice->ForgetDrawState();
+    s.nNrdFrame = bNrdDone ? m_nFrames : -1;
+    m_pDevice->Transition(s.pNrdOut->m_pResource, D3D12_RESOURCE_STATE_UNORDERED_ACCESS, PATH_KERNEL_READ);
+    m_pCompute->DispatchRays(pList, eD3D12K_PathNrdResolve, FrameCB.nGPU, PassCB.nGPU, nTlas, nInstances,
+                             s.nTables[PATH_TABLE_TEMPORAL0 + nCur], gx, gy, nLights);
+    m_pDevice->Transition(s.pNrdOut->m_pResource, PATH_KERNEL_READ, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+  }
+  else
+  {
+    m_pDevice->Transition(pPrevHistory->m_pResource, D3D12_RESOURCE_STATE_UNORDERED_ACCESS, PATH_KERNEL_READ);
+    m_pDevice->Transition(pPrevFrames->m_pResource, D3D12_RESOURCE_STATE_UNORDERED_ACCESS, PATH_KERNEL_READ);
+    GpuSection("pt history");
+    m_pCompute->DispatchRays(pList, eD3D12K_PathTemporal, FrameCB.nGPU, PassCB.nGPU, nTlas, nInstances, s.nTables[PATH_TABLE_TEMPORAL0 + nCur],
+                             gx, gy, nLights);
+  }
   m_pDevice->Transition(pHistory->m_pResource, D3D12_RESOURCE_STATE_UNORDERED_ACCESS, PATH_KERNEL_READ);
   m_pDevice->Transition(pFrames->m_pResource, D3D12_RESOURCE_STATE_UNORDERED_ACCESS, PATH_KERNEL_READ);
   GpuSection("pt filter");
@@ -611,8 +777,11 @@ void CD3D12Renderer::DrawPathTrace()
                            nLights);
   m_pDevice->Transition(s.pLight->m_pResource, D3D12_RESOURCE_STATE_UNORDERED_ACCESS, PATH_READ);
   m_pDevice->Transition(s.pHighlights->m_pResource, D3D12_RESOURCE_STATE_UNORDERED_ACCESS, PATH_READ);
-  for (CD3D12Texture *pTex : { s.pRays, pPrevHistory, pPrevFrames, pHistory, pFrames })
+  for (CD3D12Texture *pTex : { s.pRays, pHistory, pFrames })
     m_pDevice->Transition(pTex->m_pResource, PATH_KERNEL_READ, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+  if (!bNrd)
+    for (CD3D12Texture *pTex : { pPrevHistory, pPrevFrames })
+      m_pDevice->Transition(pTex->m_pResource, PATH_KERNEL_READ, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
   m_pDevice->Transition(pDepth, PATH_DEPTH_READ, D3D12_RESOURCE_STATE_DEPTH_WRITE);
   m_pDevice->BindRootSignature();
   InvalidateFrameConstants();
@@ -659,7 +828,15 @@ void CD3D12Renderer::DrawPathTrace()
             "ambient %.2f beyond %.2f m, highlights: sun %.3f %.3f %.3f, lamps %.3f, denoiser %s, history %d (%d frames)\n",
             bReference ? "reference" : "real time", w, h, nBounces, P.nLights, vSky[0], vSky[1], vSky[2], P.vSun[0], P.vSun[1], P.vSun[2],
             bOutdoors ? "" : " (indoors: no sun in the frame)", P.fBakeLight, fAmbient, fAmbientRange, pc.vSpecular[0], pc.vSpecular[1],
-            pc.vSpecular[2], pc.vSpecular[3], bDenoise ? "simple" : "none", bHistory ? 1 : 0, s.nAccumulated);
+            pc.vSpecular[2], pc.vSpecular[3], bNrd ? "nrd" : bDenoise ? "simple" : "none", bHistory ? 1 : 0, s.nAccumulated);
+  if (m_pFrameDump && bNrd)
+  {
+    int nPasses = 0, nTables = 0, nTextures = 0;
+    m_pNrd->GetStats(nPasses, nTables, nTextures);
+    fprintf(m_pFrameDump.get(), "pt nrd: NVIDIA NRD %s REBLUR_DIFFUSE, %s, %d passes, %d descriptor tables, %d textures of its own, motion vectors: %s\n",
+            CD3D12Nrd::GetVersion(), bNrdDone ? "denoised" : "failed", nNrdPasses, nTables, nTextures,
+            s.nVelocitySRV >= 0 ? "the scene's" : "the camera's");
+  }
 }
 
 void CD3D12Renderer::DrawPathDebug()

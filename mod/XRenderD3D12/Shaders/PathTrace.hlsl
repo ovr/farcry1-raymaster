@@ -22,7 +22,10 @@
 //	    pixel's own surface is not in it: the composite takes the
 //	    visibility the raster found
 //	    (the G-buffer's). rgb the light, w the pixel's view depth (0: no
-//	    surface the path tracer lights).
+//	    surface the path tracer lights); u2 the hit distance of the first
+//	    bounce (the rays' length where it finds nothing, 0 where the path
+//	    ends at once), which NRD weighs (PathNrd.hlsl; a null view without
+//	    it).
 //	  CSTemporal: blended into the history where the surface was in the
 //	    frame before, vParams.z frames at most (the reference: all of them
 //	    while the view stays).
@@ -49,6 +52,7 @@
 ConstantBuffer<SPathTraceConstants> g_PT : register(b2);
 RWTexture2D<float4> g_Out : register(u0);
 RWTexture2D<unorm float> g_Frames : register(u1);
+RWTexture2D<float> g_HitDistance : register(u2);
 #define RAY_VIEW g_PT
 #include "RayView.hlsli"
 
@@ -125,12 +129,14 @@ void CSTrace(uint3 vId : SV_DispatchThreadID)
   if (PathGBufferMaterial(vGBuffer) == 0 || z >= 1 || d <= 0)
   {
     g_Out[p] = 0;
+    g_HitDistance[p] = 0;
     return;
   }
   const float3 vPos = PixelPos(p + 0.5, d);
   const float3 vFace = FaceNormal(p, vPos, d);
   const float3 vN = PixelNormal(vGBuffer, vPos);
   const float fPixel = d * g_PT.vParams.y;
+  float fHitDistance = 0;
   // Each pixel's own numbers, others each frame.
   uint nSeed = Hash((uint)p.x | ((uint)p.y << 16)) ^ Hash(g_PT.nFlags.y * 0x9e3779b9u + 1);
   SPathShade P = PathShadeParams(XR_RAY_MAX_ALPHA_TESTS);
@@ -157,6 +163,8 @@ void CSTrace(uint3 vId : SV_DispatchThreadID)
     Ray.TMin = 0.005;
     Ray.TMax = g_PT.vParams.x;
     const SRayHit Hit = TraceScene(Ray, P.nMask, fWidth, PT_CONE_SPREAD, P.nMaxTests);
+    if (b == 0)
+      fHitDistance = Hit.bHit ? Hit.fT : Ray.TMax;
     if (!Hit.bHit)
     {
       vLight += vThrough * max(g_PT.vSky.rgb, vFill);
@@ -191,6 +199,7 @@ void CSTrace(uint3 vId : SV_DispatchThreadID)
   if (g_PT.vParams.w > 0 && fLuminance > g_PT.vParams.w)
     vLight *= g_PT.vParams.w / fLuminance;
   g_Out[p] = float4(max(vLight, 0), d);
+  g_HitDistance[p] = fHitDistance;
 }
 
 //! The frames in a history at texel q of texture n (R16_UNORM, frames / 65535).

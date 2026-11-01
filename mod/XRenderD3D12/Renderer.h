@@ -39,6 +39,7 @@ class CD3D12Texture;
 class CD3D12Descriptors;
 class CD3D12Pipeline;
 class CD3D12Compute;
+class CD3D12Nrd;
 class CD3D12RayScene;
 class CTexture;
 class CTextureManager;
@@ -760,12 +761,17 @@ public:
   //! d3d12_PTDebug: the G-buffer or the paths' light over the whole back buffer (RayDebug.hlsl, XR_RAY_DEBUG_GB_*).
   void DrawPathDebug();
   //! After the main view's opaque list wrote the G-buffer (Scene.cpp): the paths (Shaders/PathTrace.hlsl: CSTrace,
-  //! CSTemporal, CSFilter) and the highlights (CSSpecular), then their light and the sun's added to the scene's colour
+  //! CSTemporal, CSFilter; with d3d12_PTDenoiser nrd NVIDIA NRD in CSTemporal's place, Shaders/PathNrd.hlsl and
+  //! NrdHost.cpp) and the highlights (CSSpecular), then their light and the sun's added to the scene's colour
   //! (Shaders/PathComposite.hlsl).
   void DrawPathTrace();
   //! The kernels' textures for w x h (made again when it changes); false: none.
   bool UpdatePathKernels(int w, int h);
   void ReleasePathKernels();
+  //! NRD's textures, CSPack's table and NRD's instance for w x h (with the kernels' textures); false, logged once, when
+  //! NRD is not built in or not available.
+  bool UpdatePathNrd(int w, int h);
+  void ReleasePathNrd();
 
   struct SPathTraceState
   {
@@ -790,6 +796,15 @@ public:
     int nTables[5] = { -1, -1, -1, -1, -1 }; //!< the kernels' UAV tables
     int nDepthSRV = -1;                     //!< the depth buffer in the texture table
     ComPtr<ID3D12Resource> pDepth;          //!< and the buffer it views
+    int nVelocitySRV = -1;                  //!< the scene's motion vectors in the texture table (NRD's)
+    ComPtr<ID3D12Resource> pVelocity;       //!< and the target it views
+    // With d3d12_PTDenoiser nrd (UpdatePathNrd; UNORDERED_ACCESS between the frames)
+    CD3D12Texture *pHitDistance = nullptr;  //!< CSTrace's hit distance of the first bounce (u2 of its table)
+    CD3D12Texture *pNrdIn[4] = {};          //!< CSPack's: NRD's IN_DIFF_RADIANCE_HITDIST, IN_NORMAL_ROUGHNESS, IN_VIEWZ, IN_MV
+    CD3D12Texture *pNrdOut = nullptr;       //!< NRD's OUT_DIFF_RADIANCE_HITDIST
+    int nNrdTable = -1;                     //!< CSPack's UAV table
+    int nNrdFrame = -1;                     //!< m_nFrames NRD last denoised (-1: never; its history starts again)
+    bool bNrdFailed = false;                //!< NRD is not available at this size (logged)
     float PrevViewProj[16] = {};            //!< the view's world to clip of the last frame traced
     float PrevJitter[2] = {};               //!< and its jitter
     int nHistoryFrame = -1;                 //!< m_nFrames of the last frame traced (-1: no history)
@@ -1361,6 +1376,7 @@ public:
   std::unique_ptr<CD3D12Descriptors> m_pDescriptors;
   std::unique_ptr<CD3D12Pipeline> m_pPipeline;
   std::unique_ptr<CD3D12Compute> m_pCompute;
+  std::unique_ptr<CD3D12Nrd> m_pNrd;        //!< the path tracer's NVIDIA NRD (UpdatePathNrd; NrdHost.h)
   std::unique_ptr<CD3D12RayScene> m_pRayScene;
   bool m_bRayTlas = false;                  //!< the scene being captured gets a TLAS (BuildRayScene)
   std::unique_ptr<CTextureManager> m_pTextures;
@@ -1564,7 +1580,7 @@ public:
   float CV_d3d12_PTAmbient = 1.0f;          //!< the game's ambient light its paths fill in with (times)
   float CV_d3d12_PTAmbientRange = 2.0f;     //!< beyond this a ray brings it (m)
   float CV_d3d12_PTSpecular = 1.0f;         //!< the highlights of the sun and the lamps (times; 0 none)
-  ICVar *m_pPTDenoiserVar = nullptr;        //!< d3d12_PTDenoiser (simple, none)
+  ICVar *m_pPTDenoiserVar = nullptr;        //!< d3d12_PTDenoiser (nrd, simple, none)
   int CV_d3d12_ToneMap = 1;                 //!< the HDR pipeline's tone map: 0 clamp, 1 soft shoulder, 2 ACES fitted, 3 AgX
   float CV_d3d12_ToneMapKnee = 0.85f;       //!< where the soft shoulder starts (a display value)
   float CV_d3d12_Exposure = 0;              //!< the exposure's compensation, EV

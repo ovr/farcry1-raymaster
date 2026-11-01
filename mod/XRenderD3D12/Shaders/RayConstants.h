@@ -209,12 +209,16 @@ struct SPathTraceConstants
                                   //!< before (CSTemporal), w this frame's (CSFilter)
   XR_UINT4(nTextures2);           //!< texture table indices: x the G-buffer's normal, y the frames of the history before, z this
                                   //!< frame's, w the G-buffer's sun and ambient light
-  XR_UINT4(nTextures3);           //!< texture table indices: x the G-buffer's highlights' colour; yzw unused
+  XR_UINT4(nTextures3);           //!< texture table indices: x the G-buffer's highlights' colour, y NRD's light (CSResolve), z the
+                                  //!< scene's motion vectors (CSPack; XR_RAY_NONE: the camera's from mPrevViewProj), w the hit
+                                  //!< distance of the paths' first bounce (CSPack)
   XR_UINT4(nTrace);               //!< RayView.hlsli's grid: x 1 (a path for each pixel), y z 0
   XR_UINT4(nFlags);               //!< x 1: a history to blend into, y the frame (the noise), z 1: filtered, w the mask of the
                                   //!< instances the rays see (RayMask)
   XR_UINT4(nPath);                //!< x the lamps (g_PTLights), y the bounces of a path, z the alpha tests of a ray at most, w 1:
                                   //!< the reference (no limit to a sample's light)
+  XR_FLOAT4(vNrd);                //!< NRD (PathNrd.hlsl): xyz its hit distances' normalization (A, B, C of REBLUR), w the view
+                                  //!< depth it takes where there is no surface (beyond its denoising range)
 };
 
 #endif

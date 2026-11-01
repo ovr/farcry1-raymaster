@@ -16,6 +16,7 @@
 #include "D3D12Descriptors.h"
 #include "D3D12Pipeline.h"
 #include "D3D12Compute.h"
+#include "NrdHost.h"
 #include "RayTracing.h"
 #include "Texture.h"
 #include "Shader.h"
@@ -339,8 +340,9 @@ void CD3D12Renderer::RegisterVariables()
   iConsole->Register("d3d12_PTSpecular", &CV_d3d12_PTSpecular, 1.0f, VF_DUMPTODISK,
                      "With d3d12_PathTracing, the highlights of the sun and the lamps on the materials with a specular colour, as "
                      "the raster's, the lamps' where a ray reaches them: times this (0: none)");
-  m_pPTDenoiserVar = iConsole->CreateVariable("d3d12_PTDenoiser", "simple", VF_DUMPTODISK,
-                     "With d3d12_PathTracing 1, the denoiser of its light: simple (its own filter) or none (the history alone)");
+  m_pPTDenoiserVar = iConsole->CreateVariable("d3d12_PTDenoiser", CD3D12Nrd::IsBuilt() ? "nrd" : "simple", VF_DUMPTODISK,
+                     "With d3d12_PathTracing 1, the denoiser of its light: nrd (NVIDIA NRD's REBLUR, when it is built in), simple "
+                     "(its own history and filter) or none (the history alone)");
   // The HDR pipeline (r_HDRRendering, Hdr.cpp).
   iConsole->Register("d3d12_ToneMap", &CV_d3d12_ToneMap, 1, VF_DUMPTODISK,
                      "With r_HDRRendering, the tone map: 0 clamp, 1 soft shoulder (the game's look up to d3d12_ToneMapKnee, then each channel rolls off to 1), 2 ACES fitted, 3 AgX");
@@ -816,6 +818,7 @@ void CD3D12Renderer::Release()
     m_pTextures->Shutdown();
   if (m_pRayScene)
     m_pRayScene->Shutdown();
+  m_pNrd.reset();
   if (m_pCompute)
     m_pCompute->Shutdown();
   if (m_pPipeline)

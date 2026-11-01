@@ -68,6 +68,8 @@ enum ED3D12Kernel
   eD3D12K_PathTemporal,             //!< their light blended into the history
   eD3D12K_PathFilter,               //!< the history filtered into the composite's light
   eD3D12K_PathSpecular,             //!< the highlights of the sun and the lamps (with rays)
+  eD3D12K_PathNrdPack,              //!< NRD's inputs from the paths (Shaders/PathNrd.hlsl; with rays; only with NRD built in)
+  eD3D12K_PathNrdResolve,           //!< NRD's light as a history for the filter (the same)
   eD3D12K_Num
 };
 

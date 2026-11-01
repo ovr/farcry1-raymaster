@@ -565,7 +565,15 @@ reference of its features and console variables.
   real time a sample is at most 16 (as light) and a bounce's ray takes 4 alpha tests. `CSTemporal`
   blends it into the history where the surface was in the frame before (32 frames at most),
   `CSFilter` filters that on the pixel's plane and normal, wider where the history is young
-  (`d3d12_PTDenoiser simple`; `none` the history alone). `CSSpecular` makes the highlights as the
+  (`d3d12_PTDenoiser simple`; `none` the history alone). With `d3d12_PTDenoiser nrd`, the default
+  where NVIDIA NRD is built in (`third_party/nrd`, a git submodule at v4.18.0, with ShaderMake and
+  MathLib; without them the renderer is built without it and takes `simple`), NRD's REBLUR_DIFFUSE
+  takes `CSTemporal`'s place: `CSPack` (`Shaders/PathNrd.hlsl`) gives it the paths' light with the
+  first bounce's distance, the normal, the linear depth and the scene's motion vectors (without them
+  the camera's), the renderer's device runs its passes (`NrdHost.cpp`: root signatures and
+  pipeline states from its descriptions, its DXIL, its textures as compute targets; 30 frames of
+  history at most), and `CSResolve` makes its light the history that `CSFilter` takes without its
+  spatial filter; it costs about 0.3 to 0.4 ms at 2560x1440. `CSSpecular` makes the highlights as the
   raster does, in the game's colour: the highlights' colour times the sun's specular colour times its
   visibility and each lamp's times its falloff, times saturate(R.V)^32; a lamp's where a ray towards
   it reaches it (4 rays a pixel at most, only for a highlight of 1/512 or more), so they are not
@@ -584,8 +592,9 @@ reference of its features and console variables.
   below too (their leaves pass no light). The highlights are where the raster has them (the
   specular templates: characters, some rocks and machines) and from the light maps' lamps too. On a
   Radeon RX 7900 XTX at 3840x2160 with FSR Quality the flights over Pier, River and Swamp run at
-  99, 91 and 82 FPS (1 % lows 62, 51 and 52; the raster 201, 193 and 193): the paths take 0.7 to
-  9 ms, most among the grass and the palms' crowns, the highlights about 0.3 ms.
+  93, 85 and 78 FPS with NRD (1 % lows 61, 49 and 48), 97, 88 and 81 with simple (64, 49 and 51;
+  the raster 201, 193 and 193): the paths take 0.7 to 9 ms, most among the grass and the palms'
+  crowns, the highlights about 0.3 ms.
   `d3d12_RTDebug` views the scene for rays from the camera: 1 instances, 2 shaded hits on the right
   half, 3 distance, 4 mip level, 5 kind, 6 alpha tests, 7 shaded hits over the whole picture; the path
   tracer's: 8 the albedo of the hits, 9 their emission, 10 them lit by the sun and the lamps;

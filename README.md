@@ -18,6 +18,10 @@ Mods for Far Cry, built with the CryENGINE MOD SDK for Far Cry:
 - `third_party/xegtao`, `third_party/fidelityfx-cacao` - Intel XeGTAO and AMD FidelityFX CACAO,
   the ambient occlusion of XRenderD3D12; `third_party/directx-headers` - Microsoft's d3dx12
   headers, which CACAO needs.
+- `third_party/nrd`, `third_party/shadermake`, `third_party/mathlib` - git submodules: NVIDIA's NRD,
+  the denoiser of XRenderD3D12's path tracer, with the tool that builds its shaders and its math
+  library. The repository has their links, not their files: clone it with `--recurse-submodules`
+  (or run `git submodule update --init`); without them XRenderD3D12 is built without NRD.
 - `assets/scripts` - patches to the game's scripts, and `Patch Scripts.cmd`, which applies them in
   the order of their numbers to the scripts of an installed game (`Patch Scripts.cmd <game
   folder>`, written to `FCData\zz_RayMaster.pak`; deleting that file gives back the original
@@ -56,7 +60,7 @@ Far Cry and CryENGINE are trademarks of their owners.
 Everything in this repository outside `sdk/`, `third_party/` and `mod/XRenderCommon/` is free
 software under the GNU General Public License, version 3 or (at your option) any later version
 (`LICENSE`), with an additional permission to combine it with the game Far Cry, the CryENGINE MOD
-SDK for Far Cry and the AMD FSR SDK (`LICENSE-EXCEPTION.md`).
+SDK for Far Cry, the AMD FSR SDK and NVIDIA NRD (`LICENSE-EXCEPTION.md`).
 
 `third_party/amd-fsr-sdk/` holds parts of the AMD FSR SDK by Advanced Micro Devices, Inc., under
 AMD's MIT license (`third_party/amd-fsr-sdk/docs/license.md`); the build downloads its upscaler
@@ -64,6 +68,12 @@ DLL (`third_party/amd-fsr-sdk/README.md`). `third_party/xegtao/` holds parts of 
 Corporation, `third_party/fidelityfx-cacao/` parts of FidelityFX CACAO by Advanced Micro Devices,
 Inc., and `third_party/directx-headers/` parts of DirectX-Headers by Microsoft Corporation, each under
 its MIT license (`LICENSE`, `license.txt`, `LICENSE` in its folder).
+
+`third_party/nrd`, `third_party/shadermake` and `third_party/mathlib` are git submodules: links to
+NVIDIA's repositories of NRD (NVIDIA Real-time Denoisers) at the tag v4.18.0 and of ShaderMake and
+MathLib at the commits it names, whose files are not part of this repository. NRD is under the
+NVIDIA RTX SDKs License (`LICENSE.txt` in its repository), which allows distributing it only built
+into an application; ShaderMake and MathLib are under NVIDIA's MIT licenses.
 
 `mod/XRenderCommon/` is dedicated to the public domain (CC0 1.0, `mod/XRenderCommon/COPYING`): its
 authors claim no rights to it, and any renderer for the game may use it, under any license.

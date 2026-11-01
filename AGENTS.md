@@ -21,8 +21,8 @@ instructions and is not committed (git-ignored). The references of the modules a
   the facts about the shared structures; the detailed notes on how that build drives its renderer
   are local research notes, not committed.
 - **License** (`README.md`): everything outside `sdk/`, `third_party/` and `mod/XRenderCommon/`
-  is GPL-3.0-or-later with an additional permission for Far Cry, its SDK and the AMD FSR SDK
-  (`LICENSE`, `LICENSE-EXCEPTION.md`); `mod/XRenderCommon/` is public domain (CC0 1.0,
+  is GPL-3.0-or-later with an additional permission for Far Cry, its SDK, the AMD FSR SDK and
+  NVIDIA NRD (`LICENSE`, `LICENSE-EXCEPTION.md`); `mod/XRenderCommon/` is public domain (CC0 1.0,
   `mod/XRenderCommon/COPYING`); `sdk/` stays under Crytek's `sdk/EULA.txt`; `third_party/` keeps
   the licenses of its upstream projects. Every source file we write starts with two lines in its
   comment syntax,
@@ -64,6 +64,13 @@ instructions and is not committed (git-ignored). The references of the modules a
   `third_party/directx-headers` the d3dx12 headers that CACAO's host includes. Every library added
   there needs a matching permission in `LICENSE-EXCEPTION.md` unless its license is GPL-compatible
   and it comes with its source.
+  `third_party/nrd` (NVIDIA NRD, the path tracer's denoiser of XRenderD3D12), `third_party/shadermake`
+  and `third_party/mathlib` (its shaders' build tool and its math library) are git submodules of
+  NVIDIA's repositories, at the tag v4.18.0 and the commits that tag names; the repository has their
+  links, not their files. NRD's license (the NVIDIA RTX SDKs License) lets it be distributed only
+  built into an application, so its files are never copied into the repository; a newer NRD is a new
+  tag of all three. Without them (a clone without `--recurse-submodules`) XRenderD3D12 is built
+  without NRD.
 - `farcry1_testing1/` - the game install for tracing (git-ignored):
   - `Bin32` - retail 1.4 (x86; stops at its CD check, which is not to be bypassed),
   - `Bin64` - the Cumulative Patch x64 build described above.
@@ -71,7 +78,7 @@ instructions and is not committed (git-ignored). The references of the modules a
 ## Running the game
 
 - Build: the x86 preset deploys `XRenderD3D8.dll` to `farcry1_testing1/Bin32`, the x64 preset to
-  `farcry1_testing1/Bin64` (`XRENDER_OUTPUT_DIR`).
+  `farcry1_testing1/Bin64` (`XRENDER_OUTPUT_DIR`). The submodules first: `git submodule update --init`.
 - `farcry1_testing1/system.cfg` selects the proxy with `r_Driver = "Direct3D8"` and runs windowed
   (`r_Fullscreen = "0"`); the original is `farcry1_testing1/system.cfg.xrt-backup`.
 - Every run of the game (a trace, a demo, a benchmark, a run for the user to play) is at the
