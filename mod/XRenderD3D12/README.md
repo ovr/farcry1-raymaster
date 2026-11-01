@@ -232,7 +232,13 @@ reference of its features and console variables.
   colour of the engine's shadows on it (`EntityShadowOnTerrain`, which fade out where the
   cascades reach; a pass whose triangles all lie before the last cascade's blend is not drawn:
   Dam's spawn, where the bushes around the camera have shadow maps, 1 ms of the GPU less).
-  Beyond the cascades the objects' shadow maps work as before.
+  Beyond the cascades the objects' shadow maps work as before. A lit object in the full set's
+  shadow is darkened as the terrain is, not to its ambient light alone: its light there is at least
+  its light in the sun times the colour of the engine's shadows on the terrain (`DF2_SHADOW_TINT`;
+  that colour about 0.5 on Training). The original has no shadow of the static world on its
+  objects, and with the ambient alone a lit object under a roof was nearly black: the papers on the
+  floor of Training's hut 7 of 255 where the original has 46, now 15, as dark as the ground in the
+  shadow beside the hut.
   `d3d12_ShadowSoftness` (0.05 m) is the filter's radius (at least a texel and a half).
   `d3d12_ShadowDebug` 1 also shows the slices, 3 colours the cascades, 4 shows the full set's
   shadow in red and the live set's in green. With `d3d12_ShadowCascades 0` (from the start,
@@ -413,7 +419,11 @@ reference of its features and console variables.
   round it on its surface, the nearer the more (with 2 nearly only its own); with
   `d3d12_RTSunDenoise` (1) the frames before are blended in where the surface was (at most 24,
   clamped to what the rays round the pixel show this frame, and left out where the rays find what
-  the history was sure of turned the other way, so that a shadow that moves does not stay behind),
+  the history was sure of turned the other way, so that a shadow that moves does not stay behind;
+  with the path tracer at most `d3d12_PTSunHistory` (64) frames, a quarter of them kept where the
+  shadow moves and up to half a step off what the rays round the pixel show, against the flicker of
+  the crowns' shadows in the wind, where the sun is all the light: on Pier's walk 2 % less, the
+  shadows of what moves lagging a little),
   and where the result is neither all sun nor all shadow (or the history is young) it is filtered
   over the width the sun's disc gives at the distance of what casts it: sharp where an object stands
   on the ground, softer the higher the leaves are. With `d3d12_RTSunDenoise 2` the rays are a ray
@@ -584,7 +594,9 @@ reference of its features and console variables.
   visibility as the raster finds it (RGBA8, r: its shadow maps, the sun's cascades and their mask by
   rays, which the path tracer turns on, from all the casters; 0 where the raster has no sun) and the
   game's ambient light on the surface (gba: what the object's ambient colour adds to its light maps or
-  its lights; the terrain, whose light is in its texture, the outdoor ambient), a fifth its highlights'
+  its lights; the terrain, whose light is in its texture, the outdoor ambient; a lit object in the
+  cascades' shadow at least its light in the sun times the terrain's shadow colour, as the raster's
+  Sun shadow cascades), a fifth its highlights'
   colour (RGBA8, half of the raster's 2 x specular colour x gloss of the specular templates; it blends
   as the albedo). Its lit draws lose their light (the light maps, the sun, the lamps and their passes,
   the ambient and the baked AO); the screen space AO, the rays' GI and the projectors' passes are not

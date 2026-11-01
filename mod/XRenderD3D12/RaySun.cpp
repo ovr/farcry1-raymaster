@@ -354,7 +354,11 @@ void CD3D12Renderer::DrawRaySunMask()
   rc.nTextures[1] = (uint32)m_RaySun.pRays->m_nSRV;
   rc.nTextures[2] = (uint32)pPrevHistory->m_nSRV;
   rc.nTextures[3] = (uint32)pHistory->m_nSRV;
-  rc.nFlags[0] = bHistory ? 1 : 0;
+  // The frames the history holds at most; with the path tracer (d3d12_PTSunHistory) more, and where the shadow moves a
+  // part of them kept (0x10000), not none: its sun has no other light to hide the rays' noise in.
+  const bool bLong = WantsPathTracing() && CV_d3d12_PTSunHistory > 0;
+  const uint32 nFrames = bLong ? (uint32)std::clamp(CV_d3d12_PTSunHistory, 1, 1024) : 24;
+  rc.nFlags[0] = bHistory ? nFrames | (bLong ? 0x10000 : 0) : 0;
   rc.nFlags[1] = (uint32)m_nFrames;
   rc.nFlags[2] = bDenoise ? 1 : 0;
   rc.nFlags[3] = (RayMask() & 0xff) | (m_pRayScene->GetLiveInstances() ? 0x100 : 0);

@@ -31,7 +31,8 @@
 //	draws the sun's shadow falls on (DF_SHADOWS, DF2_SUN_CASCADES; with
 //	DF2_CASCADES_LIVE, a light map or the terrain with their shadows baked
 //	in, only the geometry of the frame casts, as only the live casters'
-//	cascades do), with DF2_SHADOW_TINT. Not fogged: the caller fogs it by
+//	cascades do), with DF2_SHADOW_TINT (a lit object: its light in the
+//	shadow at least the lit one times the tint). Not fogged: the caller fogs it by
 //	its path.
 //
 //////////////////////////////////////////////////////////////////////
@@ -409,14 +410,22 @@ float4 RayShade(SRayHit Hit, float3 vRayDir, float fConeWidth, bool bShadows, ui
   float4 vVertexColor = RayVertexColor(I, S);
   if (nFlags & DF_LIGHTING)
   {
-    const float3 vSun = fSun * g_Frame.vSunColor.rgb * saturate(dot(S.vNormal, g_Frame.vSunDir.xyz));
-    if (nFlags2 & DF2_MATERIAL_LIGHT)
-      vVertexColor.rgb = saturate(I.vAmbient.rgb + I.vColor.rgb * vSun);
-    else
+    const float fNL = saturate(dot(S.vNormal, g_Frame.vSunDir.xyz));
+    const float3 vSunFull = g_Frame.vSunColor.rgb * fNL, vSun = fSun * g_Frame.vSunColor.rgb * fNL;
+    const float fScale = I.vAmbient.w > 0 ? I.vAmbient.w : 1;
+    const bool bMaterial = (nFlags2 & DF2_MATERIAL_LIGHT) != 0;
+    float3 vLight = bMaterial ? saturate(I.vAmbient.rgb + I.vColor.rgb * vSun) : fScale * saturate(I.vAmbient.rgb / fScale + vSun);
+    // A lit object in the full set's shadow (DF2_SHADOW_TINT): at least the lit light times the tint, towards the lit
+    // one as the sun shows (General.hlsl).
+    if ((nFlags2 & DF2_SHADOW_TINT) && fSun < 1)
     {
-      const float fScale = I.vAmbient.w > 0 ? I.vAmbient.w : 1;
-      vVertexColor.rgb *= fScale * saturate(I.vAmbient.rgb / fScale + vSun);
+      const float3 vLit = bMaterial ? saturate(I.vAmbient.rgb + I.vColor.rgb * vSunFull) : fScale * saturate(I.vAmbient.rgb / fScale + vSunFull);
+      vLight = max(vLight, lerp(vLit * g_Frame.vShadowTint.rgb, vLit, fSun));
     }
+    if (bMaterial)
+      vVertexColor.rgb = vLight;
+    else
+      vVertexColor.rgb *= vLight;
   }
 
   const float4 vTex = RayTexture0(I, S, vRayDir);
@@ -443,7 +452,7 @@ float4 RayShade(SRayHit Hit, float3 vRayDir, float fConeWidth, bool bShadows, ui
     vColor.rgb += vTex.rgb * vTex.a;
   if (nFlags & DF_TERRAIN_CLIFF)
     vColor.rgb *= 2;
-  if (nFlags2 & DF2_SHADOW_TINT)
+  if ((nFlags2 & DF2_SHADOW_TINT) && !(nFlags & DF_LIGHTING))
     vColor.rgb *= lerp(g_Frame.vShadowTint.rgb, 1, fSun);
   return vColor;
 }

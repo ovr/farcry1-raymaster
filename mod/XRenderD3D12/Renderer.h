@@ -1628,6 +1628,7 @@ public:
   int CV_d3d12_PTCache = 1;                 //!< its radiance cache in real time (all the light at its last bounce's hit)
   float CV_d3d12_PTBehind = 40;             //!< how far what is behind the camera is in its scene for rays (m, UpdateRayBehind)
   int CV_d3d12_PTCheckerboard = 1;          //!< the paths of half the pixels each frame, the others from their neighbours
+  int CV_d3d12_PTSunHistory = 64;           //!< the frames the sun's shadow by rays holds at most with it (RaySun)
   int CV_d3d12_PTBounces = 1;               //!< its bounces in real time
   int CV_d3d12_PTReferenceBounces = 8;      //!< and in the reference (d3d12_PathTracing 2)
   float CV_d3d12_PTAmbient = 1.0f;          //!< the game's ambient light its paths fill in with (times)

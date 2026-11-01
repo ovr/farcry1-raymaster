@@ -717,11 +717,17 @@ void CD3D12Renderer::DrawLeafItem(const SRenderItem &it)
       return;
     // The sun hidden by the shadow maps of the object's casters; by the sun's cascades where they
     // reach (a light map by the live casters only: it has the shadows of the rest). The scene for
-    // rays takes their flags: which casters hide the sun at its hits (RayShade.hlsli).
+    // rays takes their flags: which casters hide the sun at its hits (RayShade.hlsli). A lit object
+    // in the cascades' shadow as dark as the original's shadows on the terrain (DF2_SHADOW_TINT):
+    // the game's light without the sun is the ambient colour alone, which the original's shadows
+    // never leave an object; times the material's colour it is far darker than the light maps
+    // around (Training's hut: the bloody papers on its floor, 0.31 times the ambient colour).
     if (dc.nFlags & (DF_LIGHTING | DF_TEX1_LIGHTMAP))
     {
       SetupShadowReceiver(dc, pObj);
       dc.nFlags2 |= CascadeReceiverFlags(!(dc.nFlags & DF_LIGHTING));
+      if ((dc.nFlags & DF_LIGHTING) && (dc.nFlags2 & DF2_SUN_CASCADES))
+        dc.nFlags2 |= DF2_SHADOW_TINT;
     }
   };
 
@@ -1076,7 +1082,7 @@ void CD3D12Renderer::DrawLeafItem(const SRenderItem &it)
     if (!(dc.nFlags & DF_LIGHTING) || !dc.nLights)
       return;
     dc.nFlags &= ~(DF_SHADOWS | DF_SHADOW_DEBUG);
-    dc.nFlags2 = (dc.nFlags2 & ~(DF2_SUN_CASCADES | DF2_CASCADES_LIVE)) | DF2_NO_SUN | DF2_FOG_BLACK;
+    dc.nFlags2 = (dc.nFlags2 & ~(DF2_SUN_CASCADES | DF2_CASCADES_LIVE | DF2_SHADOW_TINT)) | DF2_NO_SUN | DF2_FOG_BLACK;
     Set4(dc.vAmbient, 0, 0, 0, dc.vAmbient[3]);
     const bool bBlended = (Key.nState & GS_BLEND_MASK) != 0;
     Key.nState = bBlended ? GS_BLSRC_SRCALPHA | GS_BLDST_ONE : GS_BLSRC_ONE | GS_BLDST_ONE | GS_DEPTHFUNC_EQUAL;
@@ -1156,6 +1162,9 @@ void CD3D12Renderer::DrawLeafItem(const SRenderItem &it)
   if (bPathMaterial && nMaterial != XR_PT_MAT_UNLIT)
   {
     const uint32 nNoSun = dc.nFlags2 & DF2_NO_SUN;
+    // A lit object's shadow as the raster's (DF2_SHADOW_TINT: the ambient light the paths fill in with at least its lit
+    // light times the tint where the sun is hidden).
+    const uint32 nTint = (dc.nFlags2 & DF2_SHADOW_TINT) && (dc.nFlags & DF_LIGHTING) && !nNoSun ? DF2_SHADOW_TINT : 0;
     float vPathSpecular[4] = {};
     if ((dc.nFlags & (DF_LIGHTING | DF_PIXEL_LIGHTING | DF_SPECULAR)) == (DF_LIGHTING | DF_PIXEL_LIGHTING | DF_SPECULAR))
       memcpy(vPathSpecular, dc.vSpecular, sizeof(vPathSpecular));
@@ -1164,7 +1173,7 @@ void CD3D12Renderer::DrawLeafItem(const SRenderItem &it)
     dc.nFlags &= ~(DF_LIGHTING | DF_PIXEL_LIGHTING | DF_SPECULAR | DF_SHADOW_DEBUG | DF_TEX1_LIGHTMAP | DF_LIGHTMAP_DIR);
     dc.nFlags2 &= ~(DF2_MATERIAL_LIGHT | DF2_VERTEX_LIGHTS | DF2_SMOOTH_FALLOFF | DF2_LIGHTMAP_LIGHTS | DF2_SUN_CASCADES | DF2_CASCADES_LIVE |
                     DF2_SHADOW_TINT | DF2_FOLIAGE | DF2_AO_BAKED | DF2_AO_ALL | DF2_NO_SUN);
-    dc.nFlags2 |= (nNoSun ? nNoSun : CascadeReceiverFlags(false)) | (((nMaterial + 1) & 3) << DF2_PT_SHIFT);
+    dc.nFlags2 |= (nNoSun ? nNoSun : CascadeReceiverFlags(false) | nTint) | (((nMaterial + 1) & 3) << DF2_PT_SHIFT);
     memcpy(dc.vColor, vAlbedo, 3 * sizeof(float));
     memcpy(dc.vAmbient, vPathAmbient, sizeof(vPathAmbient));
     memcpy(dc.vSpecular, vPathSpecular, sizeof(vPathSpecular));
