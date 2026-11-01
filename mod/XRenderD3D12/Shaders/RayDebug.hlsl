@@ -14,6 +14,10 @@
 //	            (XR_RAY_DEBUG_*), w the rays' length (m)
 //	  vParams1  xyz the camera, w the instance mask (d3d12_RTMask, bits
 //	            0-7), bit 8 the sun's shadow at the hits (d3d12_RTShadows)
+//	  the path tracer's views (SPathShade, PathShade.hlsli):
+//	  vParams2  xyz vSun, w fLamps
+//	  vParams3  x fEmission, y fDelight, z fBakeLight, w fLightGap
+//	  nTex2     nLights (g_PTLights, root SRV t2 space5)
 //	The views:
 //	  XR_RAY_DEBUG_INSTANCES  a colour per instance, the edges of its
 //	                          triangles darker
@@ -30,13 +34,18 @@
 //	  XR_RAY_DEBUG_ALPHA      the alpha tests along the ray: none dark,
 //	                          then green to red at XR_RAY_MAX_ALPHA_TESTS
 //	  XR_RAY_DEBUG_SHADED_ALL as XR_RAY_DEBUG_SHADED, the whole picture
+//	  XR_RAY_DEBUG_PT_ALBEDO  the path tracer's albedo of the hits, as the
+//	                          game's colour (PathSurface)
+//	  XR_RAY_DEBUG_PT_EMISSION its emission, as the game's colour
+//	  XR_RAY_DEBUG_PT_DIRECT  emission + albedo * the light of the sun and
+//	                          the lamps (PathDirect), fogged as the picture
 //	A ray that hits nothing is black (the shaded views: the fog's
 //	colour). The views of the instances, the distance and the kind take
 //	the alpha tested triangles as opaque.
 //
 //////////////////////////////////////////////////////////////////////
 
-#include "RayShade.hlsli"
+#include "PathShade.hlsli"
 
 struct SRayDebugOutput
 {
@@ -86,6 +95,37 @@ float4 PSMain(SRayDebugOutput In) : SV_Target
   Ray.TMin = 0.01;
   Ray.TMax = g_Draw.vParams0.w;
   const uint nMask = asuint(g_Draw.vParams1.w) & 0xff;
+
+  if (nView >= XR_RAY_DEBUG_PT_ALBEDO && nView <= XR_RAY_DEBUG_PT_DIRECT)
+  {
+    const float fSpread = length(PixelRay(In.vPos.xy + float2(1, 0)) - Ray.Direction);
+    const SRayHit Hit = TraceScene(Ray, nMask, 0, fSpread);
+    if (!Hit.bHit)
+      return nView == XR_RAY_DEBUG_PT_DIRECT ? SceneOutput(float4(g_Frame.vFogColor.rgb, 1)) : float4(0, 0, 0, 1);
+    SPathShade P;
+    P.vSun = g_Draw.vParams2.xyz;
+    P.fLamps = g_Draw.vParams2.w;
+    P.fEmission = g_Draw.vParams3.x;
+    P.fDelight = g_Draw.vParams3.y;
+    P.fBakeLight = g_Draw.vParams3.z;
+    P.fLightGap = g_Draw.vParams3.w;
+    P.nLights = g_Draw.nTex2;
+    P.nMask = nMask;
+    P.nMaxTests = XR_RAY_MAX_ALPHA_TESTS;
+    const float fWidth = Hit.fT * fSpread;
+    const SPathSurface H = PathSurface(Hit, Ray.Direction, fWidth, P);
+    float3 vLight;
+    if (nView == XR_RAY_DEBUG_PT_ALBEDO)
+      vLight = H.vAlbedo;
+    else if (nView == XR_RAY_DEBUG_PT_EMISSION)
+      vLight = H.vEmission;
+    else
+      vLight = H.vEmission + H.vAlbedo * PathDirect(H, P, fWidth);
+    float3 vColor = float3(HdrEncode(vLight.r), HdrEncode(vLight.g), HdrEncode(vLight.b));
+    if (nView == XR_RAY_DEBUG_PT_DIRECT && H.bFog && g_Frame.vFogParams.w != 0)
+      vColor = lerp(g_Frame.vFogColor.rgb, vColor, SceneFog(Ray.Origin + Ray.Direction * Hit.fT));
+    return SceneOutput(float4(vColor, 1));
+  }
 
   if (nView == XR_RAY_DEBUG_SHADED || nView == XR_RAY_DEBUG_SHADED_ALL || nView == XR_RAY_DEBUG_LOD || nView == XR_RAY_DEBUG_ALPHA)
   {

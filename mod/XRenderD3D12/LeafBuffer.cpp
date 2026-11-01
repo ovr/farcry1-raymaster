@@ -20,7 +20,9 @@
 #include <array>
 #include <cmath>
 #include <cstddef>
+#include <unordered_map>
 #include <unordered_set>
+#include <vector>
 
 CLeafBuffer CLeafBuffer::m_Root("Root");
 CLeafBuffer CLeafBuffer::m_RootGlobal("RootGlobal");
@@ -411,9 +413,20 @@ bool ReserveBytes(SVertexStream &s, uint32 nBytes)
 //////////////////////////////////////////////////////////////////////////
 // State of all leaf buffers
 
+//! The values of a leaf buffer's last UpdateCustomLighting (Geometry::SetUnlitVegetation bakes again with them).
+struct SCustomLighting
+{
+  float fBackSideLevel = 1;
+  Vec3 vAmbient = Vec3(0, 0, 0);
+  Vec3 vLight = Vec3(0, 0, 1);
+  bool bCalcLighting = false;
+};
+
 struct SGeomState
 {
   std::unordered_set<CLeafBuffer *> Live;
+  std::unordered_map<CLeafBuffer *, SCustomLighting> Lighting;
+  bool bUnlitVegetation = false;    //!< Geometry::SetUnlitVegetation
 };
 
 SGeomState *s_pState = nullptr;
@@ -1090,7 +1103,10 @@ CLeafBuffer::~CLeafBuffer()
   if (IsRoot(this))
     return;
   if (s_pState)
+  {
     s_pState->Live.erase(this);
+    s_pState->Lighting.erase(this);
+  }
   Unlink();
   UnlinkGlobal();
 
@@ -1827,6 +1843,15 @@ static int CountRayHits(const uint8 *pVerts, const SFormatInfo &F, int nVerts, c
 
 void CLeafBuffer::UpdateCustomLighting(float fBackSideLevel, Vec3 vStatObjAmbientColor, const Vec3 &vLight, bool bCalcLighting)
 {
+  SCustomLighting &Last = State().Lighting[this];
+  Last.fBackSideLevel = fBackSideLevel;
+  Last.vAmbient = vStatObjAmbientColor;
+  Last.vLight = vLight;
+  Last.bCalcLighting = bCalcLighting;
+  // For the path tracer the mesh's colours alone, halved for the shaders' 2x (Geometry::SetUnlitVegetation).
+  const bool bUnlit = State().bUnlitVegetation;
+  if (bUnlit)
+    bCalcLighting = false;
   CVertexBuffer *pSys = m_pSecVertBuffer;
   if (!pSys || !pSys->m_VS[VSF_GENERAL].m_VData)
     return;
@@ -1900,6 +1925,9 @@ void CLeafBuffer::UpdateCustomLighting(float fBackSideLevel, Vec3 vStatObjAmbien
         rgb[c] *= 0.5f * amb[c] + std::max(fSun - fShadow, 0.f);
       }
     }
+    if (bUnlit)
+      for (float &c : rgb)
+        c *= 0.5f;
     pCol[2] = (uint8)(std::clamp(rgb[0], 0.f, 1.f) * 255.f + 0.5f);
     pCol[1] = (uint8)(std::clamp(rgb[1], 0.f, 1.f) * 255.f + 0.5f);
     pCol[0] = (uint8)(std::clamp(rgb[2], 0.f, 1.f) * 255.f + 0.5f);
@@ -2388,6 +2416,19 @@ std::optional<D3D12_VERTEX_BUFFER_VIEW> Geometry::GetTangentStream(CLeafBuffer *
   vb.SizeInBytes = nBytes;
   vb.StrideInBytes = sizeof(SPipTangents);
   return vb;
+}
+
+void Geometry::SetUnlitVegetation(bool bUnlit)
+{
+  SGeomState &S = State();
+  if (S.bUnlitVegetation == bUnlit)
+    return;
+  S.bUnlitVegetation = bUnlit;
+  // UpdateCustomLighting writes its entry again (the same values).
+  std::vector<std::pair<CLeafBuffer *, SCustomLighting>> All(S.Lighting.begin(), S.Lighting.end());
+  for (const auto &[pLB, L] : All)
+    if (S.Live.count(pLB))
+      pLB->UpdateCustomLighting(L.fBackSideLevel, L.vAmbient, L.vLight, L.bCalcLighting);
 }
 
 void Geometry::Shutdown()

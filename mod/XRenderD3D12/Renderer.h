@@ -734,6 +734,16 @@ public:
   //! The main view's lights for the path tracer (Lights, the scene's), once a frame before its opaque
   //! list: SPTLight in per frame memory (m_PathTrace.nLights); a "pt lights:" line in the frame dump.
   void UpdatePathLights(std::span<CDLight *const> Lights);
+  //! The path tracer's views of d3d12_RTDebug (XR_RAY_DEBUG_PT_*): they want the frame's lights too.
+  bool WantsPathDebug() const;
+  //! SPathShade of Shaders/PathShade.hlsli (its fields there) from the frame and the cvars.
+  struct SPathShadeParams
+  {
+    float vSun[3];
+    float fLamps, fEmission, fDelight, fBakeLight, fLightGap;
+    uint32 nLights;
+  };
+  void GetPathShade(SPathShadeParams &P) const;
 
   struct SPathTraceState
   {
@@ -1493,6 +1503,11 @@ public:
   float CV_d3d12_RTGIBounce = 1.0f;         //!< how much light what they find gives back (0: it only occludes)
   int CV_d3d12_PathTracing = 0;             //!< the main view's lighting by paths (PathTrace.cpp): 1 in real time, 2 the reference
   int CV_d3d12_PTFillLights = 0;            //!< with d3d12_PathTracing, the characters' fill lights (DLF_AMBIENT_LIGHT) among its lights
+  float CV_d3d12_PTLightDistance = 60.0f;   //!< the path tracer's lights within this distance of the camera (to their sphere, m)
+  float CV_d3d12_PTSun = 1.0f;              //!< the path tracer's sun: times HdrDecode(2 * its colour) (Shaders/PathShade.hlsli)
+  float CV_d3d12_PTLamps = 1.0f;            //!< its lamps
+  float CV_d3d12_PTEmission = 1.0f;         //!< what glows
+  float CV_d3d12_PTTerrainDelight = 2.0f;   //!< the light baked into the terrain's texture: lit over shadowed (<= 1: none taken off)
   int CV_d3d12_ToneMap = 1;                 //!< the HDR pipeline's tone map: 0 clamp, 1 soft shoulder, 2 ACES fitted, 3 AgX
   float CV_d3d12_ToneMapKnee = 0.85f;       //!< where the soft shoulder starts (a display value)
   float CV_d3d12_Exposure = 0;              //!< the exposure's compensation, EV

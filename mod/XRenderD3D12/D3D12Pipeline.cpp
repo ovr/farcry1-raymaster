@@ -523,7 +523,7 @@ bool CD3D12Pipeline::CreateRootSignature()
   Ranges[4] = Ranges[0];
   Ranges[4].RegisterSpace = 6;                  // Texture3D g_Volumes[] (the volumetric light's froxels)
 
-  D3D12_ROOT_PARAMETER Params[5] = {};
+  D3D12_ROOT_PARAMETER Params[6] = {};
   Params[0].ParameterType = D3D12_ROOT_PARAMETER_TYPE_CBV;      // b0 SFrameConstants
   Params[0].Descriptor.ShaderRegister = 0;
   Params[0].ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
@@ -542,6 +542,10 @@ bool CD3D12Pipeline::CreateRootSignature()
   Params[ROOT_RAY_INSTANCES].Descriptor.ShaderRegister = 1;
   Params[ROOT_RAY_INSTANCES].Descriptor.RegisterSpace = 5;
   Params[ROOT_RAY_INSTANCES].ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
+  Params[ROOT_RAY_LIGHTS].ParameterType = D3D12_ROOT_PARAMETER_TYPE_SRV;     // t2 space5 the path tracer's lights
+  Params[ROOT_RAY_LIGHTS].Descriptor.ShaderRegister = 2;
+  Params[ROOT_RAY_LIGHTS].Descriptor.RegisterSpace = 5;
+  Params[ROOT_RAY_LIGHTS].ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
 
   D3D12_STATIC_SAMPLER_DESC Samplers[5];
   Samplers[XR_SAMPLER_LINEAR_WRAP] = StaticSampler(XR_SAMPLER_LINEAR_WRAP, D3D12_FILTER_ANISOTROPIC, D3D12_TEXTURE_ADDRESS_MODE_WRAP);
@@ -553,7 +557,7 @@ bool CD3D12Pipeline::CreateRootSignature()
   Samplers[4].ComparisonFunc = D3D12_COMPARISON_FUNC_LESS_EQUAL;
 
   D3D12_ROOT_SIGNATURE_DESC Desc = {};
-  Desc.NumParameters = 5;
+  Desc.NumParameters = (UINT)std::size(Params);
   Desc.pParameters = Params;
   Desc.NumStaticSamplers = 5;
   Desc.pStaticSamplers = Samplers;

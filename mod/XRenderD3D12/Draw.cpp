@@ -290,6 +290,8 @@ void CD3D12Renderer::DrawGeometry(const SPipelineKey &Key, const SDrawConstants 
   {
     pList->SetGraphicsRootShaderResourceView(ROOT_RAY_SCENE, nRayScene);
     pList->SetGraphicsRootShaderResourceView(ROOT_RAY_INSTANCES, m_pRayScene->GetInstances());
+    if (m_PathTrace.nLights && m_PathTrace.nLightsFrame == m_nFrames)
+      pList->SetGraphicsRootShaderResourceView(ROOT_RAY_LIGHTS, m_PathTrace.nLights);
   }
   const auto SetVB = [&](UINT nSlot, const D3D12_VERTEX_BUFFER_VIEW &View)
   {

@@ -409,6 +409,15 @@ void CD3D12RayScene::CaptureDraw(const SPipelineKey &Key, const SDrawConstants &
     return;
   d.nKind = (uint8)((bStatic ? XR_RAY_STATIC : XR_RAY_DYNAMIC) | (bAlphaTest ? XR_RAY_ALPHATEST : 0));
   FillInstance(d.Inst, Key, dc, Tri, d.nTexCoord1);
+  if (m_bCaptureMaterial)
+  {
+    memcpy(d.Inst.vAlbedo, m_vCaptureAlbedo, sizeof(d.Inst.vAlbedo));
+    memcpy(d.Inst.vSpecular, m_vCaptureSpecular, sizeof(d.Inst.vSpecular));
+    d.Inst.nPath[0] = m_nCaptureMaterial;
+  }
+  else
+    DefaultMaterial(d.Inst, dc);
+  d.bTerrain = d.Inst.nPath[0] == XR_PT_MAT_TERRAIN;
   uint32 Slots[4];
   GetTextureSlots(d.Inst, Slots);
   for (int i = 0; i < 4; i++)
@@ -475,6 +484,21 @@ void CD3D12RayScene::FillInstance(SRayInstance &Inst, const SPipelineKey &Key, c
   memcpy(Inst.vTexMat0, dc.vTexMat0, sizeof(Inst.vTexMat0));
   memcpy(Inst.vTexMat1, dc.vTexMat1, sizeof(Inst.vTexMat1));
   memcpy(Inst.vAddColor, dc.vAddColor, sizeof(Inst.vAddColor));
+}
+
+void CD3D12RayScene::DefaultMaterial(SRayInstance &Inst, const SDrawConstants &dc)
+{
+  memcpy(Inst.vAlbedo, dc.vColor, sizeof(Inst.vAlbedo));
+  memset(Inst.vSpecular, 0, sizeof(Inst.vSpecular));
+  Inst.nPath[0] = (dc.nFlags & DF_VCOLOR_X2) ? XR_PT_MAT_VEGETATION : (dc.nFlags & (DF_LIGHTING | DF_TEX1_LIGHTMAP)) ? XR_PT_MAT_LIT : XR_PT_MAT_UNLIT;
+}
+
+void CD3D12RayScene::SetCaptureMaterial(uint32 nMaterial, const float vAlbedo[4], const float vSpecular[4])
+{
+  m_bCaptureMaterial = true;
+  m_nCaptureMaterial = nMaterial;
+  memcpy(m_vCaptureAlbedo, vAlbedo, sizeof(m_vCaptureAlbedo));
+  memcpy(m_vCaptureSpecular, vSpecular, sizeof(m_vCaptureSpecular));
 }
 
 //////////////////////////////////////////////////////////////////////////
@@ -845,7 +869,7 @@ void CD3D12RayScene::Build(FILE *pDump, bool bTop)
       D3D12_RAYTRACING_INSTANCE_DESC Instance = {};
       memcpy(Instance.Transform, d.Transform, sizeof(Instance.Transform));
       Instance.InstanceID = nInstance;
-      Instance.InstanceMask = d.nKind | (d.bLive ? XR_RAY_LIVE : 0);
+      Instance.InstanceMask = d.nKind | (d.bLive ? XR_RAY_LIVE : 0) | (d.bTerrain ? XR_RAY_TERRAIN : 0);
       Instance.InstanceContributionToHitGroupIndex = Instance.InstanceMask;
       nLive += d.bLive ? 1 : 0;
       Instance.Flags = D3D12_RAYTRACING_INSTANCE_FLAG_TRIANGLE_CULL_DISABLE;
@@ -952,7 +976,8 @@ void CD3D12Renderer::GetRayView(float vCameraPos[4], float vRayX[4], float vRayY
 
 uint32 CD3D12Renderer::RayMask() const
 {
-  return ((uint32)CV_d3d12_RTMask & 0xff) | (CV_d3d12_RTShadows ? 0x100u : 0u);
+  // The terrain's bit is for the path tracer's rays over the terrain alone.
+  return ((uint32)CV_d3d12_RTMask & 0xff & ~(uint32)XR_RAY_TERRAIN) | (CV_d3d12_RTShadows ? 0x100u : 0u);
 }
 
 void CD3D12Renderer::BuildRayScene(std::span<const SRenderItem> Opaque, bool bTraced)
@@ -1118,6 +1143,15 @@ void CD3D12Renderer::DrawRayDebug()
   const uint32 nMask = RayMask();
   Set4(dc.vParams1, vCamera.x, vCamera.y, vCamera.z, 0);
   memcpy(&dc.vParams1[3], &nMask, sizeof(nMask));
+  // The path tracer's views: its shading (SPathShade, Shaders/PathShade.hlsli).
+  if (WantsPathDebug())
+  {
+    SPathShadeParams P;
+    GetPathShade(P);
+    Set4(dc.vParams2, P.vSun[0], P.vSun[1], P.vSun[2], P.fLamps);
+    Set4(dc.vParams3, P.fEmission, P.fDelight, P.fBakeLight, P.fLightGap);
+    dc.nTex2 = P.nLights;
+  }
   DrawImmediate(Key, dc, D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST, VERTEX_FORMAT_P3F, s_FullScreen, 3);
   memcpy(m_Viewport, Viewport, sizeof(Viewport));
   m_bScissor = bScissor;
