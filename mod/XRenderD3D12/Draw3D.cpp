@@ -805,7 +805,8 @@ void CD3D12Renderer::DrawLeafItem(const SRenderItem &it)
       if (CV_d3d12_FoliageTranslucency > 0 && !m_bHeatPass && CascadeReceiverFlags(false))
         dc.nFlags2 |= DF2_FOLIAGE;
     }
-    if (IsBlendedVColor(eDC, pRes, pObj))
+    // (with the path tracer the grass fading in or out is alpha tested, its alpha times the fade: it thins out; Scene.cpp)
+    if (IsBlendedVColor(eDC, pRes, pObj) && !(eDC == eDC_AlphaTestVColor && WantsPathTracing()))
     {
       // Grass fading in or out, transparent plants: blended, no depth writes.
       Key.nState = GS_BLSRC_SRCALPHA | GS_BLDST_ONEMINUSSRCALPHA;
@@ -1131,14 +1132,17 @@ void CD3D12Renderer::DrawLeafItem(const SRenderItem &it)
   }
   if (bRayMaterial)
     m_pRayScene->SetCaptureMaterial(nMaterial, vAlbedo, vSpecular);
-  // Into the G-buffer: a surface the path tracer lights without its light (no sun, ambient, lamps, light map or
-  // shadows), its colour the albedo (General.hlsl, XR_PT).
+  // Into the G-buffer: a surface the path tracer lights without its light (no sun, ambient, lamps or light map), its
+  // colour the albedo (General.hlsl, XR_PT); the sun's visibility from all the casters (its shadow maps, the sun's
+  // cascades, the mask by rays), which the composite takes.
+  // (none where the raster has no sun, DF2_NO_SUN)
   if (bPathMaterial && nMaterial != XR_PT_MAT_UNLIT)
   {
-    dc.nFlags &= ~(DF_LIGHTING | DF_PIXEL_LIGHTING | DF_SPECULAR | DF_SHADOWS | DF_SHADOW_DEBUG | DF_TEX1_LIGHTMAP | DF_LIGHTMAP_DIR);
+    const uint32 nNoSun = dc.nFlags2 & DF2_NO_SUN;
+    dc.nFlags &= ~(DF_LIGHTING | DF_PIXEL_LIGHTING | DF_SPECULAR | DF_SHADOW_DEBUG | DF_TEX1_LIGHTMAP | DF_LIGHTMAP_DIR);
     dc.nFlags2 &= ~(DF2_MATERIAL_LIGHT | DF2_VERTEX_LIGHTS | DF2_SMOOTH_FALLOFF | DF2_LIGHTMAP_LIGHTS | DF2_SUN_CASCADES | DF2_CASCADES_LIVE |
                     DF2_SHADOW_TINT | DF2_FOLIAGE | DF2_AO_BAKED | DF2_AO_ALL | DF2_NO_SUN);
-    dc.nFlags2 |= ((nMaterial + 1) & 3) << DF2_PT_SHIFT;
+    dc.nFlags2 |= (nNoSun ? nNoSun : CascadeReceiverFlags(false)) | (((nMaterial + 1) & 3) << DF2_PT_SHIFT);
     memcpy(dc.vColor, vAlbedo, 3 * sizeof(float));
     dc.nLights = 0;
   }

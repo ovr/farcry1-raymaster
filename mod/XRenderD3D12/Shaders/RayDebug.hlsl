@@ -41,8 +41,11 @@
 //	                          the lamps (PathDirect), fogged as the picture
 //	  XR_RAY_DEBUG_GB_*       the path tracer's G-buffer (PathGBuffer.hlsli:
 //	                          the albedo, the normal, the fog's share, the
-//	                          material), no rays: tex0 its albedo, tex1 its
-//	                          normal, vParams2.xy their size
+//	                          material, the sun's visibility) and the
+//	                          light of its paths on a grey albedo (the
+//	                          game's 0.5), no rays: tex0 its albedo, tex1
+//	                          its normal, tex2 the light (PathTrace.hlsl's)
+//	                          or the visibility, vParams2.xy their size
 //	A ray that hits nothing is black (the shaded views: the fog's
 //	colour). The views of the instances, the distance and the kind take
 //	the alpha tested triangles as opaque.
@@ -100,10 +103,14 @@ float4 GBufferView(uint nView, float2 vPixel)
     return float4(vAlbedo, 1);
   if (nView == XR_RAY_DEBUG_GB_FOG)
     return float4(vNormal.bbb, 1);
+  if (nView == XR_RAY_DEBUG_GB_SUN)
+    return float4(g_Textures[g_Draw.nTex2].Load(vAt).rrr, 1);
   if (nMaterial == 0)
     return float4(0, 0, 0, 1);
   if (nView == XR_RAY_DEBUG_GB_NORMAL)
     return float4(PathOctDecode(vNormal.rg) * 0.5 + 0.5, 1);
+  if (nView == XR_RAY_DEBUG_GB_LIGHT || nView == XR_RAY_DEBUG_GB_RAYS)
+    return float4(pow(saturate(pow(0.5, HDR_GAMMA) * g_Textures[g_Draw.nTex2].Load(vAt).rgb), 1 / HDR_GAMMA), 1);
   const float3 vColor = nMaterial == 2 ? float3(0.3, 0.9, 0.3) : nMaterial == 3 ? float3(0.9, 0.9, 0.2) : float3(0.8, 0.8, 0.8);
   return float4(vColor * (0.4 + 0.6 * saturate(dot(vAlbedo, float3(0.299, 0.587, 0.114)))), 1);
 }

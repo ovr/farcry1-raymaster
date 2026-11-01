@@ -54,6 +54,9 @@
 #define XR_RAY_DEBUG_GB_NORMAL  17  //!< the normal, rgb = n * 0.5 + 0.5; no surface black
 #define XR_RAY_DEBUG_GB_FOG     18  //!< the fog's share, grey
 #define XR_RAY_DEBUG_GB_MATERIAL 19 //!< the material over the albedo's grey: lit grey, the terrain green, the vegetation yellow; none black
+#define XR_RAY_DEBUG_GB_LIGHT   20  //!< the light of the lamps and the bounces on the surfaces as the composite takes it (PathTrace.hlsl CSFilter), grey
+#define XR_RAY_DEBUG_GB_RAYS    21  //!< the same as the paths of the frame found it (CSTrace), no history or filter
+#define XR_RAY_DEBUG_GB_SUN     22  //!< the sun's visibility the raster found (the G-buffer's), grey
 
 //! SRayInstance: no view, no stream.
 #define XR_RAY_NONE         0xffffffff
@@ -172,6 +175,36 @@ struct SRayAOConstants
   XR_FLOAT4(vGI);                 //!< x d3d12_RTGIBounce
   XR_FLOAT4(vOutdoorAmbient);     //!< rgb the 3D engine's outdoor ambient colour (a hit's without one of its own)
   XR_UINT4(nTextures2);           //!< texture table indices: x the frames of the history before, y this frame's
+};
+
+// The threads a side of a group of the path tracer's kernels (PathTrace.hlsl, PathTrace.cpp)
+#define XR_PT_GROUP 8
+
+//! b2 of the path tracer's kernels (PathTrace.hlsl, PathTrace.cpp); the view's fields as SRayAOConstants' (RayView.hlsli).
+struct SPathTraceConstants
+{
+  XR_FLOAT4X4(mPrevViewProj);     //!< world to clip in the frame before, without its jitter: where a point was in the history
+  XR_FLOAT4(vCameraPos);          //!< xyz the camera
+  XR_FLOAT4(vRayX);               //!< the world position at the view depth d and x, y -1..1 across the view (y up), the jitter
+  XR_FLOAT4(vRayY);               //!< taken off: vCameraPos + d (vRayO + x vRayX + y vRayY)
+  XR_FLOAT4(vRayO);
+  XR_FLOAT4(vSize);               //!< x width, y height, z 1 / width, w 1 / height (the depth buffer's and the G-buffer's pixels)
+  XR_FLOAT4(vJitter);             //!< xy this frame's jitter (SFrameConstants::vJitter.xy), zw the frame before's
+  XR_FLOAT4(vParams);             //!< x the rays' length (m), y a pixel's size at a view depth of 1 m, z the frames a history holds
+                                  //!< at most, w the most light a path's sample brings (luminance; 0: no limit)
+  XR_FLOAT4(vSun);                //!< rgb the sun's light (SPathShade::vSun), w d3d12_PTLamps
+  XR_FLOAT4(vSky);                //!< rgb the sky's light where a path finds nothing, w d3d12_PTEmission
+  XR_FLOAT4(vShade);              //!< x d3d12_PTTerrainDelight, y the light baked into the terrain (SPathShade::fBakeLight), z the
+                                  //!< lamps' rays' gap (d3d12_RTLightShadowGap)
+  XR_UINT4(nTextures);            //!< texture table indices: x the depth buffer, y CSTrace's paths, z the history of the frame
+                                  //!< before (CSTemporal), w this frame's (CSFilter)
+  XR_UINT4(nTextures2);           //!< texture table indices: x the G-buffer's normal, y the frames of the history before, z this
+                                  //!< frame's
+  XR_UINT4(nTrace);               //!< RayView.hlsli's grid: x 1 (a path for each pixel), y z 0
+  XR_UINT4(nFlags);               //!< x 1: a history to blend into, y the frame (the noise), z 1: filtered, w the mask of the
+                                  //!< instances the rays see (RayMask)
+  XR_UINT4(nPath);                //!< x the lamps (g_PTLights), y the bounces of a path, z the alpha tests of a ray at most, w 1:
+                                  //!< the reference (no limit to a sample's light)
 };
 
 #endif

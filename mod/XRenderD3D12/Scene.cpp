@@ -116,7 +116,10 @@ namespace
     // alone (the muzzle flash) is drawn among the blended ones, after the weapon.
     if (SortGroup(it.nSort) == eS_Nearest)
       return eRL_Nearest;
-    if (IsBlendedClass(it.eDrawClass) || IsBlendedVColor(it.eDrawClass, it.pRes, it.pObj))
+    // (with the path tracer the grass that fades in or out is alpha tested among the opaque surfaces: the paths light
+    // what is in its G-buffer; DrawLeafItem)
+    if (IsBlendedClass(it.eDrawClass) ||
+        (IsBlendedVColor(it.eDrawClass, it.pRes, it.pObj) && !(it.eDrawClass == eDC_AlphaTestVColor && g_pRenderer->WantsPathTracing())))
       return eRL_Blended;
     if (it.pObj->m_ObjFlags & FOB_NEAREST)
       return eRL_Nearest;
@@ -593,6 +596,7 @@ void CScene::EndEf3D(int nFlags)
       if (l == eRL_Opaque)
       {
         g_pRenderer->EndPathTargets();
+        g_pRenderer->DrawPathTrace();
         g_pRenderer->DrawAmbientOcclusion();
       }
     }

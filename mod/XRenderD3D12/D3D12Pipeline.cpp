@@ -80,6 +80,10 @@
 #include "General_Ambient_RaySun_Rays_Hdr_Velocity_PS.h"
 #include "General_PT_Hdr_PS.h"
 #include "General_PT_Hdr_Velocity_PS.h"
+#include "General_PT_Cascades_Hdr_PS.h"
+#include "General_PT_Cascades_Hdr_Velocity_PS.h"
+#include "General_PT_RaySun_Hdr_PS.h"
+#include "General_PT_RaySun_Hdr_Velocity_PS.h"
 #include "Water_VS.h"
 #include "Water_PS.h"
 #include "Water_Velocity_VS.h"
@@ -98,6 +102,8 @@
 #include "Hdr_Highlight_PS.h"
 #include "RayDebug_VS.h"
 #include "RayDebug_PS.h"
+#include "PathComposite_VS.h"
+#include "PathComposite_PS.h"
 
 using Microsoft::WRL::ComPtr;
 
@@ -159,6 +165,7 @@ namespace
     { "Post", g_Post_VS, sizeof(g_Post_VS), g_Post_PS, sizeof(g_Post_PS) },
     { "Hdr", g_Hdr_VS, sizeof(g_Hdr_VS), g_Hdr_PS, sizeof(g_Hdr_PS) },
     { "RayDebug", g_RayDebug_VS, sizeof(g_RayDebug_VS), g_RayDebug_PS, sizeof(g_RayDebug_PS) },
+    { "PathComposite", g_PathComposite_VS, sizeof(g_PathComposite_VS), g_PathComposite_PS, sizeof(g_PathComposite_PS) },
   };
 
   //! The general program's pixel shaders with the ambient light's part (XR_AMBIENT) by [cascades][HDR][velocity].
@@ -224,10 +231,15 @@ namespace
           { g_General_Ambient_RaySun_Rays_Hdr_Velocity_PS, sizeof(g_General_Ambient_RaySun_Rays_Hdr_Velocity_PS) } } } },
   };
 
-  //! The general program's pixel shaders into the path tracer's G-buffer (XR_PT, SPipelineKey::bPathTrace), by [velocity].
-  const D3D12_SHADER_BYTECODE s_PathPS[2] =
+  //! The general program's pixel shaders into the path tracer's G-buffer (XR_PT, SPipelineKey::bPathTrace), by [without
+  //! the sun's cascades, with them, with the mask by rays too][velocity].
+  const D3D12_SHADER_BYTECODE s_PathPS[3][2] =
   {
-    { g_General_PT_Hdr_PS, sizeof(g_General_PT_Hdr_PS) }, { g_General_PT_Hdr_Velocity_PS, sizeof(g_General_PT_Hdr_Velocity_PS) },
+    { { g_General_PT_Hdr_PS, sizeof(g_General_PT_Hdr_PS) }, { g_General_PT_Hdr_Velocity_PS, sizeof(g_General_PT_Hdr_Velocity_PS) } },
+    { { g_General_PT_Cascades_Hdr_PS, sizeof(g_General_PT_Cascades_Hdr_PS) },
+      { g_General_PT_Cascades_Hdr_Velocity_PS, sizeof(g_General_PT_Cascades_Hdr_Velocity_PS) } },
+    { { g_General_PT_RaySun_Hdr_PS, sizeof(g_General_PT_RaySun_Hdr_PS) },
+      { g_General_PT_RaySun_Hdr_Velocity_PS, sizeof(g_General_PT_RaySun_Hdr_Velocity_PS) } },
   };
 
   //! Input slot 1: what a vertex format lacks, read with stride 0 by every vertex.
@@ -856,7 +868,8 @@ ComPtr<ID3D12PipelineState> CD3D12Pipeline::CreatePSO(const SPipelineKey &Key, b
     const bool bMotion = bVelocity || bUpscaleDepth;
     Desc.VS = bMotion ? D3D12_SHADER_BYTECODE{ g_General_Velocity_VS, sizeof(g_General_Velocity_VS) }
                       : D3D12_SHADER_BYTECODE{ g_General_VS, sizeof(g_General_VS) };
-    Desc.PS = s_PathPS[bMotion ? 1 : 0];
+    // (the leaves' sun through them, XR_FOLIAGE, as the cascades: the path tracer lights them)
+    Desc.PS = s_PathPS[Key.bCascades == 3 ? 2 : Key.bCascades ? 1 : 0][bMotion ? 1 : 0];
   }
   // A caster of the sun's cascades into all its slices at once.
   if (bGeneral && bShadowMap && Key.bCascadeInstances)
@@ -949,6 +962,7 @@ ComPtr<ID3D12PipelineState> CD3D12Pipeline::CreatePSO(const SPipelineKey &Key, b
     D3D12_RENDER_TARGET_BLEND_DESC &Normal = Desc.BlendState.RenderTarget[4];
     Normal = Desc.BlendState.RenderTarget[1];
     Normal.RenderTargetWriteMask = bWrites && !(nState & (GS_BLSRC_MASK | GS_BLDST_MASK)) ? D3D12_COLOR_WRITE_ENABLE_ALL : 0;
+    Desc.BlendState.RenderTarget[5] = Normal;
   }
   // Without a pixel shader no colour target is written.
   if (Key.bDepthOnly)
@@ -1018,7 +1032,7 @@ ComPtr<ID3D12PipelineState> CD3D12Pipeline::CreatePSO(const SPipelineKey &Key, b
   const int nTopology = Key.nTopology;
   Desc.PrimitiveTopologyType = nTopology >= D3D12_PRIMITIVE_TOPOLOGY_TYPE_POINT && nTopology <= D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE ?
     (D3D12_PRIMITIVE_TOPOLOGY_TYPE)nTopology : D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
-  Desc.NumRenderTargets = bShadowMap ? 0 : bPath ? 5 : bAmbient ? 4 : bScene ? 3 : bHighlight ? 2 : 1;
+  Desc.NumRenderTargets = bShadowMap ? 0 : bPath ? 6 : bAmbient ? 4 : bScene ? 3 : bHighlight ? 2 : 1;
   switch (Key.nColorFormat)
   {
   case PIPELINE_COLOR_HDR:   Desc.RTVFormats[0] = D3D12_HDR_FORMAT; break;
@@ -1034,6 +1048,7 @@ ComPtr<ID3D12PipelineState> CD3D12Pipeline::CreatePSO(const SPipelineKey &Key, b
   Desc.RTVFormats[2] = bScene || bAmbient ? D3D12_UPSCALE_DEPTH_FORMAT : DXGI_FORMAT_UNKNOWN;
   Desc.RTVFormats[3] = bPath ? D3D12_PT_ALBEDO_FORMAT : bAmbient ? D3D12_AMBIENT_FORMAT : DXGI_FORMAT_UNKNOWN;
   Desc.RTVFormats[4] = bPath ? D3D12_PT_NORMAL_FORMAT : DXGI_FORMAT_UNKNOWN;
+  Desc.RTVFormats[5] = bPath ? D3D12_PT_SUN_FORMAT : DXGI_FORMAT_UNKNOWN;
   Desc.DSVFormat = bShadowMap ? D3D12_SHADOW_MAP_FORMAT : bScene ? D3D12_SCENE_DEPTH_FORMAT : bDepth ? D3D12_DEPTH_FORMAT : DXGI_FORMAT_UNKNOWN;
   Desc.SampleDesc.Count = 1;
   Desc.SampleDesc.Quality = 0;

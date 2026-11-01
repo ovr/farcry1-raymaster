@@ -320,7 +320,16 @@ void CD3D12Renderer::RegisterVariables()
                      "much brighter a face towards the sun is than one in the terrain's shadow (1 or less: none taken off)");
   iConsole->Register("d3d12_PTDebug", &CV_d3d12_PTDebug, 0, 0,
                      "With d3d12_PathTracing, its G-buffer over the picture: 1 the albedo, 2 the normal, 3 the fog's share, "
-                     "4 the material (lit grey, the terrain green, the vegetation yellow; none black)");
+                     "4 the material (lit grey, the terrain green, the vegetation yellow; none black); 5 the light of its paths "
+                     "(on grey), 6 one frame's paths, 7 the sun's visibility");
+  iConsole->Register("d3d12_PTSky", &CV_d3d12_PTSky, 1.0f, VF_DUMPTODISK,
+                     "With d3d12_PathTracing, the sky's light where a path leaves the scene: times the level's outdoor ambient");
+  iConsole->Register("d3d12_PTBounces", &CV_d3d12_PTBounces, 1, VF_DUMPTODISK,
+                     "With d3d12_PathTracing 1, the bounces of its paths (0: the lamps and the sun on the surfaces alone)");
+  iConsole->Register("d3d12_PTReferenceBounces", &CV_d3d12_PTReferenceBounces, 8, VF_DUMPTODISK,
+                     "With d3d12_PathTracing 2 (the reference), the bounces of its paths at most");
+  m_pPTDenoiserVar = iConsole->CreateVariable("d3d12_PTDenoiser", "simple", VF_DUMPTODISK,
+                     "With d3d12_PathTracing 1, the denoiser of its light: simple (its own filter) or none (the history alone)");
   // The HDR pipeline (r_HDRRendering, Hdr.cpp).
   iConsole->Register("d3d12_ToneMap", &CV_d3d12_ToneMap, 1, VF_DUMPTODISK,
                      "With r_HDRRendering, the tone map: 0 clamp, 1 soft shoulder (the game's look up to d3d12_ToneMapKnee, then each channel rolls off to 1), 2 ACES fitted, 3 AgX");
@@ -506,6 +515,11 @@ WIN_HWND CD3D12Renderer::Init(int x,int y,int width,int height,unsigned int cbpp
     iConsole->UnregisterVariable("d3d12_PTTerrainDelight", true);
     iConsole->UnregisterVariable("d3d12_PTDebug", true);
     CV_d3d12_PTDebug = 0;
+    iConsole->UnregisterVariable("d3d12_PTSky", true);
+    iConsole->UnregisterVariable("d3d12_PTBounces", true);
+    iConsole->UnregisterVariable("d3d12_PTReferenceBounces", true);
+    iConsole->UnregisterVariable("d3d12_PTDenoiser", true);
+    m_pPTDenoiserVar = nullptr;
   }
   m_Viewport[0] = 0;
   m_Viewport[1] = 0;

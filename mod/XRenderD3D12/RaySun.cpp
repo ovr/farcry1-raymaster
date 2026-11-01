@@ -72,7 +72,9 @@ D3D12_SHADER_RESOURCE_VIEW_DESC TextureSRV(DXGI_FORMAT Format)
 
 bool CD3D12Renderer::WantsRaySun() const
 {
-  return CV_d3d12_RTSunShadows > 0 && m_pRayScene && m_pRayScene->IsSupported() && CV_d3d12_DepthPrepass && CV_d3d12_ShadowCascades > 0;
+  // (the path tracer takes its visibility at the surfaces of the depth buffer)
+  return (CV_d3d12_RTSunShadows > 0 || WantsPathTracing()) && m_pRayScene && m_pRayScene->IsSupported() && CV_d3d12_DepthPrepass &&
+         CV_d3d12_ShadowCascades > 0;
 }
 
 bool CD3D12Renderer::EnsureRaySunTargets(int nWidth, int nHeight)
