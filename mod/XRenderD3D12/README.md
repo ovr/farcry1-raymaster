@@ -571,7 +571,18 @@ reference of its features and console variables.
   the hit's, kept in its instance), as the raster's ambient times its occlusion, besides what it
   finds; one that finds nothing at all the brighter of that and the sky. Rooms have it from the light
   maps' ambient, which a path of a few bounces through a window does not make up for; in
-  real time a sample is at most 16 (as light) and a bounce's ray takes 4 alpha tests. `CSTemporal`
+  real time a sample is at most 16 (as light) and a bounce's ray takes 4 alpha tests. With
+  `d3d12_PTCache` (1) the last bounce's hit takes the light of the bounces after it from a radiance
+  cache (`Shaders/PathCache.hlsli`): a hash grid over the world (2^20 entries, 28 MB) of the light that
+  comes to a point by its bounces, cells of 0.25 m near the camera, twice as large each time the
+  distance doubles past 12.5 m, one for each axis a face's normal leans along most (no light through
+  a thin wall); a lookup takes a cell across the face picked at random (noise for the denoiser, not
+  edges). `CSCacheUpdate` keeps it up to date: from a pixel of each 8 x 8 (another each frame) a path
+  of 3 bounces at most as `CSTrace`'s, the cache's light at its end, and back from there what comes to
+  each of its points is a sample of the cell there; `CSCacheResolve` blends a cell's samples into its
+  light (32 frames at most) and lets an entry go after 120 frames without one. So the light of many
+  bounces costs about one more: rooms and tunnels come closer to the reference (the hut, Research's
+  hall); it costs 0.5 to 0.6 ms at 2560x1440 and its lookups about 0.1 ms more. `CSTemporal`
   blends it into the history where the surface was in the frame before (32 frames at most),
   `CSFilter` filters that on the pixel's plane and normal, wider where the history is young
   (`d3d12_PTDenoiser simple`; `none` the history alone). With `d3d12_PTDenoiser nrd`, the default
@@ -595,13 +606,15 @@ reference of its features and console variables.
   `d3d12_PTReferenceBounces` (8) bounces with Russian roulette, every alpha test, no clamp or filter.
   `d3d12_PTDebug` shows it: 1 the albedo, 2 the normal, 3 the fog's share, 4 the material, 5 the
   paths' light on the game's grey 0.5, 6 one frame's paths, 7 the sun's visibility, 8 the ambient
-  light, 9 the highlights' colour, 10 the highlights. Open places are as bright as the raster, a
+  light, 9 the highlights' colour, 10 the highlights, 11 the radiance cache's light at the surfaces.
+  Open places are as bright as the raster, a
   hut or a tunnel lit through an opening about as bright (without the ambient light far darker, the
   reference too); a hall lit by its light maps' lamps is darker, the crowns of the trees seen from
   below too (their leaves pass no light). The highlights are where the raster has them (the
   specular templates: characters, some rocks and machines) and from the light maps' lamps too. On a
   Radeon RX 7900 XTX at 3840x2160 with FSR Quality the flights over Pier, River and Swamp run at
-  93, 85 and 78 FPS with NRD (1 % lows 61, 49 and 48), 97, 88 and 81 with simple (64, 49 and 51;
+  87, 79 and 72 FPS with NRD and the radiance cache (1 % lows 57, 46 and 45), 89, 82 and 76 without
+  the cache; before it 93, 85 and 78 with NRD (1 % lows 61, 49 and 48), 97, 88 and 81 with simple (64, 49 and 51;
   the raster 201, 193 and 193): the paths take 0.7 to 9 ms, most among the grass and the palms'
   crowns, the highlights about 0.3 ms.
   `d3d12_RTDebug` views the scene for rays from the camera: 1 instances, 2 shaded hits on the right
