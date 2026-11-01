@@ -628,9 +628,13 @@ void CD3D12Renderer::DrawLeafItem(const SRenderItem &it)
     {
       if (CTexture *pGlow = GetGlowMap(it.pRes))
       {
+        // The pulse: the game's wave of the gloss layer, a constant colour (clamped to 0 to 1).
         const float t = iTimer ? iTimer->GetCurrTime() : 0.0f;
-        const float g = (Props.eGlow == EGlow::Pulse ? std::clamp(0.75f + 0.75f * sinf(gf_PI * t), 0.0f, 1.0f) : bSelfIllum ? 2.0f : 1.0f) *
-                        HdrBoost(CV_d3d12_HDRGlow);
+        const float fPulse = Props.eGlow == EGlow::Pulse       ? std::clamp(0.75f + 0.75f * sinf(gf_PI * t), 0.0f, 1.0f)
+                           : Props.eGlow == EGlow::PulseSlow ? std::clamp(0.95f + 0.75f * sinf(0.2f * gf_PI * t), 0.0f, 1.0f)
+                           : bSelfIllum                      ? 2.0f
+                                                             : 1.0f;
+        const float g = fPulse * HdrBoost(CV_d3d12_HDRGlow);
         dc.nFlags2 |= DF2_ADD_TEX4;
         dc.nTex4 = pGlow->GetSRV();
         Set4(dc.vAddColor, g, g, g, 0);
