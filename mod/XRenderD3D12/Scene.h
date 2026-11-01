@@ -66,6 +66,7 @@ struct SRenderItem
   float fDistance = 0;                      //!< from the camera (CRendElement::mfDistanceToCameraSquared), set in EF_EndEf3D
   int nOrder = 0;                           //!< position in the scene (EF_AddEf order)
   bool bFogPass = false;                    //!< the fog volume pass the renderer adds itself (see CScene::AddEf)
+  bool bBakedLightCopy = false;             //!< a light mapped surface again for a light its light map has, not drawn (CScene::BuildLists)
 };
 
 //! A leaf item's part at its place: its render element and its object's position (Cascades.cpp).
@@ -285,4 +286,5 @@ private:
   std::vector<SFogVolume> m_FogVolumes;           //!< ID n at [n - 1]
   std::vector<CREScreenProcess *> m_ScreenProcesses;
   std::vector<CCObject *> m_Skinned;              //!< scratch of PrepareItems
+  std::vector<uint64> m_LightMappedParts;         //!< scratch of BuildLists: PartKey of the surfaces drawn with their light map
 };
