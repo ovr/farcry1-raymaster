@@ -39,7 +39,8 @@
 #define XR_RAY_TERRAIN    16
 
 //! d3d12_RTDebug, the views of RayDebug.hlsl.
-#define XR_RAY_DEBUG_INSTANCES  1   //!< the instances in colours, their triangles' edges darker
+#define XR_RAY_DEBUG_INSTANCES  1   //!< the instances in colours (of the mesh and where it is, to 0.25 m: not the index of the
+                                    //!< frame's list), their triangles' edges darker
 #define XR_RAY_DEBUG_SHADED     2   //!< the hits shaded (RayShade.hlsli) on the right half, the picture on the left
 #define XR_RAY_DEBUG_DISTANCE   3   //!< the distance to the hit
 #define XR_RAY_DEBUG_LOD        4   //!< the mip level of the hit's texture 0
@@ -49,6 +50,8 @@
 #define XR_RAY_DEBUG_PT_ALBEDO  8   //!< the path tracer's albedo of the hits (PathShade.hlsli)
 #define XR_RAY_DEBUG_PT_EMISSION 9  //!< its emission of the hits
 #define XR_RAY_DEBUG_PT_DIRECT  10  //!< the hits lit by the sun and the lamps as the path tracer lights them, with their emission
+#define XR_RAY_DEBUG_MATERIALS  11  //!< a colour per material the rays take of the hit's instance (SRayInstance but where its
+                                    //!< geometry is): the same from frame to frame while that material is
 // The path tracer's G-buffer (d3d12_PTDebug 1 to 4, PathTrace.cpp; Shaders/PathGBuffer.hlsli), no rays
 #define XR_RAY_DEBUG_GB_ALBEDO  16  //!< the albedo, the game's colour
 #define XR_RAY_DEBUG_GB_NORMAL  17  //!< the normal, rgb = n * 0.5 + 0.5; no surface black
@@ -92,7 +95,9 @@ struct SRayInstance
                           //!< ambient colour of the templates lit by it alone)
   XR_FLOAT4(vSpecular);   //!< rgb the material's specular colour (0: none), w its shininess (the exponent of N.H)
   XR_UINT4(nPath);        //!< x XR_PT_MAT_*, y the game's ambient light on it (what its ambient colour adds to its albedo, the
-                          //!< game's colour) / 2, 8 bits a channel from the lowest (PathPackAmbient); zw unused
+                          //!< game's colour) / 2, 8 bits a channel from the lowest (PathPackAmbient); z a hash of the mesh
+                          //!< (the static buffers and the part of them, this frame's by the counts: d3d12_RTDebug 1's colours);
+                          //!< w unused
 };
 
 //! SRayInstance::nPath.x, how the path tracer takes the draw's colour.

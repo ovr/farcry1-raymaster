@@ -19,8 +19,11 @@
 //	  vParams3  x fEmission, y fDelight, z fBakeLight, w fLightGap
 //	  nTex2     nLights (g_PTLights, root SRV t2 space5)
 //	The views:
-//	  XR_RAY_DEBUG_INSTANCES  a colour per instance, the edges of its
-//	                          triangles darker
+//	  XR_RAY_DEBUG_INSTANCES  a colour per instance, of its mesh
+//	                          (SRayInstance::nPath.z) and where it is to
+//	                          0.25 m (not the index of the frame's list,
+//	                          which moves as the list does), the edges of
+//	                          its triangles darker
 //	  XR_RAY_DEBUG_SHADED     the hits shaded (RayShade.hlsli) and fogged
 //	                          as the picture, on the right half (the
 //	                          picture under it on the left)
@@ -39,6 +42,13 @@
 //	  XR_RAY_DEBUG_PT_EMISSION its emission, as the game's colour
 //	  XR_RAY_DEBUG_PT_DIRECT  emission + albedo * the light of the sun and
 //	                          the lamps (PathDirect), fogged as the picture
+//	  XR_RAY_DEBUG_MATERIALS  a colour per material of the hit's instance
+//	                          (its SRayInstance's words but where its
+//	                          geometry is in the buffers): not the index of
+//	                          the frame's instance, which moves as the
+//	                          frame's list does, so a surface keeps its
+//	                          colour while the rays take the same of it;
+//	                          its triangles' edges darker
 //	  XR_RAY_DEBUG_GB_*       the path tracer's G-buffer (PathGBuffer.hlsli:
 //	                          the albedo, the normal, the fog's share, the
 //	                          material, the sun's visibility, the ambient
@@ -78,6 +88,28 @@ float3 HashColor(uint n)
   n = ((n >> ((n >> 28u) + 4u)) ^ n) * 277803737u;
   n = (n >> 22u) ^ n;
   return 0.25 + 0.75 * float3(n & 255, (n >> 8) & 255, (n >> 16) & 255) / 255;
+}
+
+//! XR_RAY_DEBUG_INSTANCES: the instances' places in their colours to this many metres.
+static const float INSTANCE_CELL = 0.25;
+
+//! A number for the material the rays take of an instance (XR_RAY_DEBUG_MATERIALS): all of its SRayInstance but the
+//! buffers and the bytes its geometry is at (this frame's geometry is in other pages of the upload each frame).
+uint MaterialHash(SRayInstance I)
+{
+  const uint4 Words[] = { uint4(I.nLayout.xyz, 0), I.nMaterial, I.nMaterial2, asuint(I.vColor), asuint(I.vAmbient),
+                          asuint(I.vTexGenU), asuint(I.vTexGenV), asuint(I.vTexMat0), asuint(I.vTexMat1), asuint(I.vAddColor),
+                          asuint(I.vAlbedo), asuint(I.vSpecular), I.nPath };
+  uint n = 2166136261u;
+  [unroll]
+  for (uint i = 0; i < 13; i++)
+  {
+    n = (n ^ Words[i].x) * 16777619u;
+    n = (n ^ Words[i].y) * 16777619u;
+    n = (n ^ Words[i].z) * 16777619u;
+    n = (n ^ Words[i].w) * 16777619u;
+  }
+  return n;
 }
 
 //! The direction from the camera through the point vPixel of the target.
@@ -170,6 +202,17 @@ float4 PSMain(SRayDebugOutput In) : SV_Target
     return SceneOutput(float4(vColor, 1));
   }
 
+  if (nView == XR_RAY_DEBUG_MATERIALS)
+  {
+    // As the paths see the scene: the alpha tests on the way.
+    const float fSpread = length(PixelRay(In.vPos.xy + float2(1, 0)) - Ray.Direction);
+    const SRayHit Hit = TraceScene(Ray, nMask, 0, fSpread);
+    if (!Hit.bHit)
+      return float4(0, 0, 0, 1);
+    const float fEdge = min(min(Hit.vBary.x, Hit.vBary.y), 1 - Hit.vBary.x - Hit.vBary.y);
+    return float4(HashColor(MaterialHash(g_RayInstances[Hit.nInstance])) * (fEdge < 0.03 ? 0.4 : 1), 1);
+  }
+
   if (nView == XR_RAY_DEBUG_SHADED || nView == XR_RAY_DEBUG_SHADED_ALL || nView == XR_RAY_DEBUG_LOD || nView == XR_RAY_DEBUG_ALPHA)
   {
     // The pixel's cone: from a point, as wide as the angle between neighbouring pixels.
@@ -217,7 +260,15 @@ float4 PSMain(SRayDebugOutput In) : SV_Target
   {
     const float2 b = Query.CommittedTriangleBarycentrics();
     const float fEdge = min(min(b.x, b.y), 1 - b.x - b.y);
-    vColor = HashColor(Query.CommittedInstanceIndex()) * (fEdge < 0.03 ? 0.4 : 1);
+    // The mesh (SRayInstance::nPath.z) and where it is to INSTANCE_CELL m: the same from frame to frame, not as the
+    // index of the frame's list.
+    const float3x4 m = Query.CommittedObjectToWorld3x4();
+    const int3 c = (int3)floor(float3(m._m03, m._m13, m._m23) / INSTANCE_CELL);
+    uint n = g_RayInstances[Query.CommittedInstanceID()].nPath.z;
+    n = (n ^ (uint)c.x) * 16777619u;
+    n = (n ^ (uint)c.y) * 16777619u;
+    n = (n ^ (uint)c.z) * 16777619u;
+    vColor = HashColor(n) * (fEdge < 0.03 ? 0.4 : 1);
   }
   return float4(vColor, 1);
 }

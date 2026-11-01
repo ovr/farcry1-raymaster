@@ -418,6 +418,16 @@ void CD3D12RayScene::CaptureDraw(const SPipelineKey &Key, const SDrawConstants &
   }
   else
     DefaultMaterial(d.Inst, dc);
+  // The mesh, for d3d12_RTDebug 1's colours: the static buffers and the part of them it is, this frame's memory by its
+  // counts alone (in other pages each frame).
+  {
+    const uint64 Mesh[4] = { d.Key.nVBId, d.Key.nIBId, ((uint64)d.Key.nVBOffset << 32) | d.Key.nIBOffset,
+                             ((uint64)Tri.VertexCount << 40) ^ ((uint64)Tri.IndexCount << 8) ^ nStride };
+    CWordHash Hash;
+    Hash.Add(Mesh);
+    const uint64 n = Hash.Get();
+    d.Inst.nPath[2] = (uint32)(n ^ (n >> 32));
+  }
   d.bTerrain = d.Inst.nPath[0] == XR_PT_MAT_TERRAIN;
   uint32 Slots[4];
   GetTextureSlots(d.Inst, Slots);
