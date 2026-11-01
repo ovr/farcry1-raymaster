@@ -234,8 +234,9 @@ static float3 s_vAmbientLight, s_vAmbientNoSun, s_vAmbient;
 #endif
 #ifdef XR_PT
 //! The path tracer's G-buffer of the pixel (PathGBuffer.hlsli): what the colour adds unlit, the albedo, the normal
-//! (N' with DF_BUMP), the highlights' colour / 2, the fog's share, the sun's visibility.
-static float3 s_vPTEmission, s_vPTAlbedo, s_vPTNormal, s_vPTSpecular;
+//! (N' with DF_BUMP), the side of its triangle the camera sees, the highlights' colour / 2, the fog's share, the sun's
+//! visibility.
+static float3 s_vPTEmission, s_vPTAlbedo, s_vPTNormal, s_vPTFace, s_vPTSpecular;
 static float s_fPTFog, s_fPTSun;
 #endif
 
@@ -622,6 +623,14 @@ float4 ShadePixel(SVertexOutput In)
   s_vPTNormal = In.vNormal;
   s_fPTFog = 1;
   s_fPTSun = 1;
+  // The side of the triangle the camera sees (before any branch or discard: derivatives); the view's direction where the
+  // triangle has none (edge on).
+  s_vPTFace = cross(ddx(In.vWorldPos), ddy(In.vWorldPos));
+  const float fPTFace = dot(s_vPTFace, g_Frame.vCameraPos.xyz - In.vWorldPos);
+  if (dot(s_vPTFace, s_vPTFace) <= 1e-20 || fPTFace == 0)
+    s_vPTFace = g_Frame.vCameraPos.xyz - In.vWorldPos;
+  else if (fPTFace < 0)
+    s_vPTFace = -s_vPTFace;
 #endif
 #if defined(XR_RAY_REFL) || defined(XR_RAY_LIGHT)
   // The rays' cone and their origin's face (before any branch or discard: derivatives).
@@ -1005,12 +1014,7 @@ SPixelOutput PSMain(SVertexOutput In)
   Out.fDepth = In.vPos.z;
 #endif
   Out.vAlbedo = float4(max(s_vPTAlbedo, 0), Out.vColor.a);
-  // The normal on the side of the triangle the camera sees (the leaves' two sides), as the rays' hits take it
-  // (PathSurface): by the view's direction instead, a crown's normals turned over where the view passes their
-  // perpendicular, a line that crossed the leaves as the camera moved.
-  float3 vFace = cross(ddx(In.vWorldPos), ddy(In.vWorldPos));
-  vFace = dot(vFace, g_Frame.vCameraPos.xyz - In.vWorldPos) < 0 ? -vFace : vFace;
-  Out.vNormal = PathGBufferNormal(s_vPTNormal, vFace, s_fPTFog, (g_Draw.nFlags2 & DF2_PT_MASK) >> DF2_PT_SHIFT);
+  Out.vNormal = PathGBufferNormal(s_vPTNormal, s_vPTFace, s_fPTFog, (g_Draw.nFlags2 & DF2_PT_MASK) >> DF2_PT_SHIFT);
   Out.vSun = float4(s_fPTSun, saturate(0.5 * g_Draw.vAmbient.rgb));
   Out.vSpecular = float4(saturate(s_vPTSpecular), Out.vColor.a);
   return Out;
