@@ -547,7 +547,9 @@ reference of its features and console variables.
   raster finds it (RGBA8, r: its shadow maps, the sun's cascades and their mask by rays, which the
   path tracer turns on, from all the casters; 0 where the raster has no sun) and the game's ambient
   light on the surface (gba: what the object's ambient colour adds to its light maps or its lights;
-  the terrain, whose light is in its texture, the outdoor ambient). Its lit draws lose their
+  the terrain, whose light is in its texture, the outdoor ambient), a fifth its highlights' colour
+  (RGBA8, half of the raster's 2 x specular colour x gloss of the specular templates; it blends as the
+  albedo). Its lit draws lose their
   light (the light maps, the sun, the lamps and their passes, the ambient and the baked AO); the
   screen space AO, the rays' GI and the projectors' passes are not drawn.
   After the opaque list its kernels (`Shaders/PathTrace.hlsl`, compute with rays, at the scene's size)
@@ -563,21 +565,27 @@ reference of its features and console variables.
   real time a sample is at most 16 (as light) and a bounce's ray takes 4 alpha tests. `CSTemporal`
   blends it into the history where the surface was in the frame before (32 frames at most),
   `CSFilter` filters that on the pixel's plane and normal, wider where the history is young
-  (`d3d12_PTDenoiser simple`; `none` the history alone). The composite (`Shaders/PathComposite.hlsl`)
-  adds the fog's share times `HdrEncode`(albedo times (the sun's light times N.L times its visibility
-  + the paths' light)) to the colour, before the blended surfaces, the weapon, the water and the
-  particles, which stay the raster's. Where the frame has no sun (indoors) there is no sun or sky
+  (`d3d12_PTDenoiser simple`; `none` the history alone). `CSSpecular` makes the highlights as the
+  raster does, in the game's colour: the highlights' colour times the sun's specular colour times its
+  visibility and each lamp's times its falloff, times saturate(R.V)^32; a lamp's where a ray towards
+  it reaches it (4 rays a pixel at most, only for a highlight of 1/512 or more), so they are not
+  noisy and the reference has them as they are (`d3d12_PTSpecular` 1 times them, 0 none). The
+  composite (`Shaders/PathComposite.hlsl`) adds the fog's share times (`HdrEncode`(albedo times (the
+  sun's light times N.L times its visibility + the paths' light)) + the highlights) to the colour,
+  before the blended surfaces, the weapon, the water and the particles, which stay the raster's. Where the frame has no sun (indoors) there is no sun or sky
   either: what keeps the sky out (a roof above the view) is not in the scene for rays. The reference
   (`d3d12_PathTracing 2`) adds up its frames while the view and the path tracer's settings stay,
   `d3d12_PTReferenceBounces` (8) bounces with Russian roulette, every alpha test, no clamp or filter.
   `d3d12_PTDebug` shows it: 1 the albedo, 2 the normal, 3 the fog's share, 4 the material, 5 the
   paths' light on the game's grey 0.5, 6 one frame's paths, 7 the sun's visibility, 8 the ambient
-  light. Open places are as bright as the raster, a hut or a tunnel lit through an opening about as
-  bright (without the ambient light far darker, the reference too); a hall lit by its light maps'
-  lamps is darker, the crowns of the trees seen from below too (their leaves pass no light). On a
+  light, 9 the highlights' colour, 10 the highlights. Open places are as bright as the raster, a
+  hut or a tunnel lit through an opening about as bright (without the ambient light far darker, the
+  reference too); a hall lit by its light maps' lamps is darker, the crowns of the trees seen from
+  below too (their leaves pass no light). The highlights are where the raster has them (the
+  specular templates: characters, some rocks and machines) and from the light maps' lamps too. On a
   Radeon RX 7900 XTX at 3840x2160 with FSR Quality the flights over Pier, River and Swamp run at
-  102, 90 and 84 FPS (1 % lows 66, 50 and 53; the raster 201, 193 and 193): the paths take 0.7 to
-  9 ms, most among the grass and the palms' crowns.
+  99, 91 and 82 FPS (1 % lows 62, 51 and 52; the raster 201, 193 and 193): the paths take 0.7 to
+  9 ms, most among the grass and the palms' crowns, the highlights about 0.3 ms.
   `d3d12_RTDebug` views the scene for rays from the camera: 1 instances, 2 shaded hits on the right
   half, 3 distance, 4 mip level, 5 kind, 6 alpha tests, 7 shaded hits over the whole picture; the path
   tracer's: 8 the albedo of the hits, 9 their emission, 10 them lit by the sun and the lamps;

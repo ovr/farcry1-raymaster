@@ -321,7 +321,8 @@ void CD3D12Renderer::RegisterVariables()
   iConsole->Register("d3d12_PTDebug", &CV_d3d12_PTDebug, 0, 0,
                      "With d3d12_PathTracing, its G-buffer over the picture: 1 the albedo, 2 the normal, 3 the fog's share, "
                      "4 the material (lit grey, the terrain green, the vegetation yellow; none black); 5 the light of its paths "
-                     "(on grey), 6 one frame's paths, 7 the sun's visibility, 8 the game's ambient light the paths fill in with");
+                     "(on grey), 6 one frame's paths, 7 the sun's visibility, 8 the game's ambient light the paths fill in with, "
+                     "9 the highlights' colour (the material's specular colour times its gloss), 10 the highlights");
   iConsole->Register("d3d12_PTSky", &CV_d3d12_PTSky, 1.0f, VF_DUMPTODISK,
                      "With d3d12_PathTracing, the sky's light where a path leaves the scene: times the level's outdoor ambient");
   iConsole->Register("d3d12_PTBounces", &CV_d3d12_PTBounces, 1, VF_DUMPTODISK,
@@ -335,6 +336,9 @@ void CD3D12Renderer::RegisterVariables()
   iConsole->Register("d3d12_PTAmbientRange", &CV_d3d12_PTAmbientRange, 2.0f, VF_DUMPTODISK,
                      "With d3d12_PathTracing, how far a ray finds nothing before it brings the game's ambient light (m): its "
                      "occlusion's reach");
+  iConsole->Register("d3d12_PTSpecular", &CV_d3d12_PTSpecular, 1.0f, VF_DUMPTODISK,
+                     "With d3d12_PathTracing, the highlights of the sun and the lamps on the materials with a specular colour, as "
+                     "the raster's, the lamps' where a ray reaches them: times this (0: none)");
   m_pPTDenoiserVar = iConsole->CreateVariable("d3d12_PTDenoiser", "simple", VF_DUMPTODISK,
                      "With d3d12_PathTracing 1, the denoiser of its light: simple (its own filter) or none (the history alone)");
   // The HDR pipeline (r_HDRRendering, Hdr.cpp).
@@ -527,6 +531,7 @@ WIN_HWND CD3D12Renderer::Init(int x,int y,int width,int height,unsigned int cbpp
     iConsole->UnregisterVariable("d3d12_PTReferenceBounces", true);
     iConsole->UnregisterVariable("d3d12_PTAmbient", true);
     iConsole->UnregisterVariable("d3d12_PTAmbientRange", true);
+    iConsole->UnregisterVariable("d3d12_PTSpecular", true);
     iConsole->UnregisterVariable("d3d12_PTDenoiser", true);
     m_pPTDenoiserVar = nullptr;
   }

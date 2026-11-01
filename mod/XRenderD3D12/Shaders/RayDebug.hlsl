@@ -42,11 +42,13 @@
 //	  XR_RAY_DEBUG_GB_*       the path tracer's G-buffer (PathGBuffer.hlsli:
 //	                          the albedo, the normal, the fog's share, the
 //	                          material, the sun's visibility, the ambient
-//	                          light the paths fill in with) and the
-//	                          light of its paths on a grey albedo (the
-//	                          game's 0.5), no rays: tex0 its albedo, tex1
-//	                          its normal, tex2 the light (PathTrace.hlsl's)
-//	                          or the visibility, vParams2.xy their size
+//	                          light the paths fill in with, the
+//	                          highlights' colour), the light of its paths
+//	                          on a grey albedo (the game's 0.5) and the
+//	                          highlights, no rays: tex0 its albedo, tex1
+//	                          its normal, tex2 the light or the highlights
+//	                          (PathTrace.hlsl's), the visibility or the
+//	                          highlights' colour, vParams2.xy their size
 //	A ray that hits nothing is black (the shaded views: the fog's
 //	colour). The views of the instances, the distance and the kind take
 //	the alpha tested triangles as opaque.
@@ -108,6 +110,10 @@ float4 GBufferView(uint nView, float2 vPixel)
     return float4(g_Textures[g_Draw.nTex2].Load(vAt).rrr, 1);
   if (nView == XR_RAY_DEBUG_GB_AMBIENT)
     return float4(nMaterial ? saturate(2 * g_Textures[g_Draw.nTex2].Load(vAt).gba) : 0, 1);
+  if (nView == XR_RAY_DEBUG_GB_SPECULAR)
+    return float4(nMaterial ? saturate(2 * g_Textures[g_Draw.nTex2].Load(vAt).rgb) : 0, 1);
+  if (nView == XR_RAY_DEBUG_GB_HIGHLIGHTS)
+    return float4(nMaterial ? saturate(g_Textures[g_Draw.nTex2].Load(vAt).rgb) : 0, 1);
   if (nMaterial == 0)
     return float4(0, 0, 0, 1);
   if (nView == XR_RAY_DEBUG_GB_NORMAL)

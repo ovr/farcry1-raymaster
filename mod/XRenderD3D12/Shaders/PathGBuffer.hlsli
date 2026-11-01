@@ -29,7 +29,12 @@
 //	    and the game's ambient light on it / 2 (gba, the game's colour: what
 //	    the draw's ambient colour adds to its albedo's light 1), which the
 //	    paths fill in with (PathTrace.hlsl). The blended draws do not write
-//	    it.
+//	    it;
+//	  - the highlights' colour (D3D12_PT_SPECULAR_FORMAT, SV_Target6, rgb):
+//	    half of the raster's 2 * vSpecular * gloss (DF_SPECULAR lit per
+//	    pixel; the fixed function's material light about as much), the game's
+//	    colour, 0 where it has none; it blends as the albedo. The highlights
+//	    of the sun and the lamps on it are PathTrace.hlsl's CSSpecular.
 //	The picture is then the colour plus the fog's share of the albedo's
 //	surfaces lit by the path tracer (PathComposite.hlsl).
 //

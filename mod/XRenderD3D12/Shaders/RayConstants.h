@@ -58,6 +58,8 @@
 #define XR_RAY_DEBUG_GB_RAYS    21  //!< the same as the paths of the frame found it (CSTrace), no history or filter
 #define XR_RAY_DEBUG_GB_SUN     22  //!< the sun's visibility the raster found (the G-buffer's), grey
 #define XR_RAY_DEBUG_GB_AMBIENT 23  //!< the game's ambient light the paths fill in with (the G-buffer's), as the game's colour
+#define XR_RAY_DEBUG_GB_SPECULAR 24 //!< the highlights' colour (the G-buffer's: the material's specular colour times its gloss, times 2)
+#define XR_RAY_DEBUG_GB_HIGHLIGHTS 25 //!< the highlights of the sun and the lamps the composite adds (CSSpecular), the game's colour
 
 //! SRayInstance: no view, no stream.
 #define XR_RAY_NONE         0xffffffff
@@ -117,7 +119,8 @@ struct SRayInstance
 struct SPTLight
 {
   XR_FLOAT4(vPos);        //!< xyz the world position (point, projector) or the direction towards the light (directional), w its radius (m)
-  XR_FLOAT4(vColor);      //!< rgb the game's colour (m_Color: the shaders linearise it), w the specular's scale (m_SpecColor's mean)
+  XR_FLOAT4(vColor);      //!< rgb the game's colour (m_Color: the shaders linearise it), w unused
+  XR_FLOAT4(vSpecular);   //!< rgb its highlights' colour (m_SpecColor, the game's colour), w unused
   XR_UINT4(nParams);      //!< x the kind (XR_PT_LIGHT_*), y XR_PT_LIGHT_* bits, z the projector's cube (texture table, XR_RAY_NONE none),
                           //!< w the light's index in the frame's lights (its bit in the objects' light masks; XR_RAY_NONE: a static
                           //!< light alone)
@@ -200,10 +203,13 @@ struct SPathTraceConstants
                                   //!< lamps' rays' gap (d3d12_RTLightShadowGap)
   XR_FLOAT4(vFill);               //!< x d3d12_PTAmbient (the game's ambient light a path's ray brings beyond y), y
                                   //!< d3d12_PTAmbientRange (m)
+  XR_FLOAT4(vSpecular);           //!< rgb the sun's highlights' colour (its specular colour times d3d12_PTSpecular; 0 indoors), w
+                                  //!< the lamps' highlights' scale (CSSpecular)
   XR_UINT4(nTextures);            //!< texture table indices: x the depth buffer, y CSTrace's paths, z the history of the frame
                                   //!< before (CSTemporal), w this frame's (CSFilter)
   XR_UINT4(nTextures2);           //!< texture table indices: x the G-buffer's normal, y the frames of the history before, z this
                                   //!< frame's, w the G-buffer's sun and ambient light
+  XR_UINT4(nTextures3);           //!< texture table indices: x the G-buffer's highlights' colour; yzw unused
   XR_UINT4(nTrace);               //!< RayView.hlsli's grid: x 1 (a path for each pixel), y z 0
   XR_UINT4(nFlags);               //!< x 1: a history to blend into, y the frame (the noise), z 1: filtered, w the mask of the
                                   //!< instances the rays see (RayMask)

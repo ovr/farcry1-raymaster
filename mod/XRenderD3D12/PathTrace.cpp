@@ -34,10 +34,11 @@
 //	the targets), at the scene's size; d3d12_PTDebug shows it.
 //	DrawPathTrace, after the opaque list: the kernels of
 //	Shaders/PathTrace.hlsl (CSTrace the paths, CSTemporal their history,
-//	CSFilter the denoise) with the depth buffer and the G-buffer, then the
-//	composite (Shaders/PathComposite.hlsl) adds their light and the sun's to
-//	the colour. d3d12_PathTracing 2, the reference, adds up its frames
-//	while the view and the settings stay.
+//	CSFilter the denoise, CSSpecular the highlights of the sun and the
+//	lamps, d3d12_PTSpecular) with the depth buffer and the G-buffer, then
+//	the composite (Shaders/PathComposite.hlsl) adds their light, the sun's
+//	and the highlights to the colour. d3d12_PathTracing 2, the reference,
+//	adds up its frames while the view and the settings stay.
 //	All of it waits for r_HDRRendering: its light is beyond an LDR target.
 //
 //////////////////////////////////////////////////////////////////////
@@ -94,8 +95,9 @@ constexpr float PATH_HISTORY_FRAMES = 32;
 constexpr float PATH_SAMPLE_MAX = 16;
 //! A bounce's alpha tests at most in real time (the reference: XR_RAY_MAX_ALPHA_TESTS).
 constexpr uint32 PATH_BOUNCE_TESTS = 4;
-//! The kernels' UAV tables (D3D12Compute.h): the paths', the history's of each texture, the composite's light.
-enum { PATH_TABLE_TRACE, PATH_TABLE_TEMPORAL0, PATH_TABLE_TEMPORAL1, PATH_TABLE_FILTER, PATH_TABLES };
+//! The kernels' UAV tables (D3D12Compute.h): the paths', the history's of each texture, the composite's light, the
+//! highlights.
+enum { PATH_TABLE_TRACE, PATH_TABLE_TEMPORAL0, PATH_TABLE_TEMPORAL1, PATH_TABLE_FILTER, PATH_TABLE_SPECULAR, PATH_TABLES };
 
 D3D12_SHADER_RESOURCE_VIEW_DESC PathTextureSRV(DXGI_FORMAT Format)
 {
@@ -281,7 +283,8 @@ void CD3D12Renderer::UpdatePathLights(std::span<CDLight *const> Lights)
     else
       Set4(L.vPos, pLight->m_Origin.x, pLight->m_Origin.y, pLight->m_Origin.z, std::max(pLight->m_fRadius, 0.01f));
     const CFColor &c = pLight->m_Color, &s = pLight->m_SpecColor;
-    Set4(L.vColor, c.r, c.g, c.b, (s.r + s.g + s.b) / 3);
+    Set4(L.vColor, c.r, c.g, c.b, 0);
+    Set4(L.vSpecular, s.r, s.g, s.b, 0);
     L.nParams[0] = nKind;
     L.nParams[1] = ((nFlags & DLF_LM) ? XR_PT_LIGHT_LM : 0u) | ((nFlags & DLF_AMBIENT_LIGHT) ? XR_PT_LIGHT_FILL : 0u) |
                    ((nFlags & DLF_HEATSOURCE) ? XR_PT_LIGHT_HEAT : 0u) | (C.nScene == XR_RAY_NONE ? XR_PT_LIGHT_STATIC : 0u);
@@ -317,9 +320,10 @@ void CD3D12Renderer::UpdatePathLights(std::span<CDLight *const> Lights)
     {
       const SPTLight &L = Out[i];
       const CDLight *pLight = Candidates[i].pLight;
-      fprintf(pDump, "  pt light %zu: %s, flags 0x%08x, %s (%.2f %.2f %.2f), radius %.2f, colour (%.3f %.3f %.3f), specular %.3f%s%s%s, %.1f m away, \"%.63s\"\n",
+      fprintf(pDump, "  pt light %zu: %s, flags 0x%08x, %s (%.2f %.2f %.2f), radius %.2f, colour (%.3f %.3f %.3f), specular (%.3f %.3f %.3f)%s%s%s, "
+              "%.1f m away, \"%.63s\"\n",
               i, LightKind(L.nParams[0]), (unsigned)pLight->m_Flags, L.nParams[0] == XR_PT_LIGHT_DIRECTIONAL ? "towards" : "at",
-              L.vPos[0], L.vPos[1], L.vPos[2], L.vPos[3], L.vColor[0], L.vColor[1], L.vColor[2], L.vColor[3],
+              L.vPos[0], L.vPos[1], L.vPos[2], L.vPos[3], L.vColor[0], L.vColor[1], L.vColor[2], L.vSpecular[0], L.vSpecular[1], L.vSpecular[2],
               (L.nParams[1] & XR_PT_LIGHT_LM) ? ", baked" : "", (L.nParams[1] & XR_PT_LIGHT_FILL) ? ", fill" : "",
               (L.nParams[1] & XR_PT_LIGHT_STATIC) ? ", static" : "", Candidates[i].fKey, pLight->m_Name);
     }
@@ -344,15 +348,16 @@ bool CD3D12Renderer::UpdatePathTargets()
   m_PathTrace.pAlbedo = m_pUpload->CreateRenderTarget(w, h, D3D12_PT_ALBEDO_FORMAT);
   m_PathTrace.pNormal = m_pUpload->CreateRenderTarget(w, h, D3D12_PT_NORMAL_FORMAT);
   m_PathTrace.pSun = m_pUpload->CreateRenderTarget(w, h, D3D12_PT_SUN_FORMAT);
-  if (!m_PathTrace.pAlbedo || !m_PathTrace.pNormal || !m_PathTrace.pSun || m_PathTrace.pAlbedo->m_nSRV < 0 || m_PathTrace.pNormal->m_nSRV < 0 ||
-      m_PathTrace.pSun->m_nSRV < 0)
+  m_PathTrace.pSpecular = m_pUpload->CreateRenderTarget(w, h, D3D12_PT_SPECULAR_FORMAT);
+  if (!m_PathTrace.pAlbedo || !m_PathTrace.pNormal || !m_PathTrace.pSun || !m_PathTrace.pSpecular || m_PathTrace.pAlbedo->m_nSRV < 0 ||
+      m_PathTrace.pNormal->m_nSRV < 0 || m_PathTrace.pSun->m_nSRV < 0 || m_PathTrace.pSpecular->m_nSRV < 0)
   {
     iLog->LogWarning("XRenderD3D12: the path tracer's G-buffer is not available at %d x %d", w, h);
     ReleasePathTargets();
     return false;
   }
   // Made in PIXEL_SHADER_RESOURCE (in a frame).
-  for (CD3D12Texture *pTex : { m_PathTrace.pAlbedo, m_PathTrace.pNormal, m_PathTrace.pSun })
+  for (CD3D12Texture *pTex : { m_PathTrace.pAlbedo, m_PathTrace.pNormal, m_PathTrace.pSun, m_PathTrace.pSpecular })
     m_pDevice->Transition(pTex->m_pResource, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, PATH_READ);
   iLog->Log("XRenderD3D12: the path tracer's G-buffer, %d x %d", w, h);
   return true;
@@ -361,15 +366,15 @@ bool CD3D12Renderer::UpdatePathTargets()
 void CD3D12Renderer::ReleasePathTargets()
 {
   if (m_PathTrace.bBound && m_pDevice)
-    m_pDevice->BindPathTargets({}, {}, {});
+    m_pDevice->BindPathTargets({}, {}, {}, {});
   m_PathTrace.bBound = false;
   if (m_pUpload)
   {
-    for (CD3D12Texture *pTex : { m_PathTrace.pAlbedo, m_PathTrace.pNormal, m_PathTrace.pSun })
+    for (CD3D12Texture *pTex : { m_PathTrace.pAlbedo, m_PathTrace.pNormal, m_PathTrace.pSun, m_PathTrace.pSpecular })
       if (pTex)
         m_pUpload->ReleaseTexture(pTex);
   }
-  m_PathTrace.pAlbedo = m_PathTrace.pNormal = m_PathTrace.pSun = nullptr;
+  m_PathTrace.pAlbedo = m_PathTrace.pNormal = m_PathTrace.pSun = m_PathTrace.pSpecular = nullptr;
   m_PathTrace.nGBufferFrame = -1;
   ReleasePathKernels();
 }
@@ -380,12 +385,12 @@ void CD3D12Renderer::BeginPathTargets()
     return;
   // Cleared to no surface (material 0) and no albedo: the sky and the far stay as the colour has them.
   static const float Zero[4] = {};
-  for (CD3D12Texture *pTex : { m_PathTrace.pAlbedo, m_PathTrace.pNormal, m_PathTrace.pSun })
+  for (CD3D12Texture *pTex : { m_PathTrace.pAlbedo, m_PathTrace.pNormal, m_PathTrace.pSun, m_PathTrace.pSpecular })
   {
     m_pDevice->Transition(pTex->m_pResource, PATH_READ, D3D12_RESOURCE_STATE_RENDER_TARGET);
     m_pDevice->GetCmdList()->ClearRenderTargetView(pTex->m_RTV, Zero, 0, nullptr);
   }
-  m_pDevice->BindPathTargets(m_PathTrace.pAlbedo->m_RTV, m_PathTrace.pNormal->m_RTV, m_PathTrace.pSun->m_RTV);
+  m_pDevice->BindPathTargets(m_PathTrace.pAlbedo->m_RTV, m_PathTrace.pNormal->m_RTV, m_PathTrace.pSun->m_RTV, m_PathTrace.pSpecular->m_RTV);
   m_PathTrace.bBound = true;
 }
 
@@ -394,8 +399,8 @@ void CD3D12Renderer::EndPathTargets()
   if (!m_PathTrace.bBound)
     return;
   m_PathTrace.bBound = false;
-  m_pDevice->BindPathTargets({}, {}, {});
-  for (CD3D12Texture *pTex : { m_PathTrace.pAlbedo, m_PathTrace.pNormal, m_PathTrace.pSun })
+  m_pDevice->BindPathTargets({}, {}, {}, {});
+  for (CD3D12Texture *pTex : { m_PathTrace.pAlbedo, m_PathTrace.pNormal, m_PathTrace.pSun, m_PathTrace.pSpecular })
     m_pDevice->Transition(pTex->m_pResource, D3D12_RESOURCE_STATE_RENDER_TARGET, PATH_READ);
   m_PathTrace.nGBufferFrame = m_nFrames;
   m_PathTrace.bTraceDue = true;
@@ -416,11 +421,12 @@ bool CD3D12Renderer::UpdatePathKernels(int w, int h)
     s.pFrames[i] = m_pUpload->CreateComputeTarget(w, h, 1, PATH_FRAMES_FORMAT, L"XRenderD3D12 path tracer's history frames");
   }
   s.pLight = m_pUpload->CreateComputeTarget(w, h, 1, PATH_LIGHT_FORMAT, L"XRenderD3D12 path tracer's light");
-  bool bOk = s.pRays && s.pHistory[0] && s.pHistory[1] && s.pFrames[0] && s.pFrames[1] && s.pLight;
+  s.pHighlights = m_pUpload->CreateComputeTarget(w, h, 1, PATH_LIGHT_FORMAT, L"XRenderD3D12 path tracer's highlights");
+  bool bOk = s.pRays && s.pHistory[0] && s.pHistory[1] && s.pFrames[0] && s.pFrames[1] && s.pLight && s.pHighlights;
   if (bOk)
   {
     D3D12_SHADER_RESOURCE_VIEW_DESC SRV = PathTextureSRV(PATH_LIGHT_FORMAT);
-    for (CD3D12Texture *pTex : { s.pRays, s.pLight })
+    for (CD3D12Texture *pTex : { s.pRays, s.pLight, s.pHighlights })
       bOk &= (pTex->m_nSRV = m_pDescriptors->AllocSRV(pTex->m_pResource, &SRV)) >= 0;
     SRV = PathTextureSRV(PATH_HISTORY_FORMAT);
     for (CD3D12Texture *pTex : { s.pHistory[0], s.pHistory[1] })
@@ -428,9 +434,10 @@ bool CD3D12Renderer::UpdatePathKernels(int w, int h)
     SRV = PathTextureSRV(PATH_FRAMES_FORMAT);
     for (CD3D12Texture *pTex : s.pFrames)
       bOk &= (pTex->m_nSRV = m_pDescriptors->AllocSRV(pTex->m_pResource, &SRV)) >= 0;
-    // The kernels' UAV tables: u0 the paths, a history or the light, u1 the history's frames (the slots they do not use null).
+    // The kernels' UAV tables: u0 the paths, a history, the light or the highlights, u1 the history's frames (the slots they
+    // do not use null).
     ID3D12Resource *const Outputs[PATH_TABLES] = { s.pRays->m_pResource, s.pHistory[0]->m_pResource, s.pHistory[1]->m_pResource,
-                                                   s.pLight->m_pResource };
+                                                   s.pLight->m_pResource, s.pHighlights->m_pResource };
     for (int t = 0; t < PATH_TABLES && bOk; t++)
     {
       if ((s.nTables[t] = m_pDescriptors->AllocRange(CD3D12Compute::COMPUTE_UAVS)) < 0)
@@ -462,7 +469,7 @@ bool CD3D12Renderer::UpdatePathKernels(int w, int h)
 void CD3D12Renderer::ReleasePathKernels()
 {
   SPathTraceState &s = m_PathTrace;
-  for (CD3D12Texture **pp : { &s.pRays, &s.pHistory[0], &s.pHistory[1], &s.pFrames[0], &s.pFrames[1], &s.pLight })
+  for (CD3D12Texture **pp : { &s.pRays, &s.pHistory[0], &s.pHistory[1], &s.pFrames[0], &s.pFrames[1], &s.pLight, &s.pHighlights })
   {
     if (*pp && m_pUpload)
       m_pUpload->ReleaseTexture(*pp);
@@ -551,6 +558,13 @@ void CD3D12Renderer::DrawPathTrace()
   Set4(pc.vSky, vSky[0], vSky[1], vSky[2], P.fEmission);
   Set4(pc.vShade, P.fDelight, P.fBakeLight, P.fLightGap, 0);
   Set4(pc.vFill, fAmbient, fAmbientRange, 0, 0);
+  // The highlights in the game's colour, as the raster's (its sun's specular colour, the lamps'), the scales of the path
+  // tracer's sun and lamps as such a colour; the sun's none indoors, as its light.
+  const float fSpecular = std::max(CV_d3d12_PTSpecular, 0.0f);
+  const bool bOutdoors = m_pScene && m_pScene->GetSun();
+  const float fSunSpecular = bOutdoors ? fSpecular * powf(std::max(CV_d3d12_PTSun, 0.0f), 1 / 2.2f) : 0.0f;
+  Set4(pc.vSpecular, std::clamp(m_SunSpec[0], 0.0f, 1.0f) * fSunSpecular, std::clamp(m_SunSpec[1], 0.0f, 1.0f) * fSunSpecular,
+       std::clamp(m_SunSpec[2], 0.0f, 1.0f) * fSunSpecular, fSpecular * powf(P.fLamps, 1 / 2.2f));
   const int nCur = s.nHistory ^= 1;
   CD3D12Texture *pHistory = s.pHistory[nCur], *pPrevHistory = s.pHistory[nCur ^ 1];
   CD3D12Texture *pFrames = s.pFrames[nCur], *pPrevFrames = s.pFrames[nCur ^ 1];
@@ -562,6 +576,7 @@ void CD3D12Renderer::DrawPathTrace()
   pc.nTextures2[1] = (uint32)pPrevFrames->m_nSRV;
   pc.nTextures2[2] = (uint32)pFrames->m_nSRV;
   pc.nTextures2[3] = (uint32)s.pSun->m_nSRV;
+  pc.nTextures3[0] = (uint32)s.pSpecular->m_nSRV;
   pc.nTrace[0] = 1;
   pc.nFlags[0] = bHistory ? 1 : 0;
   pc.nFlags[1] = (uint32)m_nFrames;
@@ -591,15 +606,19 @@ void CD3D12Renderer::DrawPathTrace()
   m_pDevice->Transition(pFrames->m_pResource, D3D12_RESOURCE_STATE_UNORDERED_ACCESS, PATH_KERNEL_READ);
   GpuSection("pt filter");
   m_pCompute->DispatchRays(pList, eD3D12K_PathFilter, FrameCB.nGPU, PassCB.nGPU, nTlas, nInstances, s.nTables[PATH_TABLE_FILTER], gx, gy, nLights);
+  GpuSection("pt highlights");
+  m_pCompute->DispatchRays(pList, eD3D12K_PathSpecular, FrameCB.nGPU, PassCB.nGPU, nTlas, nInstances, s.nTables[PATH_TABLE_SPECULAR], gx, gy,
+                           nLights);
   m_pDevice->Transition(s.pLight->m_pResource, D3D12_RESOURCE_STATE_UNORDERED_ACCESS, PATH_READ);
+  m_pDevice->Transition(s.pHighlights->m_pResource, D3D12_RESOURCE_STATE_UNORDERED_ACCESS, PATH_READ);
   for (CD3D12Texture *pTex : { s.pRays, pPrevHistory, pPrevFrames, pHistory, pFrames })
     m_pDevice->Transition(pTex->m_pResource, PATH_KERNEL_READ, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
   m_pDevice->Transition(pDepth, PATH_DEPTH_READ, D3D12_RESOURCE_STATE_DEPTH_WRITE);
   m_pDevice->BindRootSignature();
   InvalidateFrameConstants();
 
-  // The composite: the light added to the scene's colour where the G-buffer has a surface the path tracer lights (the
-  // viewport in the back buffer's pixels, scaled to the scene's by the draw).
+  // The composite: the light and the highlights added to the scene's colour where the G-buffer has a surface the path
+  // tracer lights (the viewport in the back buffer's pixels, scaled to the scene's by the draw).
   GpuSection("pt composite");
   int Viewport[4];
   memcpy(Viewport, m_Viewport, sizeof(Viewport));
@@ -618,12 +637,14 @@ void CD3D12Renderer::DrawPathTrace()
   dc.nTex1 = (uint32)s.pNormal->m_nSRV;
   dc.nTex2 = (uint32)s.pSun->m_nSRV;
   dc.nTex3 = (uint32)s.pLight->m_nSRV;
+  dc.nTex4 = (uint32)s.pHighlights->m_nSRV;
   static const float s_Triangle[3][3] = { { -1, -1, 0 }, { -1, 3, 0 }, { 3, -1, 0 } };
   DrawImmediate(Key, dc, D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST, VERTEX_FORMAT_P3F, s_Triangle, 3);
   memcpy(m_Viewport, Viewport, sizeof(Viewport));
   m_bScissor = bScissor;
   m_bItemScissor = bItemScissor;
   m_pDevice->Transition(s.pLight->m_pResource, PATH_READ, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+  m_pDevice->Transition(s.pHighlights->m_pResource, PATH_READ, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
 
   // This frame for the next one's history.
   memcpy(s.PrevViewProj, ViewProj.data, sizeof(s.PrevViewProj));
@@ -635,19 +656,22 @@ void CD3D12Renderer::DrawPathTrace()
   s.nLightFrame = m_nFrames;
   if (m_pFrameDump)
     fprintf(m_pFrameDump.get(), "pt: %s, %d x %d, %d bounces, %u lamps, sky %.3f %.3f %.3f, sun %.3f %.3f %.3f%s, terrain's baked light %.3f, "
-            "ambient %.2f beyond %.2f m, denoiser %s, history %d (%d frames)\n", bReference ? "reference" : "real time", w, h, nBounces, P.nLights,
-            vSky[0], vSky[1], vSky[2], P.vSun[0], P.vSun[1], P.vSun[2], m_pScene && m_pScene->GetSun() ? "" : " (indoors: no sun in the frame)",
-            P.fBakeLight, fAmbient, fAmbientRange, bDenoise ? "simple" : "none", bHistory ? 1 : 0, s.nAccumulated);
+            "ambient %.2f beyond %.2f m, highlights: sun %.3f %.3f %.3f, lamps %.3f, denoiser %s, history %d (%d frames)\n",
+            bReference ? "reference" : "real time", w, h, nBounces, P.nLights, vSky[0], vSky[1], vSky[2], P.vSun[0], P.vSun[1], P.vSun[2],
+            bOutdoors ? "" : " (indoors: no sun in the frame)", P.fBakeLight, fAmbient, fAmbientRange, pc.vSpecular[0], pc.vSpecular[1],
+            pc.vSpecular[2], pc.vSpecular[3], bDenoise ? "simple" : "none", bHistory ? 1 : 0, s.nAccumulated);
 }
 
 void CD3D12Renderer::DrawPathDebug()
 {
-  if (CV_d3d12_PTDebug <= 0 || CV_d3d12_PTDebug > 8 || m_PathTrace.nGBufferFrame != m_nFrames || !m_PathTrace.pAlbedo || !m_pDevice ||
+  if (CV_d3d12_PTDebug <= 0 || CV_d3d12_PTDebug > 10 || m_PathTrace.nGBufferFrame != m_nFrames || !m_PathTrace.pAlbedo || !m_pDevice ||
       m_pDevice->IsOffscreen() || !m_pRayScene || !m_pRayScene->GetTLAS())
     return;
-  // The paths' light: of this frame's.
-  CD3D12Texture *pLight = CV_d3d12_PTDebug == 5 ? m_PathTrace.pLight : CV_d3d12_PTDebug == 6 ? m_PathTrace.pRays : nullptr;
-  if ((CV_d3d12_PTDebug == 5 || CV_d3d12_PTDebug == 6) && (!pLight || m_PathTrace.nLightFrame != m_nFrames))
+  // The paths' light and the highlights: of this frame's.
+  CD3D12Texture *pLight = CV_d3d12_PTDebug == 5 ? m_PathTrace.pLight : CV_d3d12_PTDebug == 6 ? m_PathTrace.pRays :
+                          CV_d3d12_PTDebug == 10 ? m_PathTrace.pHighlights : nullptr;
+  const bool bKernel = CV_d3d12_PTDebug == 5 || CV_d3d12_PTDebug == 6 || CV_d3d12_PTDebug == 10;
+  if (bKernel && (!pLight || m_PathTrace.nLightFrame != m_nFrames))
     return;
   if (pLight)
     m_pDevice->Transition(pLight->m_pResource, D3D12_RESOURCE_STATE_UNORDERED_ACCESS, PATH_READ);
@@ -669,7 +693,7 @@ void CD3D12Renderer::DrawPathDebug()
   Set4(dc.vParams2, (float)m_PathTrace.pAlbedo->m_nWidth, (float)m_PathTrace.pAlbedo->m_nHeight, 0, 0);
   dc.nTex0 = (uint32)m_PathTrace.pAlbedo->m_nSRV;
   dc.nTex1 = (uint32)m_PathTrace.pNormal->m_nSRV;
-  dc.nTex2 = pLight ? (uint32)pLight->m_nSRV : (uint32)m_PathTrace.pSun->m_nSRV;
+  dc.nTex2 = pLight ? (uint32)pLight->m_nSRV : CV_d3d12_PTDebug == 9 ? (uint32)m_PathTrace.pSpecular->m_nSRV : (uint32)m_PathTrace.pSun->m_nSRV;
   static const float s_Triangle[3][3] = { { -1, -1, 0 }, { -1, 3, 0 }, { 3, -1, 0 } };
   DrawImmediate(Key, dc, D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST, VERTEX_FORMAT_P3F, s_Triangle, 3);
   memcpy(m_Viewport, Viewport, sizeof(Viewport));

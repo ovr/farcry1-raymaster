@@ -954,7 +954,7 @@ ComPtr<ID3D12PipelineState> CD3D12Pipeline::CreatePSO(const SPipelineKey &Key, b
   }
   if (bPath)
   {
-    // The albedo blends as the colour (General.hlsl, XR_PT); the normal is the opaque surface's.
+    // The albedo and the highlights' colour blend as the colour (General.hlsl, XR_PT); the normal is the opaque surface's.
     const bool bWrites = bGeneral && bHdr && !(nState & (GS_NOCOLMASK | GS_COLMASKONLYALPHA));
     D3D12_RENDER_TARGET_BLEND_DESC &Albedo = Desc.BlendState.RenderTarget[3];
     Albedo = Blend;
@@ -963,6 +963,7 @@ ComPtr<ID3D12PipelineState> CD3D12Pipeline::CreatePSO(const SPipelineKey &Key, b
     Normal = Desc.BlendState.RenderTarget[1];
     Normal.RenderTargetWriteMask = bWrites && !(nState & (GS_BLSRC_MASK | GS_BLDST_MASK)) ? D3D12_COLOR_WRITE_ENABLE_ALL : 0;
     Desc.BlendState.RenderTarget[5] = Normal;
+    Desc.BlendState.RenderTarget[6] = Albedo;
   }
   // Without a pixel shader no colour target is written.
   if (Key.bDepthOnly)
@@ -1032,7 +1033,7 @@ ComPtr<ID3D12PipelineState> CD3D12Pipeline::CreatePSO(const SPipelineKey &Key, b
   const int nTopology = Key.nTopology;
   Desc.PrimitiveTopologyType = nTopology >= D3D12_PRIMITIVE_TOPOLOGY_TYPE_POINT && nTopology <= D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE ?
     (D3D12_PRIMITIVE_TOPOLOGY_TYPE)nTopology : D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
-  Desc.NumRenderTargets = bShadowMap ? 0 : bPath ? 6 : bAmbient ? 4 : bScene ? 3 : bHighlight ? 2 : 1;
+  Desc.NumRenderTargets = bShadowMap ? 0 : bPath ? 7 : bAmbient ? 4 : bScene ? 3 : bHighlight ? 2 : 1;
   switch (Key.nColorFormat)
   {
   case PIPELINE_COLOR_HDR:   Desc.RTVFormats[0] = D3D12_HDR_FORMAT; break;
@@ -1049,6 +1050,7 @@ ComPtr<ID3D12PipelineState> CD3D12Pipeline::CreatePSO(const SPipelineKey &Key, b
   Desc.RTVFormats[3] = bPath ? D3D12_PT_ALBEDO_FORMAT : bAmbient ? D3D12_AMBIENT_FORMAT : DXGI_FORMAT_UNKNOWN;
   Desc.RTVFormats[4] = bPath ? D3D12_PT_NORMAL_FORMAT : DXGI_FORMAT_UNKNOWN;
   Desc.RTVFormats[5] = bPath ? D3D12_PT_SUN_FORMAT : DXGI_FORMAT_UNKNOWN;
+  Desc.RTVFormats[6] = bPath ? D3D12_PT_SPECULAR_FORMAT : DXGI_FORMAT_UNKNOWN;
   Desc.DSVFormat = bShadowMap ? D3D12_SHADOW_MAP_FORMAT : bScene ? D3D12_SCENE_DEPTH_FORMAT : bDepth ? D3D12_DEPTH_FORMAT : DXGI_FORMAT_UNKNOWN;
   Desc.SampleDesc.Count = 1;
   Desc.SampleDesc.Quality = 0;

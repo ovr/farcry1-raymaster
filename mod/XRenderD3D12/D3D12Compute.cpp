@@ -41,6 +41,7 @@
 #include "PathTraceTrace_CS.h"
 #include "PathTraceTemporal_CS.h"
 #include "PathTraceFilter_CS.h"
+#include "PathTraceSpecular_CS.h"
 
 using Microsoft::WRL::ComPtr;
 
@@ -83,6 +84,7 @@ const SKernel s_Kernels[eD3D12K_Num] =
   { "path tracer", g_PathTraceTrace_CS, sizeof(g_PathTraceTrace_CS), true },
   { "path tracer (history)", g_PathTraceTemporal_CS, sizeof(g_PathTraceTemporal_CS), true },
   { "path tracer (filter)", g_PathTraceFilter_CS, sizeof(g_PathTraceFilter_CS), true },
+  { "path tracer (highlights)", g_PathTraceSpecular_CS, sizeof(g_PathTraceSpecular_CS), true },
 };
 static_assert(sizeof(s_Kernels) / sizeof(s_Kernels[0]) == eD3D12K_Num, "a kernel for each ED3D12Kernel");
 
