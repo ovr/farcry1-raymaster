@@ -921,7 +921,8 @@ void CD3D12Renderer::DrawLeafItem(const SRenderItem &it)
     // with the element's custom data (u row in floats 0..2, v row in 4..6, the layer's own scale;
     // u = y / 4, v = x / 4 without it), the weight faded out from a quarter of the distance in float
     // 3 of the custom data to that distance (13 to 52 m; r_DetailDistance to twice that without
-    // it), multiplied in twice (DESTCOLOR, SRCCOLOR); no depth writes. A layer with a material of
+    // it), multiplied in twice (DESTCOLOR, SRCCOLOR); no depth writes, lifted towards the viewer
+    // as the original lifts it (DF_DETAIL_LAYER in General.hlsl). A layer with a material of
     // its own (the template "terrainlayer": the cliffs, projected on a vertical plane, one element
     // for each plane) is the material's diffuse texture, bump mapped with its normal map
     // (EFTT_NORMALMAP, else EFTT_BUMP): the sun's light on the bumps relative to its light on the
