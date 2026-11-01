@@ -71,6 +71,7 @@ constexpr STemplateEntry s_Templates[] =
   { "templdecalglow",                  "",                              eS_Opaque,                kOpaque2,                               0,              eDC_Opaque,           eCULL_Back },
   { "templdecalglowselfillum",         "",                              eS_Opaque,                kOpaque2,                               0,              eDC_Opaque,           eCULL_Back },
   { "templdecalglowselfillumanimated", "",                              eS_Opaque,                kOpaque2,                               0,              eDC_Opaque,           eCULL_Back },
+  { "templdecalglowselfillumanimatedslow", "",                          eS_Opaque,                kOpaque2,                               0,              eDC_Opaque,           eCULL_Back },
   { "templreflcm",                     "",                              eS_Opaque,                kOpaque2,                               0,              eDC_Opaque,           eCULL_Back },
   { "templreflcmdecal",                "",                              eS_Opaque,                kOpaque2,                               0,              eDC_Opaque,           eCULL_Back },
   { "templreflcmdecal_reflamountopacity", "",                           eS_Opaque,                kOpaque2,                               0,              eDC_Opaque,           eCULL_Back },
@@ -154,6 +155,7 @@ constexpr STemplateLighting s_TemplateLighting[] =
   { "templdecalglow",                  ELighting::Vertex,   EGlow::Glow },
   { "templdecalglowselfillum",         ELighting::Vertex,   EGlow::SelfIllum },
   { "templdecalglowselfillumanimated", ELighting::Vertex,   EGlow::Pulse },
+  { "templdecalglowselfillumanimatedslow", ELighting::Vertex, EGlow::PulseSlow },
   // Lit by 2 (also by their light map), the texture's alpha its glow (plants blended by it).
   { "templbumpdiffuse_alphaglow",      ELighting::Overbright, EGlow::Alpha },
   { "templlightdiffuse_alphaglow",     ELighting::Overbright, EGlow::Alpha },

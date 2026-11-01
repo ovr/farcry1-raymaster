@@ -122,7 +122,10 @@ enum class EGlow : uint8
 {
   None,
   Glow,                   //!< + gloss map
-  Pulse,                  //!< + gloss map * saturate(0.75 + 0.75 * sin(pi * t))
+  Pulse,                  //!< + gloss map * saturate(0.75 + 0.75 * sin(pi * t)): the game's wave of level 0.75, amplitude
+                          //!< 0.75 and frequency 0.5 (TemplDecalGlowSelfIllumAnimated)
+  PulseSlow,              //!< + gloss map * saturate(0.95 + 0.75 * sin(0.2 * pi * t)): level 0.95, frequency 0.1
+                          //!< (TemplDecalGlowSelfIllumAnimatedSLOW)
   SelfIllum,              //!< bump mapping on: the texture unlit + 2 * gloss map; off: + gloss map
   Alpha,                  //!< + texture * its alpha: the texture's alpha is the glow mask (no gloss map)
 };
