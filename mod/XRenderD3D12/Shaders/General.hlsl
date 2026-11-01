@@ -105,8 +105,11 @@
 //	      (texture alpha if vSpecular.w, else 1) * the sum over the sun (times
 //	      v) and the lights of their specular colour (clamped to 1) * falloff
 //	      * saturate(R.V)^32, R the light reflected about the normal
-//	    DF2_ADD_TEX4: rgb += tex4 at uv0 * vAddColor.rgb + vAddColor.w (a glow
-//	      map or a texture added, unlit); with DF2_GLASS also a *= tex4 a
+//	    DF2_ADD_TEX4: rgb += tex4 at uv0 + (vTexMat0.w, vTexMat1.w) * vAddColor.rgb
+//	      + vAddColor.w (a glow map or a texture added, unlit); with DF2_GLASS
+//	      also a *= tex4 a
+//	    DF2_TEX4_LAYER: the texture is tex4 (there) over tex0 by tex4's alpha,
+//	      before the light (a second layer moving on its own)
 //	    DF2_PROJECTOR (a projected light's pass): the colour times the cube
 //	      g_Cubes[nTex5] at the lookup vector float4(world pos, 1) * mParams0
 //	    DF2_MODULATE (a decal multiplied into the frame): rgb = saturate(rgb +
@@ -734,6 +737,13 @@ float4 ShadePixel(SVertexOutput In)
     if (HasFlag2(DF2_BUMP_OFFSET))
       vUV0 += (SampleTexture(g_Draw.nTex3, XR_SAMPLER_LINEAR_WRAP, In.vTex1).rg * 2 - 1) * g_Draw.vParams0.x;
     vTex = SampleTexture(g_Draw.nTex0, nSampler0, vUV0);
+    if (HasFlag2(DF2_TEX4_LAYER))
+    {
+      // A second layer over the texture by its alpha, moving on its own (the fixed function
+      // templates' second pass).
+      float4 vLayer = SampleTexture(g_Draw.nTex4, XR_SAMPLER_LINEAR_WRAP, In.vTex0 + float2(g_Draw.vTexMat0.w, g_Draw.vTexMat1.w));
+      vTex = float4(lerp(vTex.rgb, vLayer.rgb, vLayer.a), vTex.a + vLayer.a - vTex.a * vLayer.a);
+    }
   }
   if (HasFlag2(DF2_TERRAIN_LIGHT))
     vTex.rgb = 0.75 * vTex.rgb + 0.25;
@@ -832,7 +842,7 @@ float4 ShadePixel(SVertexOutput In)
 #endif
   if (HasFlag2(DF2_ADD_TEX4))
   {
-    float4 vTex4 = SampleTexture(g_Draw.nTex4, XR_SAMPLER_LINEAR_WRAP, In.vTex0);
+    float4 vTex4 = SampleTexture(g_Draw.nTex4, XR_SAMPLER_LINEAR_WRAP, In.vTex0 + float2(g_Draw.vTexMat0.w, g_Draw.vTexMat1.w));
     vColor.rgb += vTex4.rgb * g_Draw.vAddColor.rgb + g_Draw.vAddColor.w;
 #ifdef XR_PT
     s_vPTEmission += vTex4.rgb * g_Draw.vAddColor.rgb + g_Draw.vAddColor.w;

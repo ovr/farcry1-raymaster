@@ -113,6 +113,8 @@ static void **s_pOrigVTable = NULL;
 static void *s_HookedVTable[DEV_CopiedSlots];
 static int s_nLevel = 0;
 static int s_nDraws = 0;
+//! XRENDERTRACED_D3D_CODE=1: the byte code of each shader as it is first seen, in hex tokens.
+static bool s_bDumpCode = false;
 //! Vertex declarations, shaders and textures already described.
 static std::set<const void *> s_Described;
 static std::map<IUnknown *, SBufferShadow> s_Shadows;
@@ -189,6 +191,17 @@ static void DescribeShader(const char *szKind, const void *pShader, UINT nSize, 
   const DWORD nVersion = pCode && nSize >= 4 ? pCode[0] : 0;
   Trace_Write("    [d3d] %s %p: %s_%u_%u, %u bytes", szKind, pShader, (nVersion >> 16) == 0xFFFF ? "ps" : "vs", (nVersion >> 8) & 0xFF,
     nVersion & 0xFF, nSize);
+  if (!s_bDumpCode || !pCode)
+    return;
+  // Eight tokens a line (the comment tokens of the constant table too).
+  for (UINT i = 0; i < nSize / 4; i += 8)
+  {
+    char szLine[128];
+    int n = 0;
+    for (UINT k = i; k < i + 8 && k < nSize / 4; k++)
+      n += sprintf_s(szLine + n, sizeof(szLine) - n, " %08lx", (unsigned long)pCode[k]);
+    Trace_Write("    [d3d] %s code %4u:%s", szKind, i, szLine);
+  }
 }
 
 //! Colour of a 565 value as B, G, R, A bytes.
@@ -500,12 +513,15 @@ static void WriteVertexBox(IDirect3DVertexDeclaration9 *pDecl, IUnknown *pVB0, U
   UINT nElements = MAXD3DDECLLENGTH + 1;
   if (!pDecl || !pVB0 || !nStride || !nCount || FAILED(pDecl->GetDeclaration(Elements, &nElements)))
     return;
-  int nPos = -1;
+  int nPos = -1, nColor = -1;
   for (UINT i = 0; i < nElements && Elements[i].Stream != 0xFF; i++)
   {
     if (Elements[i].Stream == 0 && Elements[i].Usage == D3DDECLUSAGE_POSITION && Elements[i].UsageIndex == 0
       && Elements[i].Type == D3DDECLTYPE_FLOAT3)
       nPos = Elements[i].Offset;
+    if (Elements[i].Stream == 0 && Elements[i].Usage == D3DDECLUSAGE_COLOR && Elements[i].UsageIndex == 0
+      && Elements[i].Type == D3DDECLTYPE_D3DCOLOR)
+      nColor = Elements[i].Offset;
   }
   IDirect3DVertexBuffer9 *pVB = (IDirect3DVertexBuffer9 *)pVB0;
   D3DVERTEXBUFFER_DESC Desc = {};
@@ -520,6 +536,8 @@ static void WriteVertexBox(IDirect3DVertexDeclaration9 *pDecl, IUnknown *pVB0, U
     return;
   const BYTE *pVerts = pShadow ? pShadow : (const BYTE *)pData;
   float fMin[3] = { 1e30f, 1e30f, 1e30f }, fMax[3] = { -1e30f, -1e30f, -1e30f };
+  // The vertex colours' range too (COLOR0 of stream 0, B G R A bytes).
+  BYTE nColMin[4] = { 255, 255, 255, 255 }, nColMax[4] = {};
   for (UINT v = 0; v < nCount; v++)
   {
     const float *pPos = (const float *)(pVerts + v * nStride + nPos);
@@ -528,10 +546,22 @@ static void WriteVertexBox(IDirect3DVertexDeclaration9 *pDecl, IUnknown *pVB0, U
       fMin[c] = min(fMin[c], pPos[c]);
       fMax[c] = max(fMax[c], pPos[c]);
     }
+    if (nColor >= 0)
+    {
+      const BYTE *pCol = pVerts + v * nStride + nColor;
+      for (int c = 0; c < 4; c++)
+      {
+        nColMin[c] = min(nColMin[c], pCol[c]);
+        nColMax[c] = max(nColMax[c], pCol[c]);
+      }
+    }
   }
   if (!pShadow)
     pVB->Unlock();
   Trace_Write("    [d3d] box (%g %g %g)-(%g %g %g) of %u vertices", fMin[0], fMin[1], fMin[2], fMax[0], fMax[1], fMax[2], nCount);
+  if (nColor >= 0)
+    Trace_Write("    [d3d] colour 0 r %u-%u g %u-%u b %u-%u a %u-%u", nColMin[2], nColMax[2], nColMin[1], nColMax[1], nColMin[0], nColMax[0],
+      nColMin[3], nColMax[3]);
 }
 
 //! The render element whose mfDraw is running and, for a leaf buffer element, its buffer and
@@ -958,6 +988,8 @@ void D3DDraws_Begin(IRenderer *pRenderer)
   if (!GetEnvironmentVariableA("XRENDERTRACED_D3D_DRAWS", szEnv, sizeof(szEnv)) || szEnv[0] < '1' || szEnv[0] > '9')
     return;
   s_nLevel = szEnv[0] - '0';
+  char szCode[8] = "";
+  s_bDumpCode = GetEnvironmentVariableA("XRENDERTRACED_D3D_CODE", szCode, sizeof(szCode)) && szCode[0] == '1';
   char szVerts[16] = "";
   if (GetEnvironmentVariableA("XRENDERTRACED_D3D_VERTS", szVerts, sizeof(szVerts)) && atoi(szVerts) > 0)
   {

@@ -536,13 +536,33 @@ void CD3D12Renderer::DrawLeafItem(const SRenderItem &it)
       pTex = pCube;
     }
   }
-  float fScale[2], fOffset[2];
-  GetTexTransform(pSh, pRes, EFTT_DIFFUSE, fScale, fOffset);
-  if (fScale[0] != 1 || fScale[1] != 1 || fOffset[0] != 0 || fOffset[1] != 0)
+  float vRow0[3], vRow1[3];
+  GetTexTransform(pSh, pRes, EFTT_DIFFUSE, vRow0, vRow1);
+  if (vRow0[0] != 1 || vRow0[1] != 0 || vRow0[2] != 0 || vRow1[0] != 0 || vRow1[1] != 1 || vRow1[2] != 0)
   {
     dc.nFlags |= DF_TEXMATRIX;
-    Set4(dc.vTexMat0, fScale[0], 0, fOffset[0], 0);
-    Set4(dc.vTexMat1, 0, fScale[1], fOffset[1], 0);
+    Set4(dc.vTexMat0, vRow0[0], vRow0[1], vRow0[2], 0);
+    Set4(dc.vTexMat1, vRow1[0], vRow1[1], vRow1[2], 0);
+  }
+  // The fixed function templates' second layer (the gloss or the opacity map), moving on its own:
+  // tex4 at uv0 + (vTexMat0.w, vTexMat1.w), its motion less the texture's.
+  if (Props.eLayer2 != ELayer2::None && (dc.nFlags & DF_TEX0) && !(dc.nFlags2 & DF2_ADD_TEX4))
+  {
+    CTexture *pLayer = Props.eLayer2 == ELayer2::BlendOpacity ? m_pShaders->LoadResourceTexture(it.pRes, EFTT_OPACITY) : GetGlowMap(it.pRes);
+    if (pLayer && !pLayer->IsCube() && !(pLayer->GetFlags() & FT_NOTFOUND) && pLayer->IsTextureLoaded())
+    {
+      const float t = iTimer ? iTimer->GetCurrTime() : 0.0f;
+      dc.nTex4 = pLayer->GetSRV();
+      dc.vTexMat0[3] = fmodf(Props.fLayer2Scroll[0] * t, 1.0f) - fmodf(Props.fScrollU * t, 1.0f);
+      dc.vTexMat1[3] = fmodf(Props.fLayer2Scroll[1] * t, 1.0f) - fmodf(Props.fScrollV * t, 1.0f);
+      if (Props.eLayer2 == ELayer2::AddGloss)
+      {
+        dc.nFlags2 |= DF2_ADD_TEX4;
+        Set4(dc.vAddColor, 1, 1, 1, 0);
+      }
+      else
+        dc.nFlags2 |= DF2_TEX4_LAYER;
+    }
   }
 
   const int nFormat = Geom->nVertexFormat;
@@ -797,7 +817,8 @@ void CD3D12Renderer::DrawLeafItem(const SRenderItem &it)
   {
     Light();
     const CFColor Color = LitColor();
-    Set4(dc.vColor, Color.r * pObj->m_Color.r, Color.g * pObj->m_Color.g, Color.b * pObj->m_Color.b, fOpacity * pObj->m_Color.a);
+    Set4(dc.vColor, Color.r * pObj->m_Color.r, Color.g * pObj->m_Color.g, Color.b * pObj->m_Color.b,
+         (Props.bNoOpacity ? 1.0f : fOpacity) * pObj->m_Color.a);
     // Glass of opacity 1 is opaque, whatever its texture's alpha.
     const bool bOpaqueGlass = (Props.eEnvMap == EEnvMap::Glass || Props.eEnvMap == EEnvMap::GlassFixed) && dc.vColor[3] >= 1;
     if (!bOpaqueGlass)

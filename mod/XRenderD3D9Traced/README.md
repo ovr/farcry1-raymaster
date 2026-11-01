@@ -198,7 +198,9 @@ reference of the rest.
   each (with
   the stencil state when stencil is on and the scissor rectangle when the scissor test is on) and
   the box of the positions an indexed draw uses (when
-  its vertex buffer can be read back), `3` also the shader constants. The `CCObject` dumps give
+  its vertex buffer can be read back), `3` also the shader constants. `XRENDERTRACED_D3D_CODE=1` also
+  writes the byte code of each vertex and pixel shader where it is first seen, eight hex tokens a
+  line (`[d3d] ps code`), to read a shader the state does not explain. The `CCObject` dumps give
   its scissor rectangle, and the camera dump of `SetCamera` the camera's portal and scissor
   rectangles when they are set.
   `XRENDERTRACED_D3D_CUBESAVE=<path prefix>` saves level 0 of the six faces of every cube texture

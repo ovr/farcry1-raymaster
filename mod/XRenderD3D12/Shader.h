@@ -130,6 +130,17 @@ enum class EGlow : uint8
   Alpha,                  //!< + texture * its alpha: the texture's alpha is the glow mask (no gloss map)
 };
 
+//! A second texture layer of the game's fixed function templates, its texture moving on its own
+//! (SShaderProps::fLayer2Scroll).
+enum class ELayer2 : uint8
+{
+  None,
+  AddGloss,               //!< + gloss map, unlit (TemplTextureShiftST_2T: layer 1, TexColorOp Add)
+  BlendGloss,             //!< the gloss map over the texture by its alpha, lit as the texture (TemplTextureShiftST_2T_AlphaBlend:
+                          //!< a second pass, SRC_ALPHA ONE_MINUS_SRC_ALPHA)
+  BlendOpacity,           //!< the opacity map over the texture by its alpha (communication_island_river: a second pass)
+};
+
 //! The environment cube map (CD3D12Renderer::GetEnvCubeMap) in place of the material's texture,
 //! looked up with the view vector reflected about the normal, in world space.
 enum class EEnvMap : uint8
@@ -167,6 +178,14 @@ struct SShaderProps
   EEnvMap eEnvMap = EEnvMap::None;
   float fAlphaRef = 0.0f;                        //!< alpha test reference (0..1, texture alpha >= it passes); 0: none
   float fScrollV = 0.0f;                          //!< texture v moves by fScrollV * ITimer::GetCurrTime()
+  float fScrollU = 0.0f;                          //!< texture u moves by fScrollU * ITimer::GetCurrTime()
+  float fRotate = 0.0f;                           //!< the texture turns by fRotate degrees a second (the material's
+                                                  //!< public float "Speed" in its place with bRotateSpeedParam)
+  float fRotatePivot = 0.5f;                      //!< about the point (fRotatePivot, fRotatePivot) of the texture
+  bool bRotateSpeedParam = false;
+  ELayer2 eLayer2 = ELayer2::None;
+  float fLayer2Scroll[2] = {};                    //!< the second layer's u and v move by these * ITimer::GetCurrTime()
+  bool bNoOpacity = false;                        //!< blended by the texture's and the vertices' alpha, not the material's opacity
   float fFlareSize = 0.0f;                        //!< eDC_ProcFlare: how far the glow reaches beyond the surface, in metres
   bool bLightmap = false;                         //!< combines the lightmap of lightmapped objects
   bool bStealth = false;                          //!< colour scaled by the object's "refraction" (GetColorScale)
@@ -442,11 +461,11 @@ ECull GetCullMode(const CShader *pShader, const SRenderShaderResources *pRes);
 //! The front diffuse colour of the material's light material (white without one): the material
 //! colour of lit draws (characters use it as the diffuse material colour).
 CFColor GetMaterialColor(const SRenderShaderResources *pRes);
-//! Texture transform of slot nSlot: u' = u * fScale[0] + fOffset[0], v' = v * fScale[1] +
-//! fOffset[1]: the material's tiling and offset (SEfTexModificator; a tiling of 0 counts as 1)
-//! plus the template's scrolling (v moved by fScrollV * ITimer::GetCurrTime()). Identity without
-//! resources or texture.
-void GetTexTransform(const CShader *pShader, const SRenderShaderResources *pRes, int nSlot, float fScale[2], float fOffset[2]);
+//! Texture transform of slot nSlot, the rows of a 2x3 matrix: u' = dot(float3(u, v, 1), vRow0), v' =
+//! dot(.., vRow1). The material's tiling and offset (SEfTexModificator; a tiling of 0 counts as 1),
+//! then the template's motion: turned about its pivot (fRotate degrees a second) and moved
+//! (fScrollU, fScrollV, times ITimer::GetCurrTime()). Identity without resources, texture or motion.
+void GetTexTransform(const CShader *pShader, const SRenderShaderResources *pRes, int nSlot, float vRow0[3], float vRow1[3]);
 //! Colour factor of the template for an object: 1, except for "mutantstealth_fp" (a cloaked
 //! character: texture * 2 * (int)(refraction * 255) / 255, added) where "refraction" is the float
 //! of the object's m_ShaderParams (12 / 255 without it).

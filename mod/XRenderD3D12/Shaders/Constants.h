@@ -83,7 +83,7 @@ typedef float float4x4_t[16];
 #define DF_BUMP             0x20000000  //!< bump mapping: N' = the normal map tex3 at uv0 (rgb * 2 - 1, its green times vParams1.y) in the vertex's tangent frame (TANGENT, BINORMAL, TNORMAL) for DF_PIXEL_LIGHTING; DF_LIGHTMAP_DIR takes saturate(dot(N', D)) for D.z
 
 // SDrawConstants::nFlags2
-#define DF2_ADD_TEX4        0x00000001  //!< rgb += tex4 (g_Textures[nTex4] at uv0) * vAddColor.rgb + vAddColor.w: a glow map or a texture added, unlit
+#define DF2_ADD_TEX4        0x00000001  //!< rgb += tex4 (g_Textures[nTex4] at uv0 + (vTexMat0.w, vTexMat1.w)) * vAddColor.rgb + vAddColor.w: a glow map or a texture added, unlit
 #define DF2_GLASS           0x00000002  //!< with DF_CUBE0: lerp(cube(T), cube(R), F), T the view vector refracted with the ratio vParams2.w, F = saturate(vParams2.z + vParams2.x * (1 - N.V)^vParams2.y); with DF2_ADD_TEX4 a *= tex4 a
 #define DF2_NO_SUN          0x00000004  //!< with DF_LIGHTING: the draw's lights without the sun (a light pass added over the object)
 #define DF2_FOG_BLACK       0x00000008  //!< with DF_FOG: fogged towards black (an additive pass)
@@ -112,6 +112,7 @@ typedef float float4x4_t[16];
 #define DF2_AO_BAKED        0x01000000  //!< the terrain, the vegetation: the colour (before DF2_SHADOW_TINT) times vMipBias.yzw, the share of the light the shadow leaves
 #define DF2_AO_ALL          0x02000000  //!< the templates lit by the ambient colour alone, the terrain's shadow: all of the colour
 #define DF2_FOLIAGE         0x04000000  //!< the leaves and the grass, seen against the sun (XR_FOLIAGE): rgb += tex0 rgb * vColor.rgb * FoliageLight (General.hlsl, vFoliage)
+#define DF2_TEX4_LAYER      0x20000000  //!< with DF_TEX0: tex0 = (lerp(tex0 rgb, tex4 rgb, tex4 a), a + tex4 a - a * tex4 a), tex4 at uv0 + (vTexMat0.w, vTexMat1.w): a second layer blended over the texture before the light
 // The path tracer's G-buffer (XR_PT, General.hlsl; set only while it is bound, PathTrace.cpp)
 #define DF2_PT_MASK         0x18000000  //!< the surface's path material plus 1 (XR_PT_MAT_* + 1 & 3, RayConstants.h; 0 unlit): its light flags off, its colour less what it adds unlit (DF2_ADD_TEX4, DF2_ALPHA_GLOW) is its albedo
 #define DF2_PT_SHIFT        27
@@ -190,8 +191,8 @@ struct SDrawConstants
   XR_FLOAT4(vAmbient);            //!< rgb ambient for DF_LIGHTING / DF_TEX1_LIGHTMAP; w the scale s of DF_LIGHTING (2 or 1)
   XR_FLOAT4(vTexGenU);            //!< DF_TEXGEN_WORLD
   XR_FLOAT4(vTexGenV);
-  XR_FLOAT4(vTexMat0);            //!< DF_TEXMATRIX: u' = dot(float3(u, v, 1), vTexMat0.xyz)
-  XR_FLOAT4(vTexMat1);            //!<               v' = dot(float3(u, v, 1), vTexMat1.xyz)
+  XR_FLOAT4(vTexMat0);            //!< DF_TEXMATRIX: u' = dot(float3(u, v, 1), vTexMat0.xyz); w: tex4's u offset (DF2_ADD_TEX4, DF2_TEX4_LAYER)
+  XR_FLOAT4(vTexMat1);            //!<               v' = dot(float3(u, v, 1), vTexMat1.xyz); w: tex4's v offset
   XR_FLOAT4_ARRAY(vLightPos, XR_MAX_DRAW_LIGHTS);   //!< DF_LIGHTING, the draw's lights: w 1 a point light at xyz (world), w 2 a directional light from xyz
   XR_FLOAT4_ARRAY(vLightColor, XR_MAX_DRAW_LIGHTS); //!< rgb: the light's colour
   XR_FLOAT4_ARRAY(vLightAtten, XR_MAX_DRAW_LIGHTS); //!< a point light's attenuation 1 / (x + y d) at the distance d, 0 from z (the range) on; w 1 / its radius (DF_BUMP)
