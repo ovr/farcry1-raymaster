@@ -51,6 +51,10 @@ Mods for Far Cry, built with the CryENGINE MOD SDK for Far Cry:
   - `06-video-vsync.patch` - Vertical Sync in Video Options stays on in a game, and Apply sets it
     without a relaunch: XRenderD3D12 takes `r_VSync` every frame (the game greys it out there, as
     its Direct3D 9 renderer had to reset its device for it; with another renderer it still does).
+  - `07-video-path-tracing.patch` - Path Tracing in Advanced Video Options: None, Real Time or
+    Reference, which sets `d3d12_PathTracing`, the lighting of XRenderD3D12 by paths in place of the
+    light maps (a graphics card with DXR 1.1; greyed out without one); choosing it while HDR is None
+    sets HDR to Soft.
 
 How to build and run them: `AGENTS.md`.
 

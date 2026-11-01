@@ -851,6 +851,11 @@ public:
     int nAccumulated = 0;                   //!< the frames in the history (the reference's, while the view stays)
     uint32 nSettingsKey = 0;                //!< the settings the history was traced with
     bool bReference = false;                //!< it was the reference's
+    // How the last frame traced was (r_DisplayInfo)
+    const char *szDenoiser = "";            //!< "NRD", "simple" or "none"
+    int nBounces = 0;                       //!< its paths' bounces
+    bool bCache = false;                    //!< with the radiance cache
+    bool bCheckerboard = false;             //!< the paths of half the pixels
   };
   SPathTraceState m_PathTrace;
 
