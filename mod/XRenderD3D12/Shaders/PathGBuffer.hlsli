@@ -17,12 +17,12 @@
 //	    layers change it as they change the colour (the layers multiply it,
 //	    their factor unfogged), a fog volume over it takes it away;
 //	  - the normal (D3D12_PT_NORMAL_FORMAT, SV_Target4) of the opaque
-//	    surface, on the side of its triangle the camera sees (the
-//	    normal map's with DF_BUMP): rg octahedral (PathOctEncode), b the
-//	    share of the surface's colour the fog leaves (SceneFog; 1 without
-//	    fog), a the path material plus 1 (XR_PT_MAT_* + 1 & 3: 0 none or
-//	    unlit, 1 lit, 2 the terrain, 3 the vegetation; DF2_PT_MASK). The
-//	    blended draws do not write it;
+//	    surface (the normal map's with DF_BUMP), on the side of its
+//	    triangle the camera sees but the vegetation's (PathGBufferNormal):
+//	    rg octahedral (PathOctEncode), b the share of the surface's colour
+//	    the fog leaves (SceneFog; 1 without fog), a the path material plus
+//	    1 (XR_PT_MAT_* + 1 & 3: 0 none or unlit, 1 lit, 2 the terrain, 3
+//	    the vegetation; DF2_PT_MASK). The blended draws do not write it;
 //	  - the sun's visibility (D3D12_PT_SUN_FORMAT, SV_Target5, r) at the
 //	    opaque surface, as the raster finds it (its shadow maps, the sun's
 //	    cascades, the mask of the sun's shadow by rays; all the casters),
@@ -42,6 +42,8 @@
 
 #ifndef XRENDERD3D12_PATHGBUFFER_HLSLI
 #define XRENDERD3D12_PATHGBUFFER_HLSLI
+
+#include "RayConstants.h"
 
 //! A unit vector as the octahedral map's point, 0..1.
 float2 PathOctEncode(float3 n)
@@ -64,12 +66,16 @@ float3 PathOctDecode(float2 e)
   return normalize(n);
 }
 
-//! The normal target's texel: vNormal (not normalised) on the side of vSide (the triangle's normal on the camera's
-//! side), the fog's share fFog, the material field of DF2_PT_MASK (the path material plus 1).
-float4 PathGBufferNormal(float3 vNormal, float3 vSide, float fFog, uint nMaterial)
+//! The normal target's texel: vNormal (not normalised) on the side of vFace (the triangle's normal on the camera's
+//! side: two-sided surfaces' backs), as the rays' hits take it (PathSurface); the vegetation's as it is: its normals are
+//! the crown's, not the leaves' (most of them point up), and the raster lights both sides of a leaf by them. (Turned by
+//! the view's direction, a crown's turned over at the eyes' height, a line that moved over the leaves with the camera;
+//! by the leaf's side, every other leaf.) fFog the fog's share, nMaterial the material field of DF2_PT_MASK (the path
+//! material plus 1).
+float4 PathGBufferNormal(float3 vNormal, float3 vFace, float fFog, uint nMaterial)
 {
   float3 n = dot(vNormal, vNormal) > 1e-12 ? normalize(vNormal) : float3(0, 0, 1);
-  if (dot(n, vSide) < 0)
+  if ((nMaterial & 3) != XR_PT_MAT_VEGETATION + 1 && dot(n, vFace) < 0)
     n = -n;
   return float4(PathOctEncode(n), saturate(fFog), (float)(nMaterial & 3) / 3);
 }

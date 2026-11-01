@@ -571,17 +571,20 @@ reference of its features and console variables.
   program's `XR_PT` permutation (`General_PT_*`, `SPipelineKey::bPathTrace`): the colour gets only what
   the path tracer does not light (glow maps, alpha glow, the unlit templates, the fog), a second target
   the albedo (RGBA16F, the game's colour without its light, unfogged; decals and the terrain's layers
-  blend into it as into the colour), a third the normal on the side of its triangle the camera sees, as
-  the rays' hits take it (R10G10B10A2: octahedral, the fog's share, the path material: lit, terrain,
-  vegetation; by the view's direction a crown's normals turned over at the eyes' height, a line that
-  moved over the leaves with the camera), a fourth the sun's visibility as the raster finds it (RGBA8,
-  r: its shadow maps, the sun's cascades and their mask by rays, which the path tracer turns on, from
-  all the casters; 0 where the raster has no sun) and the game's ambient light on the surface (gba: what
-  the object's ambient colour adds to its light maps or its lights; the terrain, whose light is in its
-  texture, the outdoor ambient), a fifth its highlights' colour (RGBA8, half of the raster's 2 x
-  specular colour x gloss of the specular templates; it blends as the albedo). Its lit draws lose their
-  light (the light maps, the sun, the lamps and their passes, the ambient and the baked AO); the screen
-  space AO, the rays' GI and the projectors' passes are not drawn.
+  blend into it as into the colour), a third the normal (R10G10B10A2: octahedral, the fog's share, the
+  path material: lit, terrain, vegetation) on the side of its triangle the camera sees, as the rays'
+  hits take it, but the vegetation's as it is: its normals are the crown's, most of them up, which the
+  raster lights both sides of a leaf by, and a path from a leaf goes through it where it is under the
+  leaf's face (turned by the view's direction, a crown's turned over at the eyes' height, a line that
+  moved over the leaves with the camera; by the leaf's side, every other leaf), a fourth the sun's
+  visibility as the raster finds it (RGBA8, r: its shadow maps, the sun's cascades and their mask by
+  rays, which the path tracer turns on, from all the casters; 0 where the raster has no sun) and the
+  game's ambient light on the surface (gba: what the object's ambient colour adds to its light maps or
+  its lights; the terrain, whose light is in its texture, the outdoor ambient), a fifth its highlights'
+  colour (RGBA8, half of the raster's 2 x specular colour x gloss of the specular templates; it blends
+  as the albedo). Its lit draws lose their light (the light maps, the sun, the lamps and their passes,
+  the ambient and the baked AO); the screen space AO, the rays' GI and the projectors' passes are not
+  drawn.
 - After the opaque list its kernels (`Shaders/PathTrace.hlsl`, compute with rays, at the scene's size)
   light it. `CSTrace`, a path from the surface of half the pixels, in a checkerboard, the others the
   next frame (`d3d12_PTCheckerboard` 1; a pixel left out takes the light of its four neighbours, weighed

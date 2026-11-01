@@ -124,6 +124,14 @@ float3 PixelNormal(float4 vGBuffer)
   return PathOctDecode(vGBuffer.rg);
 }
 
+//! The face a path along vDir leaves a leaf by (the vegetation's pixels; vFace the side the camera sees): the leaf's
+//! normal is the crown's (PathGBufferNormal), most of them up, so a path is often under the leaf's face; it goes on
+//! through the leaf from its other side, as the raster lights both sides of a leaf by the crown's normal.
+float3 PathLeafSide(float3 vFace, float3 vDir)
+{
+  return dot(vDir, vFace) < 0 ? -vFace : vFace;
+}
+
 //! A direction of the hemisphere about vN as the cosine spreads them, from two random numbers u, v of 0..1.
 float3 CosineDirection(float3 vN, float u, float v)
 {
@@ -195,11 +203,14 @@ void CSTrace(uint3 vId : SV_DispatchThreadID)
   float3 vThrough = 1;
   float3 vOrigin = vPos, vNormal = vN, vFaceNormal = vFace;
   float fWidth = fPixel;
+  bool bLeaves = PathGBufferMaterial(vGBuffer) == XR_PT_MAT_VEGETATION + 1;
   [loop]
   for (uint b = 0; b < g_PT.nPath.y; b++)
   {
     const float u = PathRandom(nSeed), v = PathRandom(nSeed);
     const float3 vDir = CosineDirection(vNormal, u, v);
+    if (bLeaves)
+      vFaceNormal = PathLeafSide(vFaceNormal, vDir);
     // Under the face (a normal map's normal leaning over): the path ends.
     if (dot(vDir, vFaceNormal) <= 0)
       break;
@@ -246,6 +257,7 @@ void CSTrace(uint3 vId : SV_DispatchThreadID)
     vNormal = H.vNormal;
     vFaceNormal = H.vFaceNormal;
     fWidth = fHitWidth;
+    bLeaves = false;
   }
   // In real time a sample's light at most: what a path rarely finds (a lamp by a bounce) would stay a blotch.
   const float fLuminance = PathLuminance(vLight);
@@ -350,7 +362,7 @@ void CSFilter(uint3 vId : SV_DispatchThreadID)
       if (h.w <= 0)
         continue;
       const float3 vQ = PixelPos(q + 0.5, h.w);
-      const float fNormal = saturate(dot(PixelNormal(GBufferNormalAt(q)), vN));
+      const float fNormal = saturate(dot(PathNormalAt(q), vN));
       const float w = exp(-2 * r * r) * saturate(1 - abs(dot(vQ - vPos, vFace)) * fPlane) * pow(fNormal, 8);
       vSum += w * float4(h.rgb, 1);
     }
@@ -452,15 +464,20 @@ void CSCacheUpdate(uint3 vId : SV_DispatchThreadID)
   bool Valid[CACHE_BOUNCES];
   uint nPoints = 0;
   float3 vOrigin = vPos, vNormal = PixelNormal(vGBuffer), vFaceNormal = FaceNormal(p, vPos, d);
+  bool bLeaves = PathGBufferMaterial(vGBuffer) == XR_PT_MAT_VEGETATION + 1;
   float3 vFill = PathAmbientLight(g_Textures[g_PT.nTextures2.w].Load(int3(p, 0)).gba) * g_PT.vFill.x;
   float fWidth = d * g_PT.vParams.y;
-  float3 vDirect = PathSun(vOrigin, vNormal, vFaceNormal, P, fWidth) + PathSampleLamp(vOrigin, vNormal, vFaceNormal, P, nSeed, fWidth);
+  // The sun through a leaf (its ray from the leaf's side towards the sun), as the paths go through it.
+  const float3 vSunFace = bLeaves ? PathLeafSide(vFaceNormal, g_Frame.vSunDir.xyz) : vFaceNormal;
+  float3 vDirect = PathSun(vOrigin, vNormal, vSunFace, P, fWidth) + PathSampleLamp(vOrigin, vNormal, vFaceNormal, P, nSeed, fWidth);
   float3 vLast = 0;
   [loop]
   for (uint b = 0; b < CACHE_BOUNCES; b++)
   {
     const float u = PathRandom(nSeed), v = PathRandom(nSeed);
     const float3 vDir = CosineDirection(vNormal, u, v);
+    if (bLeaves)
+      vFaceNormal = PathLeafSide(vFaceNormal, vDir);
     // Under the face (a normal map's normal leaning over): the path ends at this point, the cache's light comes to it
     // (where it has none, what comes straight to it).
     if (dot(vDir, vFaceNormal) <= 0)
@@ -504,6 +521,7 @@ void CSCacheUpdate(uint3 vId : SV_DispatchThreadID)
     vNormal = H.vNormal;
     vFaceNormal = H.vFaceNormal;
     fWidth = fHitWidth;
+    bLeaves = false;
   }
   // Back from the last point: what comes to point b is what comes straight to it, what its ray's hit gives back of its
   // own and that hit's albedo times what comes to the hit.
