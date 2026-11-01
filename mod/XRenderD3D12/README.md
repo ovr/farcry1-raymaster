@@ -654,6 +654,13 @@ reference of its features and console variables.
 - The game's menu gets it from `assets/scripts/07-video-path-tracing.patch`: Path Tracing, None / Real
   Time / Reference in Advanced Video Options, in the last row of the right column under HDR output;
   choosing it while HDR is None sets HDR to Soft, greyed out without `d3d12_PathTracing`.
+- Its unit tests (`Tests/`, the console program `XRenderD3D12Tests`, `ctest --preset x64-release`)
+  run its shader code without the game, on a D3D12 device of their own (a hardware adapter; WARP
+  with `--warp` or without one; `--debug` fails a test on a debug layer message): the G-buffer's
+  normal (the octahedral map, the side it is turned to, the vegetation's left as it is), its fog and
+  material fields, the HDR targets' light curve, the radiance cache (cells, keys, insertion from many
+  threads, the samples' sum and `CSCacheResolve` itself), `PathLeafSide`, the cosine directions, the
+  checkerboard, and the structures C++ shares with the shaders word for word.
 
 ## Pipeline states
 

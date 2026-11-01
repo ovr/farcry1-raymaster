@@ -361,3 +361,8 @@ if(XRENDER_OUTPUT_DIR)
         VERBATIM
     )
 endif()
+
+# The unit tests (Tests/CMakeLists.txt, ctest): a console program of their own with their own shader compiles; it does
+# not depend on the XRenderD3D12 target and is not deployed.
+enable_testing()
+add_subdirectory(Tests)
