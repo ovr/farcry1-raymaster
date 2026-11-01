@@ -116,7 +116,14 @@ constexpr STemplateEntry s_Templates[] =
   { "templglassdispersionenvcm",       "templreflenvcm",                eS_Opaque,                kOpaque2,                               0,              eDC_Opaque,           eCULL_Back },
   { "templtextureshiftt02",            "",                              eS_Opaque,                kOpaque2,                               0,              eDC_Opaque,           eCULL_Back, 0.0f,         0.2f },
   { "templtextureshiftt05",            "",                              eS_Opaque,                kOpaque2,                               0,              eDC_Opaque,           eCULL_Back, 0.0f,         0.5f },
-  { "lavavolume",                      "",                              eS_Opaque,                kOpaque2,                               0,              eDC_Opaque,           eCULL_Back },
+  // The other texture shifts (s_TemplateMotion). TemplDeform's vertex wave (DeformVertexes, Div 100)
+  // moves nothing that shows in the original's frames: drawn as it stands.
+  { "templtextureshifts05",            "",                              eS_Opaque,                kOpaque2,                               0,              eDC_Opaque,           eCULL_Back },
+  { "templtextureshiftst05",           "",                              eS_Opaque,                kOpaque2,                               0,              eDC_Opaque,           eCULL_Back },
+  { "templtextureshiftst_2t",          "",                              eS_Opaque,                kOpaque2,                               0,              eDC_Opaque,           eCULL_Back },
+  { "templtextureshiftst_2t_alphablend", "",                            eS_Opaque,                kOpaque2,                               0,              eDC_Opaque,           eCULL_Back },
+  { "templdeform",                     "",                              eS_Opaque,                kOpaque2,                               0,              eDC_Opaque,           eCULL_Back },
+  { "lavavolume",                    "",                              eS_Opaque,                kOpaque2,                               0,              eDC_Opaque,           eCULL_Back },
   // Glass: drawn blended so that what is behind shows (alpha: the opacity).
   { "templglasscm",                    "templglasscm_fp",               eS_Opaque,                kOpaque2,                               0,              eDC_AlphaBlend,       eCULL_Back },
   { "templglasscm_fp",                 "",                              eS_Opaque,                kOpaque2,                               0,              eDC_AlphaBlend,       eCULL_Back },
@@ -129,9 +136,12 @@ constexpr STemplateEntry s_Templates[] =
   { "templdecalmodulate",              "templdecalmodulate_fp",         eS_Decal,                 EF2_DONTSORTBYDIST,                     0,              eDC_Modulate,         eCULL_Back },
   { "templdecalalphablend",            "",                              eS_Decal,                 EF2_DONTSORTBYDIST,                     0,              eDC_AlphaBlend,       eCULL_Back },
   // Blended (no depth writes). TemplDecalAlphaBlend_NoSort: lit, among the blended objects, no decal
-  // offset. The opacity shifts (waterfalls): the texture alone, its v running down.
+  // offset. The opacity shifts (waterfalls): the texture times the vertex colours, its v running
+  // down, both faces, not the material's opacity (bNoOpacity).
   { "templalphablend",                 "",                              eS_Banner,                0,                                      0,              eDC_AlphaBlend,       eCULL_Back },
   { "templdecalalphablend_nosort",     "",                              eS_Banner,                0,                                      0,              eDC_AlphaBlend,       eCULL_Back },
+  { "templtexturerotate",              "",                              eS_Banner,                0,                                      0,              eDC_AlphaBlend,       eCULL_None },
+  { "communication_island_river",      "",                              eS_Banner,                0,                                      0,              eDC_AlphaBlend,       eCULL_Back },
   { "templdecalopacity",               "",                              eS_Banner,                0,                                      0,              eDC_AlphaBlend,       eCULL_Back },
   { "templdecalopacityshift",          "templdecalopacityshift_fp",     eS_Banner,                0,                                      0,              eDC_AlphaBlend,       eCULL_None, 0.0f,         -0.35f },
   { "templdecalopacityshift1",         "templdecalopacityshift1_fp",    eS_Banner,                0,                                      0,              eDC_AlphaBlend,       eCULL_None, 0.0f,         -0.35f },
@@ -220,6 +230,13 @@ constexpr STemplateLighting s_TemplateLighting[] =
   { "templlightdiffuse_alphaglow",     ELighting::Overbright, EGlow::Alpha },
   { "templtextureshiftt02",            ELighting::Vertex },
   { "templtextureshiftt05",            ELighting::Vertex },
+  { "templtextureshifts05",            ELighting::Vertex },
+  { "templtextureshiftst05",           ELighting::Vertex },
+  { "templtextureshiftst_2t",          ELighting::Vertex },
+  { "templtextureshiftst_2t_alphablend", ELighting::Vertex },
+  { "templtexturerotate",              ELighting::Vertex },
+  { "templdeform",                     ELighting::Vertex },
+  { "communication_island_river",      ELighting::None },
   // The cube map alone (its material's ambient is white: the light saturates), the cube map lit
   // plus the texture, the glass unlit.
   { "templreflcm",                     ELighting::None,     EGlow::None, EEnvMap::Cube },
@@ -238,17 +255,51 @@ constexpr STemplateLighting s_TemplateLighting[] =
   { "templdecalopacity",               ELighting::Ambient },
   { "templdecalalphatestforshadows",   ELighting::Ambient2 },
   { "templdecaladd_vlight",            ELighting::Ambient },
-  { "templdecalopacityshift",          ELighting::None },
-  { "templdecalopacityshift1",         ELighting::None },
-  { "templdecalopacityshift2",         ELighting::None },
-  { "templdecalopacityshift3",         ELighting::None },
-  { "templdecalopacityshift4",         ELighting::None },
+  // The texture times the mesh's vertex colours (white without them).
+  { "templdecalopacityshift",          ELighting::VColor },
+  { "templdecalopacityshift1",         ELighting::VColor },
+  { "templdecalopacityshift2",         ELighting::VColor },
+  { "templdecalopacityshift3",         ELighting::VColor },
+  { "templdecalopacityshift4",         ELighting::VColor },
+  // The texture alone.
   { "templtexturev22rotate",           ELighting::None },
   // Texture * fixed function vertex lighting, blended.
   { "templdecalalphablend_nosort",     ELighting::Vertex },
   // No lights: the texture times the vertex colour (also added by its alpha).
   { "templdecalalphablend",            ELighting::VColor },
   { "templdecalalphaadd",              ELighting::VColor },
+};
+
+//! The texture motion of the game's fixed function templates (FixedPipeline.csl: the Matrix
+//! 'GL_TEXTURE' of the texture and of a second layer) beyond s_Templates' fScrollV. The original
+//! renderer (D3D) takes a matrix's steps in the order written, on the row vector (u, v):
+//! TemplTextureRotate's Translate 0.5, RotateZ, Translate -0.5 turns the texture about (-0.5, -0.5);
+//! TemplTextureV22Rotate writes them the other way round for D3D (#ifdef OTHER): about the middle.
+//! Their RgbGen 'Fixed' (1 1 1 0.5) does not make the original's blend see-through: the alpha is the
+//! texture's and the opacity's. TemplTextureShiftST_2T's texture stands still in the original: its
+//! stage 0 matrix has the offset in the fourth row only, which a COUNT2 transform of (u, v, 1) does
+//! not reach; its gloss layer moves.
+struct STemplateMotion
+{
+  std::string_view Name;
+  float fScrollU, fScrollV;       //!< a second (Translate (Comp 'time n'))
+  float fRotate;                  //!< degrees a second (RotateZ (Comp 'time n'))
+  float fPivot;                   //!< about (fPivot, fPivot)
+  bool bSpeedParam;               //!< fRotate is the material's public float "Speed" (UsrTime 'Speed'), when it has it
+  ELayer2 eLayer2;
+  float fLayer2U, fLayer2V;       //!< the second layer's motion, a second
+};
+
+constexpr STemplateMotion s_TemplateMotion[] =
+{
+  // name                              u      v      turn    pivot  speed  second layer           u      v
+  { "templtextureshifts05",            0.5f,  0.0f,  0.0f,   0.5f,  false, ELayer2::None,         0.0f,  0.0f },
+  { "templtextureshiftst05",           0.5f,  0.5f,  0.0f,   0.5f,  false, ELayer2::None,         0.0f,  0.0f },
+  { "templtextureshiftst_2t",          0.0f,  0.0f,  0.0f,   0.5f,  false, ELayer2::AddGloss,     0.25f, 0.25f },
+  { "templtextureshiftst_2t_alphablend", 0.1f, 0.0f, 0.0f,   0.5f,  false, ELayer2::BlendGloss,   0.25f, 0.0f },
+  { "templtexturerotate",              0.0f,  0.0f,  200.0f, -0.5f, false, ELayer2::None,         0.0f,  0.0f },
+  { "templtexturev22rotate",           0.0f,  0.0f,  200.0f, 0.5f,  true,  ELayer2::None,         0.0f,  0.0f },
+  { "communication_island_river",      0.1f,  0.0f,  0.0f,   0.5f,  false, ELayer2::BlendOpacity, 0.08f, 0.0f },
 };
 
 //! An engine shader (EF_LoadShader by name).
@@ -397,6 +448,21 @@ SResolvedTemplate ResolveTemplate(const std::string &Name, uint64 nMaskGen)
   }
   if (pE->bNotFound)
     R.Props.nFlags |= EF_NOTFOUND;
+  // The opacity shifts' pixel shader is the texture times the vertex colour (CGVProgWaterFall passes
+  // the mesh's colours, white without them): the material's opacity does not reach it.
+  R.Props.bNoOpacity = Name.starts_with("templdecalopacityshift");
+  if (const STemplateMotion *pM = FindEntry(s_TemplateMotion, Name))
+  {
+    R.Props.fScrollU = pM->fScrollU;
+    if (pM->fScrollV != 0.0f)
+      R.Props.fScrollV = pM->fScrollV;
+    R.Props.fRotate = pM->fRotate;
+    R.Props.fRotatePivot = pM->fPivot;
+    R.Props.bRotateSpeedParam = pM->bSpeedParam;
+    R.Props.eLayer2 = pM->eLayer2;
+    R.Props.fLayer2Scroll[0] = pM->fLayer2U;
+    R.Props.fLayer2Scroll[1] = pM->fLayer2V;
+  }
   SetTemplateLighting(R.Props, Name);
   return R;
 }
@@ -1220,8 +1286,11 @@ void CShaderManager::LoadDrawnTextures(const CShader *pSH, SRenderShaderResource
   const SShaderProps &Props = pSH->GetProps();
   if ((Props.bPixelLighting && g_pRenderer && g_pRenderer->CV_r_Quality_BumpMapping > 0) || Props.eDrawClass == eDC_TerrainLayer)
     LoadNormalMap(pRes);
-  if ((Props.eGlow != EGlow::None && Props.eGlow != EGlow::Alpha) || Props.eEnvMap == EEnvMap::CubeDecalAmount)
+  if ((Props.eGlow != EGlow::None && Props.eGlow != EGlow::Alpha) || Props.eEnvMap == EEnvMap::CubeDecalAmount ||
+      Props.eLayer2 == ELayer2::AddGloss || Props.eLayer2 == ELayer2::BlendGloss)
     LoadResourceTexture(pRes, EFTT_GLOSS);
+  if (Props.eLayer2 == ELayer2::BlendOpacity)
+    LoadResourceTexture(pRes, EFTT_OPACITY);
   if (Props.eEnvMap != EEnvMap::None && Props.eEnvMap != EEnvMap::Auto)
     LoadResourceTexture(pRes, EFTT_CUBEMAP);
 }
@@ -1423,22 +1492,63 @@ CFColor GetMaterialColor(const SRenderShaderResources *pRes)
   return CFColor(1.0f, 1.0f, 1.0f, 1.0f);
 }
 
-void GetTexTransform(const CShader *pShader, const SRenderShaderResources *pRes, int nSlot, float fScale[2], float fOffset[2])
+//! The material's public float named szName (its shader params), fDefault without it.
+static float GetResourceFloat(const SRenderShaderResources *pRes, const char *szName, float fDefault)
 {
-  fScale[0] = fScale[1] = 1.0f;
-  fOffset[0] = fOffset[1] = 0.0f;
+  if (!pRes)
+    return fDefault;
+  const TArray<SShaderParam> &Params = pRes->m_ShaderParams;
+  for (int i = 0; i < Params.Num(); i++)
+  {
+    const SShaderParam &P = Params[i];
+    if (_strnicmp(P.m_Name, szName, sizeof(P.m_Name)))
+      continue;
+    if (P.m_Type == eType_FLOAT)
+      return P.m_Value.m_Float;
+    if (P.m_Type == eType_INT)
+      return (float)P.m_Value.m_Int;
+  }
+  return fDefault;
+}
+
+void GetTexTransform(const CShader *pShader, const SRenderShaderResources *pRes, int nSlot, float vRow0[3], float vRow1[3])
+{
+  vRow0[0] = 1.0f, vRow0[1] = 0.0f, vRow0[2] = 0.0f;
+  vRow1[0] = 0.0f, vRow1[1] = 1.0f, vRow1[2] = 0.0f;
   if (pRes && nSlot >= 0 && nSlot < EFTT_MAX && pRes->m_Textures[nSlot])
   {
     const SEfTexModificator &Mod = pRes->m_Textures[nSlot]->m_TexModificator;
-    for (int i = 0; i < 2; i++)
-    {
-      if (Mod.m_Tiling[i] != 0.0f)
-        fScale[i] = Mod.m_Tiling[i];
-      fOffset[i] = Mod.m_Offs[i];
-    }
+    if (Mod.m_Tiling[0] != 0.0f)
+      vRow0[0] = Mod.m_Tiling[0];
+    if (Mod.m_Tiling[1] != 0.0f)
+      vRow1[1] = Mod.m_Tiling[1];
+    vRow0[2] = Mod.m_Offs[0];
+    vRow1[2] = Mod.m_Offs[1];
   }
-  if (pShader && pShader->GetProps().fScrollV != 0.0f)
-    fOffset[1] += fmodf(pShader->GetProps().fScrollV * CurrentTime(), 1.0f);
+  if (!pShader)
+    return;
+  const SShaderProps &Props = pShader->GetProps();
+  const float fRotate = Props.bRotateSpeedParam ? GetResourceFloat(pRes, "speed", Props.fRotate) : Props.fRotate;
+  if (fRotate != 0.0f)
+  {
+    // (u, v) about the pivot p: u' = c (u - p) - s (v - p) + p, v' = s (u - p) + c (v - p) + p.
+    const float a = fmodf(fRotate * CurrentTime(), 360.0f) * (gf_PI / 180.0f);
+    const float c = cosf(a), s = sinf(a), p = Props.fRotatePivot;
+    float r0[3], r1[3];
+    for (int i = 0; i < 3; i++)
+    {
+      r0[i] = c * vRow0[i] - s * vRow1[i];
+      r1[i] = s * vRow0[i] + c * vRow1[i];
+    }
+    r0[2] += p * (1.0f - c + s);
+    r1[2] += p * (1.0f - s - c);
+    for (int i = 0; i < 3; i++)
+      vRow0[i] = r0[i], vRow1[i] = r1[i];
+  }
+  if (Props.fScrollU != 0.0f)
+    vRow0[2] += fmodf(Props.fScrollU * CurrentTime(), 1.0f);
+  if (Props.fScrollV != 0.0f)
+    vRow1[2] += fmodf(Props.fScrollV * CurrentTime(), 1.0f);
 }
 
 float GetColorScale(const CShader *pShader, const CCObject *pObj)
