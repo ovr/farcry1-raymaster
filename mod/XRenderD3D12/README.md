@@ -44,12 +44,18 @@ reference of its features and console variables.
     (R16G16, written by the general program's opaque draws and the water) and the depth the
     upscaler gets (R32, the nearest of the depth writes and of the water, which does not write
     the depth buffer). It is jittered and its textures get a mip bias. The screen effects and the
-    2D stay at the display's size.
+    2D stay at the display's size. The targets are bound before the opaque list's passes (the
+    ambient light's target, the scene for rays), so the ambient occlusion and the rays' GI work on
+    the scene's depth buffer at its size (bound after them, they took the back buffer's, empty
+    with an upscaler, and did nothing).
   - Motion comes from the previous frame's camera for static geometry and the water's surface, and
     from the previous world matrix of a character instance or a permanent object. The weapon
     (`FOB_NEAREST`) has none.
   - The history is reset after a frame without the main view, a camera jump of more than 5 m, a
     field of view change of more than 10 degrees, and a new mode.
+  - The path tracer (`d3d12_PathTracing`) needs the motion vectors: with `none` it gets the scene
+    targets of the display's size, without jitter or mip bias, and the scene's picture as it is
+    (`none (the path tracer's scene targets)` in the log and the frame dump).
   - The build downloads the upscaler DLL (`third_party/amd-fsr-sdk/README.md`) and copies it, the
     loader and AMD's license next to `XRenderD3D12.dll`.
   - For comparisons, DemoLevel with `-DemoArgs '--exec-at 1 "d3d12_Upscaler fsr|d3d12_UpscaleMode
@@ -503,6 +509,14 @@ reference of its features and console variables.
   At 3840 x 2160 under 8 lamps (DemoMultiLight with `DemoMultiLightTeapot.ini`: `main_view = 1`
   draws it as the main view) the opaque list takes 0.05 -> 0.23 ms, the GPU 0.96 -> 1.18; in
   Research's hall 1.05 -> 1.23 (the opaque list waits for the scene for rays).
+  `d3d12_PathTracing` (0 by default, read every frame; not registered without rays) is the path tracer
+  of the lighting, being built (`PathTrace.cpp`). So far 1 and 2 give it the scene for rays, with what
+  is out of the view (as `d3d12_RTOffscreen` 1 does for the effects), the motion vectors (the scene
+  targets without an upscaler, Upscaler), and the frame's lights for its kernels: `SPTLight`
+  (`Shaders/RayConstants.h`), the root SRV t2 space5 of the kernels with rays, at most 64 a frame:
+  the point lights, the directional ones and the projectors with their cube, those baked into the
+  light maps (`DLF_LM`) too; not the sun, a heat source that gives no light, the characters' fill
+  lights (`DLF_AMBIENT_LIGHT`) without `d3d12_PTFillLights`. The frame dump lists them (`pt lights:`).
   `d3d12_RTDebug` views the scene for rays from the camera: 1 instances, 2 shaded hits on the right
   half, 3 distance, 4 mip level, 5 kind, 6 alpha tests, 7 shaded hits over the whole picture;
   `d3d12_WaterDebug` 13, 14, 15 the water rays' colour, distance and weight. With the rays off the

@@ -183,7 +183,7 @@ bool CD3D12Compute::CreateRayRootSignature()
   Ranges[5].RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_UAV;
   Ranges[5].NumDescriptors = COMPUTE_UAVS;
 
-  D3D12_ROOT_PARAMETER Params[6] = {};
+  D3D12_ROOT_PARAMETER Params[7] = {};
   for (D3D12_ROOT_PARAMETER &p : Params)
     p.ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
   Params[0].ParameterType = D3D12_ROOT_PARAMETER_TYPE_CBV;
@@ -202,6 +202,9 @@ bool CD3D12Compute::CreateRayRootSignature()
   Params[5].ParameterType = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
   Params[5].DescriptorTable.NumDescriptorRanges = 1;
   Params[5].DescriptorTable.pDescriptorRanges = &Ranges[5];
+  Params[ROOT_RAY_LIGHTS].ParameterType = D3D12_ROOT_PARAMETER_TYPE_SRV;
+  Params[ROOT_RAY_LIGHTS].Descriptor.ShaderRegister = 2;
+  Params[ROOT_RAY_LIGHTS].Descriptor.RegisterSpace = 5;
 
   D3D12_STATIC_SAMPLER_DESC Samplers[5];
   Samplers[XR_SAMPLER_LINEAR_WRAP] = StaticSampler(XR_SAMPLER_LINEAR_WRAP, D3D12_FILTER_ANISOTROPIC);
@@ -217,7 +220,7 @@ bool CD3D12Compute::CreateRayRootSignature()
   Samplers[4].ComparisonFunc = D3D12_COMPARISON_FUNC_LESS_EQUAL;
 
   D3D12_ROOT_SIGNATURE_DESC Desc = {};
-  Desc.NumParameters = 6;
+  Desc.NumParameters = 7;
   Desc.pParameters = Params;
   Desc.NumStaticSamplers = 5;
   Desc.pStaticSamplers = Samplers;
@@ -284,7 +287,8 @@ void CD3D12Compute::Dispatch(ID3D12GraphicsCommandList *pList, ED3D12Kernel eKer
 }
 
 void CD3D12Compute::DispatchRays(ID3D12GraphicsCommandList *pList, ED3D12Kernel eKernel, D3D12_GPU_VIRTUAL_ADDRESS FrameCB, D3D12_GPU_VIRTUAL_ADDRESS PassCB,
-                                 D3D12_GPU_VIRTUAL_ADDRESS nRayScene, D3D12_GPU_VIRTUAL_ADDRESS nRayInstances, int nUAVs, UINT nGroupsX, UINT nGroupsY)
+                                 D3D12_GPU_VIRTUAL_ADDRESS nRayScene, D3D12_GPU_VIRTUAL_ADDRESS nRayInstances, int nUAVs, UINT nGroupsX, UINT nGroupsY,
+                                 D3D12_GPU_VIRTUAL_ADDRESS nLights)
 {
   ID3D12PipelineState *pPSO = s_Kernels[eKernel].bRays ? GetPSO(eKernel) : nullptr;
   CD3D12Descriptors *pDescriptors = g_pRenderer->m_pDescriptors.get();
@@ -304,5 +308,7 @@ void CD3D12Compute::DispatchRays(ID3D12GraphicsCommandList *pList, ED3D12Kernel 
     pList->SetComputeRootShaderResourceView(ROOT_RAY_INSTANCES, nRayInstances);
   if (nUAVs >= 0)
     pList->SetComputeRootDescriptorTable(5, pDescriptors->GetGPU(nUAVs));
+  if (nLights)
+    pList->SetComputeRootShaderResourceView(ROOT_RAY_LIGHTS, nLights);
   pList->Dispatch(nGroupsX, nGroupsY, 1);
 }

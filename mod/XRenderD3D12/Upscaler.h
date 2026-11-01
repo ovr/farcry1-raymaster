@@ -66,6 +66,8 @@ public:
   virtual bool Dispatch(const SUpscaleInputs &In) = 0;
   //! For the log: the upscaler and its version.
   virtual const char *GetName() const = 0;
+  //! It gathers the jittered frames into its picture: the scene's textures get a mip bias for them.
+  virtual bool GathersFrames() const { return true; }
 };
 
 //! AMD FSR Upscaling through the AMD FSR SDK's loader (amd_fidelityfx_loader_dx12.dll next to this

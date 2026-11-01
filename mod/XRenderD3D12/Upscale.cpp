@@ -15,6 +15,10 @@
 //	or a permanent object was then. UpscaleScene makes the picture of the
 //	back buffer's size from it, before the screen effects and the 2D, which
 //	stay at the display's size.
+//	The path tracer (d3d12_PathTracing) wants the motion vectors without an
+//	upscaler too: with d3d12_Upscaler none it gets the scene targets of the
+//	display's size, without jitter, and the picture is the scene's as it is
+//	(CNativeScene).
 //
 //////////////////////////////////////////////////////////////////////
 
@@ -38,11 +42,41 @@ const float s_FullScreen[3][3] = { { -1, -1, 0 }, { -1, 3, 0 }, { 3, -1, 0 } };
 
 const char *const s_ModeNames[eUM_Num] = { "Native AA", "Quality", "Balanced", "Performance", "Ultra Performance" };
 
+//! The scene targets of the display's size for the path tracer without an upscaler: no jitter, and the
+//! scene's picture as it is (Dispatch upscales nothing).
+class CNativeScene final : public IUpscaler
+{
+public:
+  bool Create(ID3D12Device *, int nWidth, int nHeight, bool, int) override
+  {
+    m_nWidth = nWidth;
+    m_nHeight = nHeight;
+    return nWidth > 0 && nHeight > 0;
+  }
+  void GetRenderSize(int, int &nWidth, int &nHeight) override
+  {
+    nWidth = m_nWidth;
+    nHeight = m_nHeight;
+  }
+  void GetJitter(int, int, float &x, float &y) override { x = y = 0; }
+  bool Dispatch(const SUpscaleInputs &) override { return false; }
+  const char *GetName() const override { return "none (the path tracer's scene targets)"; }
+  bool GathersFrames() const override { return false; }
+
+private:
+  int m_nWidth = 0, m_nHeight = 0;
+};
+
+//! The d3d12_Upscaler the path tracer gets in place of none (CNativeScene).
+const char *const NATIVE_SCENE = "native";
+
 //! The upscaler of a d3d12_Upscaler value; nullptr for "none" and unknown names.
 std::unique_ptr<IUpscaler> CreateUpscaler(const char *szName)
 {
   if (!_stricmp(szName, "fsr"))
     return CreateUpscalerFsr();
+  if (!_stricmp(szName, NATIVE_SCENE))
+    return std::make_unique<CNativeScene>();
   return nullptr;
 }
 
@@ -94,6 +128,9 @@ bool CD3D12Renderer::UpdateUpscaler()
   if (!m_pUpscalerVar)
     m_pUpscalerVar = iConsole->GetCVar("d3d12_Upscaler");
   const char *szName = m_pUpscalerVar && m_pUpscalerVar->GetString() ? m_pUpscalerVar->GetString() : "none";
+  // The path tracer's motion vectors without an upscaler.
+  if (!_stricmp(szName, "none") && WantsPathTracing())
+    szName = NATIVE_SCENE;
   const int w = m_pDevice->GetWidth(), h = m_pDevice->GetHeight();
   const int nVersion = std::max(CV_d3d12_UpscaleVersion, 0);
   if (_stricmp(szName, m_UpscalerName.c_str()) != 0 || w != m_nUpscalerWidth || h != m_nUpscalerHeight || nVersion != m_nUpscalerVersion)
@@ -122,8 +159,8 @@ bool CD3D12Renderer::UpdateUpscaler()
   if (!m_pUpscaler)
     return false;
 
-  // The scene targets of the mode, their colour HDR or not.
-  const int nMode = std::clamp(CV_d3d12_UpscaleMode, 0, eUM_Num - 1);
+  // The scene targets of the mode, their colour HDR or not (the path tracer's of the display's size).
+  const int nMode = _stricmp(m_UpscalerName.c_str(), NATIVE_SCENE) ? std::clamp(CV_d3d12_UpscaleMode, 0, eUM_Num - 1) : (int)eUM_NativeAA;
   if (nMode != m_nUpscaleMode || m_bHdrScene != m_bUpscaleHdr)
   {
     if (m_nUpscaleOutputSRV >= 0)
@@ -159,7 +196,8 @@ CD3D12Renderer::SUpscaleInfo CD3D12Renderer::UpscaleInfo() const
   ICVar *pVar = m_pUpscalerVar ? m_pUpscalerVar : (iConsole ? iConsole->GetCVar("d3d12_Upscaler") : nullptr);
   if (pVar && pVar->GetString())
     Info.szWanted = pVar->GetString();
-  if (m_pUpscaler && m_nUpscaleMode >= 0 && m_pDevice)
+  // The path tracer's scene targets (CNativeScene) are not an upscaler for the statistics.
+  if (m_pUpscaler && m_pUpscaler->GathersFrames() && m_nUpscaleMode >= 0 && m_pDevice)
   {
     Info.szName = m_pUpscaler->GetName();
     Info.szMode = s_ModeNames[m_nUpscaleMode];

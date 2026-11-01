@@ -474,7 +474,9 @@ public:
 
   //! Draws the sorted render items of one list of EF_EndEf3D.
   void DrawItems(SRenderItem *pItems, int nItems, int eList);
-  //! Before the first list: the sun, the first person projection, the clear of the main view.
+  //! Before the opaque list (EF_EndEf3D, before what it makes for the list: the ambient light's target,
+  //! the scene for rays): the sun, the first person projection, the clear of the main view and, with an
+  //! upscaler or the path tracer, its scene targets bound (BeginMainScene).
   void BeginScene3D();
   void DrawLeafItem(const SRenderItem &it);
   //! Heat vision: how hot an item is, 0 to 1 (FOB_HOTAMBIENT, a heat source among its lights).
@@ -723,6 +725,23 @@ public:
     bool bActive = false;                   //!< the opaque list reads the mask (DrawRaySunMask .. EndRaySunMask)
   };
   SRaySunState m_RaySun;
+
+  //////////////////////////////////////////////////////////////////////////
+  // PathTrace.cpp: the path tracer of the main view's lighting (d3d12_PathTracing)
+
+  //! d3d12_PathTracing on a device with rays (it wants the scene for rays with what is out of the view).
+  bool WantsPathTracing() const;
+  //! The main view's lights for the path tracer (Lights, the scene's), once a frame before its opaque
+  //! list: SPTLight in per frame memory (m_PathTrace.nLights); a "pt lights:" line in the frame dump.
+  void UpdatePathLights(std::span<CDLight *const> Lights);
+
+  struct SPathTraceState
+  {
+    D3D12_GPU_VIRTUAL_ADDRESS nLights = 0;  //!< this frame's SPTLight array (per frame memory; 0: none made)
+    uint32 nLightCount = 0;                 //!< its lights
+    int nLightsFrame = -1;                  //!< m_nFrames it was made in
+  };
+  SPathTraceState m_PathTrace;
 
   //////////////////////////////////////////////////////////////////////////
   // Water.cpp
@@ -1472,6 +1491,8 @@ public:
   int CV_d3d12_RTGI = 0;                    //!< the ambient light by rays, a bounce (RayAO.cpp): 1 a ray for each 2 x 2 pixels, 2 a pixel
   float CV_d3d12_RTGIDistance = 4.0f;       //!< how far its rays look (m)
   float CV_d3d12_RTGIBounce = 1.0f;         //!< how much light what they find gives back (0: it only occludes)
+  int CV_d3d12_PathTracing = 0;             //!< the main view's lighting by paths (PathTrace.cpp): 1 in real time, 2 the reference
+  int CV_d3d12_PTFillLights = 0;            //!< with d3d12_PathTracing, the characters' fill lights (DLF_AMBIENT_LIGHT) among its lights
   int CV_d3d12_ToneMap = 1;                 //!< the HDR pipeline's tone map: 0 clamp, 1 soft shoulder, 2 ACES fitted, 3 AgX
   float CV_d3d12_ToneMapKnee = 0.85f;       //!< where the soft shoulder starts (a display value)
   float CV_d3d12_Exposure = 0;              //!< the exposure's compensation, EV

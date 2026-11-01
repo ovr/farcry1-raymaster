@@ -82,6 +82,7 @@ set(XRENDERD3D12_SOURCES
     RayTracing.cpp
     RaySun.cpp
     RayAO.cpp
+    PathTrace.cpp
     Cacao/base/UserMarkers.h
 )
 source_group("Source Files" FILES ${XRENDERD3D12_SOURCES})

@@ -233,6 +233,8 @@ void SetPointLight(SDrawConstants &dc, uint32 n, const CDLight *pLight, const CC
 
 void CD3D12Renderer::BeginScene3D()
 {
+  if (!m_pScene || !EnsureFrame())
+    return;
   // The sun of the scene as the directional light (black without one); each object can also get
   // lights of its own (SetObjectLights).
   Vec3 vDir(0, 0, 1);
@@ -280,8 +282,6 @@ void CD3D12Renderer::DrawItems(SRenderItem *pItems, int nItems, int eList)
   CFrameProfilerSection ProfilerSection(eList >= 0 && eList < eRL_Num ? &s_Profilers[eList] : nullptr);
   if (!m_pScene || !EnsureFrame())
     return;
-  if (eList == eRL_Opaque)
-    BeginScene3D();
   // The blended list starts with the water surfaces (over a copy of the scene so far); the
   // particle sprites come after them.
   bool bSprites = eList != eRL_Blended;

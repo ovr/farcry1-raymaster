@@ -906,7 +906,8 @@ D3D12_GPU_VIRTUAL_ADDRESS CD3D12RayScene::GetTLAS() const
 bool CD3D12Renderer::WantsRays() const
 {
   return m_pRayScene && m_pRayScene->IsSupported() &&
-         (CV_d3d12_RTDebug != 0 || CV_d3d12_RTReflections > 0 || WantsRaySun() || WantsRayAO() || WantsRayGI() || WantsRayLights());
+         (CV_d3d12_RTDebug != 0 || CV_d3d12_RTReflections > 0 || WantsRaySun() || WantsRayAO() || WantsRayGI() || WantsRayLights() ||
+          WantsPathTracing());
 }
 
 bool CD3D12Renderer::WantsRayLights() const
@@ -967,7 +968,7 @@ void CD3D12Renderer::BuildRayScene(std::span<const SRenderItem> Opaque, bool bTr
   // One scene a frame: rebuilt for another top level view, it would change under the draws of the first.
   if (!IsAOView() || m_pRayScene->GetBuiltFrame() == m_nFrames)
     return;
-  m_bRayTlas = bTraced || CV_d3d12_RTDebug != 0 || WantsRaySun() || WantsRayAO() || WantsRayGI();
+  m_bRayTlas = bTraced || CV_d3d12_RTDebug != 0 || WantsRaySun() || WantsRayAO() || WantsRayGI() || WantsPathTracing();
   m_pRayScene->BeginCapture(m_CameraView * m_ProjMatrix, m_Camera.GetPos());
   // The list's draws as it will draw them, without their lights, before it is drawn.
   const float fDepthMin = m_fDepthMin, fDepthMax = m_fDepthMax;
@@ -1051,13 +1052,15 @@ bool CD3D12Renderer::IsRayWalked(const SRenderItem &it)
 bool CD3D12Renderer::WantsOffscreenRays() const
 {
   // 1: for what traces rays from the surfaces of the main view (not the water's reflection, which
-  // sees what is in front of the camera and has the planar reflection's draws).
+  // sees what is in front of the camera and has the planar reflection's draws), the path tracer's
+  // too.
   // The surfaces that reflect a cube map by rays, while there were some the frame before.
   const bool bSurfaces = WantsRaySurfaces() && m_nRaySurfaceFrame + 1 >= m_nFrames;
   // The lamps' shadows by rays, the same.
   const bool bLights = WantsRayLights() && m_nRayLightFrame + 1 >= m_nFrames;
   return WantsRays() && (CV_d3d12_RTOffscreen >= 2 ||
-                         (CV_d3d12_RTOffscreen == 1 && (CV_d3d12_RTDebug != 0 || WantsRaySun() || WantsRayAO() || WantsRayGI() || bSurfaces || bLights)));
+                         (CV_d3d12_RTOffscreen == 1 && (CV_d3d12_RTDebug != 0 || WantsRaySun() || WantsRayAO() || WantsRayGI() || bSurfaces || bLights ||
+                                                        WantsPathTracing())));
 }
 
 void CD3D12Renderer::NoteRayOffscreenItems(std::span<const SRenderItem> Items)
