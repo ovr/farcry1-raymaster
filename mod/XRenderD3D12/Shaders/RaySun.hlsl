@@ -28,12 +28,16 @@
 //	(the same view depth), the nearer the more (of a ray a pixel its own),
 //	their visibility of each set blended into the history: where the point
 //	was in the frame before (the camera's move), the history's texels there
-//	whose depth is the point's, at most HISTORY_FRAMES of them, clamped to
-//	the range of what this frame's rays within 2 pixels show; where the
-//	history at the rays' own pixels was sure of the other way (a caster
-//	that moves) it goes, to this frame's rays (a shadow that moved does not
-//	stay behind, nor is its edge cut on the rays' grid). Without a ray on
-//	its surface the history as it is.
+//	whose depth is the point's, at most HistoryFrames() of them (24, with
+//	the path tracer d3d12_PTSunHistory), clamped to the range of what this
+//	frame's rays within 2 pixels show; where the history at the rays' own
+//	pixels was sure of the other way (a caster that moves) it goes, to this
+//	frame's rays (a shadow that moved does not stay behind, nor is its edge
+//	cut on the rays' grid). With the path tracer (SoftHistory()) it keeps a
+//	quarter of its frames there and may stay half a step off the rays'
+//	range: its sun is the light there, the rays' noise on moving leaves
+//	would show, and their shadows lag behind instead. Without a ray on its
+//	surface the history as it is.
 //	CSFilter: the history spread over the soft edge of the shadow (where it
 //	is neither 0 nor 1, or young), the half shadow as wide as the sun's
 //	disc at the distance of the casters round the pixel: a spiral of taps
@@ -52,8 +56,19 @@ RWTexture2D<float4> g_Out : register(u0);
 #define RAY_VIEW g_Sun
 #include "RayView.hlsli"
 
-//! The frames a history holds at most.
-static const float HISTORY_FRAMES = 24;
+//! The frames a history holds at most (nFlags.x's low 16 bits; 0: no history).
+float HistoryFrames()
+{
+  return (float)(g_Sun.nFlags.x & 0xffff);
+}
+
+//! The path tracer's history (0x10000): where the shadow moves it keeps a quarter of its frames and may stay
+//! SOFT_MARGIN off the range of the rays round the pixel.
+bool SoftHistory()
+{
+  return (g_Sun.nFlags.x & 0x10000) != 0;
+}
+static const float SOFT_MARGIN = 0.5;
 //! CSFilter's taps and their widest radius (pixels).
 static const uint FILTER_TAPS = 12;
 static const float FILTER_MAX_RADIUS = 32;
@@ -261,9 +276,13 @@ void CSTemporal(uint3 vId : SV_DispatchThreadID, uint3 vGroup : SV_GroupID, uint
   }
   // Where the rays round it find the shadow moved (their history sure of the other way: a caster that
   // moves), the history goes, to this frame's rays (else it lags behind, and the range of the rays round
-  // the pixel cuts its edge on their grid).
-  const float fFrames = max(min(vHistory.z + 1, HISTORY_FRAMES) * saturate(1 - 2 * Near.fMoved), 1);
-  g_Out[p] = float4(lerp(clamp(vHistory.xy, Near.vMin, Near.vMax), Near.vOwn, 1 / fFrames), fFrames, d);
+  // the pixel cuts its edge on their grid); the path tracer's keeps a quarter of it, a step off the range.
+  const bool bSoft = SoftHistory();
+  const float fKeep = bSoft ? lerp(1, 0.25, saturate(2 * Near.fMoved)) : saturate(1 - 2 * Near.fMoved);
+  const float fMargin = bSoft ? SOFT_MARGIN : 0;
+  const float fFrames = max(min(vHistory.z + 1, HistoryFrames()) * fKeep, 1);
+  const float2 vKept = clamp(vHistory.xy, Near.vMin - fMargin, Near.vMax + fMargin);
+  g_Out[p] = float4(lerp(vKept, Near.vOwn, 1 / fFrames), fFrames, d);
 }
 
 [numthreads(XR_RAY_SUN_GROUP, XR_RAY_SUN_GROUP, 1)]

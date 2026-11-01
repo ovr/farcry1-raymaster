@@ -339,6 +339,11 @@ void CD3D12Renderer::RegisterVariables()
   iConsole->Register("d3d12_PTCheckerboard", &CV_d3d12_PTCheckerboard, 1, VF_DUMPTODISK,
                      "With d3d12_PathTracing 1, the paths of half the pixels each frame, in a checkerboard, the others' light "
                      "from their four neighbours (0: a path from each pixel)");
+  iConsole->Register("d3d12_PTSunHistory", &CV_d3d12_PTSunHistory, 64, VF_DUMPTODISK,
+                     "With d3d12_PathTracing, the frames the sun's shadow by rays (its mask, d3d12_RTSunDenoise 1) holds at "
+                     "most (24 without it); where the shadow moves (crowns in the wind) the history keeps a quarter of them "
+                     "and may stay half a step off what the rays round the pixel show: the light through moving leaves "
+                     "smooth, the shadows of what moves lagging behind (0: as without the path tracer)");
   iConsole->Register("d3d12_PTBehind", &CV_d3d12_PTBehind, 40.0f, VF_DUMPTODISK,
                      "With d3d12_PathTracing, how far (m, at most d3d12_RTDistance) what is behind the camera is in its scene "
                      "for rays: the static objects and entities the 3D engine gives cameras at the view looking back, up and "
@@ -546,6 +551,7 @@ WIN_HWND CD3D12Renderer::Init(int x,int y,int width,int height,unsigned int cbpp
     iConsole->UnregisterVariable("d3d12_PTSky", true);
     iConsole->UnregisterVariable("d3d12_PTBounces", true);
     iConsole->UnregisterVariable("d3d12_PTCache", true);
+    iConsole->UnregisterVariable("d3d12_PTSunHistory", true);
     iConsole->UnregisterVariable("d3d12_PTBehind", true);
     iConsole->UnregisterVariable("d3d12_PTCheckerboard", true);
     iConsole->UnregisterVariable("d3d12_PTReferenceBounces", true);

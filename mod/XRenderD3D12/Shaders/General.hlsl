@@ -75,7 +75,13 @@
 //	    DF2_SUN_CASCADES: v from the sun's cascades where they reach
 //	      (SunCascades, Common.hlsli; the live casters' with DF2_CASCADES_LIVE),
 //	      the shadow maps' beyond them; DF2_SHADOW_TINT (the terrain): rgb *=
-//	      lerp(vShadowTint, 1, v) after the terrain's cliff textures. Only in
+//	      lerp(vShadowTint, 1, v) after the terrain's cliff textures; with
+//	      DF_LIGHTING (a lit object in the full set's shadow) the light without
+//	      the sun becomes the larger of it and the light with the sun times
+//	      vShadowTint (and so its ambient part): as dark as the original's
+//	      shadows on the terrain, where the game's light would leave the
+//	      ambient colour alone; under XR_PT the G-buffer's ambient light so
+//	      in the shadow instead (PSMain). Only in
 //	      the pixel shaders with XR_CASCADES (Shaders.cmake), which the draws
 //	      with DF2_SUN_CASCADES or DF2_CASCADE_CASTER get: the others' code is
 //	      the same as without the cascades. With XR_RAY_SUN too (the main
@@ -364,11 +370,12 @@ void MaterialLighting(float3 vPos, float3 vN, float fSun, out float3 vDiffuse, o
 {
   float3 vToEye = SafeNormalize(g_Frame.vCameraPos.xyz - vPos);
   float fPower = max(g_Draw.vParams3.x, 1);
-  float3 vLight = 0, vSpec = 0;
+  float3 vLight = 0, vSpec = 0, vSun = 0;
   if (!HasFlag2(DF2_NO_SUN))
   {
     float fNL = dot(vN, g_Frame.vSunDir.xyz);
-    vLight += fSun * g_Frame.vSunColor.rgb * saturate(fNL);
+    vSun = g_Frame.vSunColor.rgb * saturate(fNL);
+    vLight += fSun * g_Frame.vSunColor.rgb * saturate(fNL);   // as before vSun (the same rounding without the cascades)
     if (fNL > 0)
       vSpec += fSun * g_Frame.vSunSpec.rgb * pow(saturate(dot(vN, SafeNormalize(g_Frame.vSunDir.xyz + vToEye))), fPower);
   }
@@ -402,6 +409,15 @@ void MaterialLighting(float3 vPos, float3 vN, float fSun, out float3 vDiffuse, o
       vSpec += g_Draw.vLightSpec[i].rgb * pow(saturate(dot(vN, SafeNormalize(vToLight + vToEye))), fPower) * fAtten;
   }
   vDiffuse = saturate(g_Draw.vAmbient.rgb + g_Draw.vColor.rgb * vLight);
+#ifdef XR_CASCADES
+  // DF2_SHADOW_TINT: in the shadow the lit diffuse times the tint where that is more, towards the lit one as the sun
+  // shows (never less than without the tint: the light with part of the sun is more than that lerp, saturate's curve).
+  if (HasFlag2(DF2_SHADOW_TINT))
+  {
+    const float3 vLit = saturate(g_Draw.vAmbient.rgb + g_Draw.vColor.rgb * (vLight + (1 - fSun) * vSun));
+    vDiffuse = max(vDiffuse, lerp(vLit * g_Frame.vShadowTint.rgb, vLit, fSun));
+  }
+#endif
   vSpecular = saturate(g_Draw.vSpecular.rgb * vSpec);
 #ifdef XR_AMBIENT
   s_vAmbientLight = vDiffuse - saturate(g_Draw.vColor.rgb * vLight);
@@ -751,9 +767,26 @@ float4 ShadePixel(SVertexOutput In)
     float3 vNoSunLight, vSunSpec, vOtherSpec;
     float3 vN = HasFlag(DF_BUMP) ? vBumpN : SafeNormalize(In.vNormal);
     float3 vLight = DrawLighting(In.vWorldPos, vN, true, vNoSunLight, vSunSpec, vOtherSpec);
-    vVertexColor.rgb *= lerp(vNoSunLight, vLight, fSun);
+    float3 vShadowLight = vNoSunLight;
 #ifdef XR_AMBIENT
-    vAmb = In.vColor.rgb * lerp(s_vAmbientNoSun, s_vAmbientLight, fSun);
+    float3 vShadowAmb = s_vAmbientNoSun;
+#endif
+#ifdef XR_CASCADES
+    // DF2_SHADOW_TINT: in the shadow the light times the tint where that is more than the light without the sun, and
+    // so its ambient part.
+    if (HasFlag2(DF2_SHADOW_TINT))
+    {
+      const float3 vTinted = vLight * g_Frame.vShadowTint.rgb;
+      const float3 vMore = step(vNoSunLight, vTinted);
+      vShadowLight = lerp(vNoSunLight, vTinted, vMore);
+#ifdef XR_AMBIENT
+      vShadowAmb = lerp(s_vAmbientNoSun, s_vAmbientLight * g_Frame.vShadowTint.rgb, vMore);
+#endif
+    }
+#endif
+    vVertexColor.rgb *= lerp(vShadowLight, vLight, fSun);
+#ifdef XR_AMBIENT
+    vAmb = In.vColor.rgb * lerp(vShadowAmb, s_vAmbientLight, fSun);
 #endif
     if (HasFlag(DF_SPECULAR))
       vSpecular = 2 * g_Draw.vSpecular.rgb * (g_Draw.vSpecular.w > 0 ? vTex.a : 1) * (fSun * vSunSpec + vOtherSpec);
@@ -768,7 +801,14 @@ float4 ShadePixel(SVertexOutput In)
 #endif
   }
   else if (HasFlag(DF_SHADOWS) && HasFlag(DF_LIGHTING))
-    vVertexColor.rgb = lerp(In.vColorNoSun.rgb, In.vColor.rgb, fSun);
+  {
+    float3 vShadowLight = In.vColorNoSun.rgb;
+#ifdef XR_CASCADES
+    if (HasFlag2(DF2_SHADOW_TINT))
+      vShadowLight = max(vShadowLight, In.vColor.rgb * g_Frame.vShadowTint.rgb);
+#endif
+    vVertexColor.rgb = lerp(vShadowLight, In.vColor.rgb, fSun);
+  }
 #ifdef XR_AMBIENT
   // Lit per vertex: about the draw's colour times the ambient colour, not more than the light.
   if (HasFlag(DF_LIGHTING) && !HasFlag(DF_PIXEL_LIGHTING) && !HasFlag2(DF2_MATERIAL_LIGHT))
@@ -874,8 +914,8 @@ float4 ShadePixel(SVertexOutput In)
   if (HasFlag2(DF2_AO_BAKED))
     vAmb = vColor.rgb * g_Frame.vMipBias.yzw;
 #endif
-#ifdef XR_CASCADES
-  if (HasFlag2(DF2_SHADOW_TINT))
+#if defined(XR_CASCADES) && !defined(XR_PT)
+  if (HasFlag2(DF2_SHADOW_TINT) && !HasFlag(DF_LIGHTING))
     vColor.rgb *= lerp(g_Frame.vShadowTint.rgb, 1, fSun);
 #endif
 
@@ -1026,7 +1066,19 @@ SPixelOutput PSMain(SVertexOutput In)
 #endif
   Out.vAlbedo = float4(max(s_vPTAlbedo, 0), Out.vColor.a);
   Out.vNormal = PathGBufferNormal(s_vPTNormal, s_vPTFace, s_fPTFog, (g_Draw.nFlags2 & DF2_PT_MASK) >> DF2_PT_SHIFT);
-  Out.vSun = float4(s_fPTSun, saturate(0.5 * g_Draw.vAmbient.rgb));
+  float3 vAmbient = g_Draw.vAmbient.rgb;
+#ifdef XR_CASCADES
+  // A lit object in the cascades' shadow (DF2_SHADOW_TINT): the ambient light the paths fill in with at least its lit
+  // light times the tint where the sun is hidden, as the raster's shadow. In these units (the albedo s / 2 of the colour,
+  // the ambient 2 / s of the game's) the lit light is 2 saturate(ambient / 2 + sun N.L).
+  if (HasFlag2(DF2_SHADOW_TINT))
+  {
+    const float fNL = saturate(dot(SafeNormalize(s_vPTNormal), g_Frame.vSunDir.xyz));
+    const float3 vLit = 2 * saturate(0.5 * vAmbient + g_Frame.vSunColor.rgb * fNL);
+    vAmbient = lerp(max(vAmbient, vLit * g_Frame.vShadowTint.rgb), vAmbient, s_fPTSun);
+  }
+#endif
+  Out.vSun = float4(s_fPTSun, saturate(0.5 * vAmbient));
   Out.vSpecular = float4(saturate(s_vPTSpecular), Out.vColor.a);
   return Out;
 }

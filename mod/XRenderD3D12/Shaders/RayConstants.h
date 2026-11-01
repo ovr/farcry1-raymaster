@@ -159,8 +159,10 @@ struct SRaySunConstants
                                   //!< before (CSTemporal), w this frame's (CSFilter)
   XR_UINT4(nTrace);               //!< the rays' grid: x the pixels a side of a cell (1, or 2 with d3d12_RTSunShadows 1), y z the
                                   //!< pixel of a cell traced in this frame
-  XR_UINT4(nFlags);               //!< x 1: a history to blend into, y the frame (the noise), z d3d12_RTSunDenoise, w the mask of all
-                                  //!< the casters (RayMask, the low 8 bits) and 0x100 when the scene has live casters
+  XR_UINT4(nFlags);               //!< x a history to blend into: the frames it holds at most (low 16 bits; 0: none) and 0x10000
+                                  //!< for the path tracer's (soft where the shadow moves), y the frame (the noise), z
+                                  //!< d3d12_RTSunDenoise, w the mask of all the casters (RayMask, the low 8 bits) and 0x100 when
+                                  //!< the scene has live casters
 };
 
 //! b2 of the kernels around AMD FidelityFX Denoiser's shadows denoiser (d3d12_RTSunDenoise 2, RaySunFfx.hlsl,
