@@ -571,8 +571,10 @@ reference of its features and console variables.
   program's `XR_PT` permutation (`General_PT_*`, `SPipelineKey::bPathTrace`): the colour gets only what
   the path tracer does not light (glow maps, alpha glow, the unlit templates, the fog), a second target
   the albedo (RGBA16F, the game's colour without its light, unfogged; decals and the terrain's layers
-  blend into it as into the colour), a third the normal (R10G10B10A2: octahedral, the fog's share, the
-  path material: lit, terrain, vegetation), a fourth the sun's visibility as the raster finds it (RGBA8,
+  blend into it as into the colour), a third the normal on the side of its triangle the camera sees, as
+  the rays' hits take it (R10G10B10A2: octahedral, the fog's share, the path material: lit, terrain,
+  vegetation; by the view's direction a crown's normals turned over at the eyes' height, a line that
+  moved over the leaves with the camera), a fourth the sun's visibility as the raster finds it (RGBA8,
   r: its shadow maps, the sun's cascades and their mask by rays, which the path tracer turns on, from
   all the casters; 0 where the raster has no sun) and the game's ambient light on the surface (gba: what
   the object's ambient colour adds to its light maps or its lights; the terrain, whose light is in its

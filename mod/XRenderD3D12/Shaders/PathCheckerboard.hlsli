@@ -23,11 +23,11 @@ bool PathTraced(int2 p)
   return !g_PT.nCheckerboard.x || ((uint)(p.x ^ p.y) & 1) == g_PT.nCheckerboard.y;
 }
 
-//! The G-buffer's normal at pixel p of the surface at vPos on the camera's side (the leaves' two sides).
-float3 PathNormalAt(int2 p, float3 vPos)
+//! The G-buffer's normal at pixel p: on the side of its triangle the camera sees (the leaves' two sides), as
+//! General.hlsl wrote it.
+float3 PathNormalAt(int2 p)
 {
-  const float3 vN = PathOctDecode(g_Textures[g_PT.nTextures2.x].Load(int3(p, 0)).rg);
-  return dot(vN, g_PT.vCameraPos.xyz - vPos) < 0 ? -vN : vN;
+  return PathOctDecode(g_Textures[g_PT.nTextures2.x].Load(int3(p, 0)).rg);
 }
 
 //! The view depth of a pixel CSTrace left out, as it finds a surface (0: none the path tracer lights).
@@ -60,7 +60,7 @@ float4 PathRaysAt(int2 p, bool bHit, out float fHit)
   if (d <= 0)
     return 0;
   const float3 vPos = PixelPos(p + 0.5, d);
-  const float3 vN = PathNormalAt(p, vPos);
+  const float3 vN = PathNormalAt(p);
   const float3 vFace = FaceNormal(p, vPos, d);
   const float fPlane = 1 / (0.02 + 2 * d * g_PT.vParams.y);
   float4 vSum = 0, vAny = 0;
@@ -76,7 +76,7 @@ float4 PathRaysAt(int2 p, bool bHit, out float fHit)
       continue;
     const float fQHit = bHit ? g_Textures[g_PT.nTextures3.w].Load(int3(q, 0)).r : 0;
     const float3 vQ = PixelPos(q + 0.5, h.w);
-    const float fNormal = saturate(dot(PathNormalAt(q, vQ), vN));
+    const float fNormal = saturate(dot(PathNormalAt(q), vN));
     const float w = saturate(1 - abs(dot(vQ - vPos, vFace)) * fPlane) * pow(fNormal, 8);
     vSum += w * float4(h.rgb, 1);
     fHitSum += w * fQHit;
