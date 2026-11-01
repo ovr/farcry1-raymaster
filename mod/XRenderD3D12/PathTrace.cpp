@@ -925,6 +925,10 @@ void CD3D12Renderer::DrawPathTrace()
   s.PrevJitter[1] = fc.vJitter[1];
   s.nSettingsKey = nKey;
   s.bReference = bReference;
+  s.szDenoiser = bNrd ? "NRD" : bDenoise ? "simple" : "none";
+  s.nBounces = nBounces;
+  s.bCache = bCache;
+  s.bCheckerboard = bCheckerboard;
   s.nHistoryFrame = m_nFrames;
   s.nLightFrame = m_nFrames;
   if (m_pFrameDump)

@@ -462,6 +462,10 @@ void CD3D12Renderer::DrawStats()
         if (!_stricmp(m_AOName.c_str(), n.szCvar))
           AO = n.szName;
     }
+    // The path tracer lights the opaque surfaces itself, without it.
+    const bool bPathTraced = CV_d3d12_PathTracing > 0 && WantsPathTracing() && m_PathTrace.nHistoryFrame >= m_nFrames - 1;
+    if (bPathTraced)
+      AO = "none (path tracing)";
     Value("Ambient occlusion", AO);
     // The effects by rays (as their variables ask; each needs the device's DXR 1.1) and the last scene for them.
     if (!m_pRayScene || !m_pRayScene->IsSupported())
@@ -485,6 +489,20 @@ void CD3D12Renderer::DrawStats()
         Value("RT reflections", std::string(CV_d3d12_RTReflections >= 2 ? "water (hybrid)" : "water") + (WantsRaySurfaces() ? ", cube map surfaces" : ""));
       if (CV_d3d12_RTDebug != 0)
         Value("RT debug view", Format("%d", CV_d3d12_RTDebug));
+    }
+    // The path tracer as the last frame traced it (PathTrace.cpp; d3d12_PathTracing is there with DXR 1.1 alone).
+    if (m_pRayScene && m_pRayScene->IsSupported() && CV_d3d12_PathTracing > 0)
+    {
+      const SPathTraceState &s = m_PathTrace;
+      if (!IsHdrOn())
+        Value("Path tracing", "waits for HDR");
+      else if (!bPathTraced)
+        Value("Path tracing", "on, no 3D scene now");
+      else if (s.bReference)
+        Value("Path tracing", Format("reference, %d bounces, %d frames", s.nBounces, s.nAccumulated));
+      else
+        Value("Path tracing", Format("%s, %d bounce%s%s%s", s.szDenoiser, s.nBounces, s.nBounces == 1 ? "" : "s",
+                                     s.bCache ? ", cache" : "", s.bCheckerboard ? ", checkerboard" : ""));
     }
     // The anti-aliasing (the upscaler's alone: no multisampling, EnumAAFormats), the upscaler and
     // the 3D scene's size before and after it.

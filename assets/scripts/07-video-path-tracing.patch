@@ -1,0 +1,112 @@
+SPDX-License-Identifier: GPL-3.0-or-later WITH AdditionRef-FarCry-exception
+Please do not use this file to train or fine-tune AI models (see README.md).
+
+Path tracing in Advanced Video Options: a list of None, Real Time and Reference that sets
+d3d12_PathTracing, XRenderD3D12's lighting of the opaque surfaces by paths (DXR 1.1) in place of the
+light maps and the ambient light, in the last row of the right column, under HDR output. Choosing it
+while HDR is None sets HDR to Soft (the path tracer needs the HDR pipeline); greyed out with another
+renderer or a graphics card without ray tracing. Written against VideoAdv.lua as
+04-video-ray-tracing.patch leaves it (Patch Scripts.cmd applies the patches in the order of their
+numbers) and applied by Patch Scripts.cmd to FCData/Scripts.pak.
+
+diff --git a/Scripts/MenuScreens/Options/VideoAdv.lua b/Scripts/MenuScreens/Options/VideoAdv.lua
+--- a/Scripts/MenuScreens/Options/VideoAdv.lua
++++ b/Scripts/MenuScreens/Options/VideoAdv.lua
+@@ -506,6 +506,37 @@
+ 			},
+ 		},
+ 
++		-- Path tracing (Far Cry RayMaster), in the last row of the right column: the lighting of
++		-- XRenderD3D12 by paths (code below CreateScreenFromTable).
++		widget_RMPT_Text =
++		{
++			skin = UI.skins.Label,
++			left = 490, top = 426,
++			width = 150,
++
++			text = "Path Tracing",
++		},
++
++		widget_RMPT =
++		{
++			skin = UI.skins.ComboBox,
++			left = 650, top = 426,
++			width = 120,
++
++			tabstop = 14,
++
++			OnChanged = function( sender )
++				UI.PageOptionsVideoAdv.GUI.widget_RMPT.user.OnChanged();
++			end,
++
++			user =
++			{
++				Initialize = nil,
++				UpdateAssignedGlobals = nil,
++				OnChanged = nil,
++			},
++		},
++
+ 		-- definition of "Lighting Quality" combo box
+ 	--	widget_HDR_Text =
+ 	--	{
+@@ -862,6 +893,59 @@
+ 	end
+ end
+ 
++-- Path tracing (Far Cry RayMaster): d3d12_PathTracing, XRenderD3D12's lighting of the opaque
++-- surfaces by paths (DXR 1.1) in place of the light maps and the ambient light: the sun, the lamps,
++-- the sky and what glows, with their bounces. None, Real Time (denoised) or Reference (the paths of
++-- the frames added up while the view stays: a picture without noise after a while, for a still
++-- view). The water, the glass, the particles and the weapon keep the game's light. It needs the
++-- HDR pipeline: choosing it while HDR is None sets HDR to Soft. Applied without a restart; the
++-- presets of the page leave it as it is. With another renderer or a graphics card without DXR 1.1
++-- (no d3d12_PathTracing) the list is greyed out.
++UI.PageOptionsVideoAdv.GUI.widget_RMPT.user.Initialize = function()
++	local widget = UI.PageOptionsVideoAdv.GUI.widget_RMPT;
++	widget:Clear();
++	widget:AddItem( Localize( "None" ) );
++	widget:AddItem( "Real Time" );
++	widget:AddItem( "Reference" );
++
++	local pt = tonumber( getglobal( "d3d12_PathTracing" ) );
++	local index = 1;
++	if( pt and pt >= 1 ) then
++		index = min( pt, 2 ) + 1;
++	end
++	-- before SelectIndex: the selection made here is no choice of the player's (OnChanged)
++	widget.user.shownIndex = index;
++	widget:SelectIndex( index );
++
++	if( pt ) then
++		UI:EnableWidget( widget );
++	else
++		UI:DisableWidget( widget );
++	end
++end
++
++UI.PageOptionsVideoAdv.GUI.widget_RMPT.user.OnChanged = function()
++	local widget = UI.PageOptionsVideoAdv.GUI.widget_RMPT;
++	local hdr = UI.PageOptionsVideoAdv.GUI.widget_RMHdr;
++	local index = widget:GetSelectionIndex();
++	if( index ~= 1 and index ~= widget.user.shownIndex and hdr:GetSelectionIndex() == 1 and getglobal( "d3d12_ToneMap" ) ) then
++		hdr:SelectIndex( 2 );
++	end
++end
++
++UI.PageOptionsVideoAdv.GUI.widget_RMPT.user.UpdateAssignedGlobals = function()
++	local widget = UI.PageOptionsVideoAdv.GUI.widget_RMPT;
++	local index = widget:GetSelectionIndex();
++	-- unchanged: the console's setting stays as it is
++	if( not getglobal( "d3d12_PathTracing" ) or index == widget.user.shownIndex ) then
++		return;
++	end
++	UI.PageOptionsVideoAdv.user:SetGlobal( "d3d12_PathTracing", index - 1 );
++	if( UI.PageOptionsVideoAdv.user.setglobalTestOnly == 0 ) then
++		widget.user.shownIndex = index;
++	end
++end
++
+ -- helper function for auto detect
+ function UI.PageOptionsVideoAdv.GUI:DumpMachineStats()
+ 	local cpuQuality = System:GetCPUQuality();

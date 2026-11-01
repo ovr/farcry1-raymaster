@@ -223,10 +223,12 @@ instructions and is not committed (git-ignored). The references of the modules a
   XeGTAO, CACAO or by rays, `rt`); ray tracing (`d3d12_RTReflections` with the cube maps'
   `d3d12_RTReflectionSurfaces`, the sun's shadow `d3d12_RTSunShadows`,
   the ambient light by rays `d3d12_RTGI`, the lamps' shadows `d3d12_RTLightShadows`,
-  `XRENDERD3D12_NORT`); the statistics
+  `XRENDERD3D12_NORT`); the path tracer of the lighting (`d3d12_PathTracing`, the `d3d12_PT*`
+  variables: its radiance cache, checkerboard and denoisers, NVIDIA NRD or its own); the statistics
   (`r_Stats`, `r_DisplayInfo`, the engine's frame profiler, `d3d12_GpuTimes`, `d3d12_FrameLog`,
   `d3d12_CpuSamples`, `d3d12_DumpFrame`);
   the water (`d3d12_WaterDebug`, `r_WaterReflections`); the far vegetation sprites and the
   terrain's detail layers. The game's menu gets the renderer's options from the patches in
-  `assets/scripts` (HDR, ambient occlusion, ray traced reflections in Advanced Video Options),
+  `assets/scripts` (HDR, ambient occlusion, ray traced reflections, path tracing in Advanced Video
+  Options),
   greyed out with another renderer.
