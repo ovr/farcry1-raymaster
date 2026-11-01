@@ -256,6 +256,14 @@ void CD3D12Renderer::BeginScene3D()
             Color.r, Color.g, Color.b, Spec.r, Spec.g, Spec.b);
     fprintf(m_pFrameDump.get(), "fog: %s, %g to %g, colour (%.3f %.3f %.3f)\n", m_bFog ? "on" : "off", m_fFogStart, m_fFogEnd, m_FogColor[0],
             m_FogColor[1], m_FogColor[2]);
+    // The scene's lights, by the bit of m_DynLMMask that names each.
+    const std::span<CDLight *const> Lights = m_pScene->GetLights();
+    for (size_t i = 0; i < Lights.size(); i++)
+    {
+      if (const CDLight *p = Lights[i])
+        fprintf(m_pFrameDump.get(), "light %zu: origin (%.1f %.1f %.1f) colour (%.2f %.2f %.2f) radius %.1f flags 0x%x\n", i, p->m_Origin.x,
+                p->m_Origin.y, p->m_Origin.z, p->m_Color.r, p->m_Color.g, p->m_Color.b, p->m_fRadius, p->m_Flags);
+    }
   }
   m_NearestProj = MakeNearestProjection(m_Camera);
   m_nSceneSkyBox = -1;
@@ -405,6 +413,9 @@ float CD3D12Renderer::ItemHeat(const SRenderItem &it) const
 
 void CD3D12Renderer::DrawLeafItem(const SRenderItem &it)
 {
+  // A light mapped surface's copy for a light its light map has (CScene::BuildLists).
+  if (it.bBakedLightCopy)
+    return;
   CREOcLeaf *pLeaf = static_cast<CREOcLeaf *>(it.pRE);
   CLeafBuffer *pLB = pLeaf->m_pBuffer;
   if (!pLB)
@@ -1287,6 +1298,8 @@ void CD3D12Renderer::DumpItem(int nIndex, const SRenderItem &it, int eList)
           pObj->m_Color.r, pObj->m_Color.g, pObj->m_Color.b, pObj->m_Color.a, it.pRes ? it.pRes->m_AlphaRef : 0.0f,
           it.pRes ? it.pRes->m_Opacity : 1.0f, it.pRes ? it.pRes->m_ResFlags : 0,
           pObj->m_pShadowCasters ? reinterpret_cast<const int *>(pObj->m_pShadowCasters)[2] : -1);
+  if (it.bBakedLightCopy)
+    fprintf(m_pFrameDump.get(), "    not drawn: a light mapped surface again for a light its light map has\n");
   // The rotation and scale of the object's matrix, when it has one.
   const float *m = pObj->m_Matrix.data;
   if (m[0] != 1 || m[1] != 0 || m[2] != 0 || m[4] != 0 || m[5] != 1 || m[6] != 0 || m[8] != 0 || m[9] != 0 || m[10] != 1)

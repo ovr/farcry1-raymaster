@@ -499,6 +499,42 @@ void CScene::BuildLists(SSceneSlot &Slot, int nItems, bool bSort)
   for (int i = 0; i < nItems && nTerrainSort < 0; i++)
     if (Slot.Items[i].eDrawClass == eDC_Terrain)
       nTerrainSort = Slot.Items[i].nSort;
+  // A surface drawn with its light map (FOB_ZPASS) comes once more without it for a light baked into
+  // that light map (DLF_LM) that casts shadow volumes: the same part at the same place, no flags,
+  // that light alone in m_DynLMMask, no ambient (Training's tunnel under the ruins: the walls and
+  // pipes near the lamp above it). The original draws such a copy only where the light's shadow
+  // volumes left the stencil set, darkening the light map's light there (DESTCOLOR ZERO, stencil not
+  // equal 0: 80 draws of 80 copies in that frame); lit by its light as a surface without a light map
+  // it would cover the light map with black away from the light. No shadow volumes here: the copy is
+  // not drawn.
+  std::vector<uint64> &LightMapped = m_LightMappedParts;
+  LightMapped.clear();
+  for (int i = 0; i < nItems; i++)
+  {
+    SRenderItem &it = Slot.Items[i];
+    it.bBakedLightCopy = false;
+    if (it.pRE->m_Type == eDATA_OcLeaf && (it.pObj->m_ObjFlags & FOB_ZPASS) && it.pObj->m_nLMId > 0)
+      LightMapped.push_back(PartKey(it));
+  }
+  if (!LightMapped.empty())
+  {
+    std::sort(LightMapped.begin(), LightMapped.end());
+    for (int i = 0; i < nItems; i++)
+    {
+      SRenderItem &it = Slot.Items[i];
+      const CCObject *pObj = it.pObj;
+      if (it.pRE->m_Type != eDATA_OcLeaf || (pObj->m_ObjFlags & (FOB_ZPASS | FOB_LIGHTPASS)) || pObj->m_nLMId > 0 || !pObj->m_DynLMMask)
+        continue;
+      bool bBaked = true;
+      for (uint32 l = 0; l < 32 && bBaked; l++)
+      {
+        if (pObj->m_DynLMMask & (1u << l))
+          bBaked = l < Slot.Lights.size() && Slot.Lights[l] && (Slot.Lights[l]->m_Flags & DLF_LM);
+      }
+      it.bBakedLightCopy = bBaked && std::binary_search(LightMapped.begin(), LightMapped.end(), PartKey(it));
+    }
+  }
+
   I3DEngine *p3DEngine = iSystem ? iSystem->GetI3DEngine() : nullptr;
   const float fWaterZ = p3DEngine ? p3DEngine->GetWaterLevel() : -FLT_MAX;
   const bool bUnderWater = g_pRenderer && g_pRenderer->GetCamera().GetPos().z < fWaterZ;
