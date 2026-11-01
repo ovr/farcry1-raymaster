@@ -229,6 +229,8 @@ void CD3D12Renderer::DrawGeometry(const SPipelineKey &Key, const SDrawConstants 
                         !(dc.nFlags2 & (DF2_CASCADE_CASTER | DF2_SCOPE_LENS))) || m_bDepthPrepass ? 1 : 0;
   // The ambient occlusion's target bound to the main view (AmbientOcclusion.cpp).
   FullKey.bAmbient = (FullKey.nTarget == 0 || FullKey.nTarget == 3) && m_pDevice->IsAmbientBound() ? 1 : 0;
+  // The path tracer's G-buffer bound to the scene's targets (PathTrace.cpp).
+  FullKey.bPathTrace = FullKey.nTarget == 3 && m_pDevice->IsPathBound() ? 1 : 0;
   ID3D12PipelineState *pPSO = m_pPipeline->GetPSO(FullKey);
   if (!pPSO)
     return;

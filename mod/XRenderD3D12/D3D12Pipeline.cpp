@@ -78,6 +78,8 @@
 #include "General_Ambient_RaySun_Rays_Velocity_PS.h"
 #include "General_Ambient_RaySun_Rays_Hdr_PS.h"
 #include "General_Ambient_RaySun_Rays_Hdr_Velocity_PS.h"
+#include "General_PT_Hdr_PS.h"
+#include "General_PT_Hdr_Velocity_PS.h"
 #include "Water_VS.h"
 #include "Water_PS.h"
 #include "Water_Velocity_VS.h"
@@ -220,6 +222,12 @@ namespace
           { g_General_Ambient_RaySun_Rays_Velocity_PS, sizeof(g_General_Ambient_RaySun_Rays_Velocity_PS) } },
         { { g_General_Ambient_RaySun_Rays_Hdr_PS, sizeof(g_General_Ambient_RaySun_Rays_Hdr_PS) },
           { g_General_Ambient_RaySun_Rays_Hdr_Velocity_PS, sizeof(g_General_Ambient_RaySun_Rays_Hdr_Velocity_PS) } } } },
+  };
+
+  //! The general program's pixel shaders into the path tracer's G-buffer (XR_PT, SPipelineKey::bPathTrace), by [velocity].
+  const D3D12_SHADER_BYTECODE s_PathPS[2] =
+  {
+    { g_General_PT_Hdr_PS, sizeof(g_General_PT_Hdr_PS) }, { g_General_PT_Hdr_Velocity_PS, sizeof(g_General_PT_Hdr_Velocity_PS) },
   };
 
   //! Input slot 1: what a vertex format lacks, read with stride 0 by every vertex.
@@ -763,6 +771,8 @@ ComPtr<ID3D12PipelineState> CD3D12Pipeline::CreatePSO(const SPipelineKey &Key, b
   const bool bHighlight = Key.nTarget == 4;
   // The ambient occlusion's target bound as the fourth (CD3D12Device::BindAmbient).
   const bool bAmbient = Key.bAmbient && (Key.nTarget == 0 || bScene);
+  // The path tracer's G-buffer bound to the scene's targets (CD3D12Device::BindPathTargets), in the ambient light's place.
+  const bool bPath = Key.bPathTrace && bScene && !bAmbient;
   const uint32 nState = Key.nState;
   // In an upscaler's scene the general program's opaque draws write the motion vectors, and the
   // ones that write the depth buffer the upscaler's depth too; the blended ones leave those of
@@ -839,6 +849,15 @@ ComPtr<ID3D12PipelineState> CD3D12Pipeline::CreatePSO(const SPipelineKey &Key, b
   // Rays in place of a cube map and towards the lamps (their vertex shaders those above).
   if (bGeneral && Key.bRayTrace && Key.bCascades != 2)
     Desc.PS = s_RaysPS[bAmbient ? 1 : 0][Key.bCascades == 3 ? 2 : Key.bCascades][bHdr ? 1 : 0][bVelocity || bUpscaleDepth ? 1 : 0];
+  // Into the path tracer's G-buffer: its own pixel shaders in place of all the above (the draws it lights have no light
+  // flags; the rest are drawn as without it, but for the cascades' and the rays' shadows).
+  if (bPath && bGeneral && bHdr)
+  {
+    const bool bMotion = bVelocity || bUpscaleDepth;
+    Desc.VS = bMotion ? D3D12_SHADER_BYTECODE{ g_General_Velocity_VS, sizeof(g_General_Velocity_VS) }
+                      : D3D12_SHADER_BYTECODE{ g_General_VS, sizeof(g_General_VS) };
+    Desc.PS = s_PathPS[bMotion ? 1 : 0];
+  }
   // A caster of the sun's cascades into all its slices at once.
   if (bGeneral && bShadowMap && Key.bCascadeInstances)
     Desc.VS = { g_General_CascadeInstances_VS, sizeof(g_General_CascadeInstances_VS) };
@@ -920,6 +939,17 @@ ComPtr<ID3D12PipelineState> CD3D12Pipeline::CreatePSO(const SPipelineKey &Key, b
     Ambient.RenderTargetWriteMask = bGeneral && !(nState & (GS_NOCOLMASK | GS_COLMASKONLYALPHA)) ?
       D3D12_COLOR_WRITE_ENABLE_RED | D3D12_COLOR_WRITE_ENABLE_GREEN | D3D12_COLOR_WRITE_ENABLE_BLUE : 0;
   }
+  if (bPath)
+  {
+    // The albedo blends as the colour (General.hlsl, XR_PT); the normal is the opaque surface's.
+    const bool bWrites = bGeneral && bHdr && !(nState & (GS_NOCOLMASK | GS_COLMASKONLYALPHA));
+    D3D12_RENDER_TARGET_BLEND_DESC &Albedo = Desc.BlendState.RenderTarget[3];
+    Albedo = Blend;
+    Albedo.RenderTargetWriteMask = bWrites ? D3D12_COLOR_WRITE_ENABLE_RED | D3D12_COLOR_WRITE_ENABLE_GREEN | D3D12_COLOR_WRITE_ENABLE_BLUE : 0;
+    D3D12_RENDER_TARGET_BLEND_DESC &Normal = Desc.BlendState.RenderTarget[4];
+    Normal = Desc.BlendState.RenderTarget[1];
+    Normal.RenderTargetWriteMask = bWrites && !(nState & (GS_BLSRC_MASK | GS_BLDST_MASK)) ? D3D12_COLOR_WRITE_ENABLE_ALL : 0;
+  }
   // Without a pixel shader no colour target is written.
   if (Key.bDepthOnly)
   {
@@ -988,7 +1018,7 @@ ComPtr<ID3D12PipelineState> CD3D12Pipeline::CreatePSO(const SPipelineKey &Key, b
   const int nTopology = Key.nTopology;
   Desc.PrimitiveTopologyType = nTopology >= D3D12_PRIMITIVE_TOPOLOGY_TYPE_POINT && nTopology <= D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE ?
     (D3D12_PRIMITIVE_TOPOLOGY_TYPE)nTopology : D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
-  Desc.NumRenderTargets = bShadowMap ? 0 : bAmbient ? 4 : bScene ? 3 : bHighlight ? 2 : 1;
+  Desc.NumRenderTargets = bShadowMap ? 0 : bPath ? 5 : bAmbient ? 4 : bScene ? 3 : bHighlight ? 2 : 1;
   switch (Key.nColorFormat)
   {
   case PIPELINE_COLOR_HDR:   Desc.RTVFormats[0] = D3D12_HDR_FORMAT; break;
@@ -1002,7 +1032,8 @@ ComPtr<ID3D12PipelineState> CD3D12Pipeline::CreatePSO(const SPipelineKey &Key, b
     Desc.RTVFormats[0] = DXGI_FORMAT_UNKNOWN;
   Desc.RTVFormats[1] = bScene || bAmbient ? D3D12_VELOCITY_FORMAT : bHighlight ? D3D12_HIGHLIGHT_FORMAT : DXGI_FORMAT_UNKNOWN;
   Desc.RTVFormats[2] = bScene || bAmbient ? D3D12_UPSCALE_DEPTH_FORMAT : DXGI_FORMAT_UNKNOWN;
-  Desc.RTVFormats[3] = bAmbient ? D3D12_AMBIENT_FORMAT : DXGI_FORMAT_UNKNOWN;
+  Desc.RTVFormats[3] = bPath ? D3D12_PT_ALBEDO_FORMAT : bAmbient ? D3D12_AMBIENT_FORMAT : DXGI_FORMAT_UNKNOWN;
+  Desc.RTVFormats[4] = bPath ? D3D12_PT_NORMAL_FORMAT : DXGI_FORMAT_UNKNOWN;
   Desc.DSVFormat = bShadowMap ? D3D12_SHADOW_MAP_FORMAT : bScene ? D3D12_SCENE_DEPTH_FORMAT : bDepth ? D3D12_DEPTH_FORMAT : DXGI_FORMAT_UNKNOWN;
   Desc.SampleDesc.Count = 1;
   Desc.SampleDesc.Quality = 0;
@@ -1016,9 +1047,9 @@ ComPtr<ID3D12PipelineState> CD3D12Pipeline::CreatePSO(const SPipelineKey &Key, b
     if (!bLog)
       return nullptr;
     iLog->LogError("XRenderD3D12: CreateGraphicsPipelineState failed (0x%08X): program %s, vertex format %d, state 0x%08X, "
-      "cull %d, topology %d, target %d, depth bias %d, streams %d, wireframe %d, colour format %d, ambient %d, blend op %d, rays %d", (unsigned)hr,
+      "cull %d, topology %d, target %d, depth bias %d, streams %d, wireframe %d, colour format %d, ambient %d, blend op %d, rays %d, path %d", (unsigned)hr,
       Program.szName, (int)Key.nVertexFormat, nState, (int)Key.nCull, nTopology, (int)Key.nTarget, (int)Key.bDepthBias,
-      (int)Key.nStreams, (int)Key.bWireframe, (int)Key.nColorFormat, (int)Key.bAmbient, (int)Key.nBlendOp, (int)Key.bRayTrace);
+      (int)Key.nStreams, (int)Key.bWireframe, (int)Key.nColorFormat, (int)Key.bAmbient, (int)Key.nBlendOp, (int)Key.bRayTrace, (int)Key.bPathTrace);
     return nullptr;
   }
   return pPSO;

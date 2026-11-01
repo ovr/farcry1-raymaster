@@ -584,6 +584,12 @@ void CD3D12Renderer::DrawLeafItem(const SRenderItem &it)
     return;
   }
 
+  // The main view's opaque list into the path tracer's G-buffer (PathTrace.cpp): the path tracer lights the surfaces, the
+  // passes of the lamps' light and of the terrain's under them and in the shadow are not drawn.
+  const bool bPathDraw = m_pDevice->IsPathBound() && !m_bDepthPrepass && !m_bRayCaptureWalk;
+  if (bPathDraw && (bLightPass || eDC == eDC_TerrainShadow || eDC == eDC_TerrainLight))
+    return;
+
   // A fog volume over the object (FogVolumeAlpha, General.hlsl) where its first pass is: blended
   // objects where they are seen, by their alpha; alpha tested ones where the test passes. The cap
   // and the sea floor beyond the terrain from both sides.
@@ -1090,14 +1096,18 @@ void CD3D12Renderer::DrawLeafItem(const SRenderItem &it)
                                           (eLighting == ELighting::Ambient || eLighting == ELighting::Ambient2)))
       dc.nFlags2 |= DF2_AO_ALL;
   }
-  // The path tracer's material of the draw in the scene for rays (SRayInstance, Shaders/PathShade.hlsli): the
-  // terrain, the vegetation, the templates lit by the ambient colour alone with the object's colour as the albedo, those
-  // without lights unlit; the material's specular colour.
+  // The path tracer's material of the draw, in the scene for rays (SRayInstance, Shaders/PathShade.hlsli) and in its
+  // G-buffer (Shaders/PathGBuffer.hlsli): the terrain, the vegetation, the templates lit by the ambient colour alone
+  // with the object's colour as the albedo, the decals as the surfaces under them, those without lights unlit. The
+  // albedo is the colour the light 1 of the game's lighting gives: a draw lit with the scale s (DF_LIGHTING's
+  // vAmbient.w; 1 for the fixed function's material light) has s / 2 of its colour (its sun and lamps are s / 2 of
+  // the others'). The material's specular colour.
   const bool bRayMaterial = bFirstPass && !bLightPass && m_pRayScene && (m_pRayScene->IsCapturing() || m_pRayScene->IsCapturingReflection());
-  if (bRayMaterial)
+  const bool bPathMaterial = bFirstPass && bPathDraw;
+  uint32 nMaterial = XR_PT_MAT_LIT;
+  float vAlbedo[4], vSpecular[4] = {};
+  if (bRayMaterial || bPathMaterial)
   {
-    uint32 nMaterial = XR_PT_MAT_LIT;
-    float vAlbedo[4], vSpecular[4] = {};
     memcpy(vAlbedo, dc.vColor, sizeof(vAlbedo));
     if (eDC == eDC_Terrain)
       nMaterial = XR_PT_MAT_TERRAIN;
@@ -1105,13 +1115,32 @@ void CD3D12Renderer::DrawLeafItem(const SRenderItem &it)
       nMaterial = XR_PT_MAT_VEGETATION;
     else if (eLighting == ELighting::Ambient || eLighting == ELighting::Ambient2)
       Set4(vAlbedo, pObj->m_Color.r, pObj->m_Color.g, pObj->m_Color.b, dc.vColor[3]);
+    else if (eDC == eDC_Decal)
+      nMaterial = XR_PT_MAT_LIT;
     else if (!(dc.nFlags & (DF_LIGHTING | DF_TEX1_LIGHTMAP)))
       nMaterial = XR_PT_MAT_UNLIT;
+    else if (dc.nFlags & DF_LIGHTING)
+    {
+      for (int c = 0; c < 3; c++)
+        vAlbedo[c] *= dc.vAmbient[3] / 2;
+    }
     if (dc.nFlags & DF_SPECULAR)
       Set4(vSpecular, dc.vSpecular[0], dc.vSpecular[1], dc.vSpecular[2], 32);
     else if (dc.nFlags2 & DF2_MATERIAL_LIGHT)
       Set4(vSpecular, dc.vSpecular[0], dc.vSpecular[1], dc.vSpecular[2], dc.vParams3[0]);
+  }
+  if (bRayMaterial)
     m_pRayScene->SetCaptureMaterial(nMaterial, vAlbedo, vSpecular);
+  // Into the G-buffer: a surface the path tracer lights without its light (no sun, ambient, lamps, light map or
+  // shadows), its colour the albedo (General.hlsl, XR_PT).
+  if (bPathMaterial && nMaterial != XR_PT_MAT_UNLIT)
+  {
+    dc.nFlags &= ~(DF_LIGHTING | DF_PIXEL_LIGHTING | DF_SPECULAR | DF_SHADOWS | DF_SHADOW_DEBUG | DF_TEX1_LIGHTMAP | DF_LIGHTMAP_DIR);
+    dc.nFlags2 &= ~(DF2_MATERIAL_LIGHT | DF2_VERTEX_LIGHTS | DF2_SMOOTH_FALLOFF | DF2_LIGHTMAP_LIGHTS | DF2_SUN_CASCADES | DF2_CASCADES_LIVE |
+                    DF2_SHADOW_TINT | DF2_FOLIAGE | DF2_AO_BAKED | DF2_AO_ALL | DF2_NO_SUN);
+    dc.nFlags2 |= ((nMaterial + 1) & 3) << DF2_PT_SHIFT;
+    memcpy(dc.vColor, vAlbedo, 3 * sizeof(float));
+    dc.nLights = 0;
   }
   if (bFirstPass)
     Draw();
@@ -1138,7 +1167,8 @@ void CD3D12Renderer::DrawLeafItem(const SRenderItem &it)
   // under the light (eDC_TerrainLight): 0.75 * texture + 0.25 lit per pixel, falling off linearly to
   // the radius, added.
   const bool bTerrain = eDC == eDC_TerrainLight;
-  if (bLightPass || m_bSpritePass || m_bReflectionPass || !HasNormal(nFormat) || (eDC != eDC_Opaque && eDC != eDC_AlphaTest && eDC != eDC_AlphaBlend && !bTerrain))
+  if (bLightPass || bPathDraw || m_bSpritePass || m_bReflectionPass || !HasNormal(nFormat) ||
+      (eDC != eDC_Opaque && eDC != eDC_AlphaTest && eDC != eDC_AlphaBlend && !bTerrain))
     return;
   const std::span<CDLight *const> Lights = m_pScene->GetLights();
   const bool bBlended = (Key.nState & GS_BLEND_MASK) != 0 && !bTerrain;

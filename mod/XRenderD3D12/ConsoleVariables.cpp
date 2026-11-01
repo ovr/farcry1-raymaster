@@ -293,7 +293,7 @@ bool CD3D12Renderer::IsShadowMapsOn()
   return m_pShadowMapsVar && m_pShadowMapsVar->GetIVal() != 0;
 }
 
-bool CD3D12Renderer::IsHdrOn()
+bool CD3D12Renderer::IsHdrOn() const
 {
   if (!m_pHdrRendering && iConsole)
     m_pHdrRendering = iConsole->GetCVar("r_HDRRendering");

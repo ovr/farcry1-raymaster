@@ -49,6 +49,11 @@
 #define XR_RAY_DEBUG_PT_ALBEDO  8   //!< the path tracer's albedo of the hits (PathShade.hlsli)
 #define XR_RAY_DEBUG_PT_EMISSION 9  //!< its emission of the hits
 #define XR_RAY_DEBUG_PT_DIRECT  10  //!< the hits lit by the sun and the lamps as the path tracer lights them, with their emission
+// The path tracer's G-buffer (d3d12_PTDebug 1 to 4, PathTrace.cpp; Shaders/PathGBuffer.hlsli), no rays
+#define XR_RAY_DEBUG_GB_ALBEDO  16  //!< the albedo, the game's colour
+#define XR_RAY_DEBUG_GB_NORMAL  17  //!< the normal, rgb = n * 0.5 + 0.5; no surface black
+#define XR_RAY_DEBUG_GB_FOG     18  //!< the fog's share, grey
+#define XR_RAY_DEBUG_GB_MATERIAL 19 //!< the material over the albedo's grey: lit grey, the terrain green, the vegetation yellow; none black
 
 //! SRayInstance: no view, no stream.
 #define XR_RAY_NONE         0xffffffff

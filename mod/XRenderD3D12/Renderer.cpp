@@ -318,6 +318,9 @@ void CD3D12Renderer::RegisterVariables()
   iConsole->Register("d3d12_PTTerrainDelight", &CV_d3d12_PTTerrainDelight, 2.0f, VF_DUMPTODISK,
                      "With d3d12_PathTracing, the light the editor baked into the terrain's texture, taken off for its albedo: how "
                      "much brighter a face towards the sun is than one in the terrain's shadow (1 or less: none taken off)");
+  iConsole->Register("d3d12_PTDebug", &CV_d3d12_PTDebug, 0, 0,
+                     "With d3d12_PathTracing, its G-buffer over the picture: 1 the albedo, 2 the normal, 3 the fog's share, "
+                     "4 the material (lit grey, the terrain green, the vegetation yellow; none black)");
   // The HDR pipeline (r_HDRRendering, Hdr.cpp).
   iConsole->Register("d3d12_ToneMap", &CV_d3d12_ToneMap, 1, VF_DUMPTODISK,
                      "With r_HDRRendering, the tone map: 0 clamp, 1 soft shoulder (the game's look up to d3d12_ToneMapKnee, then each channel rolls off to 1), 2 ACES fitted, 3 AgX");
@@ -501,6 +504,8 @@ WIN_HWND CD3D12Renderer::Init(int x,int y,int width,int height,unsigned int cbpp
     iConsole->UnregisterVariable("d3d12_PTLamps", true);
     iConsole->UnregisterVariable("d3d12_PTEmission", true);
     iConsole->UnregisterVariable("d3d12_PTTerrainDelight", true);
+    iConsole->UnregisterVariable("d3d12_PTDebug", true);
+    CV_d3d12_PTDebug = 0;
   }
   m_Viewport[0] = 0;
   m_Viewport[1] = 0;
@@ -766,6 +771,7 @@ void CD3D12Renderer::Release()
   ReleaseScreenEffects();
   ReleaseFlares();
   ReleaseAO();
+  ReleasePathTargets();
   ReleaseUpscaler();
   ReleaseHdr();
   ReleaseVolumetricLight();

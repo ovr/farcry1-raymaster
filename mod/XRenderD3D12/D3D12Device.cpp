@@ -748,7 +748,14 @@ void CD3D12Device::SetBackBufferTargets()
 {
   m_nStateEpoch++;
   EndOffscreen();
-  if (m_bInScene)
+  if (m_bInScene && m_hPathRTV[0].ptr)
+  {
+    // The path tracer's G-buffer in the places of the ambient light and after it.
+    const D3D12_CPU_DESCRIPTOR_HANDLE hRTV[5] = { SceneRTV(0), SceneRTV(1), SceneRTV(2), m_hPathRTV[0], m_hPathRTV[1] };
+    const D3D12_CPU_DESCRIPTOR_HANDLE hDSV = m_bDepthReadOnly ? ReadOnlyDSV(true) : SceneDSV();
+    m_pCmdList->OMSetRenderTargets(5, hRTV, FALSE, &hDSV);
+  }
+  else if (m_bInScene)
   {
     const D3D12_CPU_DESCRIPTOR_HANDLE hRTV[4] = { SceneRTV(0), SceneRTV(1), SceneRTV(2), m_hAmbientRTV };
     const D3D12_CPU_DESCRIPTOR_HANDLE hDSV = m_bDepthReadOnly ? ReadOnlyDSV(true) : SceneDSV();
@@ -770,6 +777,14 @@ void CD3D12Device::SetBackBufferTargets()
 void CD3D12Device::BindAmbient(D3D12_CPU_DESCRIPTOR_HANDLE hRTV)
 {
   m_hAmbientRTV = hRTV;
+  if (m_bInFrame && !m_pOffscreen)
+    SetBackBufferTargets();
+}
+
+void CD3D12Device::BindPathTargets(D3D12_CPU_DESCRIPTOR_HANDLE hAlbedo, D3D12_CPU_DESCRIPTOR_HANDLE hNormal)
+{
+  m_hPathRTV[0] = hAlbedo;
+  m_hPathRTV[1] = hNormal;
   if (m_bInFrame && !m_pOffscreen)
     SetBackBufferTargets();
 }

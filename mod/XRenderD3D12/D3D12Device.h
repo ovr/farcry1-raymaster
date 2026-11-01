@@ -42,6 +42,8 @@ constexpr DXGI_FORMAT D3D12_HDR10_FORMAT = DXGI_FORMAT_R10G10B10A2_UNORM; //!< t
 constexpr DXGI_FORMAT D3D12_SCRGB_FORMAT = DXGI_FORMAT_R16G16B16A16_FLOAT; //!< the swap chain of the scRGB output (linear Rec. 709, 1 = 80 nits)
 constexpr DXGI_FORMAT D3D12_HIGHLIGHT_FORMAT = DXGI_FORMAT_R16G16B16A16_FLOAT; //!< the highlight layer (HdrOutput.cpp)
 constexpr DXGI_FORMAT D3D12_AMBIENT_FORMAT = DXGI_FORMAT_R11G11B10_FLOAT; //!< the ambient light of the ambient occlusion (BindAmbient)
+constexpr DXGI_FORMAT D3D12_PT_ALBEDO_FORMAT = DXGI_FORMAT_R16G16B16A16_FLOAT; //!< the path tracer's G-buffer: the albedo (BindPathTargets)
+constexpr DXGI_FORMAT D3D12_PT_NORMAL_FORMAT = DXGI_FORMAT_R10G10B10A2_UNORM;  //!< its normal, the fog's share and the material
 
 //! What the swap chain shows (d3d12_HDROutput, HdrOutput.cpp).
 enum class EDisplayOutput
@@ -244,6 +246,13 @@ public:
   void BindAmbient(D3D12_CPU_DESCRIPTOR_HANDLE hRTV);
   //! The main view's draws write the ambient light too (bound, not off screen).
   bool IsAmbientBound() const { return m_hAmbientRTV.ptr && !m_pOffscreen; }
+  //! The path tracer's G-buffer (PathTrace.cpp, Shaders/PathGBuffer.hlsli), targets of the scene's size: from here
+  //! (in a frame, in the scene) SetBackBufferTargets binds hAlbedo (D3D12_PT_ALBEDO_FORMAT) and hNormal
+  //! (D3D12_PT_NORMAL_FORMAT) as the scene's fourth and fifth colour targets (SV_Target3 and 4, SPipelineKey::bPathTrace)
+  //! in place of the ambient light's; empty handles unbind them. The caller makes its transitions.
+  void BindPathTargets(D3D12_CPU_DESCRIPTOR_HANDLE hAlbedo, D3D12_CPU_DESCRIPTOR_HANDLE hNormal);
+  //! The main view's draws write the path tracer's G-buffer too (bound, in the scene, not off screen).
+  bool IsPathBound() const { return m_hPathRTV[0].ptr && m_bInScene && !m_pOffscreen; }
   //! true: from here (in a frame) SetBackBufferTargets binds the main view's depth buffer read only
   //! (GetMainDepth in DEPTH_READ, which a pixel shader can then read too); false: writable again. The
   //! caller makes its transitions.
@@ -487,6 +496,7 @@ private:
   ComPtr<ID3D12Resource> m_pHdrColor;               //!< SetHdrTarget
   bool m_bInHdr = false;                            //!< BeginHdr .. EndHdr
   D3D12_CPU_DESCRIPTOR_HANDLE m_hAmbientRTV = {};   //!< BindAmbient
+  D3D12_CPU_DESCRIPTOR_HANDLE m_hPathRTV[2] = {};   //!< BindPathTargets
   bool m_bDepthReadOnly = false;                    //!< SetDepthReadOnly
 
   int m_nWidth = 0, m_nHeight = 0;
