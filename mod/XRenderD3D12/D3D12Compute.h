@@ -70,6 +70,12 @@ enum ED3D12Kernel
   eD3D12K_PathSpecular,             //!< the highlights of the sun and the lamps (with rays)
   eD3D12K_PathNrdPack,              //!< NRD's inputs from the paths (Shaders/PathNrd.hlsl; with rays; only with NRD built in)
   eD3D12K_PathNrdResolve,           //!< NRD's light as a history for the filter (the same)
+  eD3D12K_RaySunFfxInputs,          //!< the sun's shadow by rays with AMD FidelityFX Denoiser: the normals and the depth
+                                    //!< (Shaders/RaySunFfx.hlsl; with rays; only with its submodule)
+  eD3D12K_RaySunFfxPrepare,         //!< its bit masks of the rays
+  eD3D12K_RaySunFfxClassify,        //!< its tile classification and history
+  eD3D12K_RaySunFfxFilter,          //!< a pass of its filter
+  eD3D12K_RaySunFfxPack,            //!< the denoised visibility into the mask
   eD3D12K_Num
 };
 
@@ -98,6 +104,8 @@ public:
   void DispatchRays(ID3D12GraphicsCommandList *pList, ED3D12Kernel eKernel, D3D12_GPU_VIRTUAL_ADDRESS FrameCB, D3D12_GPU_VIRTUAL_ADDRESS PassCB,
                     D3D12_GPU_VIRTUAL_ADDRESS nRayScene, D3D12_GPU_VIRTUAL_ADDRESS nRayInstances, int nUAVs, UINT nGroupsX, UINT nGroupsY,
                     D3D12_GPU_VIRTUAL_ADDRESS nLights = 0);
+  //! Whether the kernel is built in and the device takes it (its pipeline state made).
+  bool HasKernel(ED3D12Kernel eKernel) { return GetPSO(eKernel) != nullptr; }
 
 private:
   bool CreateRootSignature();

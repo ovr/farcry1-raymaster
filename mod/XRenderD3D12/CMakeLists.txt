@@ -119,6 +119,19 @@ set(XRENDERD3D12_SHADER_INCLUDES "")
 # library with its shaders as DXIL, compiled by the Windows SDK's dxc; nothing is downloaded. Without
 # the submodules (a clone without --recurse-submodules) or with a CMake older than NRD's 3.30,
 # XRenderD3D12 is built without NRD.
+# AMD FidelityFX Denoiser v1.2 (MIT): its shadows denoiser for the sun's shadow by rays
+# (d3d12_RTSunDenoise 2, Shaders/RaySunFfx.hlsl), shader headers alone. A git submodule of AMD's
+# repository at the tag v1.2 (third_party/fidelityfx-denoiser); without it XRenderD3D12 is built
+# without that denoiser.
+set(XRENDERD3D12_FFX_DENOISER_DIR "${CMAKE_SOURCE_DIR}/third_party/fidelityfx-denoiser/ffx-shadows-dnsr")
+set(XRENDERD3D12_FFX_DENOISER OFF)
+if(EXISTS "${XRENDERD3D12_FFX_DENOISER_DIR}/ffx_denoiser_shadows_filter.h")
+    set(XRENDERD3D12_FFX_DENOISER ON)
+else()
+    message(WARNING "third_party/fidelityfx-denoiser is empty (git submodule update --init): "
+        "XRenderD3D12 is built without AMD FidelityFX Denoiser.")
+endif()
+
 set(XRENDERD3D12_NRD_DIR "${CMAKE_SOURCE_DIR}/third_party/nrd")
 set(XRENDERD3D12_SHADERMAKE_DIR "${CMAKE_SOURCE_DIR}/third_party/shadermake")
 set(XRENDERD3D12_MATHLIB_DIR "${CMAKE_SOURCE_DIR}/third_party/mathlib")
@@ -145,7 +158,7 @@ function(xrender_d3d12_shader name file profile entry)
     set(more_globs "")
     foreach(dir ${XRENDERD3D12_SHADER_INCLUDES})
         list(APPEND more "-I" "${dir}")
-        list(APPEND more_globs "${dir}/*.hlsli")
+        list(APPEND more_globs "${dir}/*.hlsli" "${dir}/*.h")
     endforeach()
     set(out "${XRENDERD3D12_SHADER_DIR}/${name}.h")
     file(GLOB includes "${CMAKE_CURRENT_SOURCE_DIR}/Shaders/*.hlsli" "${CMAKE_CURRENT_SOURCE_DIR}/Shaders/*.h"
@@ -323,6 +336,9 @@ function(xrender_d3d12_add_nrd)
     endforeach()
 endfunction()
 
+if(XRENDERD3D12_FFX_DENOISER)
+    target_compile_definitions(XRenderD3D12 PRIVATE XRENDERD3D12_FFX_DENOISER=1)
+endif()
 if(XRENDERD3D12_NRD)
     xrender_d3d12_add_nrd()
     target_link_libraries(XRenderD3D12 PRIVATE NRD)

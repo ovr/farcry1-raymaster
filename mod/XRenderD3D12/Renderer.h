@@ -30,6 +30,8 @@
 #include "AmbientOcclusion.h"
 #include "Shaders/Constants.h"
 
+struct SRaySunConstants;
+
 struct SDisplayInfo;
 enum class EDisplayOutput;
 
@@ -708,6 +710,14 @@ public:
   void EndRaySunMask();
   //! m_RaySun's targets and views for nWidth x nHeight, made when it changes. False: none.
   bool EnsureRaySunTargets(int nWidth, int nHeight);
+  //! With d3d12_RTSunDenoise 2, m_RaySun.Ffx's targets and tables at m_RaySun's size (after EnsureRaySunTargets).
+  //! False: AMD FidelityFX Denoiser is not built in or the device or the memory refuse it (logged once; the
+  //! renderer's own denoise instead).
+  bool EnsureRaySunFfx();
+  void ReleaseRaySunFfx();
+  //! After CSTrace (a ray a pixel, its rays readable): FidelityFX Denoiser's kernels for each set of casters, the mask
+  //! from them (DrawRaySunMask; rc its constants, w x h the depth buffer's pixels).
+  void DenoiseRaySunFfx(D3D12_GPU_VIRTUAL_ADDRESS FrameCB, const SRaySunConstants &rc, int w, int h);
   void ReleaseRaySun();
 
   struct SRaySunState
@@ -724,6 +734,26 @@ public:
     float PrevJitter[2] = {};               //!< and its jitter (SFrameConstants::vJitter.xy)
     int nFrame = -1;                        //!< m_nFrames of the last mask with a history (-1: none to blend into)
     bool bActive = false;                   //!< the opaque list reads the mask (DrawRaySunMask .. EndRaySunMask)
+    //! With d3d12_RTSunDenoise 2, AMD FidelityFX Denoiser's shadows denoiser (Shaders/RaySunFfx.hlsl): its
+    //! textures, all in UNORDERED_ACCESS between the frames.
+    struct SFfx
+    {
+      CD3D12Texture *pNormals = nullptr;      //!< CSInputs' normals (R10G10B10A2_UNORM)
+      CD3D12Texture *pDepth[2] = {};          //!< and depth (R32_FLOAT), this frame's and the frame before's (nCur)
+      CD3D12Texture *pTiles = nullptr;        //!< CSPrepare's bit masks (R32_UINT, a texel for 8 x 4 pixels)
+      CD3D12Texture *pMeta = nullptr;         //!< CSClassify's tiles (R32_UINT, a texel for 8 x 8 pixels)
+      CD3D12Texture *pReprojected = nullptr;  //!< its history and variance (R16G16_FLOAT)
+      CD3D12Texture *pFiltered = nullptr;     //!< CSFilter's first pass (R16G16_FLOAT)
+      CD3D12Texture *pMoments[2][2] = {};     //!< for each set of casters the moments (R16G16B16A16_FLOAT), [nCur] this frame's
+      CD3D12Texture *pHistory[2] = {};        //!< for each set the history: CSFilter's second pass (R16G16_FLOAT)
+      CD3D12Texture *pDenoised[2] = {};       //!< for each set its third pass (R16G16_FLOAT)
+      int nTables[12];                        //!< the kernels' UAV tables (RaySun.cpp)
+      int nCur = 0;
+      int nFrame = -1;                        //!< m_nFrames of the last denoise (-1: none, a first frame)
+      int nSets = 0;                          //!< its sets of casters (1: all, 2: and the live ones)
+      bool bFailed = false;                   //!< not to be had (logged)
+      SFfx() { std::fill(std::begin(nTables), std::end(nTables), -1); }
+    } Ffx;
   };
   SRaySunState m_RaySun;
 

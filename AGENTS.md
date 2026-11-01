@@ -70,7 +70,9 @@ instructions and is not committed (git-ignored). The references of the modules a
   links, not their files. NRD's license (the NVIDIA RTX SDKs License) lets it be distributed only
   built into an application, so its files are never copied into the repository; a newer NRD is a new
   tag of all three. Without them (a clone without `--recurse-submodules`) XRenderD3D12 is built
-  without NRD.
+  without NRD. `third_party/fidelityfx-denoiser` (AMD FidelityFX Denoiser, MIT: the shadows
+  denoiser of the sun's shadow by rays, shader headers alone) is a git submodule of AMD's repository
+  at the tag v1.2; without it XRenderD3D12 is built without that denoiser.
 - `farcry1_testing1/` - the game install for tracing (git-ignored):
   - `Bin32` - retail 1.4 (x86; stops at its CD check, which is not to be bypassed),
   - `Bin64` - the Cumulative Patch x64 build described above.

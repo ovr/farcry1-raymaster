@@ -416,7 +416,16 @@ reference of its features and console variables.
   the history was sure of turned the other way, so that a shadow that moves does not stay behind),
   and where the result is neither all sun nor all shadow (or the history is young) it is filtered
   over the width the sun's disc gives at the distance of what casts it: sharp where an object stands
-  on the ground, softer the higher the leaves are. The mask reaches as far as the cascades and gives
+  on the ground, softer the higher the leaves are. With `d3d12_RTSunDenoise 2` the rays are a ray
+  for each pixel and AMD FidelityFX Denoiser's shadows denoiser (v1.2, `third_party/fidelityfx-denoiser`,
+  a git submodule; our kernels round its headers in `Shaders/RaySunFfx.hlsl`; without it 1) takes
+  the history's and the filter's place, for all the casters and again for the live ones: the rays as
+  its bit masks of 8 x 4 pixels, its tile classification (tiles all in the sun or all in the shadow
+  skipped; the history where the point was in the frame before, the camera's move from the depth,
+  clamped to the rays round it; the moments of the visibility) and its three edge-avoiding passes on
+  the depth and the normals from it, the second's output the next frame's history; it costs
+  more than 1 (on an RX 7900 XTX 0.3 to 0.7 ms with the path tracer under FSR Quality, 0.8 to 1.6 ms in the
+  raster at 3840 x 2160). The mask reaches as far as the cascades and gives
   way to them over the last tenth. The general program takes it where its pixel is the mask's
   surface (the view depth the same: the depth prepass's surfaces; `XR_RAY_SUN`, pixel shaders of
   their own); the others (alpha tested surfaces, the leaves, what is blended, the weapon in the

@@ -153,6 +153,29 @@ struct SRaySunConstants
                                   //!< the casters (RayMask, the low 8 bits) and 0x100 when the scene has live casters
 };
 
+//! b2 of the kernels around AMD FidelityFX Denoiser's shadows denoiser (d3d12_RTSunDenoise 2, RaySunFfx.hlsl,
+//! RaySun.cpp): the view's fields as SRaySunConstants' (RayView.hlsli), then the denoiser's.
+struct SRaySunFfxConstants
+{
+  XR_FLOAT4X4(mPrevViewProj);     //!< world to clip in the frame before, without its jitter
+  XR_FLOAT4(vCameraPos);          //!< xyz the camera
+  XR_FLOAT4(vRayX);               //!< the world position at the view depth d and x, y -1..1 across the view (y up), the jitter
+  XR_FLOAT4(vRayY);               //!< taken off: vCameraPos + d (vRayO + x vRayX + y vRayY)
+  XR_FLOAT4(vRayO);
+  XR_FLOAT4(vSize);               //!< x width, y height, z 1 / width, w 1 / height (the depth buffer's pixels)
+  XR_FLOAT4(vJitter);             //!< xy this frame's jitter, zw the frame before's
+  XR_FLOAT4(vParams);             //!< x the mask's range (view depth), y where it starts to give way to the cascades, z unused,
+                                  //!< w a pixel's size at a view depth of 1 m
+  XR_UINT4(nTextures);            //!< texture table indices: x the depth buffer, y CSTrace's rays (a ray a pixel), z w unused
+  XR_UINT4(nTrace);               //!< x 1 (a ray a pixel), y z 0
+  XR_UINT4(nSet);                 //!< x the set of casters (0 all, 1 the live ones), y 1: the first frame (no history), z the
+                                  //!< filter's pass (0 to 2), w its step (1, 2, 4)
+  XR_UINT4(nInputs);              //!< texture table indices: x the normals, y this frame's depth, z the frame before's, w the
+                                  //!< history (the frame before's filter's second pass)
+  XR_UINT4(nInputs2);             //!< x the moments of the frame before, y the filter pass's input, z w the denoised visibility of
+                                  //!< all and of the live casters (CSPack)
+};
+
 // The threads a side of a group of the ambient occlusion by rays' kernels (RayAO.hlsl, RayAO.cpp)
 #define XR_RAY_AO_GROUP 8
 
