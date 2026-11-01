@@ -568,6 +568,9 @@ void CScene::EndEf3D(int nFlags)
       // beside the list until a draw or pass that traces rays (those of the water) waits for it.
       if (l == eRL_Opaque)
       {
+        // The main view's targets first: the ambient light's target and the passes over the depth
+        // buffer take the scene's (with an upscaler or the path tracer, its scene targets).
+        g_pRenderer->BeginScene3D();
         g_pRenderer->BeginAOTarget(s.Items.data(), nItems);
         if (m_nDrawing == 1)
         {
@@ -579,6 +582,8 @@ void CScene::EndEf3D(int nFlags)
           g_pRenderer->BuildRayScene({ list.data(), list.size() }, bLamps || std::any_of(s.Lists.begin(), s.Lists.end(), [&](const std::vector<SRenderItem> &Items)
             { return std::any_of(Items.begin(), Items.end(), [&](const SRenderItem &it)
               { return it.eDrawClass == eDC_Water || (bSurfaces && it.pShader && it.pShader->GetProps().eEnvMap != EEnvMap::None); }); }));
+          // The path tracer's lights of the frame.
+          g_pRenderer->UpdatePathLights(s.Lights);
         }
       }
       g_pRenderer->DrawItems(list.data(), (int)list.size(), l);

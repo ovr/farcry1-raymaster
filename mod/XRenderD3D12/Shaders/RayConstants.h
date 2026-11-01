@@ -13,6 +13,8 @@
 //	              one per instance of the TLAS, by its InstanceID
 //	  t0, space4: ByteAddressBuffer g_Buffers[] (the texture table): the raw
 //	              views of the vertices and indices (CD3D12Upload::GetRawSRV)
+//	  t2, space5: StructuredBuffer<SPTLight> g_PTLights, the path tracer's
+//	              lights (the kernels with rays only, D3D12Compute.h)
 //	Every instance of the TLAS has the kind of its draw (XR_RAY_*) as its
 //	mask and as its InstanceContributionToHitGroupIndex, which a RayQuery
 //	reads back (CommittedInstanceContributionToHitGroupIndex).
@@ -67,6 +69,29 @@ struct SRayInstance
   XR_FLOAT4(vTexMat0);
   XR_FLOAT4(vTexMat1);
   XR_FLOAT4(vAddColor);
+};
+
+//! The path tracer's lights (d3d12_PathTracing, PathTrace.cpp): the scene's lights besides the sun, at most this many a frame
+//! (the engine numbers 32 in an object's light mask).
+#define XR_PT_MAX_LIGHTS 64
+//! SPTLight::nParams.x, the kind of light.
+#define XR_PT_LIGHT_POINT        1   //!< from vPos over vPos.w metres (DLF_POINT)
+#define XR_PT_LIGHT_DIRECTIONAL  2   //!< from the direction vPos.xyz, unattenuated (DLF_DIRECTIONAL without DLF_SUN)
+#define XR_PT_LIGHT_PROJECTOR    3   //!< a point light through the picture of its cube (DLF_PROJECT with m_pLightImage)
+//! SPTLight::nParams.y, bits.
+#define XR_PT_LIGHT_LM           1   //!< baked into the light maps (DLF_LM): the light maps are not read in its place
+#define XR_PT_LIGHT_FILL         2   //!< a fill light of the characters (DLF_AMBIENT_LIGHT)
+#define XR_PT_LIGHT_HEAT         4   //!< also a heat source (DLF_HEATSOURCE)
+
+//! A light of the frame for the path tracer (g_PTLights, root SRV t2 space5 of the kernels with rays), in the order of the
+//! scene's lights (EF_ADDDlight).
+struct SPTLight
+{
+  XR_FLOAT4(vPos);        //!< xyz the world position (point, projector) or the direction towards the light (directional), w its radius (m)
+  XR_FLOAT4(vColor);      //!< rgb the game's colour (m_Color: the shaders linearise it), w the specular's scale (m_SpecColor's mean)
+  XR_UINT4(nParams);      //!< x the kind (XR_PT_LIGHT_*), y XR_PT_LIGHT_* bits, z the projector's cube (texture table, XR_RAY_NONE none),
+                          //!< w the light's index in the scene (its bit in the objects' light masks)
+  XR_FLOAT4X4(mProject);  //!< the projector's m_TextureMatrix (Direct3D style, the world point times it is its cube's lookup vector)
 };
 
 // The threads a side of a group of the sun's shadow by rays' kernels (RaySun.hlsl, RaySun.cpp)

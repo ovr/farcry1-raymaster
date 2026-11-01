@@ -26,6 +26,8 @@
 //	  3: root SRV t0 space5, the scene for rays (ROOT_RAY_SCENE)
 //	  4: root SRV t1 space5, its instances (ROOT_RAY_INSTANCES)
 //	  5: descriptor table u0..u4 (COMPUTE_UAVS UAVs)
+//	  6: root SRV t2 space5, the path tracer's lights (ROOT_RAY_LIGHTS,
+//	     SPTLight of Shaders/RayConstants.h)
 //	  static samplers s0..s4 as the draws' (XR_SAMPLER_*, the shadow maps'
 //	  comparison)
 //
@@ -70,6 +72,8 @@ class CD3D12Compute
 public:
   static constexpr int COMPUTE_SRVS = 4;
   static constexpr int COMPUTE_UAVS = 5;
+  //! The root parameter of the path tracer's lights in the root signature with rays.
+  static constexpr UINT ROOT_RAY_LIGHTS = 6;
 
   CD3D12Compute();
   ~CD3D12Compute();
@@ -83,9 +87,11 @@ public:
   void Dispatch(ID3D12GraphicsCommandList *pList, ED3D12Kernel eKernel, D3D12_GPU_VIRTUAL_ADDRESS CB, int nSRVs, int nUAVs,
                 UINT nGroupsX, UINT nGroupsY, UINT nGroupsZ = 1);
   //! The same for a kernel with rays: b0 at FrameCB, b2 at PassCB, the texture table, the scene for rays
-  //! nRayScene and its instances nRayInstances (0: unset), the UAV table from slot nUAVs.
+  //! nRayScene and its instances nRayInstances (0: unset), the UAV table from slot nUAVs, the path tracer's lights
+  //! nLights (0: unset).
   void DispatchRays(ID3D12GraphicsCommandList *pList, ED3D12Kernel eKernel, D3D12_GPU_VIRTUAL_ADDRESS FrameCB, D3D12_GPU_VIRTUAL_ADDRESS PassCB,
-                    D3D12_GPU_VIRTUAL_ADDRESS nRayScene, D3D12_GPU_VIRTUAL_ADDRESS nRayInstances, int nUAVs, UINT nGroupsX, UINT nGroupsY);
+                    D3D12_GPU_VIRTUAL_ADDRESS nRayScene, D3D12_GPU_VIRTUAL_ADDRESS nRayInstances, int nUAVs, UINT nGroupsX, UINT nGroupsY,
+                    D3D12_GPU_VIRTUAL_ADDRESS nLights = 0);
 
 private:
   bool CreateRootSignature();

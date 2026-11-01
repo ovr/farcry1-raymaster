@@ -300,6 +300,13 @@ void CD3D12Renderer::RegisterVariables()
                      "and entities towards the sun, the live casters). 1 for the effects that trace rays from the main view's "
                      "surfaces (d3d12_RTDebug; not the water's reflection), 2 always, 0 never (the main view's and the water "
                      "reflection's draws alone)");
+  // The path tracer (PathTrace.cpp), on a device with DXR 1.1.
+  iConsole->Register("d3d12_PathTracing", &CV_d3d12_PathTracing, 0, VF_DUMPTODISK,
+                     "The main view's lighting by paths (a device with DXR 1.1, r_HDRRendering): the sun, the lamps, the sky and "
+                     "what glows, with their bounces, in place of the light maps and the ambient light; 0 off, 1 in real time, "
+                     "2 the reference (the paths of the frames added up while the view stays)");
+  iConsole->Register("d3d12_PTFillLights", &CV_d3d12_PTFillLights, 0, VF_DUMPTODISK,
+                     "With d3d12_PathTracing, 1: the characters' fill lights (DLF_AMBIENT_LIGHT) light the scene too");
   // The HDR pipeline (r_HDRRendering, Hdr.cpp).
   iConsole->Register("d3d12_ToneMap", &CV_d3d12_ToneMap, 1, VF_DUMPTODISK,
                      "With r_HDRRendering, the tone map: 0 clamp, 1 soft shoulder (the game's look up to d3d12_ToneMapKnee, then each channel rolls off to 1), 2 ACES fitted, 3 AgX");
@@ -475,6 +482,9 @@ WIN_HWND CD3D12Renderer::Init(int x,int y,int width,int height,unsigned int cbpp
     iConsole->UnregisterVariable("d3d12_RTLightShadowGap", true);
     iConsole->UnregisterVariable("d3d12_RTGI", true);
     CV_d3d12_RTGI = 0;
+    iConsole->UnregisterVariable("d3d12_PathTracing", true);
+    CV_d3d12_PathTracing = 0;
+    iConsole->UnregisterVariable("d3d12_PTFillLights", true);
   }
   m_Viewport[0] = 0;
   m_Viewport[1] = 0;
