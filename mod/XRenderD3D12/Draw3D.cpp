@@ -1102,16 +1102,27 @@ void CD3D12Renderer::DrawLeafItem(const SRenderItem &it)
   // with the object's colour as the albedo, the decals as the surfaces under them, those without lights unlit. The
   // albedo is the colour the light 1 of the game's lighting gives: a draw lit with the scale s (DF_LIGHTING's
   // vAmbient.w; 1 for the fixed function's material light) has s / 2 of its colour (its sun and lamps are s / 2 of
-  // the others'). The material's specular colour.
+  // the others'). The material's specular colour. The game's ambient light on it (CD3D12RayScene::PathAmbient; the
+  // templates lit by the ambient colour alone: that colour, twice for Ambient2; the terrain, whose light is in its
+  // texture and whose ambient colour is white, unused: the outdoor ambient, as the sky), which the paths fill in with.
   const bool bRayMaterial = bFirstPass && !bLightPass && m_pRayScene && (m_pRayScene->IsCapturing() || m_pRayScene->IsCapturingReflection());
   const bool bPathMaterial = bFirstPass && bPathDraw;
   uint32 nMaterial = XR_PT_MAT_LIT;
-  float vAlbedo[4], vSpecular[4] = {};
+  float vAlbedo[4], vSpecular[4] = {}, vPathAmbient[3] = {};
   if (bRayMaterial || bPathMaterial)
   {
     memcpy(vAlbedo, dc.vColor, sizeof(vAlbedo));
+    CD3D12RayScene::PathAmbient(dc, vPathAmbient);
+    if (eLighting == ELighting::Ambient2)
+      for (float &a : vPathAmbient)
+        a *= 2;
     if (eDC == eDC_Terrain)
+    {
       nMaterial = XR_PT_MAT_TERRAIN;
+      I3DEngine *p3D = iSystem ? iSystem->GetI3DEngine() : nullptr;
+      const Vec3 vOutdoor = p3D ? p3D->GetOutdoorAmbientColor() : Vec3(0, 0, 0);
+      memcpy(vPathAmbient, &vOutdoor.x, sizeof(vPathAmbient));
+    }
     else if (dc.nFlags & DF_VCOLOR_X2)
       nMaterial = XR_PT_MAT_VEGETATION;
     else if (eLighting == ELighting::Ambient || eLighting == ELighting::Ambient2)
@@ -1129,13 +1140,15 @@ void CD3D12Renderer::DrawLeafItem(const SRenderItem &it)
       Set4(vSpecular, dc.vSpecular[0], dc.vSpecular[1], dc.vSpecular[2], 32);
     else if (dc.nFlags2 & DF2_MATERIAL_LIGHT)
       Set4(vSpecular, dc.vSpecular[0], dc.vSpecular[1], dc.vSpecular[2], dc.vParams3[0]);
+    if (nMaterial == XR_PT_MAT_UNLIT)
+      memset(vPathAmbient, 0, sizeof(vPathAmbient));
   }
   if (bRayMaterial)
-    m_pRayScene->SetCaptureMaterial(nMaterial, vAlbedo, vSpecular);
+    m_pRayScene->SetCaptureMaterial(nMaterial, vAlbedo, vSpecular, vPathAmbient);
   // Into the G-buffer: a surface the path tracer lights without its light (no sun, ambient, lamps or light map), its
   // colour the albedo (General.hlsl, XR_PT); the sun's visibility from all the casters (its shadow maps, the sun's
-  // cascades, the mask by rays), which the composite takes.
-  // (none where the raster has no sun, DF2_NO_SUN)
+  // cascades, the mask by rays), which the composite takes (none where the raster has no sun, DF2_NO_SUN); the game's
+  // ambient light on it in vAmbient.rgb (unused once its light is off), which the paths fill in with.
   if (bPathMaterial && nMaterial != XR_PT_MAT_UNLIT)
   {
     const uint32 nNoSun = dc.nFlags2 & DF2_NO_SUN;
@@ -1144,6 +1157,7 @@ void CD3D12Renderer::DrawLeafItem(const SRenderItem &it)
                     DF2_SHADOW_TINT | DF2_FOLIAGE | DF2_AO_BAKED | DF2_AO_ALL | DF2_NO_SUN);
     dc.nFlags2 |= (nNoSun ? nNoSun : CascadeReceiverFlags(false)) | (((nMaterial + 1) & 3) << DF2_PT_SHIFT);
     memcpy(dc.vColor, vAlbedo, 3 * sizeof(float));
+    memcpy(dc.vAmbient, vPathAmbient, sizeof(vPathAmbient));
     dc.nLights = 0;
   }
   if (bFirstPass)

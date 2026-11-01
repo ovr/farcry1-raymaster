@@ -44,7 +44,7 @@ constexpr DXGI_FORMAT D3D12_HIGHLIGHT_FORMAT = DXGI_FORMAT_R16G16B16A16_FLOAT; /
 constexpr DXGI_FORMAT D3D12_AMBIENT_FORMAT = DXGI_FORMAT_R11G11B10_FLOAT; //!< the ambient light of the ambient occlusion (BindAmbient)
 constexpr DXGI_FORMAT D3D12_PT_ALBEDO_FORMAT = DXGI_FORMAT_R16G16B16A16_FLOAT; //!< the path tracer's G-buffer: the albedo (BindPathTargets)
 constexpr DXGI_FORMAT D3D12_PT_NORMAL_FORMAT = DXGI_FORMAT_R10G10B10A2_UNORM;  //!< its normal, the fog's share and the material
-constexpr DXGI_FORMAT D3D12_PT_SUN_FORMAT = DXGI_FORMAT_R8_UNORM;              //!< the sun's visibility
+constexpr DXGI_FORMAT D3D12_PT_SUN_FORMAT = DXGI_FORMAT_R8G8B8A8_UNORM;        //!< the sun's visibility, the ambient light / 2
 
 //! What the swap chain shows (d3d12_HDROutput, HdrOutput.cpp).
 enum class EDisplayOutput

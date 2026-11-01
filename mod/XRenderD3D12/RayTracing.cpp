@@ -414,6 +414,7 @@ void CD3D12RayScene::CaptureDraw(const SPipelineKey &Key, const SDrawConstants &
     memcpy(d.Inst.vAlbedo, m_vCaptureAlbedo, sizeof(d.Inst.vAlbedo));
     memcpy(d.Inst.vSpecular, m_vCaptureSpecular, sizeof(d.Inst.vSpecular));
     d.Inst.nPath[0] = m_nCaptureMaterial;
+    d.Inst.nPath[1] = m_nCaptureAmbient;
   }
   else
     DefaultMaterial(d.Inst, dc);
@@ -491,12 +492,31 @@ void CD3D12RayScene::DefaultMaterial(SRayInstance &Inst, const SDrawConstants &d
   memcpy(Inst.vAlbedo, dc.vColor, sizeof(Inst.vAlbedo));
   memset(Inst.vSpecular, 0, sizeof(Inst.vSpecular));
   Inst.nPath[0] = (dc.nFlags & DF_VCOLOR_X2) ? XR_PT_MAT_VEGETATION : (dc.nFlags & (DF_LIGHTING | DF_TEX1_LIGHTMAP)) ? XR_PT_MAT_LIT : XR_PT_MAT_UNLIT;
+  float vAmbient[3];
+  PathAmbient(dc, vAmbient);
+  Inst.nPath[1] = Inst.nPath[0] == XR_PT_MAT_UNLIT ? 0 : PathPackAmbient(vAmbient);
 }
 
-void CD3D12RayScene::SetCaptureMaterial(uint32 nMaterial, const float vAlbedo[4], const float vSpecular[4])
+uint32 CD3D12RayScene::PathPackAmbient(const float vAmbient[3])
+{
+  uint32 n = 0;
+  for (int c = 0; c < 3; c++)
+    n |= (uint32)std::lround(std::clamp(vAmbient[c] * 0.5f, 0.0f, 1.0f) * 255) << (8 * c);
+  return n;
+}
+
+void CD3D12RayScene::PathAmbient(const SDrawConstants &dc, float vAmbient[3])
+{
+  const float fScale = (dc.nFlags & DF_LIGHTING) && !(dc.nFlags & DF_TEX1_LIGHTMAP) && dc.vAmbient[3] > 0 ? 2 / dc.vAmbient[3] : 1;
+  for (int c = 0; c < 3; c++)
+    vAmbient[c] = dc.vAmbient[c] * fScale;
+}
+
+void CD3D12RayScene::SetCaptureMaterial(uint32 nMaterial, const float vAlbedo[4], const float vSpecular[4], const float vAmbient[3])
 {
   m_bCaptureMaterial = true;
   m_nCaptureMaterial = nMaterial;
+  m_nCaptureAmbient = PathPackAmbient(vAmbient);
   memcpy(m_vCaptureAlbedo, vAlbedo, sizeof(m_vCaptureAlbedo));
   memcpy(m_vCaptureSpecular, vSpecular, sizeof(m_vCaptureSpecular));
 }

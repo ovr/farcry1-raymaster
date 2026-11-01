@@ -35,6 +35,9 @@
 //	The game's lights multiply its colours (the raster's colour * light):
 //	in light, colour^2.2 * light^2.2 is that product's light below 1
 //	(PathMultiplier), what most of the picture is.
+//	The game's ambient light on a surface (SPathSurface::vAmbient): what its
+//	ambient colour adds to the light 1 of its albedo in the raster, as light;
+//	the paths fill in with it (PathTrace.hlsl).
 //	PathSampleLamp: the lamps' light by one ray, towards a lamp picked among
 //	PT_LAMP_CANDIDATES of them by how much each gives without its shadow
 //	(resampled importance sampling: all of them where there are no more).
@@ -84,6 +87,7 @@ struct SPathSurface
   float3 vAlbedo;       //!< linear, 0..1
   float3 vEmission;     //!< linear
   float4 vSpecular;     //!< SRayInstance::vSpecular (the game's colour, the shininess)
+  float3 vAmbient;      //!< the game's ambient light there, as light (PathAmbientLight of SRayInstance::nPath.y)
   uint nMaterial;       //!< XR_PT_MAT_*
   bool bFog;            //!< fogged (DF_FOG)
 };
@@ -98,6 +102,17 @@ float3 PathLight(float3 c)
 float3 PathMultiplier(float3 c)
 {
   return pow(max(c, 0), HDR_GAMMA);
+}
+
+//! The game's ambient light / 2 as the G-buffer (gba) and SRayInstance::nPath.y (PathPackAmbient) keep it, as light.
+float3 PathAmbientLight(float3 vHalf)
+{
+  return PathMultiplier(2 * vHalf);
+}
+
+float3 PathUnpackAmbient(uint n)
+{
+  return PathAmbientLight(float3(n & 0xff, (n >> 8) & 0xff, (n >> 16) & 0xff) / 255);
 }
 
 float PathLuminance(float3 c)
@@ -134,6 +149,7 @@ SPathSurface PathSurface(SRayHit Hit, float3 vRayDir, float fConeWidth, SPathSha
   O.vNormal = dot(S.vNormal, S.vFaceNormal) < 0 ? -S.vNormal : S.vNormal;
   O.vSpecular = I.vSpecular;
   O.nMaterial = I.nPath.x;
+  O.vAmbient = PathUnpackAmbient(I.nPath.y);
   O.bFog = (nFlags & DF_FOG) != 0;
   O.vEmission = 0;
   if (I.nGeom.x == XR_RAY_NONE)

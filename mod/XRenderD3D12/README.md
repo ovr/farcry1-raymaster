@@ -544,15 +544,22 @@ reference of its features and console variables.
   second target the albedo (RGBA16F, the game's colour without its light, unfogged; decals and the
   terrain's layers blend into it as into the colour), a third the normal (R10G10B10A2: octahedral,
   the fog's share, the path material: lit, terrain, vegetation), a fourth the sun's visibility as the
-  raster finds it (R8: its shadow maps, the sun's cascades and their mask by rays, which the path
-  tracer turns on, from all the casters; 0 where the raster has no sun). Its lit draws lose their
+  raster finds it (RGBA8, r: its shadow maps, the sun's cascades and their mask by rays, which the
+  path tracer turns on, from all the casters; 0 where the raster has no sun) and the game's ambient
+  light on the surface (gba: what the object's ambient colour adds to its light maps or its lights;
+  the terrain, whose light is in its texture, the outdoor ambient). Its lit draws lose their
   light (the light maps, the sun, the lamps and their passes, the ambient and the baked AO); the
   screen space AO, the rays' GI and the projectors' passes are not drawn.
   After the opaque list its kernels (`Shaders/PathTrace.hlsl`, compute with rays, at the scene's size)
   light it. `CSTrace`, a path from each pixel's surface: a lamp picked among 16 of them by how much each
   gives (resampled importance sampling) with a ray towards it, then `d3d12_PTBounces` (1) bounces in
   directions the cosine spreads; a hit gives its emission and its albedo times the sun and a lamp
-  there, a path that leaves the scene the sky (`d3d12_PTSky` times the outdoor ambient as light); in
+  there, a path that leaves the scene the sky (`d3d12_PTSky` times the outdoor ambient as light). The
+  game's ambient light fills in (`d3d12_PTAmbient` 1): a ray that finds nothing within
+  `d3d12_PTAmbientRange` (2 m) brings the ambient light of the point it leaves (the G-buffer's, then
+  the hit's, kept in its instance), as the raster's ambient times its occlusion, besides what it
+  finds; one that finds nothing at all the brighter of that and the sky. Rooms have it from the light
+  maps' ambient, which a path of a few bounces through a window does not make up for; in
   real time a sample is at most 16 (as light) and a bounce's ray takes 4 alpha tests. `CSTemporal`
   blends it into the history where the surface was in the frame before (32 frames at most),
   `CSFilter` filters that on the pixel's plane and normal, wider where the history is young
@@ -564,13 +571,13 @@ reference of its features and console variables.
   (`d3d12_PathTracing 2`) adds up its frames while the view and the path tracer's settings stay,
   `d3d12_PTReferenceBounces` (8) bounces with Russian roulette, every alpha test, no clamp or filter.
   `d3d12_PTDebug` shows it: 1 the albedo, 2 the normal, 3 the fog's share, 4 the material, 5 the
-  paths' light on the game's grey 0.5, 6 one frame's paths, 7 the sun's visibility. Open places are as
-  bright as the raster; a hut or a tunnel lit through an opening, and a hall's walls away from its
-  lamps, are far darker than the light maps' flat ambient had them (the reference too), what a lamp
-  lights is as the raster has it. On a Radeon RX 7900
-  XTX at 3840x2160 with FSR Quality the flights over Pier, River and Swamp run at 103, 93 and 85 FPS
-  (1 % lows 67, 52 and 54; the raster 201, 193 and 193): the paths take 0.7 to 9 ms, most among the
-  grass and the palms' crowns.
+  paths' light on the game's grey 0.5, 6 one frame's paths, 7 the sun's visibility, 8 the ambient
+  light. Open places are as bright as the raster, a hut or a tunnel lit through an opening about as
+  bright (without the ambient light far darker, the reference too); a hall lit by its light maps'
+  lamps is darker, the crowns of the trees seen from below too (their leaves pass no light). On a
+  Radeon RX 7900 XTX at 3840x2160 with FSR Quality the flights over Pier, River and Swamp run at
+  102, 90 and 84 FPS (1 % lows 66, 50 and 53; the raster 201, 193 and 193): the paths take 0.7 to
+  9 ms, most among the grass and the palms' crowns.
   `d3d12_RTDebug` views the scene for rays from the camera: 1 instances, 2 shaded hits on the right
   half, 3 distance, 4 mip level, 5 kind, 6 alpha tests, 7 shaded hits over the whole picture; the path
   tracer's: 8 the albedo of the hits, 9 their emission, 10 them lit by the sun and the lamps;

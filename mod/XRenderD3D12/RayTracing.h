@@ -117,9 +117,15 @@ public:
   //! The main view's draws captured from here on are of a live caster (XR_RAY_LIVE in their masks).
   void SetCaptureLive(bool bLive) { m_bCaptureLive = bLive; }
   //! The path tracer's material of the draws captured until ClearCaptureMaterial (SRayInstance's vAlbedo,
-  //! vSpecular, nPath; XR_PT_MAT_TERRAIN also XR_RAY_TERRAIN in the masks). Without one CaptureDraw takes it from
-  //! the draw's flags (DefaultMaterial).
-  void SetCaptureMaterial(uint32 nMaterial, const float vAlbedo[4], const float vSpecular[4]);
+  //! vSpecular, nPath; XR_PT_MAT_TERRAIN also XR_RAY_TERRAIN in the masks; vAmbient the game's ambient light, rgb,
+  //! PathPackAmbient). Without one CaptureDraw takes it from the draw's flags (DefaultMaterial).
+  void SetCaptureMaterial(uint32 nMaterial, const float vAlbedo[4], const float vSpecular[4], const float vAmbient[3]);
+  //! The game's ambient light on a draw (rgb, the game's colour: what its ambient colour adds to the light 1 its
+  //! albedo has) as SRayInstance::nPath.y keeps it: / 2, 8 bits a channel from the lowest.
+  static uint32 PathPackAmbient(const float vAmbient[3]);
+  //! That light of a draw from its constants as the raster lights it: the ambient colour (under a light map the
+  //! material's colour in it), times 2 / its scale where DF_LIGHTING lights it (the albedo is scale / 2 of its colour).
+  static void PathAmbient(const SDrawConstants &dc, float vAmbient[3]);
   void ClearCaptureMaterial() { m_bCaptureMaterial = false; }
   void EndCapture() { m_bCapturing = false; }
   bool IsCapturing() const { return m_bCapturing; }
@@ -253,6 +259,7 @@ private:
   bool m_bCaptureMaterial = false;  //!< SetCaptureMaterial
   uint32 m_nCaptureMaterial = XR_PT_MAT_LIT;
   float m_vCaptureAlbedo[4] = {}, m_vCaptureSpecular[4] = {};
+  uint32 m_nCaptureAmbient = 0;     //!< PathPackAmbient
   Vec3 m_vCamera = Vec3(0, 0, 0);
   int m_nFrame = 0;                 //!< counts BeginCapture
   int m_nBuiltFrame = -1;           //!< the renderer's m_nFrames of the last Build (GetTLAS)

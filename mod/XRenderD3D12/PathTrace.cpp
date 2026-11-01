@@ -529,7 +529,8 @@ void CD3D12Renderer::DrawPathTrace()
   const char *szDenoiser = m_pPTDenoiserVar && m_pPTDenoiserVar->GetString() ? m_pPTDenoiserVar->GetString() : "simple";
   const bool bDenoise = !bReference && _stricmp(szDenoiser, "none") != 0;
   uint32 nKey = (uint32)nBounces * 0x9e3779b1u;
-  for (float f : { P.vSun[0], P.vSun[1], P.vSun[2], P.fLamps, P.fEmission, P.fDelight, vSky[0], vSky[1], vSky[2] })
+  const float fAmbient = std::max(CV_d3d12_PTAmbient, 0.0f), fAmbientRange = std::max(CV_d3d12_PTAmbientRange, 0.0f);
+  for (float f : { P.vSun[0], P.vSun[1], P.vSun[2], P.fLamps, P.fEmission, P.fDelight, vSky[0], vSky[1], vSky[2], fAmbient, fAmbientRange })
   {
     uint32 n;
     memcpy(&n, &f, sizeof(n));
@@ -549,6 +550,7 @@ void CD3D12Renderer::DrawPathTrace()
   Set4(pc.vSun, P.vSun[0], P.vSun[1], P.vSun[2], P.fLamps);
   Set4(pc.vSky, vSky[0], vSky[1], vSky[2], P.fEmission);
   Set4(pc.vShade, P.fDelight, P.fBakeLight, P.fLightGap, 0);
+  Set4(pc.vFill, fAmbient, fAmbientRange, 0, 0);
   const int nCur = s.nHistory ^= 1;
   CD3D12Texture *pHistory = s.pHistory[nCur], *pPrevHistory = s.pHistory[nCur ^ 1];
   CD3D12Texture *pFrames = s.pFrames[nCur], *pPrevFrames = s.pFrames[nCur ^ 1];
@@ -559,6 +561,7 @@ void CD3D12Renderer::DrawPathTrace()
   pc.nTextures2[0] = (uint32)s.pNormal->m_nSRV;
   pc.nTextures2[1] = (uint32)pPrevFrames->m_nSRV;
   pc.nTextures2[2] = (uint32)pFrames->m_nSRV;
+  pc.nTextures2[3] = (uint32)s.pSun->m_nSRV;
   pc.nTrace[0] = 1;
   pc.nFlags[0] = bHistory ? 1 : 0;
   pc.nFlags[1] = (uint32)m_nFrames;
@@ -632,14 +635,14 @@ void CD3D12Renderer::DrawPathTrace()
   s.nLightFrame = m_nFrames;
   if (m_pFrameDump)
     fprintf(m_pFrameDump.get(), "pt: %s, %d x %d, %d bounces, %u lamps, sky %.3f %.3f %.3f, sun %.3f %.3f %.3f%s, terrain's baked light %.3f, "
-            "denoiser %s, history %d (%d frames)\n", bReference ? "reference" : "real time", w, h, nBounces, P.nLights, vSky[0], vSky[1], vSky[2],
-            P.vSun[0], P.vSun[1], P.vSun[2], m_pScene && m_pScene->GetSun() ? "" : " (indoors: no sun in the frame)", P.fBakeLight,
-            bDenoise ? "simple" : "none", bHistory ? 1 : 0, s.nAccumulated);
+            "ambient %.2f beyond %.2f m, denoiser %s, history %d (%d frames)\n", bReference ? "reference" : "real time", w, h, nBounces, P.nLights,
+            vSky[0], vSky[1], vSky[2], P.vSun[0], P.vSun[1], P.vSun[2], m_pScene && m_pScene->GetSun() ? "" : " (indoors: no sun in the frame)",
+            P.fBakeLight, fAmbient, fAmbientRange, bDenoise ? "simple" : "none", bHistory ? 1 : 0, s.nAccumulated);
 }
 
 void CD3D12Renderer::DrawPathDebug()
 {
-  if (CV_d3d12_PTDebug <= 0 || CV_d3d12_PTDebug > 7 || m_PathTrace.nGBufferFrame != m_nFrames || !m_PathTrace.pAlbedo || !m_pDevice ||
+  if (CV_d3d12_PTDebug <= 0 || CV_d3d12_PTDebug > 8 || m_PathTrace.nGBufferFrame != m_nFrames || !m_PathTrace.pAlbedo || !m_pDevice ||
       m_pDevice->IsOffscreen() || !m_pRayScene || !m_pRayScene->GetTLAS())
     return;
   // The paths' light: of this frame's.
