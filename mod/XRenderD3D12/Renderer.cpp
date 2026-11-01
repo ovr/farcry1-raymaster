@@ -283,7 +283,8 @@ void CD3D12Renderer::RegisterVariables()
                      "of the shadow widen with the distance to what casts it");
   iConsole->Register("d3d12_RTSunDenoise", &CV_d3d12_RTSunDenoise, 1, 0,
                      "With d3d12_RTSunShadows, 1: the rays of the frames before blended in where the surface was and the soft edges "
-                     "filtered; 0: this frame's ray as it is");
+                     "filtered; 2: a ray a pixel, denoised by AMD FidelityFX Denoiser's shadows denoiser (where it is built in, else 1); "
+                     "0: this frame's ray as it is");
   iConsole->Register("d3d12_RTGI", &CV_d3d12_RTGI, 0, VF_DUMPTODISK,
                      "The ambient light by rays, one bounce (a device with DXR 1.1, d3d12_AOApply 1; in place of d3d12_AO): what the "
                      "rays from a surface find, lit by the sun and the light maps, darkens or lights its ambient light, what they miss "

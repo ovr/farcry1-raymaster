@@ -151,6 +151,17 @@ xrender_d3d12_shader(VolumetricIntegrate_CS Volumetric.hlsl cs_6_0 CSIntegrate)
 xrender_d3d12_shader(RaySunTrace_CS RaySun.hlsl cs_6_5 CSTrace)
 xrender_d3d12_shader(RaySunTemporal_CS RaySun.hlsl cs_6_5 CSTemporal)
 xrender_d3d12_shader(RaySunFilter_CS RaySun.hlsl cs_6_5 CSFilter)
+# Its denoise by AMD FidelityFX Denoiser's shadows denoiser (d3d12_RTSunDenoise 2): our kernels with its headers; only when
+# its submodule is there (XRENDERD3D12_FFX_DENOISER).
+if(XRENDERD3D12_FFX_DENOISER)
+    set(XRENDERD3D12_SHADER_INCLUDES "${XRENDERD3D12_FFX_DENOISER_DIR}")
+    xrender_d3d12_shader(RaySunFfxInputs_CS RaySunFfx.hlsl cs_6_5 CSInputs RAY_FFX_INPUTS)
+    xrender_d3d12_shader(RaySunFfxPrepare_CS RaySunFfx.hlsl cs_6_5 CSPrepare RAY_FFX_PREPARE)
+    xrender_d3d12_shader(RaySunFfxClassify_CS RaySunFfx.hlsl cs_6_5 CSClassify RAY_FFX_CLASSIFY)
+    xrender_d3d12_shader(RaySunFfxFilter_CS RaySunFfx.hlsl cs_6_5 CSFilter RAY_FFX_FILTER)
+    xrender_d3d12_shader(RaySunFfxPack_CS RaySunFfx.hlsl cs_6_5 CSPack RAY_FFX_PACK)
+    set(XRENDERD3D12_SHADER_INCLUDES "")
+endif()
 # The ambient occlusion by rays (d3d12_AO rt, RayAO.cpp), as the sun's shadow's.
 xrender_d3d12_shader(RayAOTrace_CS RayAO.hlsl cs_6_5 CSTrace)
 xrender_d3d12_shader(RayAOTemporal_CS RayAO.hlsl cs_6_5 CSTemporal)

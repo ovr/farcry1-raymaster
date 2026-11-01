@@ -7,3 +7,6 @@
 [submodule "third_party/mathlib"]
 	path = third_party/mathlib
 	url = https://github.com/NVIDIA-RTX/MathLib.git
+[submodule "third_party/fidelityfx-denoiser"]
+	path = third_party/fidelityfx-denoiser
+	url = https://github.com/GPUOpen-Effects/FidelityFX-Denoiser.git

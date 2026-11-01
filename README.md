@@ -22,6 +22,8 @@ Mods for Far Cry, built with the CryENGINE MOD SDK for Far Cry:
   the denoiser of XRenderD3D12's path tracer, with the tool that builds its shaders and its math
   library. The repository has their links, not their files: clone it with `--recurse-submodules`
   (or run `git submodule update --init`); without them XRenderD3D12 is built without NRD.
+- `third_party/fidelityfx-denoiser` - a git submodule: AMD FidelityFX Denoiser, whose shadows
+  denoiser XRenderD3D12 can take for the sun's shadow by rays; without it that denoiser is left out.
 - `assets/scripts` - patches to the game's scripts, and `Patch Scripts.cmd`, which applies them in
   the order of their numbers to the scripts of an installed game (`Patch Scripts.cmd <game
   folder>`, written to `FCData\zz_RayMaster.pak`; deleting that file gives back the original
@@ -74,6 +76,8 @@ NVIDIA's repositories of NRD (NVIDIA Real-time Denoisers) at the tag v4.18.0 and
 MathLib at the commits it names, whose files are not part of this repository. NRD is under the
 NVIDIA RTX SDKs License (`LICENSE.txt` in its repository), which allows distributing it only built
 into an application; ShaderMake and MathLib are under NVIDIA's MIT licenses.
+`third_party/fidelityfx-denoiser` is a git submodule too: a link to AMD's repository of FidelityFX
+Denoiser at the tag v1.2, under AMD's MIT license (`LICENSE.txt` in its repository).
 
 `mod/XRenderCommon/` is dedicated to the public domain (CC0 1.0, `mod/XRenderCommon/COPYING`): its
 authors claim no rights to it, and any renderer for the game may use it, under any license.

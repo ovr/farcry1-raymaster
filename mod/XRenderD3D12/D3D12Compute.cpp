@@ -32,6 +32,13 @@
 #include "RaySunTrace_CS.h"
 #include "RaySunTemporal_CS.h"
 #include "RaySunFilter_CS.h"
+#if XRENDERD3D12_FFX_DENOISER
+#include "RaySunFfxInputs_CS.h"
+#include "RaySunFfxPrepare_CS.h"
+#include "RaySunFfxClassify_CS.h"
+#include "RaySunFfxFilter_CS.h"
+#include "RaySunFfxPack_CS.h"
+#endif
 #include "RayAOTrace_CS.h"
 #include "RayAOTemporal_CS.h"
 #include "RayAOFilter_CS.h"
@@ -96,6 +103,20 @@ const SKernel s_Kernels[eD3D12K_Num] =
   // Without NRD built in: no kernels (GetPSO has none).
   { "path tracer (NRD's inputs)", nullptr, 0, true },
   { "path tracer (NRD's light)", nullptr, 0, true },
+#endif
+#if XRENDERD3D12_FFX_DENOISER
+  { "sun's shadow by rays (FidelityFX Denoiser's inputs)", g_RaySunFfxInputs_CS, sizeof(g_RaySunFfxInputs_CS), true },
+  { "sun's shadow by rays (FidelityFX Denoiser's masks)", g_RaySunFfxPrepare_CS, sizeof(g_RaySunFfxPrepare_CS), true },
+  { "sun's shadow by rays (FidelityFX Denoiser's tiles)", g_RaySunFfxClassify_CS, sizeof(g_RaySunFfxClassify_CS), true },
+  { "sun's shadow by rays (FidelityFX Denoiser's filter)", g_RaySunFfxFilter_CS, sizeof(g_RaySunFfxFilter_CS), true },
+  { "sun's shadow by rays (FidelityFX Denoiser's mask)", g_RaySunFfxPack_CS, sizeof(g_RaySunFfxPack_CS), true },
+#else
+  // Without its submodule: no kernels (GetPSO has none).
+  { "sun's shadow by rays (FidelityFX Denoiser's inputs)", nullptr, 0, true },
+  { "sun's shadow by rays (FidelityFX Denoiser's masks)", nullptr, 0, true },
+  { "sun's shadow by rays (FidelityFX Denoiser's tiles)", nullptr, 0, true },
+  { "sun's shadow by rays (FidelityFX Denoiser's filter)", nullptr, 0, true },
+  { "sun's shadow by rays (FidelityFX Denoiser's mask)", nullptr, 0, true },
 #endif
 };
 static_assert(sizeof(s_Kernels) / sizeof(s_Kernels[0]) == eD3D12K_Num, "a kernel for each ED3D12Kernel");
