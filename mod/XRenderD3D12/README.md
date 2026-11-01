@@ -841,7 +841,15 @@ and lists theirs (`NamesObjects`).
 - The far vegetation sprites are made when a level is loaded (before its first frame): each object
   that `MakeSprite` gets is drawn from its 24 directions, `d3d12_SpriteRes` texels a side (128,
   32 to 256) into a texture array per object; the log says how many were made and how long it
-  took.
+  took. A mip level's alpha is its texels' average, as the original's (alpha tested at 0.5): what is
+  thinner than a texel fades out with the distance. Scaled to keep level 0's coverage, the vines of
+  Pier's ancient trees were short dark lines in the air 600 m away; the crowns look the same either
+  way.
+- The low detail terrain beyond the sectors (shader "terrainlowlod") has the level's low resolution
+  cover texture over the whole terrain; the engine gives it u and v one whole texture further (an
+  offset of 1), which wrapping does not see but the terrain's clamped sampling did: all the far land
+  took the texture's corner, one flat colour, which the fog made the colour of the sky's mountains
+  while the trees on it stayed, as if in the air.
 - The terrain's detail layers near the camera (very high: `e_detail_texture_quality 1`) are drawn
   while `r_DetailTextures` is 1 and fade out between a quarter of the distance the engine puts in
   the layer's custom data and that distance (13 and 52 m on Training, whatever `r_DetailDistance`
