@@ -5,7 +5,8 @@
 //	File: HdrStatsMath.h
 //	Description: The CPU's side of the HDR statistics' histogram
 //	(HdrStats.cpp, Shaders/HdrStats.hlsl): the light of a place in it and
-//	its percentiles. Without the renderer: the unit tests include it.
+//	its percentiles; the sum of the output's nits. Without the renderer: the
+//	unit tests include it.
 //
 //////////////////////////////////////////////////////////////////////
 
@@ -19,6 +20,13 @@
 #ifndef XR_HDR_HIST_BINS
 #error "include Shaders/Constants.h first"
 #endif
+
+//! The sum of the output's nits (the brightest channel's) from its two words, XR_HDR_STAT_OUT_SUM and its carries
+//! XR_HDR_STAT_OUT_SUM_HIGH (Shaders/HdrStats.hlsl, HdrSumCarries).
+inline double HdrOutNitsSum(uint32_t nLow, uint32_t nHigh)
+{
+  return ((double)nHigh * 4294967296.0 + nLow) * XR_HDR_NITS_UNIT;
+}
 
 //! log2 of the light at fBin bins from the first bin's lower edge (HdrHistogramBin's inverse).
 inline float HdrHistLog2(float fBin)

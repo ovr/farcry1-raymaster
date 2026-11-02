@@ -283,11 +283,12 @@ struct SMeterConstants
 #define XR_HDR_STAT_TARGET      (XR_HDR_STAT_SAMPLES + 6)         // asuint: d3d12_ExposureMeter 1, the target EV (HdrExposure.hlsli, before the range)
 #define XR_HDR_STAT_CEILING     (XR_HDR_STAT_SAMPLES + 7)         // asuint: its sky's ceiling EV (XR_EXPOSURE_NONE: none)
 #define XR_HDR_STAT_OUT_PIXELS  (XR_HDR_STAT_SAMPLES + 8)         // the HDR output's samples
-#define XR_HDR_STAT_OUT_SUM     (XR_HDR_STAT_SAMPLES + 9)         // the sum of their brightest channel's nits (x XR_HDR_NITS_UNIT)
+#define XR_HDR_STAT_OUT_SUM     (XR_HDR_STAT_SAMPLES + 9)         // the sum of their brightest channel's nits (in XR_HDR_NITS_UNIT), its low word
 #define XR_HDR_STAT_OUT_MAX     (XR_HDR_STAT_SAMPLES + 10)        // asuint: the most nits of a channel (MaxCLL)
 #define XR_HDR_STAT_OUT_PAPER   (XR_HDR_STAT_SAMPLES + 11)        // the samples whose brightest channel is above paper white (x 1.02)
 #define XR_HDR_STAT_OUT_PEAK    (XR_HDR_STAT_SAMPLES + 12)        // ... is at the peak (95 % of it or more)
 #define XR_HDR_STAT_SKY         (XR_HDR_STAT_SAMPLES + 13)        // asuint: d3d12_ExposureMeter 1, the sky's share of its samples
+#define XR_HDR_STAT_OUT_SUM_HIGH (XR_HDR_STAT_SAMPLES + 14)       // XR_HDR_STAT_OUT_SUM's high word: its carries (HdrSumCarries)
 #define XR_HDR_STAT_WORDS       256
 
 //! b0 of the HDR statistics' kernels (HdrStats.hlsl, HdrStats.cpp).

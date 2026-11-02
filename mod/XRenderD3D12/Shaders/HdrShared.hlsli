@@ -104,4 +104,11 @@ float3 BloomDownTaps(float3 a, float3 b, float3 c, float3 d, float3 e, float3 f,
   return vLight;
 }
 
+//! Whether adding n to a word whose value was nWas (InterlockedAdd's original value) wrapped it around: the carry of a sum kept in
+//! two words (XR_HDR_STAT_OUT_SUM and XR_HDR_STAT_OUT_SUM_HIGH; HdrOutNitsSum on the CPU).
+bool HdrSumCarries(uint nWas, uint n)
+{
+  return nWas + n < nWas;
+}
+
 #endif

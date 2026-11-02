@@ -195,7 +195,10 @@ reference of its features and console variables.
     1, 5, 25, 50, 75, 95 and 99, the shares in the shoulder and at white, the output's mean and
     most nits and the shares above paper white and at the peak, the output and its levels, the
     camera, the samples of each of the histogram's bins, and the histogram meter's sky ceiling and
-    the sky's share.
+    the sky's share. The log has the frames drawn while it is on, each with its own camera,
+    written when they are read back (also after it is turned off); turned on again in a run, it is
+    added to. The output's nits are summed in two words (the carries in the second), exact at any
+    size and peak.
   - What the game draws as light sources is brighter in the HDR targets (`IsHdrTarget`: not in
     heat vision), each a factor of white's light, 1 the game's: `d3d12_HDRSun` (8) the sun's
     flare, `d3d12_HDRSky` (2) the sky towards the sun (`DF2_SKY_GLOW`, `HdrSkyGlow` in

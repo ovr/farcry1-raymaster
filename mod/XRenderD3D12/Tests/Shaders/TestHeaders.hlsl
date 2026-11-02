@@ -136,12 +136,22 @@ void CSExposure(uint i : SV_DispatchThreadID)
 
 //! The HDR statistics' maths (HdrShared.hlsli, HdrLight.hlsli). g_Test.nTest.y 0: of g_TestIn[i] = (light, u, v, 0) out[i] =
 //! (HdrHistogramBin of the light as a word, MeterWeight at (u, v) of a 1920 x 1080 screen, 0, 0); 1: LayerRatio of the frame's
-//! colour g_TestIn[2i].rgb and the layer g_TestIn[2i + 1]: out[i] = (the ratio, 1 where the layer has the scene).
+//! colour g_TestIn[2i].rgb and the layer g_TestIn[2i + 1]: out[i] = (the ratio, 1 where the layer has the scene); 2: g_TestIn[i].x
+//! added to a sum in two words as CSOutput adds a frame's nits (HdrSumCarries): out[0] = (the low word, the high word, 0, 0).
 [numthreads(64, 1, 1)]
 void CSHdrStats(uint i : SV_DispatchThreadID)
 {
   if (i >= g_Test.nTest.x)
     return;
+  if (g_Test.nTest.y == 2)
+  {
+    const uint n = g_TestIn[i].x;
+    uint nWas;
+    InterlockedAdd(g_TestOut[0].x, n, nWas);
+    if (HdrSumCarries(nWas, n))
+      InterlockedAdd(g_TestOut[0].y, 1);
+    return;
+  }
   if (g_Test.nTest.y == 0)
   {
     const float4 a = TestIn(i);

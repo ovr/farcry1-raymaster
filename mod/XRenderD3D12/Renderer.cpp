@@ -1038,6 +1038,7 @@ void CD3D12Renderer::Update (void)
   m_fTopLeftText[1] = m_fTopLeftText[0];
   m_fTopLeftText[0] = 0;
   DumpHdrOutput();
+  DumpHdrTargets();
   // Shown only when swapping is on: the hidden frames of a level load are drawn but never seen.
   if (m_bSwapBuffers)
     DrawHdrOutput();

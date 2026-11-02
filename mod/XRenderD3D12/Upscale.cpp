@@ -136,7 +136,9 @@ bool CD3D12Renderer::UpdateUpscaler()
     szName = NATIVE_SCENE;
   const int w = m_pDevice->GetWidth(), h = m_pDevice->GetHeight();
   const int nVersion = std::max(CV_d3d12_UpscaleVersion, 0);
-  // An upscaler of the HDR scene's light; the path tracer's scene targets show the scene tone mapped as before.
+  // An upscaler of the HDR scene's light; the path tracer's scene targets show the scene tone mapped as before. Its context is made
+  // for its input (FSR's FFX_UPSCALE_ENABLE_HIGH_DYNAMIC_RANGE): a change of r_HDRRendering or d3d12_UpscaleHdr makes it anew, its
+  // history reset, as a change of the upscaler or of the display's size.
   const bool bHdrInput = m_bHdrScene && CV_d3d12_UpscaleHdr > 0 && _stricmp(szName, "none") != 0 && _stricmp(szName, NATIVE_SCENE) != 0;
   if (_stricmp(szName, m_UpscalerName.c_str()) != 0 || w != m_nUpscalerWidth || h != m_nUpscalerHeight || nVersion != m_nUpscalerVersion ||
       bHdrInput != m_bUpscalerHdrInput)
@@ -364,16 +366,21 @@ void CD3D12Renderer::UpscaleScene()
   In.bDebugView = CV_d3d12_UpscaleDebug == 1;
   const bool bUpscaled = m_pUpscaler->Dispatch(In);
   m_pDevice->BindRootSignature();
-  if (pIn)
-    m_pDevice->Transition(pIn->m_pResource, READ, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
   if (pLight)
     m_pDevice->Transition(m_Hdr.pExposureScale->m_pResource, READ, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+  // Not upscaled: the light tone mapped at the scene's size, shown stretched; still readable by the bloom's kernel
+  // (DispatchBloomLevel reads its first level's source so).
+  if (pLight && !bUpscaled)
+    pLdr = ResolveHdr(pLight->m_nSRV, pLight->m_pResource, rw, rh, true, nullptr, DXGI_FORMAT_UNKNOWN, true);
+  if (pIn)
+    m_pDevice->Transition(pIn->m_pResource, READ, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
 
   const int w = m_pDevice->GetWidth(), h = m_pDevice->GetHeight();
-  if (pLight && bUpscaled && !In.bDebugView && CV_d3d12_UpscaleDebug != 2)
+  if (pLight && bUpscaled && CV_d3d12_UpscaleDebug != 2)
   {
     // The light upscaled: the bloom, the tone map, the colour grading and the highlight layer at the display's size, into the
-    // back buffer.
+    // back buffer. The upscaler's debug view (d3d12_UpscaleDebug 1) too: with the light its picture is of the light, exposed and
+    // tone mapped as the frame.
     GpuSection("hdr");
     m_pDevice->Transition(In.pOutput, D3D12_RESOURCE_STATE_UNORDERED_ACCESS, READ);
     ResolveHdr(m_nUpscaleOutputSRV, In.pOutput, w, h, false, nullptr, DXGI_FORMAT_UNKNOWN, true);
@@ -381,9 +388,6 @@ void CD3D12Renderer::UpscaleScene()
   }
   else
   {
-    // Not upscaled: the light tone mapped at the scene's size, shown stretched.
-    if (pLight && !bUpscaled)
-      pLdr = ResolveHdr(pLight->m_nSRV, pLight->m_pResource, rw, rh, true, nullptr, DXGI_FORMAT_UNKNOWN, true);
     // Its picture over the whole back buffer (else the scene stretched; with d3d12_UpscaleDebug 2
     // the depth it got).
     int Viewport[4];
@@ -411,7 +415,7 @@ void CD3D12Renderer::UpscaleScene()
       Set4(dc.vParams1, In.fNear, In.fFar, 0, 0);
     }
     // With the highlight layer (HdrOutput.cpp) it gets the resolve's ratio, upscaled bilinearly (none
-    // for the depth view and the upscaler's picture of the light).
+    // for the depth view).
     const bool bHighlight = m_pDevice->HasLayer();
     if (bHighlight)
     {

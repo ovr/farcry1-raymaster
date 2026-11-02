@@ -81,7 +81,8 @@ bool CD3D12Renderer::BeginHdrStats()
     const D3D12_RESOURCE_DESC Words = BufferDesc(WORDS_BYTES, D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS);
     const D3D12_RESOURCE_DESC Copies = BufferDesc((UINT64)WORDS_BYTES * D3D12_FRAMES, D3D12_RESOURCE_FLAG_NONE);
     s.Tables.assign(2 * D3D12_FRAMES, -1);
-    // The words common (a buffer is created so; the first frame's copy promotes them), the read back copy destination.
+    // The words common (a buffer is created so and is so again after each list: each frame's clearing copy promotes them), the
+    // read back copy destination.
     bool bOk = SUCCEEDED(pDevice->CreateCommittedResource(&Default, D3D12_HEAP_FLAG_NONE, &Words, D3D12_RESOURCE_STATE_COMMON, nullptr,
                                                           IID_PPV_ARGS(&s.pWords))) &&
                SUCCEEDED(pDevice->CreateCommittedResource(&Readback, D3D12_HEAP_FLAG_NONE, &Copies, D3D12_RESOURCE_STATE_COPY_DEST, nullptr,
@@ -136,6 +137,7 @@ bool CD3D12Renderer::BeginHdrStats()
   ID3D12GraphicsCommandList *pList = m_pDevice->GetCmdList();
   pList->CopyBufferRegion(s.pWords.Get(), 0, Zeros.pResource, Zeros.nOffset, WORDS_BYTES);
   m_pDevice->Transition(s.pWords.Get(), D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+  s.nWordsList = m_pDevice->GetListSerial();
   s.nFrame = m_nFrames;
   s.Cur = {};
   s.Cur.nFrame = m_nFrameID;
@@ -171,6 +173,7 @@ void CD3D12Renderer::DispatchHdrHistogram(ID3D12Resource *pScene, int nWidth, in
   constexpr D3D12_RESOURCE_STATES READ = D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE | D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE;
   m_pDevice->Transition(pExposure, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, READ);
   m_pDevice->Transition(pMeter, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, READ);
+  HdrStatsWordsUav();
   m_pCompute->Dispatch(m_pDevice->GetCmdList(), eD3D12K_HdrHistogram, CB.nGPU, nTable, nTable + CD3D12Compute::COMPUTE_SRVS,
                        (UINT)(nWidth + GROUP_PIXELS - 1) / GROUP_PIXELS, (UINT)(nHeight + GROUP_PIXELS - 1) / GROUP_PIXELS);
   m_pDevice->Transition(pMeter, READ, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
@@ -219,6 +222,7 @@ void CD3D12Renderer::DispatchHdrOutputStats(bool bCapture)
   m_pDevice->Transition(pFrame, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, READ);
   m_pDevice->Transition(pHighlight, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, READ);
   // After the histogram's adds.
+  HdrStatsWordsUav();
   m_pDevice->UavBarrier(s.pWords.Get());
   m_pCompute->Dispatch(m_pDevice->GetCmdList(), eD3D12K_HdrOutputStats, CB.nGPU, nTable, nTable + CD3D12Compute::COMPUTE_SRVS,
                        (UINT)(w + GROUP_PIXELS - 1) / GROUP_PIXELS, (UINT)(h + GROUP_PIXELS - 1) / GROUP_PIXELS);
@@ -232,17 +236,40 @@ void CD3D12Renderer::DispatchHdrOutputStats(bool bCapture)
   f.fPeak = m_HdrOut.fPeak;
 }
 
+void CD3D12Renderer::HdrStatsWordsUav()
+{
+  SHdrStatsState &s = m_HdrStats;
+  if (s.nWordsList == m_pDevice->GetListSerial())
+    return;
+  m_pDevice->Transition(s.pWords.Get(), D3D12_RESOURCE_STATE_COMMON, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+  s.nWordsList = m_pDevice->GetListSerial();
+}
+
 void CD3D12Renderer::EndHdrStats()
 {
   SHdrStatsState &s = m_HdrStats;
   if (s.nFrame != m_nFrames || !s.pWords)
+  {
+    // None this frame: the frame D3D12_FRAMES back read all the same (its line to the log if that was on then), so that no
+    // old frame is read when they are on again; the log closed once it is off and nothing of it is left.
+    if (s.pReadback && m_pDevice && m_pDevice->IsInFrame())
+      ReadHdrStats();
+    if (CV_d3d12_HDRLog <= 0 && std::none_of(std::begin(s.Slots), std::end(s.Slots), [](const SHdrStatsFrame &f) { return f.nFrame >= 0 && f.bLog; }))
+      s.pLog.reset();
     return;
+  }
   const int nSlot = m_pDevice->GetFrameSlot();
   m_pDevice->EndOffscreen();
-  m_pDevice->Transition(s.pWords.Get(), D3D12_RESOURCE_STATE_UNORDERED_ACCESS, D3D12_RESOURCE_STATE_COPY_SOURCE);
+  // UNORDERED_ACCESS, or COMMON where the frame's list was executed after the last kernel (a readback's FlushFrame).
+  const D3D12_RESOURCE_STATES Before = s.nWordsList == m_pDevice->GetListSerial() ? D3D12_RESOURCE_STATE_UNORDERED_ACCESS : D3D12_RESOURCE_STATE_COMMON;
+  m_pDevice->Transition(s.pWords.Get(), Before, D3D12_RESOURCE_STATE_COPY_SOURCE);
   m_pDevice->GetCmdList()->CopyBufferRegion(s.pReadback.Get(), (UINT64)WORDS_BYTES * nSlot, s.pWords.Get(), 0, WORDS_BYTES);
+  // Ready for a copy of zeros (COMMON once the list is done).
   m_pDevice->Transition(s.pWords.Get(), D3D12_RESOURCE_STATE_COPY_SOURCE, D3D12_RESOURCE_STATE_COPY_DEST);
   s.Cur.Output = m_pDevice->GetOutput();
+  // The camera of this frame, not of the frame the words are read in (D3D12_FRAMES later).
+  s.Cur.vCamera = iSystem->GetViewCamera().GetPos();
+  s.Cur.bLog = CV_d3d12_HDRLog > 0;
   s.Slots[nSlot] = s.Cur;
   s.nFrame = -1;
 }
@@ -269,16 +296,23 @@ void CD3D12Renderer::ReadHdrStats()
 void CD3D12Renderer::LogHdrStats(const SHdrStatsFrame &f)
 {
   SHdrStatsState &s = m_HdrStats;
-  if (CV_d3d12_HDRLog <= 0)
+  // The frames drawn while d3d12_HDRLog was on, whenever they are read; the file closed while it is off.
+  if (!f.bLog)
   {
-    s.pLog.reset();
+    if (CV_d3d12_HDRLog <= 0)
+      s.pLog.reset();
     return;
   }
   if (!s.pLog)
   {
-    s.pLog.reset(fopen("XRenderD3D12_hdr.txt", "w"));
+    // Opened again in a run (the log off and on): added to.
+    s.pLog.reset(fopen("XRenderD3D12_hdr.txt", s.bLogStarted ? "a" : "w"));
     if (!s.pLog)
       return;
+  }
+  if (!s.bLogStarted)
+  {
+    s.bLogStarted = true;
     fprintf(s.pLog.get(), "# frame, EV (exposed with: the adapted and the compensation), the automatic exposure's target EV (none: nan), the meter's mean "
                           "log2 luminance, log2 of the scene's luminance (before the exposure) at the percentiles 1 5 25 50 75 95 99, %% of the "
                           "samples whose brightest channel exposed is in the tone map's shoulder and at white or above, the output's nits "
@@ -298,12 +332,12 @@ void CD3D12Renderer::LogHdrStats(const SHdrStatsFrame &f)
   const double fSamples = std::max<double>(w[XR_HDR_STAT_SAMPLES], 1);
   const double fOut = std::max<double>(w[XR_HDR_STAT_OUT_PIXELS], 1);
   const bool bOut = f.bOutput && w[XR_HDR_STAT_OUT_PIXELS];
-  const Vec3 vPos = iSystem->GetViewCamera().GetPos();
+  const Vec3 vPos = f.vCamera;
   fprintf(s.pLog.get(), "%d,%.3f,%.3f,%.3f", f.nFrame, fEV, fTarget, f.bAuto ? fMeter : NAN);
   for (double p : { 0.01, 0.05, 0.25, 0.5, 0.75, 0.95, 0.99 })
     fprintf(s.pLog.get(), ",%.2f", HdrHistPercentile(&w[XR_HDR_STAT_LUMA], p));
   fprintf(s.pLog.get(), ",%.2f,%.2f,%.1f,%.1f,%.3f,%.3f,%s,%g,%g,%.1f,%.1f,%.1f,", 100 * w[XR_HDR_STAT_SHOULDER] / fSamples,
-          100 * w[XR_HDR_STAT_WHITE] / fSamples, bOut ? w[XR_HDR_STAT_OUT_SUM] * (double)XR_HDR_NITS_UNIT / fOut : NAN,
+          100 * w[XR_HDR_STAT_WHITE] / fSamples, bOut ? HdrOutNitsSum(w[XR_HDR_STAT_OUT_SUM], w[XR_HDR_STAT_OUT_SUM_HIGH]) / fOut : NAN,
           bOut ? AsFloat(w[XR_HDR_STAT_OUT_MAX]) : NAN, bOut ? 100 * w[XR_HDR_STAT_OUT_PAPER] / fOut : NAN,
           bOut ? 100 * w[XR_HDR_STAT_OUT_PEAK] / fOut : NAN,
           !bOut ? "none" : f.bCapture ? "capture" : f.Output == EDisplayOutput::Hdr10 ? "hdr10" : "scrgb", f.fPaperWhite, f.fPeak, vPos.x, vPos.y,

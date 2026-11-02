@@ -20,6 +20,8 @@
 
 #include "DemoPlugin.h"
 
+#include <string>
+
 //! Formats the arguments of a variadic IRenderer method into szBuf, so they can be forwarded with "%s".
 #define PROXY_VFORMAT(szBuf, szFormat)   char szBuf[2048];   {     va_list args;     va_start(args, szFormat);     if (szFormat)       _vsnprintf(szBuf, sizeof(szBuf) - 1, szFormat, args);     else       szBuf[0] = 0;     va_end(args);     szBuf[sizeof(szBuf) - 1] = 0;   }
 
@@ -324,7 +326,7 @@ private:
   int m_nShotFrame = -1;
   //! "inframe n command": the console command runs at the end of each of the next n frames, inside
   //! the frame (before Update presents it), e.g. a script call that draws.
-  char m_szInFrame[256] = "";
+  std::string m_InFrame;
   int m_nInFrameLeft = 0;
   //! "texsave name": the pixels of the next DownLoadToVideoMemory or UpdateTextureInVideoMemory
   //! call with eTF_0888 or eTF_8888 are saved as a 32-bit TGA file, 4 bytes per pixel as they are
@@ -334,8 +336,8 @@ private:
   //! "after frames command": the command runs that many frames later (32 at most waiting).
   struct SDeferred
   {
-    int nFrame;
-    char szCmd[256];
+    int nFrame = 0;
+    std::string Cmd;
   };
   SDeferred m_Deferred[32];
   int m_nDeferred = 0;

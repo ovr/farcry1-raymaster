@@ -312,7 +312,7 @@ void CRendererProxy::Update()
   if (m_nInFrameLeft > 0 && iConsole)
   {
     m_nInFrameLeft--;
-    iConsole->ExecuteString(m_szInFrame, false, true);
+    iConsole->ExecuteString(m_InFrame.c_str(), false, true);
   }
   if (m_pDemo)
     m_pDemo->EndFrame(m_nFrames + 1);
@@ -347,19 +347,18 @@ void CRendererProxy::Update()
       i++;
       continue;
     }
-    char szCmd[256];
-    strcpy_s(szCmd, m_Deferred[i].szCmd);
+    const std::string Cmd = m_Deferred[i].Cmd;
     m_Deferred[i] = m_Deferred[--m_nDeferred];
-    ExecuteCommands(szCmd);
+    ExecuteCommands(Cmd.c_str());
   }
   // xrt_Exec from the game's console (a demo's --exec-at, e.g. "xrt_Exec frame" at a frame of a time
-  // demo).
+  // demo). Copied whole: a demo's chain of commands may be longer than any fixed buffer (strcpy_s ends the
+  // process on a longer string).
   if (g_pXrtExec && g_pXrtExec->GetString() && g_pXrtExec->GetString()[0])
   {
-    char szCmd[256];
-    strcpy_s(szCmd, g_pXrtExec->GetString());
+    const std::string Cmd = g_pXrtExec->GetString();
     g_pXrtExec->Set("");
-    ExecuteCommands(szCmd);
+    ExecuteCommands(Cmd.c_str());
   }
   if (m_pDemo)
     m_pDemo->AfterFrame(m_nFrames);
@@ -386,10 +385,10 @@ void CRendererProxy::ExecuteCommands(const char *szCommands)
 {
   if (!iConsole)
     return;
-  char szCopy[2048];
-  strcpy_s(szCopy, szCommands);
+  std::string Copy(szCommands ? szCommands : "");
+  Copy.push_back(0);
   char *szContext = NULL;
-  for (char *szCmd = strtok_s(szCopy, ";", &szContext); szCmd; szCmd = strtok_s(NULL, ";", &szContext))
+  for (char *szCmd = strtok_s(&Copy[0], ";", &szContext); szCmd; szCmd = strtok_s(NULL, ";", &szContext))
   {
     while (*szCmd == ' ')
       szCmd++;
@@ -532,7 +531,7 @@ void CRendererProxy::ExecuteCommands(const char *szCommands)
       if (sscanf_s(szCmd + 6, "%d %n", &nAfter, &nLen) == 1 && nLen && m_nDeferred < (int)ARRAYSIZE(m_Deferred))
       {
         m_Deferred[m_nDeferred].nFrame = m_nFrames + max(nAfter, 1);
-        strcpy_s(m_Deferred[m_nDeferred].szCmd, szCmd + 6 + nLen);
+        m_Deferred[m_nDeferred].Cmd = szCmd + 6 + nLen;
         m_nDeferred++;
       }
     }
@@ -540,7 +539,7 @@ void CRendererProxy::ExecuteCommands(const char *szCommands)
     {
       int nLen = 0;
       if (sscanf_s(szCmd + 8, "%d %n", &m_nInFrameLeft, &nLen) >= 1)
-        strcpy_s(m_szInFrame, szCmd + 8 + nLen);
+        m_InFrame = szCmd + 8 + nLen;
     }
     else if (!strncmp(szCmd, "texsave ", 8))
       sscanf_s(szCmd + 8, "%259s", m_szTexSave, (unsigned)sizeof(m_szTexSave));

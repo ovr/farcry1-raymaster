@@ -612,7 +612,7 @@ void CD3D12Renderer::DrawStats()
     if (bFresh && f.bOutput && w[XR_HDR_STAT_OUT_PIXELS])
     {
       const double fOut = w[XR_HDR_STAT_OUT_PIXELS];
-      Value("Nits: average, MaxCLL", Format("%.0f, %.0f (of %g / %g)", w[XR_HDR_STAT_OUT_SUM] * (double)XR_HDR_NITS_UNIT / fOut,
+      Value("Nits: average, MaxCLL", Format("%.0f, %.0f (of %g / %g)", HdrOutNitsSum(w[XR_HDR_STAT_OUT_SUM], w[XR_HDR_STAT_OUT_SUM_HIGH]) / fOut,
                                            Float(w[XR_HDR_STAT_OUT_MAX]), f.fPaperWhite, f.fPeak));
       Value("Above paper white / at peak", Format("%.1f %% / %.1f %%", 100 * w[XR_HDR_STAT_OUT_PAPER] / fOut, 100 * w[XR_HDR_STAT_OUT_PEAK] / fOut));
     }
