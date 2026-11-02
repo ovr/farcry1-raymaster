@@ -440,7 +440,24 @@ void CD3D12Renderer::RegisterVariables()
                      "display's, none when it reports none)");
   iConsole->Register("d3d12_HDROutputDebug", &CV_d3d12_HDROutputDebug, 0, 0,
                      "With d3d12_HDROutput: 1 the highlights (yellow to red at the peak; blue: drawn over the scene), 2 patches at paper white, "
-                     "twice and four times that and at the peak");
+                     "twice and four times that and at the peak, 3 the test of the menu's HDR page in d3d12_HDROutputTestRect: a square at 10000 "
+                     "nits around a smaller one at the peak (it disappears once the peak is the display's), patches at paper white, twice and "
+                     "four times that and at the peak");
+  m_HdrOut.pTestRect = iConsole->CreateVariable("d3d12_HDROutputTestRect", HDR_TEST_RECT, 0,
+                                                "With d3d12_HDROutputDebug 3, where its test is: left, top, right and bottom in the screen's 0..1 "
+                                                "(the free area of the menu's HDR page)");
+  // What the HDR output is and the window's display, for the menu's HDR page (read only, not saved; HdrOutput.cpp).
+  m_HdrOut.pState = iConsole->CreateVariable("d3d12_HDROutputState", "SDR", VF_READONLY,
+                                             "The HDR output now (read only): SDR, HDR10 or scRGB; with d3d12_HDROutput, \"SDR: \" and why");
+  m_HdrOut.pDisplay[0] = iConsole->CreateVariable("d3d12_HDRDisplayOn", "-1", VF_READONLY,
+                                                  "The window's display (read only): 1 in HDR mode (Windows: Use HDR), 0 in SDR, -1 not found");
+  m_HdrOut.pDisplay[1] = iConsole->CreateVariable("d3d12_HDRDisplayPeak", "0", VF_READONLY,
+                                                  "The window's display (read only): its peak in nits, as it reports it (0: none)");
+  m_HdrOut.pDisplay[2] = iConsole->CreateVariable("d3d12_HDRDisplayFullFrame", "0", VF_READONLY,
+                                                  "The window's display (read only): the light in nits it holds over the whole screen, as it "
+                                                  "reports it (0: none)");
+  m_HdrOut.pDisplay[3] = iConsole->CreateVariable("d3d12_HDRDisplayWhite", "0", VF_READONLY,
+                                                  "The window's display (read only): Windows' SDR content brightness in nits (0: none)");
   // The colour grading of the HDR pipeline's resolve (ColorGrading.cpp).
   iConsole->Register("d3d12_Saturation", &CV_d3d12_Saturation, 1.0f, VF_DUMPTODISK, "With r_HDRRendering, the saturation, 0 (grey) to 4 (1: none)");
   iConsole->Register("d3d12_Contrast", &CV_d3d12_Contrast, 1.0f, VF_DUMPTODISK, "With r_HDRRendering, the contrast around middle grey, 0.25 to 4 (1: none)");

@@ -252,7 +252,18 @@ reference of its features and console variables.
     frame dump gives the mode, the levels, the display's and how much of the frame has the scene
     and highlights. `d3d12_HDROutputDebug 1` shows the highlights (grey none, yellow to red at
     the peak, blue where something was drawn over the scene), `2` patches at paper white, twice
-    and four times that and at the peak, to set `d3d12_HDRPeak` by eye.
+    and four times that and at the peak, to set `d3d12_HDRPeak` by eye, `3` the test of the
+    menu's HDR page (since step 261, `PageTest`) in `d3d12_HDROutputTestRect` (left, top, right,
+    bottom in the screen's 0..1; the default is the page's free area): at its left a square at
+    10000 nits round a smaller one at the peak, which disappears into it once the peak is the
+    display's (it shows nothing brighter: the lowest peak where it does is the display's real
+    one), at its right patches at paper white, twice and four times that and at the peak (each at
+    most the peak, as the game's light), black between. For the page, read only and not saved:
+    `d3d12_HDROutputState` (SDR, HDR10 or scRGB, with `d3d12_HDROutput` "SDR: " and why) and the
+    window's display as it reports itself, `d3d12_HDRDisplayOn` (1 in HDR mode, 0 in SDR, -1 not
+    found), `d3d12_HDRDisplayPeak`, `d3d12_HDRDisplayFullFrame` and `d3d12_HDRDisplayWhite`
+    (Windows' SDR content brightness), set through the console when they change (read a few times
+    a second with the output off).
     The frame average limit (since step 259, `d3d12_HDRFrameAverage` 1, 0 off): a display holds
     its peak over a small part of the screen only, and an OLED dims the whole picture by itself
     when a frame's average is above its full frame light. Before the output pass two kernels
@@ -278,7 +289,14 @@ reference of its features and console variables.
     or 3 (Soft also shows the clamp and the old soft shoulder, 0 and 1, set from the console),
     and next to the Basic Video Options button HDR output, SDR / HDR10 / scRGB for
     `d3d12_HDROutput` (choosing HDR10 or scRGB with HDR at None sets it to Soft); both greyed out
-    without the variables, that is with another renderer.
+    without the variables, that is with another renderer. Since step 261
+    (`assets/scripts/08-hdr-page.patch`) HDR output is a button that shows the output and opens
+    the HDR page: HDR Output (with a line of what the display is), SDR Brightness
+    (`d3d12_HDRPaperWhite`, Windows' at the slider's left end, else 80 to 480 nits), Peak
+    Brightness (`d3d12_HDRPeak`, the display's at the left end, else 250 to 4000 nits), Frame
+    Average Limit (`d3d12_HDRFrameAverage` 1 or 0), applied at once and saved when the page
+    closes; while it is open `d3d12_HDROutputDebug` is 3 (as it was again after). Greyed out
+    without `d3d12_HDROutputState` (another renderer: system.cfg may keep `d3d12_HDROutput`).
 
 ## Per pixel lighting
 
