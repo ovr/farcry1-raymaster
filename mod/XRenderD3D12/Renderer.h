@@ -1232,6 +1232,8 @@ public:
     int nResolvedFrame = -1;                //!< m_nFrames of the last resolve
     ComPtr<ID3D12Resource> pHdrColor;       //!< the device's HDR target nHdrColorSRV is of (kept: a new one is never at its address)
     int nHdrColorSRV = -1;
+    ComPtr<ID3D12Resource> pDepth;          //!< d3d12_HDRDebug 3 (the sky mask): the scene's depth buffer nDepthSRV is of (kept, as pHdrColor)
+    int nDepthSRV = -1;
   };
 
   //! At the start of the main view's 3D scene (BeginScene3D): its targets bound, HDR (with
@@ -1243,8 +1245,13 @@ public:
   //! The HDR passes over the scene (pScene in PIXEL_SHADER_RESOURCE | NON_PIXEL_SHADER_RESOURCE, its
   //! SRV nSceneSRV, nWidth x nHeight): the meter, the adaptation, the bloom and the resolve, into the
   //! back buffer, or with bToTexture into m_Hdr.pLdr, which it returns (nullptr: the back buffer, or
-  //! no targets).
-  CD3D12Texture *ResolveHdr(int nSceneSRV, ID3D12Resource *pScene, int nWidth, int nHeight, bool bToTexture);
+  //! no targets). pDepth is the scene's depth buffer (read through an SRV of DepthFormat), for the
+  //! sky mask of d3d12_HDRDebug 3: in DEPTH_WRITE for the back buffer (the pass binds it read
+  //! only), readable already with bToTexture (the upscaler's).
+  CD3D12Texture *ResolveHdr(int nSceneSRV, ID3D12Resource *pScene, int nWidth, int nHeight, bool bToTexture, ID3D12Resource *pDepth,
+                            DXGI_FORMAT DepthFormat);
+  //! m_Hdr.nDepthSRV for pDepth (a new view when it changes). -1: none.
+  int HdrDepthSRV(ID3D12Resource *pDepth, DXGI_FORMAT DepthFormat);
   //! This frame's table of an HDR kernel (m_Hdr.KernelTables): of bloom level nPass, or of the
   //! meter's first level for m_Hdr.Bloom.size(). The GPU is done with the one of the frame
   //! D3D12_FRAMES before. -1: none.
@@ -1325,6 +1332,8 @@ public:
   //! true: the main view's depth buffer readable by the resolve (DEPTH_READ, bound read only); false:
   //! writable again.
   void SetVolumetricDepthRead(bool bRead);
+  //! The same for the depth buffer pDepth (the sky mask of d3d12_HDRDebug 3 too).
+  void SetDepthRead(ID3D12Resource *pDepth, bool bRead);
   //! m_Volumetric's targets and tables for nWidth x nHeight froxels, made when it changes. False: none.
   bool EnsureVolumetricTargets(int nWidth, int nHeight);
   void ReleaseVolumetricLight();

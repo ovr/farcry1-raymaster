@@ -44,7 +44,9 @@
 //	                  mapped by vParams1.w (0 clamp, 1 soft shoulder from the
 //	                  knee vParams2.x, 2 ACES fitted, 3 AgX); vParams2.y 1: the
 //	                  scene clamped alone (heat vision); vParams2.z the debug
-//	                  view (1 the luminance in EV bands, 2 the bloom alone);
+//	                  view (1 the luminance in EV bands, 2 the bloom alone, 3
+//	                  the sky mask: white where the depth buffer tex5 is at the
+//	                  far plane, black elsewhere);
 //	                  vParams2.w 1: then through the colour grading's table
 //	                  tex3 (ColorGrading.cpp). The alpha is the scene's.
 //	                  PSHighlight also writes the highlight layer (Common.hlsli,
@@ -316,6 +318,8 @@ float4 Resolve(float2 vPixel, out float3 vRatio)
   float fAlpha = saturate(vScene.a);
   if (g_Draw.vParams2.y > 0)
     return float4(saturate(vScene.rgb), fAlpha);
+  if ((int)g_Draw.vParams2.z == 3)
+    return float4((g_Textures[g_Draw.nTex5].Load(int3(vPixel, 0)).r >= 1 ? 1 : 0).xxx, fAlpha);
   float fExposure = Exposure(g_Draw.nTex2, g_Draw.vParams1.x, g_Draw.vParams1.y > 0);
   float3 vLight = Decode(vScene.rgb);
   if (HasFlag(HDR_VOLUMETRIC))

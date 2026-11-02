@@ -311,7 +311,8 @@ void CD3D12Renderer::UpscaleScene()
     // froxels are of the view without the jitter, many pixels each.
     if (UpdateVolumetricLight(m_pDevice->GetSceneDepth(), DXGI_FORMAT_R32_FLOAT))
       GpuSection("hdr");
-    pLdr = ResolveHdr(m_nUpscaleColorSRV, m_pDevice->GetSceneColor(), m_pDevice->GetSceneWidth(), m_pDevice->GetSceneHeight(), true);
+    pLdr = ResolveHdr(m_nUpscaleColorSRV, m_pDevice->GetSceneColor(), m_pDevice->GetSceneWidth(), m_pDevice->GetSceneHeight(), true,
+                      m_pDevice->GetSceneDepth(), DXGI_FORMAT_R32_FLOAT);
     InvalidateFrameConstants();
   }
   GpuSection("upscale");

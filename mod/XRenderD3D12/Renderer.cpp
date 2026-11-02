@@ -379,7 +379,7 @@ void CD3D12Renderer::RegisterVariables()
   iConsole->Register("d3d12_Bloom", &CV_d3d12_Bloom, 0.5f, VF_DUMPTODISK, "With r_HDRRendering, the strength of the bloom (0: none)");
   iConsole->Register("d3d12_BloomThreshold", &CV_d3d12_BloomThreshold, 1.0f, VF_DUMPTODISK,
                      "The light above which the bloom starts (exposed, linear: 1 is the display's white)");
-  iConsole->Register("d3d12_HDRDebug", &CV_d3d12_HDRDebug, 0, 0, "With r_HDRRendering: 1 the luminance in EV bands from middle grey (green), 2 the bloom alone");
+  iConsole->Register("d3d12_HDRDebug", &CV_d3d12_HDRDebug, 0, 0, "With r_HDRRendering: 1 the luminance in EV bands from middle grey (green), 2 the bloom alone, 3 the sky mask (white where nothing but the sky is drawn)");
   // Brighter than the game draws them in HDR (Hdr.cpp): factors of the light, 1 the game's.
   iConsole->Register("d3d12_HDRSun", &CV_d3d12_HDRSun, 8.0f, VF_DUMPTODISK, "With r_HDRRendering, the light of the sun's flare in its core times this (1: the game's)");
   iConsole->Register("d3d12_HDRSky", &CV_d3d12_HDRSky, 2.0f, VF_DUMPTODISK,
