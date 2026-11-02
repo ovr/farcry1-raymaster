@@ -114,7 +114,8 @@
 //	      + vAddColor.w (a glow map or a texture added, unlit); with DF2_GLASS
 //	      also a *= tex4 a
 //	    DF2_TEX4_LAYER: the texture is tex4 (there) over tex0 by tex4's alpha,
-//	      before the light (a second layer moving on its own)
+//	      before the light (a second layer moving on its own); tex0 + tex4 *
+//	      vAddColor.x with vAddColor.x > 0
 //	    DF2_PROJECTOR (a projected light's pass): the colour times the cube
 //	      g_Cubes[nTex5] at the lookup vector float4(world pos, 1) * mParams0
 //	    DF2_MODULATE (a decal multiplied into the frame): rgb = saturate(rgb +
@@ -142,8 +143,9 @@
 //	  draw's lights without the sun (DrawLighting per pixel with
 //	  DF2_VERTEX_LIGHTS, the normal as for DF_PIXEL_LIGHTING) take vAmbient's
 //	  place under the light map: rgb *= 4 * v * tex1 + those lights.
-//	  DF2_SCREEN_FX (the glass of a scope, a mirror, heat haze) replaces the
-//	  pixel shader with ScreenFx.
+//	  DF2_SHADER_FX (the glass of a scope, a mirror, heat haze, the templates
+//	  of special lighting) replaces the pixel shader with ShaderFx; the fur's
+//	  shells and the bubble also move the vertices out along the normal.
 //	The upscaler's jitter (vJitter) moves every clip position. Compiled with
 //	XR_VELOCITY (the draws into an upscaler's scene that write its motion
 //	vectors or its depth) the pixel shader also writes the motion vector of
@@ -452,7 +454,7 @@ float FogVolumeAlpha(float3 vPos)
   return fGate * (1 - exp(-ViewDepth(vPos) * g_Draw.vParams0.y));
 }
 
-//! The glass of a scope (DF2_SCREEN_FX, XR_SCREEN_SCOPE): the copy of the scene (tex0) around the middle of the
+//! The glass of a scope (DF2_SHADER_FX, XR_FX_SCOPE): the copy of the scene (tex0) around the middle of the
 //! screen, where the scope aims, as through a real one: each pixel shows the scene at its own offset
 //! from the middle of the glass times vParams0.x from there. The middle of the glass is uv0 (0.5,
 //! 0.5); the offset in pixels comes from uv0 through its screen derivatives, so the picture stands
@@ -479,7 +481,7 @@ float4 ScopeLens(SVertexOutput In)
   return float4(vScene * g_Draw.vColor.rgb, g_Draw.vColor.a * exp2(-r2 * r2));
 }
 
-//! A mirror (XR_SCREEN_MIRROR; TemplGlassEnvTex, the original's CGRCGlassTex): the scene mirrored in
+//! A mirror (XR_FX_MIRROR; TemplGlassEnvTex, the original's CGRCGlassTex): the scene mirrored in
 //! its plane (tex0, seen by the mirrored camera, mParams0 its world to clip) at the pixel's world
 //! position * vParams2.x (ReflectAmount; 0 without the picture) + the texture (tex1 at uv0) *
 //! vParams2.z (1 - ReflectAmount); alpha vColor.a (Opacity) * the vertex colour's alpha * the
@@ -493,7 +495,7 @@ float4 Mirror(SVertexOutput In)
   return float4(vScene * g_Draw.vParams2.x + vDecal.rgb * g_Draw.vParams2.z, In.vColor.a * vDecal.a);
 }
 
-//! Heat haze (XR_SCREEN_HAZE; the particles of ParticleMin/Med/MaxHeatHaze, the original's
+//! Heat haze (XR_FX_HAZE; the particles of ParticleMin/Med/MaxHeatHaze, the original's
 //! CGVProgHeatHaze and CGRCHeatHaze): the copy of the scene (tex0) at the pixel moved by the ripple
 //! (tex1, WaterBump's normal map, whose xy are the height's slopes as the original's du/dv map: rg *
 //! 2 - 1, at (uv0 + vParams0.zw) * vParams0.y) times vParams0.x,
@@ -509,7 +511,7 @@ float4 HeatHaze(SVertexOutput In)
   return float4(vScene * g_Draw.vColor.rgb, fMask * In.vColor.a);
 }
 
-//! The scene behind a model moved by its bump map (XR_SCREEN_BUMP; TemplBumpOffsetEnv, the original's
+//! The scene behind a model moved by its bump map (XR_FX_BUMP_OFFSET; TemplBumpOffsetEnv, the original's
 //! CGPSBumpOffset): the copy of the scene (tex0) at the pixel moved by the normal map's xy (tex1 at
 //! uv0, as the original's du/dv map) * vParams0.xy (BumpAmountX/Y), + the texture (tex2 at uv0, when
 //! vParams0.z), opaque.
@@ -524,21 +526,152 @@ float4 BumpOffset(SVertexOutput In)
   return float4(vScene + vBase, 1);
 }
 
-//! DF2_SCREEN_FX: the mode vParams3.w; fogged with DF_FOG.
-float4 ScreenFx(SVertexOutput In)
+// The templates of special lighting, per pixel where the original's vertex shaders take N.E, N.L as
+// texture coordinates of their vertices: N the vertex normal, E towards the camera, L towards the sun.
+
+//! The rainbow (XR_FX_RAINBOW; TemplRainbow: the original's CGVProg_RainbowShading over its fixed function
+//! stage, its pixel shader CGRCRainbow not used): tex0 (Defaults/colors2) at (N.E, N.H), H = normalize(E + N);
+//! opaque, unlit.
+float4 Rainbow(SVertexOutput In)
+{
+  float3 N = SafeNormalize(In.vNormal);
+  float3 E = SafeNormalize(g_Frame.vCameraPos.xyz - In.vWorldPos);
+  float3 H = SafeNormalize(E + N);
+  return float4(SampleTexture(g_Draw.nTex0, XR_SAMPLER_LINEAR_WRAP, float2(dot(N, E), dot(N, H))).rgb, 1);
+}
+
+//! The membrane (XR_FX_MEMBRANE; TemplMembrane, CGVProg_MembraneShading): tex0 (membrane/yellowred, a row of
+//! colours) at u = E.N + vParams0.x (0.2 t), added (ONE, ONE).
+float4 Membrane(SVertexOutput In)
+{
+  float3 N = SafeNormalize(In.vNormal);
+  float3 E = SafeNormalize(g_Frame.vCameraPos.xyz - In.vWorldPos);
+  return float4(SampleTexture(g_Draw.nTex0, XR_SAMPLER_LINEAR_WRAP, float2(dot(E, N) + g_Draw.vParams0.x, 0)).rgb, 1);
+}
+
+//! Cartoon shading (XR_FX_CARTOON; TemplCartoonShading, CGVProg_CartoonShading): tex0 (defaults/4shade, the
+//! steps of the light) at L.N times tex1 (defaults/edgeimage, dark at the outline) at E.N, both clamped, times
+//! vColor (the script's 1 0.8 0.2); opaque, unlit.
+float4 Cartoon(SVertexOutput In)
+{
+  float3 N = SafeNormalize(In.vNormal);
+  float3 E = SafeNormalize(g_Frame.vCameraPos.xyz - In.vWorldPos);
+  float3 vShade = SampleTexture(g_Draw.nTex0, XR_SAMPLER_LINEAR_CLAMP, float2(dot(g_Frame.vSunDir.xyz, N), 0)).rgb;
+  float3 vEdge = SampleTexture(g_Draw.nTex1, XR_SAMPLER_LINEAR_CLAMP, float2(dot(E, N), 0)).rgb;
+  return float4(vShade * vEdge * g_Draw.vColor.rgb, 1);
+}
+
+//! A shell of fur (XR_FX_FUR; TemplFurRendering, CGVProg_Fur; the vertex shader moves it vParams0.x out along
+//! the normal): tex0 (defaults/fuzz) at uv0 times the sun's light by N.L (the script's: N.L of each light alone)
+//! plus the object's ambient colour (vAmbient.rgb; without it the fur away from the sun is black); alpha the
+//! texture's times vColor.a (the shell's: 0.9 for the first down to 0.2).
+float4 Fur(SVertexOutput In)
+{
+  float4 vFuzz = SampleTexture(g_Draw.nTex0, XR_SAMPLER_LINEAR_WRAP, In.vTex0);
+  float3 vLight = g_Draw.vAmbient.rgb + g_Frame.vSunColor.rgb * saturate(dot(SafeNormalize(In.vNormal), g_Frame.vSunDir.xyz));
+  return float4(vFuzz.rgb * vLight, vFuzz.a * g_Draw.vColor.a);
+}
+
+//! Iridescence (XR_FX_IRIDESCENCE; TemplIridescence_PS20, CGRCIridescence_PS20): the wing tex0, whose alpha is
+//! how much light it lets through, lit from both sides (N'.L + 0.5, and -N'.L * a * vParams1.x the light
+//! scattered through) and times its opacity 1 - a, plus the gloss map tex2 * (saturate(N'.H) * vParams0.x +
+//! vParams0.y) * the rainbow tex3 (Defaults/rainbowgradient) at N'.E * vParams0.z + vParams0.w; alpha 1 - a, for
+//! ONE, INVSRCALPHA. N' the normal map tex1 in the tangent frame (vParams1.y 1 with one; the vertex normal
+//! without), turned towards the camera for H.
+float4 Iridescence(SVertexOutput In)
+{
+  float4 vBase = SampleTexture(g_Draw.nTex0, g_Draw.nSamplers & 15, In.vTex0);
+  float3 N = SafeNormalize(In.vNormal);
+  if (g_Draw.vParams1.y > 0)
+  {
+    float3 m = SampleTexture(g_Draw.nTex1, XR_SAMPLER_LINEAR_WRAP, In.vTex0).rgb * 2 - 1;
+    N = SafeNormalize(m.x * In.vTangent + m.y * In.vBinormal + m.z * In.vTNormal);
+  }
+  float3 L = g_Frame.vSunDir.xyz;
+  float3 E = SafeNormalize(g_Frame.vCameraPos.xyz - In.vWorldPos);
+  float3 H = SafeNormalize(L + E);
+  float fOpacity = 1 - vBase.a;
+  float fScattered = saturate(dot(-N, L)) * vBase.a * g_Draw.vParams1.x;
+  float3 c = vBase.rgb * (fScattered + saturate(dot(N, L)) + 0.5) * fOpacity;
+  float3 vRainbow = SampleTexture(g_Draw.nTex3, XR_SAMPLER_LINEAR_WRAP, float2(dot(N, E) * g_Draw.vParams0.z + g_Draw.vParams0.w, 0.5)).rgb;
+  float3 Nh = dot(In.vNormal, E) < 0 ? -N : N;
+  float3 vGloss = SampleTexture(g_Draw.nTex2, XR_SAMPLER_LINEAR_WRAP, In.vTex0).rgb * (saturate(dot(Nh, H)) * g_Draw.vParams0.x + g_Draw.vParams0.y);
+  return float4(c + vGloss * vRainbow, fOpacity);
+}
+
+//! A soap bubble (XR_FX_BUBBLE; TemplBubble_PS20, CGRCBubble_PS20; the vertex shader makes it wobble): the
+//! texture tex0 times the cube g_Cubes[nTex1] at the view reflected about the normal, times 2, towards the cube
+//! where its alpha glows (saturate((a^2 - 0.75) * 4)); alpha (1 - |N.E|) * vParams0.x + vParams0.y + the glow.
+float4 Bubble(SVertexOutput In)
+{
+  float4 vBase = SampleTexture(g_Draw.nTex0, g_Draw.nSamplers & 15, In.vTex0);
+  float3 N = SafeNormalize(In.vNormal);
+  float3 I = SafeNormalize(In.vWorldPos - g_Frame.vCameraPos.xyz);
+  float4 vEnv = SampleCube(g_Draw.nTex1, XR_SAMPLER_LINEAR_CLAMP, reflect(I, N));
+  float fGlow = saturate((vEnv.a * vEnv.a - 0.75) * 4);
+  float3 c = lerp(saturate(vBase.rgb * vEnv.rgb * 2), vEnv.rgb, fGlow);
+  return float4(c, (1 - abs(dot(I, N))) * g_Draw.vParams0.x + g_Draw.vParams0.y + fGlow);
+}
+
+//! DF2_SHADER_FX: the mode vParams3.w; fogged with DF_FOG (towards black with DF2_FOG_BLACK).
+float4 ShaderFx(SVertexOutput In)
 {
   float4 vColor;
-  if (g_Draw.vParams3.w == XR_SCREEN_MIRROR)
-    vColor = Mirror(In);
-  else if (g_Draw.vParams3.w == XR_SCREEN_BUMP)
-    vColor = BumpOffset(In);
-  else if (g_Draw.vParams3.w == XR_SCREEN_HAZE)
-    return HeatHaze(In);
-  else
+  switch ((uint)g_Draw.vParams3.w)
+  {
+  case XR_FX_SCOPE:
     return ScopeLens(In);
+  case XR_FX_HAZE:
+    return HeatHaze(In);
+  case XR_FX_MIRROR:
+    vColor = Mirror(In);
+    break;
+  case XR_FX_BUMP_OFFSET:
+    vColor = BumpOffset(In);
+    break;
+  case XR_FX_RAINBOW:
+    vColor = Rainbow(In);
+    break;
+  case XR_FX_MEMBRANE:
+    vColor = Membrane(In);
+    break;
+  case XR_FX_CARTOON:
+    vColor = Cartoon(In);
+    break;
+  case XR_FX_FUR:
+    vColor = Fur(In);
+    break;
+  case XR_FX_IRIDESCENCE:
+    vColor = Iridescence(In);
+    break;
+  default:
+    vColor = Bubble(In);
+    break;
+  }
   if (HasFlag(DF_FOG) && g_Frame.vFogParams.w != 0)
-    vColor.rgb = lerp(g_Frame.vFogColor.rgb, vColor.rgb, SceneFog(In.vWorldPos));
+    vColor.rgb = lerp(HasFlag2(DF2_FOG_BLACK) ? float3(0, 0, 0) : g_Frame.vFogColor.rgb, vColor.rgb, SceneFog(In.vWorldPos));
   return vColor;
+}
+
+//! The gradient noise of the bubble's wobble (the original's 2D Perlin noise of 32 x 32 random gradients):
+//! about -0.7 to 0.7, repeating every 32 units.
+float BubbleNoise(float2 v)
+{
+  float2 i = floor(v), f = v - i;
+  float2 s = f * f * (3 - 2 * f);
+  float vCorner[4];
+  [unroll] for (uint k = 0; k < 4; k++)
+  {
+    float2 o = float2(k & 1, k >> 1);
+    uint2 q = (uint2)(int2(i + o) & 31);
+    uint h = q.x * 0x8da6b343u ^ q.y * 0xd8163841u;
+    h ^= h >> 13;
+    h *= 0x5bd1e995u;
+    h ^= h >> 15;
+    float a = h * (6.2831853 / 4294967296.0);
+    vCorner[k] = dot(float2(cos(a), sin(a)), f - o);
+  }
+  return lerp(lerp(vCorner[0], vCorner[1], s.x), lerp(vCorner[2], vCorner[3], s.x), s.y);
 }
 
 #ifdef XR_CASCADE_INSTANCES
@@ -572,6 +705,15 @@ SVertexOutput VSMain(SVertexInput In)
     const bool bOverlay = HasFlag(DF_DETAIL_LAYER);
     if (bOverlay)
       vPos.xyz += In.vNormal * 0.05;
+    // A shell of fur, vParams0.x out along the normal; the bubble wobbling, out along the normal by the noise
+    // at its xy moving with vParams1.xy, times vParams1.w (CGVProgBubble_VS20's PosWaterDeform_TNorm).
+    if (HasFlag2(DF2_SHADER_FX))
+    {
+      if (g_Draw.vParams3.w == XR_FX_FUR)
+        vPos.xyz += In.vNormal * g_Draw.vParams0.x;
+      else if (g_Draw.vParams3.w == XR_FX_BUBBLE)
+        vPos.xyz += In.vNormal * (BubbleNoise(vPos.xy + g_Draw.vParams1.xy) * g_Draw.vParams1.w);
+    }
 #ifdef XR_CASCADE_INSTANCES
     Out.vPos = mul(vPos, g_Draw.mShadow[nInstance]);
     Out.nSlice = g_Draw.nShadowTex[nInstance];
@@ -839,8 +981,8 @@ float4 ShadePixel(SVertexOutput In)
   s_fRayWidth = fRayDistance * fPixelAngle;
   s_nRayLightsLeft = g_Frame.nRaySun.z >> 28;
 #endif
-  if (HasFlag2(DF2_SCREEN_FX))
-    return ScreenFx(In);
+  if (HasFlag2(DF2_SHADER_FX))
+    return ShaderFx(In);
 #ifdef XR_CASCADES
   // A caster of the live cascades: not where the full set has something nearer to the sun.
   if (HasFlag2(DF2_CASCADE_CASTER))
@@ -905,9 +1047,12 @@ float4 ShadePixel(SVertexOutput In)
     if (HasFlag2(DF2_TEX4_LAYER))
     {
       // A second layer over the texture by its alpha, moving on its own (the fixed function
-      // templates' second pass).
+      // templates' second pass); added with vAddColor.x (TemplDecalLight_SpecAdd's gloss map, lit as the texture).
       float4 vLayer = SampleTexture(g_Draw.nTex4, XR_SAMPLER_LINEAR_WRAP, In.vTex0 + float2(g_Draw.vTexMat0.w, g_Draw.vTexMat1.w));
-      vTex = float4(lerp(vTex.rgb, vLayer.rgb, vLayer.a), vTex.a + vLayer.a - vTex.a * vLayer.a);
+      if (g_Draw.vAddColor.x > 0)
+        vTex.rgb += vLayer.rgb * g_Draw.vAddColor.x;
+      else
+        vTex = float4(lerp(vTex.rgb, vLayer.rgb, vLayer.a), vTex.a + vLayer.a - vTex.a * vLayer.a);
     }
   }
   if (HasFlag2(DF2_TERRAIN_LIGHT))

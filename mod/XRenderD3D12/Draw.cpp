@@ -226,7 +226,7 @@ void CD3D12Renderer::DrawGeometry(const SPipelineKey &Key, const SDrawConstants 
   // test and write after it for all its pixels.
   // The depth prepass: the depth alone too.
   FullKey.bDepthOnly = (FullKey.nTarget == 2 && Key.nProgram == eD3D12P_General && !(dc.nFlags & DF_ALPHATEST) &&
-                        !(dc.nFlags2 & (DF2_CASCADE_CASTER | DF2_SCREEN_FX))) || m_bDepthPrepass ? 1 : 0;
+                        !(dc.nFlags2 & (DF2_CASCADE_CASTER | DF2_SHADER_FX))) || m_bDepthPrepass ? 1 : 0;
   // The ambient occlusion's target bound to the main view (AmbientOcclusion.cpp).
   FullKey.bAmbient = (FullKey.nTarget == 0 || FullKey.nTarget == 3) && m_pDevice->IsAmbientBound() ? 1 : 0;
   // The path tracer's G-buffer bound to the scene's targets (PathTrace.cpp).

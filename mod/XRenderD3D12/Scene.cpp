@@ -76,7 +76,7 @@ namespace
   bool IsBlendedClass(EDrawClass eDC)
   {
     return eDC == eDC_AlphaBlend || eDC == eDC_Additive || eDC == eDC_ProcFlare || eDC == eDC_FogLayer || eDC == eDC_ScopeLens ||
-           eDC == eDC_ScreenTex || eDC == eDC_ScreenBump || eDC == eDC_Mirror || IsWaterClass(eDC);
+           eDC == eDC_ScreenTex || eDC == eDC_ScreenBump || eDC == eDC_Mirror || eDC == eDC_ShaderFxBlend || IsWaterClass(eDC);
   }
 
   //! The order of the passes of an object drawn one over another: its first pass, its light

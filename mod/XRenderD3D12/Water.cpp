@@ -428,8 +428,8 @@ bool CD3D12Renderer::SetupScopeLensDraw(SPipelineKey &Key, SDrawConstants &dc, c
   if (!m_bSceneCopied && !(ScopeLensRect(it, WorldViewProj, Rect) ? CopySceneForWater(Rect) : CopySceneForWater()))
     return false;
   dc.nFlags = 0;
-  dc.nFlags2 = DF2_SCREEN_FX;
-  dc.vParams3[3] = XR_SCREEN_SCOPE;
+  dc.nFlags2 = DF2_SHADER_FX;
+  dc.vParams3[3] = XR_FX_SCOPE;
   dc.nTex0 = (uint32)m_nSceneColorSRV;
   dc.nTex1 = (uint32)GetWaveTexture();
   Set4(dc.vColor, SCOPE_LENS_TINT[0], SCOPE_LENS_TINT[1], SCOPE_LENS_TINT[2], SCOPE_LENS_OPACITY);

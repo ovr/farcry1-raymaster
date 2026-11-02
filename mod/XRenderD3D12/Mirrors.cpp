@@ -180,8 +180,8 @@ bool CD3D12Renderer::SetupScreenBumpDraw(SPipelineKey &Key, SDrawConstants &dc, 
     return false;
   CTexture *pBump = GetNormalMap(it.pRes);
   dc.nFlags = 0;
-  dc.nFlags2 = DF2_SCREEN_FX;
-  dc.vParams3[3] = XR_SCREEN_BUMP;
+  dc.nFlags2 = DF2_SHADER_FX;
+  dc.vParams3[3] = XR_FX_BUMP_OFFSET;
   dc.nTex0 = (uint32)m_nSceneColorSRV;
   dc.nTex1 = pBump ? pBump->GetSRV() : D3D12_SRV_WHITE;
   dc.nTex2 = pTex ? pTex->GetSRV() : D3D12_SRV_WHITE;
@@ -208,8 +208,8 @@ bool CD3D12Renderer::SetupHeatHazeDraw(SPipelineKey &Key, SDrawConstants &dc)
   // The particles' alpha from their vertices (the particle system's), the scene's colour as it is
   // (RefrColor 1 1 1; their HeatMoveSpeed is 0: the ripple moves with the particles).
   dc.nFlags = DF_VCOLOR;
-  dc.nFlags2 = DF2_SCREEN_FX;
-  dc.vParams3[3] = XR_SCREEN_HAZE;
+  dc.nFlags2 = DF2_SHADER_FX;
+  dc.vParams3[3] = XR_FX_HAZE;
   dc.nTex0 = (uint32)m_nSceneColorSRV;
   dc.nTex1 = m_pHazeBump->GetSRV();
   dc.nTex2 = m_pHazeMask->GetSRV();
@@ -350,8 +350,8 @@ bool CD3D12Renderer::SetupMirrorDraw(SPipelineKey &Key, SDrawConstants &dc, cons
                         m_nRecurseLevel <= 1;
   const float fReflect = std::clamp(GetResourceFloat(it.pRes, "ReflectAmount", 0.9f), 0.0f, 1.0f);
   dc.nFlags = DF_VCOLOR | (dc.nFlags & DF_FOG);
-  dc.nFlags2 = DF2_SCREEN_FX;
-  dc.vParams3[3] = XR_SCREEN_MIRROR;
+  dc.nFlags2 = DF2_SHADER_FX;
+  dc.vParams3[3] = XR_FX_MIRROR;
   dc.nTex0 = bPicture ? (uint32)m_nMirrorSRV : D3D12_SRV_WHITE;
   dc.nTex1 = pTex ? pTex->GetSRV() : D3D12_SRV_WHITE;
   dc.nSamplers = pTex ? pTex->GetSampler() : XR_SAMPLER_LINEAR_WRAP;

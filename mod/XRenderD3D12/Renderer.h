@@ -49,6 +49,7 @@ class CShaderManager;
 class CScene;
 struct SRenderItem;
 struct SScreenFxState;
+struct SShaderProps;
 
 //! GPU milliseconds per section added up over frames (CD3D12Device::GetGpuTimes), the sections in
 //! the order they first came.
@@ -934,6 +935,16 @@ public:
   //! r_HeatHaze (looked up on first use).
   bool IsHeatHazeOn();
 
+  // TemplateFx.cpp: the templates of shaders of their own (eDC_ShaderFx, eDC_ShaderFxBlend)
+  //! The draw of a template of a shader of its own (Props.eFx): its textures, constants and blend, the
+  //! fur's model itself (its shells: SetupFurShell). pTex: the material's texture, or none. False: not drawn.
+  bool SetupTemplateFxDraw(SPipelineKey &Key, SDrawConstants &dc, const SRenderItem &it, const SShaderProps &Props, CTexture *pTex);
+  //! The fur's shell n (1 to FUR_SHELLS) over the model drawn by SetupTemplateFxDraw: n cm out, blended.
+  static void SetupFurShell(SPipelineKey &Key, SDrawConstants &dc, int n);
+  static constexpr int FUR_SHELLS = 8;
+  //! A texture of the game the templates name (Defaults/colors2, ...), loaded once (FT_CLAMP: clamped).
+  CTexture *GetFxTexture(int nIndex, const char *szName, int nFlags);
+
   ComPtr<ID3D12Resource> m_pMirrorColor, m_pMirrorDepth;
   D3D12_CPU_DESCRIPTOR_HANDLE m_hMirrorRTV = {}, m_hMirrorDSV = {};
   int m_nMirrorSRV = -1;
@@ -947,6 +958,7 @@ public:
   CTexture *m_pHazeMask = nullptr;          //!< textures/haze_mask (one reference)
   CTexture *m_pHazeBump = nullptr;          //!< textures/waterbump (one reference)
   ICVar *m_pHeatHaze = nullptr;             //!< r_HeatHaze
+  CTexture *m_pFxTextures[8] = {};          //!< GetFxTexture's (one reference each)
 
   //! The levels of a copy's depth tiles (BuildDepthTiles).
   static constexpr int DEPTH_TILE_LEVELS = 7;

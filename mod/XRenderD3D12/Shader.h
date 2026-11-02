@@ -76,6 +76,20 @@ enum EDrawClass
   eDC_Mirror,             //!< a mirror: the scene mirrored in its plane (Mirrors.cpp) * ReflectAmount + texture * (1 - it), blended
                           //!< (TemplGlassEnvTex)
   eDC_HeatHaze,           //!< particles of heat haze: the copy of the scene seen through a ripple (r_HeatHaze; DrawSprites)
+  eDC_ShaderFx,           //!< a template's shader of its own (SShaderProps::eFx; TemplateFx.cpp), opaque: rainbow, cartoon shading
+  eDC_ShaderFxBlend,      //!< as eDC_ShaderFx, among the blended objects: membrane, fur, iridescence, bubble
+};
+
+//! The templates of shaders of their own (General.hlsl, ShaderFx; TemplateFx.cpp).
+enum class ETemplateFx : uint8
+{
+  None,
+  Rainbow,                //!< TemplRainbow: Defaults/colors2 at (N.E, N.H), unlit
+  Membrane,               //!< TemplMembrane: a row of colours at E.N + 0.2 t, added
+  Cartoon,                //!< TemplCartoonShading: the steps of the sun's light times the dark outline, times 1 0.8 0.2
+  Fur,                    //!< TemplFurRendering: the model and 8 shells 1 to 8 cm out along the normal, blended
+  Iridescence,            //!< TemplIridescence_PS20: a wing lit from both sides, see-through by its alpha, a rainbow gloss
+  Bubble,                 //!< TemplBubble_PS20: a wobbling soap bubble, the cube reflected, see-through but at its edges
 };
 
 //! The corona of a flare shader: the "ClientEffect 'Corona'" block of its script.
@@ -133,6 +147,8 @@ enum class EGlow : uint8
                           //!< (TemplDecalGlowSelfIllumAnimatedSLOW)
   SelfIllum,              //!< bump mapping on: the texture unlit + 2 * gloss map; off: + gloss map
   Alpha,                  //!< + texture * its alpha: the texture's alpha is the glow mask (no gloss map)
+  LitGloss,               //!< + gloss map, lit as the texture (TemplDecalLight_SpecAdd's second pass, ONE ONE: its gloss map
+                          //!< times the fixed function light), with the material's highlights
 };
 
 //! A second texture layer of the game's fixed function templates, its texture moving on its own
@@ -215,6 +231,7 @@ struct SShaderProps
                                                   //!< mapping on it is lit per pixel, with its normal map when it has one
   bool bSpecular = false;                         //!< with bPixelLighting: a specular template (TemplBumpSpec*, TemplModelBumpSpec*)
   bool bGlossAlpha = false;                       //!< with bSpecular: the specular is times the texture's alpha (*GlossAlpha)
+  ETemplateFx eFx = ETemplateFx::None;            //!< eDC_ShaderFx, eDC_ShaderFxBlend: which
   std::string Template;                           //!< materials: the template the material names (lower case)
 
   //! The cube of the scene around the object (EnvCubes.cpp) in place of the material's cube map.
