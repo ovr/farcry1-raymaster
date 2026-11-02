@@ -314,7 +314,8 @@ void CD3D12Renderer::RegisterVariables()
                      "what glows, with their bounces, in place of the light maps and the ambient light; 0 off, 1 in real time, "
                      "2 the reference (the paths of the frames added up while the view stays)");
   iConsole->Register("d3d12_PTFillLights", &CV_d3d12_PTFillLights, 0, VF_DUMPTODISK,
-                     "With d3d12_PathTracing, 1: the characters' fill lights (DLF_AMBIENT_LIGHT) light the scene too");
+                     "With d3d12_PathTracing, the characters' fill lights (DLF_AMBIENT_LIGHT): 0 in their ambient light, which the "
+                     "paths fill in with (unshadowed, as the raster's); 1 lamps that light the scene with a ray");
   iConsole->Register("d3d12_PTLightDistance", &CV_d3d12_PTLightDistance, 60.0f, VF_DUMPTODISK,
                      "With d3d12_PathTracing, its lights (the frame's and the level's static ones) within this distance of the camera "
                      "(to their sphere, m), the nearest 128 at most");

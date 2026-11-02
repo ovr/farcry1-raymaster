@@ -1359,16 +1359,17 @@ void CD3D12Renderer::DrawLeafItem(const SRenderItem &it)
   // Into the G-buffer: a surface the path tracer lights without its light (no sun, ambient, lamps or light map), its
   // colour the albedo (General.hlsl, XR_PT); the sun's visibility from all the casters (its shadow maps, the sun's
   // cascades, the mask by rays), which the composite takes (none where the raster has no sun, DF2_NO_SUN); the game's
-  // ambient light on it in vAmbient.rgb (unused once its light is off), which the paths fill in with; the colour of its
-  // highlights in vSpecular (rgb, w > 0: times texture 0's alpha), which CSSpecular lights: the raster's 2 * vSpecular *
-  // gloss of DF_SPECULAR lit per pixel, the fixed function's material light about as much (vSpecular, its power taken
-  // as the raster's), half of it.
+  // ambient light on it in vAmbient.rgb (unused once its light is off) and a lit object's fill lights as its lights
+  // (SetPathFillLights), which the paths fill in with; the colour of its highlights in vSpecular (rgb, w > 0: times
+  // texture 0's alpha), which CSSpecular lights: the raster's 2 * vSpecular * gloss of DF_SPECULAR lit per pixel, the
+  // fixed function's material light about as much (vSpecular, its power taken as the raster's), half of it.
   if (bPathMaterial && nMaterial != XR_PT_MAT_UNLIT)
   {
     const uint32 nNoSun = dc.nFlags2 & DF2_NO_SUN;
     // A lit object's shadow as the raster's (DF2_SHADOW_TINT: the ambient light the paths fill in with at least its lit
     // light times the tint where the sun is hidden).
     const uint32 nTint = (dc.nFlags2 & DF2_SHADOW_TINT) && (dc.nFlags & DF_LIGHTING) && !nNoSun ? DF2_SHADOW_TINT : 0;
+    const bool bLit = (dc.nFlags & DF_LIGHTING) && dc.nLights > 0;
     float vPathSpecular[4] = {};
     if ((dc.nFlags & (DF_LIGHTING | DF_PIXEL_LIGHTING | DF_SPECULAR)) == (DF_LIGHTING | DF_PIXEL_LIGHTING | DF_SPECULAR))
       memcpy(vPathSpecular, dc.vSpecular, sizeof(vPathSpecular));
@@ -1381,7 +1382,12 @@ void CD3D12Renderer::DrawLeafItem(const SRenderItem &it)
     memcpy(dc.vColor, vAlbedo, 3 * sizeof(float));
     memcpy(dc.vAmbient, vPathAmbient, sizeof(vPathAmbient));
     memcpy(dc.vSpecular, vPathSpecular, sizeof(vPathSpecular));
-    dc.nLights = 0;
+    // Its fill lights, which General.hlsl adds to that ambient light (SetPathFillLights), where the raster lit it with
+    // its lights; no other light.
+    if (bLit)
+      SetPathFillLights(dc, pObj, World, pLB);
+    else
+      dc.nLights = 0;
   }
   if (bFirstPass)
     Draw();
@@ -1742,6 +1748,38 @@ void CD3D12Renderer::SetObjectLights(SDrawConstants &dc, const CCObject *pObj, c
       continue;
     }
     SetPointLight(dc, n++, pLight, pObj, vCenter, r);
+  }
+  dc.nLights = n;
+}
+
+void CD3D12Renderer::SetPathFillLights(SDrawConstants &dc, const CCObject *pObj, const Matrix44 &World, CLeafBuffer *pLB)
+{
+  // The fill lights of a lit object (DLF_AMBIENT_LIGHT, directional: the characters' light from above, the light maps'
+  // stand-in) as the G-buffer draw's lights, which General.hlsl (XR_PT) adds to the game's ambient light on it that the
+  // paths fill in with, as the raster lights it with them (no shadow: a cave's roof does not hide it); with
+  // d3d12_PTFillLights they light the scene as the path tracer's lamps instead (UpdatePathLights).
+  dc.nLights = 0;
+  if (CV_d3d12_PTFillLights)
+    return;
+  Vec3 vCenter;
+  float r;
+  GetLightSphere(World, pLB, vCenter, r);
+  const std::span<CDLight *const> Lights = m_pScene->GetLights();
+  uint32 n = 0;
+  for (size_t i = 0; i < Lights.size() && i < 32 && n < XR_MAX_DRAW_LIGHTS; i++)
+  {
+    const CDLight *pLight = Lights[i];
+    if (!pLight || (pLight->m_Flags & (DLF_AMBIENT_LIGHT | DLF_DIRECTIONAL | DLF_SUN | DLF_PROJECT)) != (DLF_AMBIENT_LIGHT | DLF_DIRECTIONAL) ||
+        !(pObj->m_DynLMMask & (1u << i)))
+      continue;
+    Vec3 vDir = pLight->m_Origin - vCenter;
+    const float fLen = vDir.GetLength();
+    vDir = fLen > 0 ? vDir / fLen : Vec3(0, 0, 1);
+    Set4(dc.vLightColor[n], pLight->m_Color.r, pLight->m_Color.g, pLight->m_Color.b, 1);
+    Set4(dc.vLightSpec[n], 0, 0, 0, 0);
+    Set4(dc.vLightPos[n], vDir.x, vDir.y, vDir.z, 2);
+    Set4(dc.vLightAtten[n], 1, 0, 0, 0);
+    n++;
   }
   dc.nLights = n;
 }

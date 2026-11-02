@@ -202,7 +202,9 @@
 //	the path material to SV_Target4 and the sun's visibility (the shadow
 //	maps', the cascades', the mask by rays; with XR_CASCADES and XR_RAY_SUN
 //	as the draw has them) and the game's ambient light on it (vAmbient.rgb,
-//	which Draw3D.cpp sets so) to SV_Target5. A surface the path tracer lights
+//	which Draw3D.cpp sets so, plus 2 * colour * N.L of each directional
+//	light of the draw: a lit object's fill lights, SetPathFillLights) to
+//	SV_Target5. A surface the path tracer lights
 //	(DF2_PT_MASK; its light flags are off, its colour its albedo times
 //	vColor) writes its colour less what it adds unlit (DF2_ADD_TEX4, times
 //	tex1, and DF2_ALPHA_GLOW) as the albedo, that as its colour, and its
@@ -1426,6 +1428,14 @@ SPixelOutput PSMain(SVertexOutput In)
   Out.vAlbedo = float4(max(s_vPTAlbedo, 0), Out.vColor.a);
   Out.vNormal = PathGBufferNormal(s_vPTNormal, s_vPTFace, s_fPTFog, (g_Draw.nFlags2 & DF2_PT_MASK) >> DF2_PT_SHIFT);
   float3 vAmbient = g_Draw.vAmbient.rgb;
+  // A lit object's fill lights (Draw3D.cpp SetPathFillLights: directional, the characters' light from above), as the
+  // raster lights it with them, unshadowed: in these units 2 * colour * N.L.
+  const float3 vPTN = SafeNormalize(s_vPTNormal);
+  for (uint i = 0; i < min(g_Draw.nLights, XR_MAX_DRAW_LIGHTS); i++)
+  {
+    if (g_Draw.vLightPos[i].w == 2)
+      vAmbient += 2 * g_Draw.vLightColor[i].rgb * saturate(dot(vPTN, g_Draw.vLightPos[i].xyz));
+  }
 #ifdef XR_CASCADES
   // A lit object in the cascades' shadow (DF2_SHADOW_TINT): the ambient light the paths fill in with at least its lit
   // light times the tint where the sun is hidden, as the raster's shadow. In these units (the albedo s / 2 of the colour,
