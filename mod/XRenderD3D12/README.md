@@ -1037,6 +1037,12 @@ and lists theirs (`NamesObjects`).
   parameters, which the engine sets only for the names the template lists (`GetPublicParams`):
   `s_PublicParams` (`Shader.cpp`) lists them for `LavaVolume`; the other templates list none (their
   materials' parameters, where a material has any, do not arrive: the template's defaults are used).
+- The decals multiplied into the frame (`TemplDecalModulate`: DESTCOLOR, ZERO) whose material has an
+  opacity below 1 are transparent, as the opaque templates are with it: their texture is laid over
+  the frame by its alpha times the opacity (SRCALPHA, INVSRCALPHA), unlit, not multiplied in (step
+  265). Research's sign "SUB-LEVEL 1" by the lamp (opacity 0.15, black with its letters in the alpha)
+  turned 10 x 5 m of the wall black in the raster and the path tracer; now the wall is lit with light
+  letters on it, as in the original (test: `render_tests` suite `decalsign`).
 - What is added (blending ONE, ONE or SRCALPHA, ONE: fire, glows, the smoke of Volcano's lava) is
   fogged towards black (`DF2_FOG_BLACK`), particles and materials alike: towards the fog's colour
   each quad added that colour over all of its rectangle, also where its texture is black, and
