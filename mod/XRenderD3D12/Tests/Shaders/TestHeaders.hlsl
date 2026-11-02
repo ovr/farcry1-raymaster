@@ -69,6 +69,30 @@ void CSToneMap(uint i : SV_DispatchThreadID)
   TestOut(i, float4(NeutralToneMap(TestIn(i).rgb, g_Test.vTest.x, g_Test.vTest.y, g_Test.vTest.z), 0));
 }
 
+//! The HDR output's tone map (HdrOutputToneMap, Hdr.hlsl's highlight layer) of the light g_TestIn[i].rgb: the knee
+//! g_Test.vTest.x, the peak's display value P g_Test.vTest.y, the desaturation g_Test.vTest.z, d3d12_HDRHighlights
+//! g_Test.vTest.w. out[2i] = (the output's display values, 0), out[2i + 1] = (the SDR picture's, NeutralToneMap to 1, 0).
+[numthreads(64, 1, 1)]
+void CSHdrOutput(uint i : SV_DispatchThreadID)
+{
+  if (i >= g_Test.nTest.x)
+    return;
+  const float3 vLight = TestIn(i).rgb;
+  const float k = g_Test.vTest.x, P = g_Test.vTest.y;
+  TestOut(2 * i, float4(HdrOutputToneMap(vLight, k, P, g_Test.vTest.z, g_Test.vTest.w), 0));
+  TestOut(2 * i + 1, float4(NeutralToneMap(vLight, k, 1, g_Test.vTest.z), 0));
+}
+
+//! The sky's glow towards the sun (HdrLight.hlsli): out[i] = (HdrSkyGlow(g_TestIn[i].x the cosine, y the glow, z the power), 0, 0, 0).
+[numthreads(64, 1, 1)]
+void CSSkyGlow(uint i : SV_DispatchThreadID)
+{
+  if (i >= g_Test.nTest.x)
+    return;
+  const float4 v = TestIn(i);
+  TestOut(i, float4(HdrSkyGlow(v.x, v.y, v.z), 0, 0, 0));
+}
+
 //! The automatic exposure's target (HdrExposure.hlsli) of case i: g_TestIn[32i .. 32i + 15] its luminance histogram (four bins
 //! an item), g_TestIn[32i + 16 .. 32i + 31] the sky's; g_Test.nTest.y the samples, g_Test.vTest the parameters (vParams),
 //! g_Test.vTest2 x log2 of the knee, y z the sky's shares (from, full), w a percentile. out[2i] = ExposureTarget, out[2i + 1] =

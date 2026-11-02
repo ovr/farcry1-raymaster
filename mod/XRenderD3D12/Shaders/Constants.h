@@ -179,7 +179,7 @@ struct SFrameConstants
   XR_FLOAT4(vJitter);             //!< the upscaler's (Upscaler.h): xy its jitter in clip space (xy += vJitter.xy * w), zw the target's pixels per pixel of the engine (DF_SCREEN_POS); 0, 0, 1, 1 without one
   XR_FLOAT4(vMipBias);            //!< x: the mip bias of the materials' textures (log2(render / display size) - 1 while upscaling, else 0);
                                   //!< yzw: DF2_AO_BAKED's share of the ambient light in a baked colour
-  XR_FLOAT4(vHdr);                //!< x: the light of the sky towards the sun times this (SkyGlow; 1: as the game's, always outside HDR targets)
+  XR_FLOAT4(vHdr);                //!< x: the light of the sky towards the sun times this (SkyGlow; 1: as the game's, always outside HDR targets), y: the power of the cosine of the angle to the sun it falls off with
   XR_FLOAT4X4_ARRAY(mCascade, XR_MAX_CASCADES);  //!< world to the sun's cascade i (DF2_SUN_CASCADES): x, y -1..1 across its map, z depth 0..1 away from the sun
   XR_FLOAT4(vCascadeEnd);         //!< the view depth (ViewDepth) where each cascade ends
   XR_FLOAT4(vCascadeTexel);       //!< the size of a texel of each in the world (m)

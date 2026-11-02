@@ -42,7 +42,8 @@
 //	What the game draws as light sources is brighter in the HDR targets
 //	(IsHdrTarget: the main scene, and with it the water's reflection and
 //	the environment cubes): the sun's flare (d3d12_HDRSun), the sky towards
-//	the sun (d3d12_HDRSky, DF2_SKY_GLOW), and what glows (d3d12_HDRGlow):
+//	the sun (d3d12_HDRSky, half way at d3d12_HDRSkyAngle from it,
+//	DF2_SKY_GLOW), and what glows (d3d12_HDRGlow):
 //	the additive particles and materials (fire, muzzle flashes), the
 //	coronas and procedural flares of the lights, the glow maps of lamps and
 //	screens. Each is a factor of the light; 1 is the game's. The flares,
@@ -723,8 +724,9 @@ void CD3D12Renderer::DumpHdr()
           m_bHeatVision ? ", heat vision: clamped" : "");
   fprintf(m_pFrameDump.get(), "hdr: meter %d (%s; window %g to %g, sky's highlights %g)\n", CV_d3d12_ExposureMeter,
           m_Hdr.bExposureHistogram ? "histogram" : "mean", CV_d3d12_ExposureLow, CV_d3d12_ExposureHigh, CV_d3d12_ExposureHighlights);
-  fprintf(m_pFrameDump.get(), "hdr: brighter than the game: sun %g, sky %g, glow %g; colour grading %s: saturation %g, contrast %g, temperature %g, tint %g, "
-          "lut \"%s\" (%d, amount %g)\n", CV_d3d12_HDRSun, CV_d3d12_HDRSky, CV_d3d12_HDRGlow, m_Grading.pLut ? "on" : "off", m_Grading.fSaturation,
+  fprintf(m_pFrameDump.get(), "hdr: brighter than the game: sun %g, sky %g (half way at %g degrees), glow %g; colour grading %s: saturation %g, contrast %g, "
+          "temperature %g, tint %g, lut \"%s\" (%d, amount %g)\n", CV_d3d12_HDRSun, CV_d3d12_HDRSky, CV_d3d12_HDRSkyAngle, CV_d3d12_HDRGlow,
+          m_Grading.pLut ? "on" : "off", m_Grading.fSaturation,
           m_Grading.fContrast, m_Grading.fTemperature, m_Grading.fTint, m_Grading.LutFile.c_str(), m_Grading.nCubeSize, m_Grading.fLutAmount);
   // The meter's mean and the adapted EV, read back (this frame is executed so far).
   if (!m_Hdr.bAdapted || m_Hdr.Meter.empty())
@@ -775,4 +777,14 @@ float CD3D12Renderer::HdrSkyGlow() const
   if (!IsHdrTarget() || !m_pScene || !m_pScene->GetSun())
     return 1.0f;
   return std::max(CV_d3d12_HDRSky, 0.0f);
+}
+
+float CD3D12Renderer::HdrSkyGlowPower() const
+{
+  // cos(a)^n is a half at the angle a: n = ln 0.5 / ln cos a. 0: the lobe up to step 257, 32 (half
+  // way at 11.9 degrees).
+  if (CV_d3d12_HDRSkyAngle <= 0)
+    return 32.0f;
+  const double fAngle = std::clamp((double)CV_d3d12_HDRSkyAngle, 0.25, 60.0) * 3.14159265358979323846 / 180;
+  return (float)(std::log(0.5) / std::log(std::cos(fAngle)));
 }
