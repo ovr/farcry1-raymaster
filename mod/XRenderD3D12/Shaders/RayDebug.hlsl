@@ -16,7 +16,8 @@
 //	            0-7), bit 8 the sun's shadow at the hits (d3d12_RTShadows)
 //	  the path tracer's views (SPathShade, PathShade.hlsli):
 //	  vParams2  xyz vSun, w fLamps
-//	  vParams3  x fEmission, y fDelight, z fBakeLight, w fLightGap
+//	  vParams3  x fEmission, y fDelight, z fLightGap
+//	  vAmbient  rgb vBakeLight
 //	  nTex2     nLights (g_PTLights, root SRV t2 space5)
 //	The views:
 //	  XR_RAY_DEBUG_INSTANCES  a colour per instance, of its mesh
@@ -182,8 +183,8 @@ float4 PSMain(SRayDebugOutput In) : SV_Target
     P.fLamps = g_Draw.vParams2.w;
     P.fEmission = g_Draw.vParams3.x;
     P.fDelight = g_Draw.vParams3.y;
-    P.fBakeLight = g_Draw.vParams3.z;
-    P.fLightGap = g_Draw.vParams3.w;
+    P.vBakeLight = g_Draw.vAmbient.rgb;
+    P.fLightGap = g_Draw.vParams3.z;
     P.nLights = g_Draw.nTex2;
     P.nMask = nMask;
     P.nMaxTests = XR_RAY_MAX_ALPHA_TESTS;

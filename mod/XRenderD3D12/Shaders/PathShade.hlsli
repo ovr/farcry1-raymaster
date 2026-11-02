@@ -42,14 +42,16 @@
 //	PT_LAMP_CANDIDATES of them by how much each gives without its shadow
 //	(resampled importance sampling: all of them where there are no more).
 //	TerrainBakedLight: the light the editor baked into a sector's texture
-//	at a point, as light: fBakeLight * ((1 + (r - 1) N.L V) / r)^2.2, r =
-//	d3d12_PTTerrainDelight (the lit over the shadowed of a face towards
-//	the sun, the game's colours), V the sun's visibility over the terrain
-//	alone (XR_RAY_TERRAIN: its own shadows are in the texture, those of the
-//	objects not), fBakeLight the path tracer's own light on an open face
-//	towards the sun (the sun and the sky): the texture's colour as light
-//	divided by it is the albedo (a lit face as bright as the editor had
-//	it).
+//	at a point, as light: vBakeLight * its share there (TerrainBakedShare)
+//	((1 + (r - 1) N.L V) / r)^2.2, r = d3d12_PTTerrainDelight (the lit over
+//	the shadowed of a face towards the sun, the game's colours), V the
+//	sun's visibility over the terrain alone (XR_RAY_TERRAIN: its own
+//	shadows are in the texture, those of the objects not), vBakeLight the
+//	path tracer's own light on an open face towards the sun (the sun and
+//	the sky), each channel: the texture's colour as light divided by it is
+//	the albedo (a lit face as bright as the editor had it, and of its
+//	colour: the texture has the colour of the light baked in, Rebellion's
+//	blue moon, which the path tracer's light brings again).
 //
 //////////////////////////////////////////////////////////////////////
 
@@ -71,7 +73,7 @@ struct SPathShade
   float fLamps;         //!< d3d12_PTLamps
   float fEmission;      //!< d3d12_PTEmission
   float fDelight;       //!< d3d12_PTTerrainDelight (at most 1: the sector's colour is the albedo)
-  float fBakeLight;     //!< the light baked into the terrain on a lit face towards the sun (the path tracer's sun and sky)
+  float3 vBakeLight;    //!< the light baked into the terrain on a lit face towards the sun (the path tracer's sun and sky)
   float fLightGap;      //!< how far short of a lamp its ray ends (d3d12_RTLightShadowGap)
   uint nLights;         //!< the lamps in g_PTLights
   uint nMask;           //!< the instances the rays towards the sun and the lamps see
@@ -129,12 +131,18 @@ float PathRandom(inout uint nSeed)
   return (float)(n >> 8) * (1.0 / 16777216.0);
 }
 
-//! The light baked into a terrain sector's texture at vPos (the game's colour; see the head of the file).
-float TerrainBakedLight(float3 vPos, float3 vNormal, float3 vFace, SPathShade P, float fConeWidth)
+//! The share of SPathShade::vBakeLight baked into a terrain sector's texture at vPos (1 on a lit face; see the head of the file).
+float TerrainBakedShare(float3 vPos, float3 vNormal, float3 vFace, SPathShade P, float fConeWidth)
 {
   const float fNL = saturate(dot(vNormal, g_Frame.vSunDir.xyz));
   const float fVis = fNL > 0 ? TraceSun(vPos, vFace, XR_RAY_TERRAIN, fConeWidth, 0) : 0;
-  return P.fBakeLight * pow((1 + (P.fDelight - 1) * fNL * fVis) / P.fDelight, HDR_GAMMA);
+  return pow((1 + (P.fDelight - 1) * fNL * fVis) / P.fDelight, HDR_GAMMA);
+}
+
+//! The light baked into a terrain sector's texture at vPos, each channel (the game's colour; see the head of the file).
+float3 TerrainBakedLight(float3 vPos, float3 vNormal, float3 vFace, SPathShade P, float fConeWidth)
+{
+  return P.vBakeLight * TerrainBakedShare(vPos, vNormal, vFace, P, fConeWidth);
 }
 
 //! The material at the hit (see the head of the file); fConeWidth the ray cone's width there.

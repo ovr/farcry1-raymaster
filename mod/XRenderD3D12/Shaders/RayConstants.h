@@ -234,8 +234,7 @@ struct SPathTraceConstants
                                   //!< at most, w the most light a path's sample brings (luminance; 0: no limit)
   XR_FLOAT4(vSun);                //!< rgb the sun's light (SPathShade::vSun), w d3d12_PTLamps
   XR_FLOAT4(vSky);                //!< rgb the sky's light where a path finds nothing, w d3d12_PTEmission
-  XR_FLOAT4(vShade);              //!< x d3d12_PTTerrainDelight, y the light baked into the terrain (SPathShade::fBakeLight), z the
-                                  //!< lamps' rays' gap (d3d12_RTLightShadowGap)
+  XR_FLOAT4(vShade);              //!< x d3d12_PTTerrainDelight, y the lamps' rays' gap (d3d12_RTLightShadowGap)
   XR_FLOAT4(vFill);               //!< x d3d12_PTAmbient (the game's ambient light a path's ray brings beyond y), y
                                   //!< d3d12_PTAmbientRange (m)
   XR_FLOAT4(vSpecular);           //!< rgb the sun's highlights' colour (its specular colour times d3d12_PTSpecular; 0 indoors), w
@@ -260,6 +259,8 @@ struct SPathTraceConstants
                                   //!< CSTrace writes it at the pixels' surfaces (d3d12_PTDebug 11), w CSCacheUpdate's tile (pixels)
   XR_UINT4(nCheckerboard);        //!< x 1: CSTrace traces half the pixels in a checkerboard (d3d12_PTCheckerboard; a thread
                                   //!< for each two pixels of a row), y those it traces: ((x ^ y) & 1) == y
+  XR_FLOAT4(vBakeLight);          //!< rgb the light baked into the terrain on a lit open face towards the sun, each channel
+                                  //!< (SPathShade::vBakeLight)
 };
 
 #endif
