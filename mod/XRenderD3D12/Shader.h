@@ -141,8 +141,10 @@ enum class ELayer2 : uint8
   BlendOpacity,           //!< the opacity map over the texture by its alpha (communication_island_river: a second pass)
 };
 
-//! The environment cube map (CD3D12Renderer::GetEnvCubeMap) in place of the material's texture,
-//! looked up with the view vector reflected about the normal, in world space.
+//! The environment cube map (CD3D12Renderer::GetEnvCubeMap; the cube of the scene around the
+//! object with SShaderProps::bAutoCube) in place of the material's texture, looked up with the view
+//! vector reflected about the normal, in world space; the modes from CubeDecalAlpha on as the
+//! original's vertex and pixel shaders of their templates (General.hlsl, DF2_CUBE_SHADER).
 enum class EEnvMap : uint8
 {
   None,
@@ -153,6 +155,18 @@ enum class EEnvMap : uint8
   Glass,                  //!< the cube map seen through (refracted) and reflected, by a fresnel term, + 0.1 * texture
   GlassFixed,             //!< cube map + 0.098 * texture
   Auto,                   //!< the scene around the object rendered into a cube (EnvCubes.cpp) * light
+  CubeDecalAlpha,         //!< (texture + cube map * the texture's alpha) * light (TemplReflCMDecal_ReflAmountAlpha)
+  CubeModulate,           //!< cube map * texture * light (TemplReflCMDecalMod)
+  Refract,                //!< the cube map seen through (the view vector refracted by the material's "Refraction")
+                          //!< * (1 - k) + texture * k, k its "DiffuseAmount" (TemplRefrCM)
+  Dispersion,             //!< seen through with the ratios 1.10 / 1.08 / 1.06 for red, green, blue, and reflected,
+                          //!< by the fresnel term; no texture (TemplGlassDispersionCM)
+  GlassPS20,              //!< TemplGlassCM_PS20: seen through (ratio 1.14) * base colour * (1 - sin t) + reflected * sin i
+                          //!< + a rainbow (the texture at cos^0.18) * 0.2 * base colour * sin t + 0.2
+  BumpRefract,            //!< seen through the normal map (TemplBumpRefrCM: the original's sum with the map's unsigned
+                          //!< values; "BumpScale", "Refraction") * the vertex colours; no texture
+  BumpGlass,              //!< BumpRefract * "RefractAmount" + reflected about the bumped normal * "ReflectAmount"
+  BumpGlassFresnel,       //!< BumpRefract * (1 - F) + reflected about the bumped normal * F (the fresnel term)
 };
 
 //! What a shader is.
@@ -176,7 +190,10 @@ struct SShaderProps
   ELighting eLighting = ELighting::Overbright;
   EGlow eGlow = EGlow::None;
   EEnvMap eEnvMap = EEnvMap::None;
-  float fAlphaRef = 0.0f;                        //!< alpha test reference (0..1, texture alpha >= it passes); 0: none
+  bool bAutoCube = false;                         //!< eEnvMap looks up the cube of the scene around the object (*EnvCM)
+  bool bAmbientCube = false;                      //!< *_EnvCMAmb: the ambient part 0.75 of itself + 0.25 * the cube map
+                                                  //!< reflected about the vertex normal
+  float fAlphaRef = 0.0f;                       //!< alpha test reference (0..1, texture alpha >= it passes); 0: none
   float fScrollV = 0.0f;                          //!< texture v moves by fScrollV * ITimer::GetCurrTime()
   float fScrollU = 0.0f;                          //!< texture u moves by fScrollU * ITimer::GetCurrTime()
   float fRotate = 0.0f;                           //!< the texture turns by fRotate degrees a second (the material's
@@ -194,6 +211,11 @@ struct SShaderProps
   bool bSpecular = false;                         //!< with bPixelLighting: a specular template (TemplBumpSpec*, TemplModelBumpSpec*)
   bool bGlossAlpha = false;                       //!< with bSpecular: the specular is times the texture's alpha (*GlossAlpha)
   std::string Template;                           //!< materials: the template the material names (lower case)
+
+  //! The cube of the scene around the object (EnvCubes.cpp) in place of the material's cube map.
+  bool UsesAutoCube() const { return eEnvMap == EEnvMap::Auto || bAutoCube; }
+  //! The cube map looked up through the material's normal map (the bump refraction templates).
+  bool BumpCube() const { return eEnvMap == EEnvMap::BumpRefract || eEnvMap == EEnvMap::BumpGlass || eEnvMap == EEnvMap::BumpGlassFresnel; }
 };
 
 //! A shader of this renderer (an engine shader, a template or a material; see above).
@@ -461,6 +483,10 @@ ECull GetCullMode(const CShader *pShader, const SRenderShaderResources *pRes);
 //! The front diffuse colour of the material's light material (white without one): the material
 //! colour of lit draws (characters use it as the diffuse material colour).
 CFColor GetMaterialColor(const SRenderShaderResources *pRes);
+//! The material's public float named szName (its shader params, case ignored), fDefault without it.
+float GetResourceFloat(const SRenderShaderResources *pRes, const char *szName, float fDefault);
+//! The material's public colour or vector named szName (rgb, xyz), vDefault without it.
+void GetResourceColor(const SRenderShaderResources *pRes, const char *szName, const float vDefault[3], float vOut[3]);
 //! Texture transform of slot nSlot, the rows of a 2x3 matrix: u' = dot(float3(u, v, 1), vRow0), v' =
 //! dot(.., vRow1). The material's tiling and offset (SEfTexModificator; a tiling of 0 counts as 1),
 //! then the template's motion: turned about its pivot (fRotate degrees a second) and moved

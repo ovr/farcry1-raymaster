@@ -5,7 +5,7 @@
 //	File: EnvCubes.cpp
 //	Description: The environment cubes of the templates that reflect the
 //	scene around the object (TemplReflEnvCM and its aliases,
-//	EEnvMap::Auto).
+//	EEnvMap::Auto; the other *EnvCM templates, SShaderProps::bAutoCube).
 //
 //	Before the main view is drawn, the objects of its items with such a
 //	template get a cube seen from their centre (objects close together
@@ -62,7 +62,7 @@ const SCubeFace s_CubeFaces[6] =
 
 bool UsesEnvCube(const SRenderItem &it)
 {
-  return it.pShader && it.pShader->GetProps().eEnvMap == EEnvMap::Auto;
+  return it.pShader && it.pShader->GetProps().UsesAutoCube();
 }
 
 //! The point an item's cube is seen from: the centre of its element in the world.
