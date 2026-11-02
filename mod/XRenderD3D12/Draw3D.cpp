@@ -472,7 +472,7 @@ void CD3D12Renderer::DrawLeafItem(const SRenderItem &it)
   // The water reflection sees the land from below the water: both sides, so that where the waves move
   // the reflection over a shore, it shows the land rather than the sky behind it, and an object
   // standing in the water, cut open by the water plane, shows its inside rather than a hole.
-  if (m_bReflectionPass)
+  if (m_bReflectionPass && !m_bMirrorPass)
     Key.nCull = R_CULL_NONE;
   Key.bWireframe = m_nPolygonMode == R_WIREFRAME_MODE ? 1 : 0;
   Key.bDepthBias = (it.nSort & ~EFSLIST_MASK) == eS_Decal ? 1 : 0;
@@ -1209,6 +1209,26 @@ void CD3D12Renderer::DrawLeafItem(const SRenderItem &it)
       return;
     pTex = nullptr;
     break;
+  case eDC_ScreenTex:
+    if (!SetupScreenTexDraw(Key, dc))
+      return;
+    dc.vColor[3] = (Props.bNoOpacity ? 1.0f : fOpacity) * pObj->m_Color.a;
+    if (dc.vColor[3] < 1)
+      Key.nState = GS_BLSRC_SRCALPHA | GS_BLDST_ONEMINUSSRCALPHA;
+    pTex = nullptr;
+    break;
+  case eDC_ScreenBump:
+    if (!SetupScreenBumpDraw(Key, dc, it, pDiffuse))
+      return;
+    pTex = nullptr;
+    break;
+  case eDC_Mirror:
+    // Not in its own picture.
+    if (m_bMirrorPass || !SetupMirrorDraw(Key, dc, it, pDiffuse))
+      return;
+    dc.vColor[3] = GetResourceFloat(it.pRes, "Opacity", fOpacity) * pObj->m_Color.a;
+    pTex = nullptr;
+    break;
   default:
     return;
   }
@@ -1867,7 +1887,8 @@ void CD3D12Renderer::DrawSprites()
 {
   // Particles: camera facing quads in world space, the object's texture (m_NumCM) and blending
   // (m_RenderState), depth tested without depth writes. Colour (the vertex colour + the object's
-  // ambient colour, each channel at most 1) * texture, alpha vertex alpha * texture alpha.
+  // ambient colour, each channel at most 1) * texture, alpha vertex alpha * texture alpha. Those of a
+  // heat haze shader ripple the scene behind them instead (SetupHeatHazeDraw).
   const std::span<const SSceneSprite> Sprites = m_pScene->GetSprites();
   if (Sprites.empty())
     return;
@@ -1879,10 +1900,13 @@ void CD3D12Renderer::DrawSprites()
   m_fDepthMin = 0;
   m_fDepthMax = 1;
   m_bItemScissor = false;
-  // One draw per run of sprites with the same texture and blending (each sprite has an object of
-  // its own; the ambient colour goes into the vertices).
-  auto SameDraw = [](const CCObject *a, const CCObject *b)
-  { return a && b && a->m_NumCM == b->m_NumCM && (a->m_RenderState & GS_BLEND_MASK) == (b->m_RenderState & GS_BLEND_MASK); };
+  // One draw per run of sprites with the same texture, blending and shader (each sprite has an object
+  // of its own; the ambient colour goes into the vertices).
+  auto SameDraw = [](const SSceneSprite &a, const SSceneSprite &b)
+  {
+    return a.pObj && b.pObj && a.pObj->m_NumCM == b.pObj->m_NumCM && a.nShaderID == b.nShaderID &&
+           (a.pObj->m_RenderState & GS_BLEND_MASK) == (b.pObj->m_RenderState & GS_BLEND_MASK);
+  };
   for (size_t nRun = 0; nRun < Sprites.size();)
   {
     const CCObject *pObj = Sprites[nRun].pObj;
@@ -1891,11 +1915,15 @@ void CD3D12Renderer::DrawSprites()
       nRun++;
       continue;
     }
+    // Heat haze (its shader's draw class): the scene behind rippled, or nothing (r_HeatHaze 0, the
+    // reflections); never the particle texture.
+    CShader *pShader = m_pShaders ? m_pShaders->GetByID(Sprites[nRun].nShaderID) : nullptr;
+    const bool bHaze = pShader && pShader->GetDrawClass() == eDC_HeatHaze;
     BatchVerts.clear();
     BatchInds.clear();
     int nCount = 0;
     size_t nNext = nRun;
-    for (; nNext < Sprites.size() && SameDraw(Sprites[nNext].pObj, pObj); nNext++)
+    for (; nNext < Sprites.size() && SameDraw(Sprites[nNext], Sprites[nRun]); nNext++)
     {
       const SSceneSprite &Sprite = Sprites[nNext];
       if (Sprite.nVerts <= 0 || Sprite.nIndices <= 0 ||
@@ -1943,21 +1971,31 @@ void CD3D12Renderer::DrawSprites()
     if ((Key.nState & GS_BLDST_MASK) == GS_BLDST_ONE)
       SetHdrCore(dc, CV_d3d12_HDRGlow, Key.nState);
     CTexture *pTex = m_pTextures ? m_pTextures->GetByID(pObj->m_NumCM) : nullptr;
-    if (pTex && !pTex->IsCube())
+    if (bHaze)
+    {
+      if (!SetupHeatHazeDraw(Key, dc))
+      {
+        if (m_pFrameDump)
+          fprintf(m_pFrameDump.get(), "  sprites: %d of heat haze (%s), not drawn\n", nCount, pShader->GetName());
+        continue;
+      }
+      pTex = nullptr;
+    }
+    else if (pTex && !pTex->IsCube())
     {
       dc.nFlags |= DF_TEX0;
       dc.nTex0 = pTex->GetSRV();
       dc.nSamplers = pTex->GetSampler();
     }
-    if (m_bFog)
+    if (m_bFog && !bHaze)
       dc.nFlags |= DF_FOG;
     if (m_pFrameDump)
     {
       const UCol &c = Verts[Sprites[nNext - 1].nFirstVert].color;
       const Vec3 &Amb = pObj->m_AmbColor;
-      fprintf(m_pFrameDump.get(), "  sprites: %d (%d verts), texture %d, state 0x%x, sort %g, first amb (%.2f %.2f %.2f), a vertex colour's bytes %u %u %u %u\n",
-              nCount, (int)BatchVerts.size(), pObj->m_NumCM, pObj->m_RenderState, pObj->m_SortId, Amb.x, Amb.y, Amb.z,
-              c.bcolor[0], c.bcolor[1], c.bcolor[2], c.bcolor[3]);
+      fprintf(m_pFrameDump.get(), "  sprites: %d (%d verts), texture %d, shader %s%s, state 0x%x, sort %g, first amb (%.2f %.2f %.2f), a vertex colour's bytes %u %u %u %u\n",
+              nCount, (int)BatchVerts.size(), pObj->m_NumCM, pShader ? pShader->GetName() : "-", bHaze ? " (heat haze)" : "", pObj->m_RenderState,
+              pObj->m_SortId, Amb.x, Amb.y, Amb.z, c.bcolor[0], c.bcolor[1], c.bcolor[2], c.bcolor[3]);
       DumpDraw(dc, Key, pTex);
     }
     DrawImmediate(Key, dc, D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST, VERTEX_FORMAT_P3F_COL4UB_TEX2F, BatchVerts.data(), (int)BatchVerts.size(),

@@ -428,7 +428,8 @@ bool CD3D12Renderer::SetupScopeLensDraw(SPipelineKey &Key, SDrawConstants &dc, c
   if (!m_bSceneCopied && !(ScopeLensRect(it, WorldViewProj, Rect) ? CopySceneForWater(Rect) : CopySceneForWater()))
     return false;
   dc.nFlags = 0;
-  dc.nFlags2 = DF2_SCOPE_LENS;
+  dc.nFlags2 = DF2_SCREEN_FX;
+  dc.vParams3[3] = XR_SCREEN_SCOPE;
   dc.nTex0 = (uint32)m_nSceneColorSRV;
   dc.nTex1 = (uint32)GetWaveTexture();
   Set4(dc.vColor, SCOPE_LENS_TINT[0], SCOPE_LENS_TINT[1], SCOPE_LENS_TINT[2], SCOPE_LENS_OPACITY);
@@ -833,13 +834,21 @@ void CD3D12Renderer::UpdateWaterReflection(std::span<const SRenderItem> Items)
 
 void CD3D12Renderer::ClipProjectionToWater(Matrix44 &Proj, const Matrix44 &View) const
 {
-  // The water plane in view space, the side above the water positive: the world's z axis turned by
-  // the view (row 2 of the view matrix, which multiplies row vectors), through the point (0, 0, W).
+  // The water plane, the side above the water kept.
+  ClipProjectionToPlane(Proj, View, Vec3(0, 0, 1), Vec3(0, 0, m_fReflectionWaterZ));
+}
+
+void CD3D12Renderer::ClipProjectionToPlane(Matrix44 &Proj, const Matrix44 &View, const Vec3 &vNormal, const Vec3 &vPoint)
+{
+  // The plane in view space, the side kept positive: the normal turned by the view (the view matrix
+  // multiplies row vectors), through the point.
   const float *v = View.data;
-  const Vec3 n(v[8], v[9], v[10]);
-  const Vec3 p(m_fReflectionWaterZ * v[8] + v[12], m_fReflectionWaterZ * v[9] + v[13], m_fReflectionWaterZ * v[10] + v[14]);
+  const Vec3 n(vNormal.x * v[0] + vNormal.y * v[4] + vNormal.z * v[8], vNormal.x * v[1] + vNormal.y * v[5] + vNormal.z * v[9],
+               vNormal.x * v[2] + vNormal.y * v[6] + vNormal.z * v[10]);
+  const Vec3 p(vPoint.x * v[0] + vPoint.y * v[4] + vPoint.z * v[8] + v[12], vPoint.x * v[1] + vPoint.y * v[5] + vPoint.z * v[9] + v[13],
+               vPoint.x * v[2] + vPoint.y * v[6] + vPoint.z * v[10] + v[14]);
   const float d = -n.Dot(p);
-  // The camera must be below the water.
+  // The camera must be on the other side.
   if (d >= 0)
     return;
   // The near plane becomes the water plane (an oblique near plane): the clip space z row is the

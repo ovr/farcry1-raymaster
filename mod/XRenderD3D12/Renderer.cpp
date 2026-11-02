@@ -818,6 +818,7 @@ void CD3D12Renderer::Release()
   EndWaterTextures();
   ReleaseWaterResources();
   ReleaseWaterReflection();
+  ReleaseMirror();
   ReleaseEnvCubes();
   ReleaseSprites();
   ReleaseShadowMaps();
@@ -834,6 +835,7 @@ void CD3D12Renderer::Release()
   m_pDetailTexture = nullptr;   // released with every texture
   m_pDefaultCube = nullptr;
   m_pBeachTexture = m_pBeachWetTexture = m_pBeachBumpTexture = nullptr;
+  m_pHazeMask = m_pHazeBump = nullptr;
   m_nWaveTexture = 0;
   m_nCausticsTexture = 0;
   m_SkyBoxes.clear();
@@ -1123,8 +1125,14 @@ void CD3D12Renderer::SetCamera(const CCamera &cam)
   m_nMatrixDepth = 0;
   m_ProjMatrix = MakeProjection(cam);
   m_SkyProjMatrix = m_ProjMatrix;
+  // The camera of a mirror's picture (the frame's mirrored in its plane): nothing behind the mirror.
+  if (m_bMirrorPass)
+  {
+    m_MirrorViewProj = m_CameraView * m_ProjMatrix;
+    ClipProjectionToPlane(m_ProjMatrix, m_CameraView, m_vMirrorNormal, m_vMirrorPoint);
+  }
   // The camera of the water reflection (the frame's mirrored in the water plane): nothing under the water.
-  if (m_bReflectionPass)
+  else if (m_bReflectionPass)
   {
     m_ReflectionViewProj = m_CameraView * m_ProjMatrix;
     ClipProjectionToWater(m_ProjMatrix, m_CameraView);

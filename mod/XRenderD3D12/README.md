@@ -835,6 +835,16 @@ and lists theirs (`NamesObjects`).
   (the middle out to `SCOPE_LENS_FIELD` times the glass's size on the screen, with room to spare;
   the colour alone), whose edges its samples are clamped to: 0.14 ms less than the whole target
   and its depth at 3840 x 2160. Each list copies the scene for itself.
+- The templates that show the scene around them (`Mirrors.cpp`): a mirror (`TemplGlassEnvTex`) gets
+  the scene rendered with the frame's camera mirrored in its plane (the plane through its vertices;
+  the nearest mirror of the frame only, every frame, half the screen's size, its near plane the
+  mirror's, as the water reflection's), 0.9 of it + 0.1 of its texture, blended; the copy of the
+  scene is wrapped round a `TemplRefrEnvTex` model by its texture coordinates (the original's
+  screen copy at TexGen Base, which makes its swatch look like chrome) and seen through a
+  `TemplBumpOffsetEnv` one moved by its normal map. The heat haze particles (`ParticleMinHeatHaze`
+  and the others, with `r_HeatHaze 1`, as the original) show the copy of the scene behind them moved
+  by the slopes of `WaterBump` and blended by `haze_mask`; the copy is taken where the particles are
+  drawn, so the grass and the fire stay in it (the original's, made before the water, loses them).
 
 ## Vegetation sprites and terrain detail
 
