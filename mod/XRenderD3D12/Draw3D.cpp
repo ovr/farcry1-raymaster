@@ -985,6 +985,16 @@ void CD3D12Renderer::DrawLeafItem(const SRenderItem &it)
   }
   case eDC_Modulate:
   {
+    // A material's opacity below 1 makes the decal transparent, as for the opaque classes: the
+    // texture laid over the frame by its alpha times the opacity (SRCALPHA, INVSRCALPHA), unlit,
+    // not multiplied in. Research's sign "SUB-LEVEL 1" (black, its letters in the alpha, opacity
+    // 0.15) leaves its 10 x 5 m of the wall lit with light letters, as in the original.
+    if (fOpacity < 1.0f)
+    {
+      Set4(dc.vColor, 1, 1, 1, fOpacity * std::clamp(pObj->m_Color.a, 0.0f, 1.0f));
+      Key.nState = GS_BLSRC_SRCALPHA | GS_BLDST_ONEMINUSSRCALPHA;
+      break;
+    }
     // The texture multiplied into the frame (DESTCOLOR, ZERO), no depth writes; an object fading
     // out (its colour's alpha a below 1) fades the decal towards white: saturate(texture + 1 - a).
     dc.nFlags2 |= DF2_MODULATE;
@@ -1600,6 +1610,15 @@ void CD3D12Renderer::DumpItem(int nIndex, const SRenderItem &it, int eList)
     {
       const float *uv = (const float *)pVB->m_VS[VSF_GENERAL].m_VData + 2 * (size_t)pC->nFirstVertId;
       fprintf(f, ", first (%g %g)", uv[0], uv[1]);
+      // Where the chunk's light lies in the map: the box of its coordinates.
+      float vMin[2] = { uv[0], uv[1] }, vMax[2] = { uv[0], uv[1] };
+      for (int i = 1; i < pC->nNumVerts && pC->nFirstVertId + i < pVB->m_NumVerts; i++)
+        for (int c = 0; c < 2; c++)
+        {
+          vMin[c] = std::min(vMin[c], uv[2 * i + c]);
+          vMax[c] = std::max(vMax[c], uv[2 * i + c]);
+        }
+      fprintf(f, ", box (%g %g) to (%g %g)", vMin[0], vMin[1], vMax[0], vMax[1]);
     }
     fprintf(f, "\n");
   }

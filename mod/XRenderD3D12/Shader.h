@@ -67,7 +67,7 @@ enum EDrawClass
   eDC_FogLayer,           //!< the cap of a fog volume (its layer), blended with the volume's fog
   eDC_ScopeLens,          //!< the glass of a weapon's scope (r_ScopeLens_fx): the scene seen through it, blended
   eDC_Flare,              //!< a flare (its Flare element; the sun's): drawn by the flare pass (Flares.cpp)
-  eDC_Modulate,           //!< a decal multiplied into the frame (DESTCOLOR, ZERO): the texture, fading to white with the object
+  eDC_Modulate,           //!< a decal multiplied into the frame (DESTCOLOR, ZERO): the texture, fading to white with the object; with a material opacity below 1 laid over by its alpha times it instead
   eDC_TerrainLight,       //!< the terrain under dynamic lights (triangles of a sector near them): their light alone, added
   eDC_ShadowOnly,         //!< not seen, only in the shadow maps: it casts its shadow (TemplRefrEnvCM)
   eDC_ProcFlare,          //!< a glow around the surface facing the camera, added (FlareProc; Flares.cpp)
