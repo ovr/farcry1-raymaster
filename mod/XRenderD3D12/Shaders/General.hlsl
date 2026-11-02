@@ -613,6 +613,29 @@ float4 Bubble(SVertexOutput In)
   return float4(c, (1 - abs(dot(I, N))) * g_Draw.vParams0.x + g_Draw.vParams0.y + fGlow);
 }
 
+//! Lava (XR_FX_LAVA; LavaVolume, the original's CGVProgLava and CGRCLava). b = (dot(world pos, vTexGenU), dot(..,
+//! vTexGenV)) the position in the object's space by its planes (an eighth of it, times TillingAmount); the ripple
+//! r: WaterBump's normal map tex1 at b + vParams2.xy, xy as the original's du/dv map (rg * 2 - 1); the glow map
+//! tex2 (defaults/white_plain_d, a noise of greens) at b + vParams2.zw + r * vParams3.xy, its green g making
+//! k = (2 (g - 0.5) - 0.75) * 4. The texture tex0 at (uv0 + vParams0.zw) * vParams0.xy (it flows with time) under
+//! the lava colour L = vParams1.rgb: f = saturate(k L + L / 2), f = saturate(f^2 + L / 2), then twice lerp(f,
+//! (texture * f)^2 * 4, vParams1.w) (the overlay; twice as the original's last instruction, _x2: its colour is
+//! above white where the glow map is greenest, which the HDR target keeps); opaque, unlit.
+float4 Lava(SVertexOutput In)
+{
+  float4 vWorld = float4(In.vWorldPos, 1);
+  float2 b = float2(dot(vWorld, g_Draw.vTexGenU), dot(vWorld, g_Draw.vTexGenV));
+  float2 r = SampleTexture(g_Draw.nTex1, XR_SAMPLER_LINEAR_WRAP, b + g_Draw.vParams2.xy).rg * 2 - 1;
+  float g = SampleTexture(g_Draw.nTex2, XR_SAMPLER_LINEAR_WRAP, b + g_Draw.vParams2.zw + r * g_Draw.vParams3.xy).g;
+  float k = (2 * (g - 0.5) - 0.75) * 4;
+  float3 vTex = SampleTexture(g_Draw.nTex0, g_Draw.nSamplers & 15, (In.vTex0 + g_Draw.vParams0.zw) * g_Draw.vParams0.xy).rgb;
+  float3 L = g_Draw.vParams1.rgb;
+  float3 f = saturate(k * L + 0.5 * L);
+  f = saturate(f * f + 0.5 * L);
+  float3 o = vTex * f;
+  return float4(2 * lerp(f, o * o * 4, g_Draw.vParams1.w), 1);
+}
+
 //! DF2_SHADER_FX: the mode vParams3.w; fogged with DF_FOG (towards black with DF2_FOG_BLACK).
 float4 ShaderFx(SVertexOutput In)
 {
@@ -643,6 +666,9 @@ float4 ShaderFx(SVertexOutput In)
     break;
   case XR_FX_IRIDESCENCE:
     vColor = Iridescence(In);
+    break;
+  case XR_FX_LAVA:
+    vColor = Lava(In);
     break;
   default:
     vColor = Bubble(In);

@@ -106,6 +106,8 @@ instructions and is not committed (git-ignored). The references of the modules a
   off in `system.cfg` (e.g. `e_shadow_maps 1; e_stencil_shadows 1`) go in front of the `map`
   command in `XRENDERTRACED_EXEC`; the game is stopped by killing it, so `system.cfg` stays as it is.
   The commands are split at every `;`, so a script command (`#System:LogAlways(...)`) has none.
+  The game's console variable `xrt_Exec` takes the same commands at a frame of a demo (e.g.
+  `--exec-at 3499 "xrt_Exec frame"` captures frame 3500 of a time demo).
 - The tracer's other variables and console commands (captures, the hooks of the engine's
   interfaces, probes, the Direct3D 9 draw log): `mod/XRenderD3D9Traced/README.md`.
 - DPI: `FarCry.exe` does not declare DPI awareness, so at a Windows display scale above 100 % the
@@ -232,8 +234,9 @@ instructions and is not committed (git-ignored). The references of the modules a
   variables: its radiance cache, checkerboard and denoisers, NVIDIA NRD or its own); the statistics
   (`r_Stats`, `r_DisplayInfo`, the engine's frame profiler, `d3d12_GpuTimes`, `d3d12_FrameLog`,
   `d3d12_CpuSamples`, `d3d12_DumpFrame`);
-  the water (`d3d12_WaterDebug`, `r_WaterReflections`); the far vegetation sprites and the
-  terrain's detail layers. The game's menu gets the renderer's options from the patches in
+  the water (`d3d12_WaterDebug`, `r_WaterReflections`); the templates with shaders of their own
+  (`TemplateFx.cpp`, Volcano's lava `LavaVolume`) and the fog of what is added; the far vegetation
+  sprites and the terrain's detail layers. The game's menu gets the renderer's options from the patches in
   `assets/scripts` (HDR, ambient occlusion, ray traced reflections, path tracing in Advanced Video
   Options),
   greyed out with another renderer.

@@ -89,7 +89,7 @@ typedef float float4x4_t[16];
 #define DF2_FOG_BLACK       0x00000008  //!< with DF_FOG: fogged towards black (an additive pass)
 #define DF2_FOG_VOLUME      0x00000010  //!< the fog of a fog volume over an object in it: rgb = vColor.rgb, a = FogVolumeAlpha (General.hlsl; vParams0: x the layer's height, y ln 100 / (2 * fog distance), z 1 for the volume's cap, w 1: times the alpha after the alpha test)
 #define DF2_HEAT            0x00000020  //!< heat vision: the colour before the fog through HeatVision (Common.hlsli) with vHeat
-#define DF2_SHADER_FX       0x00000040  //!< a template's shader of its own in place of the shading (ShaderFx, General.hlsl), the mode vParams3.w (XR_FX_*): the pictures of the scene (the glass of a scope: the scene copy tex0 around the middle of the screen; a mirror: tex0 projected by mParams0; heat haze: the scene copy rippled; bump offset: the scene copy moved by the normal map tex1, + tex2) and the special lighting of the templates (rainbow, membrane, cartoon, fur, iridescence, bubble); nothing else applies but the fog (DF_FOG, towards black with DF2_FOG_BLACK)
+#define DF2_SHADER_FX       0x00000040  //!< a template's shader of its own in place of the shading (ShaderFx, General.hlsl), the mode vParams3.w (XR_FX_*): the pictures of the scene (the glass of a scope: the scene copy tex0 around the middle of the screen; a mirror: tex0 projected by mParams0; heat haze: the scene copy rippled; bump offset: the scene copy moved by the normal map tex1, + tex2) and the special lighting of the templates (rainbow, membrane, cartoon, fur, iridescence, bubble) and the lava; nothing else applies but the fog (DF_FOG, towards black with DF2_FOG_BLACK)
 #define XR_FX_SCOPE         0
 #define XR_FX_MIRROR        1
 #define XR_FX_HAZE          2
@@ -100,6 +100,7 @@ typedef float float4x4_t[16];
 #define XR_FX_FUR           7   //!< also in the vertex shader: the position vParams0.x out along the normal (a shell)
 #define XR_FX_IRIDESCENCE   8
 #define XR_FX_BUBBLE        9   //!< also in the vertex shader: the position out along the normal by a gradient noise
+#define XR_FX_LAVA          10
 #define DF2_MODULATE        0x00000080  //!< a decal multiplied into the frame (DESTCOLOR, ZERO): rgb = saturate(rgb + vAddColor.w), a = 1, fogged towards white
 #define DF2_PROJECTOR       0x00000100  //!< a projected light's pass: the colour (with the specular) times the cube g_Cubes[nTex5] at float4(world pos, 1) * mParams0 (the light's m_TextureMatrix)
 #define DF2_TERRAIN_LIGHT   0x00000200  //!< the terrain under dynamic lights: tex0 rgb as 0.75 * rgb + 0.25; with DF_PIXEL_LIGHTING point lights fall off as saturate(1 - (d * vLightAtten.w)^2) (linearly with DF2_PROJECTOR)

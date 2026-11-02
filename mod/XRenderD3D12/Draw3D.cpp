@@ -1274,8 +1274,13 @@ void CD3D12Renderer::DrawLeafItem(const SRenderItem &it)
     const bool bBlended = (Key.nState & GS_BLEND_MASK) != 0;
     Key.nState = bBlended ? GS_BLSRC_SRCALPHA | GS_BLDST_ONE : GS_BLSRC_ONE | GS_BLDST_ONE | GS_DEPTHFUNC_EQUAL;
   }
+  // An added draw fogged towards black (as the sprites, DrawSprites).
   if (m_bFog)
+  {
     dc.nFlags |= DF_FOG;
+    if ((Key.nState & GS_BLDST_MASK) == GS_BLDST_ONE)
+      dc.nFlags2 |= DF2_FOG_BLACK;
+  }
   // The picture of a far vegetation sprite: where the object is, whatever the texture's alpha.
   if (m_bSpritePass)
     dc.nFlags |= DF_ALPHA_ONE;
@@ -2027,8 +2032,15 @@ void CD3D12Renderer::DrawSprites()
       dc.nTex0 = pTex->GetSRV();
       dc.nSamplers = pTex->GetSampler();
     }
+    // Fog: an added one (fire, smoke, glows) fades towards black. Towards the fog's colour each of its quads would
+    // add that colour over all of it, also where its texture is black: Volcano's smoke over the lava (ONE, ONE,
+    // dozens of quads) was white.
     if (m_bFog && !bHaze)
+    {
       dc.nFlags |= DF_FOG;
+      if ((Key.nState & GS_BLDST_MASK) == GS_BLDST_ONE)
+        dc.nFlags2 |= DF2_FOG_BLACK;
+    }
     if (m_pFrameDump)
     {
       const UCol &c = Verts[Sprites[nNext - 1].nFirstVert].color;

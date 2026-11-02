@@ -147,7 +147,8 @@ constexpr STemplateEntry s_Templates[] =
   { "templtextureshiftst_2t",          "",                              eS_Opaque,                kOpaque2,                               0,              eDC_Opaque,           eCULL_Back },
   { "templtextureshiftst_2t_alphablend", "",                            eS_Opaque,                kOpaque2,                               0,              eDC_Opaque,           eCULL_Back },
   { "templdeform",                     "",                              eS_Opaque,                kOpaque2,                               0,              eDC_Opaque,           eCULL_Back },
-  { "lavavolume",                    "",                              eS_Opaque,                kOpaque2,                               0,              eDC_Opaque,           eCULL_Back },
+  // LavaVolume (the lava of Volcano): a shader of its own (TemplateFx.cpp), opaque and unlit.
+  { "lavavolume",                      "",                              eS_Opaque,                kOpaque2,                               0,              eDC_ShaderFx,         eCULL_Back },
   // Glass: drawn blended so that what is behind shows (alpha: the opacity).
   { "templglasscm",                    "templglasscm_fp",               eS_Opaque,                kOpaque2,                               0,              eDC_AlphaBlend,       eCULL_Back },
   { "templglasscm_fp",                 "",                              eS_Opaque,                kOpaque2,                               0,              eDC_AlphaBlend,       eCULL_Back },
@@ -371,7 +372,51 @@ constexpr STemplateFx s_TemplateFx[] =
   { "templfurrendering",               ETemplateFx::Fur },
   { "templiridescence_ps20",           ETemplateFx::Iridescence },
   { "templbubble_ps20",                ETemplateFx::Bubble },
+  { "lavavolume",                      ETemplateFx::Lava },
 };
+
+//! The public parameters of a template (GetPublicParams): the engine sets a material's values only for
+//! the names a template lists, so a template whose drawing reads them lists them, with their defaults.
+struct SPublicParam
+{
+  std::string_view Template;
+  const char *szName;
+  float fDefault;
+};
+
+constexpr SPublicParam s_PublicParams[] =
+{
+  { "lavavolume", "TillingAmountX", 2.0f },
+  { "lavavolume", "TillingAmountY", 2.0f },
+  { "lavavolume", "BumpAmountX", 0.02f },
+  { "lavavolume", "BumpAmountY", 0.02f },
+  { "lavavolume", "MoveSpeedX", 0.2f },
+  { "lavavolume", "MoveSpeedY", 0.2f },
+  { "lavavolume", "ColorR", 0.8f },
+  { "lavavolume", "ColorG", 0.55f },
+  { "lavavolume", "ColorB", 0.0f },
+  { "lavavolume", "OverlayAmount", 0.32f },
+  { "lavavolume", "DetailTillingAmountX", 1.0f },
+  { "lavavolume", "DetailTillingAmountY", 1.0f },
+  { "lavavolume", "DetailMoveSpeedX", 0.2f },
+  { "lavavolume", "DetailMoveSpeedY", 0.2f },
+  { "lavavolume", "WaveAmplitude", 0.1f },
+};
+
+void AddPublicParams(TArray<SShaderParam> &Params, std::string_view Template)
+{
+  for (const SPublicParam &P : s_PublicParams)
+  {
+    if (P.Template != Template)
+      continue;
+    SShaderParam sp;
+    strncpy(sp.m_Name, P.szName, sizeof(sp.m_Name) - 1);
+    sp.m_Name[sizeof(sp.m_Name) - 1] = 0;
+    sp.m_Type = eType_FLOAT;
+    sp.m_Value.m_Float = P.fDefault;
+    Params.AddElem(sp);
+  }
+}
 
 //! An engine shader (EF_LoadShader by name).
 struct SEngineEntry
@@ -1162,6 +1207,7 @@ CShader *CShaderManager::GetTemplate(const char *szName, uint64 nMaskGen)
   else
   {
     pSH = Create(R.Name, EShaderKind::Template, R.Props, nullptr, nMaskGen);
+    AddPublicParams(pSH->m_PublicParams, R.Name);
     m_ByName.emplace(R.Name, pSH);
   }
   m_TemplateNames.emplace(std::move(Key), pSH);
@@ -1205,6 +1251,7 @@ CShader *CShaderManager::LoadMaterial(const char *szName, const char *szTemplate
   if (bBump)
     Props.nFlags |= EF_NEEDTANGENTS;
   CShader *pSH = Create(std::move(ShaderName), EShaderKind::Material, Props, pTempl, nMaskGen);
+  AddPublicParams(pSH->m_PublicParams, pSH->m_Props.Template);
   m_Materials.emplace(std::move(Key), pSH);
   return pSH;
 }

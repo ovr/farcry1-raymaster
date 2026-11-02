@@ -901,6 +901,23 @@ and lists theirs (`NamesObjects`).
   the dot products at the vertices; the original draws neither the fur nor the wing (its trace), ours
   draws what their scripts set out. `TemplDecalLight_SpecAdd` is lit as the fixed function lights a
   material: its texture plus its gloss map, times the light, with the material's highlights.
+- The lava of Volcano (`LavaVolume`, `TemplateFx.cpp`, `Lava` in `General.hlsl`; step 255): opaque
+  and unlit, the original's program: the material's texture flowing with time under its lava colour,
+  brighter where the glow map (`Defaults/white_plain_d`, a noise of greens, rippled by `WaterBump`)
+  is greener, mixed by `OverlayAmount` and doubled (the original's last instruction; in the HDR
+  target the lava's brightest parts are above white). Before it the lava was drawn as lit ground
+  with the terrain's rock: grey. Its colour, speeds and tiling come from the material's public
+  parameters, which the engine sets only for the names the template lists (`GetPublicParams`):
+  `s_PublicParams` (`Shader.cpp`) lists them for `LavaVolume`; the other templates list none (their
+  materials' parameters, where a material has any, do not arrive: the template's defaults are used).
+- What is added (blending ONE, ONE or SRCALPHA, ONE: fire, glows, the smoke of Volcano's lava) is
+  fogged towards black (`DF2_FOG_BLACK`), particles and materials alike: towards the fog's colour
+  each quad added that colour over all of its rectangle, also where its texture is black, and
+  dozens of big smoke quads over Volcano's lava were white rectangles. The original draws its
+  particles unfogged; their smoke is as bright as the original's in the game's picture
+  (`r_HDRRendering 0`: the light the particles add in the lava yard, averaged over 37 frames of
+  the time demo, 4.08 against 4.07 of 255). In the original's HDR mode its particles add next to
+  nothing; ours keep the game's picture there too.
 
 ## Vegetation sprites and terrain detail
 

@@ -59,6 +59,9 @@ reference of the rest.
   (e.g. `capture; quit` in `XRENDERTRACED_EXEC_LEVEL` for the shutdown; in the menu it never ends
   and the log grows by gigabytes), `frame` only the next frame, as `XRENDERTRACED_CAPTURE` does
   (e.g. the start-up videos with `XRENDERTRACED_EXEC_FRAME=20`).
+  The game's console variable `xrt_Exec` takes the same commands from the game's console: set to a
+  command, it runs after that frame and is cleared (e.g. a demo's `--exec-at 3499 "xrt_Exec frame"`
+  captures frame 3500 of a time demo, where no fixed frame of the renderer is known in advance).
 - The screen effect calls (`CREScreenProcess::mfSetParameter`, `mfGetParameter`) are written as
   `[screenfx]` lines (the first 8 of each parameter, then every 50th); `XRENDERTRACED_SCREENFX_ALL=1`
   writes all of them, with the timer's time. `XRENDERTRACED_SCREENFX_WATCH=8.24,8.30` reads those

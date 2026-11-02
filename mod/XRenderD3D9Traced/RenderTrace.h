@@ -22,6 +22,9 @@ extern int CV_xrt_Trace;
 extern int CV_xrt_TraceCalls;
 //! Call statistics are written for the first N frames and then every 500th frame.
 extern int CV_xrt_TraceFrames;
+//! xrt_Exec: the tracer's commands (as XRENDERTRACED_EXEC) from the game's console, run after the
+//! frame and cleared; NULL before the console variables are registered.
+extern ICVar *g_pXrtExec;
 
 void Trace_Open(const char *szFileName);
 void Trace_Close();
