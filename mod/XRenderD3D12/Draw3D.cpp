@@ -267,6 +267,8 @@ void CD3D12Renderer::BeginScene3D()
   }
   m_NearestProj = MakeNearestProjection(m_Camera);
   m_nSceneSkyBox = -1;
+  m_fSceneSkyTurn[0] = 1;
+  m_fSceneSkyTurn[1] = 0;
   InvalidateFrameConstants();
 
   // The main view of the game clears colour and depth before its scene (with an upscaler, its
@@ -1544,6 +1546,9 @@ void CD3D12Renderer::DumpItem(int nIndex, const SRenderItem &it, int eList)
     fprintf(m_pFrameDump.get(), "    sky: water level %.2f stretching %.2f alpha %.2f sphere list %d fog layers %d %d portals %d\n", pSky->m_fTerrainWaterLevel,
             pSky->m_fSkyBoxStretching, pSky->m_fAlpha, pSky->m_nSphereListId, pSky->m_parrFogLayer ? pSky->m_parrFogLayer->Count() : -1,
             pSky->m_parrFogLayer2 ? pSky->m_parrFogLayer2->Count() : -1, nPortals);
+    const float *m = pObj->m_Matrix.data;
+    fprintf(m_pFrameDump.get(), "    sky matrix: (%.4f %.4f %.4f) (%.4f %.4f %.4f) (%.4f %.4f %.4f)\n", m[0], m[1], m[2], m[4], m[5], m[6], m[8], m[9],
+            m[10]);
   }
 
   // The tangent frames of the video copy (bump mapping): how many, of how many vertices.
@@ -1810,11 +1815,32 @@ void CD3D12Renderer::DrawSkyItem(const SRenderItem &it)
     {  32,  32, -32,  32, 1, 2 },
   };
 
+  // The level's sky box angle (SkyBoxAngle of the mission) is the object's rotation about z (its
+  // matrix, row vectors: x goes to its first row). The box above and the layers below are laid out as
+  // the rotation of 90 degrees turns them (x to -y, y to x: Training's and Carrier's angle), so they
+  // are turned by that one undone and the object's: Turn = R(90)^T R(object), rows (r1, -r0, r2) of
+  // the object's matrix; the identity at 90 degrees.
+  const float *m = it.pObj->m_Matrix.data;
+  Matrix44 Turn;
+  Turn.SetIdentity();
+  for (int j = 0; j < 3; j++)
+  {
+    Turn.data[0 + j] = m[4 + j];
+    Turn.data[4 + j] = -m[0 + j];
+    Turn.data[8 + j] = m[8 + j];
+  }
+  // At 90 degrees (the float's cos 90 is not 0) exactly the identity: those levels' frames as before.
+  if (std::abs(Turn.data[0] - 1) < 1e-5f && std::abs(Turn.data[1]) < 1e-5f)
+    Turn.SetIdentity();
+  m_fSceneSkyTurn[0] = Turn.data[0];
+  m_fSceneSkyTurn[1] = Turn.data[1];
+
   // The view without its translation; no depth test or writes, no fog; texture * (1, 1, 1, alpha),
   // blended below alpha 1.
   Matrix44 View = m_CameraView;
   View.data[12] = View.data[13] = View.data[14] = 0;
-  const Matrix44 ViewProj = View * m_SkyProjMatrix;
+  const Matrix44 ViewProj = Turn * View * m_SkyProjMatrix;
+  const Matrix44 PrevViewProj = Turn * m_PrevSkyViewProj;
   const float fAlpha = std::clamp(pSky->m_fAlpha, 0.0f, 1.0f);
   m_fSceneSkyZ1 = z1;
   m_fSceneSkyAlpha = fAlpha;
@@ -1836,7 +1862,7 @@ void CD3D12Renderer::DrawSkyItem(const SRenderItem &it)
     SDrawConstants dc = DefaultDrawConstants();
     memcpy(dc.mWorldViewProj, ViewProj.data, sizeof(dc.mWorldViewProj));
     if (m_bUpscaling)
-      memcpy(dc.mPrevWorldViewProj, m_PrevSkyViewProj.data, sizeof(dc.mPrevWorldViewProj));
+      memcpy(dc.mPrevWorldViewProj, PrevViewProj.data, sizeof(dc.mPrevWorldViewProj));
     dc.nFlags = DF_TEX0;
     dc.nFlags2 = bSkyGlow ? DF2_SKY_GLOW : 0;
     dc.nTex0 = pTex->GetSRV();
@@ -1869,7 +1895,8 @@ void CD3D12Renderer::DrawSkyItem(const SRenderItem &it)
   }
 
   // The layers over the box, in the sky's own axes: the world's turned a quarter about z (x_sky =
-  // -y, y_sky = x; the box's top above has u = (x_sky + 32) / 64, v = (y_sky + 32) / 64 in them). A
+  // -y, y_sky = x; the box's top above has u = (x_sky + 32) / 64, v = (y_sky + 32) / 64 in them),
+  // turned on by Turn as the box (the sky's axes are the object's: x_sky its first row). A
   // dome around the camera, its top at z = 8 over a ring of radius 16 at z = 0 and one of radius 32
   // at z = -8, in 9 segments of 40 degrees from the y_sky axis towards x_sky; white, opaque up to the
   // inner ring and transparent at the outer one (the dome goes on to radius 48 at z = -16, all of it
@@ -1912,7 +1939,7 @@ void CD3D12Renderer::DrawSkyItem(const SRenderItem &it)
     SDrawConstants dc = DefaultDrawConstants();
     memcpy(dc.mWorldViewProj, ViewProj.data, sizeof(dc.mWorldViewProj));
     if (m_bUpscaling)
-      memcpy(dc.mPrevWorldViewProj, m_PrevSkyViewProj.data, sizeof(dc.mPrevWorldViewProj));
+      memcpy(dc.mPrevWorldViewProj, PrevViewProj.data, sizeof(dc.mPrevWorldViewProj));
     dc.nFlags = DF_TEX0 | DF_VCOLOR;
     dc.nFlags2 = bSkyGlow ? DF2_SKY_GLOW : 0;
     dc.nTex0 = pTex->GetSRV();

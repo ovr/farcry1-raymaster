@@ -958,8 +958,9 @@ bool CD3D12Renderer::SetupWaterDraw(SPipelineKey &Key, SDrawConstants &dc, const
     dc.vParams1[3] = 1;
     memcpy(dc.mParams0, m_ReflectionViewProj.data, sizeof(dc.mParams0));
   }
-  // How much the ripple finer than a pixel blurs the reflection (and turns the fresnel term).
-  Set4(dc.vTexGenU, std::max(CV_d3d12_WaterReflectionBlur, 0.0f), 0, 0, 0);
+  // How much the ripple finer than a pixel blurs the reflection (and turns the fresnel term); the sky
+  // box's turn (the level's sky box angle, DrawSkyItem).
+  Set4(dc.vTexGenU, std::max(CV_d3d12_WaterReflectionBlur, 0.0f), m_fSceneSkyTurn[0], m_fSceneSkyTurn[1], 0);
   // The reflection by rays, with this frame's scene for them.
   if (CV_d3d12_RTReflections > 0 && !m_bEnvCubePass && m_pRayScene && m_pRayScene->GetTLAS())
   {

@@ -537,6 +537,7 @@ public:
   int m_nSceneSkyBox = -1;                  //!< the m_SkyBoxes entry the scene's sky drew, -1 none (the water reflects it)
   float m_fSceneSkyZ1 = 0;                  //!< where its sides end (DrawSkyItem)
   float m_fSceneSkyAlpha = 1;
+  float m_fSceneSkyTurn[2] = { 1, 0 };     //!< the first row of its Turn (DrawSkyItem: the level's sky box angle; the water reflects it so)
   Matrix44 m_NearestProj;                   //!< FOB_NEAREST objects
 
   //////////////////////////////////////////////////////////////////////////
