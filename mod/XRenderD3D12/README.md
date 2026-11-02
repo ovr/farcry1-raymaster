@@ -313,6 +313,18 @@ reference of its features and console variables.
   0, e.g. `-DemoArgs '--exec-at 1 "d3d12_PixelLighting 0"'`): the new paths are branches of their
   own, so the old ones compile instruction for instruction as before (dxc reassociates the
   `fast` arithmetic of a branch that is changed).
+- The tangent frames of bump mapping (`CLeafBuffer::CreateTangBuffer`, `TangentFrame.h`): the
+  tangent and the binormal from the triangles' texture coordinates, the normal the vertex's own
+  while it is within 60 degrees of its triangles' normal, else theirs (summed by the angle at the
+  vertex, as the SDK's `TangentSpaceCalculation.h` takes it). The game's meshes carry one normal
+  per position, and one exported without split vertices at a box's edges has the normal of one
+  side on the corners of the next: on the shelves of Training's store (`shelve_indoor_*.cgf`,
+  `TemplBumpSpec_GlossAlpha`) two thirds of the faces' corners (816 of 1224) have a normal at
+  right angles to their face. With that normal in the frame the normal map's normal lay in the face's plane, and the
+  path tracer, which turns it to the side of the triangle the camera sees, turned it up and down
+  from a pixel to the next: noise all over the shelves (normals turned over on 5.8 % of a shelf's
+  pixels, 0.6 % now). The raster lights them with no lamp, so its frames were the same. Meshes
+  whose normals fit keep their frames bit for bit (unit tests `TangentFrame_*`).
 
 ## Depth prepass
 

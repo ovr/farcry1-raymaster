@@ -15,6 +15,7 @@
 #include "D3D12Upload.h"
 #include "Geometry.h"
 #include "Shader.h"
+#include "TangentFrame.h"
 #include <CryCompiledFile.h>
 
 #include <array>
@@ -1199,81 +1200,36 @@ bool CLeafBuffer::CreateTangBuffer()
   if (!pF || pF->nPos < 0 || nVerts <= 0 || !GeometryImpl::ReserveVertices(pVB, VSF_TANGENTS, nVerts))
     return false;
 
+  // The frames (TangentFrame.h): the vertices' own normals are the format's, else the ones UpdateCustomLighting keeps.
   const uint8 *p = (const uint8 *)pVB->m_VS[VSF_GENERAL].m_VData;
-  std::vector<float> Acc((size_t)nVerts * 9, 0.f);   // tangent, binormal, face normal sums
-  const std::vector<uint16> Tris = TriangleList(this);
-  for (size_t t = 0; t + 2 < Tris.size(); t += 3)
+  TangentFrame::SMesh Mesh;
+  Mesh.pVerts = p;
+  Mesh.nStride = (size_t)pF->nSize;
+  Mesh.nPos = pF->nPos;
+  Mesh.nTC = pF->nTC;
+  if (pF->nNormal >= 0)
   {
-    const int i0 = Tris[t], i1 = Tris[t + 1], i2 = Tris[t + 2];
-    if (i0 >= nVerts || i1 >= nVerts || i2 >= nVerts)
-      continue;
-    const float *p0 = (const float *)(p + (size_t)i0 * pF->nSize + pF->nPos);
-    const float *p1 = (const float *)(p + (size_t)i1 * pF->nSize + pF->nPos);
-    const float *p2 = (const float *)(p + (size_t)i2 * pF->nSize + pF->nPos);
-    float uv[3][2] = {};
-    if (pF->nTC >= 0)
-    {
-      memcpy(uv[0], p + (size_t)i0 * pF->nSize + pF->nTC, 8);
-      memcpy(uv[1], p + (size_t)i1 * pF->nSize + pF->nTC, 8);
-      memcpy(uv[2], p + (size_t)i2 * pF->nSize + pF->nTC, 8);
-    }
-    const float e1[3] = { p1[0] - p0[0], p1[1] - p0[1], p1[2] - p0[2] };
-    const float e2[3] = { p2[0] - p0[0], p2[1] - p0[1], p2[2] - p0[2] };
-    const float du1 = uv[1][0] - uv[0][0], dv1 = uv[1][1] - uv[0][1];
-    const float du2 = uv[2][0] - uv[0][0], dv2 = uv[2][1] - uv[0][1];
-    const float fDet = du1 * dv2 - du2 * dv1;
-    const float r = fabsf(fDet) > 1e-12f ? 1.f / fDet : 0.f;
-    float T[3], B[3], N[3];
-    for (int k = 0; k < 3; k++)
-    {
-      T[k] = (e1[k] * dv2 - e2[k] * dv1) * r;
-      B[k] = (e2[k] * du1 - e1[k] * du2) * r;
-    }
-    Cross(e1, e2, N);
-    for (const int v : { i0, i1, i2 })
-    {
-      float *a = &Acc[(size_t)v * 9];
-      for (int k = 0; k < 3; k++)
-      {
-        a[k] += T[k];
-        a[3 + k] += B[k];
-        a[6 + k] += N[k];
-      }
-    }
+    Mesh.pNormals = p + pF->nNormal;
+    Mesh.nNormalStride = (size_t)pF->nSize;
+    Mesh.nNormals = nVerts;
   }
+  else if (m_TempNormals)
+  {
+    Mesh.pNormals = (const uint8 *)m_TempNormals;
+    Mesh.nNormalStride = sizeof(Vec3);
+    Mesh.nNormals = std::min(nVerts, m_SecVertCount);
+  }
+  const std::vector<uint16> Tris = TriangleList(this);
+  std::vector<TangentFrame::SFrame> Frames((size_t)nVerts);
+  TangentFrame::Build(Mesh, nVerts, Tris.data(), Tris.size(), Frames.data());
 
   auto *pOut = (SPipTangents *)pVB->m_VS[VSF_TANGENTS].m_VData;
   for (int v = 0; v < nVerts; v++)
   {
-    float *a = &Acc[(size_t)v * 9];
-    float N[3] = { a[6], a[7], a[8] };
-    if (pF->nNormal >= 0)
-      memcpy(N, p + (size_t)v * pF->nSize + pF->nNormal, 12);
-    else if (m_TempNormals && v < m_SecVertCount)
-      memcpy(N, &m_TempNormals[v], 12);
-    if (Normalize3(N) <= 1e-12f)
-    {
-      N[0] = 0; N[1] = 0; N[2] = 1;
-    }
-    float T[3] = { a[0], a[1], a[2] };
-    const float d = T[0] * N[0] + T[1] * N[1] + T[2] * N[2];
-    for (int k = 0; k < 3; k++)
-      T[k] -= N[k] * d;
-    if (Normalize3(T) <= 1e-12f)
-    {
-      const float x[3] = { 1, 0, 0 }, y[3] = { 0, 1, 0 };
-      Cross(fabsf(N[0]) < 0.9f ? x : y, N, T);
-      Normalize3(T);
-    }
-    float B[3] = { a[3], a[4], a[5] };
-    float BN[3];
-    Cross(N, T, BN);
-    if (BN[0] * B[0] + BN[1] * B[1] + BN[2] * B[2] < 0)
-      for (float &f : BN)
-        f = -f;
-    pOut[v].m_Tangent.Set(T[0], T[1], T[2]);
-    pOut[v].m_Binormal.Set(BN[0], BN[1], BN[2]);
-    pOut[v].m_TNormal.Set(N[0], N[1], N[2]);
+    const TangentFrame::SFrame &f = Frames[(size_t)v];
+    pOut[v].m_Tangent.Set(f.T[0], f.T[1], f.T[2]);
+    pOut[v].m_Binormal.Set(f.B[0], f.B[1], f.B[2]);
+    pOut[v].m_TNormal.Set(f.N[0], f.N[1], f.N[2]);
   }
   GeometryImpl::Invalidate(pVB->m_VS[VSF_TANGENTS]);
   if (pVB == m_pSecVertBuffer)
