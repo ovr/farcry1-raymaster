@@ -141,14 +141,33 @@ void CD3D12Renderer::EndMainScene()
     // The volumetric light's froxels (Volumetric.cpp), which the resolve takes.
     if (UpdateVolumetricLight(m_pDevice->GetMainDepth(), m_pDevice->GetMainDepthSRVFormat()))
       GpuSection("hdr");
-    ResolveHdr(m_Hdr.nHdrColorSRV, m_Hdr.pHdrColor.Get(), m_pDevice->GetWidth(), m_pDevice->GetHeight(), false);
+    ResolveHdr(m_Hdr.nHdrColorSRV, m_Hdr.pHdrColor.Get(), m_pDevice->GetWidth(), m_pDevice->GetHeight(), false, m_pDevice->GetMainDepth(),
+               m_pDevice->GetMainDepthSRVFormat());
   }
   if (m_bHdrScene && m_pFrameDump)
     DumpHdr();
   m_bHdrScene = false;
 }
 
-CD3D12Texture *CD3D12Renderer::ResolveHdr(int nSceneSRV, ID3D12Resource *pScene, int nWidth, int nHeight, bool bToTexture)
+int CD3D12Renderer::HdrDepthSRV(ID3D12Resource *pDepth, DXGI_FORMAT DepthFormat)
+{
+  if (pDepth != m_Hdr.pDepth.Get())
+  {
+    if (m_Hdr.nDepthSRV >= 0)
+      m_pDescriptors->FreeSRV(m_Hdr.nDepthSRV);
+    m_Hdr.pDepth = pDepth;
+    D3D12_SHADER_RESOURCE_VIEW_DESC SRV = {};
+    SRV.Format = DepthFormat;
+    SRV.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
+    SRV.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+    SRV.Texture2D.MipLevels = 1;
+    m_Hdr.nDepthSRV = pDepth ? m_pDescriptors->AllocSRV(pDepth, &SRV) : -1;
+  }
+  return m_Hdr.nDepthSRV;
+}
+
+CD3D12Texture *CD3D12Renderer::ResolveHdr(int nSceneSRV, ID3D12Resource *pScene, int nWidth, int nHeight, bool bToTexture, ID3D12Resource *pDepth,
+                                          DXGI_FORMAT DepthFormat)
 {
   if (nSceneSRV < 0 || !EnsureHdrTargets(nWidth, nHeight, bToTexture))
   {
@@ -250,10 +269,15 @@ CD3D12Texture *CD3D12Renderer::ResolveHdr(int nSceneSRV, ID3D12Resource *pScene,
   Set4(dc.vParams1, fComp, bAdapted ? 1.0f : 0.0f, fBloom / m_Hdr.Bloom.size(), (float)std::clamp(CV_d3d12_ToneMap, 0, 3));
   Set4(dc.vParams2, CV_d3d12_ToneMapKnee, bHeat ? 1.0f : 0.0f, (float)CV_d3d12_HDRDebug, nLutSRV >= 0 ? 1.0f : 0.0f);
   SetHighlightConstants(dc);
+  // d3d12_HDRDebug 3, the sky mask: white where the depth buffer is at the far plane (nothing but
+  // the sky drawn there), black elsewhere; the depth instead of the volumetric light's.
+  const bool bSkyMask = !bHeat && CV_d3d12_HDRDebug == 3 && HdrDepthSRV(pDepth, DepthFormat) >= 0;
+  if (bSkyMask)
+    dc.nTex5 = (uint32)m_Hdr.nDepthSRV;
   // The volumetric light, this frame's froxels at the depth buffer's depth (Volumetric.cpp). The
   // upscaler's scene depth is readable already (CD3D12Device::EndScene); the back buffer's is
   // bound read only meanwhile.
-  const bool bVolumetric = !bHeat && SetVolumetricConstants(dc);
+  const bool bVolumetric = !bHeat && !bSkyMask && SetVolumetricConstants(dc);
   if (bToTexture)
   {
     DrawHdrPass(m_Hdr.pLdr, dc, 0, m_pDevice->HasLayer() ? m_Hdr.pRatio : nullptr);
@@ -262,9 +286,13 @@ CD3D12Texture *CD3D12Renderer::ResolveHdr(int nSceneSRV, ID3D12Resource *pScene,
   }
   if (bVolumetric)
     SetVolumetricDepthRead(true);
+  else if (bSkyMask)
+    SetDepthRead(pDepth, true);
   DrawHdrToBackBuffer(dc);
   if (bVolumetric)
     SetVolumetricDepthRead(false);
+  else if (bSkyMask)
+    SetDepthRead(pDepth, false);
   return nullptr;
 }
 
@@ -515,6 +543,10 @@ void CD3D12Renderer::ReleaseHdrColor()
     m_pDescriptors->FreeSRV(m_Hdr.nHdrColorSRV);
   m_Hdr.nHdrColorSRV = -1;
   m_Hdr.pHdrColor.Reset();
+  if (m_pDescriptors && m_Hdr.nDepthSRV >= 0)
+    m_pDescriptors->FreeSRV(m_Hdr.nDepthSRV);
+  m_Hdr.nDepthSRV = -1;
+  m_Hdr.pDepth.Reset();
   if (m_pDevice)
     m_pDevice->SetHdrTarget(false);
 }

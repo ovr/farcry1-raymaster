@@ -276,7 +276,11 @@ bool CD3D12Renderer::SetVolumetricConstants(SDrawConstants &dc) const
 
 void CD3D12Renderer::SetVolumetricDepthRead(bool bRead)
 {
-  ID3D12Resource *pDepth = m_Volumetric.pDepth.Get();
+  SetDepthRead(m_Volumetric.pDepth.Get(), bRead);
+}
+
+void CD3D12Renderer::SetDepthRead(ID3D12Resource *pDepth, bool bRead)
+{
   if (!pDepth)
     return;
   if (bRead)

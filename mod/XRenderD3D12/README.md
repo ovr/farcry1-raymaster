@@ -107,7 +107,9 @@ reference of its features and console variables.
     `d3d12_Bloom` is the bloom's strength (0 off), `d3d12_BloomThreshold` the exposed light it
     starts from.
     `d3d12_HDRDebug 1` shows the luminance in bands of 1 EV around middle grey (green), `2` the
-    bloom alone. The frame dump gets the settings, the meter's mean and the adapted EV.
+    bloom alone, `3` the sky mask (white where the depth buffer is at the far plane: nothing but the
+    sky drawn there; for the checks of the HDR test bench). The frame dump gets the settings, the
+    meter's mean and the adapted EV.
   - What the game draws as light sources is brighter in the HDR targets (`IsHdrTarget`: not in
     heat vision), each a factor of white's light, 1 the game's: `d3d12_HDRSun` (8) the sun's
     flare, `d3d12_HDRSky` (2) the sky towards the sun (`DF2_SKY_GLOW`, falling off with the
