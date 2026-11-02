@@ -371,8 +371,8 @@ float4 Output(float2 vPixel)
 {
   float3 f = g_Textures[g_Draw.nTex0].Load(int3(vPixel, 0)).rgb;
   float4 vLayer = g_Textures[g_Draw.nTex1].Load(int3(vPixel, 0));
-  bool bScene = abs(HighlightFingerprint(f) - vLayer.a) <= HIGHLIGHT_TOLERANCE;
-  float3 vRatio = bScene ? max(vLayer.rgb, 1) : 1;
+  bool bScene;
+  float3 vRatio = LayerRatio(f, vLayer, bScene);
   float fPaper = g_Draw.vParams0.x, fPeak = g_Draw.vParams0.y;
   float3 vLight = Decode(f);
   int nDebug = (int)g_Draw.vParams0.w;

@@ -257,6 +257,40 @@ struct SMeterConstants
   XR_UINT4(vTaps);                //!< x the taps a side of a texel (as HDR_LUMINANCE's vParams0.z)
 };
 
+// The HDR statistics (HdrStats.cpp, HdrStats.hlsl; d3d12_DisplayHDR, d3d12_HDRLog): a histogram of the scene's light and
+// counts of the HDR output's nits, words of a buffer the CPU reads D3D12_FRAMES frames later. A sample every
+// XR_HDR_STRIDE pixels across and down.
+#define XR_HDR_STRIDE           2
+#define XR_HDR_HIST_BINS        64          // the histogram's bins of log2 of the light, from XR_HDR_HIST_MIN to XR_HDR_HIST_MAX
+#define XR_HDR_HIST_MIN         (-12)       // (the light outside goes to the first or the last bin)
+#define XR_HDR_HIST_MAX         8
+#define XR_HDR_WEIGHT_ONE       256         // the centre weight 1 in XR_HDR_STAT_LUMA_W and _WEIGHT
+#define XR_HDR_NITS_UNIT        8           // XR_HDR_STAT_OUT_SUM's unit (nits x pixels)
+#define XR_HDR_STAT_LUMA        0                                 // the scene's samples by log2 of their luminance
+#define XR_HDR_STAT_LUMA_W      XR_HDR_HIST_BINS                  // the same, by the meter's centre weight (x XR_HDR_WEIGHT_ONE)
+#define XR_HDR_STAT_MAX         (2 * XR_HDR_HIST_BINS)            // the samples by log2 of their brightest channel
+#define XR_HDR_STAT_SAMPLES     (3 * XR_HDR_HIST_BINS)            // the samples
+#define XR_HDR_STAT_WEIGHT      (XR_HDR_STAT_SAMPLES + 1)         // their weight (x XR_HDR_WEIGHT_ONE)
+#define XR_HDR_STAT_SHOULDER    (XR_HDR_STAT_SAMPLES + 2)         // exposed, the brightest channel above the tone map's knee
+#define XR_HDR_STAT_WHITE       (XR_HDR_STAT_SAMPLES + 3)         // exposed, the brightest channel at the game's white (1) or above
+#define XR_HDR_STAT_SCENE_WORDS (XR_HDR_STAT_SAMPLES + 4)         // the words the histogram's kernel adds to
+#define XR_HDR_STAT_EV          (XR_HDR_STAT_SAMPLES + 4)         // asuint: the EV the samples were exposed with (the adapted and the compensation)
+#define XR_HDR_STAT_METER       (XR_HDR_STAT_SAMPLES + 5)         // asuint: the meter's mean log2 luminance (with the automatic exposure)
+#define XR_HDR_STAT_OUT_PIXELS  (XR_HDR_STAT_SAMPLES + 8)         // the HDR output's samples
+#define XR_HDR_STAT_OUT_SUM     (XR_HDR_STAT_SAMPLES + 9)         // the sum of their brightest channel's nits (x XR_HDR_NITS_UNIT)
+#define XR_HDR_STAT_OUT_MAX     (XR_HDR_STAT_SAMPLES + 10)        // asuint: the most nits of a channel (MaxCLL)
+#define XR_HDR_STAT_OUT_PAPER   (XR_HDR_STAT_SAMPLES + 11)        // the samples whose brightest channel is above paper white (x 1.02)
+#define XR_HDR_STAT_OUT_PEAK    (XR_HDR_STAT_SAMPLES + 12)        // ... is at the peak (95 % of it or more)
+#define XR_HDR_STAT_WORDS       256
+
+//! b0 of the HDR statistics' kernels (HdrStats.hlsl, HdrStats.cpp).
+struct SHdrStatsConstants
+{
+  XR_FLOAT4(vSize);               //!< what is sampled: x width, y height (pixels), z 1 / width, w 1 / height
+  XR_FLOAT4(vParams);             //!< CSHistogram: x the exposure's compensation (EV), y 1: plus the adapted EV (t1), z the light of the tone
+                                  //!< map's knee, w 1: the meter's mean in t2; CSOutput: x paper white, y the peak (nits)
+};
+
 // The texels a side of the water's depth copy in a texel of level 0 of its depth tiles (DepthTiles.hlsl, Water.hlsl)
 #define XR_DEPTH_TILE       8
 

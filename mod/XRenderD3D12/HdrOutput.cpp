@@ -168,6 +168,9 @@ void CD3D12Renderer::DrawHdrOutput()
     return;
   GpuSection("hdr output");
   m_pDevice->BeginOutput();
+  // The HDR statistics' nits of the output (HdrStats.cpp).
+  if (WantHdrStats())
+    DispatchHdrOutputStats(false);
   DrawHdrFullScreen(HdrOutputConstants(Output), 1, Output == EDisplayOutput::Hdr10 ? PIPELINE_COLOR_HDR10 : PIPELINE_COLOR_HDR);
 }
 
@@ -239,6 +242,8 @@ bool CD3D12Renderer::ReadFrameHdr10(void *pDst, int nPitch, int *pWidth, int *pH
   if (!m_HdrOut.pCapture)
     return false;
   m_pDevice->SetFrameReadable(true);
+  if (WantHdrStats())
+    DispatchHdrOutputStats(true);
   DrawHdrPass(m_HdrOut.pCapture, HdrOutputConstants(EDisplayOutput::Hdr10));
   m_pDevice->SetFrameReadable(false);
   m_pDevice->SetBackBufferTargets();

@@ -44,6 +44,8 @@ set(XRENDERD3D12_SOURCES
     Volumetric.cpp
     ColorGrading.cpp
     HdrOutput.cpp
+    HdrStats.cpp
+    HdrStatsMath.h
     Flares.cpp
     Stats.cpp
     CpuSampler.h

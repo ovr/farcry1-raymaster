@@ -395,6 +395,13 @@ void CD3D12Renderer::RegisterVariables()
                      "With d3d12_HDROutput, the light of the frame's white in nits (0: Windows' SDR content brightness of the display)");
   iConsole->Register("d3d12_HDRPeak", &CV_d3d12_HDRPeak, 0.0f, VF_DUMPTODISK,
                      "With d3d12_HDROutput, the most light in nits, where the highlights end (0: the display's peak)");
+  iConsole->Register("d3d12_DisplayHDR", &CV_d3d12_DisplayHDR, 0, 0,
+                     "With r_HDRRendering, a panel of the HDR pipeline at the right of the screen (below r_DisplayInfo's): the histogram of the "
+                     "scene's light with the exposure's marks, the exposure and its target, the tone map, how much of the frame is in its shoulder "
+                     "and above white, the output and the display's levels, the output's measured nits (of D3D12_FRAMES frames before)");
+  iConsole->Register("d3d12_HDRLog", &CV_d3d12_HDRLog, 0, 0,
+                     "With r_HDRRendering, a line of the HDR statistics per frame to XRenderD3D12_hdr.txt: the EV and its target, the meter, "
+                     "percentiles of the scene's light, the shares in the shoulder and above white, the output's nits");
   iConsole->Register("d3d12_HDROutputDebug", &CV_d3d12_HDROutputDebug, 0, 0,
                      "With d3d12_HDROutput: 1 the highlights (yellow to red at the peak; blue: drawn over the scene), 2 patches at paper white, "
                      "twice and four times that and at the peak");
@@ -832,6 +839,7 @@ void CD3D12Renderer::Release()
   ReleaseVolumetricLight();
   ReleaseRaySun();
   ReleaseHdrOutput();
+  ReleaseHdrStats();
   m_pDetailTexture = nullptr;   // released with every texture
   m_pDefaultCube = nullptr;
   m_pBeachTexture = m_pBeachWetTexture = m_pBeachBumpTexture = nullptr;
@@ -969,6 +977,7 @@ void CD3D12Renderer::Update (void)
   // Shown only when swapping is on: the hidden frames of a level load are drawn but never seen.
   if (m_bSwapBuffers)
     DrawHdrOutput();
+  EndHdrStats();
   if (CV_d3d12_DredTest)
   {
     m_pDevice->DredTest(CV_d3d12_DredTest);

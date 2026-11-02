@@ -73,9 +73,6 @@ constexpr int METER_FACTOR = 8;
 constexpr int METER_TAPS = (METER_FACTOR + 1) / 2;
 static_assert(METER_TAPS == 4, "Shaders/Meter.hlsl's TAPS");
 constexpr int METER_REDUCE = 4;
-//! The mean log2 luminance the exposure brings to EV 0: the game's daylight (Training's beach and
-//! hills from above read -2.56 and -2.69).
-constexpr float EXPOSURE_KEY_LOG2 = -2.6f;
 //! The bloom's levels below the scene: half its size, then each half the one before.
 constexpr int BLOOM_LEVELS = 6;
 //! The soft knee under the bloom's threshold, a part of the threshold.
@@ -213,7 +210,7 @@ CD3D12Texture *CD3D12Renderer::ResolveHdr(int nSceneSRV, ID3D12Resource *pScene,
     dc.nFlags = HDR_ADAPT;
     dc.nTex0 = (uint32)m_Hdr.Meter.back()->m_nSRV;
     dc.nTex1 = (uint32)m_Hdr.pExposure[m_Hdr.nExposure]->m_nSRV;
-    Set4(dc.vParams0, EXPOSURE_KEY_LOG2, std::min(CV_d3d12_ExposureMin, CV_d3d12_ExposureMax), std::max(CV_d3d12_ExposureMin, CV_d3d12_ExposureMax),
+    Set4(dc.vParams0, HDR_EXPOSURE_KEY_LOG2, std::min(CV_d3d12_ExposureMin, CV_d3d12_ExposureMax), std::max(CV_d3d12_ExposureMin, CV_d3d12_ExposureMax),
          m_Hdr.bAdapted ? 0.0f : 1.0f);
     Set4(dc.vParams1, 1 - expf(-2 * fRate), 1 - expf(-fRate), 0, 0);
     m_Hdr.nExposure ^= 1;
@@ -222,6 +219,9 @@ CD3D12Texture *CD3D12Renderer::ResolveHdr(int nSceneSRV, ID3D12Resource *pScene,
   }
   const bool bAdapted = bAuto && m_Hdr.bAdapted && !bHeat;
   const int nExposureSRV = m_Hdr.pExposure[m_Hdr.nExposure]->m_nSRV;
+  // The HDR statistics' histogram of the scene (HdrStats.cpp: d3d12_DisplayHDR, d3d12_HDRLog).
+  if (!bHeat && WantHdrStats())
+    DispatchHdrHistogram(pScene, nWidth, nHeight, fComp, bAdapted, bAuto, CV_d3d12_VolumetricLight > 0);
 
   // The bloom: down from the scene, then up again, each level added to the one above.
   if (fBloom > 0)
@@ -578,7 +578,7 @@ void CD3D12Renderer::DumpHdr()
   {
     const float fWeight = HalfToFloat(Meter[1]);
     const float fMeanLog = fWeight > 0 ? HalfToFloat(Meter[0]) / fWeight : 0.0f;
-    fprintf(m_pFrameDump.get(), "hdr: meter mean log2 luminance %.3f (target %+.3f EV), adapted %+.3f EV\n", fMeanLog, EXPOSURE_KEY_LOG2 - fMeanLog, fEV);
+    fprintf(m_pFrameDump.get(), "hdr: meter mean log2 luminance %.3f (target %+.3f EV), adapted %+.3f EV\n", fMeanLog, HDR_EXPOSURE_KEY_LOG2 - fMeanLog, fEV);
   }
 }
 

@@ -1299,6 +1299,66 @@ public:
 
   SHdrState m_Hdr;
   bool m_bHdrScene = false;                 //!< BeginMainScene .. EndMainScene: the main scene draws in D3D12_HDR_FORMAT
+  //! The light the exposure brings the meter's mean to (log2): EV 0 is the game's daylight (Training's
+  //! beach and hills from above read -2.56 and -2.69).
+  static constexpr float HDR_EXPOSURE_KEY_LOG2 = -2.6f;
+
+  //////////////////////////////////////////////////////////////////////////
+  // HdrStats.cpp: the HDR statistics (d3d12_DisplayHDR, d3d12_HDRLog)
+
+  //! A frame's statistics (Shaders/HdrStats.hlsl's words) and the settings they were taken with.
+  struct SHdrStatsFrame
+  {
+    int nFrame = -1;                        //!< m_nFrameID of the frame (-1: none)
+    bool bScene = false;                    //!< the scene's histogram is in Words
+    bool bOutput = false;                   //!< the output's nits are
+    uint32 Words[XR_HDR_STAT_WORDS] = {};
+    int nToneMap = 0;                       //!< d3d12_ToneMap, d3d12_ToneMapKnee
+    float fKnee = 0;
+    bool bAuto = false;                     //!< the automatic exposure, its range
+    float fExposureMin = 0, fExposureMax = 0;
+    float fBloom = 0;                       //!< d3d12_Bloom
+    bool bVolumetric = false;               //!< the volumetric light in the resolve
+    EDisplayOutput Output = EDisplayOutput::Sdr;   //!< the display's output
+    bool bCapture = false;                  //!< the output's nits are of an HDR10 capture (ReadFrameHdr10)
+    float fPaperWhite = 0, fPeak = 0;       //!< the levels of the output's nits
+  };
+
+  //! The words on the GPU and their copies to read back.
+  struct SHdrStatsState
+  {
+    ComPtr<ID3D12Resource> pWords;          //!< XR_HDR_STAT_WORDS (a raw UAV), in COPY_DEST between frames
+    ComPtr<ID3D12Resource> pReadback;       //!< D3D12_FRAMES copies of them, a frame slot each
+    std::vector<int> Tables;                //!< the kernels' tables, D3D12_FRAMES each: the histogram's, the output's
+    int nFrame = -1;                        //!< m_nFrames of the frame whose words are being added up (cleared then)
+    SHdrStatsFrame Cur;                     //!< its settings and what was added up
+    SHdrStatsFrame Slots[D3D12_FRAMES];     //!< what each slot's copy was taken with (its words when read back)
+    SHdrStatsFrame Last;                    //!< the newest frame read back
+    bool bFailed = false;                   //!< no buffers or kernels: none
+    std::unique_ptr<FILE, SFileClose> pLog; //!< XRenderD3D12_hdr.txt, open while d3d12_HDRLog is on
+  };
+
+  //! d3d12_DisplayHDR or d3d12_HDRLog is on (and the kernels are there).
+  bool WantHdrStats() const;
+  //! The words of this frame cleared and ready for the kernels (the first call of a frame: the words
+  //! of the frame D3D12_FRAMES back read); false: none.
+  bool BeginHdrStats();
+  //! In ResolveHdr after the adaptation: the histogram of pScene (nWidth x nHeight, in
+  //! PIXEL_SHADER_RESOURCE | NON_PIXEL_SHADER_RESOURCE) exposed by fCompensation plus, with
+  //! bAdapted, the adapted EV; with bMeter the meter's mean of this frame too.
+  void DispatchHdrHistogram(ID3D12Resource *pScene, int nWidth, int nHeight, float fCompensation, bool bAdapted, bool bMeter, bool bVolumetric);
+  //! The output's nits (once a frame) from the frame target and the highlight layer, both in
+  //! PIXEL_SHADER_RESOURCE (the output pass, ReadFrameHdr10's).
+  void DispatchHdrOutputStats(bool bCapture);
+  //! Before EndFrame: this frame's words to its slot's copy.
+  void EndHdrStats();
+  //! The words of the frame D3D12_FRAMES back (this slot's copy) into m_HdrStats.Last, and its line
+  //! to d3d12_HDRLog's file.
+  void ReadHdrStats();
+  void LogHdrStats(const SHdrStatsFrame &f);
+  void ReleaseHdrStats();
+
+  SHdrStatsState m_HdrStats;
 
   //////////////////////////////////////////////////////////////////////////
   // Volumetric.cpp: the volumetric light of the main view (d3d12_VolumetricLight)
@@ -1709,7 +1769,7 @@ public:
   float CV_d3d12_ExposureSpeed = 1.5f;      //!< its adaptation rate per second (twice that towards a brighter scene)
   float CV_d3d12_Bloom = 0.5f;              //!< the bloom's strength (0: none)
   float CV_d3d12_BloomThreshold = 1;        //!< the light above which it blooms (exposed, linear)
-  int CV_d3d12_HDRDebug = 0;                //!< 1: the luminance in EV bands, 2: the bloom alone
+  int CV_d3d12_HDRDebug = 0;                //!< 1: the luminance in EV bands, 2: the bloom alone, 3: the sky mask
   float CV_d3d12_HDRSun = 8;                //!< the light of the sun's flare in HDR, times the game's
   float CV_d3d12_HDRSky = 2;                //!< the light of the sky towards the sun in HDR, times the game's
   float CV_d3d12_HDRGlow = 3;               //!< the light of what glows in HDR, times the game's
@@ -1717,6 +1777,8 @@ public:
   float CV_d3d12_HDRPaperWhite = 0;         //!< its paper white in nits (0: Windows' SDR white level of the display)
   float CV_d3d12_HDRPeak = 0;               //!< its peak in nits (0: the display's)
   int CV_d3d12_HDROutputDebug = 0;          //!< 1: the highlight mask, 2: test patches
+  int CV_d3d12_DisplayHDR = 0;              //!< 1: the HDR statistics' panel (HdrStats.cpp, Stats.cpp)
+  int CV_d3d12_HDRLog = 0;                  //!< 1: a line of them per frame to XRenderD3D12_hdr.txt
   float CV_d3d12_Saturation = 1;            //!< the colour grading (ColorGrading.cpp): 1, 1, 0, 0 neutral
   float CV_d3d12_Contrast = 1;
   float CV_d3d12_Temperature = 0;
