@@ -1362,6 +1362,7 @@ void CD3D12Device::EndFrame(bool bPresent, bool bVSync)
     g_pRenderer->m_pUpload->Flush();
   ID3D12CommandList *pList = m_pCmdList.Get();
   m_pQueue->ExecuteCommandLists(1, &pList);
+  m_nListSerial++;
   HRESULT hr = S_OK;
   m_fPresentMs = 0;
   if (bPresent)
@@ -1448,6 +1449,7 @@ void CD3D12Device::WaitAsyncCompute()
     g_pRenderer->m_pUpload->Flush();
   ID3D12CommandList *pList = m_pCmdList.Get();
   m_pQueue->ExecuteCommandLists(1, &pList);
+  m_nListSerial++;
   QueueWaitAsyncCompute();
   ContinueCmdList();
   if (szSection)
@@ -1499,6 +1501,7 @@ void CD3D12Device::FlushFrame()
     g_pRenderer->m_pUpload->Flush();
   ID3D12CommandList *pList = m_pCmdList.Get();
   m_pQueue->ExecuteCommandLists(1, &pList);
+  m_nListSerial++;
   QueueWaitAsyncCompute();
   WaitForFence(Signal());
   OpenCmdList();
@@ -1767,6 +1770,7 @@ bool CD3D12Device::ReadBackTexture(ID3D12Resource *pTexture, D3D12_RESOURCE_STAT
     m_pCmdList->Close();
     ID3D12CommandList *pList = m_pCmdList.Get();
     m_pQueue->ExecuteCommandLists(1, &pList);
+    m_nListSerial++;
     WaitForFence(Signal());
   }
 

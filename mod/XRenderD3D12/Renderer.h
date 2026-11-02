@@ -1314,9 +1314,13 @@ public:
   void ReleaseSceneLightTargets();
   //! The device's HDR target and its texture table entry.
   void ReleaseHdrColor();
+  //! The sky mask's depth buffer and its view (d3d12_HDRDebug 3), released when the view is off or the HDR colour made anew.
+  void ReleaseHdrDepth();
   void ReleaseHdr();
   //! The frame dump's lines: the settings, the meter and the EV read back.
   void DumpHdr();
+  //! The frame dump's line of what the HDR pipeline holds (also with r_HDRRendering 0: nothing then).
+  void DumpHdrTargets();
   //! With r_HDRRendering, drawing into a target of D3D12_HDR_FORMAT (the main scene, the water's
   //! reflection, the environment cubes) outside heat vision.
   bool IsHdrTarget() const;
@@ -1362,12 +1366,16 @@ public:
     EDisplayOutput Output = EDisplayOutput::Sdr;   //!< the display's output
     bool bCapture = false;                  //!< the output's nits are of an HDR10 capture (ReadFrameHdr10)
     float fPaperWhite = 0, fPeak = 0;       //!< the levels of the output's nits
+    Vec3 vCamera = Vec3(0, 0, 0);           //!< the view camera's position at the frame's end (the log's)
+    bool bLog = false;                      //!< d3d12_HDRLog was on: the frame's line goes to the log when it is read back
   };
 
   //! The words on the GPU and their copies to read back.
   struct SHdrStatsState
   {
-    ComPtr<ID3D12Resource> pWords;          //!< XR_HDR_STAT_WORDS (a raw UAV), in COPY_DEST between frames
+    ComPtr<ID3D12Resource> pWords;          //!< XR_HDR_STAT_WORDS (a raw UAV); COMMON between frames (a buffer's state decays to
+                                            //!< it when its list is done), the frame's clearing copy promotes it
+    uint64 nWordsList = 0;                  //!< the device's list (GetListSerial) the words were made UNORDERED_ACCESS in
     ComPtr<ID3D12Resource> pReadback;       //!< D3D12_FRAMES copies of them, a frame slot each
     std::vector<int> Tables;                //!< the kernels' tables, D3D12_FRAMES each: the histogram's, the output's
     int nFrame = -1;                        //!< m_nFrames of the frame whose words are being added up (cleared then)
@@ -1375,7 +1383,8 @@ public:
     SHdrStatsFrame Slots[D3D12_FRAMES];     //!< what each slot's copy was taken with (its words when read back)
     SHdrStatsFrame Last;                    //!< the newest frame read back
     bool bFailed = false;                   //!< no buffers or kernels: none
-    std::unique_ptr<FILE, SFileClose> pLog; //!< XRenderD3D12_hdr.txt, open while d3d12_HDRLog is on
+    std::unique_ptr<FILE, SFileClose> pLog; //!< XRenderD3D12_hdr.txt, open while frames of d3d12_HDRLog are read
+    bool bLogStarted = false;               //!< it was opened in this run: opened again, it is added to
   };
 
   //! d3d12_DisplayHDR or d3d12_HDRLog is on (and the kernels are there).
@@ -1390,10 +1399,14 @@ public:
   //! The output's nits (once a frame) from the frame target and the highlight layer, both in
   //! PIXEL_SHADER_RESOURCE (the output pass, ReadFrameHdr10's).
   void DispatchHdrOutputStats(bool bCapture);
-  //! Before EndFrame: this frame's words to its slot's copy.
+  //! Before a kernel adds to the words: UNORDERED_ACCESS again where the frame's list was executed since
+  //! they were made so (a readback's FlushFrame, WaitAsyncCompute), which left them COMMON.
+  void HdrStatsWordsUav();
+  //! Before EndFrame: this frame's words to its slot's copy; without statistics this frame, the frame
+  //! D3D12_FRAMES back read all the same (none left for when they are on again).
   void EndHdrStats();
   //! The words of the frame D3D12_FRAMES back (this slot's copy) into m_HdrStats.Last, and its line
-  //! to d3d12_HDRLog's file.
+  //! to d3d12_HDRLog's file if the log was on in that frame.
   void ReadHdrStats();
   void LogHdrStats(const SHdrStatsFrame &f);
   void ReleaseHdrStats();

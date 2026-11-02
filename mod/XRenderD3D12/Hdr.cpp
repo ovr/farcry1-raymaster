@@ -141,8 +141,14 @@ void CD3D12Renderer::BeginMainScene()
 {
   // r_HDRRendering is read every frame: it can change at any time.
   const bool bHdr = IsHdrOn();
-  if (!bHdr && (m_Hdr.nWidth || m_pDevice->GetHdrColor()))
+  // Off: all of it, also when only the meter and the upscaler's light were made (d3d12_UpscaleHdr with d3d12_UpscaleDebug, no
+  // resolve).
+  if (!bHdr && (m_Hdr.nWidth || m_Hdr.nMeterWidth || m_Hdr.pLight || m_Hdr.pExposureTarget || m_Hdr.pDepth || m_pDevice->GetHdrColor()))
     ReleaseHdr();
+  // The sky mask's depth (d3d12_HDRDebug 3) only while it is shown: the depth buffer it was of stays with it after a change of
+  // the size.
+  if (CV_d3d12_HDRDebug != 3 && m_Hdr.pDepth)
+    ReleaseHdrDepth();
   m_bHdrScene = bHdr;
   BeginUpscale();
   if (!m_bUpscaling && bHdr && m_pDevice->SetHdrTarget(true))
@@ -154,6 +160,8 @@ void CD3D12Renderer::BeginMainScene()
         m_pDescriptors->FreeSRV(m_Hdr.nHdrColorSRV);
       m_Hdr.pHdrColor = m_pDevice->GetHdrColor();
       m_Hdr.nHdrColorSRV = m_pDescriptors->AllocSRV(m_Hdr.pHdrColor.Get(), nullptr);
+      // Made anew with the depth buffer (a new size).
+      ReleaseHdrDepth();
     }
     if (m_Hdr.nHdrColorSRV >= 0)
       m_pDevice->BeginHdr();
@@ -439,7 +447,8 @@ bool CD3D12Renderer::DispatchExposure(ID3D12Resource *pScene, int nWidth, int nH
   Set4(ec.vSize, (float)nWidth, (float)nHeight, 1.0f / nWidth, 1.0f / nHeight);
   const float fLow = std::clamp(CV_d3d12_ExposureLow, 0.0f, 1.0f), fHigh = std::clamp(CV_d3d12_ExposureHigh, 0.0f, 1.0f);
   Set4(ec.vParams, HDR_EXPOSURE_KEY_LOG2, std::min(fLow, fHigh), std::max(fLow, fHigh), std::clamp(CV_d3d12_ExposureHighlights, 0.0f, 1.0f));
-  // The knee as light: the display value decoded (HdrDecode); the clamp's is white.
+  // The knee as light: the display value decoded (HdrDecode); the clamp's is white. From 0.01, not the tone map's 0 (Hdr.hlsl,
+  // as the statistics take it): its log2; below, the light of the knee is under 4e-5 of white either way.
   const float fKnee = std::clamp(CV_d3d12_ToneMapKnee, 0.01f, 0.99f);
   Set4(ec.vParams1, CV_d3d12_ToneMap == 0 ? 0.0f : 2.2f * log2f(fKnee), pDepth ? 1.0f : 0.0f, 0, 0);
   const UINT nStride = (UINT)std::max(lroundf(sqrtf((float)nWidth * nHeight / EXPOSURE_SAMPLES)), 1L);
@@ -829,12 +838,20 @@ void CD3D12Renderer::ReleaseHdrColor()
     m_pDescriptors->FreeSRV(m_Hdr.nHdrColorSRV);
   m_Hdr.nHdrColorSRV = -1;
   m_Hdr.pHdrColor.Reset();
+  ReleaseHdrDepth();
+  if (m_pDevice)
+    m_pDevice->SetHdrTarget(false);
+}
+
+void CD3D12Renderer::ReleaseHdrDepth()
+{
   if (m_pDescriptors && m_Hdr.nDepthSRV >= 0)
     m_pDescriptors->FreeSRV(m_Hdr.nDepthSRV);
   m_Hdr.nDepthSRV = -1;
+  // The GPU may still read it in the frames under way.
+  if (m_pDevice && m_Hdr.pDepth)
+    m_pDevice->DeferredRelease(m_Hdr.pDepth);
   m_Hdr.pDepth.Reset();
-  if (m_pDevice)
-    m_pDevice->SetHdrTarget(false);
 }
 
 void CD3D12Renderer::ReleaseHdr()
@@ -846,6 +863,21 @@ void CD3D12Renderer::ReleaseHdr()
   m_Hdr.bExposureFailed = false;
   ReleaseHdrColor();
   ReleaseColorGrading();
+}
+
+void CD3D12Renderer::DumpHdrTargets()
+{
+  if (!m_pFrameDump)
+    return;
+  char szDepth[64] = "none";
+  if (m_Hdr.pDepth)
+  {
+    const D3D12_RESOURCE_DESC Desc = m_Hdr.pDepth->GetDesc();
+    sprintf_s(szDepth, "%llu x %u", (unsigned long long)Desc.Width, Desc.Height);
+  }
+  fprintf(m_pFrameDump.get(), "hdr targets: resolve %d x %d, meter %d x %d, upscaler's light %s, histogram meter %s, sky mask depth %s, colour %s\n",
+          m_Hdr.nWidth, m_Hdr.nHeight, m_Hdr.nMeterWidth, m_Hdr.nMeterHeight,
+          m_Hdr.pLight ? "made" : "none", m_Hdr.pExposureTarget ? "made" : "none", szDepth, m_Hdr.pHdrColor ? "made" : "none");
 }
 
 void CD3D12Renderer::DumpHdr()

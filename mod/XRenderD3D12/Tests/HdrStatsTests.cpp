@@ -6,8 +6,9 @@
 //	Description: Unit tests of the HDR statistics (d3d12_DisplayHDR,
 //	d3d12_HDRLog): the histogram's bins and the meter's weight on the GPU
 //	(Shaders/HdrShared.hlsli), the highlight layer's ratio as the output
-//	pass and the statistics take it (Shaders/HdrLight.hlsli), and the CPU's
-//	percentiles of a histogram (HdrStatsMath.h).
+//	pass and the statistics take it (Shaders/HdrLight.hlsli), the output's
+//	nits summed in two words, and the CPU's percentiles of a histogram
+//	(HdrStatsMath.h).
 //
 //////////////////////////////////////////////////////////////////////
 
@@ -127,6 +128,35 @@ XR_TEST(HdrStats_LayerRatio)
       CHECK_NEAR(At(Out, i, k), Cases[i].Ratio[k], 1e-6);
     CHECK((At(Out, i, 3) > 0.5f) == Cases[i].bScene);
   }
+}
+
+//! The HDR output's nits summed in two words (Shaders/HdrStats.hlsl's CSOutput: HdrSumCarries on the GPU, HdrOutNitsSum on the
+//! CPU): 4096 threads adding at once, each up to 4 billion, give the exact 64 bit sum, the carries in the high word; one word of
+//! a sum that never wraps reads as it is. Why: one word held a frame's nits only up to 3.4 million samples at 10000 nits (a 5K
+//! output at a 10000 nits peak), and the panel's and the log's average then wrapped around to near 0 (review of step 261).
+XR_TEST(HdrStats_OutputSum)
+{
+  SDispatch d;
+  d.Shader = XR_BYTECODE(Test_HdrStats);
+  const uint32 nItems = 4096;
+  d.Test.nTest[0] = nItems;
+  d.Test.nTest[1] = 2;
+  d.nGroups[0] = Groups64(nItems);
+  uint64_t nWant = 0;
+  for (uint32 i = 0; i < nItems; i++)
+  {
+    const uint32 n = 0xF0000000u + i * 2654435u;
+    PushWords(d.In, n, 0, 0, 0);
+    nWant += n;
+  }
+  d.nOut = 1;
+  const std::vector<uint32> Out = Gpu().Run(d);
+  const uint64_t nGot = ((uint64_t)Out[1] << 32) | Out[0];
+  CHECK_MSG(nGot == nWant, "sum " + std::to_string(nGot) + ", not " + std::to_string(nWant));
+  CHECK((nWant >> 32) > 1000);   // many carries
+  CHECK_NEAR(HdrOutNitsSum(Out[0], Out[1]), (double)nWant * XR_HDR_NITS_UNIT, 1);
+  CHECK_NEAR(HdrOutNitsSum(123456, 0), 123456.0 * XR_HDR_NITS_UNIT, 1e-9);
+  CHECK_NEAR(HdrOutNitsSum(0xFFFFFFFFu, 2), (2.0 * 4294967296.0 + 4294967295.0) * XR_HDR_NITS_UNIT, 1);
 }
 
 //! HdrHistPercentile, HdrHistShareAbove, HdrHistMeanLog2 (HdrStatsMath.h), on the CPU: an empty histogram gives the bottom; one

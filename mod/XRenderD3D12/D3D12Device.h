@@ -148,6 +148,9 @@ public:
   void WaitAsyncCompute();
   //! 0 .. D3D12_FRAMES-1: the slot of the current frame (per frame resources, the upload ring).
   int GetFrameSlot() const { return m_nFrameSlot; }
+  //! How many times the frame's list was executed (EndFrame; in a frame FlushFrame, a readback's, and WaitAsyncCompute): where
+  //! it changed, the buffers the list used are COMMON again (a buffer's state decays to it when its list is done).
+  uint64 GetListSerial() const { return m_nListSerial; }
 
   int GetWidth() const { return m_nWidth; }
   int GetHeight() const { return m_nHeight; }
@@ -508,6 +511,7 @@ private:
 
   int m_nWidth = 0, m_nHeight = 0;
   int m_nFrameSlot = 0;
+  uint64 m_nListSerial = 0;                         //!< GetListSerial
   bool m_bInFrame = false;
 
   ComPtr<ID3D12QueryHeap> m_pTimestamps;            //!< GPU_MARKS per frame slot; NULL: no GPU timing

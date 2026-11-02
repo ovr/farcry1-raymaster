@@ -105,7 +105,7 @@ void CSHistogram(uint2 vThread : SV_DispatchThreadID, uint2 vGroup : SV_GroupID,
   }
 }
 
-groupshared uint gs_Out[5];         //!< the samples, their nits (x 1/4), the most (asuint), above paper white, at the peak
+groupshared uint gs_Out[5];         //!< the samples, their nits in quarters (x 4), the most (asuint), above paper white, at the peak
 
 [numthreads(GROUP, GROUP, 1)]
 void CSOutput(uint2 vThread : SV_DispatchThreadID, uint nIndex : SV_GroupIndex)
@@ -136,10 +136,14 @@ void CSOutput(uint2 vThread : SV_DispatchThreadID, uint nIndex : SV_GroupIndex)
   GroupMemoryBarrierWithGroupSync();
   if (nIndex == 0 && gs_Out[0])
   {
-    // A group's sum in XR_HDR_NITS_UNIT: at most 256 samples of 10000 nits, so that the buffer's
-    // word holds a frame's.
+    // The group's sum (256 samples of at most 10000 nits fit its word in quarters) in XR_HDR_NITS_UNIT; the frame's in two words,
+    // the carries in the high one: one word holds 3.4 million samples at 10000 nits (a 4K frame has 2.1 million, 8K 8.3).
     g_Words.InterlockedAdd(XR_HDR_STAT_OUT_PIXELS * 4, gs_Out[0]);
-    g_Words.InterlockedAdd(XR_HDR_STAT_OUT_SUM * 4, (uint)round(gs_Out[1] / (4.0 * XR_HDR_NITS_UNIT)));
+    const uint nSum = (uint)round(gs_Out[1] / (4.0 * XR_HDR_NITS_UNIT));
+    uint nWas;
+    g_Words.InterlockedAdd(XR_HDR_STAT_OUT_SUM * 4, nSum, nWas);
+    if (HdrSumCarries(nWas, nSum))
+      g_Words.InterlockedAdd(XR_HDR_STAT_OUT_SUM_HIGH * 4, 1);
     g_Words.InterlockedMax(XR_HDR_STAT_OUT_MAX * 4, gs_Out[2]);
     g_Words.InterlockedAdd(XR_HDR_STAT_OUT_PAPER * 4, gs_Out[3]);
     g_Words.InterlockedAdd(XR_HDR_STAT_OUT_PEAK * 4, gs_Out[4]);
