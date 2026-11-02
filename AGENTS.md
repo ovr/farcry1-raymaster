@@ -225,7 +225,8 @@ instructions and is not committed (git-ignored). The references of the modules a
   that keeps the hue, `Shaders/HdrToneMap.hlsli`, the automatic exposure's meter by a histogram
   with the sky kept below the knee `d3d12_ExposureMeter`, `Shaders/HdrExposure.hlsli`, the bloom,
   colour grading, the HDR output `d3d12_HDROutput` with its highlights above the game's white
-  `d3d12_HDRHighlights`, the frame average limit `d3d12_HDRFrameAverage`, the sky's glow round the sun `d3d12_HDRSkyAngle`, the statistics' panel
+  `d3d12_HDRHighlights`, the frame average limit `d3d12_HDRFrameAverage`, the menu's HDR page with
+  its test `d3d12_HDROutputDebug 3` and the display's read only `d3d12_HDRDisplay*`, the sky's glow round the sun `d3d12_HDRSkyAngle`, the statistics' panel
   `d3d12_DisplayHDR` and log `d3d12_HDRLog`); the volumetric light (`d3d12_VolumetricLight`, the
   sun's shafts alone `d3d12_VolumetricLightShafts`); per pixel lighting (`d3d12_PixelLighting`); the depth prepass
   (`d3d12_DepthPrepass`); the sun's shadow cascades (`d3d12_ShadowCascades`,

@@ -86,7 +86,9 @@
 //	                  for the swap chain: vParams0.z 1 HDR10 (PQ, Rec. 2020),
 //	                  2 scRGB (linear Rec. 709, 1 = 80 nits). vParams0.w the
 //	                  debug view (d3d12_HDROutputDebug: 1 the mask, 2 the test
-//	                  patches), vParams1.xy 1 / the frame's size; tex2 the
+//	                  patches, 3 the HDR page's test in the rectangle vParams2:
+//	                  left, top, right, bottom in uv; PageTest), vParams1.xy
+//	                  1 / the frame's size; tex2 the
 //	                  frame average limit's (FrameAverage.hlsl, 1 x 1: x the
 //	                  factor of what the layer adds, white: none)
 //
@@ -424,6 +426,37 @@ float3 TestPatches(float2 vUV, float3 vLight, float fPeak)
   return n == 3 ? fPeak : LEVELS[n];
 }
 
+//! d3d12_HDROutputDebug 3, the test of the menu's HDR page in the rectangle vRect (uv: left, top,
+//! right, bottom): at its left a square at 10000 nits around a smaller one at the peak fPeak, which
+//! disappears into it once the peak is the display's (it shows nothing brighter); at its right four
+//! patches at paper white fPaper, twice and four times that and at the peak, each at most the peak (as
+//! the game's light); black between. False outside the rectangle; fNits the light in nits.
+bool PageTest(float2 vPixel, float4 vRect, float fPaper, float fPeak, out float fNits)
+{
+  float2 vSize = 1 / g_Draw.vParams1.xy;
+  float2 p0 = floor(vRect.xy * vSize), p1 = floor(vRect.zw * vSize);
+  fNits = 0;
+  if (any(vPixel < p0) || any(vPixel >= p1))
+    return false;
+  float2 q = vPixel - p0;
+  float h = p1.y - p0.y;
+  if (q.x < h)
+  {
+    float2 d = abs(q - h / 2);
+    fNits = max(d.x, d.y) < h / 6 ? fPeak : 10000;
+    return true;
+  }
+  // The patches after a gap of a quarter of the square, a sixteenth between them.
+  float x0 = h * 1.25, w = (p1.x - p0.x - x0) / 4, g = h / 16;
+  float x = q.x - x0;
+  int n = (int)floor(x / w);
+  float f = x - n * w;
+  static const float LEVELS[3] = { 1, 2, 4 };
+  if (x >= 0 && n <= 3 && f >= g / 2 && f < w - g / 2)
+    fNits = n == 3 ? fPeak : min(LEVELS[n] * fPaper, fPeak);
+  return true;
+}
+
 float4 Output(float2 vPixel)
 {
   float3 f = g_Textures[g_Draw.nTex0].Load(int3(vPixel, 0)).rgb;
@@ -437,6 +470,10 @@ float4 Output(float2 vPixel)
   float fPaper = g_Draw.vParams0.x, fPeak = g_Draw.vParams0.y;
   float3 vLight = Decode(f);
   int nDebug = (int)g_Draw.vParams0.w;
+  // The HDR page's test: grey at its light in nits, the peak's square above the peak.
+  float fTest;
+  if (nDebug == 3 && PageTest(vPixel, g_Draw.vParams2, fPaper, fPeak, fTest))
+    return float4(g_Draw.vParams0.z == 1 ? Pq(fTest.xxx) : (fTest / 80).xxx, 1);
   if (nDebug == 1)
   {
     // The scene's highlights from yellow (a little) to red (the peak), the rest grey, blue where

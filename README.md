@@ -55,6 +55,14 @@ Mods for Far Cry, built with the CryENGINE MOD SDK for Far Cry:
     Reference, which sets `d3d12_PathTracing`, the lighting of XRenderD3D12 by paths in place of the
     light maps (a graphics card with DXR 1.1; greyed out without one); choosing it while HDR is None
     sets HDR to Soft.
+  - `08-hdr-page.patch` - an HDR page of the video options: HDR output in Advanced Video Options
+    becomes a button that opens it. On it the output (SDR, HDR10 or scRGB, with what the display
+    is), SDR Brightness (Windows' or 80 to 480 nits), Peak Brightness (the display's or 250 to 4000
+    nits) and Frame Average Limit (Display or Off: the frame's average at most the display's full
+    frame light, so that an OLED does not dim the picture itself), applied at once; while it is
+    open, on a display in HDR mode, a test under them: a square at 10000 nits round a smaller one
+    at the peak, which disappears once the peak is the display's, and patches at the SDR
+    brightness, twice and four times that and at the peak.
 
 How to build and run them: `AGENTS.md`.
 

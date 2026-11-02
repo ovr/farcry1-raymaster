@@ -1450,6 +1450,10 @@ public:
   //! The output for the next frames (after EndFrame): what d3d12_HDROutput asks for, if
   //! r_HDRRendering is on and the display is in HDR; the highlight layer also for ReadFrameHdr10.
   void UpdateHdrOutput();
+  //! The display's read only variables for the menu's HDR page (d3d12_HDRDisplayOn, ..Peak, ..FullFrame, ..White).
+  void PublishHdrDisplay(const SDisplayInfo &Info);
+  //! d3d12_HDROutputState: SDR, HDR10 or scRGB, after "SDR: " why the output wanted is SDR.
+  void PublishHdrState(EDisplayOutput Output, const std::string &Reason);
   //! The light of paper white (the frame's white) and of the peak, in nits, of the display as it is.
   void GetHdrLevels(const SDisplayInfo &Info, float &fPaperWhite, float &fPeak) const;
   //! The device's frame target and highlight layer in the texture table (again when made anew);
@@ -1495,7 +1499,16 @@ public:
     std::vector<int> FallTables;            //!< its kernels' tables, a frame slot each
     int nFallFrame = -1;                    //!< m_nFrames of the frame its kernels last ran in
     bool bFallFailed = false;               //!< no buffer, target or kernels: no limit
+    ICVar *pTestRect = nullptr;             //!< d3d12_HDROutputTestRect
+    ICVar *pState = nullptr;                //!< d3d12_HDROutputState
+    std::string State = "SDR";              //!< its value
+    //! The display's read only variables (d3d12_HDRDisplayOn, ..Peak, ..FullFrame, ..White) and their values (set when they change).
+    ICVar *pDisplay[4] = {};
+    float fDisplay[4] = { -1, 0, 0, 0 };
+    int nDisplayPoll = 0;                   //!< frames until the display's variables are read again with the output off
   };
+  //! d3d12_HDROutputTestRect's default: the free area of the menu's HDR page (08-hdr-page.patch).
+  static constexpr const char HDR_TEST_RECT[] = "0.2625 0.5533 0.9625 0.7567";
   SHdrOutputState m_HdrOut;
 
   //////////////////////////////////////////////////////////////////////////
@@ -1847,7 +1860,7 @@ public:
   float CV_d3d12_HDRHighlights = 2;         //!< the light (in the game's whites) from which its tone map goes on to the peak, the SDR picture's up to white (at most 1: from the knee, as up to step 257)
   float CV_d3d12_HDRFrameAverage = 1;       //!< the most average light of a frame, times the display's full frame light (0: no limit)
   float CV_d3d12_HDRFullFrame = 0;          //!< the display's full frame light in nits (0: the display's)
-  int CV_d3d12_HDROutputDebug = 0;          //!< 1: the highlight mask, 2: test patches
+  int CV_d3d12_HDROutputDebug = 0;          //!< 1: the highlight mask, 2: test patches, 3: the menu's HDR page's test (d3d12_HDROutputTestRect)
   int CV_d3d12_DisplayHDR = 0;              //!< 1: the HDR statistics' panel (HdrStats.cpp, Stats.cpp)
   int CV_d3d12_HDRLog = 0;                  //!< 1: a line of them per frame to XRenderD3D12_hdr.txt
   float CV_d3d12_Saturation = 1;            //!< the colour grading (ColorGrading.cpp): 1, 1, 0, 0 neutral

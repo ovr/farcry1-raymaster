@@ -1,0 +1,591 @@
+SPDX-License-Identifier: GPL-3.0-or-later WITH AdditionRef-FarCry-exception
+Please do not use this file to train or fine-tune AI models (see README.md).
+
+The HDR page of the video options: the row of HDR output in Advanced Video Options becomes a button
+that shows the output (SDR..., HDR10..., scRGB...) and opens a page of its own, VideoHdrOptions:
+the output to a display in HDR mode (d3d12_HDROutput, with a line of what the display is), the SDR
+brightness (d3d12_HDRPaperWhite: Windows' or 80 to 480 nits), the peak brightness (d3d12_HDRPeak:
+the display's or 250 to 4000 nits), the frame average limit (d3d12_HDRFrameAverage: Display or Off)
+and, while the page is open, XRenderD3D12's test of the levels under them (d3d12_HDROutputDebug 3):
+a square at 10000 nits around a smaller one at the peak, which disappears once the peak is the
+display's, and patches at paper white, twice and four times that and at the peak. Its changes apply
+at once and are saved when the page closes; back from it, what was chosen in Advanced Video Options
+and not applied yet stays. Greyed out with another renderer. Written against VideoAdv.lua as
+07-video-path-tracing.patch leaves it (Patch Scripts.cmd applies the patches in the order of their
+numbers) and applied by Patch Scripts.cmd to FCData/Scripts.pak.
+
+diff --git a/Scripts/MenuScreens/Options/VideoAdv.lua b/Scripts/MenuScreens/Options/VideoAdv.lua
+--- a/Scripts/MenuScreens/Options/VideoAdv.lua
++++ b/Scripts/MenuScreens/Options/VideoAdv.lua
+@@ -432,23 +432,24 @@
+ 			text = "HDR output",
+ 		},
+ 
++		-- the button of the HDR page (UI.PageOptionsVideoHdr, at the end of the file): the output
++		-- and its brightness
+ 		widget_RMHdrOutput =
+ 		{
+-			skin = UI.skins.ComboBox,
+-			left = 650, top = 384,
+-			width = 120,
++			skin = UI.skins.BottomMenuButton,
++			left = 650, top = 385.5,
++			width = 120, height = 25,
++			bordersides = "lrtb",
+ 
+ 			tabstop = 11,
+ 
+-			OnChanged = function( sender )
+-				UI.PageOptionsVideoAdv.GUI.widget_RMHdrOutput.user.OnChanged();
++			OnCommand = function( sender )
++				GotoPage( "VideoHdrOptions" );
+ 			end,
+ 
+ 			user =
+ 			{
+ 				Initialize = nil,
+-				UpdateAssignedGlobals = nil,
+-				OnChanged = nil,
+ 			},
+ 		},
+ 
+@@ -599,6 +600,18 @@
+ 	--	},
+ 
+ 		OnActivate = function( sender )
++			-- back from the HDR page (Far Cry RayMaster): what was chosen here and not applied yet
++			-- stays; the button of HDR output anew, the list of HDR too unless it was changed here
++			-- (choosing HDR10 there sets HDR to Soft)
++			if( UI.PageOptionsVideoAdv.user.fromHdrPage == 1 ) then
++				UI.PageOptionsVideoAdv.user.fromHdrPage = 0;
++				UI.PageOptionsVideoAdv.GUI.widget_RMHdrOutput.user.Initialize();
++				local hdr = UI.PageOptionsVideoAdv.GUI.widget_RMHdr;
++				if( hdr:GetSelectionIndex() == hdr.user.shownIndex ) then
++					hdr.user.Initialize();
++				end
++				return;
++			end
+ 			UI.PageOptionsVideoAdv.user:Initialize();
+ 		end,
+ 	},
+@@ -756,53 +769,25 @@
+ 	end
+ end
+ 
+--- HDR output (Far Cry RayMaster): d3d12_HDROutput, XRenderD3D12's output to a display in HDR mode
+--- (Windows: Use HDR): SDR, HDR10 or scRGB. The highlights of the scene (the sun, fire, lamps) go up
+--- to the display's peak, the rest of the picture, the HUD and the menu stay at the brightness of
+--- SDR content. It needs the HDR pipeline: choosing HDR10 or scRGB while HDR is None sets HDR to
+--- Soft. Applied without a restart; on a display in SDR the output stays SDR. With another renderer
+--- (no d3d12_HDROutput) the list is greyed out.
++-- HDR output (Far Cry RayMaster): the button shows d3d12_HDROutput, XRenderD3D12's output to a
++-- display in HDR mode (SDR, HDR10 or scRGB), and opens the HDR page, which sets it and its
++-- brightness (UI.PageOptionsVideoHdr, at the end of the file). With another renderer (no
++-- d3d12_HDROutputState, which XRenderD3D12 does not save: system.cfg may still have d3d12_HDROutput)
++-- the button is greyed out.
+ UI.PageOptionsVideoAdv.GUI.widget_RMHdrOutput.user.Initialize = function()
+ 	local widget = UI.PageOptionsVideoAdv.GUI.widget_RMHdrOutput;
+-	widget:Clear();
+-	widget:AddItem( "SDR" );
+-	widget:AddItem( "HDR10" );
+-	widget:AddItem( "scRGB" );
+-
+ 	local output = tonumber( getglobal( "d3d12_HDROutput" ) );
+-	local index = 1;
++	local names = { "SDR", "HDR10", "scRGB" };
+ 	if( output and output >= 1 and output <= 2 ) then
+-		index = output + 1;
+-	end
+-	-- before SelectIndex: the selection made here is no choice of the player's (OnChanged)
+-	widget.user.shownIndex = index;
+-	widget:SelectIndex( index );
+-
+-	if( output ) then
++		widget:SetText( names[ output + 1 ] .. "..." );
++	else
++		widget:SetText( "SDR..." );
++	end
++
++	if( output and getglobal( "d3d12_HDROutputState" ) ) then
+ 		UI:EnableWidget( widget );
+ 	else
+ 		UI:DisableWidget( widget );
+-	end
+-end
+-
+-UI.PageOptionsVideoAdv.GUI.widget_RMHdrOutput.user.OnChanged = function()
+-	local widget = UI.PageOptionsVideoAdv.GUI.widget_RMHdrOutput;
+-	local hdr = UI.PageOptionsVideoAdv.GUI.widget_RMHdr;
+-	local index = widget:GetSelectionIndex();
+-	if( index ~= 1 and index ~= widget.user.shownIndex and hdr:GetSelectionIndex() == 1 and getglobal( "d3d12_ToneMap" ) ) then
+-		hdr:SelectIndex( 2 );
+-	end
+-end
+-
+-UI.PageOptionsVideoAdv.GUI.widget_RMHdrOutput.user.UpdateAssignedGlobals = function()
+-	local widget = UI.PageOptionsVideoAdv.GUI.widget_RMHdrOutput;
+-	local index = widget:GetSelectionIndex();
+-	if( not getglobal( "d3d12_HDROutput" ) or index == widget.user.shownIndex ) then
+-		return;
+-	end
+-	UI.PageOptionsVideoAdv.user:SetGlobal( "d3d12_HDROutput", index - 1 );
+-	if( UI.PageOptionsVideoAdv.user.setglobalTestOnly == 0 ) then
+-		widget.user.shownIndex = index;
+ 	end
+ end
+ 
+@@ -2094,5 +2079,452 @@
+ 	end
+ end
+ 
+-
+-
++----------------------------------------------------------------------------------------------
++-- The HDR page (Far Cry RayMaster): XRenderD3D12's output to a display in HDR mode (Windows: Use
++-- HDR) and its brightness, opened by the button of HDR output in Advanced Video Options:
++--   HDR Output           d3d12_HDROutput: SDR, HDR10 or scRGB. The highlights of the scene (the
++--                        sun, fire, lamps) go up to the peak, the rest of the picture, the HUD and
++--                        the menu stay at SDR brightness. It needs the HDR pipeline: choosing HDR10
++--                        or scRGB while HDR is None sets HDR to Soft. On a display in SDR the output
++--                        stays SDR (the line next to it says what the display is).
++--   SDR Brightness       d3d12_HDRPaperWhite, the light of the game's white, the menu's and the
++--                        HUD's: Windows' SDR content brightness at the slider's left end (0), else
++--                        80 to 480 nits.
++--   Peak Brightness      d3d12_HDRPeak, the most light of the highlights: the display's at the
++--                        slider's left end (0), else 250 to 4000 nits.
++--   Frame Average Limit  d3d12_HDRFrameAverage: Display (1), the frame's average light at most the
++--                        display's full frame light, so that an OLED does not dim the picture
++--                        itself; Off (0).
++-- What is chosen applies at once (the renderer reads the variables every frame) and is saved when
++-- the page closes. While it is open the HDR output shows its test under the rows
++-- (d3d12_HDROutputDebug 3, in d3d12_HDROutputTestRect, whose default is the free area here): at
++-- the left a square at 10000 nits around a smaller one at the peak, which disappears into it once
++-- the peak is the display's; at the right patches at paper white, twice and four times that and
++-- at the peak. With another renderer (no d3d12_HDROutputState, which XRenderD3D12 does not save)
++-- the rows are greyed out.
++----------------------------------------------------------------------------------------------
++
++UI.PageOptionsVideoHdr =
++{
++	GUI =
++	{
++		widget_back =
++		{
++			left = 200,
++			width = 160,
++			skin = UI.skins.BottomMenuButton,
++			bordersides = "lrtb",
++
++			text = Localize( "AdvancedVidOptions" ),
++
++			tabstop = 6,
++
++			OnCommand = function( sender )
++				UI.PageOptionsVideoAdv.user.fromHdrPage = 1;
++				GotoPage( "VideoAdvOptions" );
++			end,
++		},
++
++		widget_default =
++		{
++			skin = UI.skins.BottomMenuButton,
++			left = 780 - 180,
++
++			tabstop = 5,
++
++			text = Localize( "RestoreDefaults" ),
++
++			OnCommand = function( sender )
++				UI.PageOptionsVideoHdr.user:SetToDefault();
++			end,
++		},
++
++		widget_output_text =
++		{
++			skin = UI.skins.Label,
++			left = 200, top = 130,
++			width = 160,
++
++			text = "HDR Output",
++		},
++
++		widget_output =
++		{
++			skin = UI.skins.ComboBox,
++			left = 370, top = 130,
++			width = 120,
++
++			tabstop = 1,
++
++			OnChanged = function( sender )
++				UI.PageOptionsVideoHdr.user:OnOutputChanged();
++			end,
++		},
++
++		widget_display =
++		{
++			skin = UI.skins.Label,
++			left = 500, top = 130,
++			width = 280,
++			halign = UIALIGN_LEFT,
++
++			text = "",
++		},
++
++		widget_paper_text =
++		{
++			skin = UI.skins.Label,
++			left = 200, top = 168,
++			width = 160,
++
++			text = "SDR Brightness",
++		},
++
++		widget_paper =
++		{
++			skin = UI.skins.HScrollBar,
++			left = 370, top = 170,
++			width = 166, height = 24,
++
++			tabstop = 2,
++
++			OnChanged = function( sender )
++				UI.PageOptionsVideoHdr.user:OnPaperChanged();
++			end,
++		},
++
++		widget_paper_value =
++		{
++			skin = UI.skins.Label,
++			left = 545, top = 168,
++			width = 235,
++			halign = UIALIGN_LEFT,
++
++			text = "",
++		},
++
++		widget_peak_text =
++		{
++			skin = UI.skins.Label,
++			left = 200, top = 206,
++			width = 160,
++
++			text = "Peak Brightness",
++		},
++
++		widget_peak =
++		{
++			skin = UI.skins.HScrollBar,
++			left = 370, top = 208,
++			width = 166, height = 24,
++
++			tabstop = 3,
++
++			OnChanged = function( sender )
++				UI.PageOptionsVideoHdr.user:OnPeakChanged();
++			end,
++		},
++
++		widget_peak_value =
++		{
++			skin = UI.skins.Label,
++			left = 545, top = 206,
++			width = 235,
++			halign = UIALIGN_LEFT,
++
++			text = "",
++		},
++
++		widget_average_text =
++		{
++			skin = UI.skins.Label,
++			left = 200, top = 244,
++			width = 160,
++
++			text = "Frame Average Limit",
++		},
++
++		widget_average =
++		{
++			skin = UI.skins.ComboBox,
++			left = 370, top = 244,
++			width = 120,
++
++			tabstop = 4,
++
++			OnChanged = function( sender )
++				UI.PageOptionsVideoHdr.user:OnAverageChanged();
++			end,
++		},
++
++		widget_average_value =
++		{
++			skin = UI.skins.Label,
++			left = 500, top = 244,
++			width = 280,
++			halign = UIALIGN_LEFT,
++
++			text = "",
++		},
++
++		-- what the test under them shows (d3d12_HDROutputTestRect: x 210 to 770, y 332 to 454)
++		widget_hint1 =
++		{
++			skin = UI.skins.Label,
++			left = 210, top = 282,
++			width = 560,
++			halign = UIALIGN_LEFT,
++
++			text = "",
++		},
++
++		widget_hint2 =
++		{
++			skin = UI.skins.Label,
++			left = 210, top = 304,
++			width = 560,
++			halign = UIALIGN_LEFT,
++
++			text = "",
++		},
++
++		OnActivate = function( sender )
++			UI.PageOptionsVideoHdr.user:Initialize();
++		end,
++
++		OnDeactivate = function( sender )
++			UI.PageOptionsVideoHdr.user:Close();
++		end,
++	},
++
++	user =
++	{
++		open = 0,
++		initializing = 0,
++		oldDebug = 0,
++		outputIndex = 1,
++		averageIndex = 1,
++
++		-- the sliders: at the left end the display's level (0), else SDR brightness 80 to 480 nits
++		-- by 10, the peak 250 to 4000 nits by 5 (evenly in log2)
++		PaperFromSlider = function( v )
++			if( not v or v < 0.02 ) then
++				return 0;
++			end
++			return 80 + floor( ( v - 0.02 ) / 0.98 * 40 + 0.5 ) * 10;
++		end,
++
++		SliderFromPaper = function( nits )
++			if( nits <= 0 ) then
++				return 0;
++			end
++			return min( max( 0.02 + 0.98 * ( nits - 80 ) / 400, 0.02 ), 1 );
++		end,
++
++		PeakFromSlider = function( v )
++			if( not v or v < 0.02 ) then
++				return 0;
++			end
++			return floor( 250 * exp( log( 16 ) * ( v - 0.02 ) / 0.98 ) / 5 + 0.5 ) * 5;
++		end,
++
++		SliderFromPeak = function( nits )
++			if( nits <= 0 ) then
++				return 0;
++			end
++			return min( max( 0.02 + 0.98 * log( nits / 250 ) / log( 16 ), 0.02 ), 1 );
++		end,
++
++		Initialize = function( self )
++			local gui = UI.PageOptionsVideoHdr.GUI;
++			local user = UI.PageOptionsVideoHdr.user;
++			user.initializing = 1;
++			gui.widget_output:Clear();
++			gui.widget_output:AddItem( "SDR" );
++			gui.widget_output:AddItem( "HDR10" );
++			gui.widget_output:AddItem( "scRGB" );
++			gui.widget_average:Clear();
++			gui.widget_average:AddItem( "Display" );
++			gui.widget_average:AddItem( "Off" );
++
++			local output = tonumber( getglobal( "d3d12_HDROutput" ) );
++			if( not output or not getglobal( "d3d12_HDROutputState" ) ) then
++				gui.widget_output:SelectIndex( 1 );
++				gui.widget_average:SelectIndex( 1 );
++				for key, val in { gui.widget_output, gui.widget_paper, gui.widget_peak, gui.widget_average, gui.widget_default } do
++					UI:DisableWidget( val );
++				end
++				gui.widget_display:SetText( "" );
++				gui.widget_hint1:SetText( "" );
++				gui.widget_hint2:SetText( "" );
++				user.initializing = 0;
++				return;
++			end
++			for key, val in { gui.widget_output, gui.widget_paper, gui.widget_peak, gui.widget_average, gui.widget_default } do
++				UI:EnableWidget( val );
++			end
++
++			user.outputIndex = 1;
++			if( output >= 1 and output <= 2 ) then
++				user.outputIndex = output + 1;
++			end
++			gui.widget_output:SelectIndex( user.outputIndex );
++			user.averageIndex = 1;
++			if( ( tonumber( getglobal( "d3d12_HDRFrameAverage" ) ) or 1 ) <= 0 ) then
++				user.averageIndex = 2;
++			end
++			gui.widget_average:SelectIndex( user.averageIndex );
++			gui.widget_paper:SetValue( user.SliderFromPaper( tonumber( getglobal( "d3d12_HDRPaperWhite" ) ) or 0 ) );
++			gui.widget_peak:SetValue( user.SliderFromPeak( tonumber( getglobal( "d3d12_HDRPeak" ) ) or 0 ) );
++			user.initializing = 0;
++
++			-- the test while the page is open
++			if( user.open == 0 ) then
++				user.open = 1;
++				user.oldDebug = tonumber( getglobal( "d3d12_HDROutputDebug" ) ) or 0;
++				if( user.oldDebug == 3 ) then
++					user.oldDebug = 0;
++				end
++				setglobal( "d3d12_HDROutputDebug", 3 );
++			end
++			user:Refresh();
++		end,
++
++		-- the lines of the levels in use, the display's and of the test
++		Refresh = function( self )
++			local gui = UI.PageOptionsVideoHdr.GUI;
++			local on = tonumber( getglobal( "d3d12_HDRDisplayOn" ) ) or -1;
++			local peak = floor( ( tonumber( getglobal( "d3d12_HDRDisplayPeak" ) ) or 0 ) + 0.5 );
++			local white = floor( ( tonumber( getglobal( "d3d12_HDRDisplayWhite" ) ) or 0 ) + 0.5 );
++			local full = floor( ( tonumber( getglobal( "d3d12_HDRDisplayFullFrame" ) ) or 0 ) + 0.5 );
++			local fullSet = tonumber( getglobal( "d3d12_HDRFullFrame" ) ) or 0;
++			if( fullSet > 0 ) then
++				full = floor( fullSet + 0.5 );
++			end
++
++			if( on == 1 ) then
++				gui.widget_display:SetText( "Display in HDR mode, peak " .. peak .. " nits" );
++			elseif( on == 0 ) then
++				gui.widget_display:SetText( "Display in SDR (Windows: Use HDR)" );
++			else
++				gui.widget_display:SetText( "Display not found" );
++			end
++
++			local paper = tonumber( getglobal( "d3d12_HDRPaperWhite" ) ) or 0;
++			if( paper > 0 ) then
++				gui.widget_paper_value:SetText( floor( paper + 0.5 ) .. " nits" );
++			elseif( white > 0 ) then
++				gui.widget_paper_value:SetText( "Windows (" .. white .. " nits)" );
++			else
++				gui.widget_paper_value:SetText( "Windows" );
++			end
++
++			local peakSet = tonumber( getglobal( "d3d12_HDRPeak" ) ) or 0;
++			if( peakSet > 0 ) then
++				gui.widget_peak_value:SetText( floor( peakSet + 0.5 ) .. " nits" );
++			elseif( on == 1 and peak > 0 ) then
++				gui.widget_peak_value:SetText( "Display (" .. peak .. " nits)" );
++			else
++				gui.widget_peak_value:SetText( "Display" );
++			end
++
++			if( gui.widget_average:GetSelectionIndex() == 2 ) then
++				gui.widget_average_value:SetText( "" );
++			elseif( full > 0 ) then
++				gui.widget_average_value:SetText( "at most " .. full .. " nits" );
++			else
++				gui.widget_average_value:SetText( "none reported" );
++			end
++
++			if( gui.widget_output:GetSelectionIndex() ~= 1 and on == 1 and ( tonumber( getglobal( "r_HDRRendering" ) ) or 0 ) ~= 0 ) then
++				gui.widget_hint1:SetText( "Left: raise Peak Brightness until the small square disappears in the bright one." );
++				gui.widget_hint2:SetText( "Right: paper white (the white of the game and the menu), twice and four times it, the peak." );
++			else
++				gui.widget_hint1:SetText( "The test of the levels shows with HDR10 or scRGB on a display in HDR mode." );
++				gui.widget_hint2:SetText( "" );
++			end
++		end,
++
++		OnOutputChanged = function( self )
++			local user = UI.PageOptionsVideoHdr.user;
++			local index = UI.PageOptionsVideoHdr.GUI.widget_output:GetSelectionIndex();
++			if( user.initializing == 1 or index == user.outputIndex ) then
++				return;
++			end
++			user.outputIndex = index;
++			setglobal( "d3d12_HDROutput", index - 1 );
++			-- HDR10 and scRGB need the HDR pipeline: HDR Soft (the neutral tone map) while it is None
++			if( index ~= 1 and ( tonumber( getglobal( "r_HDRRendering" ) ) or 0 ) == 0 ) then
++				setglobal( "r_HDRRendering", 1 );
++				setglobal( "d3d12_ToneMap", 4 );
++			end
++			user:Refresh();
++		end,
++
++		OnPaperChanged = function( self )
++			local user = UI.PageOptionsVideoHdr.user;
++			if( user.initializing == 1 ) then
++				return;
++			end
++			local nits = user.PaperFromSlider( tonumber( UI.PageOptionsVideoHdr.GUI.widget_paper:GetValue() ) );
++			if( nits ~= tonumber( getglobal( "d3d12_HDRPaperWhite" ) ) ) then
++				setglobal( "d3d12_HDRPaperWhite", nits );
++			end
++			user:Refresh();
++		end,
++
++		OnPeakChanged = function( self )
++			local user = UI.PageOptionsVideoHdr.user;
++			if( user.initializing == 1 ) then
++				return;
++			end
++			local nits = user.PeakFromSlider( tonumber( UI.PageOptionsVideoHdr.GUI.widget_peak:GetValue() ) );
++			if( nits ~= tonumber( getglobal( "d3d12_HDRPeak" ) ) ) then
++				setglobal( "d3d12_HDRPeak", nits );
++			end
++			user:Refresh();
++		end,
++
++		OnAverageChanged = function( self )
++			local user = UI.PageOptionsVideoHdr.user;
++			local index = UI.PageOptionsVideoHdr.GUI.widget_average:GetSelectionIndex();
++			if( user.initializing == 1 or index == user.averageIndex ) then
++				return;
++			end
++			user.averageIndex = index;
++			if( index == 2 ) then
++				setglobal( "d3d12_HDRFrameAverage", 0 );
++			else
++				setglobal( "d3d12_HDRFrameAverage", 1 );
++			end
++			user:Refresh();
++		end,
++
++		-- the levels of the display, the frame average limit on (the output stays)
++		SetToDefault = function( self )
++			setglobal( "d3d12_HDRPaperWhite", 0 );
++			setglobal( "d3d12_HDRPeak", 0 );
++			setglobal( "d3d12_HDRFrameAverage", 1 );
++			UI.PageOptionsVideoHdr.user:Initialize();
++		end,
++
++		-- the page closes: the debug view as it was, the settings saved
++		Close = function( self )
++			local user = UI.PageOptionsVideoHdr.user;
++			if( user.open == 0 ) then
++				return;
++			end
++			user.open = 0;
++			setglobal( "d3d12_HDROutputDebug", user.oldDebug );
++			System:SaveConfiguration();
++		end,
++	},
++}
++
++AddUISideMenu( UI.PageOptionsVideoHdr.GUI,
++{
++	{ "MainMenu", Localize( "MainMenu" ), "$MainScreen$", 0 },
++} );
++
++UI:CreateScreenFromTable( "VideoHdrOptions", UI.PageOptionsVideoHdr.GUI );
++

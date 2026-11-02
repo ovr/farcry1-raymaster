@@ -105,6 +105,31 @@ float CD3D12Renderer::GetFrameAverageLimit(const SDisplayInfo &Info, float fPeak
   return fLimit > 0 && fLimit < fPeak ? fLimit : 0;
 }
 
+void CD3D12Renderer::PublishHdrDisplay(const SDisplayInfo &Info)
+{
+  // Set through the console, so that it and the scripts show the same.
+  const float fValues[4] = { !Info.szName[0] ? -1.0f : Info.bHdr ? 1.0f : 0.0f, Info.fMaxNits, Info.fMaxFullFrameNits, Info.bHdr ? Info.fSdrWhiteNits : 0 };
+  for (int i = 0; i < 4; i++)
+  {
+    if (fValues[i] == m_HdrOut.fDisplay[i] || !m_HdrOut.pDisplay[i])
+      continue;
+    m_HdrOut.fDisplay[i] = fValues[i];
+    char szValue[32];
+    snprintf(szValue, sizeof(szValue), "%g", fValues[i]);
+    m_HdrOut.pDisplay[i]->ForceSet(szValue);
+  }
+}
+
+void CD3D12Renderer::PublishHdrState(EDisplayOutput Output, const std::string &Reason)
+{
+  const std::string State = Output == EDisplayOutput::Hdr10 ? "HDR10" : Output == EDisplayOutput::ScRgb ? "scRGB" : Reason.empty() ? "SDR" : "SDR: " + Reason;
+  if (State == m_HdrOut.State)
+    return;
+  m_HdrOut.State = State;
+  if (m_HdrOut.pState)
+    m_HdrOut.pState->ForceSet(State.c_str());
+}
+
 void CD3D12Renderer::UpdateHdrOutput()
 {
   if (!m_pDevice)
@@ -113,11 +138,19 @@ void CD3D12Renderer::UpdateHdrOutput()
   if (!nWanted && !m_HdrOut.bCapture && m_pDevice->GetOutput() == EDisplayOutput::Sdr && !m_pDevice->HasLayer())
   {
     m_HdrOut.Reason.clear();
+    PublishHdrState(EDisplayOutput::Sdr, m_HdrOut.Reason);
+    // The display's variables for the menu's HDR page, a few times a second (its state is read at most once a second).
+    if (--m_HdrOut.nDisplayPoll <= 0)
+    {
+      m_HdrOut.nDisplayPoll = 30;
+      PublishHdrDisplay(m_pDevice->GetDisplayInfo());
+    }
     return;
   }
   EDisplayOutput Output = EDisplayOutput::Sdr;
   std::string Reason;
   const SDisplayInfo &Info = m_pDevice->GetDisplayInfo();
+  PublishHdrDisplay(Info);
   GetHdrLevels(Info, m_HdrOut.fPaperWhite, m_HdrOut.fPeak);
   m_HdrOut.fFrameAverage = GetFrameAverageLimit(Info, m_HdrOut.fPeak);
   if (nWanted && !IsHdrOn())
@@ -136,6 +169,7 @@ void CD3D12Renderer::UpdateHdrOutput()
     Reason = "the swap chain can't show its colour space";
 
   const EDisplayOutput Actual = m_pDevice->GetOutput();
+  PublishHdrState(Actual, Reason);
   if ((int)Actual == m_HdrOut.nLogged && Reason == m_HdrOut.Reason)
     return;
   if (Actual != EDisplayOutput::Sdr)
@@ -341,8 +375,17 @@ SDrawConstants CD3D12Renderer::HdrOutputConstants(EDisplayOutput Output) const
   // The frame average limit's factor of the highlights (white: none).
   const CD3D12Texture *pFall = FrameAverageTarget();
   dc.nTex2 = pFall ? (uint32)pFall->m_nSRV : D3D12_SRV_WHITE;
-  Set4(dc.vParams0, m_HdrOut.fPaperWhite, m_HdrOut.fPeak, Output == EDisplayOutput::Hdr10 ? 1.0f : 2.0f, (float)std::clamp(CV_d3d12_HDROutputDebug, 0, 2));
+  const int nDebug = std::clamp(CV_d3d12_HDROutputDebug, 0, 3);
+  Set4(dc.vParams0, m_HdrOut.fPaperWhite, m_HdrOut.fPeak, Output == EDisplayOutput::Hdr10 ? 1.0f : 2.0f, (float)nDebug);
   Set4(dc.vParams1, 1.0f / m_pDevice->GetWidth(), 1.0f / m_pDevice->GetHeight(), 0, 0);
+  // The HDR page's test: where it is (left, top, right, bottom in 0..1).
+  if (nDebug == 3)
+  {
+    float r[4] = {};
+    if (!m_HdrOut.pTestRect || sscanf(m_HdrOut.pTestRect->GetString(), "%f %f %f %f", &r[0], &r[1], &r[2], &r[3]) != 4)
+      sscanf(HDR_TEST_RECT, "%f %f %f %f", &r[0], &r[1], &r[2], &r[3]);
+    Set4(dc.vParams2, r[0], r[1], r[2], r[3]);
+  }
   return dc;
 }
 
