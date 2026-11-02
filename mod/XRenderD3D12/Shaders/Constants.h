@@ -335,6 +335,8 @@ struct SVolumetricConstants
   XR_FLOAT4(vCascadeEnd);         //!< as SFrameConstants'
   XR_FLOAT4(vCascadeDepth);       //!< as SFrameConstants'
   XR_FLOAT4(vCascadeParams);      //!< x the number of cascades (0: the sun reaches everywhere), w the depth bias (m)
+  XR_FLOAT4(vShafts);             //!< the shafts alone (d3d12_VolumetricLightShafts): x the radius of the air around (m; 0 all the
+                                  //!< air, as before), y the power of the part of it in shadow (the sun's light as much as that)
 };
 
 #endif

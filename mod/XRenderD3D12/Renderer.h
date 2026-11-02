@@ -1787,7 +1787,10 @@ public:
   int CV_d3d12_VolumetricLight = 1;         //!< the volumetric light (Volumetric.cpp): 0 off, 1 on
   float CV_d3d12_VolumetricLightDensity = 0.002f;    //!< the air's extinction (1 / m)
   float CV_d3d12_VolumetricLightSun = 1;    //!< the sun's light it scatters, times the sun's
-  float CV_d3d12_VolumetricLightAmbient = 1;         //!< the light from all round it scatters, times the fog's colour
+  float CV_d3d12_VolumetricLightAmbient = 1;         //!< the light from all round it scatters, times the fog's colour (without the shafts)
+  float CV_d3d12_VolumetricLightShafts = 4;          //!< the shafts alone: the radius of the air around (m; 0 all the air)
+  float CV_d3d12_VolumetricLightShaftsSun = 16;      //!< the shafts: the sun's light scattered, times d3d12_VolumetricLightSun
+  float CV_d3d12_VolumetricLightShaftsPower = 3;     //!< the shafts: the power of the part of the air around in shadow
   float CV_d3d12_VolumetricLightAnisotropy = 0.3f;   //!< the phase's g: 0 the same all round, towards 1 forwards
   float CV_d3d12_VolumetricLightDistance = 60;       //!< the far end of its froxels (m)
   float CV_d3d12_VolumetricLightHeight = 40;         //!< the height above the water over which the air thins to half (0: the same everywhere)
