@@ -67,6 +67,7 @@ set(XRENDERD3D12_SOURCES
     Shader.cpp
     RendererShaders.cpp
     Geometry.h
+    TangentFrame.h
     LeafBuffer.cpp
     RendererBuffers.cpp
     RenderElements.cpp
