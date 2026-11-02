@@ -111,6 +111,18 @@ constexpr STemplateEntry s_Templates[] =
   { "templreflcmdecal",                "",                              eS_Opaque,                kOpaque2,                               0,              eDC_Opaque,           eCULL_Back },
   { "templreflcmdecal_reflamountopacity", "",                           eS_Opaque,                kOpaque2,                               0,              eDC_Opaque,           eCULL_Back },
   { "templreflcmdecaladdsig",          "",                              eS_Opaque,                kOpaque2,                               0,              eDC_Opaque,           eCULL_Back },
+  { "templreflcmdecal_reflamountalpha", "",                             eS_Opaque,                kOpaque2,                               0,              eDC_Opaque,           eCULL_Back },
+  { "templreflcmdecalmod",             "",                              eS_Opaque,                kOpaque2,                               0,              eDC_Opaque,           eCULL_Back },
+  // The refraction and glass templates of vertex and pixel shaders (s_TemplateLighting): opaque in
+  // the original (its blend off). Exact, ahead of the prefix templbump*.
+  { "templrefrcm",                     "",                              eS_Opaque,                kOpaque2,                               0,              eDC_Opaque,           eCULL_Back },
+  { "templbumprefrcm",                 "",                              eS_Opaque,                kOpaque2,                               0,              eDC_Opaque,           eCULL_Back },
+  { "templglasscm_ps20",               "",                              eS_Opaque,                kOpaque2,                               0,              eDC_Opaque,           eCULL_Back },
+  { "templglassdispersioncm",          "",                              eS_Opaque,                kOpaque2,                               0,              eDC_Opaque,           eCULL_Back },
+  { "templbumpglasscm",                "",                              eS_Opaque,                kOpaque2,                               0,              eDC_Opaque,           eCULL_Back },
+  { "templbumpglassenvcm",             "",                              eS_Opaque,                kOpaque2,                               0,              eDC_Opaque,           eCULL_Back },
+  { "templbumpglassfresnelcm",         "",                              eS_Opaque,                kOpaque2,                               0,              eDC_Opaque,           eCULL_Back },
+  { "templbumpglassfresnelenvcm",      "",                              eS_Opaque,                kOpaque2,                               0,              eDC_Opaque,           eCULL_Back },
   { "templreflenvcm",                  "",                              eS_Opaque,                kOpaque2,                               0,              eDC_Opaque,           eCULL_Back },
   { "templbumpreflenvcm",              "templreflenvcm",                eS_Opaque,                kOpaque2,                               0,              eDC_Opaque,           eCULL_Back },
   { "templglassdispersionenvcm",       "templreflenvcm",                eS_Opaque,                kOpaque2,                               0,              eDC_Opaque,           eCULL_Back },
@@ -127,11 +139,14 @@ constexpr STemplateEntry s_Templates[] =
   // Glass: drawn blended so that what is behind shows (alpha: the opacity).
   { "templglasscm",                    "templglasscm_fp",               eS_Opaque,                kOpaque2,                               0,              eDC_AlphaBlend,       eCULL_Back },
   { "templglasscm_fp",                 "",                              eS_Opaque,                kOpaque2,                               0,              eDC_AlphaBlend,       eCULL_Back },
+  { "templglassenvcm",                 "",                              eS_Opaque,                kOpaque2,                               0,              eDC_AlphaBlend,       eCULL_Back },
   // Not drawn: a light pass of dynamic lights.
   { "templinvlight",                   "",                              eS_Opaque,                EF2_FOGOVERLAY1 | EF2_DONTSORTBYDIST,   0,              eDC_NoDraw,           eCULL_Back },
-  // Not seen (what is behind shows unchanged), but casts its shadow.
-  { "templrefrenvcm",                  "",                              eS_Opaque,                kOpaque2,                               0,              eDC_ShadowOnly,       eCULL_Back },
-  { "templbumprefrenvcm",              "templrefrenvcm",                eS_Opaque,                kOpaque2,                               0,              eDC_ShadowOnly,       eCULL_Back },
+  // TemplRefrEnvCM: the texture alone, opaque (its pixel shader's cube weight is 0; the swatch shows
+  // the red "Replace Me" of a missing texture). TemplBumpRefrEnvCM is an alias by name, but draws the
+  // bump refraction of the scene's cube (s_TemplateLighting).
+  { "templrefrenvcm",                  "",                              eS_Opaque,                kOpaque2,                               0,              eDC_Opaque,           eCULL_Back },
+  { "templbumprefrenvcm",              "templrefrenvcm",                eS_Opaque,                kOpaque2,                               0,              eDC_Opaque,           eCULL_Back },
   // Decals over surfaces, after the opaque ones: multiplied in, blended.
   { "templdecalmodulate",              "templdecalmodulate_fp",         eS_Decal,                 EF2_DONTSORTBYDIST,                     0,              eDC_Modulate,         eCULL_Back },
   { "templdecalalphablend",            "",                              eS_Decal,                 EF2_DONTSORTBYDIST,                     0,              eDC_AlphaBlend,       eCULL_Back },
@@ -244,12 +259,28 @@ constexpr STemplateLighting s_TemplateLighting[] =
   { "templreflcmdecal",                ELighting::Vertex,   EGlow::None, EEnvMap::CubeDecal },
   { "templreflcmdecal_reflamountopacity", ELighting::Vertex, EGlow::None, EEnvMap::CubeDecalAmount },
   { "templreflcmdecaladdsig",          ELighting::Vertex,   EGlow::None, EEnvMap::CubeAddSigned },
+  { "templreflcmdecal_reflamountalpha", ELighting::Vertex,  EGlow::None, EEnvMap::CubeDecalAlpha },
+  { "templreflcmdecalmod",             ELighting::Vertex,   EGlow::None, EEnvMap::CubeModulate },
   // The scene around the object (rendered into a cube) times the vertex lighting.
   { "templreflenvcm",                  ELighting::Vertex,   EGlow::None, EEnvMap::Auto },
   { "templbumpreflenvcm",              ELighting::Vertex,   EGlow::None, EEnvMap::Auto },
-  { "templglassdispersionenvcm",       ELighting::Vertex,   EGlow::None, EEnvMap::Auto },
   { "templglasscm",                    ELighting::None,     EGlow::None, EEnvMap::Glass },
   { "templglasscm_fp",                 ELighting::None,     EGlow::None, EEnvMap::GlassFixed },
+  // The templates of vertex and pixel shaders, unlit; the *EnvCM ones with the scene's cube
+  // (SetTemplateLighting): the refraction (+ the texture), the bump refraction and bump glass (times
+  // the vertex colours), the glass, the dispersion. TemplRefrEnvCM: the texture alone.
+  { "templrefrcm",                     ELighting::None,     EGlow::None, EEnvMap::Refract },
+  { "templrefrenvcm",                  ELighting::None },
+  { "templbumprefrcm",                 ELighting::VColor,   EGlow::None, EEnvMap::BumpRefract },
+  { "templbumprefrenvcm",              ELighting::VColor,   EGlow::None, EEnvMap::BumpRefract },
+  { "templglassenvcm",                 ELighting::None,     EGlow::None, EEnvMap::Glass },
+  { "templglasscm_ps20",               ELighting::None,     EGlow::None, EEnvMap::GlassPS20 },
+  { "templglassdispersioncm",          ELighting::None,     EGlow::None, EEnvMap::Dispersion },
+  { "templglassdispersionenvcm",       ELighting::None,     EGlow::None, EEnvMap::Dispersion },
+  { "templbumpglasscm",                ELighting::VColor,   EGlow::None, EEnvMap::BumpGlass },
+  { "templbumpglassenvcm",             ELighting::VColor,   EGlow::None, EEnvMap::BumpGlass },
+  { "templbumpglassfresnelcm",         ELighting::VColor,   EGlow::None, EEnvMap::BumpGlassFresnel },
+  { "templbumpglassfresnelenvcm",      ELighting::VColor,   EGlow::None, EEnvMap::BumpGlassFresnel },
   // No lights: the texture times the object's ambient colour, or the texture alone (also added).
   { "templalphablend",                 ELighting::Ambient },
   { "templdecalopacity",               ELighting::Ambient },
@@ -391,13 +422,17 @@ std::string Hex(uint64 n)
 }
 
 //! The lighting, glow and cube map of the template a material names (s_TemplateLighting; the
-//! templates of one shader light each their own way).
+//! templates of one shader light each their own way). The cube of the *EnvCM templates is the
+//! scene around the object, as the original's render target cube; the *_EnvCMAmb ones take a quarter
+//! of their ambient light from the material's cube (a cube file in the original).
 void SetTemplateLighting(SShaderProps &Props, std::string_view Name)
 {
   const STemplateLighting *pL = FindEntry(s_TemplateLighting, Name);
   Props.eLighting = pL ? pL->eLighting : ELighting::Overbright;
   Props.eGlow = pL ? pL->eGlow : EGlow::None;
   Props.eEnvMap = pL ? pL->eEnvMap : EEnvMap::None;
+  Props.bAutoCube = Props.eEnvMap != EEnvMap::None && Props.eEnvMap != EEnvMap::Auto && Name.ends_with("envcm");
+  Props.bAmbientCube = Name.find("_envcmamb") != std::string_view::npos;
 }
 
 //! A template name resolved through s_Templates.
@@ -1107,7 +1142,8 @@ CShader *CShaderManager::LoadMaterial(const char *szName, const char *szTemplate
   const SShaderProps &Shared = pTempl->GetProps();
   SShaderProps Props = Shared;
   SetTemplateLighting(Props, Templ);
-  const bool bOwnLighting = Props.eLighting != Shared.eLighting || Props.eGlow != Shared.eGlow || Props.eEnvMap != Shared.eEnvMap;
+  const bool bOwnLighting = Props.eLighting != Shared.eLighting || Props.eGlow != Shared.eGlow || Props.eEnvMap != Shared.eEnvMap ||
+                            Props.bAutoCube != Shared.bAutoCube || Props.bAmbientCube != Shared.bAmbientCube;
   std::string Key = Name + '\n' + (bBump || bOwnLighting ? Templ : std::string(pTempl->GetName()));
   if (auto it = m_Materials.find(Key); it != m_Materials.end())
     return it->second;
@@ -1282,16 +1318,17 @@ void CShaderManager::LoadDrawnTextures(const CShader *pSH, SRenderShaderResource
 {
   // As CD3D12Renderer::DrawLeafItem reads them: the normal map for the bump mapping of the pixel lit
   // templates and for the terrain's detail layers, the gloss map for the glow and the reflection
-  // amount, the material's cube for the cube map templates.
+  // amount, the material's cube for the cube map templates (and their ambient's).
   const SShaderProps &Props = pSH->GetProps();
-  if ((Props.bPixelLighting && g_pRenderer && g_pRenderer->CV_r_Quality_BumpMapping > 0) || Props.eDrawClass == eDC_TerrainLayer)
+  if ((Props.bPixelLighting && g_pRenderer && g_pRenderer->CV_r_Quality_BumpMapping > 0) || Props.eDrawClass == eDC_TerrainLayer ||
+      Props.BumpCube())
     LoadNormalMap(pRes);
   if ((Props.eGlow != EGlow::None && Props.eGlow != EGlow::Alpha) || Props.eEnvMap == EEnvMap::CubeDecalAmount ||
       Props.eLayer2 == ELayer2::AddGloss || Props.eLayer2 == ELayer2::BlendGloss)
     LoadResourceTexture(pRes, EFTT_GLOSS);
   if (Props.eLayer2 == ELayer2::BlendOpacity)
     LoadResourceTexture(pRes, EFTT_OPACITY);
-  if (Props.eEnvMap != EEnvMap::None && Props.eEnvMap != EEnvMap::Auto)
+  if ((Props.eEnvMap != EEnvMap::None && !Props.UsesAutoCube()) || Props.bAmbientCube)
     LoadResourceTexture(pRes, EFTT_CUBEMAP);
 }
 
@@ -1492,8 +1529,7 @@ CFColor GetMaterialColor(const SRenderShaderResources *pRes)
   return CFColor(1.0f, 1.0f, 1.0f, 1.0f);
 }
 
-//! The material's public float named szName (its shader params), fDefault without it.
-static float GetResourceFloat(const SRenderShaderResources *pRes, const char *szName, float fDefault)
+float GetResourceFloat(const SRenderShaderResources *pRes, const char *szName, float fDefault)
 {
   if (!pRes)
     return fDefault;
@@ -1509,6 +1545,26 @@ static float GetResourceFloat(const SRenderShaderResources *pRes, const char *sz
       return (float)P.m_Value.m_Int;
   }
   return fDefault;
+}
+
+void GetResourceColor(const SRenderShaderResources *pRes, const char *szName, const float vDefault[3], float vOut[3])
+{
+  for (int i = 0; i < 3; i++)
+    vOut[i] = vDefault[i];
+  if (!pRes)
+    return;
+  const TArray<SShaderParam> &Params = pRes->m_ShaderParams;
+  for (int i = 0; i < Params.Num(); i++)
+  {
+    const SShaderParam &P = Params[i];
+    if (_strnicmp(P.m_Name, szName, sizeof(P.m_Name)))
+      continue;
+    if (P.m_Type == eType_FCOLOR)
+      vOut[0] = P.m_Value.m_Color[0], vOut[1] = P.m_Value.m_Color[1], vOut[2] = P.m_Value.m_Color[2];
+    else if (P.m_Type == eType_VECTOR)
+      vOut[0] = P.m_Value.m_Vector[0], vOut[1] = P.m_Value.m_Vector[1], vOut[2] = P.m_Value.m_Vector[2];
+    return;
+  }
 }
 
 void GetTexTransform(const CShader *pShader, const SRenderShaderResources *pRes, int nSlot, float vRow0[3], float vRow1[3])

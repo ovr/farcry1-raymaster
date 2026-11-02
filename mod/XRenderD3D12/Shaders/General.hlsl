@@ -26,7 +26,9 @@
 //	      N' with DF_BUMP; DF2_GLASS: lerp(cube(T), cube(R), F), T the view
 //	      vector refracted with vParams2.w, F = saturate(vParams2.z +
 //	      vParams2.x * (1 - N.V)^vParams2.y); DF2_REFL_AMOUNT: rgb = cube * tex5
-//	      + tex4 * vAddColor.rgb, both at uv0), else DF_TEX0_ARRAY
+//	      + tex4 * vAddColor.rgb, both at uv0; DF2_CUBE_SHADER: as the original's
+//	      shader of the template, by the mode vParams3.w, CubeShader), else
+//	      DF_TEX0_ARRAY
 //	      (g_TextureArrays, slice floor(u / 2) at (u - 2 * slice, v)), else DF_TEX0
 //	      (g_Textures; DF2_BUMP_OFFSET at uv0 + (tex3 at uv1 rg * 2 - 1) *
 //	      vParams0.x), else white; sampler from nSamplers bits 0-3
@@ -43,6 +45,9 @@
 //	      else *= tex1
 //	    DF2_ALPHA_GLOW: rgb += tex0 rgb * tex0 a (the texture's alpha its
 //	      glow, unlit)
+//	    DF2_AMBIENT_CUBE: rgb += 0.25 * (the cube g_Cubes[nTex6] at the view
+//	      vector reflected about the vertex normal - tex0 * vColor * vAmbient):
+//	      a quarter of the ambient light from the cube, unlit
 //	    DF_TERRAIN_CLIFF (terrain with cliffs): rgb = 2 * rgb * lerp(1, 2 * tex2,
 //	      w.x) * lerp(1, 2 * tex3, w.y), w = vertex colour rg * vTexGen1V.xy, uv
 //	      of tex2 from the world position with vParams0 / 1, of tex3 with 2 / 3
@@ -641,6 +646,99 @@ float3 SurfaceRay(float3 vCube, float3 P, float3 vFace, float3 R, float fDistanc
 }
 #endif
 
+//! The cube tex0 in the direction vDir (world). The rays of XR_RAY_REFL do not take its place: the pixel shader with
+//! a ray query at each of these lookups hung the GPU (a page fault, AMD).
+float4 CubeLookup(float3 vDir, uint nSampler)
+{
+  return SampleCube(g_Draw.nTex0, nSampler, vDir);
+}
+
+//! The view vector I refracted about the normal N with the ratio fEta as the original's vertex shaders refract it:
+//! the square root of the absolute value (their rsq), so that beyond the critical angle it bends on instead of
+//! giving 0.
+float3 RefractAbs(float3 I, float3 N, float fEta)
+{
+  const float d = dot(N, I);
+  return fEta * I - (fEta * d + sqrt(abs(1 - fEta * fEta * (1 - d * d)))) * N;
+}
+
+//! DF2_CUBE_SHADER: the colour of the cube map templates of the original's vertex and pixel shaders (Draw3D.cpp), in
+//! world space, by the mode vParams3.w; vView the view vector (normalized, from the camera), vN the normal:
+//!   1 TemplRefrCM: the cube seen through (vView refracted with the ratio vParams2.w) times vParams2.x
+//!   2 the dispersion: red, green and blue seen through with the ratios vParams3.xyz, the cube reflected over them
+//!     by F = saturate(vParams2.z + vParams2.x * (1 - N.V)^vParams2.y)
+//!   3 TemplGlassCM_PS20 (sin t = saturate(sin i * vParams2.w)): seen through along the refracted ray (sin t along
+//!     the incident ray's direction on the surface, - cos t along N) times the base colour vParams0.rgb, 1 - sin t and
+//!     vParams2.x; reflected times sin i and vParams2.y; the rainbow (tex4 at cos i^vParams3.x) times vParams2.z, the
+//!     base colour and sin t; + vParams3.y
+//!   4 the bump refraction (the vertex shader's sum with the normal map tex3's unsigned values, or a flat one
+//!     without vParams0.z, in the tangent frame; vParams2.x its bump scale, vParams2.y its ratio) times vParams2.z,
+//!     plus the cube reflected about the bumped normal (the map's x and y times vParams0.x) times vParams2.w; with
+//!     vParams0.y the amounts 1 - F and F, F = saturate(vParams3.z + vParams3.x * (1 - N.V)^vParams3.y)
+//!   5 tex4 + the reflection times tex4's alpha, 6 the reflection times tex4 (tex4 at uv0)
+float4 CubeShader(SVertexOutput In, float3 vView, float3 vN, uint nSampler)
+{
+  const int nMode = (int)g_Draw.vParams3.w;
+  const float3 P = In.vWorldPos;
+  if (nMode == 1)
+    return float4(CubeLookup(RefractAbs(vView, vN, g_Draw.vParams2.w), nSampler).rgb * g_Draw.vParams2.x, 1);
+  if (nMode == 2)
+  {
+    const float3 vThrough = float3(CubeLookup(RefractAbs(vView, vN, g_Draw.vParams3.x), nSampler).r,
+                                   CubeLookup(RefractAbs(vView, vN, g_Draw.vParams3.y), nSampler).g,
+                                   CubeLookup(RefractAbs(vView, vN, g_Draw.vParams3.z), nSampler).b);
+    const float F = saturate(g_Draw.vParams2.z + g_Draw.vParams2.x * pow(1 - saturate(-dot(vView, vN)), g_Draw.vParams2.y));
+    return float4(lerp(vThrough, CubeLookup(reflect(vView, vN), nSampler).rgb, F), 1);
+  }
+  if (nMode == 3)
+  {
+    const float fCosI = -dot(vView, vN);
+    const float fSinI = sqrt(abs(1 - fCosI * fCosI));
+    const float fSinT = saturate(fSinI * g_Draw.vParams2.w);
+    const float fCosT = sqrt(abs(1 - fSinT * fSinT));
+    const float3 vThrough = fSinT * SafeNormalize(vView + fCosI * vN) - fCosT * vN;
+    const float3 vBase = g_Draw.vParams0.rgb;
+    const float3 vRainbow = SampleTexture(g_Draw.nTex4, XR_SAMPLER_LINEAR_WRAP, pow(abs(fCosI), g_Draw.vParams3.x).xx).rgb;
+    float3 c = CubeLookup(vThrough, nSampler).rgb * vBase * ((1 - fSinT) * g_Draw.vParams2.x);
+    c += CubeLookup(reflect(vView, vN), nSampler).rgb * (fSinI * g_Draw.vParams2.y);
+    c += vRainbow * vBase * (fSinT * g_Draw.vParams2.z) + g_Draw.vParams3.y;
+    return float4(c, 1);
+  }
+  if (nMode == 4)
+  {
+    float3 vT = In.vTangent, vB = In.vBinormal, vF = In.vTNormal;
+    if (dot(vT, vT) < 1e-8 || dot(vF, vF) < 1e-8)
+    {
+      vF = SafeNormalize(In.vNormal);
+      vT = SafeNormalize(cross(abs(vF.z) < 0.999 ? float3(0, 0, 1) : float3(1, 0, 0), vF));
+      vB = cross(vF, vT);
+    }
+    // The eye (camera - point, not normalized) in the tangent frame, as the vertex shader has it.
+    const float3 E = g_Frame.vCameraPos.xyz - P;
+    const float3 V = float3(dot(vT, E), dot(vB, E), dot(vF, E));
+    const float fRatio = g_Draw.vParams2.y;
+    const float d = sqrt(abs(fRatio * fRatio * dot(V, V) - dot(V.xy, V.xy))) - V.z;
+    const float3 n = g_Draw.vParams0.z > 0 ? SampleTexture(g_Draw.nTex3, XR_SAMPLER_LINEAR_WRAP, In.vTex0).rgb : float3(0.5, 0.5, 1);
+    const float3 D = g_Draw.vParams2.x * (n.x * float3(-d, 0, V.x * d) + n.y * float3(0, -d, V.y * d)) - n.z * V;
+    float fRefract = g_Draw.vParams2.z, fReflect = g_Draw.vParams2.w;
+    if (g_Draw.vParams0.y > 0)
+    {
+      fReflect = saturate(g_Draw.vParams3.z + g_Draw.vParams3.x * pow(1 - saturate(dot(SafeNormalize(E), SafeNormalize(In.vNormal))), g_Draw.vParams3.y));
+      fRefract = 1 - fReflect;
+    }
+    float3 c = CubeLookup(D.x * vT + D.y * vB + D.z * vF, nSampler).rgb * fRefract;
+    if (fReflect > 0)
+    {
+      const float3 Nb = g_Draw.vParams0.x * (n.x * vT + n.y * vB) + n.z * vF;
+      c += CubeLookup(2 * Nb * dot(Nb, E) / max(dot(Nb, Nb), 1e-8) - E, nSampler).rgb * fReflect;
+    }
+    return float4(c, 1);
+  }
+  const float4 vDecal = SampleTexture(g_Draw.nTex4, XR_SAMPLER_LINEAR_WRAP, In.vTex0);
+  const float3 vRefl = CubeLookup(reflect(vView, vN), nSampler).rgb;
+  return float4(nMode == 5 ? vDecal.rgb + vRefl * vDecal.a : vRefl * vDecal.rgb, 1);
+}
+
 float4 ShadePixel(SVertexOutput In)
 {
 #ifdef XR_AMBIENT
@@ -707,11 +805,16 @@ float4 ShadePixel(SVertexOutput In)
   {
     float3 vView = SafeNormalize(In.vWorldPos - g_Frame.vCameraPos.xyz);
     float3 vN = HasFlag(DF_BUMP) ? vBumpN : SafeNormalize(In.vNormal);
-    vTex = SampleCube(g_Draw.nTex0, nSampler0, reflect(vView, vN));
+    if (HasFlag2(DF2_CUBE_SHADER))
+      vTex = CubeShader(In, vView, vN, nSampler0);
+    else
+    {
+      vTex = SampleCube(g_Draw.nTex0, nSampler0, reflect(vView, vN));
 #ifdef XR_RAY_REFL
-    if (((g_Frame.nRaySun.z >> 16) & 0xff) != 0)
-      vTex.rgb = SurfaceRay(vTex.rgb, In.vWorldPos, vRayFace, reflect(vView, vN), fRayDistance, fPixelAngle);
+      if (((g_Frame.nRaySun.z >> 16) & 0xff) != 0)
+        vTex.rgb = SurfaceRay(vTex.rgb, In.vWorldPos, vRayFace, reflect(vView, vN), fRayDistance, fPixelAngle);
 #endif
+    }
     if (HasFlag2(DF2_GLASS))
     {
       float4 vThrough = SampleCube(g_Draw.nTex0, nSampler0, refract(vView, vN, g_Draw.vParams2.w));
@@ -908,6 +1011,19 @@ float4 ShadePixel(SVertexOutput In)
   if (HasFlag2(DF2_ALPHA_GLOW))
     s_vPTEmission += vTex.rgb * vTex.a;
 #endif
+  // DF2_AMBIENT_CUBE: a quarter of the ambient light is the cube reflected about the vertex normal, unlit (the path
+  // tracer's surfaces keep their albedo and add it).
+  if (HasFlag2(DF2_AMBIENT_CUBE))
+  {
+    const float3 vCube = 0.25 * SampleCube(g_Draw.nTex6, XR_SAMPLER_LINEAR_CLAMP,
+                                           reflect(SafeNormalize(In.vWorldPos - g_Frame.vCameraPos.xyz), SafeNormalize(In.vNormal))).rgb;
+    vColor.rgb += vCube;
+#ifdef XR_PT
+    s_vPTEmission += vCube;
+    if (!(g_Draw.nFlags2 & DF2_PT_MASK))
+#endif
+      vColor.rgb -= 0.25 * vTex.rgb * g_Draw.vColor.rgb * g_Draw.vAmbient.rgb;
+  }
 
   if (HasFlag(DF_TERRAIN_CLIFF))
   {

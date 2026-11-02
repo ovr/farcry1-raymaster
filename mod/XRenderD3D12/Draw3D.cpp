@@ -430,7 +430,7 @@ void CD3D12Renderer::DrawLeafItem(const SRenderItem &it)
   if (eDC == eDC_NoDraw || eDC == eDC_Engine || eDC == eDC_Sky || (eDC == eDC_ShadowOnly && !m_bShadowMapPass))
     return;
   // The objects that show the scene around them are not in its environment cubes.
-  if (m_bEnvCubePass && pSh->GetProps().eEnvMap == EEnvMap::Auto)
+  if (m_bEnvCubePass && pSh->GetProps().UsesAutoCube())
     return;
   // The fog volume pass: the element once more, with the ID of the fog volume it is in, in the
   // sort group eS_FogShader (the object of a static one has FOB_FOGPASS), and the volume's cap
@@ -500,25 +500,103 @@ void CD3D12Renderer::DrawLeafItem(const SRenderItem &it)
   // vector refracted with the ratio 1.05) and reflected, mixed by F = saturate(0.2 + 2 *
   // (1 - N.V)^2); not lit. TemplReflCMDecal_ReflAmountOpacity: the texture plus the cube times
   // the gloss map (the reflect amount; the whole cube without one), lit together. The auto cube
-  // map is the cube of the scene around the object (EnvCubes.cpp); before it has one, the default
-  // cube.
+  // map is the cube of the scene around the object (EnvCubes.cpp; also of the other *EnvCM
+  // templates); before it has one, the material's cube. The templates of the original's vertex and
+  // pixel shaders (DF2_CUBE_SHADER, General.hlsl) with the material's public parameters, the
+  // script's values without them: TemplRefrCM the cube seen through (the view vector refracted by
+  // "Refraction") times 1 - k plus the texture times k ("DiffuseAmount"); the dispersion seen
+  // through with the ratios 1.10 / 1.08 / 1.06 for red, green and blue and reflected by the glass's
+  // fresnel term; TemplGlassCM_PS20 seen through and reflected by the angle's sine, its texture a
+  // rainbow at the cosine; the bump refraction through the normal map, the bump glass adding the
+  // cube reflected about the bumped normal ("RefractAmount" and "ReflectAmount", or by the fresnel
+  // term), times the vertex colours; TemplReflCMDecal_ReflAmountAlpha the texture plus the cube
+  // times its alpha, TemplReflCMDecalMod the cube times the texture, lit.
   const SShaderProps &Props = pSh->GetProps();
   if (Props.eEnvMap != EEnvMap::None)
   {
-    const int nAutoCube = Props.eEnvMap == EEnvMap::Auto ? GetEnvCubeSRV(it) : -1;
+    const int nAutoCube = Props.UsesAutoCube() ? GetEnvCubeSRV(it) : -1;
     if (CTexture *pCube = nAutoCube < 0 ? GetEnvCubeMap(it.pRes) : nullptr; pCube || nAutoCube >= 0)
     {
-      if (Props.eEnvMap == EEnvMap::CubeDecalAmount)
+      CTexture *pWhite = m_pTextures ? m_pTextures->GetWhite() : nullptr;
+      const bool bTex = (dc.nFlags & DF_TEX0) != 0;
+      // The texture as tex4, white without one.
+      const uint32 nDecal = bTex || !pWhite ? dc.nTex0 : pWhite->GetSRV();
+      auto CubeShader = [&](float fMode)
       {
-        CTexture *pWhite = m_pTextures ? m_pTextures->GetWhite() : nullptr;
+        dc.nFlags2 |= DF2_CUBE_SHADER;
+        dc.vParams3[3] = fMode;
+      };
+      switch (Props.eEnvMap)
+      {
+      case EEnvMap::CubeDecalAlpha:
+      case EEnvMap::CubeModulate:
+        dc.nTex4 = nDecal;
+        CubeShader(Props.eEnvMap == EEnvMap::CubeDecalAlpha ? 5.0f : 6.0f);
+        break;
+      case EEnvMap::Refract:
+      {
+        const float k = GetResourceFloat(it.pRes, "DiffuseAmount", 0.1f);
+        if (bTex)
+        {
+          dc.nFlags2 |= DF2_ADD_TEX4;
+          dc.nTex4 = dc.nTex0;
+          Set4(dc.vAddColor, k, k, k, 0);
+        }
+        Set4(dc.vParams2, 1 - k, 0, 0, GetResourceFloat(it.pRes, "Refraction", 1.05f));
+        CubeShader(1);
+        break;
+      }
+      case EEnvMap::Dispersion:
+        Set4(dc.vParams2, 2, 2, 0.2f, 0);
+        Set4(dc.vParams3, 1.10f, 1.08f, 1.06f, 0);
+        CubeShader(2);
+        break;
+      case EEnvMap::GlassPS20:
+      {
+        static const float vBase[3] = { 0.72f, 0.7f, 0.76f };
+        float vColor[3];
+        GetResourceColor(it.pRes, "BaseColor", vBase, vColor);
+        dc.nTex4 = nDecal;
+        Set4(dc.vParams0, vColor[0], vColor[1], vColor[2], 0);
+        Set4(dc.vParams2, GetResourceFloat(it.pRes, "RefractionScale", 1), GetResourceFloat(it.pRes, "ReflectionScale", 1),
+             GetResourceFloat(it.pRes, "RainbowScale", 0.2f), GetResourceFloat(it.pRes, "IndexOfRefractionRatio", 1.14f));
+        Set4(dc.vParams3, GetResourceFloat(it.pRes, "RainbowSpread", 0.18f), GetResourceFloat(it.pRes, "Ambient", 0.2f), 0, 0);
+        CubeShader(3);
+        break;
+      }
+      case EEnvMap::BumpRefract:
+      case EEnvMap::BumpGlass:
+      case EEnvMap::BumpGlassFresnel:
+      {
+        // vParams2: the refraction's bump scale, ratio and amount, the reflection's amount; vParams0: x
+        // the reflection's bump scale, y 1 for the amounts by the fresnel term (vParams3.xyz), z 1 with
+        // a normal map (tex3).
+        const bool bRefract = Props.eEnvMap == EEnvMap::BumpRefract, bFresnel = Props.eEnvMap == EEnvMap::BumpGlassFresnel;
+        CTexture *pBump = GetNormalMap(it.pRes);
+        if (pBump)
+          dc.nTex3 = pBump->GetSRV();
+        Set4(dc.vParams2, GetResourceFloat(it.pRes, bRefract ? "BumpScale" : "RefractBumpScale", bRefract ? 0.3f : 0.5f),
+             GetResourceFloat(it.pRes, "Refraction", bRefract ? 1.5f : 1.2f), bRefract ? 1.0f : GetResourceFloat(it.pRes, "RefractAmount", 0.7f),
+             bRefract ? 0.0f : GetResourceFloat(it.pRes, "ReflectAmount", 0.3f));
+        Set4(dc.vParams0, GetResourceFloat(it.pRes, "ReflectBumpScale", bFresnel ? 0.1f : 0.5f), bFresnel ? 1.0f : 0.0f, pBump ? 1.0f : 0.0f, 0);
+        Set4(dc.vParams3, 2, 2, 0.2f, 0);
+        CubeShader(4);
+        break;
+      }
+      case EEnvMap::CubeDecalAmount:
+      {
         CTexture *pAmount = GetGlowMap(it.pRes);
-        const bool bTex = (dc.nFlags & DF_TEX0) != 0;
-        dc.nTex4 = bTex || !pWhite ? dc.nTex0 : pWhite->GetSRV();
+        dc.nTex4 = nDecal;
         dc.nTex5 = pAmount ? pAmount->GetSRV() : pWhite ? pWhite->GetSRV() : dc.nTex4;
         dc.nFlags2 |= DF2_REFL_AMOUNT;
         Set4(dc.vAddColor, bTex ? 1.0f : 0.0f, bTex ? 1.0f : 0.0f, bTex ? 1.0f : 0.0f, 0);
+        break;
       }
-      else if (Props.eEnvMap != EEnvMap::Cube && Props.eEnvMap != EEnvMap::Auto && (dc.nFlags & DF_TEX0))
+      default:
+        break;
+      }
+      if ((Props.eEnvMap == EEnvMap::CubeDecal || Props.eEnvMap == EEnvMap::CubeAddSigned || Props.eEnvMap == EEnvMap::Glass ||
+           Props.eEnvMap == EEnvMap::GlassFixed) && bTex)
       {
         const float k = Props.eEnvMap == EEnvMap::Glass ? 0.1f : Props.eEnvMap == EEnvMap::GlassFixed ? 25.0f / 255.0f : 1.0f;
         dc.nFlags2 |= DF2_ADD_TEX4;
@@ -534,6 +612,16 @@ void CD3D12Renderer::DrawLeafItem(const SRenderItem &it)
       dc.nTex0 = pCube ? pCube->GetSRV() : nAutoCube;
       dc.nSamplers = XR_SAMPLER_LINEAR_CLAMP;
       pTex = pCube;
+    }
+  }
+  // The *_EnvCMAmb templates: a quarter of the ambient light of their first pass is the material's
+  // cube (the default cube without one) reflected about the vertex normal, unlit.
+  if (Props.bAmbientCube && !(pObj->m_ObjFlags & FOB_LIGHTPASS))
+  {
+    if (CTexture *pAmbientCube = GetEnvCubeMap(it.pRes))
+    {
+      dc.nFlags2 |= DF2_AMBIENT_CUBE;
+      dc.nTex6 = pAmbientCube->GetSRV();
     }
   }
   float vRow0[3], vRow1[3];
@@ -575,6 +663,10 @@ void CD3D12Renderer::DrawLeafItem(const SRenderItem &it)
   Set4(dc.vAmbient, pObj->m_AmbColor.x, pObj->m_AmbColor.y, pObj->m_AmbColor.z, eLighting == ELighting::Vertex ? 1.0f : 2.0f);
   std::optional<D3D12_VERTEX_BUFFER_VIEW> TexCoord1, Tangents;
   uint32 nInstances = 1;
+  // The bump refraction: the tangent frames under the normal map (an orthonormal frame about the
+  // normal without them, General.hlsl).
+  if ((dc.nFlags2 & DF2_CUBE_SHADER) && Props.BumpCube())
+    Tangents = Geometry::GetTangentStream(pLB);
 
   auto Draw = [&]()
   {

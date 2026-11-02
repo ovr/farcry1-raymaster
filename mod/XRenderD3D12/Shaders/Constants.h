@@ -113,6 +113,8 @@ typedef float float4x4_t[16];
 #define DF2_AO_ALL          0x02000000  //!< the templates lit by the ambient colour alone, the terrain's shadow: all of the colour
 #define DF2_FOLIAGE         0x04000000  //!< the leaves and the grass, seen against the sun (XR_FOLIAGE): rgb += tex0 rgb * vColor.rgb * FoliageLight (General.hlsl, vFoliage)
 #define DF2_TEX4_LAYER      0x20000000  //!< with DF_TEX0: tex0 = (lerp(tex0 rgb, tex4 rgb, tex4 a), a + tex4 a - a * tex4 a), tex4 at uv0 + (vTexMat0.w, vTexMat1.w): a second layer blended over the texture before the light
+#define DF2_CUBE_SHADER     0x40000000  //!< with DF_CUBE0: tex0 rgb as the original's shader of the template, the mode vParams3.w (CubeShader, General.hlsl): 1 refraction, 2 dispersion, 3 the glass of ps_2_0, 4 the bump refraction and bump glass, 5 tex4 + cube * tex4 a, 6 cube * tex4; the cube alone, no rays (ray queries in its branches hung the GPU)
+#define DF2_AMBIENT_CUBE    0x80000000  //!< rgb += 0.25 * (g_Cubes[nTex6] at the view vector reflected about the vertex normal - tex0 * vColor * vAmbient): a quarter of the ambient light from the cube (the *_EnvCMAmb templates), unlit
 // The path tracer's G-buffer (XR_PT, General.hlsl; set only while it is bound, PathTrace.cpp)
 #define DF2_PT_MASK         0x18000000  //!< the surface's path material plus 1 (XR_PT_MAT_* + 1 & 3, RayConstants.h; 0 unlit): its light flags off, its colour less what it adds unlit (DF2_ADD_TEX4, DF2_ALPHA_GLOW) is its albedo
 #define DF2_PT_SHIFT        27
@@ -206,7 +208,7 @@ struct SDrawConstants
   XR_UINT(nLights);               //!< the lights in vLightPos
   XR_UINT(nTex2);                 //!< more textures for the other programs (Water.hlsl) and DF_TERRAIN_CLIFF
   XR_UINT(nTex3);
-  XR_FLOAT4(vParams0);            //!< parameters of the other programs (Water.hlsl), DF_DETAIL_LAYER, DF_TERRAIN_CLIFF, DF2_GLASS and DF2_BUMP_OFFSET
+  XR_FLOAT4(vParams0);            //!< parameters of the other programs (Water.hlsl), DF_DETAIL_LAYER, DF_TERRAIN_CLIFF, DF2_GLASS, DF2_BUMP_OFFSET and DF2_CUBE_SHADER
   XR_FLOAT4(vParams1);
   XR_FLOAT4(vParams2);
   XR_FLOAT4(vParams3);
