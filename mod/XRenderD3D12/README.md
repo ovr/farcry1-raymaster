@@ -747,9 +747,10 @@ reference of its features and console variables.
   colours, so in light they are to the power 2.2 (a colour times a light below 1 is the same picture as
   the raster's); a colour that glows is `HdrDecode`d. The terrain's texture has the sun and the
   terrain's own shadows baked in: its albedo (as light) is divided by that light, the path tracer's own
-  sun and sky on an open face towards the sun times ((1 + (r - 1) N.L V) / r)^2.2, V the sun's
-  visibility over the terrain alone, r `d3d12_PTTerrainDelight` (a lit face over a shadowed one): a lit
-  face is as bright as the editor had it. While the path tracer is on the vegetation's vertex colours
+  sun and sky on an open face towards the sun (each channel: the texture has the light's colour too)
+  times ((1 + (r - 1) N.L V) / r)^2.2, V the sun's visibility over the terrain alone, r
+  `d3d12_PTTerrainDelight` (a lit face over a shadowed one): a lit face is as bright as the editor had
+  it, and of its colour (Rebellion's sand under the blue moon is not blue twice). While the path tracer is on the vegetation's vertex colours
   are baked without the light (the engine's values again on a change), and the grass that fades in or
   out is alpha tested among the opaque surfaces (its alpha times the fade: it thins out), not blended
   after them.

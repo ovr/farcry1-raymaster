@@ -1179,7 +1179,8 @@ void CD3D12Renderer::DrawRayDebug()
     SPathShadeParams P;
     GetPathShade(P);
     Set4(dc.vParams2, P.vSun[0], P.vSun[1], P.vSun[2], P.fLamps);
-    Set4(dc.vParams3, P.fEmission, P.fDelight, P.fBakeLight, P.fLightGap);
+    Set4(dc.vParams3, P.fEmission, P.fDelight, P.fLightGap, 0);
+    Set4(dc.vAmbient, P.vBakeLight[0], P.vBakeLight[1], P.vBakeLight[2], 0);
     dc.nTex2 = P.nLights;
   }
   DrawImmediate(Key, dc, D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST, VERTEX_FORMAT_P3F, s_FullScreen, 3);

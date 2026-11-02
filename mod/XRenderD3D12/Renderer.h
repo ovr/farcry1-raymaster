@@ -777,7 +777,8 @@ public:
   {
     float vSun[3];
     float vSky[3];      //!< the sky's light where a path leaves the scene
-    float fLamps, fEmission, fDelight, fBakeLight, fLightGap;
+    float vBakeLight[3]; //!< the light baked into the terrain on a lit open face towards the sun, each channel
+    float fLamps, fEmission, fDelight, fLightGap;
     uint32 nLights;
   };
   void GetPathShade(SPathShadeParams &P) const;

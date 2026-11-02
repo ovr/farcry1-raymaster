@@ -45,8 +45,9 @@
 //	    while the view stays).
 //	  CSFilter: the history filtered on the pixel's surface (its plane and
 //	    its normal), wider where it is young; rgb the composite's light, w
-//	    the light baked into the terrain's texture there (TerrainBakedLight;
-//	    1 elsewhere), which the composite takes out of its albedo.
+//	    the share of the light baked into the terrain's texture there
+//	    (TerrainBakedShare; 1 elsewhere), which the composite takes out of
+//	    its albedo (times SPathShade::vBakeLight).
 //	  CSSpecular: the highlights of the sun and the lamps, as the raster
 //	    makes them (General.hlsl, DF_SPECULAR), in the game's colour: the
 //	    G-buffer's highlights' colour (2 * vSpecular * gloss) times the
@@ -103,8 +104,8 @@ SPathShade PathShadeParams(uint nMaxTests)
   P.fLamps = g_PT.vSun.w;
   P.fEmission = g_PT.vSky.w;
   P.fDelight = g_PT.vShade.x;
-  P.fBakeLight = g_PT.vShade.y;
-  P.fLightGap = g_PT.vShade.z;
+  P.vBakeLight = g_PT.vBakeLight.rgb;
+  P.fLightGap = g_PT.vShade.y;
   P.nLights = g_PT.nPath.x;
   P.nMask = g_PT.nFlags.w & 0xff;
   P.nMaxTests = nMaxTests;
@@ -368,10 +369,11 @@ void CSFilter(uint3 vId : SV_DispatchThreadID)
     }
     vLight = vSum.rgb / vSum.w;
   }
-  // The terrain: the light its texture has baked in, which its albedo is divided by.
+  // The terrain: the share of the light its texture has baked in (the composite takes it times SPathShade::vBakeLight and
+  // divides the albedo by that).
   float fBaked = 1;
   if (PathGBufferMaterial(vGBuffer) == XR_PT_MAT_TERRAIN + 1 && g_PT.vShade.x > 1)
-    fBaked = max(TerrainBakedLight(vPos, vN, vFace, PathShadeParams(0), d * g_PT.vParams.y), 0.01);
+    fBaked = TerrainBakedShare(vPos, vN, vFace, PathShadeParams(0), d * g_PT.vParams.y);
   g_Out[p] = float4(max(vLight, 0), fBaked);
 }
 

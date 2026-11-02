@@ -92,7 +92,7 @@ constexpr D3D12_RESOURCE_STATES PATH_READ = D3D12_RESOURCE_STATE_PIXEL_SHADER_RE
 //! The kernels' textures between their dispatches; the depth buffer while they read it.
 constexpr D3D12_RESOURCE_STATES PATH_KERNEL_READ = D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE;
 constexpr D3D12_RESOURCE_STATES PATH_DEPTH_READ = D3D12_RESOURCE_STATE_DEPTH_READ | D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE;
-//! The paths' light and the composite's (rgb, w the view depth or the terrain's baked light), the history (the reference
+//! The paths' light and the composite's (rgb, w the view depth or the terrain's share of its baked light), the history (the reference
 //! adds up thousands of frames), its frames (/ 65535).
 constexpr DXGI_FORMAT PATH_LIGHT_FORMAT = DXGI_FORMAT_R16G16B16A16_FLOAT;
 constexpr DXGI_FORMAT PATH_HISTORY_FORMAT = DXGI_FORMAT_R32G32B32A32_FLOAT;
@@ -177,8 +177,14 @@ void CD3D12Renderer::GetPathShade(SPathShadeParams &P) const
   P.fEmission = std::max(CV_d3d12_PTEmission, 0.0f);
   P.fDelight = CV_d3d12_PTTerrainDelight;
   // The editor's light on a lit face of the terrain towards the sun, as the path tracer's own: the sun and the open sky
-  // (its texture there lit as the path tracer lights it).
-  P.fBakeLight = std::max(Luminance(P.vSun[0], P.vSun[1], P.vSun[2]) + Luminance(P.vSky[0], P.vSky[1], P.vSky[2]), 0.05f);
+  // (its texture there lit as the path tracer lights it), each channel: the sector's colour has that light's colour too
+  // (Rebellion's blue moon), the albedo is without it. Its luminance at least 0.05, a channel at least a tenth of it.
+  float vOpen[3];
+  for (int c = 0; c < 3; c++)
+    vOpen[c] = P.vSun[c] + P.vSky[c];
+  const float fOpen = Luminance(vOpen[0], vOpen[1], vOpen[2]), fBake = std::max(fOpen, 0.05f);
+  for (int c = 0; c < 3; c++)
+    P.vBakeLight[c] = fOpen > 0 ? std::max(vOpen[c] / fOpen, 0.1f) * fBake : fBake;
   P.fLightGap = std::max(CV_d3d12_RTLightShadowGap, 0.0f);
   P.nLights = m_PathTrace.nLightsFrame == m_nFrames ? m_PathTrace.nLightCount : 0;
 }
@@ -747,7 +753,8 @@ void CD3D12Renderer::DrawPathTrace()
        bReference ? 0.0f : PATH_SAMPLE_MAX);
   Set4(pc.vSun, P.vSun[0], P.vSun[1], P.vSun[2], P.fLamps);
   Set4(pc.vSky, vSky[0], vSky[1], vSky[2], P.fEmission);
-  Set4(pc.vShade, P.fDelight, P.fBakeLight, P.fLightGap, 0);
+  Set4(pc.vShade, P.fDelight, P.fLightGap, 0, 0);
+  Set4(pc.vBakeLight, P.vBakeLight[0], P.vBakeLight[1], P.vBakeLight[2], 0);
   Set4(pc.vFill, fAmbient, fAmbientRange, 0, 0);
   // The cache's light starts again after a frame without it or where the settings change.
   const bool bCacheRestart = bCache && (s.nCacheFrame != m_nFrames - 1 || nKey != s.nSettingsKey);
@@ -906,6 +913,9 @@ void CD3D12Renderer::DrawPathTrace()
   Key.nCull = R_CULL_NONE;
   SDrawConstants dc = DefaultDrawConstants();
   Set4(dc.vParams0, P.vSun[0], P.vSun[1], P.vSun[2], 0);
+  // The terrain's albedo divided by its baked light: CSFilter's share of it times this (none without the delight).
+  const bool bDelight = P.fDelight > 1;
+  Set4(dc.vParams1, bDelight ? P.vBakeLight[0] : 1, bDelight ? P.vBakeLight[1] : 1, bDelight ? P.vBakeLight[2] : 1, 0);
   dc.nTex0 = (uint32)s.pAlbedo->m_nSRV;
   dc.nTex1 = (uint32)s.pNormal->m_nSRV;
   dc.nTex2 = (uint32)s.pSun->m_nSRV;
@@ -932,12 +942,12 @@ void CD3D12Renderer::DrawPathTrace()
   s.nHistoryFrame = m_nFrames;
   s.nLightFrame = m_nFrames;
   if (m_pFrameDump)
-    fprintf(m_pFrameDump.get(), "pt: %s, %d x %d, %s, %d bounces, %u lamps, sky %.3f %.3f %.3f, sun %.3f %.3f %.3f%s, terrain's baked light %.3f, "
+    fprintf(m_pFrameDump.get(), "pt: %s, %d x %d, %s, %d bounces, %u lamps, sky %.3f %.3f %.3f, sun %.3f %.3f %.3f%s, terrain's baked light %.3f %.3f %.3f, "
             "ambient %.2f beyond %.2f m, highlights: sun %.3f %.3f %.3f, lamps %.3f, denoiser %s, history %d (%d frames)\n",
             bReference ? "reference" : "real time", w, h,
             bCheckerboard ? (m_nFrames & 1 ? "paths of the odd checkerboard's pixels" : "paths of the even checkerboard's pixels") : "a path from each pixel",
             nBounces, P.nLights, vSky[0], vSky[1], vSky[2], P.vSun[0], P.vSun[1], P.vSun[2],
-            bOutdoors ? "" : " (indoors: no sun in the frame)", P.fBakeLight, fAmbient, fAmbientRange, pc.vSpecular[0], pc.vSpecular[1],
+            bOutdoors ? "" : " (indoors: no sun in the frame)", P.vBakeLight[0], P.vBakeLight[1], P.vBakeLight[2], fAmbient, fAmbientRange, pc.vSpecular[0], pc.vSpecular[1],
             pc.vSpecular[2], pc.vSpecular[3], bNrd ? "nrd" : bDenoise ? "simple" : "none", bHistory ? 1 : 0, s.nAccumulated);
   if (m_pFrameDump)
     fprintf(m_pFrameDump.get(), "pt cache: %s, %u entries (%u KB), cells %.2f m and %.3f m per metre, %.0f frames, a path for each %u x %u "

@@ -117,4 +117,5 @@ void CSLayout()
   g_TestOut[o++] = asuint(g_PT.vCache);
   g_TestOut[o++] = g_PT.nCache;
   g_TestOut[o++] = g_PT.nCheckerboard;
+  g_TestOut[o++] = asuint(g_PT.vBakeLight);
 }
