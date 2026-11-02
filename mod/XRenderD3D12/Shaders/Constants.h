@@ -153,7 +153,10 @@ typedef float float4x4_t[16];
 #define HDR_BLOOM_UP        0x00000020  //!< the smaller level tex0 through a 3x3 tent, added to the target
 #define HDR_RESOLVE         0x00000040  //!< the scene tex0 exposed, with the bloom tex1, tone mapped to the display
 #define HDR_OUTPUT          0x00000080  //!< the frame tex0 with the highlight layer tex1 for an HDR swap chain (HdrOutput.cpp)
-#define HDR_VOLUMETRIC      0x00000100  //!< with HDR_RESOLVE: the scene's light through the volumetric light (Volumetric.cpp): tex4 its froxels, tex5 the depth
+#define HDR_VOLUMETRIC      0x00000100  //!< with HDR_RESOLVE or HDR_SCENE_LIGHT: the scene's light through the volumetric light (Volumetric.cpp): tex4 its froxels, tex5 the depth
+#define HDR_EXPOSURE_SCALE  0x00000200  //!< the exposure's factor of the light, 2^(the compensation + the EV tex0), for an upscaler (1 x 1 R32_FLOAT)
+#define HDR_LINEAR          0x00000400  //!< with HDR_RESOLVE or HDR_BLOOM_DOWN: tex0 holds light (the scene's upscaled, d3d12_UpscaleHdr), not the game's colours
+#define HDR_SCENE_LIGHT     0x00000800  //!< the scene tex0's light, not exposed, for an upscaler (d3d12_UpscaleHdr): the input of the tone map after the upscale
 #define HDR_COLOR_LUT_SIZE  32          //!< the colour grading's table (ColorGrading.cpp): points along each axis
 
 #define XR_SAMPLER_LINEAR_WRAP  0
@@ -352,7 +355,7 @@ struct SBloomConstants
   XR_FLOAT4(vSize);               //!< the level: x width, y height (texels), z 1 / width, w 1 / height
   XR_FLOAT4(vParams);             //!< as HDR_BLOOM_DOWN's vParams1 (Hdr.hlsl): x the compensation, y 1 with the adapted EV, z the threshold,
                                   //!< w its soft knee
-  XR_UINT4(vFlags);               //!< x 1: from the scene, its light exposed (HDR_BLOOM_PREFILTER)
+  XR_UINT4(vFlags);               //!< x 1: from the scene, its light exposed (HDR_BLOOM_PREFILTER); y 1: the scene holds light already (HDR_LINEAR)
 };
 
 // The threads a side of a group of the volumetric light's kernels (Volumetric.hlsl, Volumetric.cpp): 8 x 8 froxels

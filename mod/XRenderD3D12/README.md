@@ -33,7 +33,8 @@ reference of its features and console variables.
   `d3d12_UpscaleDebug 1` shows FSR's debug view (FSR 4: the motion vectors at the top left, the
   weight of the history at the top right), and `d3d12_UpscaleDebug 2` the depth it gets (near
   black, far white, log scale). All of them change at run time, and the frame dump names the
-  upscaler, its render size and the frame's jitter.
+  upscaler, its render size, the frame's jitter and whether it gets the HDR scene's light
+  (`HDR input`, `d3d12_UpscaleHdr`, in the HDR section below).
   The game's menu gets them from `assets/scripts/05-video-upscaler.patch`: in Video Options under
   Resolution, Upscaler, None / FSR (auto) / FSR 3.1 / FSR 4 (`d3d12_Upscaler` and
   `d3d12_UpscaleVersion` 0, 3 or 4), and Upscaler Mode, Native AA to Ultra Performance
@@ -87,10 +88,29 @@ reference of its features and console variables.
     R32 EV, twice as fast towards a brighter scene; it starts at the meter's after a frame
     without the main view), the bloom (a soft-threshold prefilter against single bright pixels,
     6 levels from half the size down with 13 taps, back up with a 3 x 3 tent) and the resolve
-    (the exposed light plus the bloom, tone mapped, gamma encoded) into the back buffer. With an
-    upscaler the resolve goes into an LDR target of the render size, which the upscaler gets as
-    it would the scene. The screen effects and the 2D stay LDR on the back buffer. In heat
-    vision the scene is only clamped (its colours are a palette), and the exposure is held.
+    (the exposed light plus the bloom, tone mapped, gamma encoded) into the back buffer. The
+    screen effects and the 2D stay LDR on the back buffer. In heat vision the scene is only
+    clamped (its colours are a palette), and the exposure is held.
+  - With an upscaler (since step 260, `d3d12_UpscaleHdr` 1, the default) the upscaler gets the
+    scene's light, and what is done at the display's size comes after it: before it, at the render
+    size, the meter and the adaptation, then a pass (`HDR_SCENE_LIGHT`) puts the light (decoded,
+    with the volumetric light, which needs the depth of the render size) into an R16G16B16A16_FLOAT
+    target of the render size, and another (`HDR_EXPOSURE_SCALE`) the exposure factor into a 1 x 1
+    R32 target. FSR takes the light as HDR (`FFX_UPSCALE_ENABLE_HIGH_DYNAMIC_RANGE`, with that
+    exposure in place of its own automatic exposure) into an R16G16B16A16_FLOAT target of the
+    display's size; the resolve of that (`HDR_LINEAR`: the light as it is, not decoded) does the
+    bloom, the tone map, the colour grading and the highlight layer of the HDR output at the
+    display's size, as without an upscaler (the debug views of `d3d12_UpscaleDebug` show the
+    upscaler's picture or the depth as they are, and a dispatch that fails the light tone mapped at
+    the render size, stretched). With `d3d12_UpscaleHdr 0` (the frames as up to step 259) the whole
+    resolve comes before the upscaler, into an LDR target of the render size, which it gets as it
+    would the scene: the bloom and the highlight layer were of the render size, and the layer of the
+    jittered frame, which the upscaler does not gather, so the lamps of Research's hall flickered in
+    HDR10 (the change of its highlights from a frame to the next 1.64 times that without an
+    upscaler; with the light upscaled 0.82 to 0.86, FSR 3.1 and 4). At 4K with FSR Quality it costs
+    the GPU 0.24 to 0.26 ms with FSR 4 (the `hdr` section 0.16 to 0.34 ms, `upscale` 0.1 ms more
+    with 16-bit floats in and out) and 0.08 to 0.13 ms with FSR 3.1 (whose `upscale` takes 0.07 to
+    0.1 ms less without its automatic exposure): FSR 4 171 to 165 FPS on Fort, FSR 3.1 313 to 304.
   - The meter's first level and each level of the bloom from one twice its size are compute
     kernels (`Shaders/Meter.hlsl`, `Shaders/Bloom.hlsl`; the maths the pixel shader does too in
     `Shaders/HdrShared.hlsli`). The meter's threads read its taps side by side and add them up in
@@ -428,14 +448,14 @@ reference of its features and console variables.
   end): the scene's light times that part plus the light scattered, before the exposure.
   At 3840 x 2160 the froxels take 0.06 to 0.09 ms of the GPU outdoors (the sweeps of ten levels)
   and the resolve 0.04 to 0.06 ms more; 3 to 10% of the frame rate at 400 to 600 FPS.
-  With an upscaler the resolve before it (at the render size) takes the froxels at the depth of
-  its scene; the froxels are of the view without the jitter, which moves a pixel by a small part
-  of a froxel. None in heat vision or under water, and indoors where the outdoor lights do
-  not reach (the camera's vis area, `IVisArea::IsAfectedByOutLights`; it fades out and in over
-  half a second, and nothing of it runs there). `d3d12_VolumetricLight 0` gives the frames of the
-  renderer without it (DemoCompare difference 0), 2 shows the light scattered alone. All are read
-  every frame. The GPU times have a `volumetric light` section and the frame dump a
-  `volumetric light:` line.
+  With an upscaler the pass before it (at the render size: the scene's light since step 260, the
+  whole resolve with `d3d12_UpscaleHdr 0`) takes the froxels at the depth of its scene; the froxels
+  are of the view without the jitter, which moves a pixel by a small part of a froxel. None in heat
+  vision or under water, and indoors where the outdoor lights do not reach (the camera's vis area,
+  `IVisArea::IsAfectedByOutLights`; it fades out and in over half a second, and nothing of it runs
+  there). `d3d12_VolumetricLight 0` gives the frames of the renderer without it (DemoCompare
+  difference 0), 2 shows the light scattered alone. All are read every frame. The GPU times have a
+  `volumetric light` section and the frame dump a `volumetric light:` line.
 - `d3d12_VolumetricLightShafts` (4 m) keeps the shafts alone: all the air lit alike is a haze
   over everything (the sky over the sea, the leaves in the shade; the game's own fog is the haze
   already), while a shaft shows as lit air against air in shadow. So a froxel scatters the sun's

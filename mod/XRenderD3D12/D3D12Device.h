@@ -37,6 +37,7 @@ constexpr DXGI_FORMAT D3D12_SCENE_DEPTH_FORMAT = DXGI_FORMAT_D32_FLOAT; //!< the
 constexpr DXGI_FORMAT D3D12_VELOCITY_FORMAT = DXGI_FORMAT_R16G16_FLOAT; //!< the scene targets' motion vectors
 constexpr DXGI_FORMAT D3D12_UPSCALE_DEPTH_FORMAT = DXGI_FORMAT_R32_FLOAT; //!< the scene targets' depth for an upscaler (with the water's)
 constexpr DXGI_FORMAT D3D12_UPSCALE_FORMAT = DXGI_FORMAT_R8G8B8A8_UNORM; //!< an upscaler's output (unordered access, which B8G8R8A8 may not have)
+constexpr DXGI_FORMAT D3D12_UPSCALE_HDR_FORMAT = DXGI_FORMAT_R16G16B16A16_FLOAT; //!< an upscaler's output of the HDR scene's light (d3d12_UpscaleHdr)
 constexpr DXGI_FORMAT D3D12_HDR_FORMAT = DXGI_FORMAT_R16G16B16A16_FLOAT;  //!< the main view's colour with r_HDRRendering (Hdr.cpp)
 constexpr DXGI_FORMAT D3D12_HDR10_FORMAT = DXGI_FORMAT_R10G10B10A2_UNORM; //!< the swap chain of the HDR10 output (PQ, Rec. 2020; HdrOutput.cpp)
 constexpr DXGI_FORMAT D3D12_SCRGB_FORMAT = DXGI_FORMAT_R16G16B16A16_FLOAT; //!< the swap chain of the scRGB output (linear Rec. 709, 1 = 80 nits)
@@ -198,10 +199,11 @@ public:
   //! (D3D12_VELOCITY_FORMAT), the depth for the upscaler (D3D12_UPSCALE_DEPTH_FORMAT: the nearest
   //! of the depth writes and of the water, which does not write the depth buffer) and a depth
   //! buffer (D3D12_SCENE_DEPTH_FORMAT), and the upscaler's output of the back buffer's size
-  //! (D3D12_UPSCALE_FORMAT). Made again when the size (or the back buffer's) or the format
-  //! changed; 0 x 0 releases them. Outside BeginScene .. EndScene the four are in the state
-  //! PIXEL_SHADER_RESOURCE | NON_PIXEL_SHADER_RESOURCE and the output in UNORDERED_ACCESS.
-  bool SetSceneSize(int nWidth, int nHeight, DXGI_FORMAT ColorFormat);
+  //! (OutputFormat: D3D12_UPSCALE_FORMAT, or D3D12_UPSCALE_HDR_FORMAT for the HDR scene's light).
+  //! Made again when the size (or the back buffer's) or a format changed; 0 x 0 releases them.
+  //! Outside BeginScene .. EndScene the four are in the state PIXEL_SHADER_RESOURCE |
+  //! NON_PIXEL_SHADER_RESOURCE and the output in UNORDERED_ACCESS.
+  bool SetSceneSize(int nWidth, int nHeight, DXGI_FORMAT ColorFormat, DXGI_FORMAT OutputFormat = D3D12_UPSCALE_FORMAT);
   int GetSceneWidth() const { return m_nSceneWidth; }
   int GetSceneHeight() const { return m_nSceneHeight; }
   ID3D12Resource *GetSceneColor() const { return m_pSceneColor.Get(); }
@@ -496,6 +498,7 @@ private:
   int m_nSceneWidth = 0, m_nSceneHeight = 0;
   int m_nSceneOutputWidth = 0, m_nSceneOutputHeight = 0;
   DXGI_FORMAT m_SceneColorFormat = D3D12_BACKBUFFER_FORMAT;
+  DXGI_FORMAT m_SceneOutputFormat = D3D12_UPSCALE_FORMAT;
   bool m_bInScene = false;                          //!< BeginScene .. EndScene
   ComPtr<ID3D12Resource> m_pHdrColor;               //!< SetHdrTarget
   bool m_bInHdr = false;                            //!< BeginHdr .. EndHdr

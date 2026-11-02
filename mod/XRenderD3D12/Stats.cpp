@@ -521,7 +521,7 @@ void CD3D12Renderer::DrawStats()
     if (Up.szName)
     {
       Value("Anti-aliasing", Up.bThisFrame ? "FSR, temporal" : "FSR, temporal (no 3D scene now)");
-      Value("Upscaler", Format("%s, %s", Up.szName, Up.szMode));
+      Value("Upscaler", Format("%s, %s%s", Up.szName, Up.szMode, Up.bHdr ? ", HDR input" : ""));
       Value("Resolution", Up.nRenderWidth == nWidth && Up.nRenderHeight == nHeight
                             ? Format("%dx%d, native", nWidth, nHeight)
                             : Format("%dx%d to %dx%d", Up.nRenderWidth, Up.nRenderHeight, nWidth, nHeight));

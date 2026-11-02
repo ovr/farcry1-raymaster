@@ -14,7 +14,10 @@
 //	the camera of the frame before (static geometry), or where a character
 //	or a permanent object was then. UpscaleScene makes the picture of the
 //	back buffer's size from it, before the screen effects and the 2D, which
-//	stay at the display's size.
+//	stay at the display's size. An HDR scene (r_HDRRendering) gets there as
+//	its light (d3d12_UpscaleHdr 1: Hdr.cpp's HdrSceneLight, through the
+//	volumetric light, with the exposure), the bloom and the tone map after
+//	it at the display's size; or tone mapped at its size (0).
 //	The path tracer (d3d12_PathTracing) wants the motion vectors without an
 //	upscaler too: with d3d12_Upscaler none it gets the scene targets of the
 //	display's size, without jitter, and the picture is the scene's as it is
@@ -47,7 +50,7 @@ const char *const s_ModeNames[eUM_Num] = { "Native AA", "Quality", "Balanced", "
 class CNativeScene final : public IUpscaler
 {
 public:
-  bool Create(ID3D12Device *, int nWidth, int nHeight, bool, int) override
+  bool Create(ID3D12Device *, int nWidth, int nHeight, bool, int, bool) override
   {
     m_nWidth = nWidth;
     m_nHeight = nHeight;
@@ -133,7 +136,10 @@ bool CD3D12Renderer::UpdateUpscaler()
     szName = NATIVE_SCENE;
   const int w = m_pDevice->GetWidth(), h = m_pDevice->GetHeight();
   const int nVersion = std::max(CV_d3d12_UpscaleVersion, 0);
-  if (_stricmp(szName, m_UpscalerName.c_str()) != 0 || w != m_nUpscalerWidth || h != m_nUpscalerHeight || nVersion != m_nUpscalerVersion)
+  // An upscaler of the HDR scene's light; the path tracer's scene targets show the scene tone mapped as before.
+  const bool bHdrInput = m_bHdrScene && CV_d3d12_UpscaleHdr > 0 && _stricmp(szName, "none") != 0 && _stricmp(szName, NATIVE_SCENE) != 0;
+  if (_stricmp(szName, m_UpscalerName.c_str()) != 0 || w != m_nUpscalerWidth || h != m_nUpscalerHeight || nVersion != m_nUpscalerVersion ||
+      bHdrInput != m_bUpscalerHdrInput)
   {
     const bool bNew = _stricmp(szName, m_UpscalerName.c_str()) != 0 || nVersion != m_nUpscalerVersion;
     ReleaseUpscaler();
@@ -141,6 +147,7 @@ bool CD3D12Renderer::UpdateUpscaler()
     m_nUpscalerWidth = w;
     m_nUpscalerHeight = h;
     m_nUpscalerVersion = nVersion;
+    m_bUpscalerHdrInput = bHdrInput;
     m_pUpscaler = CreateUpscaler(szName);
     if (!m_pUpscaler)
     {
@@ -148,7 +155,7 @@ bool CD3D12Renderer::UpdateUpscaler()
         iLog->LogWarning("XRenderD3D12: d3d12_Upscaler %s: no such upscaler (none, fsr); none", szName);
       return false;
     }
-    if (!m_pUpscaler->Create(m_pDevice->GetDevice(), w, h, CV_d3d12_debug != 0, nVersion))
+    if (!m_pUpscaler->Create(m_pDevice->GetDevice(), w, h, CV_d3d12_debug != 0, nVersion, bHdrInput))
     {
       m_pUpscaler.reset();
       if (bNew)
@@ -172,7 +179,9 @@ bool CD3D12Renderer::UpdateUpscaler()
     m_nUpscaleOutputSRV = m_nUpscaleColorSRV = m_nUpscaleDepthSRV = -1;
     int rw = w, rh = h;
     m_pUpscaler->GetRenderSize(nMode, rw, rh);
-    if (!m_pDevice->SetSceneSize(rw, rh, m_bHdrScene ? D3D12_HDR_FORMAT : D3D12_BACKBUFFER_FORMAT) || (m_nUpscaleOutputSRV = m_pDescriptors->AllocSRV(m_pDevice->GetSceneOutput(), nullptr)) < 0 ||
+    if (!m_pDevice->SetSceneSize(rw, rh, m_bHdrScene ? D3D12_HDR_FORMAT : D3D12_BACKBUFFER_FORMAT,
+                                 m_bUpscalerHdrInput ? D3D12_UPSCALE_HDR_FORMAT : D3D12_UPSCALE_FORMAT) ||
+        (m_nUpscaleOutputSRV = m_pDescriptors->AllocSRV(m_pDevice->GetSceneOutput(), nullptr)) < 0 ||
         (m_nUpscaleColorSRV = m_pDescriptors->AllocSRV(m_pDevice->GetSceneColor(), nullptr)) < 0 ||
         (m_nUpscaleDepthSRV = m_pDescriptors->AllocSRV(m_pDevice->GetUpscaleDepth(), nullptr)) < 0)
     {
@@ -180,12 +189,14 @@ bool CD3D12Renderer::UpdateUpscaler()
       ReleaseUpscaler();
       return false;
     }
-    // A new mode starts without history; the same with the colour HDR or not keeps it (the upscaler gets LDR colours both ways).
+    // A new mode starts without history; the same with the colour HDR or not keeps it (the upscaler gets LDR colours both ways;
+    // for its HDR light it is made anew, without history).
     if (nMode != m_nUpscaleMode)
       m_bUpscaleReset = true;
     m_nUpscaleMode = nMode;
     m_bUpscaleHdr = m_bHdrScene;
-    iLog->Log("XRenderD3D12: %s, %s: %d x %d to %d x %d%s", m_pUpscaler->GetName(), s_ModeNames[nMode], rw, rh, w, h, m_bHdrScene ? ", HDR" : "");
+    iLog->Log("XRenderD3D12: %s, %s: %d x %d to %d x %d%s", m_pUpscaler->GetName(), s_ModeNames[nMode], rw, rh, w, h,
+              m_bUpscalerHdrInput ? ", HDR: the scene's light, tone mapped after the upscale" : m_bHdrScene ? ", HDR: tone mapped before the upscale" : "");
   }
   return true;
 }
@@ -205,6 +216,7 @@ CD3D12Renderer::SUpscaleInfo CD3D12Renderer::UpscaleInfo() const
     Info.nRenderHeight = m_pDevice->GetSceneHeight();
     // DrawStats runs before Update counts the frame.
     Info.bThisFrame = m_nUpscaledFrame == m_nFrames;
+    Info.bHdr = m_bUpscalerHdrInput;
   }
   return Info;
 }
@@ -227,6 +239,7 @@ void CD3D12Renderer::ReleaseUpscaler()
   if (m_pDevice)
     m_pDevice->SetSceneSize(0, 0, D3D12_BACKBUFFER_FORMAT);
   m_pUpscaler.reset();
+  ReleaseSceneLightTargets();
   m_nUpscaleMode = -1;
   m_bUpscaleHdr = false;
   m_bUpscaling = false;
@@ -289,8 +302,9 @@ void CD3D12Renderer::BeginUpscale()
   UpdateReprojection();
   InvalidateFrameConstants();
   if (m_pFrameDump)
-    fprintf(m_pFrameDump.get(), "upscaler: %s, %d x %d, jitter (%.3f %.3f)%s\n", m_pUpscaler->GetName(), m_pDevice->GetSceneWidth(),
-            m_pDevice->GetSceneHeight(), m_UpscaleJitter[0], m_UpscaleJitter[1], m_bUpscaleHistoryReset ? ", reset" : "");
+    fprintf(m_pFrameDump.get(), "upscaler: %s, %d x %d, jitter (%.3f %.3f)%s%s\n", m_pUpscaler->GetName(), m_pDevice->GetSceneWidth(),
+            m_pDevice->GetSceneHeight(), m_UpscaleJitter[0], m_UpscaleJitter[1], m_bUpscaleHistoryReset ? ", reset" : "",
+            m_bUpscalerHdrInput ? ", HDR input" : "");
 }
 
 void CD3D12Renderer::UpscaleScene()
@@ -302,33 +316,41 @@ void CD3D12Renderer::UpscaleScene()
   InvalidateFrameConstants();
   m_pDevice->EndScene();
 
-  // An HDR scene is tone mapped at its size first: the upscaler gets the LDR colours it is made for.
-  CD3D12Texture *pLdr = nullptr;
+  // An HDR scene: its light for an upscaler made for it (d3d12_UpscaleHdr), through the volumetric light at the scene's depth (its
+  // froxels are of the view without the jitter, many pixels each) with the exposure's factor, the meter from the scene as without
+  // an upscaler; else tone mapped at its size first, the upscaler getting the LDR colours it is made for.
+  const int rw = m_pDevice->GetSceneWidth(), rh = m_pDevice->GetSceneHeight();
+  CD3D12Texture *pLdr = nullptr, *pLight = nullptr;
   if (m_bHdrScene)
   {
     GpuSection("hdr");
-    // The volumetric light at the scene's depth (Volumetric.cpp), as without an upscaler: its
-    // froxels are of the view without the jitter, many pixels each.
     if (UpdateVolumetricLight(m_pDevice->GetSceneDepth(), DXGI_FORMAT_R32_FLOAT))
       GpuSection("hdr");
-    pLdr = ResolveHdr(m_nUpscaleColorSRV, m_pDevice->GetSceneColor(), m_pDevice->GetSceneWidth(), m_pDevice->GetSceneHeight(), true,
-                      m_pDevice->GetSceneDepth(), DXGI_FORMAT_R32_FLOAT);
+    if (m_bUpscalerHdrInput && EnsureSceneLightTargets(rw, rh) &&
+        MeterHdr(m_nUpscaleColorSRV, m_pDevice->GetSceneColor(), rw, rh, m_pDevice->GetSceneDepth(), DXGI_FORMAT_R32_FLOAT, true))
+      pLight = HdrSceneLight(m_nUpscaleColorSRV, rw, rh, m_pDevice->GetSceneDepth(), DXGI_FORMAT_R32_FLOAT);
+    if (!pLight)
+      pLdr = ResolveHdr(m_nUpscaleColorSRV, m_pDevice->GetSceneColor(), rw, rh, true, m_pDevice->GetSceneDepth(), DXGI_FORMAT_R32_FLOAT);
     InvalidateFrameConstants();
   }
   GpuSection("upscale");
-  // The upscaler reads it in a compute shader.
-  if (pLdr)
-    m_pDevice->Transition(pLdr->m_pResource, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE,
-                          D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE | D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+  // The upscaler reads them in a compute shader.
+  constexpr D3D12_RESOURCE_STATES READ = D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE | D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE;
+  CD3D12Texture *pIn = pLight ? pLight : pLdr;
+  if (pIn)
+    m_pDevice->Transition(pIn->m_pResource, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, READ);
+  if (pLight)
+    m_pDevice->Transition(m_Hdr.pExposureScale->m_pResource, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, READ);
 
   SUpscaleInputs In;
   In.pCmdList = m_pDevice->GetCmdList();
-  In.pColor = pLdr ? pLdr->m_pResource : m_pDevice->GetSceneColor();
+  In.pColor = pIn ? pIn->m_pResource : m_pDevice->GetSceneColor();
+  In.pExposure = pLight ? m_Hdr.pExposureScale->m_pResource : nullptr;
   In.pDepth = m_pDevice->GetUpscaleDepth();
   In.pVelocity = m_pDevice->GetSceneVelocity();
   In.pOutput = m_pDevice->GetSceneOutput();
-  In.nRenderWidth = m_pDevice->GetSceneWidth();
-  In.nRenderHeight = m_pDevice->GetSceneHeight();
+  In.nRenderWidth = rw;
+  In.nRenderHeight = rh;
   In.fJitterX = m_UpscaleJitter[0];
   In.fJitterY = m_UpscaleJitter[1];
   // The planes and the field of view of the projection (MakeProjection).
@@ -342,55 +364,72 @@ void CD3D12Renderer::UpscaleScene()
   In.bDebugView = CV_d3d12_UpscaleDebug == 1;
   const bool bUpscaled = m_pUpscaler->Dispatch(In);
   m_pDevice->BindRootSignature();
-  if (pLdr)
-    m_pDevice->Transition(pLdr->m_pResource, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE | D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE,
-                          D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+  if (pIn)
+    m_pDevice->Transition(pIn->m_pResource, READ, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+  if (pLight)
+    m_pDevice->Transition(m_Hdr.pExposureScale->m_pResource, READ, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
 
-  // Its picture over the whole back buffer (else the scene stretched; with d3d12_UpscaleDebug 2
-  // the depth it got), then the depth buffer cleared for what is drawn in 3D after the scene.
   const int w = m_pDevice->GetWidth(), h = m_pDevice->GetHeight();
-  int Viewport[4];
-  memcpy(Viewport, m_Viewport, sizeof(Viewport));
-  const bool bScissor = m_bScissor;
-  m_Viewport[0] = m_Viewport[1] = 0;
-  m_Viewport[2] = w;
-  m_Viewport[3] = h;
-  m_bScissor = m_bItemScissor = false;
-  if (bUpscaled)
-    m_pDevice->Transition(In.pOutput, D3D12_RESOURCE_STATE_UNORDERED_ACCESS, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
-  SPipelineKey Key = {};
-  Key.nProgram = eD3D12P_Post;
-  Key.nState = GS_NODEPTHTEST;
-  Key.nCull = R_CULL_NONE;
-  SDrawConstants dc = DefaultDrawConstants();
-  dc.nFlags = POST_BLEND;
-  dc.nTex0 = (uint32)(bUpscaled ? m_nUpscaleOutputSRV : pLdr ? pLdr->m_nSRV : m_nUpscaleColorSRV);
-  Set4(dc.vParams0, 1.0f / w, 1.0f / h, 0, 0);
-  Set4(dc.vParams1, 1, 1, 1, 1);
-  if (CV_d3d12_UpscaleDebug == 2)
+  if (pLight && bUpscaled && !In.bDebugView && CV_d3d12_UpscaleDebug != 2)
   {
-    dc.nFlags = POST_DEPTH_VIEW;
-    dc.nTex0 = (uint32)m_nUpscaleDepthSRV;
-    Set4(dc.vParams1, In.fNear, In.fFar, 0, 0);
+    // The light upscaled: the bloom, the tone map, the colour grading and the highlight layer at the display's size, into the
+    // back buffer.
+    GpuSection("hdr");
+    m_pDevice->Transition(In.pOutput, D3D12_RESOURCE_STATE_UNORDERED_ACCESS, READ);
+    ResolveHdr(m_nUpscaleOutputSRV, In.pOutput, w, h, false, nullptr, DXGI_FORMAT_UNKNOWN, true);
+    m_pDevice->Transition(In.pOutput, READ, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
   }
-  // With the highlight layer (HdrOutput.cpp) it gets the resolve's ratio, upscaled bilinearly (none
-  // for the depth view).
-  const bool bHighlight = m_pDevice->HasLayer();
-  if (bHighlight)
+  else
   {
-    dc.nTex1 = pLdr && m_Hdr.pRatio && CV_d3d12_UpscaleDebug != 2 ? (uint32)m_Hdr.pRatio->m_nSRV : D3D12_SRV_WHITE;
-    Set4(dc.vParams2, std::clamp(CV_d3d12_ToneMapKnee, 0.0f, 0.99f), 0, 0, 0);
-    Key.nTarget = 4;
-    m_pDevice->BindHighlight(true);
+    // Not upscaled: the light tone mapped at the scene's size, shown stretched.
+    if (pLight && !bUpscaled)
+      pLdr = ResolveHdr(pLight->m_nSRV, pLight->m_pResource, rw, rh, true, nullptr, DXGI_FORMAT_UNKNOWN, true);
+    // Its picture over the whole back buffer (else the scene stretched; with d3d12_UpscaleDebug 2
+    // the depth it got).
+    int Viewport[4];
+    memcpy(Viewport, m_Viewport, sizeof(Viewport));
+    const bool bScissor = m_bScissor;
+    m_Viewport[0] = m_Viewport[1] = 0;
+    m_Viewport[2] = w;
+    m_Viewport[3] = h;
+    m_bScissor = m_bItemScissor = false;
+    if (bUpscaled)
+      m_pDevice->Transition(In.pOutput, D3D12_RESOURCE_STATE_UNORDERED_ACCESS, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+    SPipelineKey Key = {};
+    Key.nProgram = eD3D12P_Post;
+    Key.nState = GS_NODEPTHTEST;
+    Key.nCull = R_CULL_NONE;
+    SDrawConstants dc = DefaultDrawConstants();
+    dc.nFlags = POST_BLEND;
+    dc.nTex0 = (uint32)(bUpscaled ? m_nUpscaleOutputSRV : pLdr ? pLdr->m_nSRV : m_nUpscaleColorSRV);
+    Set4(dc.vParams0, 1.0f / w, 1.0f / h, 0, 0);
+    Set4(dc.vParams1, 1, 1, 1, 1);
+    if (CV_d3d12_UpscaleDebug == 2)
+    {
+      dc.nFlags = POST_DEPTH_VIEW;
+      dc.nTex0 = (uint32)m_nUpscaleDepthSRV;
+      Set4(dc.vParams1, In.fNear, In.fFar, 0, 0);
+    }
+    // With the highlight layer (HdrOutput.cpp) it gets the resolve's ratio, upscaled bilinearly (none
+    // for the depth view and the upscaler's picture of the light).
+    const bool bHighlight = m_pDevice->HasLayer();
+    if (bHighlight)
+    {
+      dc.nTex1 = pLdr && m_Hdr.pRatio && CV_d3d12_UpscaleDebug != 2 ? (uint32)m_Hdr.pRatio->m_nSRV : D3D12_SRV_WHITE;
+      Set4(dc.vParams2, std::clamp(CV_d3d12_ToneMapKnee, 0.0f, 0.99f), 0, 0, 0);
+      Key.nTarget = 4;
+      m_pDevice->BindHighlight(true);
+    }
+    DrawImmediate(Key, dc, D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST, VERTEX_FORMAT_P3F, s_FullScreen, 3);
+    if (bHighlight)
+      m_pDevice->BindHighlight(false);
+    if (bUpscaled)
+      m_pDevice->Transition(In.pOutput, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+    memcpy(m_Viewport, Viewport, sizeof(Viewport));
+    m_bScissor = bScissor;
   }
-  DrawImmediate(Key, dc, D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST, VERTEX_FORMAT_P3F, s_FullScreen, 3);
-  if (bHighlight)
-    m_pDevice->BindHighlight(false);
-  if (bUpscaled)
-    m_pDevice->Transition(In.pOutput, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+  // The depth buffer cleared for what is drawn in 3D after the scene.
   m_pDevice->ClearDepth(1.0f, 0, true, true);
-  memcpy(m_Viewport, Viewport, sizeof(Viewport));
-  m_bScissor = bScissor;
   InvalidateFrameConstants();
 
   // This frame's camera for the next one; the objects not seen for a while go.
