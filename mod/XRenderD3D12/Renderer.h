@@ -1442,6 +1442,20 @@ public:
   void ReleaseHdrOutput();
   //! In the constants of the resolve and the upscaler's picture: the highlight layer's.
   void SetHighlightConstants(SDrawConstants &dc) const;
+  //! The frame average limit (d3d12_HDRFrameAverage) in nits for the display as it is: its full
+  //! frame light (or d3d12_HDRFullFrame) times the cvar; 0: none (off, not known, or at the peak or
+  //! above, where no frame gets to).
+  float GetFrameAverageLimit(const SDisplayInfo &Info, float fPeak) const;
+  //! Before the output pass and the HDR statistics' output nits, once a frame: the limit's kernels
+  //! (Shaders/FrameAverage.hlsl) on the frame target and the highlight layer, both in
+  //! PIXEL_SHADER_RESOURCE, in a GPU section of their own ("hdr frame average"), szSection the one
+  //! after; true: its target holds this frame's factor of the highlights.
+  bool LimitFrameAverage(const char *szSection);
+  //! Its buffer, target and tables (false: none, the limit off for good).
+  bool EnsureFrameAverage();
+  void ReleaseFrameAverage();
+  //! Its target when it holds this frame's factor, else nullptr.
+  CD3D12Texture *FrameAverageTarget() const;
 
   struct SHdrOutputState
   {
@@ -1453,6 +1467,12 @@ public:
     std::vector<uint8> Pixels;              //!< its pixels read back
     ComPtr<ID3D12Resource> pFrame, pHighlight;   //!< the device's the SRVs are of
     int nFrameSRV = -1, nHighlightSRV = -1;
+    float fFrameAverage = 0;                //!< the frame average limit in use (nits; 0: none)
+    ComPtr<ID3D12Resource> pFallWords;      //!< its sums and its factor (Shaders/FrameAverage.hlsl, XR_FALL_*), a raw UAV
+    CD3D12Texture *pFall = nullptr;         //!< its 1 x 1 target (R32G32B32A32_FLOAT: x the factor)
+    std::vector<int> FallTables;            //!< its kernels' tables, a frame slot each
+    int nFallFrame = -1;                    //!< m_nFrames of the frame its kernels last ran in
+    bool bFallFailed = false;               //!< no buffer, target or kernels: no limit
   };
   SHdrOutputState m_HdrOut;
 
@@ -1801,6 +1821,8 @@ public:
   float CV_d3d12_HDRPaperWhite = 0;         //!< its paper white in nits (0: Windows' SDR white level of the display)
   float CV_d3d12_HDRPeak = 0;               //!< its peak in nits (0: the display's)
   float CV_d3d12_HDRHighlights = 2;         //!< the light (in the game's whites) from which its tone map goes on to the peak, the SDR picture's up to white (at most 1: from the knee, as up to step 257)
+  float CV_d3d12_HDRFrameAverage = 1;       //!< the most average light of a frame, times the display's full frame light (0: no limit)
+  float CV_d3d12_HDRFullFrame = 0;          //!< the display's full frame light in nits (0: the display's)
   int CV_d3d12_HDROutputDebug = 0;          //!< 1: the highlight mask, 2: test patches
   int CV_d3d12_DisplayHDR = 0;              //!< 1: the HDR statistics' panel (HdrStats.cpp, Stats.cpp)
   int CV_d3d12_HDRLog = 0;                  //!< 1: a line of them per frame to XRenderD3D12_hdr.txt

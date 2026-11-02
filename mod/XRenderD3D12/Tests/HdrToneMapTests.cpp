@@ -7,8 +7,9 @@
 //	Shaders/HdrToneMap.hlsli) on the GPU: the game's look below the knee,
 //	the shoulder smooth at the knee, never decreasing and below its limit,
 //	the hue kept, the light far above white white; the HDR output's tone
-//	map: the SDR picture's up to white, the highlights' above (d3d12_HDRHighlights) and the sky's glow towards
-//	the sun (d3d12_HDRSkyAngle, HdrLight.hlsli).
+//	map: the SDR picture's up to white, the highlights' above (d3d12_HDRHighlights), the sky's glow towards
+//	the sun (d3d12_HDRSkyAngle, HdrLight.hlsli) and the frame average limit (d3d12_HDRFrameAverage,
+//	HdrFrameAverage.hlsli).
 //
 //////////////////////////////////////////////////////////////////////
 
@@ -19,6 +20,7 @@
 #include "Test_ToneMap.h"
 #include "Test_HdrOutput.h"
 #include "Test_SkyGlow.h"
+#include "Test_FrameAverage.h"
 
 #include <algorithm>
 #include <cmath>
@@ -333,4 +335,91 @@ XR_TEST(HdrSkyGlow_Lobe)
         CHECK(L[i] <= L[i - 1] + 1e-6);
     }
   }
+}
+
+//! The HDR output's frame average limit (FrameAverageFactor, HdrFrameAverage.hlsli; d3d12_HDRFrameAverage): where a frame is
+//! above the limit, the factor of its highlights brings its average (the SDR picture's plus the highlights' times the factor)
+//! to the limit exactly; 1 where it is within it or has no highlights; 0 where the SDR picture alone is at the limit or above
+//! (the limit takes the highlights only); never larger with more highlights or a brighter SDR picture. Its steps
+//! (FrameAverageStep): down by fDown at most, up by fUp at most, to the target exactly, so that a frame back within the limit
+//! has the factor 1 again (its frames as without the limit); at once with no frame before. Frame by frame: from 1 to a target
+//! of 0.3 in 4 frames of 0.2, back to 1 in 35 of 0.02 (36 with the rounding), then 1 exactly.
+//! Why: a frame above the display's full frame light makes an OLED dim the whole picture by itself (ABL).
+XR_TEST(HdrFrameAverage_Limit)
+{
+  struct SCase
+  {
+    float fSdr, fHighlights, fLimit;
+  };
+  std::vector<SCase> Cases;
+  for (float fLimit : { 254 / 240.0f, 1.0f, 0.5f, 1.25f })
+  {
+    for (float fSdr : { 0.0f, 0.2f, 0.5f, 0.9f, 1.0f, 1.2f })
+    {
+      for (float fHighlights : { 0.0f, 0.01f, 0.1f, 0.5f, 1.0f, 3.0f })
+        Cases.push_back({ fSdr, fHighlights, fLimit });
+    }
+  }
+  SDispatch d;
+  d.Shader = XR_BYTECODE(Test_FrameAverage);
+  d.Test.nTest[0] = (uint32)Cases.size();
+  d.nGroups[0] = Groups64(Cases.size());
+  for (const SCase &c : Cases)
+    Push(d.In, c.fSdr, c.fHighlights, c.fLimit, 0);
+  d.nOut = Cases.size();
+  const std::vector<uint32> Out = Gpu().Run(d);
+  for (size_t i = 0; i < Cases.size(); i++)
+  {
+    const SCase &c = Cases[i];
+    const float f = At(Out, i, 0);
+    CHECK(f >= 0 && f <= 1);
+    if (c.fHighlights <= 0 || c.fSdr + c.fHighlights <= c.fLimit)
+      CHECK(f == 1.0f);
+    else if (c.fSdr >= c.fLimit)
+      CHECK(f == 0.0f);
+    else
+      CHECK_NEAR(c.fSdr + f * c.fHighlights, c.fLimit, 1e-5);
+    // More highlights (the next case), a brighter SDR picture (six cases on): never a larger factor.
+    if (i % 6 != 5)
+      CHECK(At(Out, i + 1, 0) <= f + 1e-7f);
+    if ((i / 6) % 6 != 5)
+      CHECK(At(Out, i + 6, 0) <= f + 1e-7f);
+  }
+
+  // The steps, one frame at a time.
+  const auto Step = [](float fLast, float fTarget, float fDown, float fUp, bool bReset)
+  {
+    SDispatch s;
+    s.Shader = XR_BYTECODE(Test_FrameAverage);
+    s.Test.nTest[0] = 1;
+    s.Test.nTest[1] = 1;
+    s.Test.nTest[2] = bReset ? 1 : 0;
+    s.nGroups[0] = 1;
+    Push(s.In, fLast, fTarget, fDown, fUp);
+    s.nOut = 1;
+    return At(Gpu().Run(s), 0, 0);
+  };
+  CHECK(Step(1, 0.3f, 0.2f, 0.02f, true) == 0.3f);
+  CHECK(Step(0.3f, 1, 0.2f, 0.02f, true) == 1.0f);
+  CHECK(Step(0.5f, 0.5f, 0.2f, 0.02f, false) == 0.5f);
+  CHECK(Step(0.99f, 1, 0.2f, 0.02f, false) == 1.0f);
+  CHECK(Step(0.35f, 0.3f, 0.2f, 0.02f, false) == 0.3f);
+  float f = 1;
+  int nDown = 0, nUp = 0;
+  while (f > 0.3f && nDown < 100)
+  {
+    const float fNext = Step(f, 0.3f, 0.2f, 0.02f, false);
+    CHECK(fNext < f && fNext >= f - 0.2f - 1e-6f);
+    f = fNext;
+    nDown++;
+  }
+  CHECK(nDown == 4 && f == 0.3f);
+  while (f < 1 && nUp < 100)
+  {
+    const float fNext = Step(f, 1, 0.2f, 0.02f, false);
+    CHECK(fNext > f && fNext <= f + 0.02f + 1e-6f);
+    f = fNext;
+    nUp++;
+  }
+  CHECK(nUp >= 35 && nUp <= 36 && f == 1.0f);
 }

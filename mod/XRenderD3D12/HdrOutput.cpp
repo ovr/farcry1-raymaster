@@ -29,7 +29,20 @@
 //
 //	Paper white is Windows' SDR white level of the display (the SDR content
 //	brightness slider), or d3d12_HDRPaperWhite; the peak is the display's
-//	(DXGI_OUTPUT_DESC1), or d3d12_HDRPeak. The output follows the display:
+//	(DXGI_OUTPUT_DESC1), or d3d12_HDRPeak.
+//
+//	The frame average limit (d3d12_HDRFrameAverage, Shaders/FrameAverage.hlsl,
+//	HdrFrameAverage.hlsli): a display holds its peak in a small part of the
+//	screen only, an OLED dims the whole picture by itself when a frame's
+//	average is above its full frame light (DXGI_OUTPUT_DESC1, or
+//	d3d12_HDRFullFrame). Before the output pass two kernels add up the
+//	frame's light (of each pixel's brightest channel, as MaxFALL), the SDR
+//	picture's and what the highlights add, and give the factor of the
+//	highlights that keeps the average at the limit: down within
+//	FALL_DOWN_SECONDS, back within FALL_UP_SECONDS. The SDR picture stays;
+//	the HDR10 metadata's MaxFALL is the limit (paper white at least).
+//
+//	The output follows the display:
 //	the HDR mode switched off in Windows, or the window on a display in
 //	SDR, and it is SDR again (the log says why).
 //
@@ -46,6 +59,7 @@
 #include "D3D12Upload.h"
 #include "D3D12Descriptors.h"
 #include "D3D12Pipeline.h"
+#include "D3D12Compute.h"
 
 namespace
 {
@@ -60,6 +74,14 @@ void Set4(float v[4], float x, float y, float z, float w)
 constexpr float DEFAULT_PAPER_WHITE = 203;
 //! The peak when the display reports none.
 constexpr float DEFAULT_PEAK = 1000;
+
+//! The frame average limit's samples of a frame (about; a sample every so many pixels across and down).
+constexpr float FALL_SAMPLES = 65536.0f;
+//! The time its factor of the highlights takes from 1 to 0 at most (a frame getting brighter), and back.
+constexpr float FALL_DOWN_SECONDS = 0.1f;
+constexpr float FALL_UP_SECONDS = 0.5f;
+constexpr UINT FALL_WORDS_BYTES = XR_FALL_WORDS * sizeof(uint32);
+constexpr int KERNEL_TABLE = CD3D12Compute::COMPUTE_SRVS + CD3D12Compute::COMPUTE_UAVS;
 
 const char *OutputName(EDisplayOutput Output)
 {
@@ -76,6 +98,13 @@ void CD3D12Renderer::GetHdrLevels(const SDisplayInfo &Info, float &fPaperWhite, 
   fPeak = std::clamp(fPeak, fPaperWhite, 10000.0f);
 }
 
+float CD3D12Renderer::GetFrameAverageLimit(const SDisplayInfo &Info, float fPeak) const
+{
+  const float fFullFrame = CV_d3d12_HDRFullFrame > 0 ? CV_d3d12_HDRFullFrame : Info.bHdr ? Info.fMaxFullFrameNits : 0;
+  const float fLimit = std::max(CV_d3d12_HDRFrameAverage, 0.0f) * fFullFrame;
+  return fLimit > 0 && fLimit < fPeak ? fLimit : 0;
+}
+
 void CD3D12Renderer::UpdateHdrOutput()
 {
   if (!m_pDevice)
@@ -90,6 +119,7 @@ void CD3D12Renderer::UpdateHdrOutput()
   std::string Reason;
   const SDisplayInfo &Info = m_pDevice->GetDisplayInfo();
   GetHdrLevels(Info, m_HdrOut.fPaperWhite, m_HdrOut.fPeak);
+  m_HdrOut.fFrameAverage = GetFrameAverageLimit(Info, m_HdrOut.fPeak);
   if (nWanted && !IsHdrOn())
     Reason = "r_HDRRendering is 0";
   else if (nWanted && !Info.szName[0])
@@ -98,8 +128,10 @@ void CD3D12Renderer::UpdateHdrOutput()
     Reason = "the display is not in HDR mode (Windows: Use HDR)";
   else if (nWanted)
     Output = nWanted == 1 ? EDisplayOutput::Hdr10 : EDisplayOutput::ScRgb;
-  // The metadata's frame average: paper white, what most of a frame is at most.
-  if (!m_pDevice->SetOutput(Output, Output != EDisplayOutput::Sdr || m_HdrOut.bCapture, m_HdrOut.fPeak, m_HdrOut.fPaperWhite) &&
+  // The metadata's frame average: the limit's, paper white at least (the SDR picture is not limited); without it paper
+  // white, what most of a frame is at most.
+  const float fMaxFall = m_HdrOut.fFrameAverage > 0 ? std::max(m_HdrOut.fFrameAverage, m_HdrOut.fPaperWhite) : m_HdrOut.fPaperWhite;
+  if (!m_pDevice->SetOutput(Output, Output != EDisplayOutput::Sdr || m_HdrOut.bCapture, m_HdrOut.fPeak, fMaxFall) &&
       Output != EDisplayOutput::Sdr)
     Reason = "the swap chain can't show its colour space";
 
@@ -107,8 +139,9 @@ void CD3D12Renderer::UpdateHdrOutput()
   if ((int)Actual == m_HdrOut.nLogged && Reason == m_HdrOut.Reason)
     return;
   if (Actual != EDisplayOutput::Sdr)
-    iLog->Log("XRenderD3D12: HDR output %s, paper white %g nits, peak %g nits (display %s: peak %g nits, SDR white %g nits)", OutputName(Actual),
-              m_HdrOut.fPaperWhite, m_HdrOut.fPeak, Info.szName, Info.fMaxNits, Info.fSdrWhiteNits);
+    iLog->Log("XRenderD3D12: HDR output %s, paper white %g nits, peak %g nits, frame average at most %g nits (display %s: peak %g nits, full "
+              "frame %g nits, SDR white %g nits)", OutputName(Actual), m_HdrOut.fPaperWhite, m_HdrOut.fPeak, m_HdrOut.fFrameAverage, Info.szName,
+              Info.fMaxNits, Info.fMaxFullFrameNits, Info.fSdrWhiteNits);
   else if (!Reason.empty())
     iLog->LogWarning("XRenderD3D12: no HDR output: %s", Reason.c_str());
   else if (m_HdrOut.nLogged > 0)
@@ -150,12 +183,164 @@ void CD3D12Renderer::SetHighlightConstants(SDrawConstants &dc) const
   Set4(dc.vParams3, fPeak > 1 ? 1 + (fPeak - 1) / 2.2f : 1.0f, fPeak, 0, std::max(CV_d3d12_HDRHighlights, 0.0f));
 }
 
+bool CD3D12Renderer::EnsureFrameAverage()
+{
+  SHdrOutputState &o = m_HdrOut;
+  if (o.pFallWords)
+    return true;
+  if (o.bFallFailed || !m_pCompute || !m_pUpload || !m_pDescriptors)
+    return false;
+  ID3D12Device *pDevice = m_pDevice->GetDevice();
+  const D3D12_HEAP_PROPERTIES Default = { D3D12_HEAP_TYPE_DEFAULT };
+  D3D12_RESOURCE_DESC Desc = {};
+  Desc.Dimension = D3D12_RESOURCE_DIMENSION_BUFFER;
+  Desc.Width = FALL_WORDS_BYTES;
+  Desc.Height = 1;
+  Desc.DepthOrArraySize = 1;
+  Desc.MipLevels = 1;
+  Desc.SampleDesc.Count = 1;
+  Desc.Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
+  Desc.Flags = D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS;
+  bool bOk = m_pCompute->HasKernel(eD3D12K_FrameAverageSum) && m_pCompute->HasKernel(eD3D12K_FrameAverageLimit) &&
+             SUCCEEDED(pDevice->CreateCommittedResource(&Default, D3D12_HEAP_FLAG_NONE, &Desc, D3D12_RESOURCE_STATE_COMMON, nullptr,
+                                                        IID_PPV_ARGS(&o.pFallWords)));
+  o.pFall = bOk ? m_pUpload->CreateRenderTarget(1, 1, DXGI_FORMAT_R32G32B32A32_FLOAT, true) : nullptr;
+  bOk = bOk && o.pFall && o.pFall->m_nSRV >= 0;
+  // The tables: t0 the frame target and t1 the highlight layer each frame, u0 the words, u1 the target; the views the
+  // kernels do not use null.
+  D3D12_SHADER_RESOURCE_VIEW_DESC NullSRV = {};
+  NullSRV.Format = D3D12_HDR_FORMAT;
+  NullSRV.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
+  NullSRV.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+  NullSRV.Texture2D.MipLevels = 1;
+  D3D12_UNORDERED_ACCESS_VIEW_DESC NullUAV = {};
+  NullUAV.Format = D3D12_HDR_FORMAT;
+  NullUAV.ViewDimension = D3D12_UAV_DIMENSION_TEXTURE2D;
+  D3D12_UNORDERED_ACCESS_VIEW_DESC WordsUAV = {};
+  WordsUAV.Format = DXGI_FORMAT_R32_TYPELESS;
+  WordsUAV.ViewDimension = D3D12_UAV_DIMENSION_BUFFER;
+  WordsUAV.Buffer.NumElements = XR_FALL_WORDS;
+  WordsUAV.Buffer.Flags = D3D12_BUFFER_UAV_FLAG_RAW;
+  D3D12_UNORDERED_ACCESS_VIEW_DESC TargetUAV = {};
+  TargetUAV.Format = DXGI_FORMAT_R32G32B32A32_FLOAT;
+  TargetUAV.ViewDimension = D3D12_UAV_DIMENSION_TEXTURE2D;
+  o.FallTables.assign(D3D12_FRAMES, -1);
+  for (int &nTable : o.FallTables)
+  {
+    if (!bOk || (nTable = m_pDescriptors->AllocRange(KERNEL_TABLE)) < 0)
+    {
+      bOk = false;
+      continue;
+    }
+    for (int i = 0; i < CD3D12Compute::COMPUTE_SRVS; i++)
+      m_pDescriptors->WriteSRV(nTable + i, nullptr, &NullSRV);
+    m_pDescriptors->WriteUAV(nTable + CD3D12Compute::COMPUTE_SRVS, o.pFallWords.Get(), &WordsUAV);
+    m_pDescriptors->WriteUAV(nTable + CD3D12Compute::COMPUTE_SRVS + 1, o.pFall->m_pResource, &TargetUAV);
+    for (int i = 2; i < CD3D12Compute::COMPUTE_UAVS; i++)
+      m_pDescriptors->WriteUAV(nTable + CD3D12Compute::COMPUTE_SRVS + i, nullptr, &NullUAV);
+  }
+  // The words zero (a copy of zeros from the frame memory: a buffer is created common, the copy promotes it), then the
+  // kernels' for good.
+  const SD3D12FrameAlloc Zeros = bOk ? m_pUpload->AllocFrame(FALL_WORDS_BYTES, 256) : SD3D12FrameAlloc{};
+  if (!bOk || !Zeros.pCPU)
+  {
+    iLog->LogWarning("XRenderD3D12: no frame average limit (d3d12_HDRFrameAverage): no buffer, target or kernels");
+    ReleaseFrameAverage();
+    o.bFallFailed = true;
+    return false;
+  }
+  o.pFallWords->SetName(L"XRenderD3D12 frame average limit");
+  memset(Zeros.pCPU, 0, FALL_WORDS_BYTES);
+  m_pDevice->GetCmdList()->CopyBufferRegion(o.pFallWords.Get(), 0, Zeros.pResource, Zeros.nOffset, FALL_WORDS_BYTES);
+  m_pDevice->Transition(o.pFallWords.Get(), D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+  return true;
+}
+
+bool CD3D12Renderer::LimitFrameAverage(const char *szSection)
+{
+  SHdrOutputState &o = m_HdrOut;
+  if (o.fFrameAverage <= 0 || !m_pDevice || !m_pDevice->HasLayer() || !m_pDevice->IsInFrame())
+    return false;
+  if (o.nFallFrame == m_nFrames)
+    return o.pFall != nullptr;
+  ID3D12Resource *pFrame = m_pDevice->GetFrameTarget(), *pHighlight = m_pDevice->GetHighlight();
+  if (!pFrame || !pHighlight || !EnsureFrameAverage())
+    return false;
+  const int w = m_pDevice->GetWidth(), h = m_pDevice->GetHeight();
+  const int nTable = o.FallTables[m_pDevice->GetFrameSlot()];
+  m_pDescriptors->WriteSRV(nTable, pFrame, nullptr);
+  m_pDescriptors->WriteSRV(nTable + 1, pHighlight, nullptr);
+
+  // Without the frame just before (the first, the output off), the factor at once.
+  SFrameAverageConstants fc = {};
+  Set4(fc.vSize, (float)w, (float)h, 1.0f / w, 1.0f / h);
+  Set4(fc.vParams, o.fPaperWhite, o.fPeak, o.fFrameAverage / o.fPaperWhite, o.nFallFrame != m_nFrames - 1 ? 1.0f : 0.0f);
+  const float fFrameTime = iTimer ? std::clamp(iTimer->GetFrameTime(), 0.0f, 1.0f) : 0.02f;
+  Set4(fc.vSteps, fFrameTime / FALL_DOWN_SECONDS, fFrameTime / FALL_UP_SECONDS, 0, 0);
+  const UINT nStride = (UINT)std::max((long)ceilf(sqrtf((float)w * h / FALL_SAMPLES)), 1L);
+  fc.vStride[0] = nStride;
+  const SD3D12FrameAlloc CB = m_pUpload->AllocFrame(sizeof(fc), 256);
+  if (!CB.pCPU)
+    return false;
+  memcpy(CB.pCPU, &fc, sizeof(fc));
+
+  constexpr D3D12_RESOURCE_STATES READ = D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE | D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE;
+  ID3D12GraphicsCommandList *pList = m_pDevice->GetCmdList();
+  GpuSection("hdr frame average");
+  m_pDevice->Transition(pFrame, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, READ);
+  m_pDevice->Transition(pHighlight, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, READ);
+  m_pDevice->Transition(o.pFall->m_pResource, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+  // 16 x 16 samples a group, then one thread.
+  const UINT nGroupPixels = 16 * nStride;
+  m_pCompute->Dispatch(pList, eD3D12K_FrameAverageSum, CB.nGPU, nTable, nTable + CD3D12Compute::COMPUTE_SRVS,
+                       (UINT)(w + nGroupPixels - 1) / nGroupPixels, (UINT)(h + nGroupPixels - 1) / nGroupPixels);
+  m_pDevice->UavBarrier(o.pFallWords.Get());
+  m_pCompute->Dispatch(pList, eD3D12K_FrameAverageLimit, CB.nGPU, nTable, nTable + CD3D12Compute::COMPUTE_SRVS, 1, 1);
+  m_pDevice->UavBarrier(o.pFallWords.Get());
+  m_pDevice->Transition(o.pFall->m_pResource, D3D12_RESOURCE_STATE_UNORDERED_ACCESS, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+  m_pDevice->Transition(pHighlight, READ, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+  m_pDevice->Transition(pFrame, READ, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+  GpuSection(szSection);
+  o.nFallFrame = m_nFrames;
+  return true;
+}
+
+CD3D12Texture *CD3D12Renderer::FrameAverageTarget() const
+{
+  const SHdrOutputState &o = m_HdrOut;
+  return o.fFrameAverage > 0 && o.nFallFrame == m_nFrames && o.pFall && o.pFall->m_nSRV >= 0 ? o.pFall : nullptr;
+}
+
+void CD3D12Renderer::ReleaseFrameAverage()
+{
+  SHdrOutputState &o = m_HdrOut;
+  if (m_pDescriptors)
+  {
+    for (int nTable : o.FallTables)
+    {
+      if (nTable >= 0)
+        m_pDescriptors->FreeRange(nTable, KERNEL_TABLE);
+    }
+  }
+  o.FallTables.clear();
+  if (m_pDevice && o.pFallWords)
+    m_pDevice->DeferredRelease(o.pFallWords);
+  o.pFallWords.Reset();
+  if (m_pUpload)
+    m_pUpload->ReleaseTexture(o.pFall);
+  o.pFall = nullptr;
+  o.nFallFrame = -1;
+}
+
 SDrawConstants CD3D12Renderer::HdrOutputConstants(EDisplayOutput Output) const
 {
   SDrawConstants dc = DefaultDrawConstants();
   dc.nFlags = HDR_OUTPUT;
   dc.nTex0 = (uint32)m_HdrOut.nFrameSRV;
   dc.nTex1 = (uint32)m_HdrOut.nHighlightSRV;
+  // The frame average limit's factor of the highlights (white: none).
+  const CD3D12Texture *pFall = FrameAverageTarget();
+  dc.nTex2 = pFall ? (uint32)pFall->m_nSRV : D3D12_SRV_WHITE;
   Set4(dc.vParams0, m_HdrOut.fPaperWhite, m_HdrOut.fPeak, Output == EDisplayOutput::Hdr10 ? 1.0f : 2.0f, (float)std::clamp(CV_d3d12_HDROutputDebug, 0, 2));
   Set4(dc.vParams1, 1.0f / m_pDevice->GetWidth(), 1.0f / m_pDevice->GetHeight(), 0, 0);
   return dc;
@@ -169,7 +354,8 @@ void CD3D12Renderer::DrawHdrOutput()
     return;
   GpuSection("hdr output");
   m_pDevice->BeginOutput();
-  // The HDR statistics' nits of the output (HdrStats.cpp).
+  // The frame average limit's factor of this frame, then the HDR statistics' nits of the output (HdrStats.cpp).
+  LimitFrameAverage("hdr output");
   if (WantHdrStats())
     DispatchHdrOutputStats(false);
   DrawHdrFullScreen(HdrOutputConstants(Output), 1, Output == EDisplayOutput::Hdr10 ? PIPELINE_COLOR_HDR10 : PIPELINE_COLOR_HDR);
@@ -181,10 +367,11 @@ void CD3D12Renderer::DumpHdrOutput()
     return;
   const SDisplayInfo &Info = m_pDevice->GetDisplayInfo();
   fprintf(m_pFrameDump.get(), "hdr output: %s (d3d12_HDROutput %d%s%s), paper white %g nits, peak %g nits; display %s: %s, peak %g nits, full frame %g nits, "
-          "black %g nits, SDR white %g nits; highlight layer %s, highlights from %g\n", OutputName(m_pDevice->GetOutput()), CV_d3d12_HDROutput,
-          m_HdrOut.Reason.empty() ? "" : ": ", m_HdrOut.Reason.c_str(), m_HdrOut.fPaperWhite, m_HdrOut.fPeak, Info.szName[0] ? Info.szName : "?",
-          Info.bHdr ? "HDR" : "SDR", Info.fMaxNits, Info.fMaxFullFrameNits, Info.fMinNits, Info.fSdrWhiteNits, m_pDevice->HasLayer() ? "on" : "off",
-          CV_d3d12_HDRHighlights);
+          "black %g nits, SDR white %g nits; highlight layer %s, highlights from %g; frame average at most %g nits (d3d12_HDRFrameAverage %g, "
+          "d3d12_HDRFullFrame %g)\n", OutputName(m_pDevice->GetOutput()), CV_d3d12_HDROutput, m_HdrOut.Reason.empty() ? "" : ": ",
+          m_HdrOut.Reason.c_str(), m_HdrOut.fPaperWhite, m_HdrOut.fPeak, Info.szName[0] ? Info.szName : "?", Info.bHdr ? "HDR" : "SDR",
+          Info.fMaxNits, Info.fMaxFullFrameNits, Info.fMinNits, Info.fSdrWhiteNits, m_pDevice->HasLayer() ? "on" : "off", CV_d3d12_HDRHighlights,
+          m_HdrOut.fFrameAverage, CV_d3d12_HDRFrameAverage, CV_d3d12_HDRFullFrame);
   if (!m_pDevice->HasLayer())
     return;
   // Where the layer has the scene (the fingerprint as the output pass checks it) and its highlights.
@@ -244,6 +431,7 @@ bool CD3D12Renderer::ReadFrameHdr10(void *pDst, int nPitch, int *pWidth, int *pH
   if (!m_HdrOut.pCapture)
     return false;
   m_pDevice->SetFrameReadable(true);
+  LimitFrameAverage("hdr capture");
   if (WantHdrStats())
     DispatchHdrOutputStats(true);
   DrawHdrPass(m_HdrOut.pCapture, HdrOutputConstants(EDisplayOutput::Hdr10));
@@ -259,6 +447,7 @@ bool CD3D12Renderer::ReadFrameHdr10(void *pDst, int nPitch, int *pWidth, int *pH
 
 void CD3D12Renderer::ReleaseHdrOutput()
 {
+  ReleaseFrameAverage();
   if (m_pDescriptors)
   {
     for (int *pSRV : { &m_HdrOut.nFrameSRV, &m_HdrOut.nHighlightSRV })

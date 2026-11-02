@@ -428,6 +428,13 @@ void CD3D12Renderer::RegisterVariables()
   iConsole->Register("d3d12_HDRLog", &CV_d3d12_HDRLog, 0, 0,
                      "With r_HDRRendering, a line of the HDR statistics per frame to XRenderD3D12_hdr.txt: the EV and its target, the meter, "
                      "percentiles of the scene's light, the shares in the shoulder and above white, the output's nits");
+  iConsole->Register("d3d12_HDRFrameAverage", &CV_d3d12_HDRFrameAverage, 1.0f, VF_DUMPTODISK,
+                     "With d3d12_HDROutput, the most average light of a frame (of each pixel's brightest channel, as HDR10's MaxFALL), times the "
+                     "display's full frame light (d3d12_HDRFullFrame): above it the highlights (the sun, fire, lamps) come down towards the SDR "
+                     "picture, quickly, and back slowly, so that the display (an OLED) does not dim the whole picture itself; 0: no limit");
+  iConsole->Register("d3d12_HDRFullFrame", &CV_d3d12_HDRFullFrame, 0.0f, VF_DUMPTODISK,
+                     "With d3d12_HDROutput, the light in nits the display holds over the whole screen, for d3d12_HDRFrameAverage (0: the "
+                     "display's, none when it reports none)");
   iConsole->Register("d3d12_HDROutputDebug", &CV_d3d12_HDROutputDebug, 0, 0,
                      "With d3d12_HDROutput: 1 the highlights (yellow to red at the peak; blue: drawn over the scene), 2 patches at paper white, "
                      "twice and four times that and at the peak");

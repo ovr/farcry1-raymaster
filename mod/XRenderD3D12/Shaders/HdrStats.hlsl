@@ -20,7 +20,8 @@
 //	Bindings (D3D12Compute.h): b0 SHdrStatsConstants; CSHistogram: t0 the
 //	scene, t1 the adapted EV (1 x 1), t2 the meter's last level (1 x 1) or
 //	the histogram meter's target (Exposure.hlsl);
-//	CSOutput: t0 the frame target, t1 the highlight layer; u0 the words
+//	CSOutput: t0 the frame target, t1 the highlight layer, t2 the frame
+//	average limit's target (FrameAverage.hlsl; with vParams.z); u0 the words
 //	(a raw buffer).
 //
 //////////////////////////////////////////////////////////////////////
@@ -118,7 +119,11 @@ void CSOutput(uint2 vThread : SV_DispatchThreadID, uint nIndex : SV_GroupIndex)
     const float fPaper = g_Stats.vParams.x, fPeak = g_Stats.vParams.y;
     const float3 f = g_Source.Load(int3(vPixel, 0)).rgb;
     bool bScene;
-    const float3 vRatio = LayerRatio(f, g_Source1.Load(int3(vPixel, 0)), bScene);
+    float3 vRatio = LayerRatio(f, g_Source1.Load(int3(vPixel, 0)), bScene);
+    // As the output pass: the frame average limit's factor of the highlights.
+    const float fLimit = g_Stats.vParams.z > 0 ? g_Source2.Load(int3(0, 0, 0)).r : 1;
+    if (fLimit < 1)
+      vRatio = 1 + (vRatio - 1) * fLimit;
     const float fNits = Max3(min(Decode(f) * vRatio * fPaper, fPeak));
     InterlockedAdd(gs_Out[0], 1);
     InterlockedAdd(gs_Out[1], (uint)round(fNits * 4));
