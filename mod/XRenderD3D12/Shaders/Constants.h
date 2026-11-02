@@ -293,7 +293,7 @@ struct SHdrStatsConstants
   XR_FLOAT4(vSize);               //!< what is sampled: x width, y height (pixels), z 1 / width, w 1 / height
   XR_FLOAT4(vParams);             //!< CSHistogram: x the exposure's compensation (EV), y 1: plus the adapted EV (t1), z the light of the tone
                                   //!< map's knee, w 1: the meter's mean in t2, 2: t2 the exposure's target (d3d12_ExposureMeter 1);
-                                  //!< CSOutput: x paper white, y the peak (nits)
+                                  //!< CSOutput: x paper white, y the peak (nits), z 1: t2 the frame average limit's target
 };
 
 // The automatic exposure's histogram (d3d12_ExposureMeter 1; Exposure.hlsl, HdrExposure.hlsli, Hdr.cpp): words of a buffer, the
@@ -315,6 +315,25 @@ struct SExposureConstants
   XR_FLOAT4(vParams);             //!< x log2 of the key, y z the window's shares (d3d12_ExposureLow, High), w the sky's percentile kept at the
                                   //!< knee (d3d12_ExposureHighlights; 0: none)
   XR_FLOAT4(vParams1);            //!< x log2 of the tone map's knee as light, y 1: t1 the depth buffer (the sky where it is at the far plane)
+  XR_UINT4(vStride);              //!< x a sample every this many pixels across and down
+};
+
+// The HDR output's frame average limit (d3d12_HDRFrameAverage; FrameAverage.hlsl, HdrFrameAverage.hlsli, HdrOutput.cpp): words
+// of a buffer, the sums in paper whites times XR_FALL_UNIT, which the limit's kernel reads and clears; it keeps its factor there.
+#define XR_FALL_SAMPLES         0           // the samples
+#define XR_FALL_SDR             1           // the sum of the SDR picture's light (of the brightest channel)
+#define XR_FALL_HIGHLIGHTS      2           // the sum of what the highlights add to it
+#define XR_FALL_LAST            3           // asuint: the last frame's factor
+#define XR_FALL_WORDS           4
+#define XR_FALL_UNIT            256         // a paper white in the sums
+#define XR_FALL_MOST            64.0f       // what a sample's highlights add at most (paper whites), so that a frame's sum fits a word
+
+//! b0 of the frame average limit's kernels (FrameAverage.hlsl, HdrOutput.cpp).
+struct SFrameAverageConstants
+{
+  XR_FLOAT4(vSize);               //!< the frame: x width, y height (pixels), z 1 / width, w 1 / height
+  XR_FLOAT4(vParams);             //!< x paper white, y the peak (nits), z the limit (paper whites), w 1: no frame before (the factor at once)
+  XR_FLOAT4(vSteps);              //!< x the most the factor goes down in this frame, y the most it goes up
   XR_UINT4(vStride);              //!< x a sample every this many pixels across and down
 };
 

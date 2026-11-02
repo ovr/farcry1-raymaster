@@ -5,7 +5,7 @@
 //	File: TestHeaders.hlsl
 //	Description: The unit tests' kernels over the renderer's shader
 //	headers that stand alone (Shader Model 6.0): PathGBuffer.hlsli,
-//	HdrLight.hlsli, HdrToneMap.hlsli, HdrExposure.hlsli and PathCache.hlsli, included as the renderer's
+//	HdrLight.hlsli, HdrToneMap.hlsli, HdrExposure.hlsli, HdrFrameAverage.hlsli and PathCache.hlsli, included as the renderer's
 //	programs include them. Each kernel runs the tested functions on the
 //	items of g_TestIn and writes what they give to g_TestOut; ShaderTests.cpp
 //	checks it. One compile per kernel (Tests/CMakeLists.txt).
@@ -19,6 +19,7 @@
 #include "HdrShared.hlsli"
 #include "HdrToneMap.hlsli"
 #include "HdrExposure.hlsli"
+#include "HdrFrameAverage.hlsli"
 #include "PathCache.hlsli"
 
 //! PathOctEncode / PathOctDecode of the unit vector g_TestIn[i].xyz: out[3i] the map's point, out[3i + 1] its vector, out[3i + 2]
@@ -91,6 +92,19 @@ void CSSkyGlow(uint i : SV_DispatchThreadID)
     return;
   const float4 v = TestIn(i);
   TestOut(i, float4(HdrSkyGlow(v.x, v.y, v.z), 0, 0, 0));
+}
+
+//! The HDR output's frame average limit (HdrFrameAverage.hlsli): g_Test.nTest.y 0, out[i] = (FrameAverageFactor(g_TestIn[i].x the
+//! SDR picture's average, y what the highlights add, z the limit), 0, 0, 0); 1, out[i] = (FrameAverageStep(x the last factor, y
+//! the target, z down, w up, g_Test.nTest.z the reset), 0, 0, 0).
+[numthreads(64, 1, 1)]
+void CSFrameAverage(uint i : SV_DispatchThreadID)
+{
+  if (i >= g_Test.nTest.x)
+    return;
+  const float4 v = TestIn(i);
+  const float f = g_Test.nTest.y == 0 ? FrameAverageFactor(v.x, v.y, v.z) : FrameAverageStep(v.x, v.y, v.z, v.w, g_Test.nTest.z != 0);
+  TestOut(i, float4(f, 0, 0, 0));
 }
 
 //! The automatic exposure's target (HdrExposure.hlsli) of case i: g_TestIn[32i .. 32i + 15] its luminance histogram (four bins

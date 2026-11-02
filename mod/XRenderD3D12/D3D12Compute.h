@@ -59,6 +59,8 @@ enum ED3D12Kernel
   eD3D12K_HdrOutputStats,           //!< the HDR statistics: the output's nits
   eD3D12K_ExposureHistogram,        //!< the automatic exposure's histogram of the scene (Shaders/Exposure.hlsl; d3d12_ExposureMeter 1)
   eD3D12K_ExposureTarget,           //!< its target EV from it
+  eD3D12K_FrameAverageSum,          //!< the HDR output's frame average limit: the frame's sums (Shaders/FrameAverage.hlsl; d3d12_HDRFrameAverage)
+  eD3D12K_FrameAverageLimit,        //!< the highlights' factor from them
   eD3D12K_RaySunTrace,              //!< the sun's shadow by rays: the rays (Shaders/RaySun.hlsl; with rays)
   eD3D12K_RaySunTemporal,           //!< their visibility blended into the history
   eD3D12K_RaySunFilter,             //!< the history over the soft edges, into the mask

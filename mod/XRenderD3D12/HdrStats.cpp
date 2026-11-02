@@ -200,10 +200,18 @@ void CD3D12Renderer::DispatchHdrOutputStats(bool bCapture)
   const int nTable = s.Tables[D3D12_FRAMES + m_pDevice->GetFrameSlot()];
   m_pDescriptors->WriteSRV(nTable, pFrame, nullptr);
   m_pDescriptors->WriteSRV(nTable + 1, pHighlight, nullptr);
+  // The frame average limit's factor of the highlights, as the output pass takes it (none: the view null).
+  CD3D12Texture *pFall = FrameAverageTarget();
+  D3D12_SHADER_RESOURCE_VIEW_DESC NullSRV = {};
+  NullSRV.Format = DXGI_FORMAT_R32G32B32A32_FLOAT;
+  NullSRV.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
+  NullSRV.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+  NullSRV.Texture2D.MipLevels = 1;
+  m_pDescriptors->WriteSRV(nTable + 2, pFall ? pFall->m_pResource : nullptr, pFall ? nullptr : &NullSRV);
 
   SHdrStatsConstants hc = {};
   Set4(hc.vSize, (float)w, (float)h, 1.0f / w, 1.0f / h);
-  Set4(hc.vParams, m_HdrOut.fPaperWhite, m_HdrOut.fPeak, 0, 0);
+  Set4(hc.vParams, m_HdrOut.fPaperWhite, m_HdrOut.fPeak, pFall ? 1.0f : 0.0f, 0);
   const SD3D12FrameAlloc CB = m_pUpload->AllocFrame(sizeof(hc), 256);
   memcpy(CB.pCPU, &hc, sizeof(hc));
 

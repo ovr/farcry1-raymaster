@@ -233,6 +233,23 @@ reference of its features and console variables.
     and highlights. `d3d12_HDROutputDebug 1` shows the highlights (grey none, yellow to red at
     the peak, blue where something was drawn over the scene), `2` patches at paper white, twice
     and four times that and at the peak, to set `d3d12_HDRPeak` by eye.
+    The frame average limit (since step 259, `d3d12_HDRFrameAverage` 1, 0 off): a display holds
+    its peak over a small part of the screen only, and an OLED dims the whole picture by itself
+    when a frame's average is above its full frame light. Before the output pass two kernels
+    (`Shaders/FrameAverage.hlsl`, the math in `Shaders/HdrFrameAverage.hlsli`) add up, every few
+    pixels (about 65536 samples), each pixel's brightest channel (as HDR10's MaxFALL) of the SDR
+    picture and of what the highlight layer adds, and give the factor of the layer's excess
+    (1 + (ratio - 1) times it in the output pass and the statistics) that keeps the frame's
+    average at `d3d12_HDRFrameAverage` times the full frame light (`d3d12_HDRFullFrame`, 0: the
+    display's `MaxFullFrameLuminance`; none when it reports none, or at the peak or above): down
+    within 0.1 s, back within 0.5 s, 1 exactly within the limit (the frames as without it). The
+    SDR picture stays as it is (the limit takes the highlights only); the HDR10 metadata's MaxFALL
+    is the limit, paper white at least (without it paper white). At 240 / 455 nits with a full
+    frame of 254 it acts where the exposure is still on its way down from a darker view and the
+    highlights are many: the sun's demo starts at 356 to 375 nits, held at 254 from its sixth
+    frame (the sun's core at the peak again within half a second); a fire close up (163) and the
+    sun in a settled view (198) are left alone. Its cost: 0.011 ms at 4K (the `hdr frame
+    average` GPU section), none in SDR.
     `XRenderD3D12_ReadFrameHdr10` (exported, for DemoHost's `--video-hdr`) runs the output pass
     in HDR10 into a target of its own and reads it; from its first call the layer is kept
     whatever the display and `d3d12_HDROutput`.

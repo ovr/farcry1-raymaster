@@ -71,7 +71,9 @@
 //	                  for the swap chain: vParams0.z 1 HDR10 (PQ, Rec. 2020),
 //	                  2 scRGB (linear Rec. 709, 1 = 80 nits). vParams0.w the
 //	                  debug view (d3d12_HDROutputDebug: 1 the mask, 2 the test
-//	                  patches), vParams1.xy 1 / the frame's size
+//	                  patches), vParams1.xy 1 / the frame's size; tex2 the
+//	                  frame average limit's (FrameAverage.hlsl, 1 x 1: x the
+//	                  factor of what the layer adds, white: none)
 //
 //////////////////////////////////////////////////////////////////////
 
@@ -394,6 +396,10 @@ float4 Output(float2 vPixel)
   float4 vLayer = g_Textures[g_Draw.nTex1].Load(int3(vPixel, 0));
   bool bScene;
   float3 vRatio = LayerRatio(f, vLayer, bScene);
+  // The frame average limit (d3d12_HDRFrameAverage): the highlights down towards the SDR picture.
+  float fLimit = g_Textures[g_Draw.nTex2].Load(int3(0, 0, 0)).r;
+  if (fLimit < 1)
+    vRatio = 1 + (vRatio - 1) * fLimit;
   float fPaper = g_Draw.vParams0.x, fPeak = g_Draw.vParams0.y;
   float3 vLight = Decode(f);
   int nDebug = (int)g_Draw.vParams0.w;

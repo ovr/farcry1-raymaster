@@ -603,6 +603,8 @@ void CD3D12Renderer::DrawStats()
     Value("Output", Output == EDisplayOutput::Sdr ? std::string(m_pDevice->HasLayer() ? "SDR (HDR10 captured)" : "SDR")
                                                   : Format("%s, %g / %g nits", Output == EDisplayOutput::Hdr10 ? "HDR10" : "scRGB", m_HdrOut.fPaperWhite,
                                                            m_HdrOut.fPeak));
+    if (m_HdrOut.fFrameAverage > 0 && m_pDevice->HasLayer())
+      Value("Frame average limit", Format("%g nits", m_HdrOut.fFrameAverage));
     if (Display.szName[0])
       Value("Display", Display.bHdr ? Format("HDR, peak %.0f, full frame %.0f, SDR white %.0f", Display.fMaxNits, Display.fMaxFullFrameNits,
                                              Display.fSdrWhiteNits)
