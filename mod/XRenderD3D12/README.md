@@ -331,7 +331,8 @@ reference of its features and console variables.
 
 - `d3d12_VolumetricLight` (1) is the light the air of the main view scatters, with
   `r_HDRRendering` (`Volumetric.cpp`, `Shaders/Volumetric.hlsl`): the shafts of the sun through the
-  leaves, the windows and the gaps between the rocks, and a haze that thickens with the distance.
+  leaves, the windows and the gaps between the rocks (by default those alone, see
+  `d3d12_VolumetricLightShafts` below; with 0 also a haze that thickens with the distance).
   Its froxels are 160 across the view and as many down as its shape gives (90 at 16:9), in 128
   slices from 0.5 m to `d3d12_VolumetricLightDistance` (60 m), each the same factor deeper than
   the one before (`R16G16B16A16_FLOAT`: this frame's, the frame before's and the integrated ones,
@@ -352,11 +353,6 @@ reference of its features and console variables.
   to each froxel's far end and the part of the light behind that reaches the camera. The resolve
   takes them at each pixel's depth (the depth buffer bound read only; the sky is beyond the far
   end): the scene's light times that part plus the light scattered, before the exposure.
-  The physical share of the sun's light (a white wall facing the sun gives its light over pi, a
-  metre of air with the extinction a quarter of that) shows no shafts at a density the open sea
-  stands, so the sun is brighter in the air than that; at 2 the sky over the sea of Fort turned
-  white. With the defaults, the sky over the sea at Fort's spawn is 164 178 211 for 135 155 200,
-  the dark leaves in Training's village against the sun 87 99 101 for 25 46 13.
   At 3840 x 2160 the froxels take 0.06 to 0.09 ms of the GPU outdoors (the sweeps of ten levels)
   and the resolve 0.04 to 0.06 ms more; 3 to 10% of the frame rate at 400 to 600 FPS.
   With an upscaler the resolve before it (at the render size) takes the froxels at the depth of
@@ -367,6 +363,29 @@ reference of its features and console variables.
   renderer without it (DemoCompare difference 0), 2 shows the light scattered alone. All are read
   every frame. The GPU times have a `volumetric light` section and the frame dump a
   `volumetric light:` line.
+- `d3d12_VolumetricLightShafts` (4 m) keeps the shafts alone: all the air lit alike is a haze
+  over everything (the sky over the sea, the leaves in the shade; the game's own fog is the haze
+  already), while a shaft shows as lit air against air in shadow. So a froxel scatters the sun's
+  light only as much as the air around it is in shadow: 8 points of a disc of that radius across
+  the sun's direction (a Vogel disc, turned from frame to frame and froxel to froxel), each looked
+  up in the cascade of the froxel's depth (one texel: the sun reaches it, or a shadow is cast onto
+  it from more than 1.5 m nearer the sun; a point less than that under a surface is the ground or
+  inside a thing, not air, and left out), that part to the power
+  `d3d12_VolumetricLightShaftsPower` (3: a narrow shaft all of it, the edge of a wide shadow and the
+  dappled light under the leaves little), times `d3d12_VolumetricLightShaftsSun` (16, times
+  `d3d12_VolumetricLightSun`: the shafts are a little of the air, brighter than all of it alike).
+  No light from all round, and the light scattered is added without hiding what is behind it.
+  With the defaults (the HDR test bench, 1920 x 1080), the sky over the sea at Fort's spawn is
+  136 156 204, as without the volumetric light (all the air: 168 181 215), the dark leaves in
+  Training's village against the sun 49 61 47 for 42 57 43 without it (all the air: 80 91 90; the
+  game's own look 35 49 35).
+  The 8 points take the froxels from 0.08-0.09 to 0.27-0.32 ms of the GPU at 3840 x 2160 (the
+  sweeps of Fort, River and Dam; 5% of the frame rate at 280 FPS).
+  `d3d12_VolumetricLightShafts 0` is the light of all the air as before (the frames as before:
+  DemoCompare difference 0): the sun's at `d3d12_VolumetricLightSun` 1 (the physical share, a
+  white wall facing the sun gives its light over pi and a metre of air with the extinction a
+  quarter of that, shows no shafts at a density the open sea stands) and the light from all round
+  of `d3d12_VolumetricLightAmbient`, the scene behind it hidden by its transmittance.
 
 ## Foliage translucency
 

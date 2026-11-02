@@ -424,7 +424,18 @@ void CD3D12Renderer::RegisterVariables()
   iConsole->Register("d3d12_VolumetricLightSun", &CV_d3d12_VolumetricLightSun, 1.0f, VF_DUMPTODISK,
                      "With d3d12_VolumetricLight, the sun's light the air scatters, times the sun's (0: none)");
   iConsole->Register("d3d12_VolumetricLightAmbient", &CV_d3d12_VolumetricLightAmbient, 1.0f, VF_DUMPTODISK,
-                     "With d3d12_VolumetricLight, the light from all round the air scatters, times the fog's colour (a quarter of it in the sun's shadow; 0: none)");
+                     "With d3d12_VolumetricLight and d3d12_VolumetricLightShafts 0, the light from all round the air scatters, times the fog's colour (a quarter of it in the sun's shadow; 0: none)");
+  iConsole->Register("d3d12_VolumetricLightShafts", &CV_d3d12_VolumetricLightShafts, 4.0f, VF_DUMPTODISK,
+                     "With d3d12_VolumetricLight, the shafts of the sun alone: the air scatters the sun's light as much as the air around it "
+                     "(within this many metres across the sun's direction) is in shadow: none in the open air, all in a shaft into the shade of "
+                     "the leaves or a room; no light from all round, and what is behind is not hidden (the game's fog is the haze). 0: all the "
+                     "air, with d3d12_VolumetricLightAmbient (as before)");
+  iConsole->Register("d3d12_VolumetricLightShaftsSun", &CV_d3d12_VolumetricLightShaftsSun, 16.0f, VF_DUMPTODISK,
+                     "With d3d12_VolumetricLightShafts, the sun's light the air of the shafts scatters, times d3d12_VolumetricLightSun "
+                     "(the shafts are a little of the air: brighter than all of it lit alike)");
+  iConsole->Register("d3d12_VolumetricLightShaftsPower", &CV_d3d12_VolumetricLightShaftsPower, 3.0f, VF_DUMPTODISK,
+                     "With d3d12_VolumetricLightShafts, the sun's light as much as this power of the part of the air around in shadow: "
+                     "1 the edges of the wide shadows and the dappled light under the leaves glow too, higher only the narrow shafts");
   iConsole->Register("d3d12_VolumetricLightAnisotropy", &CV_d3d12_VolumetricLightAnisotropy, 0.3f, VF_DUMPTODISK,
                      "With d3d12_VolumetricLight, how much more of the sun's light the air scatters forwards: 0 the same all round, up to 0.95");
   iConsole->Register("d3d12_VolumetricLightDistance", &CV_d3d12_VolumetricLightDistance, 60.0f, VF_DUMPTODISK,

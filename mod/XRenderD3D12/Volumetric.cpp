@@ -202,9 +202,13 @@ bool CD3D12Renderer::UpdateVolumetricLight(ID3D12Resource *pDepth, DXGI_FORMAT D
   if (fLen <= 0)
     fLen = 1;
   Set4(vc.vSunDir, m_SunDir[0] / fLen, m_SunDir[1] / fLen, m_SunDir[2] / fLen, std::clamp(CV_d3d12_VolumetricLightAnisotropy, -0.95f, 0.95f));
-  const float fSun = m_pScene && m_pScene->GetSun() ? std::max(CV_d3d12_VolumetricLightSun, 0.0f) : 0.0f;
+  const float fShafts = std::max(CV_d3d12_VolumetricLightShafts, 0.0f);
+  const float fSun = m_pScene && m_pScene->GetSun()
+                         ? std::max(CV_d3d12_VolumetricLightSun, 0.0f) * (fShafts > 0 ? std::max(CV_d3d12_VolumetricLightShaftsSun, 0.0f) : 1.0f)
+                         : 0.0f;
   Set4(vc.vSunLight, HdrDecode(m_SunColor[0]) * fSun, HdrDecode(m_SunColor[1]) * fSun, HdrDecode(m_SunColor[2]) * fSun, 0);
-  const float fAmbient = std::max(CV_d3d12_VolumetricLightAmbient, 0.0f);
+  Set4(vc.vShafts, fShafts, std::max(CV_d3d12_VolumetricLightShaftsPower, 0.0f), 0, 0);
+  const float fAmbient = fShafts > 0 ? 0.0f : std::max(CV_d3d12_VolumetricLightAmbient, 0.0f);
   Set4(vc.vAmbientLight, HdrDecode(m_FogColor[0]) * fAmbient, HdrDecode(m_FogColor[1]) * fAmbient, HdrDecode(m_FogColor[2]) * fAmbient, AMBIENT_IN_SHADOW);
   const bool bHistory = m_Volumetric.nFrame == m_nFrames - 1;
   Set4(vc.vDensity, std::max(CV_d3d12_VolumetricLightDensity, 0.0f) * m_Volumetric.fOutdoor, fWaterZ > -1e6f ? fWaterZ : 0.0f,
@@ -256,8 +260,8 @@ bool CD3D12Renderer::UpdateVolumetricLight(ID3D12Resource *pDepth, DXGI_FORMAT D
   m_Volumetric.fM32 = P[14];
   if (m_pFrameDump)
     fprintf(m_pFrameDump.get(), "volumetric light: %d x %d x %d froxels, %g to %g m, extinction %g / m from %.2f m (half over %g m), sun (%.3f %.3f %.3f) g %g, "
-            "ambient (%.3f %.3f %.3f), outdoors %.2f, %d cascades, history %d\n", m_Volumetric.nWidth, m_Volumetric.nHeight, VOLUME_SLICES, fNear, fFar,
-            vc.vDensity[0], vc.vDensity[1], CV_d3d12_VolumetricLightHeight, vc.vSunLight[0], vc.vSunLight[1], vc.vSunLight[2], vc.vSunDir[3],
+            "shafts %g m (power %g), ambient (%.3f %.3f %.3f), outdoors %.2f, %d cascades, history %d\n", m_Volumetric.nWidth, m_Volumetric.nHeight, VOLUME_SLICES, fNear,
+            fFar, vc.vDensity[0], vc.vDensity[1], CV_d3d12_VolumetricLightHeight, vc.vSunLight[0], vc.vSunLight[1], vc.vSunLight[2], vc.vSunDir[3], fShafts, vc.vShafts[1],
             vc.vAmbientLight[0], vc.vAmbientLight[1], vc.vAmbientLight[2], m_Volumetric.fOutdoor, nCascades, bHistory ? 1 : 0);
   return true;
 }
