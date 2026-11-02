@@ -110,17 +110,14 @@ struct SHighlightOutput
 //! The sky with r_HDRRendering (DF2_SKY_GLOW, the water's reflected sky box; Hdr.cpp): the factor
 //! of the sky's colour in the direction vDir from the camera that makes its light g_Frame.vHdr.x
 //! times brighter towards the sun, falling off with the cosine of the angle to the sun to the power
-//! SKY_GLOW_POWER (half way at 12 degrees). The colours are the game's (gamma encoded) and the
-//! sky's below white, so the factor of the light is taken to the power 1 / 2.2 (HdrDecode below
-//! 1). 1 when vHdr.x is 1, and in the programs for the other targets (without XR_HDR).
-static const float SKY_GLOW_POWER = 32;
+//! g_Frame.vHdr.y (HdrSkyGlow, HdrLight.hlsli). 1 when vHdr.x is 1, and in the programs for the
+//! other targets (without XR_HDR).
 float SkyGlow(float3 vDir)
 {
 #ifdef XR_HDR
   if (g_Frame.vHdr.x == 1)
     return 1;
-  float a = pow(saturate(dot(SafeNormalize(vDir), g_Frame.vSunDir.xyz)), SKY_GLOW_POWER);
-  return pow(max(1 + (g_Frame.vHdr.x - 1) * a, 0), 1 / 2.2);
+  return HdrSkyGlow(dot(SafeNormalize(vDir), g_Frame.vSunDir.xyz), g_Frame.vHdr.x, g_Frame.vHdr.y);
 #else
   return 1;
 #endif

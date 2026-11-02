@@ -224,9 +224,10 @@ instructions and is not committed (git-ignored). The references of the modules a
   (`d3d12_Upscaler`, AMD FSR); HDR (`r_HDRRendering`, `d3d12_ToneMap` with the neutral tone map
   that keeps the hue, `Shaders/HdrToneMap.hlsli`, the automatic exposure's meter by a histogram
   with the sky kept below the knee `d3d12_ExposureMeter`, `Shaders/HdrExposure.hlsli`, the bloom,
-  colour grading, the HDR output `d3d12_HDROutput`, the statistics' panel `d3d12_DisplayHDR` and log
-  `d3d12_HDRLog`); the volumetric light (`d3d12_VolumetricLight`, the sun's shafts alone
-  `d3d12_VolumetricLightShafts`); per pixel lighting (`d3d12_PixelLighting`); the depth prepass
+  colour grading, the HDR output `d3d12_HDROutput` with its highlights above the game's white
+  `d3d12_HDRHighlights`, the sky's glow round the sun `d3d12_HDRSkyAngle`, the statistics' panel
+  `d3d12_DisplayHDR` and log `d3d12_HDRLog`); the volumetric light (`d3d12_VolumetricLight`, the
+  sun's shafts alone `d3d12_VolumetricLightShafts`); per pixel lighting (`d3d12_PixelLighting`); the depth prepass
   (`d3d12_DepthPrepass`); the sun's shadow cascades (`d3d12_ShadowCascades`,
   `d3d12_CascadeInstancing`); ambient occlusion (`d3d12_AO`:
   XeGTAO, CACAO or by rays, `rt`); ray tracing (`d3d12_RTReflections` with the cube maps'

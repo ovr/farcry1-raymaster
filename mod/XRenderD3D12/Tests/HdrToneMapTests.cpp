@@ -6,7 +6,9 @@
 //	Description: Unit tests of the neutral tone map (d3d12_ToneMap 4,
 //	Shaders/HdrToneMap.hlsli) on the GPU: the game's look below the knee,
 //	the shoulder smooth at the knee, never decreasing and below its limit,
-//	the hue kept, the light far above white white.
+//	the hue kept, the light far above white white; the HDR output's tone
+//	map: the SDR picture's up to white, the highlights' above (d3d12_HDRHighlights) and the sky's glow towards
+//	the sun (d3d12_HDRSkyAngle, HdrLight.hlsli).
 //
 //////////////////////////////////////////////////////////////////////
 
@@ -15,6 +17,8 @@
 #include "TestMath.h"
 
 #include "Test_ToneMap.h"
+#include "Test_HdrOutput.h"
+#include "Test_SkyGlow.h"
 
 #include <algorithm>
 #include <cmath>
@@ -57,6 +61,37 @@ namespace
       R.push_back({ At(Out, i, 0), At(Out, i, 1), At(Out, i, 2) });
     return R;
   }
+
+  //! The HDR output's tone map of each light (CSHdrOutput): the output's display values with its knee, and the SDR
+  //! picture's.
+  struct SHdrOut
+  {
+    SRgb Hdr, Sdr;
+    float fKnee;
+  };
+  std::vector<SHdrOut> HdrOutput(const std::vector<SRgb> &In, float k, float P, float fDesat, float fKnee)
+  {
+    SDispatch d;
+    d.Shader = XR_BYTECODE(Test_HdrOutput);
+    d.Test.nTest[0] = (uint32)In.size();
+    d.Test.vTest[0] = k;
+    d.Test.vTest[1] = P;
+    d.Test.vTest[2] = fDesat;
+    d.Test.vTest[3] = fKnee;
+    d.nGroups[0] = Groups64(In.size());
+    for (const SRgb &c : In)
+      Push(d.In, c.r, c.g, c.b, 0);
+    d.nOut = 2 * In.size();
+    const std::vector<uint32> Out = Gpu().Run(d);
+    std::vector<SHdrOut> R;
+    for (size_t i = 0; i < In.size(); i++)
+      R.push_back({ { At(Out, 2 * i, 0), At(Out, 2 * i, 1), At(Out, 2 * i, 2) }, { At(Out, 2 * i + 1, 0), At(Out, 2 * i + 1, 1), At(Out, 2 * i + 1, 2) },
+                    At(Out, 2 * i, 3) });
+    return R;
+  }
+
+  //! The display value of a peak of fNits over paper white (HdrOutput.cpp's vParams3.x: HdrEncode of the ratio).
+  float PeakValue(double fNits, double fPaper) { return (float)Encode(fNits / fPaper); }
 
   //! Saturation as (max - min) / max.
   double Saturation(const SRgb &c) { return c.Max() > 0 ? (c.Max() - c.Min()) / c.Max() : 0; }
@@ -186,4 +221,116 @@ XR_TEST(HdrToneMap_Hue)
   CHECK_NEAR(Fire[0].b / Fire[0].r, 0.15, 0.02);
   CHECK(Fire[1].g >= 0.9f * Fire[1].r);
   CHECK(Fire[1].b <= 0.6f * Fire[1].r);
+}
+
+//! The HDR output's tone map (HdrOutputToneMap, d3d12_HDRHighlights 2, the default), for a peak of 455 nits over 240, 1000
+//! over 203 and 300 over 240: every colour the game shows at white or below (its brightest display value at most 1) comes
+//! out as in the SDR picture (the layer's ratio 1: at paper white at most, also where the exposure put it in the shoulder);
+//! from twice white up the neutral tone map to the peak; the grey's curve between smooth (no step in its slope), never
+//! decreasing, never below the SDR picture, the peak far above; d3d12_HDRHighlights 0 the neutral tone map to the peak
+//! throughout (as up to step 257). Why: with the tone map to the peak from the knee (0.85), a sky the exposure lifted to 1.2
+//! times white went to 1.1 to 1.2 times paper white in HDR10 (the sky between the huts of Training, the sun's view).
+XR_TEST(HdrToneMap_Output)
+{
+  const float k = 0.85f, fFull = 2;
+  const float Peaks[] = { PeakValue(455, 240), PeakValue(1000, 203), PeakValue(300, 240) };
+  std::vector<SRgb> Grid, Disp;
+  for (int r = 0; r <= 20; r++)
+    for (int g = 0; g <= 20; g++)
+      for (int b = 0; b <= 20; b++)
+      {
+        Disp.push_back({ r / 20.0f, g / 20.0f, b / 20.0f });  // up to 1
+        Grid.push_back(Light(r / 20.0, g / 20.0, b / 20.0));
+      }
+  const double h = 1.0 / 1024;
+  const size_t nSweep = 4 * 1024;
+  std::vector<SRgb> Grey;
+  std::vector<double> M;
+  for (size_t i = 0; i <= nSweep; i++)
+  {
+    M.push_back(i * h);
+    const float x = (float)Decode(i * h);
+    Grey.push_back({ x, x, x });
+  }
+  for (float x : { 1e3f, 1e5f })
+  {
+    M.push_back(Encode(x));
+    Grey.push_back({ x, x, x });
+  }
+  const double fFullValue = Encode(fFull);
+  for (float P : Peaks)
+  {
+    const std::vector<SHdrOut> Out = HdrOutput(Grid, k, P, 3.0f, fFull);
+    for (size_t i = 0; i < Grid.size(); i++)
+    {
+      CHECK_NEAR(Out[i].Hdr.r, Out[i].Sdr.r, 1e-6);
+      CHECK_NEAR(Out[i].Hdr.g, Out[i].Sdr.g, 1e-6);
+      CHECK_NEAR(Out[i].Hdr.b, Out[i].Sdr.b, 1e-6);
+      CHECK(Out[i].Hdr.Max() <= 1 + 1e-6f);
+    }
+    const std::vector<SHdrOut> G = HdrOutput(Grey, k, P, 3.0f, fFull);
+    const double d = P - k;
+    for (size_t i = 0; i < Grey.size(); i++)
+    {
+      const double m = M[i];
+      if (m >= fFullValue)
+      {
+        const double fWant = k + d * (1 - std::exp(-(m - k) / d));
+        CHECK_NEAR(G[i].Hdr.r, fWant, 2e-4 + 1e-5 * fWant);
+      }
+      CHECK(G[i].Hdr.r <= P + 1e-5f);
+      CHECK(G[i].Hdr.r >= G[i].Sdr.r - 1e-5f);
+      if (i > 0 && i <= nSweep)
+        CHECK(G[i].Hdr.r >= G[i - 1].Hdr.r - 1e-5f);
+      // The slope from a step to the next changes little: no kink where the highlights take over (at 1 and at 2 x white).
+      if (i > 1 && i <= nSweep)
+        CHECK(std::fabs((G[i].Hdr.r - G[i - 1].Hdr.r) - (G[i - 1].Hdr.r - G[i - 2].Hdr.r)) / h <= 0.02);
+    }
+    CHECK(G[Grey.size() - 1].Hdr.r >= P - 1e-4f);
+    // d3d12_HDRHighlights 0: the neutral tone map to the peak from the knee.
+    const std::vector<SHdrOut> Old = HdrOutput(Grey, k, P, 3.0f, 0);
+    for (size_t i = 0; i < Grey.size(); i++)
+    {
+      const double m = M[i], fWant = m <= k ? m : k + d * (1 - std::exp(-(m - k) / d));
+      CHECK_NEAR(Old[i].Hdr.r, fWant, 2e-4 + 1e-5 * fWant);
+    }
+  }
+}
+
+//! The sky's glow towards the sun (HdrSkyGlow, d3d12_HDRSky 2): its light d3d12_HDRSky times the game's at the sun, half way
+//! between at d3d12_HDRSkyAngle (the cosine's power ln 0.5 / ln cos of it, as Hdr.cpp gives it), next to nothing at three
+//! times the angle, none behind the camera's half of the sky, never brighter further from the sun; with d3d12_HDRSky 1 none.
+//! Why: the lobe of up to step 257 (32, half way at 12 degrees) brightened a quarter of the sky towards the sun, white in SDR
+//! and above paper white in HDR10.
+XR_TEST(HdrSkyGlow_Lobe)
+{
+  for (double fAngle : { 2.0, 4.0, 11.89 })
+  {
+    const double a = fAngle * 3.14159265358979323846 / 180, fPower = std::log(0.5) / std::log(std::cos(a));
+    std::vector<double> Angles;
+    for (int i = 0; i <= 120; i++)
+      Angles.push_back(a * i / 40.0);  // the sun to three times the angle
+    Angles.push_back(1.2);
+    Angles.push_back(2.5);
+    for (float fGlow : { 2.0f, 1.0f })
+    {
+      SDispatch d;
+      d.Shader = XR_BYTECODE(Test_SkyGlow);
+      d.Test.nTest[0] = (uint32)Angles.size();
+      d.nGroups[0] = Groups64(Angles.size());
+      for (double t : Angles)
+        Push(d.In, (float)std::cos(t), fGlow, (float)fPower, 0);
+      d.nOut = Angles.size();
+      const std::vector<uint32> Out = Gpu().Run(d);
+      std::vector<double> L;
+      for (size_t i = 0; i < Angles.size(); i++)
+        L.push_back(std::pow(At(Out, i, 0), 2.2));  // the factor of the light
+      CHECK_NEAR(L[0], fGlow, 1e-4);
+      CHECK_NEAR(L[40], 1 + (fGlow - 1) / 2, 2e-3);
+      CHECK(L[120] - 1 <= (fGlow - 1) * 0.01 + 1e-5);
+      CHECK_NEAR(L[Angles.size() - 1], 1, 1e-6);
+      for (size_t i = 1; i < Angles.size(); i++)
+        CHECK(L[i] <= L[i - 1] + 1e-6);
+    }
+  }
 }

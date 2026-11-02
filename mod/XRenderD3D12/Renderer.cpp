@@ -403,6 +403,9 @@ void CD3D12Renderer::RegisterVariables()
   iConsole->Register("d3d12_HDRSun", &CV_d3d12_HDRSun, 8.0f, VF_DUMPTODISK, "With r_HDRRendering, the light of the sun's flare in its core times this (1: the game's)");
   iConsole->Register("d3d12_HDRSky", &CV_d3d12_HDRSky, 2.0f, VF_DUMPTODISK,
                      "With r_HDRRendering, the light of the sky towards the sun times up to this (1: the game's)");
+  iConsole->Register("d3d12_HDRSkyAngle", &CV_d3d12_HDRSkyAngle, 4.0f, VF_DUMPTODISK,
+                     "With d3d12_HDRSky, the angle from the sun in degrees where the sky's glow is half way (0: the wide glow up to step 257, half "
+                     "way at 11.9 degrees)");
   iConsole->Register("d3d12_HDRGlow", &CV_d3d12_HDRGlow, 3.0f, VF_DUMPTODISK,
                      "With r_HDRRendering, the light of what glows (in their cores: fire and the other additive particles, muzzle flashes and the other additive "
                      "materials, the coronas and flares of the lights, the glow maps of lamps and screens) times this (1: the game's)");
@@ -414,6 +417,10 @@ void CD3D12Renderer::RegisterVariables()
                      "With d3d12_HDROutput, the light of the frame's white in nits (0: Windows' SDR content brightness of the display)");
   iConsole->Register("d3d12_HDRPeak", &CV_d3d12_HDRPeak, 0.0f, VF_DUMPTODISK,
                      "With d3d12_HDROutput, the most light in nits, where the highlights end (0: the display's peak)");
+  iConsole->Register("d3d12_HDRHighlights", &CV_d3d12_HDRHighlights, 2.0f, VF_DUMPTODISK,
+                     "With d3d12_HDROutput and d3d12_ToneMap 4, the exposed light in the game's whites from which the scene goes on to the peak: "
+                     "up to its white the SDR picture (at paper white at most: the sky, the clouds, what the sun lights), from this light up the "
+                     "highlights (the sun, fire, lamps), smoothly between; at most 1: the tone map to the peak from its knee, as up to step 257");
   iConsole->Register("d3d12_DisplayHDR", &CV_d3d12_DisplayHDR, 0, 0,
                      "With r_HDRRendering, a panel of the HDR pipeline at the right of the screen (below r_DisplayInfo's): the histogram of the "
                      "scene's light with the exposure's marks, the exposure and its target, the tone map, how much of the frame is in its shoulder "

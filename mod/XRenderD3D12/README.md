@@ -178,8 +178,11 @@ reference of its features and console variables.
     the sky's share.
   - What the game draws as light sources is brighter in the HDR targets (`IsHdrTarget`: not in
     heat vision), each a factor of white's light, 1 the game's: `d3d12_HDRSun` (8) the sun's
-    flare, `d3d12_HDRSky` (2) the sky towards the sun (`DF2_SKY_GLOW`, falling off with the
-    cosine of the angle to the sun to the power 32), `d3d12_HDRGlow` (3) what glows. The flares,
+    flare, `d3d12_HDRSky` (2) the sky towards the sun (`DF2_SKY_GLOW`, `HdrSkyGlow` in
+    `Shaders/HdrLight.hlsli`: falling off with the cosine of the angle to the sun to the power
+    that makes it half way at `d3d12_HDRSkyAngle`, 4 degrees since step 258: a small aureole
+    round the sun's disc; 0 the power 32 of up to step 257, half way at 11.9 degrees, which made
+    a quarter of the sky towards the sun white in SDR), `d3d12_HDRGlow` (3) what glows. The flares,
     coronas, procedural flares, additive particles and additive materials (not the stealth
     effect) get it in their cores (`DF2_HDR_CORE`: by the fourth power of their texture's
     brightness, so their soft edges stay the game's); the glow maps, which light a surface, all
@@ -204,7 +207,18 @@ reference of its features and console variables.
     SDR colour per channel, and a fingerprint of that colour (`HighlightFingerprint`,
     `Shaders/HdrLight.hlsli`). The tone map goes on above its knee up to the peak instead of white
     (`HighlightRatio`, `Shaders/Hdr.hlsl`: the soft shoulder's excess, which ACES and AgX are
-    mapped to), so below the knee the ratio is 1. The output pass before Present (`HDR_OUTPUT`)
+    mapped to), so below the knee the ratio is 1. With the neutral tone map (since step 258,
+    `HdrOutputToneMap`, `Shaders/HdrToneMap.hlsli`) the output is the SDR picture up to the game's
+    white, and the neutral tone map to the peak only from `d3d12_HDRHighlights` (2: twice the
+    game's white) up, smoothly between: what the game shows as white or below, the sky, the clouds,
+    what the sun lights, is at paper white at most also where the exposure lifted it into the
+    shoulder, and the headroom is the highlights' (the sun, fire, lamps, glints). With the tone map
+    to the peak from the knee (`d3d12_HDRHighlights` 1 or less, up to step 257) the sky between the
+    huts of Training, which the exposure lifted by 0.3 EV, was 1.1 times the game's light in HDR10
+    (now 0.97), and 9.6 % of the frame looking at the sun was above paper white (now 5.3 %, the
+    sun's core still at the peak; of a 1000 nit peak with paper white at 203 it reaches 830 nits,
+    910 with `d3d12_HDRSun` 12, which also widens the bloom round the sun in SDR, by up to 11
+    levels). The output pass before Present (`HDR_OUTPUT`)
     gives each pixel the light of its SDR colour, times the ratio where the fingerprint still
     matches (nothing was drawn over the scene), times paper white, at most the peak. So the HUD,
     the menu and the screen effects show as SDR content does under Windows HDR, and the scene's

@@ -1309,6 +1309,9 @@ public:
   //! There: the light of the sky towards the sun times d3d12_HDRSky (DF2_SKY_GLOW,
   //! SFrameConstants::vHdr), with a sun in the scene; else 1.
   float HdrSkyGlow() const;
+  //! The power of the cosine of the angle to the sun that glow falls off with: a half at
+  //! d3d12_HDRSkyAngle (SFrameConstants::vHdr.y).
+  float HdrSkyGlowPower() const;
 
   SHdrState m_Hdr;
   bool m_bHdrScene = false;                 //!< BeginMainScene .. EndMainScene: the main scene draws in D3D12_HDR_FORMAT
@@ -1792,10 +1795,12 @@ public:
   int CV_d3d12_HDRDebug = 0;                //!< 1: the luminance in EV bands, 2: the bloom alone, 3: the sky mask
   float CV_d3d12_HDRSun = 8;                //!< the light of the sun's flare in HDR, times the game's
   float CV_d3d12_HDRSky = 2;                //!< the light of the sky towards the sun in HDR, times the game's
+  float CV_d3d12_HDRSkyAngle = 4;           //!< the angle from the sun where it is half way (degrees; 0: the lobe up to step 257, half way at 11.9)
   float CV_d3d12_HDRGlow = 3;               //!< the light of what glows in HDR, times the game's
   int CV_d3d12_HDROutput = 0;               //!< the output to the display: 0 SDR, 1 HDR10, 2 scRGB (HdrOutput.cpp)
   float CV_d3d12_HDRPaperWhite = 0;         //!< its paper white in nits (0: Windows' SDR white level of the display)
   float CV_d3d12_HDRPeak = 0;               //!< its peak in nits (0: the display's)
+  float CV_d3d12_HDRHighlights = 2;         //!< the light (in the game's whites) from which its tone map goes on to the peak, the SDR picture's up to white (at most 1: from the knee, as up to step 257)
   int CV_d3d12_HDROutputDebug = 0;          //!< 1: the highlight mask, 2: test patches
   int CV_d3d12_DisplayHDR = 0;              //!< 1: the HDR statistics' panel (HdrStats.cpp, Stats.cpp)
   int CV_d3d12_HDRLog = 0;                  //!< 1: a line of them per frame to XRenderD3D12_hdr.txt

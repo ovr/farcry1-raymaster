@@ -5,8 +5,9 @@
 //	File: HdrLight.hlsli
 //	Description: The game's colours as light and back, for the HDR
 //	targets (r_HDRRendering), and the fingerprint of the HDR output's
-//	highlight layer. Without bindings: the programs (Common.hlsli) and the
-//	kernels (Bloom.hlsl, HdrStats.hlsl) include it.
+//	highlight layer, and the sky's glow towards the sun. Without bindings:
+//	the programs (Common.hlsli), the kernels (Bloom.hlsl, HdrStats.hlsl)
+//	and the unit tests include it.
 //
 //////////////////////////////////////////////////////////////////////
 
@@ -28,6 +29,17 @@ float HdrDecode(float c)
 float HdrEncode(float fLight)
 {
   return fLight > 1 ? 1 + (fLight - 1) / HDR_GAMMA : pow(max(fLight, 0), 1 / HDR_GAMMA);
+}
+
+//! The sky with r_HDRRendering brighter towards the sun (Common.hlsli's SkyGlow, d3d12_HDRSky): the factor of the sky's
+//! colour where fCos is the cosine of the angle to the sun that makes its light fGlow times brighter at the sun, falling
+//! off with fCos to the power fPower (Hdr.cpp: half way at d3d12_HDRSkyAngle). The colours are the game's (gamma
+//! encoded) and the sky's below white, so the factor of the light is taken to the power 1 / 2.2 (HdrDecode below 1).
+float HdrSkyGlow(float fCos, float fGlow, float fPower)
+{
+  float a = pow(saturate(fCos), fPower);
+  // 1 / 2.2 a literal, as up to step 257 (1 / HDR_GAMMA is a step off in a pixel or two in a million).
+  return pow(max(1 + (fGlow - 1) * a, 0), 1 / 2.2);
 }
 
 //! The highlight layer of the HDR output (HdrOutput.cpp). A pass that puts the scene into the

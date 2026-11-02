@@ -43,4 +43,22 @@ float3 NeutralToneMap(float3 vLight, float k, float P, float fDesat)
   return lerp(c * (n / m), vChannels, g);
 }
 
+//! The HDR output's tone map (Hdr.hlsl's highlight layer): the display values of the light on an HDR display, P the
+//! peak's display value (HdrEncode of the peak over paper white), k the knee, fDesat the desaturation (as NeutralToneMap's).
+//! Up to the game's white (the brightest display value m at most 1) the SDR picture's (NeutralToneMap to 1), so that what the
+//! game shows as white or below, the sky, the clouds, what the sun lights, is at paper white at most also where the
+//! exposure lifted it into the shoulder; from the light fFull (d3d12_HDRHighlights, in the game's whites) up the neutral
+//! tone map to P, the headroom for the highlights alone (the sun, fire, lamps, glints); between them the two blended by
+//! smoothstep of m (smooth, never decreasing: both curves rise, the HDR one faster). fFull at most 1: the neutral tone map
+//! to P throughout (from the knee, as up to step 257: a sky the exposure lifted above the knee went above paper white).
+float3 HdrOutputToneMap(float3 vLight, float k, float P, float fDesat, float fFull)
+{
+  float3 h = NeutralToneMap(vLight, k, P, fDesat);
+  if (fFull <= 1)
+    return h;
+  float3 s = NeutralToneMap(vLight, k, 1, fDesat);
+  float m = HdrEncode(max(vLight.r, max(vLight.g, vLight.b)));
+  return lerp(s, h, smoothstep(1, HdrEncode(fFull), m));
+}
+
 #endif

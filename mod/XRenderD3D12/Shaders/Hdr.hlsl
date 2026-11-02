@@ -56,7 +56,8 @@
 //	                  HdrOutput.cpp): the tone map continued above the knee up
 //	                  to the display's peak (HighlightRatio), vParams3.x the
 //	                  peak's display value HdrEncode(peak / paper white), y
-//	                  peak / paper white. With HDR_VOLUMETRIC the scene's light
+//	                  peak / paper white, w where the highlights take
+//	                  over (d3d12_HDRHighlights, HdrOutputToneMap). With HDR_VOLUMETRIC the scene's light
 //	                  before the exposure through the volumetric light
 //	                  (Volumetric.cpp): tex4 the integrated froxels (Texture3D),
 //	                  tex5 the depth buffer, mParams0[0] x the volume's near
@@ -293,14 +294,18 @@ float3 ColorLut(uint nTex, float3 c)
 //! (the encoded light above the knee); ACES and AgX keep their curve up to the knee, and t is
 //! what puts a soft shoulder where they got to, -(1 - k) ln(1 - (s - k) / (1 - k)). The clamp
 //! clips at the peak instead of at white. The neutral tone map is itself with the peak's display
-//! value for its limit.
+//! value for its limit, taking over from the SDR picture above the game's white (HdrOutputToneMap:
+//! fully from d3d12_HDRHighlights).
 float3 HighlightRatio(float3 vLight, float3 s, int nMode, float k)
 {
   float3 h;
   if (nMode == 0)
     h = Encode(min(vLight, g_Draw.vParams3.y));
   else if (nMode == 4)
-    h = NeutralToneMap(vLight, clamp(k, 0, 0.99), max(g_Draw.vParams3.x, 1), g_Draw.vParams3.z);
+  {
+    float P = max(g_Draw.vParams3.x, 1);
+    h = HdrOutputToneMap(vLight, clamp(k, 0, 0.99), P, g_Draw.vParams3.z, g_Draw.vParams3.w);
+  }
   else
   {
     k = clamp(k, 0, 0.99);

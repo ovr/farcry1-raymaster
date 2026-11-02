@@ -144,9 +144,10 @@ void CD3D12Renderer::SetHighlightConstants(SDrawConstants &dc) const
 {
   if (!m_pDevice->HasLayer())
     return;
-  // The peak in paper whites, and its display value (HdrEncode, HdrLight.hlsli).
+  // The peak in paper whites, and its display value (HdrEncode, HdrLight.hlsli); the light from which
+  // the neutral tone map's continuation takes over (HdrOutputToneMap, HdrToneMap.hlsli).
   const float fPeak = m_HdrOut.fPeak / m_HdrOut.fPaperWhite;
-  Set4(dc.vParams3, fPeak > 1 ? 1 + (fPeak - 1) / 2.2f : 1.0f, fPeak, 0, 0);
+  Set4(dc.vParams3, fPeak > 1 ? 1 + (fPeak - 1) / 2.2f : 1.0f, fPeak, 0, std::max(CV_d3d12_HDRHighlights, 0.0f));
 }
 
 SDrawConstants CD3D12Renderer::HdrOutputConstants(EDisplayOutput Output) const
@@ -180,9 +181,10 @@ void CD3D12Renderer::DumpHdrOutput()
     return;
   const SDisplayInfo &Info = m_pDevice->GetDisplayInfo();
   fprintf(m_pFrameDump.get(), "hdr output: %s (d3d12_HDROutput %d%s%s), paper white %g nits, peak %g nits; display %s: %s, peak %g nits, full frame %g nits, "
-          "black %g nits, SDR white %g nits; highlight layer %s\n", OutputName(m_pDevice->GetOutput()), CV_d3d12_HDROutput,
+          "black %g nits, SDR white %g nits; highlight layer %s, highlights from %g\n", OutputName(m_pDevice->GetOutput()), CV_d3d12_HDROutput,
           m_HdrOut.Reason.empty() ? "" : ": ", m_HdrOut.Reason.c_str(), m_HdrOut.fPaperWhite, m_HdrOut.fPeak, Info.szName[0] ? Info.szName : "?",
-          Info.bHdr ? "HDR" : "SDR", Info.fMaxNits, Info.fMaxFullFrameNits, Info.fMinNits, Info.fSdrWhiteNits, m_pDevice->HasLayer() ? "on" : "off");
+          Info.bHdr ? "HDR" : "SDR", Info.fMaxNits, Info.fMaxFullFrameNits, Info.fMinNits, Info.fSdrWhiteNits, m_pDevice->HasLayer() ? "on" : "off",
+          CV_d3d12_HDRHighlights);
   if (!m_pDevice->HasLayer())
     return;
   // Where the layer has the scene (the fingerprint as the output pass checks it) and its highlights.
