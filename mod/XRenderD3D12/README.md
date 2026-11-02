@@ -845,6 +845,16 @@ and lists theirs (`NamesObjects`).
   and the others, with `r_HeatHaze 1`, as the original) show the copy of the scene behind them moved
   by the slopes of `WaterBump` and blended by `haze_mask`; the copy is taken where the particles are
   drawn, so the grass and the fire stay in it (the original's, made before the water, loses them).
+- The templates with shaders of their own (`TemplateFx.cpp`; one mode of `General.hlsl`'s `ShaderFx`
+  each, `DF2_SHADER_FX` with the mode in `vParams3.w`, the screen copies' and the mirrors' too): the
+  rainbow (`Defaults/colors2` at N.E, N.H, unlit), the membrane (a row of colours at E.N moving with
+  time, added), cartoon shading (the steps of the sun's light times a dark outline), fur (the model
+  and 8 shells out along the normal, blended), iridescence (a wing lit from both sides, see-through
+  by its alpha, with a rainbow gloss) and the soap bubble (wobbling along its normal by a noise, the
+  cube reflected, see-through but at its edges). Per pixel where the original's vertex programs take
+  the dot products at the vertices; the original draws neither the fur nor the wing (its trace), ours
+  draws what their scripts set out. `TemplDecalLight_SpecAdd` is lit as the fixed function lights a
+  material: its texture plus its gloss map, times the light, with the material's highlights.
 
 ## Vegetation sprites and terrain detail
 

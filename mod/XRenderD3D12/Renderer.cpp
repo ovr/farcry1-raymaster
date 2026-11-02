@@ -836,6 +836,8 @@ void CD3D12Renderer::Release()
   m_pDefaultCube = nullptr;
   m_pBeachTexture = m_pBeachWetTexture = m_pBeachBumpTexture = nullptr;
   m_pHazeMask = m_pHazeBump = nullptr;
+  for (CTexture *&pTex : m_pFxTextures)
+    pTex = nullptr;
   m_nWaveTexture = 0;
   m_nCausticsTexture = 0;
   m_SkyBoxes.clear();

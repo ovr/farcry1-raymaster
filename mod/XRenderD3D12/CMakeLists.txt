@@ -35,6 +35,7 @@ set(XRENDERD3D12_SOURCES
     Water.cpp
     EnvCubes.cpp
     Mirrors.cpp
+    TemplateFx.cpp
     FarSprites.cpp
     Shadows.cpp
     Cascades.cpp

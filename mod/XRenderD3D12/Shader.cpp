@@ -93,6 +93,18 @@ constexpr STemplateEntry s_Templates[] =
   { "templlightdiffuse",               "",                              eS_Opaque,                kOpaque2,                               0,              eDC_Opaque,           eCULL_Back, 0.0f,         0.0f,     true },
   { "templlightdiffuse_alphaglow",     "templdiffuse_fp",               eS_Opaque,                kOpaque2,                               0,              eDC_Opaque,           eCULL_Back, 0.0f,         0.0f,     true },
   { "templdiffusespec_fp",             "",                              eS_Opaque,                kOpaque2,                               0,              eDC_Opaque,           eCULL_Back, 0.0f,         0.0f,     true },
+  // TemplDecalLight_SpecAdd: the texture plus its gloss map, lit together, with the highlights (s_TemplateLighting).
+  { "templdecallight_specadd",         "",                              eS_Opaque,                kOpaque2,                               0,              eDC_Opaque,           eCULL_Back },
+  // Shaders of their own (s_TemplateFx; TemplateFx.cpp): the rainbow and the cartoon shading opaque, the membrane
+  // added, the fur's shells, the wings of iridescence and the bubble blended. The fur and the iridescence are light
+  // passes the original draws nothing of (its fur's vertex program outside its passes, the wing's not drawn either):
+  // drawn as their scripts mean them, lit by the sun.
+  { "templrainbow",                    "",                              eS_Opaque,                kOpaque2,                               0,              eDC_ShaderFx,         eCULL_Back },
+  { "templcartoonshading",             "",                              eS_Opaque,                kOpaque2,                               0,              eDC_ShaderFx,         eCULL_Back },
+  { "templmembrane",                   "",                              eS_Banner,                0,                                      0,              eDC_ShaderFxBlend,    eCULL_Back },
+  { "templfurrendering",               "",                              eS_Banner,                0,                                      0,              eDC_ShaderFxBlend,    eCULL_Back },
+  { "templiridescence_ps20",           "",                              eS_Banner,                0,                                      0,              eDC_ShaderFxBlend,    eCULL_Back },
+  { "templbubble_ps20",                "",                              eS_Banner,                0,                                      0,              eDC_ShaderFxBlend,    eCULL_Back },
   // Vegetation: no lighting; the leaves alpha tested (or blended by the object's colour), two-sided.
   // TemplDecal_VColors (the bark's, also named by a model): the texture times the object's colour.
   { "templplantsbark",                 "templdecal_vcolors",            eS_Trees,                 EF2_OPAQUE,                             0,              eDC_VColor,           eCULL_Back },
@@ -250,6 +262,7 @@ constexpr STemplateLighting s_TemplateLighting[] =
   { "templdecalglowselfillum",         ELighting::Vertex,   EGlow::SelfIllum },
   { "templdecalglowselfillumanimated", ELighting::Vertex,   EGlow::Pulse },
   { "templdecalglowselfillumanimatedslow", ELighting::Vertex, EGlow::PulseSlow },
+  { "templdecallight_specadd",         ELighting::Vertex,   EGlow::LitGloss },
   // Lit by 2 (also by their light map), the texture's alpha its glow (plants blended by it).
   { "templbumpdiffuse_alphaglow",      ELighting::Overbright, EGlow::Alpha },
   { "templlightdiffuse_alphaglow",     ELighting::Overbright, EGlow::Alpha },
@@ -341,6 +354,23 @@ constexpr STemplateMotion s_TemplateMotion[] =
   { "templtexturerotate",              0.0f,  0.0f,  200.0f, -0.5f, false, ELayer2::None,         0.0f,  0.0f },
   { "templtexturev22rotate",           0.0f,  0.0f,  200.0f, 0.5f,  true,  ELayer2::None,         0.0f,  0.0f },
   { "communication_island_river",      0.1f,  0.0f,  0.0f,   0.5f,  false, ELayer2::BlendOpacity, 0.08f, 0.0f },
+};
+
+//! The templates of shaders of their own (eDC_ShaderFx, eDC_ShaderFxBlend).
+struct STemplateFx
+{
+  std::string_view Name;
+  ETemplateFx eFx;
+};
+
+constexpr STemplateFx s_TemplateFx[] =
+{
+  { "templrainbow",                    ETemplateFx::Rainbow },
+  { "templmembrane",                   ETemplateFx::Membrane },
+  { "templcartoonshading",             ETemplateFx::Cartoon },
+  { "templfurrendering",               ETemplateFx::Fur },
+  { "templiridescence_ps20",           ETemplateFx::Iridescence },
+  { "templbubble_ps20",                ETemplateFx::Bubble },
 };
 
 //! An engine shader (EF_LoadShader by name).
@@ -508,6 +538,8 @@ SResolvedTemplate ResolveTemplate(const std::string &Name, uint64 nMaskGen)
     R.Props.fLayer2Scroll[0] = pM->fLayer2U;
     R.Props.fLayer2Scroll[1] = pM->fLayer2V;
   }
+  if (const STemplateFx *pFx = FindEntry(s_TemplateFx, Name))
+    R.Props.eFx = pFx->eFx;
   SetTemplateLighting(R.Props, Name);
   return R;
 }
@@ -1328,17 +1360,18 @@ void CShaderManager::LoadDrawnTextures(const CShader *pSH, SRenderShaderResource
 {
   // As CD3D12Renderer::DrawLeafItem reads them: the normal map for the bump mapping of the pixel lit
   // templates and for the terrain's detail layers, the gloss map for the glow and the reflection
-  // amount, the material's cube for the cube map templates (and their ambient's).
+  // amount, the material's cube for the cube map templates (and their ambient's); the wings of iridescence
+  // their normal and gloss maps, the bubble its cube.
   const SShaderProps &Props = pSH->GetProps();
   if ((Props.bPixelLighting && g_pRenderer && g_pRenderer->CV_r_Quality_BumpMapping > 0) || Props.eDrawClass == eDC_TerrainLayer ||
-      Props.BumpCube())
+      Props.BumpCube() || Props.eFx == ETemplateFx::Iridescence)
     LoadNormalMap(pRes);
   if ((Props.eGlow != EGlow::None && Props.eGlow != EGlow::Alpha) || Props.eEnvMap == EEnvMap::CubeDecalAmount ||
-      Props.eLayer2 == ELayer2::AddGloss || Props.eLayer2 == ELayer2::BlendGloss)
+      Props.eLayer2 == ELayer2::AddGloss || Props.eLayer2 == ELayer2::BlendGloss || Props.eFx == ETemplateFx::Iridescence)
     LoadResourceTexture(pRes, EFTT_GLOSS);
   if (Props.eLayer2 == ELayer2::BlendOpacity)
     LoadResourceTexture(pRes, EFTT_OPACITY);
-  if ((Props.eEnvMap != EEnvMap::None && !Props.UsesAutoCube()) || Props.bAmbientCube)
+  if ((Props.eEnvMap != EEnvMap::None && !Props.UsesAutoCube()) || Props.bAmbientCube || Props.eFx == ETemplateFx::Bubble)
     LoadResourceTexture(pRes, EFTT_CUBEMAP);
 }
 

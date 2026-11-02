@@ -89,11 +89,17 @@ typedef float float4x4_t[16];
 #define DF2_FOG_BLACK       0x00000008  //!< with DF_FOG: fogged towards black (an additive pass)
 #define DF2_FOG_VOLUME      0x00000010  //!< the fog of a fog volume over an object in it: rgb = vColor.rgb, a = FogVolumeAlpha (General.hlsl; vParams0: x the layer's height, y ln 100 / (2 * fog distance), z 1 for the volume's cap, w 1: times the alpha after the alpha test)
 #define DF2_HEAT            0x00000020  //!< heat vision: the colour before the fog through HeatVision (Common.hlsli) with vHeat
-#define DF2_SCREEN_FX       0x00000040  //!< a picture of the scene in place of the shading (ScreenFx, General.hlsl), the mode vParams3.w: 0 the glass of a scope (the scene copy tex0 around the middle of the screen), 1 a mirror (tex0 projected by mParams0), 2 heat haze (the scene copy tex0 rippled), 3 bump offset (the scene copy tex0 moved by the normal map tex1, + tex2); nothing else applies but the fog (DF_FOG)
-#define XR_SCREEN_SCOPE     0
-#define XR_SCREEN_MIRROR    1
-#define XR_SCREEN_HAZE      2
-#define XR_SCREEN_BUMP      3
+#define DF2_SHADER_FX       0x00000040  //!< a template's shader of its own in place of the shading (ShaderFx, General.hlsl), the mode vParams3.w (XR_FX_*): the pictures of the scene (the glass of a scope: the scene copy tex0 around the middle of the screen; a mirror: tex0 projected by mParams0; heat haze: the scene copy rippled; bump offset: the scene copy moved by the normal map tex1, + tex2) and the special lighting of the templates (rainbow, membrane, cartoon, fur, iridescence, bubble); nothing else applies but the fog (DF_FOG, towards black with DF2_FOG_BLACK)
+#define XR_FX_SCOPE         0
+#define XR_FX_MIRROR        1
+#define XR_FX_HAZE          2
+#define XR_FX_BUMP_OFFSET   3
+#define XR_FX_RAINBOW       4
+#define XR_FX_MEMBRANE      5
+#define XR_FX_CARTOON       6
+#define XR_FX_FUR           7   //!< also in the vertex shader: the position vParams0.x out along the normal (a shell)
+#define XR_FX_IRIDESCENCE   8
+#define XR_FX_BUBBLE        9   //!< also in the vertex shader: the position out along the normal by a gradient noise
 #define DF2_MODULATE        0x00000080  //!< a decal multiplied into the frame (DESTCOLOR, ZERO): rgb = saturate(rgb + vAddColor.w), a = 1, fogged towards white
 #define DF2_PROJECTOR       0x00000100  //!< a projected light's pass: the colour (with the specular) times the cube g_Cubes[nTex5] at float4(world pos, 1) * mParams0 (the light's m_TextureMatrix)
 #define DF2_TERRAIN_LIGHT   0x00000200  //!< the terrain under dynamic lights: tex0 rgb as 0.75 * rgb + 0.25; with DF_PIXEL_LIGHTING point lights fall off as saturate(1 - (d * vLightAtten.w)^2) (linearly with DF2_PROJECTOR)
@@ -116,7 +122,7 @@ typedef float float4x4_t[16];
 #define DF2_AO_BAKED        0x01000000  //!< the terrain, the vegetation: the colour (before DF2_SHADOW_TINT) times vMipBias.yzw, the share of the light the shadow leaves
 #define DF2_AO_ALL          0x02000000  //!< the templates lit by the ambient colour alone, the terrain's shadow: all of the colour
 #define DF2_FOLIAGE         0x04000000  //!< the leaves and the grass, seen against the sun (XR_FOLIAGE): rgb += tex0 rgb * vColor.rgb * FoliageLight (General.hlsl, vFoliage)
-#define DF2_TEX4_LAYER      0x20000000  //!< with DF_TEX0: tex0 = (lerp(tex0 rgb, tex4 rgb, tex4 a), a + tex4 a - a * tex4 a), tex4 at uv0 + (vTexMat0.w, vTexMat1.w): a second layer blended over the texture before the light
+#define DF2_TEX4_LAYER      0x20000000  //!< with DF_TEX0: tex0 = (lerp(tex0 rgb, tex4 rgb, tex4 a), a + tex4 a - a * tex4 a), tex4 at uv0 + (vTexMat0.w, vTexMat1.w): a second layer blended over the texture before the light; vAddColor.x > 0: tex0 rgb + tex4 rgb * vAddColor.x instead (added, lit as the texture)
 #define DF2_CUBE_SHADER     0x40000000  //!< with DF_CUBE0: tex0 rgb as the original's shader of the template, the mode vParams3.w (CubeShader, General.hlsl): 1 refraction, 2 dispersion, 3 the glass of ps_2_0, 4 the bump refraction and bump glass, 5 tex4 + cube * tex4 a, 6 cube * tex4; the cube alone, no rays (ray queries in its branches hung the GPU)
 #define DF2_AMBIENT_CUBE    0x80000000  //!< rgb += 0.25 * (g_Cubes[nTex6] at the view vector reflected about the vertex normal - tex0 * vColor * vAmbient): a quarter of the ambient light from the cube (the *_EnvCMAmb templates), unlit
 // The path tracer's G-buffer (XR_PT, General.hlsl; set only while it is bound, PathTrace.cpp)

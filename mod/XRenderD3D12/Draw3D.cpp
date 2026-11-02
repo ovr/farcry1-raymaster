@@ -660,6 +660,8 @@ void CD3D12Renderer::DrawLeafItem(const SRenderItem &it)
   // twice; below as TemplDecalGlow.
   const bool bSelfIllum = Props.eGlow == EGlow::SelfIllum && CV_r_Quality_BumpMapping >= 3;
   const ELighting eLighting = bSelfIllum ? ELighting::None : Props.eLighting;
+  // Lit as the fixed function lights a material (DF2_MATERIAL_LIGHT): the auto cube map, TemplDecalLight_SpecAdd.
+  const bool bMaterialLight = Props.eEnvMap == EEnvMap::Auto || Props.eGlow == EGlow::LitGloss;
   Set4(dc.vAmbient, pObj->m_AmbColor.x, pObj->m_AmbColor.y, pObj->m_AmbColor.z, eLighting == ELighting::Vertex ? 1.0f : 2.0f);
   std::optional<D3D12_VERTEX_BUFFER_VIEW> TexCoord1, Tangents;
   uint32 nInstances = 1;
@@ -745,7 +747,17 @@ void CD3D12Renderer::DrawLeafItem(const SRenderItem &it)
   //! the alpha glow ones their texture times its alpha, unlit.
   auto Light = [&]()
   {
-    if (Props.eGlow == EGlow::Alpha && !bLightPass)
+    // TemplDecalLight_SpecAdd: its gloss map added to the texture before the light (also in the light passes).
+    if (Props.eGlow == EGlow::LitGloss)
+    {
+      if (CTexture *pGloss = GetGlowMap(it.pRes); pGloss && (dc.nFlags & DF_TEX0))
+      {
+        dc.nFlags2 |= DF2_TEX4_LAYER;
+        dc.nTex4 = pGloss->GetSRV();
+        Set4(dc.vAddColor, 1, 0, 0, 0);
+      }
+    }
+    else if (Props.eGlow == EGlow::Alpha && !bLightPass)
       dc.nFlags2 |= DF2_ALPHA_GLOW;
     else if (Props.eGlow != EGlow::None && !bLightPass)
     {
@@ -796,7 +808,7 @@ void CD3D12Renderer::DrawLeafItem(const SRenderItem &it)
     // light map does not have (no sun, no DLF_LM light; not one lit in passes, whose light passes
     // bring them), per pixel as the vertex lighting takes them and in place of the ambient under the
     // light map, as the original adds its vertex lighting there (DF2_LIGHTMAP_LIGHTS).
-    if (CV_d3d12_PixelLighting && TexCoord1 && !(pObj->m_ObjFlags & FOB_ZPASS) && Props.eEnvMap != EEnvMap::Auto && HasNormal(nFormat) &&
+    if (CV_d3d12_PixelLighting && TexCoord1 && !(pObj->m_ObjFlags & FOB_ZPASS) && !bMaterialLight && HasNormal(nFormat) &&
         !m_bDepthPrepass && !m_bRayCaptureWalk)
     {
       const uint32 nFlags2 = dc.nFlags2;
@@ -831,8 +843,8 @@ void CD3D12Renderer::DrawLeafItem(const SRenderItem &it)
     }
     // d3d12_PixelLighting: the other lit materials per pixel too, with the lights as their vertex
     // lighting has them (static objects falling off by the curve their attenuation is fitted to);
-    // the auto cube map keeps the fixed function's lighting (DF2_MATERIAL_LIGHT, below).
-    if (CV_d3d12_PixelLighting && (dc.nFlags & DF_LIGHTING) && !(dc.nFlags & DF_PIXEL_LIGHTING) && Props.eEnvMap != EEnvMap::Auto)
+    // the auto cube map and SpecAdd keep the fixed function's lighting (DF2_MATERIAL_LIGHT, below).
+    if (CV_d3d12_PixelLighting && (dc.nFlags & DF_LIGHTING) && !(dc.nFlags & DF_PIXEL_LIGHTING) && !bMaterialLight)
     {
       dc.nFlags |= DF_PIXEL_LIGHTING;
       dc.nFlags2 |= DF2_VERTEX_LIGHTS | (pObj->m_pCharInstance ? 0 : DF2_SMOOTH_FALLOFF);
@@ -888,9 +900,10 @@ void CD3D12Renderer::DrawLeafItem(const SRenderItem &it)
     Light();
     const CFColor Color = LitColor();
     Set4(dc.vColor, Color.r * pObj->m_Color.r, Color.g * pObj->m_Color.g, Color.b * pObj->m_Color.b, 1);
-    // The auto cube map is lit as the fixed function lights the material: the object's ambient
-    // colour plus the material's colour times the lights, and the highlights of its specular colour.
-    if (Props.eEnvMap == EEnvMap::Auto && (dc.nFlags & DF_LIGHTING))
+    // The auto cube map and SpecAdd are lit as the fixed function lights the material: the object's
+    // ambient colour plus the material's colour times the lights, and the highlights of its specular
+    // colour (SpecAdd's first pass in the original's trace: specular on, the material's 0.72 and power 29).
+    if (bMaterialLight && (dc.nFlags & DF_LIGHTING))
     {
       const SLightMaterial *pMat = it.pRes ? it.pRes->m_LMaterial : nullptr;
       dc.nFlags2 |= DF2_MATERIAL_LIGHT;
@@ -1229,6 +1242,23 @@ void CD3D12Renderer::DrawLeafItem(const SRenderItem &it)
     dc.vColor[3] = GetResourceFloat(it.pRes, "Opacity", fOpacity) * pObj->m_Color.a;
     pTex = nullptr;
     break;
+  case eDC_ShaderFx:
+  case eDC_ShaderFxBlend:
+    // The scene for rays (the opaque ones, the rainbow and cartoon shading): lit as an opaque template, its effect
+    // being the raster's.
+    if (m_bRayCaptureWalk)
+    {
+      Light();
+      const CFColor Color = LitColor();
+      Set4(dc.vColor, Color.r * pObj->m_Color.r, Color.g * pObj->m_Color.g, Color.b * pObj->m_Color.b, 1);
+      break;
+    }
+    if (bLightPass || !SetupTemplateFxDraw(Key, dc, it, Props, pDiffuse))
+      return;
+    if (Props.eFx == ETemplateFx::Iridescence && dc.vParams1[1] > 0 && !(Tangents = Geometry::GetTangentStream(pLB)))
+      dc.vParams1[1] = 0;
+    pTex = nullptr;
+    break;
   default:
     return;
   }
@@ -1349,6 +1379,15 @@ void CD3D12Renderer::DrawLeafItem(const SRenderItem &it)
       dc.nFlags |= DF_FOG;
     Draw();
   }
+  // The fur's shells over its model (TemplateFx.cpp), the nearest last.
+  if (eDC == eDC_ShaderFxBlend && Props.eFx == ETemplateFx::Fur && !bPathDraw)
+  {
+    for (int n = 1; n <= FUR_SHELLS; n++)
+    {
+      SetupFurShell(Key, dc, n);
+      Draw();
+    }
+  }
 
   // The projected lights of the object's m_DynLMMask (DLF_PROJECT with an image, a cube with the
   // picture on +X): the object once more for each, where its first pass is (blended objects: by
@@ -1416,7 +1455,8 @@ void CD3D12Renderer::DrawLeafItem(const SRenderItem &it)
 void CD3D12Renderer::DumpItem(int nIndex, const SRenderItem &it, int eList)
 {
   static const char *const s_DrawClasses[] = { "NoDraw", "Opaque", "AlphaTest", "AlphaTestVColor", "VColor", "AlphaBlend", "Additive", "Terrain", "Sky", "Engine", "Water", "WaterBottom", "WaterBeach", "TerrainLayer", "Decal",
-                                                "TerrainShadow", "Caustics", "FogLayer", "ScopeLens", "Flare", "Modulate", "TerrainLight" };
+                                                "TerrainShadow", "Caustics", "FogLayer", "ScopeLens", "Flare", "Modulate", "TerrainLight", "ShadowOnly",
+                                                "ProcFlare", "ScreenTex", "ScreenBump", "Mirror", "HeatHaze", "ShaderFx", "ShaderFxBlend" };
   const CCObject *pObj = it.pObj;
   const char *szLB = "";
   if (it.pRE->m_Type == eDATA_OcLeaf && static_cast<CREOcLeaf *>(it.pRE)->m_pBuffer)
