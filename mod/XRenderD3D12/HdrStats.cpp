@@ -156,7 +156,7 @@ void CD3D12Renderer::DispatchHdrHistogram(ID3D12Resource *pScene, int nWidth, in
   SHdrStatsConstants hc = {};
   Set4(hc.vSize, (float)nWidth, (float)nHeight, 1.0f / nWidth, 1.0f / nHeight);
   // The light of the knee: the soft shoulder's display value as light; the clamp's is white.
-  const int nToneMap = std::clamp(CV_d3d12_ToneMap, 0, 3);
+  const int nToneMap = std::clamp(CV_d3d12_ToneMap, 0, 4);
   const float fKnee = std::clamp(CV_d3d12_ToneMapKnee, 0.0f, 0.99f);
   Set4(hc.vParams, fCompensation, bAdapted ? 1.0f : 0.0f, nToneMap == 0 ? 1.0f : powf(fKnee, 2.2f), bMeter ? 1.0f : 0.0f);
   const SD3D12FrameAlloc CB = m_pUpload->AllocFrame(sizeof(hc), 256);

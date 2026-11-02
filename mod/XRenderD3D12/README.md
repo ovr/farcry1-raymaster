@@ -97,9 +97,24 @@ reference of its features and console variables.
     once, at the uv of the texel centre or corner it is at: in a frame 0 to 2 pixels of the
     picture differ from the pixel shader's by 1 of 255. At 4K the meter's first level and the
     bloom's levels down take 0.14 to 0.17 ms, with pixel shaders 0.34 to 0.35.
-  - `d3d12_ToneMap`: 0 clamp, 1 soft shoulder (the default: the game's picture up to
-    `d3d12_ToneMapKnee`, then each channel rolls off smoothly to 1 where the original clips it,
-    so the sun still goes white and bright fire yellow), 2 ACES (fitted), 3 AgX.
+  - `d3d12_ToneMap`: 0 clamp, 1 soft shoulder (the game's picture up to `d3d12_ToneMapKnee`,
+    then each channel rolls off smoothly to 1 where the original clips it), 2 ACES (fitted),
+    3 AgX, 4 neutral (the default since step 256, `Shaders/HdrToneMap.hlsli`): the game's picture
+    up to the knee too, then the brightest channel rolls off along the soft shoulder's curve,
+    k + d (1 - e^(-(m - k) / d)) with d = P - k (slope 1 at the knee, P far above; P 1 for the
+    picture, the peak's display value for the HDR output's highlight layer: a grey as with 1), and
+    the colour is scaled with it as a whole, so its hue and saturation stay. The light far above
+    white goes over to the soft shoulder of each channel, by 1 - 1 / (1 + s e^2) of the brightest
+    channel's excess e (m less the rolled off m; s `d3d12_ToneMapDesaturation`, 3): next to
+    nothing just above the knee, most where the game itself clips each channel: the sun white and
+    fire yellow with a white core, as in the game's picture (with the hue kept the sun was a peach
+    disc with a lilac rim and fire white in the middle and red around; towards white alone a
+    white ball). The soft shoulder rolled the blue of a bright sky off and not its red and green:
+    the sky between the huts of Training went cyan and white (its hue 15 degrees off the game's
+    look, its saturation 0.71 of it; neutral 0.4 degrees, 0.99), and the sun was a white glare
+    over a fifth of the frame. No toe: below the knee nothing changes. (Khronos' PBR Neutral's
+    own shoulder, P - d^2 / (m - k + d), reaches P too slowly: the sun of the HDR output 380
+    nits of a 455 nit peak.)
     `d3d12_Exposure` is a compensation in EV; `d3d12_AutoExposure 0` makes the exposure
     2^`d3d12_Exposure`; `d3d12_ExposureMin` / `d3d12_ExposureMax` limit the automatic one (EV,
     0 is the game's daylight; by default 0 and 1.5: the game's sky and daylight are made for the
@@ -182,7 +197,8 @@ reference of its features and console variables.
     in HDR10 into a target of its own and reads it; from its first call the layer is kept
     whatever the display and `d3d12_HDROutput`.
   - The game's menu gets entries from `assets/scripts/02-hdr-options.patch` in Advanced Video
-    Options: HDR, None / Soft / ACES / AgX for `r_HDRRendering` 0 or 1 with `d3d12_ToneMap` 1 to 3,
+    Options: HDR, None / Soft / ACES / AgX for `r_HDRRendering` 0 or 1 with `d3d12_ToneMap` 4, 2
+    or 3 (Soft also shows the clamp and the old soft shoulder, 0 and 1, set from the console),
     and next to the Basic Video Options button HDR output, SDR / HDR10 / scRGB for
     `d3d12_HDROutput` (choosing HDR10 or scRGB with HDR at None sets it to Soft); both greyed out
     without the variables, that is with another renderer.

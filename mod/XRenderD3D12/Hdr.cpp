@@ -80,7 +80,7 @@ constexpr float BLOOM_KNEE = 0.5f;
 //! A table of a kernel: its SRVs and UAVs (D3D12Compute.h).
 constexpr int KERNEL_TABLE = CD3D12Compute::COMPUTE_SRVS + CD3D12Compute::COMPUTE_UAVS;
 
-const char *const s_ToneMapNames[] = { "clamp", "soft shoulder", "ACES fitted", "AgX" };
+const char *const s_ToneMapNames[] = { "clamp", "soft shoulder", "ACES fitted", "AgX", "neutral" };
 
 }
 
@@ -266,9 +266,10 @@ CD3D12Texture *CD3D12Renderer::ResolveHdr(int nSceneSRV, ID3D12Resource *pScene,
   dc.nTex2 = (uint32)nExposureSRV;
   dc.nTex3 = nLutSRV >= 0 ? (uint32)nLutSRV : D3D12_SRV_WHITE;
   Set4(dc.vParams0, 1.0f / nWidth, 1.0f / nHeight, 0, 0);
-  Set4(dc.vParams1, fComp, bAdapted ? 1.0f : 0.0f, fBloom / m_Hdr.Bloom.size(), (float)std::clamp(CV_d3d12_ToneMap, 0, 3));
+  Set4(dc.vParams1, fComp, bAdapted ? 1.0f : 0.0f, fBloom / m_Hdr.Bloom.size(), (float)std::clamp(CV_d3d12_ToneMap, 0, 4));
   Set4(dc.vParams2, CV_d3d12_ToneMapKnee, bHeat ? 1.0f : 0.0f, (float)CV_d3d12_HDRDebug, nLutSRV >= 0 ? 1.0f : 0.0f);
   SetHighlightConstants(dc);
+  dc.vParams3[2] = std::max(CV_d3d12_ToneMapDesaturation, 0.0f);
   // d3d12_HDRDebug 3, the sky mask: white where the depth buffer is at the far plane (nothing but
   // the sky drawn there), black elsewhere; the depth instead of the volumetric light's.
   const bool bSkyMask = !bHeat && CV_d3d12_HDRDebug == 3 && HdrDepthSRV(pDepth, DepthFormat) >= 0;
@@ -560,7 +561,7 @@ void CD3D12Renderer::ReleaseHdr()
 
 void CD3D12Renderer::DumpHdr()
 {
-  const int nToneMap = std::clamp(CV_d3d12_ToneMap, 0, 3);
+  const int nToneMap = std::clamp(CV_d3d12_ToneMap, 0, 4);
   fprintf(m_pFrameDump.get(), "hdr: %d x %d, tone map %s (knee %g), exposure %+g EV, auto %d (%g to %g EV, speed %g), bloom %g (threshold %g)%s\n",
           m_Hdr.nWidth, m_Hdr.nHeight, s_ToneMapNames[nToneMap], CV_d3d12_ToneMapKnee, CV_d3d12_Exposure, CV_d3d12_AutoExposure,
           CV_d3d12_ExposureMin, CV_d3d12_ExposureMax, CV_d3d12_ExposureSpeed, CV_d3d12_Bloom, CV_d3d12_BloomThreshold,

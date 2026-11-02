@@ -5,7 +5,7 @@
 //	File: TestHeaders.hlsl
 //	Description: The unit tests' kernels over the renderer's shader
 //	headers that stand alone (Shader Model 6.0): PathGBuffer.hlsli,
-//	HdrLight.hlsli and PathCache.hlsli, included as the renderer's
+//	HdrLight.hlsli, HdrToneMap.hlsli and PathCache.hlsli, included as the renderer's
 //	programs include them. Each kernel runs the tested functions on the
 //	items of g_TestIn and writes what they give to g_TestOut; ShaderTests.cpp
 //	checks it. One compile per kernel (Tests/CMakeLists.txt).
@@ -17,6 +17,7 @@
 #include "PathGBuffer.hlsli"
 #include "HdrLight.hlsli"
 #include "HdrShared.hlsli"
+#include "HdrToneMap.hlsli"
 #include "PathCache.hlsli"
 
 //! PathOctEncode / PathOctDecode of the unit vector g_TestIn[i].xyz: out[3i] the map's point, out[3i + 1] its vector, out[3i + 2]
@@ -55,6 +56,16 @@ void CSHdr(uint i : SV_DispatchThreadID)
     return;
   const float x = TestIn(i).x;
   TestOut(i, float4(HdrDecode(x), HdrEncode(x), HdrEncode(HdrDecode(x)), HdrDecode(HdrEncode(x))));
+}
+
+//! NeutralToneMap of the light g_TestIn[i].rgb, the knee g_Test.vTest.x, the limit P g_Test.vTest.y, the desaturation
+//! g_Test.vTest.z: out[i] = (the display values, 0).
+[numthreads(64, 1, 1)]
+void CSToneMap(uint i : SV_DispatchThreadID)
+{
+  if (i >= g_Test.nTest.x)
+    return;
+  TestOut(i, float4(NeutralToneMap(TestIn(i).rgb, g_Test.vTest.x, g_Test.vTest.y, g_Test.vTest.z), 0));
 }
 
 //! The HDR statistics' maths (HdrShared.hlsli, HdrLight.hlsli). g_Test.nTest.y 0: of g_TestIn[i] = (light, u, v, 0) out[i] =

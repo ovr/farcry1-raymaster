@@ -1760,8 +1760,9 @@ public:
   float CV_d3d12_PTAmbientRange = 2.0f;     //!< beyond this a ray brings it (m)
   float CV_d3d12_PTSpecular = 1.0f;         //!< the highlights of the sun and the lamps (times; 0 none)
   ICVar *m_pPTDenoiserVar = nullptr;        //!< d3d12_PTDenoiser (nrd, simple, none)
-  int CV_d3d12_ToneMap = 1;                 //!< the HDR pipeline's tone map: 0 clamp, 1 soft shoulder, 2 ACES fitted, 3 AgX
-  float CV_d3d12_ToneMapKnee = 0.85f;       //!< where the soft shoulder starts (a display value)
+  int CV_d3d12_ToneMap = 4;                 //!< the HDR pipeline's tone map: 0 clamp, 1 soft shoulder, 2 ACES fitted, 3 AgX, 4 neutral
+  float CV_d3d12_ToneMapKnee = 0.85f;       //!< where the soft shoulder and the neutral one start (a display value)
+  float CV_d3d12_ToneMapDesaturation = 3.0f;  //!< the neutral tone map: how fast the light far above white goes per channel
   float CV_d3d12_Exposure = 0;              //!< the exposure's compensation, EV
   int CV_d3d12_AutoExposure = 1;            //!< 0: the exposure is 2^d3d12_Exposure alone
   float CV_d3d12_ExposureMin = 0;           //!< the automatic exposure's range, EV

@@ -78,8 +78,8 @@ diff --git a/Scripts/MenuScreens/Options/VideoAdv.lua b/Scripts/MenuScreens/Opti
  UI:CreateScreenFromTable( "VideoAdvOptions", UI.PageOptionsVideoAdv.GUI );
  
 +-- HDR (Far Cry RayMaster): the list sets r_HDRRendering and, while it is on, d3d12_ToneMap, the
-+-- tone map of XRenderD3D12's HDR pipeline: None (no HDR), Soft (the soft shoulder: the game's
-+-- picture, with what is brighter than white rolled off smoothly), ACES, AgX. The renderer reads
++-- tone map of XRenderD3D12's HDR pipeline: None (no HDR), Soft (4, the neutral one: the game's
++-- picture, what is brighter than white rolled off smoothly, its hue kept), ACES, AgX. The renderer reads
 +-- them every frame, so they need no restart, and the presets of the page leave them as they are.
 +-- With another renderer (no d3d12_ToneMap) the list is greyed out.
 +UI.PageOptionsVideoAdv.GUI.widget_RMHdr.user.Initialize = function()
@@ -94,10 +94,10 @@ diff --git a/Scripts/MenuScreens/Options/VideoAdv.lua b/Scripts/MenuScreens/Opti
 +	local tonemap = tonumber( getglobal( "d3d12_ToneMap" ) );
 +	local index = 1;
 +	if( hdr ~= 0 and tonemap ) then
-+		-- tone maps 1 to 3; 0 (a clamp, set from the console) is shown as the soft shoulder
-+		index = tonemap + 1;
-+		if( index < 2 or index > 4 ) then
-+			index = 2;
++		-- Soft: the neutral tone map 4, also 0 and 1 (the clamp, the old soft shoulder: the console's)
++		index = 2;
++		if( tonemap == 2 or tonemap == 3 ) then
++			index = tonemap + 1;
 +		end
 +	end
 +	widget:SelectIndex( index );
@@ -121,7 +121,7 @@ diff --git a/Scripts/MenuScreens/Options/VideoAdv.lua b/Scripts/MenuScreens/Opti
 +		UI.PageOptionsVideoAdv.user:SetGlobal( "r_HDRRendering", 0 );
 +	else
 +		UI.PageOptionsVideoAdv.user:SetGlobal( "r_HDRRendering", 1 );
-+		UI.PageOptionsVideoAdv.user:SetGlobal( "d3d12_ToneMap", index - 1 );
++		UI.PageOptionsVideoAdv.user:SetGlobal( "d3d12_ToneMap", ( index == 2 and 4 ) or ( index - 1 ) );
 +	end
 +	if( UI.PageOptionsVideoAdv.user.setglobalTestOnly == 0 ) then
 +		widget.user.shownIndex = index;
