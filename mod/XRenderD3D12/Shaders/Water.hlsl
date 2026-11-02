@@ -89,7 +89,10 @@
 //	  nTex6     the planar reflection (with mip levels), mParams0 its camera's
 //	            world to clip
 //	  vTexGenU  x the factor of the variance of the slopes finer than a pixel
-//	            (d3d12_WaterReflectionBlur; 0: the reflection is not blurred)
+//	            (d3d12_WaterReflectionBlur; 0: the reflection is not blurred),
+//	            yz the first row (c, s) of the sky box's turn about z (the
+//	            level's sky box angle, DrawSkyItem: a direction of the world is
+//	            turned back by it before the box is looked up)
 //	  vTexGenV  XR_RAYTRACE: x the mode (1, 2), y the rays' length (m), z the
 //	            instance mask (bits 0-7) and bit 8 the sun's shadow at the
 //	            hits
@@ -203,6 +206,9 @@ float3 SkyBoxColor(float3 vDir)
   if (g_Draw.vParams1.y == 0)
     return vFog;
   vDir.z = max(vDir.z, 0.0);
+  // Into the box's axes: the box is drawn turned by (c s; -s c) (row vectors), so back by its transpose.
+  float c = g_Draw.vTexGenU.y, s = g_Draw.vTexGenU.z;
+  vDir.xy = float2(c * vDir.x + s * vDir.y, -s * vDir.x + c * vDir.y);
   float fSide = max(abs(vDir.x), abs(vDir.y));
   float4 vTex;
   if (vDir.z >= fSide)
