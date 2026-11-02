@@ -383,6 +383,18 @@ void CD3D12Renderer::RegisterVariables()
   iConsole->Register("d3d12_ExposureMax", &CV_d3d12_ExposureMax, 1.5f, VF_DUMPTODISK, "The most EV of the automatic exposure (dark scenes made brighter)");
   iConsole->Register("d3d12_ExposureSpeed", &CV_d3d12_ExposureSpeed, 1.5f, VF_DUMPTODISK,
                      "The automatic exposure's rate of adaptation per second (twice that towards a brighter scene)");
+  iConsole->Register("d3d12_ExposureMeter", &CV_d3d12_ExposureMeter, 1, VF_DUMPTODISK,
+                     "The automatic exposure's meter: 0 the mean log2 luminance of the scene (centre weighted); 1 by a histogram: the "
+                     "mean between d3d12_ExposureLow and High, lowered where the sky is in the frame so that its bright part "
+                     "(d3d12_ExposureHighlights) stays below the tone map's knee");
+  iConsole->Register("d3d12_ExposureLow", &CV_d3d12_ExposureLow, 0.05f, VF_DUMPTODISK,
+                     "d3d12_ExposureMeter 1: the share of the scene (by its light, centre weighted) below which the meter's mean leaves "
+                     "it out (the dark corners), 0 to 1");
+  iConsole->Register("d3d12_ExposureHigh", &CV_d3d12_ExposureHigh, 0.95f, VF_DUMPTODISK,
+                     "d3d12_ExposureMeter 1: the share above which it leaves it out (single bright spots), 0 to 1");
+  iConsole->Register("d3d12_ExposureHighlights", &CV_d3d12_ExposureHighlights, 0.9f, VF_DUMPTODISK,
+                     "d3d12_ExposureMeter 1: the percentile of the sky's brightest channel that the exposure keeps at the tone map's "
+                     "knee, the more the bigger the sky's share of the frame (0: none; a little sky through a window may go white)");
   iConsole->Register("d3d12_Bloom", &CV_d3d12_Bloom, 0.5f, VF_DUMPTODISK, "With r_HDRRendering, the strength of the bloom (0: none)");
   iConsole->Register("d3d12_BloomThreshold", &CV_d3d12_BloomThreshold, 1.0f, VF_DUMPTODISK,
                      "The light above which the bloom starts (exposed, linear: 1 is the display's white)");

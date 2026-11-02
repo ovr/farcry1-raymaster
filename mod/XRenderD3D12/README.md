@@ -81,8 +81,9 @@ reference of its features and console variables.
     (`HdrDecode` in `Shaders/HdrLight.hlsli`): the game adds its colours in gamma space, and what it
     adds up above white (additive sprites over each other) is light added up. With the power
     above 1 too, the bloom of a fire is a ball.
-  - Then, at the scene's size: a meter (the centre-weighted mean log2 luminance of the light,
-    reduced to 1 x 1), the adaptation of the exposure towards it (a 1 x 1
+  - Then, at the scene's size: a meter (by default a histogram of the light, below; with
+    `d3d12_ExposureMeter 0` the centre-weighted mean log2 luminance of the light, reduced to
+    1 x 1), the adaptation of the exposure towards it (a 1 x 1
     R32 EV, twice as fast towards a brighter scene; it starts at the meter's after a frame
     without the main view), the bloom (a soft-threshold prefilter against single bright pixels,
     6 levels from half the size down with 13 taps, back up with a 3 x 3 tent) and the resolve
@@ -97,6 +98,26 @@ reference of its features and console variables.
     once, at the uv of the texel centre or corner it is at: in a frame 0 to 2 pixels of the
     picture differ from the pixel shader's by 1 of 255. At 4K the meter's first level and the
     bloom's levels down take 0.14 to 0.17 ms, with pixel shaders 0.34 to 0.35.
+  - The meter by a histogram (`d3d12_ExposureMeter 1`, the default since step 257;
+    `Shaders/Exposure.hlsl`, the maths in `Shaders/HdrExposure.hlsli`): a kernel adds up about
+    131 000 samples of the scene's light (one every 4 pixels across and down at 1920 x 1080, 8
+    at 4K) into 64 bins of log2 from -12 to +8, by the luminance with the old meter's centre
+    weight, and where the depth buffer is at the far plane (the sky) by the brightest channel;
+    a second kernel of one group reads them (and clears them for the next frame) and writes the
+    target EV into a 1 x 1 target, which the adaptation takes instead of the old meter's mean. The
+    target is the key (the old one, -2.6) over the mean log2 luminance between
+    `d3d12_ExposureLow` and `High` of the samples (5 and 95 %: a black border or the sun no longer
+    move it), lowered where the sky is in the frame: the EV that puts the sky's
+    `d3d12_ExposureHighlights` (90th) percentile at the tone map's knee is a ceiling, which
+    counts from none at 2 % of the frame of sky to whole at 8 %, so a big sky is never pushed into
+    the shoulder while a room seen with a little sky through its windows is still made brighter.
+    The old meter's mean took every pixel and knew no sky: in River's forest with the sky between
+    the crowns it gave +1.5 EV and the sky 2.4 times the game's light, white (now +0.4 EV, the
+    sky 1.3 times, its bright part at the knee); under the palms of Training +0.38 EV and the sky
+    1.16 times (now +0.03, 0.99); inside the hut and in Research's hall it still gives +1.5 EV.
+    Without the kernels the old meter. The two kernels cost less than the old meter's levels they
+    replace: at 3840×2160 the hdr section takes 0.30 instead of 0.32 ms at fort, 0.33 instead of
+    0.36 at river, 0.32 instead of 0.34 at dam.
   - `d3d12_ToneMap`: 0 clamp, 1 soft shoulder (the game's picture up to `d3d12_ToneMapKnee`,
     then each channel rolls off smoothly to 1 where the original clips it), 2 ACES (fitted),
     3 AgX, 4 neutral (the default since step 256, `Shaders/HdrToneMap.hlsli`): the game's picture
@@ -118,13 +139,16 @@ reference of its features and console variables.
     `d3d12_Exposure` is a compensation in EV; `d3d12_AutoExposure 0` makes the exposure
     2^`d3d12_Exposure`; `d3d12_ExposureMin` / `d3d12_ExposureMax` limit the automatic one (EV,
     0 is the game's daylight; by default 0 and 1.5: the game's sky and daylight are made for the
-    display, so only dark views get brighter) and `d3d12_ExposureSpeed` is its rate per second.
+    display, so only dark views get brighter) and `d3d12_ExposureSpeed` is its rate per second;
+    `d3d12_ExposureMeter` picks the meter (1 the histogram, 0 the mean), `d3d12_ExposureLow` /
+    `High` the histogram's window and `d3d12_ExposureHighlights` the sky's percentile kept at the
+    knee (0: no ceiling).
     `d3d12_Bloom` is the bloom's strength (0 off), `d3d12_BloomThreshold` the exposed light it
     starts from.
     `d3d12_HDRDebug 1` shows the luminance in bands of 1 EV around middle grey (green), `2` the
     bloom alone, `3` the sky mask (white where the depth buffer is at the far plane: nothing but the
     sky drawn there; for the checks of the HDR test bench). The frame dump gets the settings, the
-    meter's mean and the adapted EV.
+    meter's mean (the histogram's: its target, the sky's share and ceiling) and the adapted EV.
   - The HDR statistics (`HdrStats.cpp`, `Shaders/HdrStats.hlsl`), only while `d3d12_DisplayHDR`
     or `d3d12_HDRLog` is on (without them nothing runs and the frames are as before): after the
     adaptation a kernel adds up a histogram of the scene's light (a sample every 2 pixels across
@@ -140,7 +164,8 @@ reference of its features and console variables.
     demos' frames and clips too): the histogram (the bars by the square root of their samples,
     grey below the knee, orange in the shoulder, red at white and above; the marks: white yellow,
     the knee orange, the meter's mean green), the exposure with its target and range, the meter's
-    mean and key, the 50th, 95th and 99th percentiles of the exposed light in EV from white, the
+    mean and key (the histogram's: its window, and the sky's share of the frame and the EV that
+    puts its bright part at the knee), the 50th, 95th and 99th percentiles of the exposed light in EV from white, the
     tone map, the shares in the shoulder and at white, the bloom and the volumetric light, the
     output and its levels, the display's (peak, full frame, SDR white), and with an HDR output or
     capture the measured nits: the frame's average and its MaxCLL, the shares above paper white
@@ -149,7 +174,8 @@ reference of its features and console variables.
     automatic exposure's target, the meter's mean, log2 of the scene's light at the percentiles
     1, 5, 25, 50, 75, 95 and 99, the shares in the shoulder and at white, the output's mean and
     most nits and the shares above paper white and at the peak, the output and its levels, the
-    camera, and the samples of each of the histogram's bins.
+    camera, the samples of each of the histogram's bins, and the histogram meter's sky ceiling and
+    the sky's share.
   - What the game draws as light sources is brighter in the HDR targets (`IsHdrTarget`: not in
     heat vision), each a factor of white's light, 1 the game's: `d3d12_HDRSun` (8) the sun's
     flare, `d3d12_HDRSky` (2) the sky towards the sun (`DF2_SKY_GLOW`, falling off with the

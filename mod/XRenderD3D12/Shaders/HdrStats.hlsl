@@ -11,13 +11,15 @@
 //	    takes it) by log2 of its luminance (as it is and by the meter's
 //	    centre weight) and of its brightest channel; exposed, how much of
 //	    it is in the tone map's shoulder and at the game's white or above;
-//	    the EV and the meter's mean of the frame.
+//	    the EV and the meter's mean of the frame (with d3d12_ExposureMeter 1
+//	    also its target, the sky's ceiling and share).
 //	  CSOutput: the HDR output's nits, as the output pass (Hdr.hlsl,
 //	    HDR_OUTPUT) gives them before PQ: of the brightest channel their
 //	    sum, the most, how many are above paper white and at the peak.
 //
 //	Bindings (D3D12Compute.h): b0 SHdrStatsConstants; CSHistogram: t0 the
-//	scene, t1 the adapted EV (1 x 1), t2 the meter's last level (1 x 1);
+//	scene, t1 the adapted EV (1 x 1), t2 the meter's last level (1 x 1) or
+//	the histogram meter's target (Exposure.hlsl);
 //	CSOutput: t0 the frame target, t1 the highlight layer; u0 the words
 //	(a raw buffer).
 //
@@ -82,13 +84,23 @@ void CSHistogram(uint2 vThread : SV_DispatchThreadID, uint2 vGroup : SV_GroupID,
   if (nIndex == 0 && all(vGroup == 0))
   {
     float fMeanLog = 0;
-    if (g_Stats.vParams.w > 0)
+    float4 vTarget = float4(0, 0, XR_EXPOSURE_NONE, 0);
+    if (g_Stats.vParams.w > 1.5)
+    {
+      // The histogram meter's target: x the EV, y the window's mean, z the sky's ceiling, w its share.
+      vTarget = g_Source2.Load(int3(0, 0, 0));
+      fMeanLog = vTarget.y;
+    }
+    else if (g_Stats.vParams.w > 0)
     {
       const float2 vMeter = g_Source2.Load(int3(0, 0, 0)).rg;
       fMeanLog = vMeter.y > 0 ? vMeter.x / vMeter.y : 0;
     }
     g_Words.Store(XR_HDR_STAT_EV * 4, asuint(fEV));
     g_Words.Store(XR_HDR_STAT_METER * 4, asuint(fMeanLog));
+    g_Words.Store(XR_HDR_STAT_TARGET * 4, asuint(vTarget.x));
+    g_Words.Store(XR_HDR_STAT_CEILING * 4, asuint(vTarget.z));
+    g_Words.Store(XR_HDR_STAT_SKY * 4, asuint(vTarget.w));
   }
 }
 

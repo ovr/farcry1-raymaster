@@ -277,11 +277,14 @@ struct SMeterConstants
 #define XR_HDR_STAT_SCENE_WORDS (XR_HDR_STAT_SAMPLES + 4)         // the words the histogram's kernel adds to
 #define XR_HDR_STAT_EV          (XR_HDR_STAT_SAMPLES + 4)         // asuint: the EV the samples were exposed with (the adapted and the compensation)
 #define XR_HDR_STAT_METER       (XR_HDR_STAT_SAMPLES + 5)         // asuint: the meter's mean log2 luminance (with the automatic exposure)
+#define XR_HDR_STAT_TARGET      (XR_HDR_STAT_SAMPLES + 6)         // asuint: d3d12_ExposureMeter 1, the target EV (HdrExposure.hlsli, before the range)
+#define XR_HDR_STAT_CEILING     (XR_HDR_STAT_SAMPLES + 7)         // asuint: its sky's ceiling EV (XR_EXPOSURE_NONE: none)
 #define XR_HDR_STAT_OUT_PIXELS  (XR_HDR_STAT_SAMPLES + 8)         // the HDR output's samples
 #define XR_HDR_STAT_OUT_SUM     (XR_HDR_STAT_SAMPLES + 9)         // the sum of their brightest channel's nits (x XR_HDR_NITS_UNIT)
 #define XR_HDR_STAT_OUT_MAX     (XR_HDR_STAT_SAMPLES + 10)        // asuint: the most nits of a channel (MaxCLL)
 #define XR_HDR_STAT_OUT_PAPER   (XR_HDR_STAT_SAMPLES + 11)        // the samples whose brightest channel is above paper white (x 1.02)
 #define XR_HDR_STAT_OUT_PEAK    (XR_HDR_STAT_SAMPLES + 12)        // ... is at the peak (95 % of it or more)
+#define XR_HDR_STAT_SKY         (XR_HDR_STAT_SAMPLES + 13)        // asuint: d3d12_ExposureMeter 1, the sky's share of its samples
 #define XR_HDR_STAT_WORDS       256
 
 //! b0 of the HDR statistics' kernels (HdrStats.hlsl, HdrStats.cpp).
@@ -289,7 +292,30 @@ struct SHdrStatsConstants
 {
   XR_FLOAT4(vSize);               //!< what is sampled: x width, y height (pixels), z 1 / width, w 1 / height
   XR_FLOAT4(vParams);             //!< CSHistogram: x the exposure's compensation (EV), y 1: plus the adapted EV (t1), z the light of the tone
-                                  //!< map's knee, w 1: the meter's mean in t2; CSOutput: x paper white, y the peak (nits)
+                                  //!< map's knee, w 1: the meter's mean in t2, 2: t2 the exposure's target (d3d12_ExposureMeter 1);
+                                  //!< CSOutput: x paper white, y the peak (nits)
+};
+
+// The automatic exposure's histogram (d3d12_ExposureMeter 1; Exposure.hlsl, HdrExposure.hlsli, Hdr.cpp): words of a buffer, the
+// bins those of the HDR statistics (XR_HDR_HIST_*), a sample every SExposureConstants::vStride.x pixels across and down; the
+// target kernel reads them and clears them for the next frame.
+#define XR_EXPOSURE_LUMA        0                                 // the scene's samples by log2 of their luminance, by the meter's
+                                                                  // centre weight (x XR_HDR_WEIGHT_ONE)
+#define XR_EXPOSURE_SKY         XR_HDR_HIST_BINS                  // the sky's (the depth at the far plane) by log2 of their brightest channel
+#define XR_EXPOSURE_SAMPLES     (2 * XR_HDR_HIST_BINS)            // the samples
+#define XR_EXPOSURE_WORDS       (XR_EXPOSURE_SAMPLES + 1)
+#define XR_EXPOSURE_NONE        64.0f                             // the target's sky ceiling when there is none
+#define XR_EXPOSURE_SKY_FROM    0.02f                             // the sky's share of the samples where its ceiling starts to count
+#define XR_EXPOSURE_SKY_FULL    0.08f                             // ... and where it counts whole
+
+//! b0 of the automatic exposure's kernels (Exposure.hlsl, Hdr.cpp).
+struct SExposureConstants
+{
+  XR_FLOAT4(vSize);               //!< the scene: x width, y height (pixels), z 1 / width, w 1 / height
+  XR_FLOAT4(vParams);             //!< x log2 of the key, y z the window's shares (d3d12_ExposureLow, High), w the sky's percentile kept at the
+                                  //!< knee (d3d12_ExposureHighlights; 0: none)
+  XR_FLOAT4(vParams1);            //!< x log2 of the tone map's knee as light, y 1: t1 the depth buffer (the sky where it is at the far plane)
+  XR_UINT4(vStride);              //!< x a sample every this many pixels across and down
 };
 
 // The texels a side of the water's depth copy in a texel of level 0 of its depth tiles (DepthTiles.hlsl, Water.hlsl)
