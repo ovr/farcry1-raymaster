@@ -487,6 +487,9 @@ public:
   float ItemHeat(const SRenderItem &it) const;
   //! The lights of an object besides the sun as the draw's own lights (SDrawConstants::vLightPos).
   void SetObjectLights(SDrawConstants &dc, const CCObject *pObj, const Matrix44 &World, CLeafBuffer *pLB);
+  //! The path tracer's G-buffer draw of a lit object: its fill lights (DLF_AMBIENT_LIGHT, directional) as its lights,
+  //! none with d3d12_PTFillLights (General.hlsl XR_PT adds them to its ambient light).
+  void SetPathFillLights(SDrawConstants &dc, const CCObject *pObj, const Matrix44 &World, CLeafBuffer *pLB);
   //! The detail texture of the terrain sectors (TerrainWithDefaultDetailTexture: always
   //! textures/terrain/detail/default, whatever r_DetailDefault and r_DetailTextures say); NULL
   //! without one.

@@ -21,7 +21,9 @@
 //	Not among them: the fake lights (DLF_FAKE: flares, beams; never in the
 //	scene's list) but those the light maps were baked with, a heat source
 //	that gives no light (heat vision), the characters' fill
-//	lights (DLF_AMBIENT_LIGHT) without d3d12_PTFillLights.
+//	lights (DLF_AMBIENT_LIGHT) without d3d12_PTFillLights: those are in
+//	their ambient light, which the paths fill in with
+//	(CD3D12Renderer::SetPathFillLights, General.hlsl XR_PT).
 //	The materials: the scene for rays' instances have them (SRayInstance
 //	vAlbedo, vSpecular, nPath; DrawLeafItem), Shaders/PathShade.hlsli
 //	shades its hits; while the path tracer is on the vegetation's vertex

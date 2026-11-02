@@ -736,7 +736,10 @@ reference of its features and console variables.
   has only those whose sphere reaches the view, one or two of the 85 of Research, and many are
   `DLF_FAKE | DLF_LM`, never in a frame), the nearest 128 within `d3d12_PTLightDistance` (60 m); not the sun, a
   fake light the light maps do not have, a heat source that gives no light, the characters' fill lights
-  (`DLF_AMBIENT_LIGHT`) without `d3d12_PTFillLights`. The frame dump lists them (`pt lights:`).
+  (`DLF_AMBIENT_LIGHT`) without `d3d12_PTFillLights`: those are in the characters' ambient light, which
+  the paths fill in with (below), unshadowed as the raster's (left out, Jack in the Training intro's
+  dream, lit mostly by it in the raster, had 0.12 of the raster's light on his shirt, 0.65 with it; as a
+  lamp a cave's roof hid it). The frame dump lists them (`pt lights:`).
 - The scene for rays has its materials (`SRayInstance` `vAlbedo`, `vSpecular`, `nPath`, set while the
   opaque list is captured): its hits are shaded by `Shaders/PathShade.hlsli` in linear light (the HDR
   target's, `HdrDecode`): the albedo is the draw's colour without its light (no light map, ambient or
@@ -767,7 +770,7 @@ reference of its features and console variables.
   visibility as the raster finds it (RGBA8, r: its shadow maps, the sun's cascades and their mask by
   rays, which the path tracer turns on, from all the casters; 0 where the raster has no sun) and the
   game's ambient light on the surface (gba: what the object's ambient colour adds to its light maps or
-  its lights; the terrain, whose light is in its texture, the outdoor ambient; a lit object in the
+  its lights, a lit object's fill lights 2 x colour x N.L; the terrain, whose light is in its texture, the outdoor ambient; a lit object in the
   cascades' shadow at least its light in the sun times the terrain's shadow colour, as the raster's
   Sun shadow cascades), a fifth its highlights'
   colour (RGBA8, half of the raster's 2 x specular colour x gloss of the specular templates; it blends
