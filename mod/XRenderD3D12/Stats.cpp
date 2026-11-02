@@ -581,7 +581,7 @@ void CD3D12Renderer::DrawStats()
       const uint32 *pLuma = &w[XR_HDR_STAT_LUMA];
       Value("Exposed p50 / p95 / p99", Format("%+.1f / %+.1f / %+.1f EV", HdrHistPercentile(pLuma, 0.5) + fEV, HdrHistPercentile(pLuma, 0.95) + fEV,
                                               HdrHistPercentile(pLuma, 0.99) + fEV));
-      static const char *const szToneMaps[] = { "clamp", "soft shoulder", "ACES fitted", "AgX" };
+      static const char *const szToneMaps[] = { "clamp", "soft shoulder", "ACES fitted", "AgX", "neutral" };
       Value("Tone map", f.nToneMap == 0 ? std::string(szToneMaps[0]) : Format("%s, knee %.2f", szToneMaps[f.nToneMap], f.fKnee));
       Value("In the shoulder / at white", Format("%.1f %% / %.1f %%", 100 * w[XR_HDR_STAT_SHOULDER] / fSamples, 100 * w[XR_HDR_STAT_WHITE] / fSamples));
       Value("Bloom, volumetric light", Format("%g, %s", f.fBloom, f.bVolumetric ? "on" : "off"));

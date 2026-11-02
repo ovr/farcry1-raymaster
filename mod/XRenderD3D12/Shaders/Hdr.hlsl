@@ -42,7 +42,8 @@
 //	                  exposed (vParams1.x the compensation, vParams1.y 1 with
 //	                  the adapted EV) plus the bloom times vParams1.z, tone
 //	                  mapped by vParams1.w (0 clamp, 1 soft shoulder from the
-//	                  knee vParams2.x, 2 ACES fitted, 3 AgX); vParams2.y 1: the
+//	                  knee vParams2.x, 2 ACES fitted, 3 AgX, 4 neutral from the
+//	                  knee, vParams3.z its desaturation); vParams2.y 1: the
 //	                  scene clamped alone (heat vision); vParams2.z the debug
 //	                  view (1 the luminance in EV bands, 2 the bloom alone, 3
 //	                  the sky mask: white where the depth buffer tex5 is at the
@@ -74,6 +75,8 @@
 #include "Common.hlsli"
 // Decode, Luminance, Max3, MeterTapUV, MeterTexel, BloomDownTaps
 #include "HdrShared.hlsli"
+// NeutralToneMap
+#include "HdrToneMap.hlsli"
 
 struct SHdrOutput
 {
@@ -240,6 +243,8 @@ float3 ToneMap(float3 vLight, int nMode, float fKnee)
 {
   if (nMode == 1)
     return SoftShoulder(vLight, fKnee);
+  if (nMode == 4)
+    return NeutralToneMap(vLight, clamp(fKnee, 0, 0.99), 1, g_Draw.vParams3.z);
   if (nMode == 2)
     return Encode(AcesFitted(vLight));
   if (nMode == 3)
@@ -279,12 +284,15 @@ float3 ColorLut(uint nTex, float3 c)
 //! k + (P - k) (1 - e^(-t / (P - k))), smooth at the knee. For the soft shoulder t is its own
 //! (the encoded light above the knee); ACES and AgX keep their curve up to the knee, and t is
 //! what puts a soft shoulder where they got to, -(1 - k) ln(1 - (s - k) / (1 - k)). The clamp
-//! clips at the peak instead of at white.
+//! clips at the peak instead of at white. The neutral tone map is itself with the peak's display
+//! value for its limit.
 float3 HighlightRatio(float3 vLight, float3 s, int nMode, float k)
 {
   float3 h;
   if (nMode == 0)
     h = Encode(min(vLight, g_Draw.vParams3.y));
+  else if (nMode == 4)
+    h = NeutralToneMap(vLight, clamp(k, 0, 0.99), max(g_Draw.vParams3.x, 1), g_Draw.vParams3.z);
   else
   {
     k = clamp(k, 0, 0.99);

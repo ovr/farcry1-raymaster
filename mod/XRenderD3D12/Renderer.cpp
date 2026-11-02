@@ -364,10 +364,17 @@ void CD3D12Renderer::RegisterVariables()
                      "With d3d12_PathTracing 1, the denoiser of its light: nrd (NVIDIA NRD's REBLUR, when it is built in), simple "
                      "(its own history and filter) or none (the history alone)");
   // The HDR pipeline (r_HDRRendering, Hdr.cpp).
-  iConsole->Register("d3d12_ToneMap", &CV_d3d12_ToneMap, 1, VF_DUMPTODISK,
-                     "With r_HDRRendering, the tone map: 0 clamp, 1 soft shoulder (the game's look up to d3d12_ToneMapKnee, then each channel rolls off to 1), 2 ACES fitted, 3 AgX");
+  iConsole->Register("d3d12_ToneMap", &CV_d3d12_ToneMap, 4, VF_DUMPTODISK,
+                     "With r_HDRRendering, the tone map: 0 clamp, 1 soft shoulder (the game's look up to d3d12_ToneMapKnee, then each channel rolls off to 1), "
+                     "2 ACES fitted, 3 AgX, 4 neutral (the game's look up to d3d12_ToneMapKnee, then the brightest channel rolls off to 1 and the colour "
+                     "with it as a whole: the hue stays, a blue sky blue; the light far above white goes over to the soft shoulder of each channel "
+                     "by d3d12_ToneMapDesaturation: the sun white, fire yellow)");
   iConsole->Register("d3d12_ToneMapKnee", &CV_d3d12_ToneMapKnee, 0.85f, VF_DUMPTODISK,
-                     "Where the soft shoulder of d3d12_ToneMap 1 starts: a display value, 0 to 0.99");
+                     "Where the soft shoulder of d3d12_ToneMap 1 and the neutral one of 4 start: a display value, 0 to 0.99");
+  iConsole->Register("d3d12_ToneMapDesaturation", &CV_d3d12_ToneMapDesaturation, 3.0f, VF_DUMPTODISK,
+                     "With d3d12_ToneMap 4, how fast the light far above white goes over from the hue kept to the soft shoulder of each "
+                     "channel (as the game clips it: the sun white, fire yellow), with the square of how far its brightest channel was "
+                     "rolled off (0: never; 3: a sky just above the knee keeps its hue)");
   iConsole->Register("d3d12_Exposure", &CV_d3d12_Exposure, 0.0f, VF_DUMPTODISK, "With r_HDRRendering, the exposure's compensation in EV (0: none)");
   iConsole->Register("d3d12_AutoExposure", &CV_d3d12_AutoExposure, 1, VF_DUMPTODISK,
                      "With r_HDRRendering, the exposure adapts to the scene (between d3d12_ExposureMin and Max); 0: d3d12_Exposure alone");
