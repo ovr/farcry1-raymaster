@@ -81,7 +81,8 @@ bool CD3D12Renderer::BeginHdrStats()
     const D3D12_RESOURCE_DESC Words = BufferDesc(WORDS_BYTES, D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS);
     const D3D12_RESOURCE_DESC Copies = BufferDesc((UINT64)WORDS_BYTES * D3D12_FRAMES, D3D12_RESOURCE_FLAG_NONE);
     s.Tables.assign(2 * D3D12_FRAMES, -1);
-    bool bOk = SUCCEEDED(pDevice->CreateCommittedResource(&Default, D3D12_HEAP_FLAG_NONE, &Words, D3D12_RESOURCE_STATE_COPY_DEST, nullptr,
+    // The words common (a buffer is created so; the first frame's copy promotes them), the read back copy destination.
+    bool bOk = SUCCEEDED(pDevice->CreateCommittedResource(&Default, D3D12_HEAP_FLAG_NONE, &Words, D3D12_RESOURCE_STATE_COMMON, nullptr,
                                                           IID_PPV_ARGS(&s.pWords))) &&
                SUCCEEDED(pDevice->CreateCommittedResource(&Readback, D3D12_HEAP_FLAG_NONE, &Copies, D3D12_RESOURCE_STATE_COPY_DEST, nullptr,
                                                           IID_PPV_ARGS(&s.pReadback)));
@@ -148,7 +149,10 @@ void CD3D12Renderer::DispatchHdrHistogram(ID3D12Resource *pScene, int nWidth, in
   if (!pScene || nWidth <= 0 || nHeight <= 0 || m_Hdr.Meter.empty() || !BeginHdrStats() || s.Cur.bScene)
     return;
   const int nTable = s.Tables[m_pDevice->GetFrameSlot()];
-  ID3D12Resource *pExposure = m_Hdr.pExposure[m_Hdr.nExposure]->m_pResource, *pMeter = m_Hdr.Meter.back()->m_pResource;
+  // The meter's mean: the histogram's target (d3d12_ExposureMeter 1) or the last level.
+  const bool bHistogram = bMeter && m_Hdr.bExposureHistogram;
+  ID3D12Resource *pExposure = m_Hdr.pExposure[m_Hdr.nExposure]->m_pResource;
+  ID3D12Resource *pMeter = bHistogram ? m_Hdr.pExposureTarget->m_pResource : m_Hdr.Meter.back()->m_pResource;
   m_pDescriptors->WriteSRV(nTable, pScene, nullptr);
   m_pDescriptors->WriteSRV(nTable + 1, pExposure, nullptr);
   m_pDescriptors->WriteSRV(nTable + 2, pMeter, nullptr);
@@ -158,7 +162,7 @@ void CD3D12Renderer::DispatchHdrHistogram(ID3D12Resource *pScene, int nWidth, in
   // The light of the knee: the soft shoulder's display value as light; the clamp's is white.
   const int nToneMap = std::clamp(CV_d3d12_ToneMap, 0, 4);
   const float fKnee = std::clamp(CV_d3d12_ToneMapKnee, 0.0f, 0.99f);
-  Set4(hc.vParams, fCompensation, bAdapted ? 1.0f : 0.0f, nToneMap == 0 ? 1.0f : powf(fKnee, 2.2f), bMeter ? 1.0f : 0.0f);
+  Set4(hc.vParams, fCompensation, bAdapted ? 1.0f : 0.0f, nToneMap == 0 ? 1.0f : powf(fKnee, 2.2f), bHistogram ? 2.0f : bMeter ? 1.0f : 0.0f);
   const SD3D12FrameAlloc CB = m_pUpload->AllocFrame(sizeof(hc), 256);
   memcpy(CB.pCPU, &hc, sizeof(hc));
 
@@ -179,6 +183,9 @@ void CD3D12Renderer::DispatchHdrHistogram(ID3D12Resource *pScene, int nWidth, in
   f.bAuto = bMeter;
   f.fExposureMin = std::min(CV_d3d12_ExposureMin, CV_d3d12_ExposureMax);
   f.fExposureMax = std::max(CV_d3d12_ExposureMin, CV_d3d12_ExposureMax);
+  f.bHistogram = bHistogram;
+  f.fLow = std::clamp(std::min(CV_d3d12_ExposureLow, CV_d3d12_ExposureHigh), 0.0f, 1.0f);
+  f.fHigh = std::clamp(std::max(CV_d3d12_ExposureLow, CV_d3d12_ExposureHigh), 0.0f, 1.0f);
   f.fBloom = std::max(CV_d3d12_Bloom, 0.0f);
   f.bVolumetric = bVolumetric;
 }
@@ -268,14 +275,18 @@ void CD3D12Renderer::LogHdrStats(const SHdrStatsFrame &f)
                           "log2 luminance, log2 of the scene's luminance (before the exposure) at the percentiles 1 5 25 50 75 95 99, %% of the "
                           "samples whose brightest channel exposed is in the tone map's shoulder and at white or above, the output's nits "
                           "(the brightest channel; none: nan): mean, most, %% above paper white, %% at the peak; output, paper white, peak; camera "
-                          "x y z; the samples of the histogram's %d bins of log2 luminance from %d to %d, by spaces\n",
+                          "x y z; the samples of the histogram's %d bins of log2 luminance from %d to %d, by spaces; the histogram meter's "
+                          "(d3d12_ExposureMeter 1; else nan) EV that puts the sky's bright part at the knee (none: nan), the sky's share\n",
             XR_HDR_HIST_BINS, XR_HDR_HIST_MIN, XR_HDR_HIST_MAX);
   }
   if (!f.bScene)
     return;
   const uint32 *w = f.Words;
   const float fEV = AsFloat(w[XR_HDR_STAT_EV]), fMeter = AsFloat(w[XR_HDR_STAT_METER]);
-  const float fTarget = f.bAuto ? std::clamp(HDR_EXPOSURE_KEY_LOG2 - fMeter, f.fExposureMin, f.fExposureMax) : NAN;
+  const float fTarget = !f.bAuto        ? NAN
+                        : f.bHistogram ? std::clamp(AsFloat(w[XR_HDR_STAT_TARGET]), f.fExposureMin, f.fExposureMax)
+                                       : std::clamp(HDR_EXPOSURE_KEY_LOG2 - fMeter, f.fExposureMin, f.fExposureMax);
+  const float fCeiling = AsFloat(w[XR_HDR_STAT_CEILING]);
   const double fSamples = std::max<double>(w[XR_HDR_STAT_SAMPLES], 1);
   const double fOut = std::max<double>(w[XR_HDR_STAT_OUT_PIXELS], 1);
   const bool bOut = f.bOutput && w[XR_HDR_STAT_OUT_PIXELS];
@@ -291,7 +302,8 @@ void CD3D12Renderer::LogHdrStats(const SHdrStatsFrame &f)
           vPos.z);
   for (int i = 0; i < XR_HDR_HIST_BINS; i++)
     fprintf(s.pLog.get(), i ? " %u" : "%u", (unsigned)w[XR_HDR_STAT_LUMA + i]);
-  fputc('\n', s.pLog.get());
+  fprintf(s.pLog.get(), ",%.3f,%.4f\n", f.bHistogram && fCeiling < XR_EXPOSURE_NONE ? fCeiling : NAN,
+          f.bHistogram ? AsFloat(w[XR_HDR_STAT_SKY]) : NAN);
   // Whole lines, also when the game is ended from outside.
   fflush(s.pLog.get());
 }

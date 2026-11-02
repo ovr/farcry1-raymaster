@@ -5,7 +5,7 @@
 //	File: TestHeaders.hlsl
 //	Description: The unit tests' kernels over the renderer's shader
 //	headers that stand alone (Shader Model 6.0): PathGBuffer.hlsli,
-//	HdrLight.hlsli, HdrToneMap.hlsli and PathCache.hlsli, included as the renderer's
+//	HdrLight.hlsli, HdrToneMap.hlsli, HdrExposure.hlsli and PathCache.hlsli, included as the renderer's
 //	programs include them. Each kernel runs the tested functions on the
 //	items of g_TestIn and writes what they give to g_TestOut; ShaderTests.cpp
 //	checks it. One compile per kernel (Tests/CMakeLists.txt).
@@ -18,6 +18,7 @@
 #include "HdrLight.hlsli"
 #include "HdrShared.hlsli"
 #include "HdrToneMap.hlsli"
+#include "HdrExposure.hlsli"
 #include "PathCache.hlsli"
 
 //! PathOctEncode / PathOctDecode of the unit vector g_TestIn[i].xyz: out[3i] the map's point, out[3i + 1] its vector, out[3i + 2]
@@ -66,6 +67,33 @@ void CSToneMap(uint i : SV_DispatchThreadID)
   if (i >= g_Test.nTest.x)
     return;
   TestOut(i, float4(NeutralToneMap(TestIn(i).rgb, g_Test.vTest.x, g_Test.vTest.y, g_Test.vTest.z), 0));
+}
+
+//! The automatic exposure's target (HdrExposure.hlsli) of case i: g_TestIn[32i .. 32i + 15] its luminance histogram (four bins
+//! an item), g_TestIn[32i + 16 .. 32i + 31] the sky's; g_Test.nTest.y the samples, g_Test.vTest the parameters (vParams),
+//! g_Test.vTest2 x log2 of the knee, y z the sky's shares (from, full), w a percentile. out[2i] = ExposureTarget, out[2i + 1] =
+//! (the luminance's percentile vTest2.w, its mean between vTest.y and z, the sky's percentile vTest.w, 0).
+[numthreads(64, 1, 1)]
+void CSExposure(uint i : SV_DispatchThreadID)
+{
+  if (i >= g_Test.nTest.x)
+    return;
+  uint vLuma[XR_HDR_HIST_BINS], vSky[XR_HDR_HIST_BINS];
+  for (int n = 0; n < XR_HDR_HIST_BINS / 4; n++)
+  {
+    const uint4 a = g_TestIn[i * 32 + n], b = g_TestIn[i * 32 + 16 + n];
+    vLuma[n * 4] = a.x;
+    vLuma[n * 4 + 1] = a.y;
+    vLuma[n * 4 + 2] = a.z;
+    vLuma[n * 4 + 3] = a.w;
+    vSky[n * 4] = b.x;
+    vSky[n * 4 + 1] = b.y;
+    vSky[n * 4 + 2] = b.z;
+    vSky[n * 4 + 3] = b.w;
+  }
+  TestOut(i * 2, ExposureTarget(vLuma, vSky, g_Test.nTest.y, g_Test.vTest, g_Test.vTest2.x, g_Test.vTest2.yz));
+  TestOut(i * 2 + 1, float4(ExposurePercentile(vLuma, g_Test.vTest2.w), ExposureWindowMean(vLuma, g_Test.vTest.y, g_Test.vTest.z),
+                            ExposurePercentile(vSky, g_Test.vTest.w), 0));
 }
 
 //! The HDR statistics' maths (HdrShared.hlsli, HdrLight.hlsli). g_Test.nTest.y 0: of g_TestIn[i] = (light, u, v, 0) out[i] =

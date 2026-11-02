@@ -1234,6 +1234,12 @@ public:
     int nHdrColorSRV = -1;
     ComPtr<ID3D12Resource> pDepth;          //!< d3d12_HDRDebug 3 (the sky mask): the scene's depth buffer nDepthSRV is of (kept, as pHdrColor)
     int nDepthSRV = -1;
+    // d3d12_ExposureMeter 1 (Shaders/Exposure.hlsl), made when first used:
+    ComPtr<ID3D12Resource> pExposureWords;  //!< the histogram's XR_EXPOSURE_WORDS (a raw UAV, always in UNORDERED_ACCESS)
+    CD3D12Texture *pExposureTarget = nullptr;   //!< 1 x 1 R32G32B32A32_FLOAT: the target EV, the mean, the sky's ceiling and share
+    std::vector<int> ExposureTables;        //!< the kernels' tables, D3D12_FRAMES
+    bool bExposureFailed = false;           //!< no buffer, target or kernels: the old meter
+    bool bExposureHistogram = false;        //!< this frame's target is the histogram's
   };
 
   //! At the start of the main view's 3D scene (BeginScene3D): its targets bound, HDR (with
@@ -1259,6 +1265,13 @@ public:
   //! The meter's first level by the kernel (Shaders/Meter.hlsl) from pScene, dc the constants of its
   //! pass (HDR_LUMINANCE). False: not by the kernel (other taps, no table), the pass draws it.
   bool DispatchMeter(ID3D12Resource *pScene, const SDrawConstants &dc);
+  //! d3d12_ExposureMeter 1: the histogram of pScene (nWidth x nHeight, in PIXEL_SHADER_RESOURCE | NON_PIXEL_SHADER_RESOURCE) and
+  //! the target EV from it into m_Hdr.pExposureTarget (Shaders/Exposure.hlsl). pDepth (read through an SRV of DepthFormat) for
+  //! the sky: readable already with bDepthReadable, else in DEPTH_WRITE (read meanwhile). False: none (no kernels, no buffer).
+  bool DispatchExposure(ID3D12Resource *pScene, int nWidth, int nHeight, ID3D12Resource *pDepth, DXGI_FORMAT DepthFormat, bool bDepthReadable);
+  //! m_Hdr's buffer, target and tables of DispatchExposure, made when first needed. False: none.
+  bool EnsureExposureTargets();
+  void ReleaseExposureTargets();
   //! Level nLevel of the bloom by the kernel (Shaders/Bloom.hlsl) from pSource (nSourceWidth x
   //! nSourceHeight; the scene, or the level before in PIXEL_SHADER_RESOURCE), dc the constants of its
   //! pass (HDR_BLOOM_DOWN). False: not by the kernel (the level before is not twice its size, no
@@ -1317,6 +1330,8 @@ public:
     float fKnee = 0;
     bool bAuto = false;                     //!< the automatic exposure, its range
     float fExposureMin = 0, fExposureMax = 0;
+    bool bHistogram = false;                //!< its meter the histogram (d3d12_ExposureMeter 1), its window's shares
+    float fLow = 0, fHigh = 0;
     float fBloom = 0;                       //!< d3d12_Bloom
     bool bVolumetric = false;               //!< the volumetric light in the resolve
     EDisplayOutput Output = EDisplayOutput::Sdr;   //!< the display's output
@@ -1768,6 +1783,10 @@ public:
   float CV_d3d12_ExposureMin = 0;           //!< the automatic exposure's range, EV
   float CV_d3d12_ExposureMax = 1.5f;
   float CV_d3d12_ExposureSpeed = 1.5f;      //!< its adaptation rate per second (twice that towards a brighter scene)
+  int CV_d3d12_ExposureMeter = 1;           //!< 0: the mean log2 luminance (centre weighted); 1: by a histogram (HdrExposure.hlsli)
+  float CV_d3d12_ExposureLow = 0.05f;       //!< d3d12_ExposureMeter 1: the window of the mean, shares of the samples by their light
+  float CV_d3d12_ExposureHigh = 0.95f;
+  float CV_d3d12_ExposureHighlights = 0.9f; //!< ... the sky's percentile (its brightest channel) kept at the tone map's knee; 0: none
   float CV_d3d12_Bloom = 0.5f;              //!< the bloom's strength (0: none)
   float CV_d3d12_BloomThreshold = 1;        //!< the light above which it blooms (exposed, linear)
   int CV_d3d12_HDRDebug = 0;                //!< 1: the luminance in EV bands, 2: the bloom alone, 3: the sky mask

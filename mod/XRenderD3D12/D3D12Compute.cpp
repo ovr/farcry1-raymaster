@@ -31,6 +31,8 @@
 #include "VolumetricIntegrate_CS.h"
 #include "HdrHistogram_CS.h"
 #include "HdrOutputStats_CS.h"
+#include "ExposureHistogram_CS.h"
+#include "ExposureTarget_CS.h"
 #include "RaySunTrace_CS.h"
 #include "RaySunTemporal_CS.h"
 #include "RaySunFilter_CS.h"
@@ -89,6 +91,8 @@ const SKernel s_Kernels[eD3D12K_Num] =
   { "volumetric light (integration)", g_VolumetricIntegrate_CS, sizeof(g_VolumetricIntegrate_CS) },
   { "HDR statistics (histogram)", g_HdrHistogram_CS, sizeof(g_HdrHistogram_CS) },
   { "HDR statistics (output)", g_HdrOutputStats_CS, sizeof(g_HdrOutputStats_CS) },
+  { "exposure (histogram)", g_ExposureHistogram_CS, sizeof(g_ExposureHistogram_CS) },
+  { "exposure (target)", g_ExposureTarget_CS, sizeof(g_ExposureTarget_CS) },
   { "sun's shadow by rays", g_RaySunTrace_CS, sizeof(g_RaySunTrace_CS), true },
   { "sun's shadow by rays (history)", g_RaySunTemporal_CS, sizeof(g_RaySunTemporal_CS), true },
   { "sun's shadow by rays (filter)", g_RaySunFilter_CS, sizeof(g_RaySunFilter_CS), true },

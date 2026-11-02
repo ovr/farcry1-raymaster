@@ -12,9 +12,15 @@
 //	back buffer clamped at 1 (overbright light, light maps, specular, the
 //	additive particles, flares and glows) stays. EndMainScene then, at the
 //	scene's size (Shaders/Hdr.hlsl):
-//	  - the meter: the mean log2 luminance of the scene's light (centre
-//	    weighted), reduced to 1 x 1; its first level by a kernel
-//	    (Shaders/Meter.hlsl), whose threads read taps side by side;
+//	  - the meter (d3d12_ExposureMeter): 1, a histogram of the scene's light
+//	    by two kernels (Shaders/Exposure.hlsl, HdrExposure.hlsli): the key
+//	    over the mean log2 luminance between two of its percentiles (centre
+//	    weighted; d3d12_ExposureLow, High), lowered where the sky is in the
+//	    frame (the depth buffer at the far plane) so that its bright part
+//	    (d3d12_ExposureHighlights) stays below the tone map's knee; 0, the
+//	    mean log2 luminance of the scene's light (centre weighted) reduced
+//	    to 1 x 1, its first level by a kernel (Shaders/Meter.hlsl), whose
+//	    threads read taps side by side;
 //	  - the adaptation: the exposure (EV) towards the meter's from the one
 //	    of the frame before, at the frame time's rate (d3d12_ExposureSpeed),
 //	    within d3d12_ExposureMin .. Max (d3d12_AutoExposure);
@@ -79,6 +85,12 @@ constexpr int BLOOM_LEVELS = 6;
 constexpr float BLOOM_KNEE = 0.5f;
 //! A table of a kernel: its SRVs and UAVs (D3D12Compute.h).
 constexpr int KERNEL_TABLE = CD3D12Compute::COMPUTE_SRVS + CD3D12Compute::COMPUTE_UAVS;
+//! The automatic exposure's histogram (d3d12_ExposureMeter 1) takes about this many samples of the scene, whatever its size
+//! (a sample every so many pixels across and down: 4 at 1920 x 1080, 8 at 3840 x 2160).
+constexpr float EXPOSURE_SAMPLES = 131072.0f;
+constexpr UINT EXPOSURE_WORDS_BYTES = XR_EXPOSURE_WORDS * sizeof(uint32);
+//! A depth buffer that a compute kernel reads.
+constexpr D3D12_RESOURCE_STATES DEPTH_READ_COMPUTE = D3D12_RESOURCE_STATE_DEPTH_READ | D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE;
 
 const char *const s_ToneMapNames[] = { "clamp", "soft shoulder", "ACES fitted", "AgX", "neutral" };
 
@@ -191,10 +203,13 @@ CD3D12Texture *CD3D12Renderer::ResolveHdr(int nSceneSRV, ID3D12Resource *pScene,
   if (!bAuto || m_Hdr.nResolvedFrame != m_nFrames - 1)
     m_Hdr.bAdapted = false;
   m_Hdr.nResolvedFrame = m_nFrames;
+  m_Hdr.bExposureHistogram = false;
   if (bAuto && !bHeat)
   {
+    // The meter: the histogram's target (d3d12_ExposureMeter 1), else (or without its kernels) the mean of the levels.
+    m_Hdr.bExposureHistogram = CV_d3d12_ExposureMeter > 0 && DispatchExposure(pScene, nWidth, nHeight, pDepth, DepthFormat, bToTexture);
     int nSrcSRV = nSceneSRV;
-    for (size_t i = 0; i < m_Hdr.Meter.size(); i++)
+    for (size_t i = 0; !m_Hdr.bExposureHistogram && i < m_Hdr.Meter.size(); i++)
     {
       CD3D12Texture *pDst = m_Hdr.Meter[i];
       SDrawConstants dc = DefaultDrawConstants();
@@ -208,11 +223,11 @@ CD3D12Texture *CD3D12Renderer::ResolveHdr(int nSceneSRV, ID3D12Resource *pScene,
     const float fRate = std::max(CV_d3d12_ExposureSpeed, 0.0f) * fFrameTime;
     SDrawConstants dc = DefaultDrawConstants();
     dc.nFlags = HDR_ADAPT;
-    dc.nTex0 = (uint32)m_Hdr.Meter.back()->m_nSRV;
+    dc.nTex0 = (uint32)(m_Hdr.bExposureHistogram ? m_Hdr.pExposureTarget->m_nSRV : m_Hdr.Meter.back()->m_nSRV);
     dc.nTex1 = (uint32)m_Hdr.pExposure[m_Hdr.nExposure]->m_nSRV;
     Set4(dc.vParams0, HDR_EXPOSURE_KEY_LOG2, std::min(CV_d3d12_ExposureMin, CV_d3d12_ExposureMax), std::max(CV_d3d12_ExposureMin, CV_d3d12_ExposureMax),
          m_Hdr.bAdapted ? 0.0f : 1.0f);
-    Set4(dc.vParams1, 1 - expf(-2 * fRate), 1 - expf(-fRate), 0, 0);
+    Set4(dc.vParams1, 1 - expf(-2 * fRate), 1 - expf(-fRate), m_Hdr.bExposureHistogram ? 1.0f : 0.0f, 0);
     m_Hdr.nExposure ^= 1;
     DrawHdrPass(m_Hdr.pExposure[m_Hdr.nExposure], dc);
     m_Hdr.bAdapted = true;
@@ -328,6 +343,144 @@ bool CD3D12Renderer::DispatchMeter(ID3D12Resource *pScene, const SDrawConstants 
                        (UINT)(pLevel->m_nWidth + 1) / 2, (UINT)(pLevel->m_nHeight + 1) / 2);
   m_pDevice->Transition(pLevel->m_pResource, D3D12_RESOURCE_STATE_UNORDERED_ACCESS, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
   return true;
+}
+
+bool CD3D12Renderer::DispatchExposure(ID3D12Resource *pScene, int nWidth, int nHeight, ID3D12Resource *pDepth, DXGI_FORMAT DepthFormat,
+                                      bool bDepthReadable)
+{
+  if (!pScene || nWidth <= 0 || nHeight <= 0 || !EnsureExposureTargets())
+    return false;
+  // The scene, the depth (or none: no sky); the words and the target are in the table already.
+  const int nTable = m_Hdr.ExposureTables[m_pDevice->GetFrameSlot()];
+  m_pDescriptors->WriteSRV(nTable, pScene, nullptr);
+  D3D12_SHADER_RESOURCE_VIEW_DESC SRV = {};
+  SRV.Format = pDepth ? DepthFormat : D3D12_HDR_FORMAT;
+  SRV.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
+  SRV.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+  SRV.Texture2D.MipLevels = 1;
+  m_pDescriptors->WriteSRV(nTable + 1, pDepth, &SRV);
+
+  SExposureConstants ec = {};
+  Set4(ec.vSize, (float)nWidth, (float)nHeight, 1.0f / nWidth, 1.0f / nHeight);
+  const float fLow = std::clamp(CV_d3d12_ExposureLow, 0.0f, 1.0f), fHigh = std::clamp(CV_d3d12_ExposureHigh, 0.0f, 1.0f);
+  Set4(ec.vParams, HDR_EXPOSURE_KEY_LOG2, std::min(fLow, fHigh), std::max(fLow, fHigh), std::clamp(CV_d3d12_ExposureHighlights, 0.0f, 1.0f));
+  // The knee as light: the display value decoded (HdrDecode); the clamp's is white.
+  const float fKnee = std::clamp(CV_d3d12_ToneMapKnee, 0.01f, 0.99f);
+  Set4(ec.vParams1, CV_d3d12_ToneMap == 0 ? 0.0f : 2.2f * log2f(fKnee), pDepth ? 1.0f : 0.0f, 0, 0);
+  const UINT nStride = (UINT)std::max(lroundf(sqrtf((float)nWidth * nHeight / EXPOSURE_SAMPLES)), 1L);
+  ec.vStride[0] = nStride;
+  const SD3D12FrameAlloc CB = m_pUpload->AllocFrame(sizeof(ec), 256);
+  memcpy(CB.pCPU, &ec, sizeof(ec));
+
+  m_pDevice->EndOffscreen();
+  ID3D12GraphicsCommandList *pList = m_pDevice->GetCmdList();
+  ID3D12Resource *pTarget = m_Hdr.pExposureTarget->m_pResource;
+  if (pDepth && !bDepthReadable)
+    m_pDevice->Transition(pDepth, D3D12_RESOURCE_STATE_DEPTH_WRITE, DEPTH_READ_COMPUTE);
+  m_pDevice->Transition(pTarget, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+  // 16 x 16 samples a group, then one group.
+  const UINT nGroupPixels = 16 * nStride;
+  m_pCompute->Dispatch(pList, eD3D12K_ExposureHistogram, CB.nGPU, nTable, nTable + CD3D12Compute::COMPUTE_SRVS,
+                       (UINT)(nWidth + nGroupPixels - 1) / nGroupPixels, (UINT)(nHeight + nGroupPixels - 1) / nGroupPixels);
+  m_pDevice->UavBarrier(m_Hdr.pExposureWords.Get());
+  m_pCompute->Dispatch(pList, eD3D12K_ExposureTarget, CB.nGPU, nTable, nTable + CD3D12Compute::COMPUTE_SRVS, 1, 1);
+  m_pDevice->UavBarrier(m_Hdr.pExposureWords.Get());
+  m_pDevice->Transition(pTarget, D3D12_RESOURCE_STATE_UNORDERED_ACCESS, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+  if (pDepth && !bDepthReadable)
+    m_pDevice->Transition(pDepth, DEPTH_READ_COMPUTE, D3D12_RESOURCE_STATE_DEPTH_WRITE);
+  return true;
+}
+
+bool CD3D12Renderer::EnsureExposureTargets()
+{
+  if (m_Hdr.pExposureWords)
+    return true;
+  if (m_Hdr.bExposureFailed || !m_pCompute || !m_pUpload || !m_pDevice->IsInFrame())
+    return false;
+  ID3D12Device *pDevice = m_pDevice->GetDevice();
+  const D3D12_HEAP_PROPERTIES Default = { D3D12_HEAP_TYPE_DEFAULT };
+  D3D12_RESOURCE_DESC Desc = {};
+  Desc.Dimension = D3D12_RESOURCE_DIMENSION_BUFFER;
+  Desc.Width = EXPOSURE_WORDS_BYTES;
+  Desc.Height = 1;
+  Desc.DepthOrArraySize = 1;
+  Desc.MipLevels = 1;
+  Desc.SampleDesc.Count = 1;
+  Desc.Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
+  Desc.Flags = D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS;
+  bool bOk = m_pCompute->HasKernel(eD3D12K_ExposureHistogram) && m_pCompute->HasKernel(eD3D12K_ExposureTarget) &&
+             SUCCEEDED(pDevice->CreateCommittedResource(&Default, D3D12_HEAP_FLAG_NONE, &Desc, D3D12_RESOURCE_STATE_COMMON, nullptr,
+                                                        IID_PPV_ARGS(&m_Hdr.pExposureWords)));
+  m_Hdr.pExposureTarget = bOk ? m_pUpload->CreateRenderTarget(1, 1, DXGI_FORMAT_R32G32B32A32_FLOAT, true) : nullptr;
+  bOk = bOk && m_Hdr.pExposureTarget && m_Hdr.pExposureTarget->m_nSRV >= 0;
+  // The tables: t0 the scene and t1 the depth each frame, u0 the words, u1 the target; the views the kernels do not use null.
+  D3D12_SHADER_RESOURCE_VIEW_DESC NullSRV = {};
+  NullSRV.Format = D3D12_HDR_FORMAT;
+  NullSRV.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
+  NullSRV.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+  NullSRV.Texture2D.MipLevels = 1;
+  D3D12_UNORDERED_ACCESS_VIEW_DESC NullUAV = {};
+  NullUAV.Format = D3D12_HDR_FORMAT;
+  NullUAV.ViewDimension = D3D12_UAV_DIMENSION_TEXTURE2D;
+  D3D12_UNORDERED_ACCESS_VIEW_DESC WordsUAV = {};
+  WordsUAV.Format = DXGI_FORMAT_R32_TYPELESS;
+  WordsUAV.ViewDimension = D3D12_UAV_DIMENSION_BUFFER;
+  WordsUAV.Buffer.NumElements = XR_EXPOSURE_WORDS;
+  WordsUAV.Buffer.Flags = D3D12_BUFFER_UAV_FLAG_RAW;
+  D3D12_UNORDERED_ACCESS_VIEW_DESC TargetUAV = {};
+  TargetUAV.Format = DXGI_FORMAT_R32G32B32A32_FLOAT;
+  TargetUAV.ViewDimension = D3D12_UAV_DIMENSION_TEXTURE2D;
+  m_Hdr.ExposureTables.assign(D3D12_FRAMES, -1);
+  for (int &nTable : m_Hdr.ExposureTables)
+  {
+    if (!bOk || (nTable = m_pDescriptors->AllocRange(KERNEL_TABLE)) < 0)
+    {
+      bOk = false;
+      continue;
+    }
+    for (int i = 0; i < CD3D12Compute::COMPUTE_SRVS; i++)
+      m_pDescriptors->WriteSRV(nTable + i, nullptr, &NullSRV);
+    m_pDescriptors->WriteUAV(nTable + CD3D12Compute::COMPUTE_SRVS, m_Hdr.pExposureWords.Get(), &WordsUAV);
+    m_pDescriptors->WriteUAV(nTable + CD3D12Compute::COMPUTE_SRVS + 1, m_Hdr.pExposureTarget->m_pResource, &TargetUAV);
+    for (int i = 2; i < CD3D12Compute::COMPUTE_UAVS; i++)
+      m_pDescriptors->WriteUAV(nTable + CD3D12Compute::COMPUTE_SRVS + i, nullptr, &NullUAV);
+  }
+  // The words zero (a copy of zeros from the frame memory: a buffer is created common, the copy promotes it), then the
+  // kernels' for good.
+  const SD3D12FrameAlloc Zeros = bOk ? m_pUpload->AllocFrame(EXPOSURE_WORDS_BYTES, 256) : SD3D12FrameAlloc{};
+  if (!bOk || !Zeros.pCPU)
+  {
+    iLog->LogWarning("XRenderD3D12: no histogram for the automatic exposure (d3d12_ExposureMeter 1): no buffer, target or kernels; the mean");
+    ReleaseExposureTargets();
+    m_Hdr.bExposureFailed = true;
+    return false;
+  }
+  m_Hdr.pExposureWords->SetName(L"XRenderD3D12 exposure histogram");
+  memset(Zeros.pCPU, 0, EXPOSURE_WORDS_BYTES);
+  m_pDevice->EndOffscreen();
+  m_pDevice->GetCmdList()->CopyBufferRegion(m_Hdr.pExposureWords.Get(), 0, Zeros.pResource, Zeros.nOffset, EXPOSURE_WORDS_BYTES);
+  m_pDevice->Transition(m_Hdr.pExposureWords.Get(), D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+  return true;
+}
+
+void CD3D12Renderer::ReleaseExposureTargets()
+{
+  if (m_pDescriptors)
+  {
+    for (int nTable : m_Hdr.ExposureTables)
+    {
+      if (nTable >= 0)
+        m_pDescriptors->FreeRange(nTable, KERNEL_TABLE);
+    }
+  }
+  m_Hdr.ExposureTables.clear();
+  if (m_pDevice && m_Hdr.pExposureWords)
+    m_pDevice->DeferredRelease(m_Hdr.pExposureWords);
+  m_Hdr.pExposureWords.Reset();
+  if (m_pUpload)
+    m_pUpload->ReleaseTexture(m_Hdr.pExposureTarget);
+  m_Hdr.pExposureTarget = nullptr;
+  m_Hdr.bExposureHistogram = false;
 }
 
 bool CD3D12Renderer::DispatchBloomLevel(size_t nLevel, ID3D12Resource *pSource, int nSourceWidth, int nSourceHeight, const SDrawConstants &dc)
@@ -555,6 +708,8 @@ void CD3D12Renderer::ReleaseHdrColor()
 void CD3D12Renderer::ReleaseHdr()
 {
   ReleaseHdrTargets();
+  ReleaseExposureTargets();
+  m_Hdr.bExposureFailed = false;
   ReleaseHdrColor();
   ReleaseColorGrading();
 }
@@ -566,14 +721,25 @@ void CD3D12Renderer::DumpHdr()
           m_Hdr.nWidth, m_Hdr.nHeight, s_ToneMapNames[nToneMap], CV_d3d12_ToneMapKnee, CV_d3d12_Exposure, CV_d3d12_AutoExposure,
           CV_d3d12_ExposureMin, CV_d3d12_ExposureMax, CV_d3d12_ExposureSpeed, CV_d3d12_Bloom, CV_d3d12_BloomThreshold,
           m_bHeatVision ? ", heat vision: clamped" : "");
+  fprintf(m_pFrameDump.get(), "hdr: meter %d (%s; window %g to %g, sky's highlights %g)\n", CV_d3d12_ExposureMeter,
+          m_Hdr.bExposureHistogram ? "histogram" : "mean", CV_d3d12_ExposureLow, CV_d3d12_ExposureHigh, CV_d3d12_ExposureHighlights);
   fprintf(m_pFrameDump.get(), "hdr: brighter than the game: sun %g, sky %g, glow %g; colour grading %s: saturation %g, contrast %g, temperature %g, tint %g, "
           "lut \"%s\" (%d, amount %g)\n", CV_d3d12_HDRSun, CV_d3d12_HDRSky, CV_d3d12_HDRGlow, m_Grading.pLut ? "on" : "off", m_Grading.fSaturation,
           m_Grading.fContrast, m_Grading.fTemperature, m_Grading.fTint, m_Grading.LutFile.c_str(), m_Grading.nCubeSize, m_Grading.fLutAmount);
   // The meter's mean and the adapted EV, read back (this frame is executed so far).
   if (!m_Hdr.bAdapted || m_Hdr.Meter.empty())
     return;
-  uint16 Meter[4] = {};
   float fEV = 0;
+  if (m_Hdr.bExposureHistogram)
+  {
+    float Target[4] = {};
+    if (m_pDevice->ReadBackTexture(m_Hdr.pExposureTarget->m_pResource, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, (uint8 *)Target, 1, 1) &&
+        m_pDevice->ReadBackTexture(m_Hdr.pExposure[m_Hdr.nExposure]->m_pResource, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, (uint8 *)&fEV, 1, 1))
+      fprintf(m_pFrameDump.get(), "hdr: histogram mean log2 luminance %.3f, target %+.3f EV, sky %.1f %% (ceiling %+.3f EV), adapted %+.3f EV\n",
+              Target[1], Target[0], 100 * Target[3], Target[2], fEV);
+    return;
+  }
+  uint16 Meter[4] = {};
   if (m_pDevice->ReadBackTexture(m_Hdr.Meter.back()->m_pResource, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, (uint8 *)Meter, 1, 1) &&
       m_pDevice->ReadBackTexture(m_Hdr.pExposure[m_Hdr.nExposure]->m_pResource, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, (uint8 *)&fEV, 1, 1))
   {

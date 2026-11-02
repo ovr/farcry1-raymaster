@@ -27,7 +27,9 @@
 //	                  EV before: vParams0 x log2 of the key, y the least EV,
 //	                  z the most, w 1: no history (the target EV at once);
 //	                  vParams1 x the step towards a smaller EV (a brighter
-//	                  scene), y towards a larger one
+//	                  scene), y towards a larger one, z 1: tex0 the
+//	                  histogram's target instead (d3d12_ExposureMeter 1,
+//	                  Exposure.hlsl: x the target EV)
 //	  HDR_BLOOM_DOWN  tex0 the level before, vParams0.zw one of its texels in
 //	                  uv: the 13 taps of a 6 x 6 footprint (a box of 4 x 4 and
 //	                  four of 2 x 2). With HDR_BLOOM_PREFILTER tex0 is the
@@ -139,9 +141,15 @@ float4 Reduce(float2 vPixel)
 
 float4 Adapt()
 {
-  float2 vMeter = g_Textures[g_Draw.nTex0].Load(int3(0, 0, 0)).rg;
-  float fMeanLog = vMeter.y > 0 ? vMeter.x / vMeter.y : 0;
-  float fTarget = clamp(g_Draw.vParams0.x - fMeanLog, g_Draw.vParams0.y, g_Draw.vParams0.z);
+  float fTarget;
+  if (g_Draw.vParams1.z > 0)
+    fTarget = clamp(g_Textures[g_Draw.nTex0].Load(int3(0, 0, 0)).r, g_Draw.vParams0.y, g_Draw.vParams0.z);
+  else
+  {
+    float2 vMeter = g_Textures[g_Draw.nTex0].Load(int3(0, 0, 0)).rg;
+    float fMeanLog = vMeter.y > 0 ? vMeter.x / vMeter.y : 0;
+    fTarget = clamp(g_Draw.vParams0.x - fMeanLog, g_Draw.vParams0.y, g_Draw.vParams0.z);
+  }
   float fBefore = g_Textures[g_Draw.nTex1].Load(int3(0, 0, 0)).r;
   if (g_Draw.vParams0.w > 0 || !(abs(fBefore) < 100))
     return float4(fTarget, 0, 0, 0);

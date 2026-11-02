@@ -30,7 +30,8 @@
 //	histogram of the scene's light (log2, before the exposure; the bars
 //	grey below the tone map's knee, orange in its shoulder, red at white
 //	and above; the marks: white yellow, the knee orange, the meter's mean
-//	green), the exposure, its target and range, percentiles of the exposed
+//	green), the exposure, its target and range (d3d12_ExposureMeter 1: the
+//	histogram's window, the sky's share and ceiling), percentiles of the exposed
 //	light, the tone map, how much of the frame is in its shoulder and at
 //	white, the bloom and the volumetric light, the output, the display's
 //	levels and the output's measured nits.
@@ -569,7 +570,17 @@ void CD3D12Renderer::DrawStats()
     if (bFresh)
     {
       const double fSamples = std::max<double>(w[XR_HDR_STAT_SAMPLES], 1);
-      if (f.bAuto)
+      if (f.bAuto && f.bHistogram)
+      {
+        // d3d12_ExposureMeter 1: the target, the window's mean, the sky's ceiling.
+        const float fTarget = std::clamp(Float(w[XR_HDR_STAT_TARGET]), f.fExposureMin, f.fExposureMax);
+        const float fCeiling = Float(w[XR_HDR_STAT_CEILING]), fSky = Float(w[XR_HDR_STAT_SKY]);
+        Value("Exposure", Format("%+.2f EV (target %+.2f, %g to %g)", fEV, fTarget, f.fExposureMin, f.fExposureMax));
+        Value("Meter: histogram", Format("mean %.2f of %.0f-%.0f %% (key %.2f)", fMeter, 100 * f.fLow, 100 * f.fHigh, HDR_EXPOSURE_KEY_LOG2));
+        Value("Sky", fCeiling < XR_EXPOSURE_NONE ? Format("%.1f %% of the frame, at the knee %+.2f EV", 100 * fSky, fCeiling)
+                                                 : Format("%.1f %% of the frame", 100 * fSky));
+      }
+      else if (f.bAuto)
       {
         const float fTarget = std::clamp(HDR_EXPOSURE_KEY_LOG2 - fMeter, f.fExposureMin, f.fExposureMax);
         Value("Exposure", Format("%+.2f EV (target %+.2f, %g to %g)", fEV, fTarget, f.fExposureMin, f.fExposureMax));
