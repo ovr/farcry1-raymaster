@@ -29,6 +29,8 @@
 #include "DepthTilesUp_CS.h"
 #include "VolumetricInject_CS.h"
 #include "VolumetricIntegrate_CS.h"
+#include "HdrHistogram_CS.h"
+#include "HdrOutputStats_CS.h"
 #include "RaySunTrace_CS.h"
 #include "RaySunTemporal_CS.h"
 #include "RaySunFilter_CS.h"
@@ -85,6 +87,8 @@ const SKernel s_Kernels[eD3D12K_Num] =
   { "depth tiles (levels 5, 6)", g_DepthTilesUp_CS, sizeof(g_DepthTilesUp_CS) },
   { "volumetric light", g_VolumetricInject_CS, sizeof(g_VolumetricInject_CS) },
   { "volumetric light (integration)", g_VolumetricIntegrate_CS, sizeof(g_VolumetricIntegrate_CS) },
+  { "HDR statistics (histogram)", g_HdrHistogram_CS, sizeof(g_HdrHistogram_CS) },
+  { "HDR statistics (output)", g_HdrOutputStats_CS, sizeof(g_HdrOutputStats_CS) },
   { "sun's shadow by rays", g_RaySunTrace_CS, sizeof(g_RaySunTrace_CS), true },
   { "sun's shadow by rays (history)", g_RaySunTemporal_CS, sizeof(g_RaySunTemporal_CS), true },
   { "sun's shadow by rays (filter)", g_RaySunFilter_CS, sizeof(g_RaySunFilter_CS), true },

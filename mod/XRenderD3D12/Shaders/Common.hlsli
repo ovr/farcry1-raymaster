@@ -98,19 +98,7 @@ float3 SafeNormalize(float3 v)
 // HdrDecode, HdrEncode: the light of a colour of the game and back.
 #include "HdrLight.hlsli"
 
-//! The highlight layer of the HDR output (HdrOutput.cpp). A pass that puts the scene into the
-//! 8-bit back buffer also writes the layer: rgb the light of the scene on an HDR display over the
-//! light of its colour in the back buffer, per channel, and a the fingerprint of that colour as the
-//! back buffer stores it (8 bits a channel). The output pass takes the layer's light where the
-//! back buffer still holds that colour, i.e. where nothing was drawn over the scene since. One
-//! channel one step off (rounding) still matches: 0.45 / 255 at most, within HIGHLIGHT_TOLERANCE
-//! with the layer's half float.
-static const float3 HIGHLIGHT_WEIGHTS = float3(0.3, 0.45, 0.25);
-static const float HIGHLIGHT_TOLERANCE = 0.6 / 255;
-float HighlightFingerprint(float3 c)
-{
-  return dot(round(saturate(c) * 255), HIGHLIGHT_WEIGHTS) / 255;
-}
+// The highlight layer's fingerprint (HighlightFingerprint) is in HdrLight.hlsli.
 
 //! The outputs of a pass that writes the highlight layer (SPipelineKey::nTarget 4).
 struct SHighlightOutput

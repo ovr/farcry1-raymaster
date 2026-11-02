@@ -110,6 +110,31 @@ reference of its features and console variables.
     bloom alone, `3` the sky mask (white where the depth buffer is at the far plane: nothing but the
     sky drawn there; for the checks of the HDR test bench). The frame dump gets the settings, the
     meter's mean and the adapted EV.
+  - The HDR statistics (`HdrStats.cpp`, `Shaders/HdrStats.hlsl`), only while `d3d12_DisplayHDR`
+    or `d3d12_HDRLog` is on (without them nothing runs and the frames are as before): after the
+    adaptation a kernel adds up a histogram of the scene's light (a sample every 2 pixels across
+    and down, before the exposure, as the meter takes it: 64 bins of log2 from -12 to +8, by the
+    luminance as it is and by the meter's centre weight, and by the brightest channel), how much
+    of it exposed is in the tone map's shoulder (above `d3d12_ToneMapKnee`) and at the game's
+    white or above, and the frame's EV and meter's mean; when the output pass runs or a demo
+    captures HDR10, another adds up the output's nits as the output pass gives them (the
+    brightest channel of each sample: their mean, the most, how many above paper white and at the
+    peak). The words are copied to a readback buffer per frame slot and read when the slot comes
+    again: the numbers are `D3D12_FRAMES` frames old, and the GPU is never waited for.
+    `d3d12_DisplayHDR 1` draws them as a panel at the top right, below `r_DisplayInfo`'s (in the
+    demos' frames and clips too): the histogram (the bars by the square root of their samples,
+    grey below the knee, orange in the shoulder, red at white and above; the marks: white yellow,
+    the knee orange, the meter's mean green), the exposure with its target and range, the meter's
+    mean and key, the 50th, 95th and 99th percentiles of the exposed light in EV from white, the
+    tone map, the shares in the shoulder and at white, the bloom and the volumetric light, the
+    output and its levels, the display's (peak, full frame, SDR white), and with an HDR output or
+    capture the measured nits: the frame's average and its MaxCLL, the shares above paper white
+    and at the peak. `d3d12_HDRLog 1` writes a line of them per frame to
+    `farcry1_testing1/XRenderD3D12_hdr.txt` (never committed): the engine's frame, the EV, the
+    automatic exposure's target, the meter's mean, log2 of the scene's light at the percentiles
+    1, 5, 25, 50, 75, 95 and 99, the shares in the shoulder and at white, the output's mean and
+    most nits and the shares above paper white and at the peak, the output and its levels, the
+    camera, and the samples of each of the histogram's bins.
   - What the game draws as light sources is brighter in the HDR targets (`IsHdrTarget`: not in
     heat vision), each a factor of white's light, 1 the game's: `d3d12_HDRSun` (8) the sun's
     flare, `d3d12_HDRSky` (2) the sky towards the sun (`DF2_SKY_GLOW`, falling off with the
@@ -136,7 +161,7 @@ reference of its features and console variables.
     -1): the pass that puts the scene into the back buffer (the resolve, or the upscaler's
     composite) also writes the ratio of the scene's light on the HDR display to the light of its
     SDR colour per channel, and a fingerprint of that colour (`HighlightFingerprint`,
-    `Shaders/Common.hlsli`). The tone map goes on above its knee up to the peak instead of white
+    `Shaders/HdrLight.hlsli`). The tone map goes on above its knee up to the peak instead of white
     (`HighlightRatio`, `Shaders/Hdr.hlsl`: the soft shoulder's excess, which ACES and AgX are
     mapped to), so below the knee the ratio is 1. The output pass before Present (`HDR_OUTPUT`)
     gives each pixel the light of its SDR colour, times the ratio where the fingerprint still

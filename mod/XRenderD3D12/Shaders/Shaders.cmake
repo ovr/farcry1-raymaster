@@ -130,7 +130,7 @@ xrender_d3d12_shader(PathComposite_PS PathComposite.hlsl ps_6_0 PSMain)
 
 # The compute kernels (D3D12Compute.h, ED3D12Kernel): Intel XeGTAO's passes (XeGtao.hlsl, one per
 # compile), the ambient occlusion's resolve, the HDR meter's first level, the bloom's levels, the
-# depth tiles of the water's depth copy and the volumetric light's froxels.
+# depth tiles of the water's depth copy, the volumetric light's froxels and the HDR statistics.
 xrender_d3d12_shader(Gtao_PrefilterDepths_CS XeGtao.hlsl cs_6_0 CSMain XR_GTAO_PREFILTER)
 xrender_d3d12_shader(Gtao_Normals_CS XeGtao.hlsl cs_6_0 CSMain XR_GTAO_NORMALS)
 xrender_d3d12_shader(Gtao_Low_CS XeGtao.hlsl cs_6_0 CSMain XR_GTAO_MAIN XR_GTAO_SLICES=1 XR_GTAO_STEPS=2)
@@ -146,6 +146,8 @@ xrender_d3d12_shader(DepthTiles_CS DepthTiles.hlsl cs_6_0 CSMain)
 xrender_d3d12_shader(DepthTilesUp_CS DepthTiles.hlsl cs_6_0 CSMain XR_TILES_UP)
 xrender_d3d12_shader(VolumetricInject_CS Volumetric.hlsl cs_6_0 CSInject)
 xrender_d3d12_shader(VolumetricIntegrate_CS Volumetric.hlsl cs_6_0 CSIntegrate)
+xrender_d3d12_shader(HdrHistogram_CS HdrStats.hlsl cs_6_0 CSHistogram)
+xrender_d3d12_shader(HdrOutputStats_CS HdrStats.hlsl cs_6_0 CSOutput)
 # The sun's shadow by rays (d3d12_RTSunShadows, RaySun.cpp): Shader Model 6.5 (inline RayQuery), the compute root
 # signature with rays (D3D12Compute.h), run only on a device with DXR 1.1.
 xrender_d3d12_shader(RaySunTrace_CS RaySun.hlsl cs_6_5 CSTrace)

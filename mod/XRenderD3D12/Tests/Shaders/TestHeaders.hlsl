@@ -16,6 +16,7 @@
 #include "RayConstants.h"
 #include "PathGBuffer.hlsli"
 #include "HdrLight.hlsli"
+#include "HdrShared.hlsli"
 #include "PathCache.hlsli"
 
 //! PathOctEncode / PathOctDecode of the unit vector g_TestIn[i].xyz: out[3i] the map's point, out[3i + 1] its vector, out[3i + 2]
@@ -54,6 +55,25 @@ void CSHdr(uint i : SV_DispatchThreadID)
     return;
   const float x = TestIn(i).x;
   TestOut(i, float4(HdrDecode(x), HdrEncode(x), HdrEncode(HdrDecode(x)), HdrDecode(HdrEncode(x))));
+}
+
+//! The HDR statistics' maths (HdrShared.hlsli, HdrLight.hlsli). g_Test.nTest.y 0: of g_TestIn[i] = (light, u, v, 0) out[i] =
+//! (HdrHistogramBin of the light as a word, MeterWeight at (u, v) of a 1920 x 1080 screen, 0, 0); 1: LayerRatio of the frame's
+//! colour g_TestIn[2i].rgb and the layer g_TestIn[2i + 1]: out[i] = (the ratio, 1 where the layer has the scene).
+[numthreads(64, 1, 1)]
+void CSHdrStats(uint i : SV_DispatchThreadID)
+{
+  if (i >= g_Test.nTest.x)
+    return;
+  if (g_Test.nTest.y == 0)
+  {
+    const float4 a = TestIn(i);
+    TestOut(i, float4(asfloat(HdrHistogramBin(a.x)), MeterWeight(a.yz, float2(1 / 1920.0, 1 / 1080.0)), 0, 0));
+    return;
+  }
+  bool bScene;
+  const float3 vRatio = LayerRatio(TestIn(i * 2).rgb, TestIn(i * 2 + 1), bScene);
+  TestOut(i, float4(vRatio, bScene ? 1 : 0));
 }
 
 //! PathCacheCellOf and PathCacheCellSize of the point g_TestIn[2i].xyz with the normal g_TestIn[2i + 1].xyz, vCache g_Test.vTest, the

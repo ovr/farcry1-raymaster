@@ -26,7 +26,14 @@
 //	angles and distance, the frame rate (half a second's, and of its
 //	slowest and fastest frames), the triangles and the lights of the frame,
 //	the anti-aliasing, the upscaler and the 3D scene's size before and
-//	after it.
+//	after it. d3d12_DisplayHDR's panel (HdrStats.cpp) is below it: the
+//	histogram of the scene's light (log2, before the exposure; the bars
+//	grey below the tone map's knee, orange in its shoulder, red at white
+//	and above; the marks: white yellow, the knee orange, the meter's mean
+//	green), the exposure, its target and range, percentiles of the exposed
+//	light, the tone map, how much of the frame is in its shoulder and at
+//	white, the bloom and the volumetric light, the output, the display's
+//	levels and the output's measured nits.
 //
 //////////////////////////////////////////////////////////////////////
 
@@ -37,6 +44,7 @@
 #include "D3D12Pipeline.h"
 #include "RayTracing.h"
 #include "CpuSampler.h"
+#include "HdrStatsMath.h"
 #include <CryVersion.h>
 
 namespace
@@ -290,8 +298,8 @@ void CD3D12Renderer::CollectStats()
 
 void CD3D12Renderer::DrawStats()
 {
-  const bool bStats = CV_r_Stats > 0, bInfo = m_DisplayInfo.nValue > 0;
-  if ((!bStats && !bInfo) || !m_pDevice || !m_pDevice->IsInFrame() || m_nStatsDrawnFrame == m_nFrameID)
+  const bool bStats = CV_r_Stats > 0, bInfo = m_DisplayInfo.nValue > 0, bHdr = CV_d3d12_DisplayHDR > 0;
+  if ((!bStats && !bInfo && !bHdr) || !m_pDevice || !m_pDevice->IsInFrame() || m_nStatsDrawnFrame == m_nFrameID)
     return;
   m_nStatsDrawnFrame = m_nFrameID;
   ICryFont *pCryFont = iSystem ? iSystem->GetICryFont() : nullptr;
@@ -352,6 +360,7 @@ void CD3D12Renderer::DrawStats()
 
   // The frames so far until the first half second is over.
   const SFrameStats &S = m_Stats.nFrames ? m_Stats : m_StatsSum;
+  float fInfoBottom = 0;                  // below r_DisplayInfo's panel
   const double fFrames = std::max(S.nFrames, 1);
   std::vector<SStatsLine> Lines;
   const auto Add = [&Lines](std::string Left, bool bDim = false) -> SStatsLine &
@@ -534,6 +543,112 @@ void CD3D12Renderer::DrawStats()
     const float fValueRight = fPad + fNameWidth + 12 + fValueWidth;
     const SPanelColumns Columns = { 0, 0, fValueRight, fValueRight, fValueRight + fPad };
     DrawPanel(Lines, 800 - fMargin - PanelWidth(Lines, Columns), fMargin, Columns);
+    fInfoBottom = fMargin + Lines.size() * fStep + 2 * fPad;
+  }
+
+  if (bHdr)
+  {
+    // d3d12_DisplayHDR below it (HdrStats.cpp): the frame of D3D12_FRAMES before.
+    Lines.clear();
+    const auto Value = [&Add](const char *szName, std::string Text) { Add(szName).Value = std::move(Text); };
+    const SHdrStatsFrame &f = m_HdrStats.Last;
+    const bool bOn = IsHdrOn();
+    const bool bFresh = bOn && f.nFrame >= 0 && m_nFrameID - f.nFrame <= D3D12_FRAMES + 2 && f.bScene;
+    const uint32 *w = f.Words;
+    const auto Float = [](uint32 n) { float x; memcpy(&x, &n, sizeof(x)); return x; };
+    Add(!bOn ? std::string("HDR: r_HDRRendering is 0")
+             : bFresh ? Format("HDR, frame %d (%d frames ago)", f.nFrame, m_nFrameID - f.nFrame) : std::string("HDR: no 3D scene now"), true);
+    // The histogram's rows (drawn over them below), then its axis.
+    constexpr int HIST_ROWS = 5;
+    const size_t nHistLine = Lines.size();
+    for (int i = 0; i < HIST_ROWS; i++)
+      Add("");
+    Add(Format("light (log2) %d", XR_HDR_HIST_MIN), true).Value = Format("%+d", XR_HDR_HIST_MAX);
+    const float fEV = bFresh ? Float(w[XR_HDR_STAT_EV]) : 0, fMeter = bFresh ? Float(w[XR_HDR_STAT_METER]) : 0;
+    const float fKneeLog = f.nToneMap == 0 ? 0.0f : 2.2f * log2f(std::max(f.fKnee, 1e-3f));
+    if (bFresh)
+    {
+      const double fSamples = std::max<double>(w[XR_HDR_STAT_SAMPLES], 1);
+      if (f.bAuto)
+      {
+        const float fTarget = std::clamp(HDR_EXPOSURE_KEY_LOG2 - fMeter, f.fExposureMin, f.fExposureMax);
+        Value("Exposure", Format("%+.2f EV (target %+.2f, %g to %g)", fEV, fTarget, f.fExposureMin, f.fExposureMax));
+        Value("Meter's mean", Format("%.2f (key %.2f)", fMeter, HDR_EXPOSURE_KEY_LOG2));
+      }
+      else
+        Value("Exposure", Format("%+.2f EV (fixed)", fEV));
+      // The scene's light exposed, in EV from the game's white.
+      const uint32 *pLuma = &w[XR_HDR_STAT_LUMA];
+      Value("Exposed p50 / p95 / p99", Format("%+.1f / %+.1f / %+.1f EV", HdrHistPercentile(pLuma, 0.5) + fEV, HdrHistPercentile(pLuma, 0.95) + fEV,
+                                              HdrHistPercentile(pLuma, 0.99) + fEV));
+      static const char *const szToneMaps[] = { "clamp", "soft shoulder", "ACES fitted", "AgX" };
+      Value("Tone map", f.nToneMap == 0 ? std::string(szToneMaps[0]) : Format("%s, knee %.2f", szToneMaps[f.nToneMap], f.fKnee));
+      Value("In the shoulder / at white", Format("%.1f %% / %.1f %%", 100 * w[XR_HDR_STAT_SHOULDER] / fSamples, 100 * w[XR_HDR_STAT_WHITE] / fSamples));
+      Value("Bloom, volumetric light", Format("%g, %s", f.fBloom, f.bVolumetric ? "on" : "off"));
+    }
+    // The output and the display.
+    const SDisplayInfo &Display = m_pDevice->GetDisplayInfo();
+    const EDisplayOutput Output = m_pDevice->GetOutput();
+    Value("Output", Output == EDisplayOutput::Sdr ? std::string(m_pDevice->HasLayer() ? "SDR (HDR10 captured)" : "SDR")
+                                                  : Format("%s, %g / %g nits", Output == EDisplayOutput::Hdr10 ? "HDR10" : "scRGB", m_HdrOut.fPaperWhite,
+                                                           m_HdrOut.fPeak));
+    if (Display.szName[0])
+      Value("Display", Display.bHdr ? Format("HDR, peak %.0f, full frame %.0f, SDR white %.0f", Display.fMaxNits, Display.fMaxFullFrameNits,
+                                             Display.fSdrWhiteNits)
+                                    : std::string("SDR"));
+    if (bFresh && f.bOutput && w[XR_HDR_STAT_OUT_PIXELS])
+    {
+      const double fOut = w[XR_HDR_STAT_OUT_PIXELS];
+      Value("Nits: average, MaxCLL", Format("%.0f, %.0f (of %g / %g)", w[XR_HDR_STAT_OUT_SUM] * (double)XR_HDR_NITS_UNIT / fOut,
+                                           Float(w[XR_HDR_STAT_OUT_MAX]), f.fPaperWhite, f.fPeak));
+      Value("Above paper white / at peak", Format("%.1f %% / %.1f %%", 100 * w[XR_HDR_STAT_OUT_PAPER] / fOut, 100 * w[XR_HDR_STAT_OUT_PEAK] / fOut));
+    }
+    float fNameWidth = 0, fValueWidth = 0;
+    for (const SStatsLine &Line : Lines)
+    {
+      if (!Line.Value.empty())
+      {
+        fNameWidth = std::max(fNameWidth, TextWidth(Line.Left));
+        fValueWidth = std::max(fValueWidth, TextWidth(Line.Value));
+      }
+    }
+    const float fValueRight = std::max(fPad + fNameWidth + 12 + fValueWidth, 200.0f);
+    const SPanelColumns Columns = { 0, 0, fValueRight, fValueRight, fValueRight + fPad };
+    const float fWidth = PanelWidth(Lines, Columns), fLeft = 800 - fMargin - fWidth, fTop = fInfoBottom + fMargin;
+    DrawPanel(Lines, fLeft, fTop, Columns);
+    if (bFresh)
+    {
+      // The bars: the samples of each bin (by the square root, so that small ones show), grey up to
+      // the tone map's knee, orange in its shoulder, red at white and above; the marks: white
+      // (yellow), the knee (orange), the meter's mean (green).
+      const uint32 *pLuma = &w[XR_HDR_STAT_LUMA];
+      uint32 nMost = 1;
+      for (int i = 0; i < XR_HDR_HIST_BINS; i++)
+        nMost = std::max(nMost, pLuma[i]);
+      const float fX = fLeft + fPad, fW = fWidth - 2 * fPad, fBottom = fTop + fPad + (nHistLine + HIST_ROWS) * fStep - 1;
+      const float fH = HIST_ROWS * fStep - 2, fBin = fW / XR_HDR_HIST_BINS;
+      for (int i = 0; i < XR_HDR_HIST_BINS; i++)
+      {
+        if (!pLuma[i])
+          continue;
+        const float h = std::max(fH * sqrtf((float)pLuma[i] / nMost), 0.5f);
+        const float fTopLog = HdrHistLog2(i + 1.0f) + fEV;
+        const bool bWhite = fTopLog > 0, bShoulder = fTopLog > fKneeLog;
+        Draw2dImage(fX + i * fBin, fBottom - h, std::max(fBin - 0.5f, 0.5f), h, -1, 0, 0, 1, 1, 0, 1, bWhite ? 0.25f : bShoulder ? 0.6f : 1.0f,
+                    bShoulder ? 0.15f : 1.0f, bShoulder ? 0.9f : 0.55f, 0);
+      }
+      const auto Mark = [&](float fLog2, float r, float g, float b)
+      {
+        const float fAt = HdrHistBinOf(fLog2);
+        if (fAt >= 0 && fAt <= XR_HDR_HIST_BINS)
+          Draw2dImage(fX + fAt * fBin - 0.5f, fBottom - fH, 1, fH, -1, 0, 0, 1, 1, 0, r, g, b, 1, 0);
+      };
+      Mark(-fEV, 1, 0.95f, 0.2f);
+      if (f.nToneMap != 0)
+        Mark(fKneeLog - fEV, 1, 0.55f, 0.1f);
+      if (f.bAuto)
+        Mark(fMeter, 0.3f, 1, 0.3f);
+    }
   }
 
   SetViewport(SavedViewport[0], SavedViewport[1], SavedViewport[2], SavedViewport[3]);

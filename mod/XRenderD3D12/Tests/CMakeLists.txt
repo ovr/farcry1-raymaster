@@ -37,7 +37,7 @@ endfunction()
 
 # The headers that stand alone (Shader Model 6.0).
 set(headers "${CMAKE_CURRENT_SOURCE_DIR}/Shaders/TestHeaders.hlsl")
-foreach(k Oct GBufferNormal Hdr CacheCell CacheLookup CacheAdd CacheRead CachePoke)
+foreach(k Oct GBufferNormal Hdr HdrStats CacheCell CacheLookup CacheAdd CacheRead CachePoke)
     xrender_d3d12_test_shader(${k} "${headers}" cs_6_0 CS${k})
 endforeach()
 # The path tracer's functions, PathTrace.hlsl included as it is (Shader Model 6.5, as Shaders.cmake compiles it).
@@ -56,6 +56,7 @@ set(XRENDERD3D12_TESTS_SOURCES
     GpuHarness.h
     GpuHarness.cpp
     GBufferTests.cpp
+    HdrStatsTests.cpp
     CacheTests.cpp
     PathTraceTests.cpp
     LayoutTests.cpp

@@ -6,13 +6,15 @@
 //	Description: The maths of the HDR passes that both the program
 //	(Hdr.hlsl) and the kernels (Meter.hlsl, Bloom.hlsl) do: the light of
 //	the scene, the meter's first level (HDR_LUMINANCE), a level of the bloom
-//	from its 13 taps (HDR_BLOOM_DOWN). Without bindings.
+//	from its 13 taps (HDR_BLOOM_DOWN), the bin of the statistics' histogram
+//	(HdrStats.hlsl). Without bindings.
 //
 //////////////////////////////////////////////////////////////////////
 
 #ifndef XRENDERD3D12_HDRSHARED_HLSLI
 #define XRENDERD3D12_HDRSHARED_HLSLI
 
+#include "Constants.h"
 #include "HdrLight.hlsli"
 
 static const float3 LUMINANCE = float3(0.2126, 0.7152, 0.0722);   //!< of linear light (Rec. 709)
@@ -43,15 +45,30 @@ float2 MeterTapUV(float2 vUV, float2 vTexel, int x, int y, int n)
   return vUV + ((float2(x, y) + 0.5) / n - 0.5) * vTexel;
 }
 
+//! The meter's weight of the screen at vUV (vTexel: the size of a texel or pixel there in uv): the
+//! middle of the screen counts most, by the distance from it in half heights.
+float MeterWeight(float2 vUV, float2 vTexel)
+{
+  float2 d = (vUV - 0.5) * float2(vTexel.y / vTexel.x, 1) * 2;
+  return exp(-0.75 * dot(d, d));
+}
+
 //! Its texel at vUV from the sum of its taps' light: (w * log2 L, w), L the mean luminance
-//! (clamped to 2^-12 .. 2^8), w the weight of the texel (the middle of the screen counts most).
+//! (clamped to 2^-12 .. 2^8), w the weight of the texel (MeterWeight).
 float4 MeterTexel(float3 vSum, int n, float2 vUV, float2 vTexel)
 {
   float L = clamp(Luminance(vSum / (n * n)), exp2(-12.0), exp2(8.0));
-  // By the distance from the middle in half heights.
-  float2 d = (vUV - 0.5) * float2(vTexel.y / vTexel.x, 1) * 2;
-  float w = exp(-0.75 * dot(d, d));
+  float w = MeterWeight(vUV, vTexel);
   return float4(w * log2(L), w, 0, 0);
+}
+
+//! The bin of the HDR statistics' histogram (HdrStats.hlsl) of a light: by its log2 from
+//! XR_HDR_HIST_MIN to XR_HDR_HIST_MAX in XR_HDR_HIST_BINS steps, the light outside in the first or the
+//! last bin (0 in the first).
+uint HdrHistogramBin(float fLight)
+{
+  float x = (log2(max(fLight, 1e-30)) - XR_HDR_HIST_MIN) * (XR_HDR_HIST_BINS / (float)(XR_HDR_HIST_MAX - XR_HDR_HIST_MIN));
+  return (uint)clamp(floor(x), 0, XR_HDR_HIST_BINS - 1);
 }
 
 //! A texel of the next level from the 13 taps of a 6 x 6 footprint of the level before around it,
