@@ -113,6 +113,36 @@ function Set-ConfigValues([string] $Text, $Settings) {
 
 $QualitySettings = if ($Quality -ne 'keep') { Get-QualitySettings $Quality } else { $null }
 
+# The display's gamma ramp: the original renderer sets it from r_Gamma, r_Brightness and r_Contrast,
+# and a demo ends the game by killing it, so that the game does not put it back. At the display's own
+# size (no change of the display's mode, which resets the ramp) the desktop stayed as bright as the
+# game. Saved before each run, put back after.
+if (-not ('DemoGammaRamp' -as [type])) {
+    Add-Type @'
+using System;
+using System.Runtime.InteropServices;
+public static class DemoGammaRamp {
+    [DllImport("user32.dll")] static extern IntPtr GetDC(IntPtr hWnd);
+    [DllImport("user32.dll")] static extern int ReleaseDC(IntPtr hWnd, IntPtr hDC);
+    [DllImport("gdi32.dll")] static extern bool GetDeviceGammaRamp(IntPtr hDC, ushort[] Ramp);
+    [DllImport("gdi32.dll")] static extern bool SetDeviceGammaRamp(IntPtr hDC, ushort[] Ramp);
+    public static ushort[] Save() {
+        ushort[] Ramp = new ushort[768];
+        IntPtr hDC = GetDC(IntPtr.Zero);
+        bool bOk = GetDeviceGammaRamp(hDC, Ramp);
+        ReleaseDC(IntPtr.Zero, hDC);
+        return bOk ? Ramp : null;
+    }
+    public static bool Restore(ushort[] Ramp) {
+        IntPtr hDC = GetDC(IntPtr.Zero);
+        bool bOk = SetDeviceGammaRamp(hDC, Ramp);
+        ReleaseDC(IntPtr.Zero, hDC);
+        return bOk;
+    }
+}
+'@
+}
+
 function Invoke-Demo([string] $Name) {
     $Info = New-Object System.Diagnostics.ProcessStartInfo $Exe
     $Info.WorkingDirectory = $GameDir
@@ -145,6 +175,7 @@ function Invoke-Demo([string] $Name) {
         $Text = Set-ConfigValues ([System.Text.Encoding]::ASCII.GetString($Config)) $QualitySettings
         [System.IO.File]::WriteAllBytes($SystemCfg, [System.Text.Encoding]::ASCII.GetBytes($Text))
     }
+    $Ramp = [DemoGammaRamp]::Save()
     $Process = [System.Diagnostics.Process]::Start($Info)
     $null = $Process.StandardOutput.ReadToEndAsync()
     $null = $Process.StandardError.ReadToEndAsync()
@@ -155,6 +186,9 @@ function Invoke-Demo([string] $Name) {
         & taskkill.exe /PID $Process.Id /T /F | Out-Null
         $Process.WaitForExit()
         $ExitCode = 4
+    }
+    if ($Ramp -and -not [DemoGammaRamp]::Restore($Ramp)) {
+        Write-Warning "the display's gamma ramp could not be put back"
     }
     [System.IO.File]::WriteAllBytes($SystemCfg, $Config)
     foreach ($File in $Profiles.Keys) {
