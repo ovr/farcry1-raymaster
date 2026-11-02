@@ -221,7 +221,7 @@ instructions and is not committed (git-ignored). The references of the modules a
   DemoReplay with `-DemoArgs '--exec-at 1 "<variable> <value>"'` against the same run without it.
 - The features and their variables, described in `mod/XRenderD3D12/README.md`: the window and full
   screen (`r_Width`, `r_Height`, `r_Fullscreen` applied while the game runs); the upscaler
-  (`d3d12_Upscaler`, AMD FSR); HDR (`r_HDRRendering`, `d3d12_ToneMap` with the neutral tone map
+  (`d3d12_Upscaler`, AMD FSR, on the HDR scene's light `d3d12_UpscaleHdr`); HDR (`r_HDRRendering`, `d3d12_ToneMap` with the neutral tone map
   that keeps the hue, `Shaders/HdrToneMap.hlsli`, the automatic exposure's meter by a histogram
   with the sky kept below the knee `d3d12_ExposureMeter`, `Shaders/HdrExposure.hlsli`, the bloom,
   colour grading, the HDR output `d3d12_HDROutput` with its highlights above the game's white

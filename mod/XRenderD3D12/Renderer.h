@@ -560,6 +560,7 @@ public:
     const char *szMode = nullptr;       //!< its d3d12_UpscaleMode
     int nRenderWidth = 0, nRenderHeight = 0;   //!< the size the 3D scene is drawn at
     bool bThisFrame = false;            //!< it made this frame's picture (a frame with the 3D scene)
+    bool bHdr = false;                  //!< it takes the HDR scene's light (d3d12_UpscaleHdr)
   };
   SUpscaleInfo UpscaleInfo() const;
   //! The scene's pixels per pixel of the back buffer while the main view draws into the scene
@@ -583,6 +584,7 @@ public:
   std::string m_UpscalerName;               //!< the d3d12_Upscaler m_pUpscaler was made for (or not)
   int m_nUpscalerWidth = 0, m_nUpscalerHeight = 0;   //!< the back buffer's size it was made for
   int m_nUpscalerVersion = 0;               //!< the d3d12_UpscaleVersion it was made with
+  bool m_bUpscalerHdrInput = false;         //!< it was made for the HDR scene's light (d3d12_UpscaleHdr with r_HDRRendering)
   int m_nUpscaleMode = -1;                  //!< EUpscaleMode of the scene targets, -1 none
   bool m_bUpscaleHdr = false;               //!< their colour is D3D12_HDR_FORMAT
   int m_nUpscaleOutputSRV = -1;             //!< the upscaler's output in the texture table
@@ -1222,14 +1224,17 @@ public:
     std::vector<CD3D12Texture *> Meter;     //!< the meter's levels, the last 1 x 1 (the sum of the log2 luminance, the weight)
     CD3D12Texture *pExposure[2] = {};       //!< 1 x 1 R32_FLOAT, the adapted EV: this frame's and the frame before's
     int nExposure = 0;                      //!< pExposure's current one
-    std::vector<CD3D12Texture *> Bloom;     //!< the bloom's levels, the first half the scene's size
-    std::vector<int> KernelTables;          //!< the tables of the kernels (D3D12Compute.h), D3D12_FRAMES a pass: the bloom's levels,
-                                            //!< then the meter's first level; -1 none
-    CD3D12Texture *pLdr = nullptr;          //!< the tone mapped scene for an upscaler (R8G8B8A8)
+    std::vector<int> MeterTables;           //!< the tables of the meter's first level's kernel (D3D12Compute.h), D3D12_FRAMES; -1 none
+    int nMeterWidth = 0, nMeterHeight = 0;  //!< the scene's size Meter is for (with it pExposure, made again)
+    std::vector<CD3D12Texture *> Bloom;     //!< the bloom's levels, the first half the resolve's size
+    std::vector<int> KernelTables;          //!< the tables of the bloom's kernel, D3D12_FRAMES a level; -1 none
+    CD3D12Texture *pLdr = nullptr;          //!< the tone mapped scene for an upscaler (R8G8B8A8; d3d12_UpscaleHdr 0)
     CD3D12Texture *pRatio = nullptr;        //!< with it and the highlight layer, the layer's ratio at the scene's size (D3D12_HIGHLIGHT_FORMAT)
-    int nWidth = 0, nHeight = 0;            //!< the scene's size they are for
+    int nWidth = 0, nHeight = 0;            //!< the size of the resolve Bloom, pLdr and pRatio are for
+    CD3D12Texture *pLight = nullptr;        //!< d3d12_UpscaleHdr 1: the scene's light for the upscaler (D3D12_HDR_FORMAT, HdrSceneLight)
+    CD3D12Texture *pExposureScale = nullptr;  //!< and its exposure's factor (1 x 1 R32_FLOAT)
     bool bAdapted = false;                  //!< pExposure[nExposure] holds an adapted EV
-    int nResolvedFrame = -1;                //!< m_nFrames of the last resolve
+    int nMeteredFrame = -1;                 //!< m_nFrames of the last meter (MeterHdr)
     ComPtr<ID3D12Resource> pHdrColor;       //!< the device's HDR target nHdrColorSRV is of (kept: a new one is never at its address)
     int nHdrColorSRV = -1;
     ComPtr<ID3D12Resource> pDepth;          //!< d3d12_HDRDebug 3 (the sky mask): the scene's depth buffer nDepthSRV is of (kept, as pHdrColor)
@@ -1249,18 +1254,28 @@ public:
   //! (UpscaleScene) into the back buffer, which is bound again.
   void EndMainScene();
   //! The HDR passes over the scene (pScene in PIXEL_SHADER_RESOURCE | NON_PIXEL_SHADER_RESOURCE, its
-  //! SRV nSceneSRV, nWidth x nHeight): the meter, the adaptation, the bloom and the resolve, into the
+  //! SRV nSceneSRV, nWidth x nHeight): the meter (MeterHdr), the bloom and the resolve, into the
   //! back buffer, or with bToTexture into m_Hdr.pLdr, which it returns (nullptr: the back buffer, or
   //! no targets). pDepth is the scene's depth buffer (read through an SRV of DepthFormat), for the
   //! sky mask of d3d12_HDRDebug 3: in DEPTH_WRITE for the back buffer (the pass binds it read
-  //! only), readable already with bToTexture (the upscaler's).
+  //! only), readable already with bToTexture (the upscaler's). bLight: pScene holds the scene's
+  //! light (HdrSceneLight's, upscaled), the meter taken from the scene this frame already; no
+  //! volumetric light then (it is in the light) and no depth.
   CD3D12Texture *ResolveHdr(int nSceneSRV, ID3D12Resource *pScene, int nWidth, int nHeight, bool bToTexture, ID3D12Resource *pDepth,
-                            DXGI_FORMAT DepthFormat);
+                            DXGI_FORMAT DepthFormat, bool bLight = false);
+  //! The meter and the adaptation of the exposure from the scene (as ResolveHdr's), and the HDR
+  //! statistics' histogram; bDepthReadable as DispatchExposure's. False: no targets.
+  bool MeterHdr(int nSceneSRV, ID3D12Resource *pScene, int nWidth, int nHeight, ID3D12Resource *pDepth, DXGI_FORMAT DepthFormat,
+                bool bDepthReadable);
+  //! d3d12_UpscaleHdr 1, after MeterHdr: the scene's light, through the volumetric light (this
+  //! frame's froxels at the depth pDepth, readable already) and not exposed, into m_Hdr.pLight
+  //! (the scene's size), which it returns, and the exposure's factor into m_Hdr.pExposureScale, for
+  //! the upscaler; ResolveHdr with bLight tone maps its picture. nullptr: no targets, or no meter.
+  CD3D12Texture *HdrSceneLight(int nSceneSRV, int nWidth, int nHeight, ID3D12Resource *pDepth, DXGI_FORMAT DepthFormat);
   //! m_Hdr.nDepthSRV for pDepth (a new view when it changes). -1: none.
   int HdrDepthSRV(ID3D12Resource *pDepth, DXGI_FORMAT DepthFormat);
-  //! This frame's table of an HDR kernel (m_Hdr.KernelTables): of bloom level nPass, or of the
-  //! meter's first level for m_Hdr.Bloom.size(). The GPU is done with the one of the frame
-  //! D3D12_FRAMES before. -1: none.
+  //! This frame's table of the bloom's kernel for level nPass (m_Hdr.KernelTables). The GPU is done
+  //! with the one of the frame D3D12_FRAMES before. -1: none.
   int GetHdrKernelTable(size_t nPass) const;
   //! The meter's first level by the kernel (Shaders/Meter.hlsl) from pScene, dc the constants of its
   //! pass (HDR_LUMINANCE). False: not by the kernel (other taps, no table), the pass draws it.
@@ -1286,10 +1301,17 @@ public:
   //! A pass of the HDR program into pTarget, with the blend of nState; with pRatio (the layer's
   //! ratio at pTarget's size) PSHighlight writes it too.
   void DrawHdrPass(CD3D12Texture *pTarget, const SDrawConstants &dc, uint32 nState = 0, CD3D12Texture *pRatio = nullptr);
-  //! m_Hdr's targets for a scene of nWidth x nHeight (and pLdr with bLdr, pRatio with it and the
+  //! m_Hdr's meter (its levels, the EV, the first level's tables) for a scene of nWidth x nHeight,
+  //! made when it changes (the EV starting anew). False: none.
+  bool EnsureMeterTargets(int nWidth, int nHeight);
+  void ReleaseMeterTargets();
+  //! m_Hdr's bloom for a resolve of nWidth x nHeight (and pLdr with bLdr, pRatio with it and the
   //! highlight layer), made when it changes. False: none.
   bool EnsureHdrTargets(int nWidth, int nHeight, bool bLdr);
   void ReleaseHdrTargets();
+  //! m_Hdr.pLight (nWidth x nHeight) and pExposureScale of HdrSceneLight. False: none (logged).
+  bool EnsureSceneLightTargets(int nWidth, int nHeight);
+  void ReleaseSceneLightTargets();
   //! The device's HDR target and its texture table entry.
   void ReleaseHdrColor();
   void ReleaseHdr();
@@ -1752,6 +1774,8 @@ public:
   float CV_d3d12_UpscaleSharpness = 0.5f;   //!< the upscaler's sharpening, 0 (none) to 1
   int CV_d3d12_UpscaleDebug = 0;            //!< non-zero: the upscaler's debug view
   int CV_d3d12_UpscaleVersion = 0;          //!< the upscaler's major version (FSR 3 or 4), 0 its own choice
+  int CV_d3d12_UpscaleHdr = 1;              //!< with r_HDRRendering: 1 the upscaler gets the scene's light, tone mapped after it; 0 the
+                                            //!< scene tone mapped at the render size (as up to step 259)
   int CV_d3d12_AOQuality = 2;               //!< the ambient occlusion's (d3d12_AO, a string) quality, 0 to 3
   float CV_d3d12_AORadius = 1;              //!< its radius (m)
   float CV_d3d12_AOStrength = 1;            //!< the exponent of its visibility

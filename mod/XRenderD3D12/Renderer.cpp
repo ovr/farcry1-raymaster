@@ -222,6 +222,9 @@ void CD3D12Renderer::RegisterVariables()
   iConsole->Register("d3d12_UpscaleDebug", &CV_d3d12_UpscaleDebug, 0, 0, "1: the upscaler's debug view; 2: the depth it gets (near black, far white)");
   iConsole->Register("d3d12_UpscaleVersion", &CV_d3d12_UpscaleVersion, 0, VF_DUMPTODISK,
                      "The upscaler's major version: 0 its own choice for the GPU, 3 or 4 (AMD FSR 3.1 or FSR 4)");
+  iConsole->Register("d3d12_UpscaleHdr", &CV_d3d12_UpscaleHdr, 1, VF_DUMPTODISK,
+                     "With r_HDRRendering: 1 the upscaler gets the scene's light (HDR), the bloom and the tone map after it at the display's "
+                     "size; 0 the scene tone mapped at the render size (LDR)");
   // The ambient occlusion (AmbientOcclusion.cpp).
   iConsole->CreateVariable("d3d12_AO", "cacao", VF_DUMPTODISK,
                            "Ambient occlusion of the 3D scene: none, gtao (Intel XeGTAO), cacao (AMD FidelityFX CACAO), both in screen "

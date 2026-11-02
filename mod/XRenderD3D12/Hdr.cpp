@@ -32,9 +32,14 @@
 //	  - the resolve: the light (through the volumetric light,
 //	    Volumetric.cpp) exposed (plus d3d12_Exposure), with the
 //	    bloom, tone mapped (d3d12_ToneMap), colour graded (ColorGrading.cpp)
-//	    into the back buffer, or for an upscaler into an LDR target of the
-//	    scene's size, which it upscales as it would the scene (its flags
-//	    unchanged).
+//	    into the back buffer.
+//	With an upscaler (Upscale.cpp, d3d12_UpscaleHdr 1) the meter takes the
+//	scene at its size, the upscaler its light through the volumetric light
+//	(HdrSceneLight: not exposed, with the exposure's factor), and the bloom
+//	and the resolve its picture at the display's size, with the highlight
+//	layer; with d3d12_UpscaleHdr 0 all of it is at the scene's size into an
+//	LDR target, which the upscaler takes as it would the scene (as up to
+//	step 259).
 //	The screen effects and the 2D come after it on the back buffer, as
 //	without HDR. Heat vision's colours are a palette, not light: while it
 //	is on the scene is only clamped (the exposure held).
@@ -86,6 +91,28 @@ constexpr int BLOOM_LEVELS = 6;
 constexpr float BLOOM_KNEE = 0.5f;
 //! A table of a kernel: its SRVs and UAVs (D3D12Compute.h).
 constexpr int KERNEL_TABLE = CD3D12Compute::COMPUTE_SRVS + CD3D12Compute::COMPUTE_UAVS;
+
+//! nTable's views null (D3D12_HDR_FORMAT): those the kernel uses are written before each dispatch.
+void WriteNullTable(CD3D12Descriptors *pDescriptors, int nTable)
+{
+  D3D12_SHADER_RESOURCE_VIEW_DESC NullSRV = {};
+  NullSRV.Format = D3D12_HDR_FORMAT;
+  NullSRV.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
+  NullSRV.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+  NullSRV.Texture2D.MipLevels = 1;
+  D3D12_UNORDERED_ACCESS_VIEW_DESC NullUAV = {};
+  NullUAV.Format = D3D12_HDR_FORMAT;
+  NullUAV.ViewDimension = D3D12_UAV_DIMENSION_TEXTURE2D;
+  for (int i = 0; i < CD3D12Compute::COMPUTE_SRVS; i++)
+    pDescriptors->WriteSRV(nTable + i, nullptr, &NullSRV);
+  for (int i = 0; i < CD3D12Compute::COMPUTE_UAVS; i++)
+    pDescriptors->WriteUAV(nTable + CD3D12Compute::COMPUTE_SRVS + i, nullptr, &NullUAV);
+}
+
+bool BadTarget(const CD3D12Texture *p)
+{
+  return !p || p->m_nSRV < 0;
+}
 //! The automatic exposure's histogram (d3d12_ExposureMeter 1) takes about this many samples of the scene, whatever its size
 //! (a sample every so many pixels across and down: 4 at 1920 x 1080, 8 at 3840 x 2160).
 constexpr float EXPOSURE_SAMPLES = 131072.0f;
@@ -176,39 +203,27 @@ int CD3D12Renderer::HdrDepthSRV(ID3D12Resource *pDepth, DXGI_FORMAT DepthFormat)
   return m_Hdr.nDepthSRV;
 }
 
-CD3D12Texture *CD3D12Renderer::ResolveHdr(int nSceneSRV, ID3D12Resource *pScene, int nWidth, int nHeight, bool bToTexture, ID3D12Resource *pDepth,
-                                          DXGI_FORMAT DepthFormat)
+bool CD3D12Renderer::MeterHdr(int nSceneSRV, ID3D12Resource *pScene, int nWidth, int nHeight, ID3D12Resource *pDepth, DXGI_FORMAT DepthFormat,
+                              bool bDepthReadable)
 {
-  if (nSceneSRV < 0 || !EnsureHdrTargets(nWidth, nHeight, bToTexture))
-  {
-    // Nothing to tone map with: the scene as it is (clamped by the back buffer).
-    if (!bToTexture && nSceneSRV >= 0)
-    {
-      SDrawConstants dc = DefaultDrawConstants();
-      dc.nFlags = HDR_RESOLVE;
-      dc.nTex0 = (uint32)nSceneSRV;
-      Set4(dc.vParams2, 0, 1, 0, 0);
-      DrawHdrToBackBuffer(dc);
-    }
-    return nullptr;
-  }
+  if (nSceneSRV < 0 || !EnsureMeterTargets(nWidth, nHeight))
+    return false;
   const bool bHeat = m_bHeatVision;
   const bool bAuto = CV_d3d12_AutoExposure != 0;
   const float fComp = bHeat ? 0.0f : CV_d3d12_Exposure;
-  const float fBloom = bHeat ? 0.0f : std::max(CV_d3d12_Bloom, 0.0f);
   const float fFrameTime = iTimer ? std::clamp(iTimer->GetFrameTime(), 0.0f, 1.0f) : 0.02f;
 
   // The meter and the adaptation; none in heat vision (the exposure stays as it was). Without a
   // frame just before (the menu, a load) or after the automatic exposure was off, the exposure
   // is the meter's at once.
-  if (!bAuto || m_Hdr.nResolvedFrame != m_nFrames - 1)
+  if (!bAuto || m_Hdr.nMeteredFrame != m_nFrames - 1)
     m_Hdr.bAdapted = false;
-  m_Hdr.nResolvedFrame = m_nFrames;
+  m_Hdr.nMeteredFrame = m_nFrames;
   m_Hdr.bExposureHistogram = false;
   if (bAuto && !bHeat)
   {
     // The meter: the histogram's target (d3d12_ExposureMeter 1), else (or without its kernels) the mean of the levels.
-    m_Hdr.bExposureHistogram = CV_d3d12_ExposureMeter > 0 && DispatchExposure(pScene, nWidth, nHeight, pDepth, DepthFormat, bToTexture);
+    m_Hdr.bExposureHistogram = CV_d3d12_ExposureMeter > 0 && DispatchExposure(pScene, nWidth, nHeight, pDepth, DepthFormat, bDepthReadable);
     int nSrcSRV = nSceneSRV;
     for (size_t i = 0; !m_Hdr.bExposureHistogram && i < m_Hdr.Meter.size(); i++)
     {
@@ -233,11 +248,68 @@ CD3D12Texture *CD3D12Renderer::ResolveHdr(int nSceneSRV, ID3D12Resource *pScene,
     DrawHdrPass(m_Hdr.pExposure[m_Hdr.nExposure], dc);
     m_Hdr.bAdapted = true;
   }
-  const bool bAdapted = bAuto && m_Hdr.bAdapted && !bHeat;
-  const int nExposureSRV = m_Hdr.pExposure[m_Hdr.nExposure]->m_nSRV;
   // The HDR statistics' histogram of the scene (HdrStats.cpp: d3d12_DisplayHDR, d3d12_HDRLog).
   if (!bHeat && WantHdrStats())
-    DispatchHdrHistogram(pScene, nWidth, nHeight, fComp, bAdapted, bAuto, CV_d3d12_VolumetricLight > 0);
+    DispatchHdrHistogram(pScene, nWidth, nHeight, fComp, bAuto && m_Hdr.bAdapted, bAuto, CV_d3d12_VolumetricLight > 0);
+  return true;
+}
+
+CD3D12Texture *CD3D12Renderer::HdrSceneLight(int nSceneSRV, int nWidth, int nHeight, ID3D12Resource *pDepth, DXGI_FORMAT DepthFormat)
+{
+  if (nSceneSRV < 0 || m_Hdr.nMeteredFrame != m_nFrames || !EnsureSceneLightTargets(nWidth, nHeight))
+    return nullptr;
+  const bool bHeat = m_bHeatVision;
+  SDrawConstants dc = DefaultDrawConstants();
+  dc.nFlags = HDR_SCENE_LIGHT;
+  dc.nTex0 = (uint32)nSceneSRV;
+  Set4(dc.vParams0, 1.0f / nWidth, 1.0f / nHeight, 0, 0);
+  // d3d12_HDRDebug 3: the sky mask, from the depth (readable already) instead of the volumetric light's; else this frame's
+  // froxels at the depth buffer's depth (Volumetric.cpp), as the resolve takes them without an upscaler.
+  const bool bSkyMask = !bHeat && CV_d3d12_HDRDebug == 3 && HdrDepthSRV(pDepth, DepthFormat) >= 0;
+  Set4(dc.vParams2, 0, bHeat ? 1.0f : 0.0f, bSkyMask ? 3.0f : 0.0f, 0);
+  if (bSkyMask)
+    dc.nTex5 = (uint32)m_Hdr.nDepthSRV;
+  else if (!bHeat)
+    SetVolumetricConstants(dc);
+  DrawHdrPass(m_Hdr.pLight, dc);
+  // The exposure's factor, which the upscaler gets.
+  SDrawConstants ec = DefaultDrawConstants();
+  ec.nFlags = HDR_EXPOSURE_SCALE;
+  ec.nTex0 = (uint32)m_Hdr.pExposure[m_Hdr.nExposure]->m_nSRV;
+  Set4(ec.vParams0, 1, 1, 0, 0);
+  Set4(ec.vParams1, bHeat ? 0.0f : CV_d3d12_Exposure, CV_d3d12_AutoExposure != 0 && m_Hdr.bAdapted && !bHeat ? 1.0f : 0.0f, 0, 0);
+  DrawHdrPass(m_Hdr.pExposureScale, ec);
+  m_pDevice->SetBackBufferTargets();
+  return m_Hdr.pLight;
+}
+
+CD3D12Texture *CD3D12Renderer::ResolveHdr(int nSceneSRV, ID3D12Resource *pScene, int nWidth, int nHeight, bool bToTexture, ID3D12Resource *pDepth,
+                                          DXGI_FORMAT DepthFormat, bool bLight)
+{
+  // The meter first; with bLight (the scene's light upscaled) it took the scene before the upscale.
+  const bool bMetered = nSceneSRV >= 0 &&
+                        (bLight ? m_Hdr.nMeteredFrame == m_nFrames : MeterHdr(nSceneSRV, pScene, nWidth, nHeight, pDepth, DepthFormat, bToTexture));
+  if (!bMetered || !EnsureHdrTargets(nWidth, nHeight, bToTexture))
+  {
+    // Nothing to tone map with: the scene as it is (clamped by the back buffer).
+    if (!bToTexture && nSceneSRV >= 0)
+    {
+      SDrawConstants dc = DefaultDrawConstants();
+      dc.nFlags = HDR_RESOLVE | (bLight ? HDR_LINEAR : 0);
+      dc.nTex0 = (uint32)nSceneSRV;
+      Set4(dc.vParams2, 0, 1, 0, 0);
+      DrawHdrToBackBuffer(dc);
+    }
+    return nullptr;
+  }
+  const bool bHeat = m_bHeatVision;
+  const bool bAuto = CV_d3d12_AutoExposure != 0;
+  const float fComp = bHeat ? 0.0f : CV_d3d12_Exposure;
+  const float fBloom = bHeat ? 0.0f : std::max(CV_d3d12_Bloom, 0.0f);
+  const bool bAdapted = bAuto && m_Hdr.bAdapted && !bHeat;
+  const int nExposureSRV = m_Hdr.pExposure[m_Hdr.nExposure]->m_nSRV;
+  // The scene's light (upscaled) instead of the game's colours.
+  const uint32 nLinear = bLight ? HDR_LINEAR : 0;
 
   // The bloom: down from the scene, then up again, each level added to the one above.
   if (fBloom > 0)
@@ -248,7 +320,7 @@ CD3D12Texture *CD3D12Renderer::ResolveHdr(int nSceneSRV, ID3D12Resource *pScene,
     {
       CD3D12Texture *pDst = m_Hdr.Bloom[i];
       SDrawConstants dc = DefaultDrawConstants();
-      dc.nFlags = HDR_BLOOM_DOWN | (i == 0 ? HDR_BLOOM_PREFILTER : 0);
+      dc.nFlags = HDR_BLOOM_DOWN | (i == 0 ? (HDR_BLOOM_PREFILTER | nLinear) : 0);
       dc.nTex0 = (uint32)nSrcSRV;
       dc.nTex1 = (uint32)nExposureSRV;
       Set4(dc.vParams0, 1.0f / pDst->m_nWidth, 1.0f / pDst->m_nHeight, 1.0f / nSrcWidth, 1.0f / nSrcHeight);
@@ -276,7 +348,7 @@ CD3D12Texture *CD3D12Renderer::ResolveHdr(int nSceneSRV, ID3D12Resource *pScene,
   // (none in heat vision).
   const int nLutSRV = bHeat ? -1 : UpdateColorGrading();
   SDrawConstants dc = DefaultDrawConstants();
-  dc.nFlags = HDR_RESOLVE;
+  dc.nFlags = HDR_RESOLVE | nLinear;
   dc.nTex0 = (uint32)nSceneSRV;
   dc.nTex1 = fBloom > 0 ? (uint32)m_Hdr.Bloom[0]->m_nSRV : D3D12_SRV_WHITE;
   dc.nTex2 = (uint32)nExposureSRV;
@@ -287,14 +359,15 @@ CD3D12Texture *CD3D12Renderer::ResolveHdr(int nSceneSRV, ID3D12Resource *pScene,
   SetHighlightConstants(dc);
   dc.vParams3[2] = std::max(CV_d3d12_ToneMapDesaturation, 0.0f);
   // d3d12_HDRDebug 3, the sky mask: white where the depth buffer is at the far plane (nothing but
-  // the sky drawn there), black elsewhere; the depth instead of the volumetric light's.
-  const bool bSkyMask = !bHeat && CV_d3d12_HDRDebug == 3 && HdrDepthSRV(pDepth, DepthFormat) >= 0;
+  // the sky drawn there), black elsewhere; the depth instead of the volumetric light's. The light
+  // upscaled has it already (HdrSceneLight), and the volumetric light.
+  const bool bSkyMask = !bHeat && !bLight && CV_d3d12_HDRDebug == 3 && HdrDepthSRV(pDepth, DepthFormat) >= 0;
   if (bSkyMask)
     dc.nTex5 = (uint32)m_Hdr.nDepthSRV;
   // The volumetric light, this frame's froxels at the depth buffer's depth (Volumetric.cpp). The
   // upscaler's scene depth is readable already (CD3D12Device::EndScene); the back buffer's is
   // bound read only meanwhile.
-  const bool bVolumetric = !bHeat && !bSkyMask && SetVolumetricConstants(dc);
+  const bool bVolumetric = !bHeat && !bSkyMask && !bLight && SetVolumetricConstants(dc);
   if (bToTexture)
   {
     DrawHdrPass(m_Hdr.pLdr, dc, 0, m_pDevice->HasLayer() ? m_Hdr.pRatio : nullptr);
@@ -322,7 +395,8 @@ int CD3D12Renderer::GetHdrKernelTable(size_t nPass) const
 bool CD3D12Renderer::DispatchMeter(ID3D12Resource *pScene, const SDrawConstants &dc)
 {
   CD3D12Texture *pLevel = m_Hdr.Meter[0];
-  const int nFirst = GetHdrKernelTable(m_Hdr.Bloom.size());
+  const size_t nSlot = m_pDevice->GetFrameSlot();
+  const int nFirst = nSlot < m_Hdr.MeterTables.size() ? m_Hdr.MeterTables[nSlot] : -1;
   if (!m_pCompute || !pScene || dc.vParams0[2] != METER_TAPS || nFirst < 0)
     return false;
   // The scene, the level.
@@ -505,6 +579,7 @@ bool CD3D12Renderer::DispatchBloomLevel(size_t nLevel, ID3D12Resource *pSource, 
   Set4(bc.vSize, (float)pLevel->m_nWidth, (float)pLevel->m_nHeight, dc.vParams0[0], dc.vParams0[1]);
   memcpy(bc.vParams, dc.vParams1, sizeof(bc.vParams));
   bc.vFlags[0] = bScene ? 1 : 0;
+  bc.vFlags[1] = bScene && (dc.nFlags & HDR_LINEAR) ? 1 : 0;
   const SD3D12FrameAlloc CB = m_pUpload->AllocFrame(sizeof(bc), 256);
   memcpy(CB.pCPU, &bc, sizeof(bc));
   // The pass before drew into the EV or the level before.
@@ -579,6 +654,68 @@ void CD3D12Renderer::DrawHdrPass(CD3D12Texture *pTarget, const SDrawConstants &d
     m_pDevice->Transition(pRatio->m_pResource, D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
 }
 
+bool CD3D12Renderer::EnsureMeterTargets(int nWidth, int nHeight)
+{
+  if (!m_pUpload || nWidth <= 0 || nHeight <= 0)
+    return false;
+  if (nWidth == m_Hdr.nMeterWidth && nHeight == m_Hdr.nMeterHeight)
+    return true;
+  ReleaseMeterTargets();
+  // The meter's levels, down to 1 x 1 (the kernel writes the first one).
+  int w = std::max((nWidth + METER_FACTOR - 1) / METER_FACTOR, 1), h = std::max((nHeight + METER_FACTOR - 1) / METER_FACTOR, 1);
+  for (;;)
+  {
+    m_Hdr.Meter.push_back(m_pUpload->CreateRenderTarget(w, h, D3D12_HDR_FORMAT, m_Hdr.Meter.empty()));
+    if (w == 1 && h == 1)
+      break;
+    w = std::max((w + METER_REDUCE - 1) / METER_REDUCE, 1);
+    h = std::max((h + METER_REDUCE - 1) / METER_REDUCE, 1);
+  }
+  for (CD3D12Texture *&pTex : m_Hdr.pExposure)
+    pTex = m_pUpload->CreateRenderTarget(1, 1, DXGI_FORMAT_R32_FLOAT);
+  // The first level's kernel's tables, D3D12_FRAMES.
+  m_Hdr.MeterTables.assign(D3D12_FRAMES, -1);
+  for (int &nTable : m_Hdr.MeterTables)
+  {
+    if ((nTable = m_pDescriptors->AllocRange(KERNEL_TABLE)) >= 0)
+      WriteNullTable(m_pDescriptors.get(), nTable);
+  }
+  m_Hdr.nMeterWidth = nWidth;
+  m_Hdr.nMeterHeight = nHeight;
+  m_Hdr.bAdapted = false;
+  if (std::any_of(m_Hdr.Meter.begin(), m_Hdr.Meter.end(), BadTarget) || BadTarget(m_Hdr.pExposure[0]) || BadTarget(m_Hdr.pExposure[1]))
+  {
+    iLog->LogError("XRenderD3D12: no HDR meter targets for %d x %d", nWidth, nHeight);
+    ReleaseMeterTargets();
+    return false;
+  }
+  return true;
+}
+
+void CD3D12Renderer::ReleaseMeterTargets()
+{
+  if (m_pUpload)
+  {
+    for (CD3D12Texture *pTex : m_Hdr.Meter)
+      m_pUpload->ReleaseTexture(pTex);
+    for (CD3D12Texture *pTex : m_Hdr.pExposure)
+      m_pUpload->ReleaseTexture(pTex);
+  }
+  m_Hdr.Meter.clear();
+  if (m_pDescriptors)
+  {
+    for (int nTable : m_Hdr.MeterTables)
+    {
+      if (nTable >= 0)
+        m_pDescriptors->FreeRange(nTable, KERNEL_TABLE);
+    }
+  }
+  m_Hdr.MeterTables.clear();
+  m_Hdr.pExposure[0] = m_Hdr.pExposure[1] = nullptr;
+  m_Hdr.nMeterWidth = m_Hdr.nMeterHeight = 0;
+  m_Hdr.bAdapted = false;
+}
+
 bool CD3D12Renderer::EnsureHdrTargets(int nWidth, int nHeight, bool bLdr)
 {
   if (!m_pUpload || nWidth <= 0 || nHeight <= 0)
@@ -586,52 +723,24 @@ bool CD3D12Renderer::EnsureHdrTargets(int nWidth, int nHeight, bool bLdr)
   if (nWidth != m_Hdr.nWidth || nHeight != m_Hdr.nHeight)
   {
     ReleaseHdrTargets();
-    // The meter's levels, down to 1 x 1 (the kernel writes the first one).
-    int w = std::max((nWidth + METER_FACTOR - 1) / METER_FACTOR, 1), h = std::max((nHeight + METER_FACTOR - 1) / METER_FACTOR, 1);
-    for (;;)
-    {
-      m_Hdr.Meter.push_back(m_pUpload->CreateRenderTarget(w, h, D3D12_HDR_FORMAT, m_Hdr.Meter.empty()));
-      if (w == 1 && h == 1)
-        break;
-      w = std::max((w + METER_REDUCE - 1) / METER_REDUCE, 1);
-      h = std::max((h + METER_REDUCE - 1) / METER_REDUCE, 1);
-    }
-    for (CD3D12Texture *&pTex : m_Hdr.pExposure)
-      pTex = m_pUpload->CreateRenderTarget(1, 1, DXGI_FORMAT_R32_FLOAT);
     // The bloom's, while they are at least 2 texels high (the kernel writes them too).
-    w = nWidth;
-    h = nHeight;
+    int w = nWidth, h = nHeight;
     for (int i = 0; i < BLOOM_LEVELS && (h + 1) / 2 >= 2; i++)
     {
       w = std::max((w + 1) / 2, 1);
       h = (h + 1) / 2;
       m_Hdr.Bloom.push_back(m_pUpload->CreateRenderTarget(w, h, D3D12_HDR_FORMAT, true));
     }
-    // The kernels' tables, D3D12_FRAMES a pass; the views they do not use null.
-    D3D12_SHADER_RESOURCE_VIEW_DESC NullSRV = {};
-    NullSRV.Format = D3D12_HDR_FORMAT;
-    NullSRV.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
-    NullSRV.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
-    NullSRV.Texture2D.MipLevels = 1;
-    D3D12_UNORDERED_ACCESS_VIEW_DESC NullUAV = {};
-    NullUAV.Format = D3D12_HDR_FORMAT;
-    NullUAV.ViewDimension = D3D12_UAV_DIMENSION_TEXTURE2D;
-    m_Hdr.KernelTables.assign((m_Hdr.Bloom.size() + 1) * D3D12_FRAMES, -1);
+    // The kernel's tables, D3D12_FRAMES a level.
+    m_Hdr.KernelTables.assign(m_Hdr.Bloom.size() * D3D12_FRAMES, -1);
     for (int &nTable : m_Hdr.KernelTables)
     {
-      if ((nTable = m_pDescriptors->AllocRange(KERNEL_TABLE)) < 0)
-        continue;
-      for (int i = 0; i < CD3D12Compute::COMPUTE_SRVS; i++)
-        m_pDescriptors->WriteSRV(nTable + i, nullptr, &NullSRV);
-      for (int i = 0; i < CD3D12Compute::COMPUTE_UAVS; i++)
-        m_pDescriptors->WriteUAV(nTable + CD3D12Compute::COMPUTE_SRVS + i, nullptr, &NullUAV);
+      if ((nTable = m_pDescriptors->AllocRange(KERNEL_TABLE)) >= 0)
+        WriteNullTable(m_pDescriptors.get(), nTable);
     }
     m_Hdr.nWidth = nWidth;
     m_Hdr.nHeight = nHeight;
-    m_Hdr.bAdapted = false;
-    const auto Bad = [](const CD3D12Texture *p) { return !p || p->m_nSRV < 0; };
-    if (m_Hdr.Bloom.empty() || std::any_of(m_Hdr.Meter.begin(), m_Hdr.Meter.end(), Bad) ||
-        std::any_of(m_Hdr.Bloom.begin(), m_Hdr.Bloom.end(), Bad) || Bad(m_Hdr.pExposure[0]) || Bad(m_Hdr.pExposure[1]))
+    if (m_Hdr.Bloom.empty() || std::any_of(m_Hdr.Bloom.begin(), m_Hdr.Bloom.end(), BadTarget))
     {
       iLog->LogError("XRenderD3D12: no HDR targets for %d x %d", nWidth, nHeight);
       ReleaseHdrTargets();
@@ -665,16 +774,11 @@ void CD3D12Renderer::ReleaseHdrTargets()
 {
   if (m_pUpload)
   {
-    for (CD3D12Texture *pTex : m_Hdr.Meter)
-      m_pUpload->ReleaseTexture(pTex);
     for (CD3D12Texture *pTex : m_Hdr.Bloom)
-      m_pUpload->ReleaseTexture(pTex);
-    for (CD3D12Texture *pTex : m_Hdr.pExposure)
       m_pUpload->ReleaseTexture(pTex);
     m_pUpload->ReleaseTexture(m_Hdr.pLdr);
     m_pUpload->ReleaseTexture(m_Hdr.pRatio);
   }
-  m_Hdr.Meter.clear();
   m_Hdr.Bloom.clear();
   if (m_pDescriptors)
   {
@@ -685,11 +789,38 @@ void CD3D12Renderer::ReleaseHdrTargets()
     }
   }
   m_Hdr.KernelTables.clear();
-  m_Hdr.pExposure[0] = m_Hdr.pExposure[1] = nullptr;
   m_Hdr.pLdr = nullptr;
   m_Hdr.pRatio = nullptr;
   m_Hdr.nWidth = m_Hdr.nHeight = 0;
-  m_Hdr.bAdapted = false;
+}
+
+bool CD3D12Renderer::EnsureSceneLightTargets(int nWidth, int nHeight)
+{
+  if (!m_pUpload || nWidth <= 0 || nHeight <= 0)
+    return false;
+  if (m_Hdr.pLight && (m_Hdr.pLight->m_nWidth != nWidth || m_Hdr.pLight->m_nHeight != nHeight))
+    ReleaseSceneLightTargets();
+  if (!m_Hdr.pLight)
+    m_Hdr.pLight = m_pUpload->CreateRenderTarget(nWidth, nHeight, D3D12_HDR_FORMAT);
+  if (!m_Hdr.pExposureScale)
+    m_Hdr.pExposureScale = m_pUpload->CreateRenderTarget(1, 1, DXGI_FORMAT_R32_FLOAT);
+  if (BadTarget(m_Hdr.pLight) || BadTarget(m_Hdr.pExposureScale))
+  {
+    iLog->LogError("XRenderD3D12: no target of %d x %d for the upscaler's HDR light (d3d12_UpscaleHdr); the tone mapped scene", nWidth, nHeight);
+    ReleaseSceneLightTargets();
+    return false;
+  }
+  return true;
+}
+
+void CD3D12Renderer::ReleaseSceneLightTargets()
+{
+  if (m_pUpload)
+  {
+    m_pUpload->ReleaseTexture(m_Hdr.pLight);
+    m_pUpload->ReleaseTexture(m_Hdr.pExposureScale);
+  }
+  m_Hdr.pLight = m_Hdr.pExposureScale = nullptr;
 }
 
 void CD3D12Renderer::ReleaseHdrColor()
@@ -709,6 +840,8 @@ void CD3D12Renderer::ReleaseHdrColor()
 void CD3D12Renderer::ReleaseHdr()
 {
   ReleaseHdrTargets();
+  ReleaseMeterTargets();
+  ReleaseSceneLightTargets();
   ReleaseExposureTargets();
   m_Hdr.bExposureFailed = false;
   ReleaseHdrColor();
@@ -718,10 +851,10 @@ void CD3D12Renderer::ReleaseHdr()
 void CD3D12Renderer::DumpHdr()
 {
   const int nToneMap = std::clamp(CV_d3d12_ToneMap, 0, 4);
-  fprintf(m_pFrameDump.get(), "hdr: %d x %d, tone map %s (knee %g), exposure %+g EV, auto %d (%g to %g EV, speed %g), bloom %g (threshold %g)%s\n",
-          m_Hdr.nWidth, m_Hdr.nHeight, s_ToneMapNames[nToneMap], CV_d3d12_ToneMapKnee, CV_d3d12_Exposure, CV_d3d12_AutoExposure,
-          CV_d3d12_ExposureMin, CV_d3d12_ExposureMax, CV_d3d12_ExposureSpeed, CV_d3d12_Bloom, CV_d3d12_BloomThreshold,
-          m_bHeatVision ? ", heat vision: clamped" : "");
+  fprintf(m_pFrameDump.get(), "hdr: %d x %d (the meter %d x %d), tone map %s (knee %g), exposure %+g EV, auto %d (%g to %g EV, speed %g), bloom %g "
+          "(threshold %g)%s\n", m_Hdr.nWidth, m_Hdr.nHeight, m_Hdr.nMeterWidth, m_Hdr.nMeterHeight, s_ToneMapNames[nToneMap], CV_d3d12_ToneMapKnee,
+          CV_d3d12_Exposure, CV_d3d12_AutoExposure, CV_d3d12_ExposureMin, CV_d3d12_ExposureMax, CV_d3d12_ExposureSpeed, CV_d3d12_Bloom,
+          CV_d3d12_BloomThreshold, m_bHeatVision ? ", heat vision: clamped" : "");
   fprintf(m_pFrameDump.get(), "hdr: meter %d (%s; window %g to %g, sky's highlights %g)\n", CV_d3d12_ExposureMeter,
           m_Hdr.bExposureHistogram ? "histogram" : "mean", CV_d3d12_ExposureLow, CV_d3d12_ExposureHigh, CV_d3d12_ExposureHighlights);
   fprintf(m_pFrameDump.get(), "hdr: brighter than the game: sun %g, sky %g (half way at %g degrees), glow %g; colour grading %s: saturation %g, contrast %g, "

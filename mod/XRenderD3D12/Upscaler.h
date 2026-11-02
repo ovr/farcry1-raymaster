@@ -33,10 +33,12 @@ struct SUpscaleInputs
 {
   ID3D12GraphicsCommandList *pCmdList = nullptr;
   ID3D12Resource *pColor = nullptr;     //!< the scene at the render size, sRGB-ish LDR colours (D3D12_BACKBUFFER_FORMAT, or
-                                        //!< with r_HDRRendering the HDR scene tone mapped, R8G8B8A8_UNORM)
+                                        //!< with r_HDRRendering the HDR scene tone mapped, R8G8B8A8_UNORM); for a context
+                                        //!< made with bHdr the HDR scene's linear light (R16G16B16A16_FLOAT, not exposed)
+  ID3D12Resource *pExposure = nullptr;  //!< with bHdr: 1 x 1 R32_FLOAT, the factor the light is exposed by after the upscale
   ID3D12Resource *pDepth = nullptr;     //!< its depth, R32_FLOAT (0 near, 1 far)
   ID3D12Resource *pVelocity = nullptr;  //!< R16G16_FLOAT: where each pixel was in the frame before minus where it is, in uv
-  ID3D12Resource *pOutput = nullptr;    //!< the picture of the display's size (R8G8B8A8_UNORM)
+  ID3D12Resource *pOutput = nullptr;    //!< the picture of the display's size (R8G8B8A8_UNORM; with bHdr its light, R16G16B16A16_FLOAT)
   int nRenderWidth = 0, nRenderHeight = 0;
   float fJitterX = 0, fJitterY = 0;     //!< the frame's jitter (GetJitter), render pixels
   float fNear = 0, fFar = 0;            //!< the camera's planes (metres)
@@ -54,8 +56,10 @@ public:
   //! A context for a display of nWidth x nHeight; false when the upscaler is not there or refuses
   //! the device (logged). bDebug: the upscaler checks what it gets (d3d12_Debug). nVersion
   //! (d3d12_UpscaleVersion): the major version of the upscaler wanted, its newest of that major; 0
-  //! the one the upscaler picks for the GPU; one it does not have acts as 0 (logged).
-  virtual bool Create(ID3D12Device *pDevice, int nWidth, int nHeight, bool bDebug, int nVersion) = 0;
+  //! the one the upscaler picks for the GPU; one it does not have acts as 0 (logged). bHdr
+  //! (d3d12_UpscaleHdr): the colours are the HDR scene's linear light with its exposure, tone
+  //! mapped after the upscale, instead of LDR colours.
+  virtual bool Create(ID3D12Device *pDevice, int nWidth, int nHeight, bool bDebug, int nVersion, bool bHdr) = 0;
   //! The render size of a mode (EUpscaleMode) for the display of Create.
   virtual void GetRenderSize(int nMode, int &nWidth, int &nHeight) = 0;
   //! The jitter of the nFrame-th frame (counting up from 0) at the render width: x and y in render

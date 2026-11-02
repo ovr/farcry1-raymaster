@@ -11,8 +11,8 @@
 //	group, at the uv of that point (HdrShared.hlsli does the rest).
 //
 //	Bindings (D3D12Compute.h): b0 SBloomConstants, t0 the level before (the
-//	scene for the prefilter), t1 the EV (1 x 1 R32_FLOAT); u0 the level
-//	(D3D12_HDR_FORMAT).
+//	scene for the prefilter: the game's colours, or its light upscaled with
+//	vFlags.y), t1 the EV (1 x 1 R32_FLOAT); u0 the level (D3D12_HDR_FORMAT).
 //
 //////////////////////////////////////////////////////////////////////
 
@@ -39,7 +39,7 @@ groupshared float3 gs_Corners[CORNERS * CORNERS];
 float3 Tap(float2 vUV, bool bScene, float fExposure)
 {
   const float3 c = g_Source.SampleLevel(g_SamplerLinearClamp, vUV, 0).rgb;
-  return bScene ? Decode(c) * fExposure : c;
+  return bScene ? (g_Bloom.vFlags.y != 0 ? max(c, 0) : Decode(c)) * fExposure : c;
 }
 
 [numthreads(TILE, TILE, 1)]

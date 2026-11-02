@@ -37,7 +37,8 @@
 //	                  compensation, vParams1.y 1 with the adapted EV), each
 //	                  box weighted by 1 / (1 + its luminance) against single
 //	                  bright pixels, then what is above the threshold
-//	                  vParams1.z (soft over vParams1.w)
+//	                  vParams1.z (soft over vParams1.w); with HDR_LINEAR tex0
+//	                  holds the scene's light (HDR_SCENE_LIGHT's, upscaled)
 //	  HDR_BLOOM_UP    tex0 the smaller level, vParams0.zw one of its texels in
 //	                  uv: a 3 x 3 tent, added to the target (ONE, ONE)
 //	  HDR_RESOLVE     tex0 the scene, tex1 the bloom, tex2 the EV: the light
@@ -51,7 +52,11 @@
 //	                  the sky mask: white where the depth buffer tex5 is at the
 //	                  far plane, black elsewhere);
 //	                  vParams2.w 1: then through the colour grading's table
-//	                  tex3 (ColorGrading.cpp). The alpha is the scene's.
+//	                  tex3 (ColorGrading.cpp). The alpha is the scene's. With
+//	                  HDR_LINEAR tex0 holds the scene's light, not its colours
+//	                  (HDR_SCENE_LIGHT's, upscaled: the volumetric light and
+//	                  the sky mask in it already; in heat vision encoded and
+//	                  clamped)
 //	                  PSHighlight also writes the highlight layer (Common.hlsli,
 //	                  HdrOutput.cpp): the tone map continued above the knee up
 //	                  to the display's peak (HighlightRatio), vParams3.x the
@@ -64,6 +69,16 @@
 //	                  depth, y 1 / log2(far / near), z half a slice, w the
 //	                  projection's m22, mParams0[1].x its m32, y 1: the
 //	                  light scattered alone (d3d12_VolumetricLight 2)
+//	  HDR_SCENE_LIGHT tex0 the scene: its light (with HDR_VOLUMETRIC through
+//	                  the volumetric light, as HDR_RESOLVE's), not exposed,
+//	                  for an upscaler (d3d12_UpscaleHdr, Upscale.cpp), which
+//	                  HDR_RESOLVE with HDR_LINEAR tone maps at the display's
+//	                  size; vParams2.y 1: the scene clamped (heat vision), z 3
+//	                  the sky mask (1 where the depth buffer tex5 is at the
+//	                  far plane, else 0)
+//	  HDR_EXPOSURE_SCALE tex0 the EV (1 x 1): the factor of the light 2^(the
+//	                  compensation vParams1.x + with vParams1.y 1 the EV), the
+//	                  upscaler's exposure
 //	  HDR_OUTPUT      tex0 the frame (the 8-bit back buffer), tex1 the
 //	                  highlight layer: the frame's light times the layer's
 //	                  ratio where its fingerprint matches, times paper white
@@ -166,7 +181,7 @@ float4 Adapt()
 float3 BloomTap(float2 vUV, bool bScene, float fExposure)
 {
   float3 c = SampleClamp(g_Draw.nTex0, vUV).rgb;
-  return bScene ? Decode(c) * fExposure : c;
+  return bScene ? (HasFlag(HDR_LINEAR) ? max(c, 0) : Decode(c)) * fExposure : c;
 }
 
 float4 BloomDown(float2 vPixel)
@@ -339,12 +354,16 @@ float4 Resolve(float2 vPixel, out float3 vRatio)
   vRatio = 1;
   float4 vScene = g_Textures[g_Draw.nTex0].Load(int3(vPixel, 0));
   float fAlpha = saturate(vScene.a);
+  // The scene's light upscaled (HDR_SCENE_LIGHT's): the upscaler's sharpening may go a little below 0.
+  bool bLinear = HasFlag(HDR_LINEAR);
+  if (bLinear)
+    vScene.rgb = max(vScene.rgb, 0);
   if (g_Draw.vParams2.y > 0)
-    return float4(saturate(vScene.rgb), fAlpha);
+    return float4(saturate(bLinear ? Encode(vScene.rgb) : vScene.rgb), fAlpha);
   if ((int)g_Draw.vParams2.z == 3)
-    return float4((g_Textures[g_Draw.nTex5].Load(int3(vPixel, 0)).r >= 1 ? 1 : 0).xxx, fAlpha);
+    return float4(bLinear ? saturate(vScene.rgb) : (g_Textures[g_Draw.nTex5].Load(int3(vPixel, 0)).r >= 1 ? 1 : 0).xxx, fAlpha);
   float fExposure = Exposure(g_Draw.nTex2, g_Draw.vParams1.x, g_Draw.vParams1.y > 0);
-  float3 vLight = Decode(vScene.rgb);
+  float3 vLight = bLinear ? vScene.rgb : Decode(vScene.rgb);
   if (HasFlag(HDR_VOLUMETRIC))
     vLight = Volumetric(vPixel, vLight);
   vLight *= fExposure;
@@ -362,6 +381,21 @@ float4 Resolve(float2 vPixel, out float3 vRatio)
   if (g_Draw.vParams2.w > 0 && nDebug == 0)
     c = ColorLut(g_Draw.nTex3, c);
   return float4(c, fAlpha);
+}
+
+//! HDR_SCENE_LIGHT: the scene's light at vPixel for an upscaler, as Resolve takes it before the exposure.
+float4 SceneLight(float2 vPixel)
+{
+  float4 vScene = g_Textures[g_Draw.nTex0].Load(int3(vPixel, 0));
+  float fAlpha = saturate(vScene.a);
+  if (g_Draw.vParams2.y > 0)
+    return float4(Decode(saturate(vScene.rgb)), fAlpha);
+  if ((int)g_Draw.vParams2.z == 3)
+    return float4((g_Textures[g_Draw.nTex5].Load(int3(vPixel, 0)).r >= 1 ? 1 : 0).xxx, fAlpha);
+  float3 vLight = Decode(vScene.rgb);
+  if (HasFlag(HDR_VOLUMETRIC))
+    vLight = Volumetric(vPixel, vLight);
+  return float4(vLight, fAlpha);
 }
 
 //////////////////////////////////////////////////////////////////////////
@@ -447,6 +481,10 @@ float4 PSMain(SHdrOutput In) : SV_Target
     return Reduce(In.vPos.xy);
   if (HasFlag(HDR_ADAPT))
     return Adapt();
+  if (HasFlag(HDR_SCENE_LIGHT))
+    return SceneLight(In.vPos.xy);
+  if (HasFlag(HDR_EXPOSURE_SCALE))
+    return float4(Exposure(g_Draw.nTex0, g_Draw.vParams1.x, g_Draw.vParams1.y > 0), 0, 0, 1);
   if (HasFlag(HDR_BLOOM_DOWN))
     return BloomDown(In.vPos.xy);
   if (HasFlag(HDR_BLOOM_UP))

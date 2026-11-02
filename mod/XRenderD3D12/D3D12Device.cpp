@@ -848,7 +848,7 @@ D3D12_CPU_DESCRIPTOR_HANDLE CD3D12Device::ReadOnlyDSV(bool bScene) const
   return h;
 }
 
-bool CD3D12Device::SetSceneSize(int nWidth, int nHeight, DXGI_FORMAT ColorFormat)
+bool CD3D12Device::SetSceneSize(int nWidth, int nHeight, DXGI_FORMAT ColorFormat, DXGI_FORMAT OutputFormat)
 {
   if (nWidth <= 0 || nHeight <= 0)
   {
@@ -856,7 +856,7 @@ bool CD3D12Device::SetSceneSize(int nWidth, int nHeight, DXGI_FORMAT ColorFormat
     return true;
   }
   if (m_pSceneColor && nWidth == m_nSceneWidth && nHeight == m_nSceneHeight && m_nSceneOutputWidth == m_nWidth &&
-      m_nSceneOutputHeight == m_nHeight && ColorFormat == m_SceneColorFormat)
+      m_nSceneOutputHeight == m_nHeight && ColorFormat == m_SceneColorFormat && OutputFormat == m_SceneOutputFormat)
     return true;
   ReleaseSceneTargets();
   if (!m_pDevice)
@@ -891,7 +891,7 @@ bool CD3D12Device::SetSceneSize(int nWidth, int nHeight, DXGI_FORMAT ColorFormat
                        "CreateCommittedResource (scene depth)");
   Desc.Width = m_nWidth;
   Desc.Height = m_nHeight;
-  Desc.Format = D3D12_UPSCALE_FORMAT;
+  Desc.Format = OutputFormat;
   Desc.Flags = D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS;
   bOk = bOk && !Failed(m_pDevice->CreateCommittedResource(&Heap, D3D12_HEAP_FLAG_NONE, &Desc, D3D12_RESOURCE_STATE_UNORDERED_ACCESS, nullptr,
                                                           IID_PPV_ARGS(&m_pSceneOutput)), "CreateCommittedResource (upscaler output)");
@@ -919,6 +919,7 @@ bool CD3D12Device::SetSceneSize(int nWidth, int nHeight, DXGI_FORMAT ColorFormat
   m_nSceneOutputWidth = m_nWidth;
   m_nSceneOutputHeight = m_nHeight;
   m_SceneColorFormat = ColorFormat;
+  m_SceneOutputFormat = OutputFormat;
   return true;
 }
 

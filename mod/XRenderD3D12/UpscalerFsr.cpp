@@ -55,7 +55,7 @@ public:
       FreeLibrary(m_hLoader);
   }
 
-  bool Create(ID3D12Device *pDevice, int nWidth, int nHeight, bool bDebug, int nVersion) override
+  bool Create(ID3D12Device *pDevice, int nWidth, int nHeight, bool bDebug, int nVersion, bool bHdr) override
   {
     const std::wstring Loader = GetModuleFolder() + L"amd_fidelityfx_loader_dx12.dll";
     m_hLoader = LoadLibraryExW(Loader.c_str(), nullptr, LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR | LOAD_LIBRARY_SEARCH_DEFAULT_DIRS);
@@ -73,9 +73,10 @@ public:
 
     ffxCreateContextDescUpscale Desc = {};
     Desc.header.type = FFX_API_CREATE_CONTEXT_DESC_TYPE_UPSCALE;
-    // The scene's colours are those of the back buffer (LDR, gamma encoded); no exposure of ours.
-    Desc.flags = FFX_UPSCALE_ENABLE_NON_LINEAR_COLORSPACE | FFX_UPSCALE_ENABLE_AUTO_EXPOSURE | FFX_UPSCALE_ENABLE_DEBUG_VISUALIZATION |
-                 (bDebug ? FFX_UPSCALE_ENABLE_DEBUG_CHECKING : 0);
+    // The scene's colours are those of the back buffer (LDR, gamma encoded), no exposure of ours; or (bHdr) the HDR scene's
+    // linear light with the exposure it gets after the upscale (SUpscaleInputs::pExposure).
+    Desc.flags = (bHdr ? FFX_UPSCALE_ENABLE_HIGH_DYNAMIC_RANGE : FFX_UPSCALE_ENABLE_NON_LINEAR_COLORSPACE | FFX_UPSCALE_ENABLE_AUTO_EXPOSURE) |
+                 FFX_UPSCALE_ENABLE_DEBUG_VISUALIZATION | (bDebug ? FFX_UPSCALE_ENABLE_DEBUG_CHECKING : 0);
     Desc.maxRenderSize = { (uint32_t)nWidth, (uint32_t)nHeight };
     Desc.maxUpscaleSize = { (uint32_t)nWidth, (uint32_t)nHeight };
     Desc.fpMessage = LogMessage;
@@ -141,6 +142,7 @@ public:
     }
     m_nWidth = nWidth;
     m_nHeight = nHeight;
+    m_bHdr = bHdr;
 
     ffxQueryGetProviderVersion Provider = {};
     Provider.header.type = FFX_API_QUERY_DESC_TYPE_GET_PROVIDER_VERSION;
@@ -197,6 +199,8 @@ public:
     Desc.depth = ffxApiGetResourceDX12(In.pDepth, READ);
     Desc.motionVectors = ffxApiGetResourceDX12(In.pVelocity, READ);
     Desc.output = ffxApiGetResourceDX12(In.pOutput, FFX_API_RESOURCE_STATE_UNORDERED_ACCESS);
+    if (m_bHdr && In.pExposure)
+      Desc.exposure = ffxApiGetResourceDX12(In.pExposure, READ);
     Desc.jitterOffset = { In.fJitterX, In.fJitterY };
     Desc.motionVectorScale = { (float)In.nRenderWidth, (float)In.nRenderHeight };
     Desc.renderSize = { (uint32_t)In.nRenderWidth, (uint32_t)In.nRenderHeight };
@@ -210,7 +214,7 @@ public:
     Desc.cameraFar = In.fFar;
     Desc.cameraFovAngleVertical = In.fFovY;
     Desc.viewSpaceToMetersFactor = 1;     // the engine's units are metres
-    Desc.flags = FFX_UPSCALE_FLAG_NON_LINEAR_COLOR_SRGB | (In.bDebugView ? FFX_UPSCALE_FLAG_DRAW_DEBUG_VIEW : 0);
+    Desc.flags = (m_bHdr ? 0 : FFX_UPSCALE_FLAG_NON_LINEAR_COLOR_SRGB) | (In.bDebugView ? FFX_UPSCALE_FLAG_DRAW_DEBUG_VIEW : 0);
     const ffxReturnCode_t nCode = m_Ffx.Dispatch(&m_Context, &Desc.header);
     if (nCode != FFX_API_RETURN_OK && !m_bDispatchFailed)
     {
@@ -227,6 +231,7 @@ private:
   ffxFunctions m_Ffx = {};
   ffxContext m_Context = nullptr;
   int m_nWidth = 0, m_nHeight = 0;    //!< the display size of the context
+  bool m_bHdr = false;                //!< the HDR scene's linear light (Create's bHdr)
   std::string m_Name;
   bool m_bDispatchFailed = false;
 };
