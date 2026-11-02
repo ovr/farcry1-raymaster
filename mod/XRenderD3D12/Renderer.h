@@ -903,6 +903,50 @@ public:
   //! The reflection pass's projection: its near plane replaced by the water plane, so that nothing
   //! under the water is drawn into the reflection.
   void ClipProjectionToWater(Matrix44 &Proj, const Matrix44 &View) const;
+  //! Proj's near plane replaced by the plane through vPoint with the normal vNormal (world space; View
+  //! the world to view), its side the normal points to kept; the camera must be on the other side.
+  static void ClipProjectionToPlane(Matrix44 &Proj, const Matrix44 &View, const Vec3 &vNormal, const Vec3 &vPoint);
+
+  //////////////////////////////////////////////////////////////////////////
+  // Mirrors.cpp: the mirrors (TemplGlassEnvTex, eDC_Mirror), the copy of the screen over a model
+  // (TemplRefrEnvTex, eDC_ScreenTex) and the heat haze particles (eDC_HeatHaze)
+
+  //! Before the main view is drawn (Items: its render items): the scene mirrored in the plane of the
+  //! nearest mirror among the items, seen by the camera mirrored in it, into m_pMirrorColor: the 3D
+  //! engine renders it with DrawLowDetail (the template's scene: the sky, the terrain, the static
+  //! objects, the entities, the particles, the far sprites), the near plane the mirror's plane.
+  void UpdateMirror(std::span<const SRenderItem> Items);
+  void ReleaseMirror();
+  //! A mirror (eDC_Mirror): the frame's mirror picture (UpdateMirror) at the pixel seen by the
+  //! mirrored camera, * "ReflectAmount" + the texture * (1 - it), alpha "Opacity" * the texture's;
+  //! another mirror of the frame has no picture (the texture's part alone, as the original's without
+  //! its target). False: not drawn.
+  bool SetupMirrorDraw(SPipelineKey &Key, SDrawConstants &dc, const SRenderItem &it, CTexture *pTex);
+  //! TemplRefrEnvTex (eDC_ScreenTex): the copy of the scene drawn so far (CopySceneForWater) as its
+  //! texture, unlit. False: not drawn.
+  bool SetupScreenTexDraw(SPipelineKey &Key, SDrawConstants &dc);
+  //! TemplBumpOffsetEnv (eDC_ScreenBump): the copy of the scene drawn so far at the pixel moved by the
+  //! normal map's xy * "BumpAmountX/Y", + the texture (pTex, or none), opaque. False: not drawn.
+  bool SetupScreenBumpDraw(SPipelineKey &Key, SDrawConstants &dc, const SRenderItem &it, CTexture *pTex);
+  //! Heat haze particles (a run of sprites of a heat haze shader): their mask (haze_mask) times their
+  //! alpha over the copy of the scene seen through a ripple (WaterBump); r_HeatHaze 1. False: not drawn.
+  bool SetupHeatHazeDraw(SPipelineKey &Key, SDrawConstants &dc);
+  //! r_HeatHaze (looked up on first use).
+  bool IsHeatHazeOn();
+
+  ComPtr<ID3D12Resource> m_pMirrorColor, m_pMirrorDepth;
+  D3D12_CPU_DESCRIPTOR_HANDLE m_hMirrorRTV = {}, m_hMirrorDSV = {};
+  int m_nMirrorSRV = -1;
+  int m_nMirrorWidth = 0, m_nMirrorHeight = 0;
+  bool m_bMirrorPass = false;               //!< the mirror's scene is being rendered (m_bReflectionPass too)
+  const CCObject *m_pMirrorObj = nullptr;   //!< the object whose mirror the picture is, this frame (m_nMirrorFrame)
+  const CRendElement *m_pMirrorRE = nullptr;
+  int m_nMirrorFrame = -1;
+  Vec3 m_vMirrorNormal, m_vMirrorPoint;     //!< its plane (the normal towards the camera)
+  Matrix44 m_MirrorViewProj;                //!< world to clip of the mirrored camera (without the clip)
+  CTexture *m_pHazeMask = nullptr;          //!< textures/haze_mask (one reference)
+  CTexture *m_pHazeBump = nullptr;          //!< textures/waterbump (one reference)
+  ICVar *m_pHeatHaze = nullptr;             //!< r_HeatHaze
 
   //! The levels of a copy's depth tiles (BuildDepthTiles).
   static constexpr int DEPTH_TILE_LEVELS = 7;

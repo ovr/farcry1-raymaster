@@ -39,6 +39,11 @@
 //	  firetexture = <file>        the textures of the effects (default: the engine's
 //	  smoketexture = <file>       own particle texture, ParticleParams::nTexId 0)
 //	  sparkstexture = <file>
+//	  hazeshader = <shader>       a fourth effect over the fire, with this shader of the
+//	                              game's (e.g. ParticleMinHeatHaze, ParticleParams::pShader):
+//	                              large slow particles rising from the fire, every 4 frames
+//	                              (none without the key)
+//	  haze = x y z                its spot (default: the fire's, 1 m higher)
 //
 //////////////////////////////////////////////////////////////////////
 
@@ -114,6 +119,8 @@ public:
       Spawn(Host, eSmoke, nFrame);
     if (nFrame % 25 == 15)
       Spawn(Host, eSparks, nFrame);
+    if (m_pHazeShader && nFrame % 4 == 0)
+      Spawn(Host, eHaze, nFrame);
   }
 
   virtual void Shutdown(CDemoHost &Host)
@@ -127,7 +134,7 @@ public:
   }
 
 private:
-  enum { eFire, eSmoke, eSparks };
+  enum { eFire, eSmoke, eSparks, eHaze };
 
   //! The fixed camera: the scene's, or the game's one as it is now.
   void SetupCamera(CDemoHost &Host)
@@ -213,8 +220,19 @@ private:
     m_nTextures[eFire] = LoadTexture(Host, eFire, "firetexture");
     m_nTextures[eSmoke] = LoadTexture(Host, eSmoke, "smoketexture");
     m_nTextures[eSparks] = LoadTexture(Host, eSparks, "sparkstexture");
+    const std::string HazeShader = Host.GetScene().Get("hazeshader");
+    if (!HazeShader.empty())
+    {
+      std::vector<float> Spot = Host.GetScene().GetFloats("haze");
+      m_vSpots[eHaze] = Spot.size() >= 3 ? Vec3(Spot[0], Spot[1], Spot[2]) : m_vSpots[eFire] + Vec3(0, 0, 1);
+      m_pHazeShader = Host.GetRenderer()->EF_LoadShader(HazeShader.c_str(), eSH_World);
+      Host.Log("DemoParticles: haze at %g %g %g, shader %s: %s", m_vSpots[eHaze].x, m_vSpots[eHaze].y, m_vSpots[eHaze].z,
+        HazeShader.c_str(), m_pHazeShader ? m_pHazeShader->GetName() : "not loaded");
+    }
     for (int i = 0; i < 3; i++)
       Spawn(Host, i, 0);
+    if (m_pHazeShader)
+      Spawn(Host, eHaze, 0);
   }
 
   //! Spawns effect nEffect after frame nFrame. The C library's rand, which SVariationValue uses, is
@@ -225,7 +243,31 @@ private:
     char szSeed[64];
     sprintf(szSeed, "if randomseed then randomseed(%d) end", nFrame * 3 + nEffect + 1);
     Host.GetSystem()->GetIScriptSystem()->ExecuteBuffer(szSeed, strlen(szSeed));
-    Host.Get3DEngine()->SpawnParticles(nEffect == eFire ? Fire() : nEffect == eSmoke ? Smoke() : Sparks());
+    Host.Get3DEngine()->SpawnParticles(nEffect == eFire ? Fire() : nEffect == eSmoke ? Smoke() : nEffect == eSparks ? Sparks() : Haze());
+  }
+
+  //! Heat haze: a large particle, rising slowly, growing, with the scene's shader (the renderer
+  //! draws the scene behind it rippled; its colour and texture are the shader's).
+  ParticleParams Haze() const
+  {
+    ParticleParams Params;
+    Params.vPosition = m_vSpots[eHaze];
+    Params.vDirection = Vec3(0, 0, 1);
+    Params.fFocus = 10;
+    Params.vColorStart = Vec3(1, 1, 1);
+    Params.vColorEnd = Vec3(1, 1, 1);
+    Params.fSpeed = 0.6f;
+    Params.fSpeed.variation = 0.2f;
+    Params.nCount = 1;
+    Params.fSize = 1.2f;
+    Params.fSizeSpeed = 0.3f;
+    Params.fLifeTime = 2.5f;
+    Params.fFadeInTime = 0.5f;
+    Params.fPosRandomOffset = 0.3f;
+    Params.pShader = m_pHazeShader;
+    Params.eBlendType = ParticleBlendType_AlphaBased;
+    Params.fScale = 1;
+    return Params;
   }
 
   //! Fire: a few particles, rising fast, yellow to red, shrinking at the end.
@@ -306,9 +348,10 @@ private:
   Vec3 m_vCamAngles = Vec3(0, 0, 0);
   float m_fFov = 1.0f;
   float m_fRatio = 0.75f;
-  Vec3 m_vSpots[3];
+  Vec3 m_vSpots[4];
   int m_nTextures[3] = { 0, 0, 0 };
   ITexPic *m_pTextures[3] = { NULL, NULL, NULL };
+  IShader *m_pHazeShader = NULL;
 };
 
 DEMO_PLUGIN(CDemoParticles)

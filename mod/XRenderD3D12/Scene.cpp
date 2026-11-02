@@ -75,7 +75,8 @@ namespace
 
   bool IsBlendedClass(EDrawClass eDC)
   {
-    return eDC == eDC_AlphaBlend || eDC == eDC_Additive || eDC == eDC_ProcFlare || eDC == eDC_FogLayer || eDC == eDC_ScopeLens || IsWaterClass(eDC);
+    return eDC == eDC_AlphaBlend || eDC == eDC_Additive || eDC == eDC_ProcFlare || eDC == eDC_FogLayer || eDC == eDC_ScopeLens ||
+           eDC == eDC_ScreenTex || eDC == eDC_ScreenBump || eDC == eDC_Mirror || IsWaterClass(eDC);
   }
 
   //! The order of the passes of an object drawn one over another: its first pass, its light
@@ -575,7 +576,7 @@ void CScene::EndEf3D(int nFlags)
   {
     UpdateScreenFx();
     // The scenes this one shows (the pictures of new far vegetation sprites, the shadow maps, the
-    // environment cubes, the water reflection), rendered from here, nested in this one.
+    // environment cubes, the water reflection, a mirror's), rendered from here, nested in this one.
     g_pRenderer->GpuSection("sprites");
     g_pRenderer->BakeSprites();
     g_pRenderer->GpuSection("shadow maps");
@@ -584,6 +585,8 @@ void CScene::EndEf3D(int nFlags)
     g_pRenderer->UpdateEnvCubes(s.Items);
     g_pRenderer->GpuSection("water reflection");
     g_pRenderer->UpdateWaterReflection(s.Items);
+    g_pRenderer->GpuSection("mirror");
+    g_pRenderer->UpdateMirror(s.Items);
   }
 
   const int nItems = PrepareItems(s);

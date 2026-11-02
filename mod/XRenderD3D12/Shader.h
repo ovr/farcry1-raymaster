@@ -71,6 +71,11 @@ enum EDrawClass
   eDC_TerrainLight,       //!< the terrain under dynamic lights (triangles of a sector near them): their light alone, added
   eDC_ShadowOnly,         //!< not seen, only in the shadow maps: it casts its shadow (TemplRefrEnvCM)
   eDC_ProcFlare,          //!< a glow around the surface facing the camera, added (FlareProc; Flares.cpp)
+  eDC_ScreenTex,          //!< the copy of the scene drawn so far over the model by its texture coordinates, unlit (TemplRefrEnvTex)
+  eDC_ScreenBump,         //!< the copy of the scene behind the model moved by its bump map + its texture, opaque (TemplBumpOffsetEnv)
+  eDC_Mirror,             //!< a mirror: the scene mirrored in its plane (Mirrors.cpp) * ReflectAmount + texture * (1 - it), blended
+                          //!< (TemplGlassEnvTex)
+  eDC_HeatHaze,           //!< particles of heat haze: the copy of the scene seen through a ripple (r_HeatHaze; DrawSprites)
 };
 
 //! The corona of a flare shader: the "ClientEffect 'Corona'" block of its script.

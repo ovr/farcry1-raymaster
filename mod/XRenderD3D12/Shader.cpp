@@ -198,9 +198,19 @@ constexpr STemplateEntry s_Templates[] =
   { "templlightglow",                  "",                              eS_Opaque,                kOpaque2,                               EF3_NOTEMPLATE, eDC_NoDraw,           eCULL_Back, 0.0f,         0.0f,     false, true },
   { "templbrushedmetal",               "",                              eS_Opaque,                kOpaque2,                               EF3_NOTEMPLATE, eDC_NoDraw,           eCULL_Back, 0.0f,         0.0f,     false, true },
   { "wew",                             "",                              eS_Opaque,                kOpaque2,                               EF3_NOTEMPLATE, eDC_NoDraw,           eCULL_Back, 0.0f,         0.0f,     false, true },
-  { "particleminheathaze",             "",                              eS_HeatVision,            0,                                      0,              eDC_NoDraw,           eCULL_None },
-  { "particlemedheathaze",             "",                              eS_HeatVision,            0,                                      0,              eDC_NoDraw,           eCULL_None },
-  { "particlemaxheathaze",             "",                              eS_HeatVision,            0,                                      0,              eDC_NoDraw,           eCULL_None },
+  // Heat haze: particles that ripple the scene behind them with r_HeatHaze, as the original's
+  // (DrawSprites); not drawn on meshes.
+  { "particleminheathaze",             "",                              eS_HeatVision,            0,                                      0,              eDC_HeatHaze,         eCULL_None },
+  { "particlemedheathaze",             "",                              eS_HeatVision,            0,                                      0,              eDC_HeatHaze,         eCULL_None },
+  { "particlemaxheathaze",             "",                              eS_HeatVision,            0,                                      0,              eDC_HeatHaze,         eCULL_None },
+  // The scene behind: TemplRefrEnvTex the copy of the screen over the model by its own texture
+  // coordinates (the original's fixed function stage, TexGen Base), opaque, unlit; TemplGlassEnvTex a
+  // mirror of the scene mirrored in its plane (Mirrors.cpp), blended, both faces; TemplBumpOffsetEnv
+  // the copy of the scene behind the model moved by its bump map, + its texture (the original draws
+  // nothing of its swatch).
+  { "templrefrenvtex",                 "",                              eS_Refractive,            0,                                      0,              eDC_ScreenTex,        eCULL_Back },
+  { "templbumpoffsetenv",              "",                              eS_Refractive,            0,                                      0,              eDC_ScreenBump,       eCULL_Back },
+  { "templglassenvtex",                "",                              eS_Banner,                0,                                      0,              eDC_Mirror,           eCULL_None },
   // The glass of the scopes (drawn with r_ScopeLens_fx).
   { "ag36scoperefraction",             "",                              eS_Refractive,            0,                                      0,              eDC_ScopeLens,        eCULL_Back },
   { "aw50scoperefraction",             "",                              eS_Refractive,            0,                                      0,              eDC_ScopeLens,        eCULL_Back },

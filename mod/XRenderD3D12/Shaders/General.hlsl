@@ -142,8 +142,8 @@
 //	  draw's lights without the sun (DrawLighting per pixel with
 //	  DF2_VERTEX_LIGHTS, the normal as for DF_PIXEL_LIGHTING) take vAmbient's
 //	  place under the light map: rgb *= 4 * v * tex1 + those lights.
-//	  DF2_SCOPE_LENS (the glass of a scope) replaces the pixel shader with
-//	  ScopeLens.
+//	  DF2_SCREEN_FX (the glass of a scope, a mirror, heat haze) replaces the
+//	  pixel shader with ScreenFx.
 //	The upscaler's jitter (vJitter) moves every clip position. Compiled with
 //	XR_VELOCITY (the draws into an upscaler's scene that write its motion
 //	vectors or its depth) the pixel shader also writes the motion vector of
@@ -452,7 +452,7 @@ float FogVolumeAlpha(float3 vPos)
   return fGate * (1 - exp(-ViewDepth(vPos) * g_Draw.vParams0.y));
 }
 
-//! The glass of a scope (DF2_SCOPE_LENS): the copy of the scene (tex0) around the middle of the
+//! The glass of a scope (DF2_SCREEN_FX, XR_SCREEN_SCOPE): the copy of the scene (tex0) around the middle of the
 //! screen, where the scope aims, as through a real one: each pixel shows the scene at its own offset
 //! from the middle of the glass times vParams0.x from there. The middle of the glass is uv0 (0.5,
 //! 0.5); the offset in pixels comes from uv0 through its screen derivatives, so the picture stands
@@ -477,6 +477,68 @@ float4 ScopeLens(SVertexOutput In)
   float2 d = (vUV - 0.5) / g_Draw.vParams0.z;
   float r2 = dot(d, d);
   return float4(vScene * g_Draw.vColor.rgb, g_Draw.vColor.a * exp2(-r2 * r2));
+}
+
+//! A mirror (XR_SCREEN_MIRROR; TemplGlassEnvTex, the original's CGRCGlassTex): the scene mirrored in
+//! its plane (tex0, seen by the mirrored camera, mParams0 its world to clip) at the pixel's world
+//! position * vParams2.x (ReflectAmount; 0 without the picture) + the texture (tex1 at uv0) *
+//! vParams2.z (1 - ReflectAmount); alpha vColor.a (Opacity) * the vertex colour's alpha * the
+//! texture's.
+float4 Mirror(SVertexOutput In)
+{
+  float4 vClip = mul(float4(In.vWorldPos, 1), g_Draw.mParams0);
+  float2 vAt = vClip.xy / max(vClip.w, 1e-4) * float2(0.5, -0.5) + 0.5;
+  float3 vScene = g_Textures[g_Draw.nTex0].SampleLevel(g_SamplerLinearClamp, vAt, 0).rgb;
+  float4 vDecal = SampleTexture(g_Draw.nTex1, g_Draw.nSamplers & 15, In.vTex0);
+  return float4(vScene * g_Draw.vParams2.x + vDecal.rgb * g_Draw.vParams2.z, In.vColor.a * vDecal.a);
+}
+
+//! Heat haze (XR_SCREEN_HAZE; the particles of ParticleMin/Med/MaxHeatHaze, the original's
+//! CGVProgHeatHaze and CGRCHeatHaze): the copy of the scene (tex0) at the pixel moved by the ripple
+//! (tex1, WaterBump's normal map, whose xy are the height's slopes as the original's du/dv map: rg *
+//! 2 - 1, at (uv0 + vParams0.zw) * vParams0.y) times vParams0.x,
+//! * vColor.rgb; alpha the mask (tex2's alpha at uv0, haze_mask) * the particle's alpha.
+float4 HeatHaze(SVertexOutput In)
+{
+  float2 vRipple = SampleTexture(g_Draw.nTex1, XR_SAMPLER_LINEAR_WRAP, (In.vTex0 + g_Draw.vParams0.zw) * g_Draw.vParams0.y).rg * 2 - 1;
+  uint nW, nH;
+  g_Textures[g_Draw.nTex0].GetDimensions(nW, nH);
+  float2 vAt = In.vPos.xy / float2(nW, nH) + vRipple * g_Draw.vParams0.x;
+  float3 vScene = g_Textures[g_Draw.nTex0].SampleLevel(g_SamplerLinearClamp, vAt, 0).rgb;
+  float fMask = SampleTexture(g_Draw.nTex2, XR_SAMPLER_LINEAR_CLAMP, In.vTex0).a;
+  return float4(vScene * g_Draw.vColor.rgb, fMask * In.vColor.a);
+}
+
+//! The scene behind a model moved by its bump map (XR_SCREEN_BUMP; TemplBumpOffsetEnv, the original's
+//! CGPSBumpOffset): the copy of the scene (tex0) at the pixel moved by the normal map's xy (tex1 at
+//! uv0, as the original's du/dv map) * vParams0.xy (BumpAmountX/Y), + the texture (tex2 at uv0, when
+//! vParams0.z), opaque.
+float4 BumpOffset(SVertexOutput In)
+{
+  float2 vBump = SampleTexture(g_Draw.nTex1, XR_SAMPLER_LINEAR_WRAP, In.vTex0).rg * 2 - 1;
+  uint nW, nH;
+  g_Textures[g_Draw.nTex0].GetDimensions(nW, nH);
+  float2 vAt = In.vPos.xy / float2(nW, nH) + vBump * g_Draw.vParams0.xy;
+  float3 vScene = g_Textures[g_Draw.nTex0].SampleLevel(g_SamplerLinearClamp, vAt, 0).rgb;
+  float3 vBase = g_Draw.vParams0.z > 0 ? SampleTexture(g_Draw.nTex2, g_Draw.nSamplers & 15, In.vTex0).rgb : 0;
+  return float4(vScene + vBase, 1);
+}
+
+//! DF2_SCREEN_FX: the mode vParams3.w; fogged with DF_FOG.
+float4 ScreenFx(SVertexOutput In)
+{
+  float4 vColor;
+  if (g_Draw.vParams3.w == XR_SCREEN_MIRROR)
+    vColor = Mirror(In);
+  else if (g_Draw.vParams3.w == XR_SCREEN_BUMP)
+    vColor = BumpOffset(In);
+  else if (g_Draw.vParams3.w == XR_SCREEN_HAZE)
+    return HeatHaze(In);
+  else
+    return ScopeLens(In);
+  if (HasFlag(DF_FOG) && g_Frame.vFogParams.w != 0)
+    vColor.rgb = lerp(g_Frame.vFogColor.rgb, vColor.rgb, SceneFog(In.vWorldPos));
+  return vColor;
 }
 
 #ifdef XR_CASCADE_INSTANCES
@@ -777,8 +839,8 @@ float4 ShadePixel(SVertexOutput In)
   s_fRayWidth = fRayDistance * fPixelAngle;
   s_nRayLightsLeft = g_Frame.nRaySun.z >> 28;
 #endif
-  if (HasFlag2(DF2_SCOPE_LENS))
-    return ScopeLens(In);
+  if (HasFlag2(DF2_SCREEN_FX))
+    return ScreenFx(In);
 #ifdef XR_CASCADES
   // A caster of the live cascades: not where the full set has something nearer to the sun.
   if (HasFlag2(DF2_CASCADE_CASTER))

@@ -89,7 +89,11 @@ typedef float float4x4_t[16];
 #define DF2_FOG_BLACK       0x00000008  //!< with DF_FOG: fogged towards black (an additive pass)
 #define DF2_FOG_VOLUME      0x00000010  //!< the fog of a fog volume over an object in it: rgb = vColor.rgb, a = FogVolumeAlpha (General.hlsl; vParams0: x the layer's height, y ln 100 / (2 * fog distance), z 1 for the volume's cap, w 1: times the alpha after the alpha test)
 #define DF2_HEAT            0x00000020  //!< heat vision: the colour before the fog through HeatVision (Common.hlsli) with vHeat
-#define DF2_SCOPE_LENS      0x00000040  //!< the glass of a scope: the scene copy tex0 around the middle of the screen (ScopeLens, General.hlsl); nothing else applies
+#define DF2_SCREEN_FX       0x00000040  //!< a picture of the scene in place of the shading (ScreenFx, General.hlsl), the mode vParams3.w: 0 the glass of a scope (the scene copy tex0 around the middle of the screen), 1 a mirror (tex0 projected by mParams0), 2 heat haze (the scene copy tex0 rippled), 3 bump offset (the scene copy tex0 moved by the normal map tex1, + tex2); nothing else applies but the fog (DF_FOG)
+#define XR_SCREEN_SCOPE     0
+#define XR_SCREEN_MIRROR    1
+#define XR_SCREEN_HAZE      2
+#define XR_SCREEN_BUMP      3
 #define DF2_MODULATE        0x00000080  //!< a decal multiplied into the frame (DESTCOLOR, ZERO): rgb = saturate(rgb + vAddColor.w), a = 1, fogged towards white
 #define DF2_PROJECTOR       0x00000100  //!< a projected light's pass: the colour (with the specular) times the cube g_Cubes[nTex5] at float4(world pos, 1) * mParams0 (the light's m_TextureMatrix)
 #define DF2_TERRAIN_LIGHT   0x00000200  //!< the terrain under dynamic lights: tex0 rgb as 0.75 * rgb + 0.25; with DF_PIXEL_LIGHTING point lights fall off as saturate(1 - (d * vLightAtten.w)^2) (linearly with DF2_PROJECTOR)
