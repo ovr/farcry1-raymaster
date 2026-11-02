@@ -90,6 +90,7 @@ enum class ETemplateFx : uint8
   Fur,                    //!< TemplFurRendering: the model and 8 shells 1 to 8 cm out along the normal, blended
   Iridescence,            //!< TemplIridescence_PS20: a wing lit from both sides, see-through by its alpha, a rainbow gloss
   Bubble,                 //!< TemplBubble_PS20: a wobbling soap bubble, the cube reflected, see-through but at its edges
+  Lava,                   //!< LavaVolume: the material's lava colour over its texture flowing with time, unlit, opaque
 };
 
 //! The corona of a flare shader: the "ClientEffect 'Corona'" block of its script.
@@ -287,6 +288,8 @@ public:
   //! An empty list.
   SEfTemplates *GetTemplates() override { return &m_Templates; }
   //! Always empty (no script parameters).
+  //! The public parameters of the template (names and defaults; empty for most): the engine sets a
+  //! material's values (its PublicParams) only for the names in this list.
   TArray<SShaderParam> &GetPublicParams() override { return m_PublicParams; }
   int GetTexId() override { return -1; }
   ITexPic *GetBaseTexture(int *nPass, int *nTU) override;
@@ -333,6 +336,7 @@ private:
   int m_nID;
   int m_nRefCount = 0;
   int m_nRenderFlags = 0;
+  friend class CShaderManager;              // fills m_PublicParams
   std::string m_Name;
   EShaderKind m_eKind;
   SShaderProps m_Props;

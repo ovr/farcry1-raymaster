@@ -352,6 +352,15 @@ void CRendererProxy::Update()
     m_Deferred[i] = m_Deferred[--m_nDeferred];
     ExecuteCommands(szCmd);
   }
+  // xrt_Exec from the game's console (a demo's --exec-at, e.g. "xrt_Exec frame" at a frame of a time
+  // demo).
+  if (g_pXrtExec && g_pXrtExec->GetString() && g_pXrtExec->GetString()[0])
+  {
+    char szCmd[256];
+    strcpy_s(szCmd, g_pXrtExec->GetString());
+    g_pXrtExec->Set("");
+    ExecuteCommands(szCmd);
+  }
   if (m_pDemo)
     m_pDemo->AfterFrame(m_nFrames);
 }

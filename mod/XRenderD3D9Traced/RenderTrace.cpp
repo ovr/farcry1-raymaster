@@ -18,6 +18,7 @@
 int CV_xrt_Trace = 2;
 int CV_xrt_TraceCalls = 30;
 int CV_xrt_TraceFrames = 3;
+ICVar *g_pXrtExec = NULL;
 
 static FILE *s_pTraceFile = NULL;
 static STraceSite *s_pSites = NULL;
@@ -144,6 +145,8 @@ void Trace_RegisterCVars()
     "Number of calls of every renderer method written to the trace log");
   iConsole->Register("xrt_TraceFrames", &CV_xrt_TraceFrames, (float)CV_xrt_TraceFrames, 0,
     "Per-frame call statistics are logged for the first N frames and then every 500th frame");
+  g_pXrtExec = iConsole->CreateVariable("xrt_Exec", "", 0,
+    "The tracer's commands (as XRENDERTRACED_EXEC, e.g. frame), run after this frame and cleared");
 }
 
 void Trace_Write(const char *szFormat, ...)
