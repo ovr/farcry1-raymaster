@@ -5,7 +5,7 @@
 //	File: TestHeaders.hlsl
 //	Description: The unit tests' kernels over the renderer's shader
 //	headers that stand alone (Shader Model 6.0): PathGBuffer.hlsli,
-//	HdrLight.hlsli, HdrToneMap.hlsli, HdrExposure.hlsli, HdrFrameAverage.hlsli, PathCache.hlsli, LightmapLight.hlsli, RenderMode.hlsli, ArrayCoords.hlsli and Fxaa.hlsli, included as the renderer's
+//	HdrLight.hlsli, HdrToneMap.hlsli, HdrExposure.hlsli, HdrFrameAverage.hlsli, PathCache.hlsli, LightmapLight.hlsli, RenderMode.hlsli, ArrayCoords.hlsli, WaterLight.hlsli and Fxaa.hlsli, included as the renderer's
 //	programs include them. Each kernel runs the tested functions on the
 //	items of g_TestIn and writes what they give to g_TestOut; ShaderTests.cpp
 //	checks it. One compile per kernel (Tests/CMakeLists.txt).
@@ -24,6 +24,7 @@
 #include "LightmapLight.hlsli"
 #include "RenderMode.hlsli"
 #include "ArrayCoords.hlsli"
+#include "WaterLight.hlsli"
 
 //! The FXAA tests' picture (Fxaa.hlsli): g_Test.nTest.y x g_Test.nTest.z pixels, g_TestIn[y * width + x] the rgba of
 //! pixel (x, y) as floats, clamped to the picture as AntiAlias.hlsl clamps its loads.
@@ -311,4 +312,29 @@ void CSPictureNoise(uint i : SV_DispatchThreadID)
     return;
   const float4 a = TestIn(i);
   TestOut(i, float4(PictureNoise(a.xy, a.z), 0, 0, 0));
+}
+
+//! WaterGlint (WaterLight.hlsli) of the normal g_TestIn[3i].xyz with the slopes' variance g_TestIn[3i].w, the
+//! direction to the camera g_TestIn[3i + 1].xyz and to the sun g_TestIn[3i + 2].xyz: out[i] = (the glint, the density
+//! of the facets of the half vector, the masking of both directions, the fresnel term at the half vector).
+[numthreads(64, 1, 1)]
+void CSWaterGlint(uint i : SV_DispatchThreadID)
+{
+  if (i >= g_Test.nTest.x)
+    return;
+  const float4 n = TestIn(i * 3);
+  const float3 V = TestIn(i * 3 + 1).xyz, L = TestIn(i * 3 + 2).xyz;
+  const float3 H = normalize(V + L);
+  TestOut(i, float4(WaterGlint(n.xyz, V, L, n.w), WaterSlopeDensity(H, n.xyz, n.w), WaterMasking(V, n.w) * WaterMasking(L, n.w),
+                    WaterFresnel(dot(V, H))));
+}
+
+//! WaterCapLight (WaterLight.hlsli) of the light g_TestIn[i].rgb at most g_TestIn[i].w: out[i].rgb.
+[numthreads(64, 1, 1)]
+void CSWaterCap(uint i : SV_DispatchThreadID)
+{
+  if (i >= g_Test.nTest.x)
+    return;
+  const float4 a = TestIn(i);
+  TestOut(i, float4(WaterCapLight(a.rgb, a.w), 0));
 }

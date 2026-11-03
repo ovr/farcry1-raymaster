@@ -1200,7 +1200,24 @@ and lists theirs (`NamesObjects`).
   2 reflection, 3 water thickness (black to white over 0-2 m), 4 normal, 5 where the screen space
   reflection hits, 6 its colour, 7 the planar reflection (blurred as the water uses it), 12 the
   RMS of the wave slopes finer than a pixel (white: 0.1; the finest of the three wave layers is
-  already lost close to the camera, so it is grey over most of the sea).
+  already lost close to the camera, so it is grey over most of the sea), 16 the sun's glint, 18 the
+  variance of its slopes (white: 0.05), 19 the sun's shadow on the water (black).
+- The sun's glint (`d3d12_WaterGlint`, 1; 0 draws the frames of the water before it; not saved;
+  `d3d12_WaterSunGlint`, a highlight fitted by eye and off as in the game, is gone with it) is the
+  sun mirrored by the waves' facets (`Shaders/WaterLight.hlsli`): Beckmann's distribution of the
+  slopes about the pixel's normal, whose variance is the one the mip levels smoothed out of it (the
+  LEAN variance below, in full) and `d3d12_WaterGlintRoughness` (0.004) for the ripple finer than
+  the wave texture's 2.3 cm, Smith's masking, Schlick's Fresnel of 2 %, as bright as a white face
+  turned to the sun (the game's twice the sun's colour). Close to the camera the waves the pixels
+  resolve glitter; further on the lost slopes widen them into the sun's path towards the camera, a
+  column under the sun at Bunker's sunset (36 degrees up), a wide patch under the higher suns of the
+  other levels (41-80 degrees), Steam's moon's too. It is at most the light of the sun's flare
+  (`d3d12_HDRSun` with `r_HDRRendering`, white without), so in HDR the path goes on above paper
+  white to the peak. In the sun's shadow there is none: the cascades' (a tap; beyond them the ocean
+  is lit, the water volumes are not), with `d3d12_RTSunShadows` a ray, cast only where there is a
+  glint to shade. None in the environment cubes and in heat vision. The water costs 0.04-0.07 ms
+  more at 3840 x 2160 (Bunker's sunset 0.56 -> 0.60 ms, Carrier towards the sun 1.01 -> 1.07, with
+  the rays' shadows and reflections 1.22 -> 1.29).
 - With `r_WaterReflections 1` the ocean reflects the scene seen by the camera mirrored in the water
   plane, which the 3D engine renders with `I3DEngine::DrawLowDetail` before the main view;
   `d3d12_WaterReflectionFlags` are the `EDrawLowDetailFlags` it gets (default 4184: the sky, the

@@ -41,8 +41,14 @@
 //	    times twice the vertex alpha, which the 3D engine lowers in shallow
 //	    water near the camera; other water Schlick's: 2 %; all of it at
 //	    grazing angles) and the reflection amount;
-//	  - the sun's highlight on the waves (off as in the game; a console
-//	    variable of our own);
+//	  - the sun's glint (WaterLight.hlsli; the game has none, d3d12_WaterGlint
+//	    0 leaves it out): the facets of the waves that mirror the sun, their
+//	    slopes about the pixel's normal a gaussian of the variance of the
+//	    ripple finer than a pixel (the reflection's LEAN, at full strength)
+//	    and of the ripple finer than the texture: sparks near the camera, the
+//	    sun's path far away; light added to the colour's, in the HDR targets
+//	    up to the sun's flare (d3d12_HDRSun), none in the sun's shadow (the
+//	    cascades, or a ray with d3d12_RTSunShadows);
 //	  - near the shore (close to the camera) the surface fades into the
 //	    scene behind it, so the water has no hard edge; seen from below,
 //	    the ocean shows the scene above bent by large swells, in its fog
@@ -70,8 +76,7 @@
 //	buffer, but it is what the upscaler sees there.
 //
 //	SDrawConstants:
-//	  vParams0  x wave slope scale, y reflection amount, z d3d12_WaterDebug,
-//	            w the strength of the sun's highlight (d3d12_WaterSunGlint)
+//	  vParams0  x wave slope scale, y reflection amount, z d3d12_WaterDebug
 //	  vParams1  x z1 of the sky box sides, y 1 when there is a sky box,
 //	            z the sky box's alpha (blends it towards the fog colour),
 //	            w 1 when there is a planar reflection
@@ -100,10 +105,16 @@
 //	            R32_FLOAT: at level 0 the least depth of each XR_DEPTH_TILE x
 //	            XR_DEPTH_TILE pixels, at each next one of 2 x 2 texels of the
 //	            one before), y their levels (0: none)
+//	  vSpecular the sun's glint: x its strength (d3d12_WaterGlint; 0: none),
+//	            y the variance of the slopes of the ripple finer than the
+//	            texture (d3d12_WaterGlintRoughness), z its most light (the
+//	            sun's flare's in the HDR targets, else 1), w the sun's shadow:
+//	            1 the cascades', 2 a ray (XR_RAYTRACE)
 //
 //////////////////////////////////////////////////////////////////////
 
 #include "Common.hlsli"
+#include "WaterLight.hlsli"
 #ifdef XR_RAYTRACE
 #include "RayShade.hlsli"
 #endif
@@ -457,6 +468,31 @@ float4 RayReflection(float3 P, float3 R, float fDistance, float fPixelAngle, flo
 }
 #endif
 
+//! How much of the sun reaches the water at P (vSpecular.w): 2 a ray towards it (XR_RAYTRACE, with
+//! d3d12_RTSunShadows; fConeWidth the pixel's width there, for the alpha tests), else the cascades'
+//! (CascadeTap, a bilinear comparison); beyond them the ocean in full sun, a water volume (it may be
+//! indoors) in none.
+float WaterSunShadow(float3 P, float fConeWidth)
+{
+#ifdef XR_RAYTRACE
+  if (g_Draw.vSpecular.w == 2)
+    return TraceSun(P, float3(0, 0, 1), asuint(g_Draw.vTexGenV.z) & 0xff, fConeWidth);
+#endif
+  const uint n = min((uint)g_Frame.vCascadeParams.x, XR_MAX_CASCADES);
+  if (n == 0 || ViewDepth(P) >= g_Frame.vCascadeEnd[n - 1])
+    return g_Draw.vParams3.w == 1 ? 0 : 1;
+  return CascadeTap(P);
+}
+
+//! The light of a white face turned to the sun: the game lights a texture modulated by 2 with twice
+//! the sun's colour (General.hlsl's DrawLighting), in gamma space (HdrDecode), as the path tracer's
+//! sun (PathShade.hlsli).
+float3 WaterSunLight()
+{
+  const float3 c = 2 * g_Frame.vSunColor.rgb;
+  return float3(HdrDecode(c.r), HdrDecode(c.g), HdrDecode(c.b));
+}
+
 float4 ShadeWater(SWaterOutput In)
 {
   float3 vCamera = g_Frame.vCameraPos.xyz;
@@ -603,17 +639,39 @@ float4 ShadeWater(SWaterOutput In)
 #endif
     vReflected = lerp(vReflected, vSSR.rgb, vSSR.w);
 
-    // The sun's highlight (d3d12_WaterSunGlint), as much of it as the facets reflect (fresnel at the
-    // half vector): faint looking down on the water, glaring towards a low sun.
-    float3 H = normalize(L + V);
-    float fSunF = 0.02 + 0.98 * pow(1 - saturate(dot(V, H)), 5);
-    float fSpec = (pow(saturate(dot(N, H)), 700) * 40 + pow(saturate(dot(N, H)), 90) * 1.5) * fSunF;
-    float3 vSun = g_Frame.vSunColor.rgb * fSpec * saturate(L.z * 4) * g_Draw.vParams0.w;
+    // The sun's glint (d3d12_WaterGlint, vSpecular.x; WaterLight.hlsli): the facets that mirror it,
+    // the pixel's waves and the slopes about them of the ripple finer than a pixel (the variance
+    // fLostVar at full strength, d3d12_WaterReflectionBlur is the reflection's) and of the ripple
+    // finer than the texture (d3d12_WaterGlintRoughness, vSpecular.y); times the reflection amount,
+    // fading out as the sun sets (below 6 degrees), at most the sun's flare (vSpecular.z); in the
+    // sun's shadow (WaterSunShadow, looked up only where there is a glint to shade) none.
+    const float fGlintVar = fLostVar + g_Draw.vSpecular.y;
+    float3 vGlint = 0;
+    if (g_Draw.vSpecular.x > 0)
+    {
+      const float fGlint = WaterGlint(N, V, L, fGlintVar) * g_Draw.vSpecular.x * g_Draw.vParams0.y * saturate(L.z * 10);
+      vGlint = WaterCapLight(WaterSunLight() * fGlint, g_Draw.vSpecular.z);
+#ifdef XR_RAYTRACE
+      const float fCone = fDistance * fPixelAngle;
+#else
+      const float fCone = 0;
+#endif
+      if (max(vGlint.r, max(vGlint.g, vGlint.b)) > 1e-3)
+        vGlint *= WaterSunShadow(In.vWorldPos, fCone);
+      else
+        vGlint = 0;
+    }
 
     // The shore: the surface fades in over the first 15 cm of water, up to 40 m away; beyond 100 m
     // it covers everything (the coarse distant terrain comes close to the surface in places).
+    // The glint is light added to the colour's (HdrDecode: the game's colours are gamma encoded).
     float fShore = saturate(fThick0 * 6.6 + saturate((fSurface - 40) / 60));
-    vColor = lerp(vRefracted, vReflected, F) + vSun * fShore;
+    vColor = lerp(vRefracted, vReflected, F);
+    if (any(vGlint > 0))
+    {
+      const float3 vLight = float3(HdrDecode(vColor.r), HdrDecode(vColor.g), HdrDecode(vColor.b)) + vGlint * fShore;
+      vColor = float3(HdrEncode(vLight.r), HdrEncode(vLight.g), HdrEncode(vLight.b));
+    }
     vColor = lerp(vScene0, vColor, fShore);
     if (g_Draw.vParams0.z == 1)
       return float4(vRefracted, 1);
@@ -639,6 +697,18 @@ float4 ShadeWater(SWaterOutput In)
       return float4(In.vColor.aaa, 1);
     if (g_Draw.vParams0.z == 12)
       return float4(saturate(sqrt(fLostVar) * 10).xxx, 1);
+    if (g_Draw.vParams0.z == 16)
+      return float4(HdrEncode(vGlint.r), HdrEncode(vGlint.g), HdrEncode(vGlint.b), 1);
+    if (g_Draw.vParams0.z == 18)
+      return float4(saturate(fGlintVar / 0.05).xxx, 1);
+    if (g_Draw.vParams0.z == 19)
+    {
+#ifdef XR_RAYTRACE
+      return float4(WaterSunShadow(In.vWorldPos, fDistance * fPixelAngle).xxx, 1);
+#else
+      return float4(WaterSunShadow(In.vWorldPos, 0).xxx, 1);
+#endif
+    }
 #ifdef XR_RAYTRACE
     if (g_Draw.vParams0.z == 13)
       return float4(vRay.rgb, 1);

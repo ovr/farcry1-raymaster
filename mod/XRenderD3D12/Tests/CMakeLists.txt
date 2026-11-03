@@ -43,7 +43,7 @@ endfunction()
 # The headers that stand alone (Shader Model 6.0).
 set(headers "${CMAKE_CURRENT_SOURCE_DIR}/Shaders/TestHeaders.hlsl")
 foreach(k Oct GBufferNormal Hdr HdrStats ToneMap HdrOutput SkyGlow FrameAverage Exposure CacheCell CacheLookup CacheAdd CacheRead CachePoke
-          LightmapLight RenderMode Fxaa ArrayCoords BlendPictures PictureNoise)
+          LightmapLight RenderMode Fxaa ArrayCoords BlendPictures PictureNoise WaterGlint WaterCap)
     xrender_d3d12_test_shader(${k} "${headers}" cs_6_0 CS${k})
 endforeach()
 # SMAA 1x (Smaa.hlsli with third_party/smaa's SMAA.hlsl, SmaaBlend.hlsli): its edges and its blending at the high
@@ -105,6 +105,7 @@ set(XRENDERD3D12_TESTS_SOURCES
     MsaaTests.cpp
     LightImageTests.cpp
     FarSpriteTests.cpp
+    WaterLightTests.cpp
 )
 file(GLOB XRENDERD3D12_TESTS_HLSL "${CMAKE_CURRENT_SOURCE_DIR}/Shaders/*.hlsl" "${CMAKE_CURRENT_SOURCE_DIR}/Shaders/*.hlsli")
 set_source_files_properties(${XRENDERD3D12_TESTS_HLSL} PROPERTIES HEADER_FILE_ONLY ON)
