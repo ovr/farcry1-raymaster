@@ -247,7 +247,8 @@ instructions and is not committed (git-ignored). The references of the modules a
   variables: its radiance cache, checkerboard and denoisers, NVIDIA NRD or its own); the statistics
   (`r_Stats`, `r_DisplayInfo`, the engine's frame profiler, `d3d12_GpuTimes`, `d3d12_FrameLog`,
   `d3d12_CpuSamples`, `d3d12_DumpFrame`);
-  the water (`d3d12_WaterDebug`, `r_WaterReflections`); the templates with shaders of their own
+  the water (`d3d12_WaterDebug`, `r_WaterReflections`; the sun's glint and its path `d3d12_WaterGlint`,
+  `Shaders/WaterLight.hlsli`); the templates with shaders of their own
   (`TemplateFx.cpp`, Volcano's lava `LavaVolume`) and the fog of what is added; the far vegetation
   sprites (their pictures blended, `d3d12_SpriteBlend`, `FarSpriteAngles.h`) and the terrain's detail layers; the video options' render modes over the scene
   (`r_RenderMode` with `r_Glare`: Improved, Paradise, Cold, Cartoon; `d3d12_RenderMode`,

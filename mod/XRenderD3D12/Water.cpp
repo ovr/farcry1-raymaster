@@ -935,8 +935,13 @@ bool CD3D12Renderer::SetupWaterDraw(SPipelineKey &Key, SDrawConstants &dc, const
   const float fReflect = std::clamp(GetObjectParam(pObj, "reflectamount", 1.0f), 0.0f, 1.0f);
   const bool bVolume = !IsOcean(it);
   const SFogVolume *pFV = bVolume ? nullptr : m_pScene->GetOceanFogVolume();
-  Set4(dc.vParams0, (fBumpX + fBumpY) * 1.2f, fReflect, (float)CV_d3d12_WaterDebug, std::max(CV_d3d12_WaterSunGlint, 0.0f));
+  Set4(dc.vParams0, (fBumpX + fBumpY) * 1.2f, fReflect, (float)CV_d3d12_WaterDebug, 0);
   dc.nTex5 = GetWaveTexture();
+  // The sun's glint: none in an environment cube (it is the camera's) or in heat vision; at most the
+  // sun's flare in the HDR targets.
+  const bool bGlint = CV_d3d12_WaterGlint > 0 && !m_bEnvCubePass && !m_bHeatPass;
+  Set4(dc.vSpecular, bGlint ? CV_d3d12_WaterGlint : 0.0f, std::max(CV_d3d12_WaterGlintRoughness, 1e-5f),
+       IsHdrTarget() ? std::max(CV_d3d12_HDRSun, 1.0f) : 1.0f, 1);
 
   // The sky box the scene's sky drew (as it drew it).
   dc.nTex2 = dc.nTex3 = dc.nTex4 = D3D12_SRV_WHITE;
@@ -972,6 +977,9 @@ bool CD3D12Renderer::SetupWaterDraw(SPipelineKey &Key, SDrawConstants &dc, const
     const uint32 nMask = RayMask();
     Set4(dc.vTexGenV, (float)std::min(CV_d3d12_RTReflections, 2), std::max(CV_d3d12_RTDistance, 1.0f), 0, 0);
     memcpy(&dc.vTexGenV[2], &nMask, sizeof(nMask));
+    // The glint's sun shadow by a ray, as the scene's with the sun's shadow by rays.
+    if (CV_d3d12_RTSunShadows > 0)
+      dc.vSpecular[3] = 2;
   }
 
   Set4(dc.vParams2, WATER_ABSORPTION[0] + WATER_TURBIDITY, WATER_ABSORPTION[1] + WATER_TURBIDITY, WATER_ABSORPTION[2] + WATER_TURBIDITY,

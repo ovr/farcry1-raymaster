@@ -1923,7 +1923,8 @@ public:
   mutable ICVar *m_pHdrRendering = nullptr;  //!< r_HDRRendering, looked up on first use
   int CV_d3d12_WaterDebug = 0;        //!< non-zero: the water shows one term of its colour (Water.hlsl)
   int CV_d3d12_Caustics = 1;          //!< 0: no caustics under the ocean
-  float CV_d3d12_WaterSunGlint = 0;   //!< strength of the sun's highlight on water (0: none)
+  float CV_d3d12_WaterGlint = 1;      //!< strength of the sun's glint on water (0: none, as the game)
+  float CV_d3d12_WaterGlintRoughness = 0.004f;  //!< the variance of the slopes of the water's ripple finer than its wave texture (the glint's)
   int CV_d3d12_GpuTimes = 0;          //!< N: the GPU time of the frame's sections to the log every N frames
   int CV_d3d12_FrameLog = 0;          //!< 1: a line per frame to XRenderD3D12_frames.txt (LogFrame), 2 with the engine's profilers
   int CV_d3d12_CpuSamples = 0;        //!< N: the render thread's stack every N microseconds, to XRenderD3D12_samples.txt at 0 (CpuSampler)
