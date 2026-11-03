@@ -9,6 +9,13 @@
 //	6.5 (inline RayQuery), with PathShade.hlsli. Linear light, as the HDR
 //	target's after HdrDecode; the light on a surface is without its
 //	albedo, the composite (PathComposite.hlsl) multiplies it in.
+//	The rays leave a pixel's surface from its point on the ray scene's
+//	(PixelSurface): the depth buffer's view depth is off by up to some
+//	1e-3 of itself (Far Cry's world coordinates in single floats, a near
+//	plane of 0.25 m; a few tenths of a metre at 300 m, under the surface
+//	or over it, another way each frame), more than a ray's offset from
+//	the surface: the terrain's sun ray (TerrainBakedShare) found the
+//	terrain it left, streaks of shadow over the hills that came and went.
 //	  CSTrace: a path from each pixel's surface. Its lamps' light by a ray
 //	    (PathSampleLamp), then nPath.y bounces in directions of the
 //	    hemisphere as the cosine spreads them: a hit gives its emission
@@ -125,6 +132,67 @@ float3 PixelNormal(float4 vGBuffer)
   return PathOctDecode(vGBuffer.rg);
 }
 
+//! How far the depth buffer's view depth can be off, of itself (see the head of the file), and the least (m).
+static const float PIXEL_DEPTH_ERROR = 2e-3;
+static const float PIXEL_DEPTH_ERROR_MIN = 0.02;
+
+//! The ray from the camera through the pixel's point vPos (from the depth buffer) within PIXEL_DEPTH_ERROR of its
+//! distance, where the ray scene's surface the raster drew there is (TMax 0 at the camera).
+RayDesc PixelSurfaceRay(float3 vPos)
+{
+  const float3 vRay = vPos - g_PT.vCameraPos.xyz;
+  const float fLength = length(vRay);
+  const float fError = PIXEL_DEPTH_ERROR_MIN + PIXEL_DEPTH_ERROR * fLength;
+  RayDesc Ray;
+  Ray.Origin = g_PT.vCameraPos.xyz;
+  Ray.Direction = fLength > 0 ? vRay / fLength : float3(0, 0, 1);
+  Ray.TMin = max(fLength - fError, 0.01);
+  Ray.TMax = fLength > 0 ? fLength + fError : 0;
+  return Ray;
+}
+
+//! The pixel's point vPos (from the depth buffer) and its face vFace on the ray scene's surface the raster drew there:
+//! the nearest hit (alpha tested as TraceScene) among the instances of nMask of PixelSurfaceRay, and that triangle's
+//! normal on the camera's side. The vegetation's (nMaterial, PathGBufferMaterial) as they are: its leaves bend in the
+//! wind as the ray scene's do not. Where the ray finds nothing (a surface the ray scene leaves out), vPos and vFace as
+//! they are too.
+void PixelSurface(inout float3 vPos, inout float3 vFace, uint nMaterial, uint nMask)
+{
+  const RayDesc Ray = PixelSurfaceRay(vPos);
+  if (nMaterial == XR_PT_MAT_VEGETATION + 1 || Ray.TMax <= 0)
+    return;
+  const SRayHit Hit = TraceScene(Ray, nMask, 0, g_PT.vParams.y, g_PT.nPath.z);
+  if (!Hit.bHit)
+    return;
+  vPos = Ray.Origin + Ray.Direction * Hit.fT;
+  vFace = RayFaceNormal(Hit.nInstance, Hit.nPrimitive, Hit.mObjectToWorld, Ray.Direction);
+}
+
+//! PixelSurface on the terrain alone (XR_RAY_TERRAIN), a terrain's pixel: the first of its triangles PixelSurfaceRay
+//! finds (opaque; a height field has one surface so near the point).
+void PixelTerrain(inout float3 vPos, inout float3 vFace)
+{
+  RayDesc Ray = PixelSurfaceRay(vPos);
+  if (Ray.TMax <= 0)
+    return;
+  RayQuery<RAY_FLAG_FORCE_OPAQUE | RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH | RAY_FLAG_SKIP_PROCEDURAL_PRIMITIVES> Query;
+  Query.TraceRayInline(g_RayScene, RAY_FLAG_NONE, XR_RAY_TERRAIN, Ray);
+  Query.Proceed();
+  if (Query.CommittedStatus() != COMMITTED_TRIANGLE_HIT)
+    return;
+  vPos = Ray.Origin + Ray.Direction * Query.CommittedRayT();
+  vFace = RayFaceNormal(Query.CommittedInstanceID(), Query.CommittedPrimitiveIndex(), Query.CommittedObjectToWorld3x4(), Ray.Direction);
+}
+
+//! The share of the light baked into the terrain's texture at a terrain pixel's point vPos (the depth buffer's; vN its
+//! normal, vFace its face, d its view depth) as the composite takes it: TerrainBakedShare from its point on the ray
+//! scene's terrain (PixelTerrain), the sun's ray over the terrain alone.
+float PixelTerrainShare(float3 vPos, float3 vN, float3 vFace, float d)
+{
+  PixelTerrain(vPos, vFace);
+  return TerrainBakedShare(vPos, vN, vFace, PathShadeParams(0), d * g_PT.vParams.y);
+}
+
 //! The face a path along vDir leaves a leaf by (the vegetation's pixels; vFace the side the camera sees): the leaf's
 //! normal is the crown's (PathGBufferNormal), most of them up, so a path is often under the leaf's face; it goes on
 //! through the leaf from its other side, as the raster lights both sides of a leaf by the crown's normal.
@@ -178,8 +246,9 @@ void CSTrace(uint3 vId : SV_DispatchThreadID)
     g_HitDistance[p] = 0;
     return;
   }
-  const float3 vPos = PixelPos(p + 0.5, d);
-  const float3 vFace = FaceNormal(p, vPos, d);
+  float3 vPos = PixelPos(p + 0.5, d);
+  float3 vFace = FaceNormal(p, vPos, d);
+  PixelSurface(vPos, vFace, PathGBufferMaterial(vGBuffer), g_PT.nFlags.w & 0xff);
   const float3 vN = PixelNormal(vGBuffer);
   const float fPixel = d * g_PT.vParams.y;
   float fHitDistance = 0;
@@ -373,7 +442,7 @@ void CSFilter(uint3 vId : SV_DispatchThreadID)
   // divides the albedo by that).
   float fBaked = 1;
   if (PathGBufferMaterial(vGBuffer) == XR_PT_MAT_TERRAIN + 1 && g_PT.vShade.x > 1)
-    fBaked = TerrainBakedShare(vPos, vN, vFace, PathShadeParams(0), d * g_PT.vParams.y);
+    fBaked = PixelTerrainShare(vPos, vN, vFace, d);
   g_Out[p] = float4(max(vLight, 0), fBaked);
 }
 
@@ -402,8 +471,9 @@ void CSSpecular(uint3 vId : SV_DispatchThreadID)
     g_Out[p] = 0;
     return;
   }
-  const float3 vPos = PixelPos(p + 0.5, d);
-  const float3 vFace = FaceNormal(p, vPos, d);
+  float3 vPos = PixelPos(p + 0.5, d);
+  float3 vFace = FaceNormal(p, vPos, d);
+  PixelSurface(vPos, vFace, PathGBufferMaterial(vGBuffer), g_PT.nFlags.w & 0xff);
   const float3 vN = PixelNormal(vGBuffer);
   const float3 vToEye = normalize(g_PT.vCameraPos.xyz - vPos);
   // The sun's, with the visibility the raster found.
@@ -457,7 +527,8 @@ void CSCacheUpdate(uint3 vId : SV_DispatchThreadID)
   const float d = ViewDepthOf(z);
   if (PathGBufferMaterial(vGBuffer) == 0 || z >= 1 || d <= 0)
     return;
-  const float3 vPos = PixelPos(p + 0.5, d);
+  float3 vPos = PixelPos(p + 0.5, d), vFace = FaceNormal(p, vPos, d);
+  PixelSurface(vPos, vFace, PathGBufferMaterial(vGBuffer), g_PT.nFlags.w & 0xff);
   SPathShade P = PathShadeParams(g_PT.nPath.z);
   // The path's points (each one's entry, the light that comes straight to it from the sun and a lamp, what its ray's hit
   // gives back of its own, that hit's albedo), then from the last back all the light that comes to each.
@@ -465,7 +536,7 @@ void CSCacheUpdate(uint3 vId : SV_DispatchThreadID)
   float3 Direct[CACHE_BOUNCES], Gives[CACHE_BOUNCES], Albedo[CACHE_BOUNCES];
   bool Valid[CACHE_BOUNCES];
   uint nPoints = 0;
-  float3 vOrigin = vPos, vNormal = PixelNormal(vGBuffer), vFaceNormal = FaceNormal(p, vPos, d);
+  float3 vOrigin = vPos, vNormal = PixelNormal(vGBuffer), vFaceNormal = vFace;
   bool bLeaves = PathGBufferMaterial(vGBuffer) == XR_PT_MAT_VEGETATION + 1;
   float3 vFill = PathAmbientLight(g_Textures[g_PT.nTextures2.w].Load(int3(p, 0)).gba) * g_PT.vFill.x;
   float fWidth = d * g_PT.vParams.y;
