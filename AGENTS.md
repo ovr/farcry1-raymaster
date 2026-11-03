@@ -243,7 +243,9 @@ instructions and is not committed (git-ignored). The references of the modules a
   `d3d12_CpuSamples`, `d3d12_DumpFrame`);
   the water (`d3d12_WaterDebug`, `r_WaterReflections`); the templates with shaders of their own
   (`TemplateFx.cpp`, Volcano's lava `LavaVolume`) and the fog of what is added; the far vegetation
-  sprites and the terrain's detail layers. The game's menu gets the renderer's options from the patches in
+  sprites and the terrain's detail layers; the video options' render modes over the scene
+  (`r_RenderMode` with `r_Glare`: Improved, Paradise, Cold, Cartoon; `d3d12_RenderMode`,
+  `Shaders/RenderMode.hlsli`). The game's menu gets the renderer's options from the patches in
   `assets/scripts` (HDR, ambient occlusion, ray traced reflections, path tracing in Advanced Video
   Options),
   greyed out with another renderer.
