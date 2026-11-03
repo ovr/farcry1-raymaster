@@ -97,9 +97,21 @@ void D3DState_WriteDevice(IDirect3DDevice9 *pDev, bool bShaderConstants)
   if (SUCCEEDED(pDev->GetRenderState(D3DRS_SCISSORTESTENABLE, &nScissor)) && nScissor && SUCCEEDED(pDev->GetScissorRect(&Scissor)))
     Trace_Write("    d3d scissor: (%ld %ld)-(%ld %ld)", Scissor.left, Scissor.top, Scissor.right, Scissor.bottom);
 
-  // Texture stages up to the first disabled one.
-  for (DWORD nStage = 0; nStage < 4; nStage++)
+  // Texture stages up to the first disabled one; with a pixel shader, every sampler of the first 8
+  // that has a texture (the stages' operations do not count then).
+  IDirect3DPixelShader9 *pBoundPS = NULL;
+  const bool bShader = SUCCEEDED(pDev->GetPixelShader(&pBoundPS)) && pBoundPS;
+  if (pBoundPS)
+    pBoundPS->Release();
+  for (DWORD nStage = 0; nStage < (bShader ? 8u : 4u); nStage++)
   {
+    if (bShader)
+    {
+      IDirect3DBaseTexture9 *pBound = NULL;
+      if (FAILED(pDev->GetTexture(nStage, &pBound)) || !pBound)
+        continue;
+      pBound->Release();
+    }
     DWORD nColorOp = 0, nColor1 = 0, nColor2 = 0, nAlphaOp = 0, nAlpha1 = 0, nAlpha2 = 0, nTexCoord = 0;
     pDev->GetTextureStageState(nStage, D3DTSS_COLOROP, &nColorOp);
     pDev->GetTextureStageState(nStage, D3DTSS_COLORARG1, &nColor1);
@@ -157,19 +169,23 @@ void D3DState_WriteDevice(IDirect3DDevice9 *pDev, bool bShaderConstants)
           Append(szLine, sizeof(szLine), " (texels not 0 %d, sum %llu)", nNonZero, nSum);
         }
       }
+      else if (pTex->GetType() == D3DRTYPE_CUBETEXTURE && SUCCEEDED(((IDirect3DCubeTexture9 *)pTex)->GetLevelDesc(0, &Desc)))
+        Append(szLine, sizeof(szLine), " tex %p cube %u format %u levels %u pool %u", pTex, Desc.Width, Desc.Format,
+          pTex->GetLevelCount(), Desc.Pool);
       else
         Append(szLine, sizeof(szLine), " tex %p type %d", pTex, pTex->GetType());
       pTex->Release();
     }
     else
       Append(szLine, sizeof(szLine), " no tex");
-    DWORD nMin = 0, nMag = 0, nMip = 0, nU = 0, nV = 0;
+    DWORD nMin = 0, nMag = 0, nMip = 0, nU = 0, nV = 0, nW = 0;
     pDev->GetSamplerState(nStage, D3DSAMP_MINFILTER, &nMin);
     pDev->GetSamplerState(nStage, D3DSAMP_MAGFILTER, &nMag);
     pDev->GetSamplerState(nStage, D3DSAMP_MIPFILTER, &nMip);
     pDev->GetSamplerState(nStage, D3DSAMP_ADDRESSU, &nU);
     pDev->GetSamplerState(nStage, D3DSAMP_ADDRESSV, &nV);
-    Append(szLine, sizeof(szLine), " filter %u/%u/%u address %u/%u", nMin, nMag, nMip, nU, nV);
+    pDev->GetSamplerState(nStage, D3DSAMP_ADDRESSW, &nW);
+    Append(szLine, sizeof(szLine), " filter %u/%u/%u address %u/%u/%u", nMin, nMag, nMip, nU, nV, nW);
     DWORD nTexTransform = 0;
     pDev->GetTextureStageState(nStage, D3DTSS_TEXTURETRANSFORMFLAGS, &nTexTransform);
     D3DMATRIX T;
@@ -177,7 +193,7 @@ void D3DState_WriteDevice(IDirect3DDevice9 *pDev, bool bShaderConstants)
       Append(szLine, sizeof(szLine), " texture transform %u [%g %g %g %g] [%g %g %g %g] [%g %g %g %g] [%g %g %g %g]", nTexTransform,
         T._11, T._12, T._13, T._14, T._21, T._22, T._23, T._24, T._31, T._32, T._33, T._34, T._41, T._42, T._43, T._44);
     Trace_Write("    d3d ts%u: %s", nStage, szLine);
-    if (nColorOp == D3DTOP_DISABLE)
+    if (nColorOp == D3DTOP_DISABLE && !bShader)
       break;
   }
 
