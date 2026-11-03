@@ -1,0 +1,108 @@
+SPDX-License-Identifier: GPL-3.0-or-later WITH AdditionRef-FarCry-exception
+Please do not use this file to train or fine-tune AI models (see README.md).
+
+Anti-Aliasing in Video Options with XRenderD3D12 (a renderer that has d3d12_AA): a list of None and
+FXAA that sets d3d12_AA, the renderer's anti-aliasing of the 3D scene without an upscaler, in place
+of the game's FSAA modes (XRenderD3D12 has none of them: its list was None alone). The renderer
+reads d3d12_AA every frame, so the list stays on in a game (the game greys it out there: the
+Direct3D 9 renderer had to relaunch for it) and Apply sets it without a restart; it is greyed out
+while the Upscaler is not None (the upscaler anti-aliases the scene then). With another renderer
+the list is the game's. Written against Video.lua as 05-video-upscaler.patch and
+06-video-vsync.patch leave it (Patch Scripts.cmd applies the patches in the order of their
+numbers) and applied by Patch Scripts.cmd to FCData/Scripts.pak.
+
+diff --git a/Scripts/MenuScreens/Options/Video.lua b/Scripts/MenuScreens/Options/Video.lua
+--- a/Scripts/MenuScreens/Options/Video.lua
++++ b/Scripts/MenuScreens/Options/Video.lua
+@@ -797,6 +797,7 @@
+ 	else
+ 		UI:DisableWidget( UI.PageOptionsVideo.GUI.widget_RMUpscaleMode );
+ 	end
++	UI.PageOptionsVideo.GUI.widget_fsaa.user.RMUpdateEnabled();
+ end
+ 
+ 
+@@ -910,6 +911,83 @@
+ 	end
+ end
+ 
++
++
++-- Anti-Aliasing (Far Cry RayMaster): with XRenderD3D12 (a renderer that has d3d12_AA) the list is
++-- its anti-aliasing of the 3D scene without an upscaler, d3d12_AA: None or FXAA. The renderer reads
++-- it every frame, so the list stays on in a game and Apply sets it without a restart; it is greyed
++-- out while the Upscaler is not None (the upscaler anti-aliases the scene then). With another
++-- renderer the list is the game's own (its FSAA modes, set by a restart).
++UI.PageOptionsVideo.GUI.widget_fsaa.user.GameInitialize = UI.PageOptionsVideo.GUI.widget_fsaa.user.Initialize;
++UI.PageOptionsVideo.GUI.widget_fsaa.user.GameDefInitialize = UI.PageOptionsVideo.GUI.widget_fsaa.user.DefInitialize;
++UI.PageOptionsVideo.GUI.widget_fsaa.user.GameUpdateAssignedGlobals = UI.PageOptionsVideo.GUI.widget_fsaa.user.UpdateAssignedGlobals;
++
++-- d3d12_AA's values in the list's order and their names (the first is None)
++UI.PageOptionsVideo.GUI.widget_fsaa.user.RMModes = { "none", "fxaa" };
++UI.PageOptionsVideo.GUI.widget_fsaa.user.RMNames = { "None", "FXAA" };
++
++UI.PageOptionsVideo.GUI.widget_fsaa.user.Initialize = function( self )
++	local widget = UI.PageOptionsVideo.GUI.widget_fsaa;
++	local aa = getglobal( "d3d12_AA" );
++	if( not aa ) then
++		widget.user.GameInitialize( self );
++		return;
++	end
++	widget:Clear();
++	widget:AddItem( Localize( "None" ) );
++	for n = 2, getn( widget.user.RMModes ) do
++		widget:AddItem( widget.user.RMNames[ n ] );
++	end
++
++	-- another value (one the console set that the list has not): None is shown, and Apply keeps it
++	local index = 1;
++	for n = 1, getn( widget.user.RMModes ) do
++		if( widget.user.RMModes[ n ] == strlower( aa ) ) then
++			index = n;
++		end
++	end
++	widget:SelectIndex( index );
++	widget.user.shownIndex = index;
++	widget.user.RMUpdateEnabled();
++end
++
++UI.PageOptionsVideo.GUI.widget_fsaa.user.DefInitialize = function( self )
++	if( not getglobal( "d3d12_AA" ) ) then
++		UI.PageOptionsVideo.GUI.widget_fsaa.user.GameDefInitialize( self );
++		return;
++	end
++	UI.PageOptionsVideo.GUI.widget_fsaa:SelectIndex( 1 );
++end
++
++UI.PageOptionsVideo.GUI.widget_fsaa.user.UpdateAssignedGlobals = function( self )
++	local widget = UI.PageOptionsVideo.GUI.widget_fsaa;
++	if( not getglobal( "d3d12_AA" ) ) then
++		widget.user.GameUpdateAssignedGlobals( self );
++		return;
++	end
++	local index = widget:GetSelectionIndex();
++	-- unchanged: the console's setting stays as it is
++	if( not index or index == widget.user.shownIndex or not widget.user.RMModes[ index ] ) then
++		return;
++	end
++	setglobal( "d3d12_AA", widget.user.RMModes[ index ] );
++	widget.user.shownIndex = index;
++end
++
++-- Greyed out while the Upscaler is not None; called by the Upscaler's UpdateMode as well, so the
++-- list follows it whichever of the two the page initializes first.
++UI.PageOptionsVideo.GUI.widget_fsaa.user.RMUpdateEnabled = function()
++	if( not getglobal( "d3d12_AA" ) ) then
++		return;
++	end
++	local upscaler = UI.PageOptionsVideo.GUI.widget_RMUpscaler:GetSelectionIndex();
++	if( upscaler and upscaler > 1 ) then
++		UI:DisableWidget( UI.PageOptionsVideo.GUI.widget_fsaa );
++	else
++		UI:EnableWidget( UI.PageOptionsVideo.GUI.widget_fsaa );
++	end
++end
++
+ 
+ 
+ UI.PageOptionsVideo.GUI.widget_brightness.user.Initialize = function( self )

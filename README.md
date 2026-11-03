@@ -63,6 +63,10 @@ Mods for Far Cry, built with the CryENGINE MOD SDK for Far Cry:
     open, on a display in HDR mode, a test under them: a square at 10000 nits round a smaller one
     at the peak, which disappears once the peak is the display's, and patches at the SDR
     brightness, twice and four times that and at the peak.
+  - `09-video-anti-aliasing.patch` - Anti-Aliasing in Video Options with XRenderD3D12: None or
+    FXAA, which sets `d3d12_AA`, its anti-aliasing of the 3D scene without an upscaler, in place
+    of the game's FSAA modes; on in a game and applied without a relaunch, greyed out while the
+    Upscaler is not None (FSR anti-aliases then).
 
 How to build and run them: `AGENTS.md`.
 

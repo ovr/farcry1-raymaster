@@ -104,6 +104,9 @@
 #include "RayDebug_PS.h"
 #include "PathComposite_VS.h"
 #include "PathComposite_PS.h"
+#include "AntiAlias_VS.h"
+#include "AntiAlias_PS.h"
+#include "AntiAlias_Highlight_PS.h"
 
 using Microsoft::WRL::ComPtr;
 
@@ -166,6 +169,7 @@ namespace
     { "Hdr", g_Hdr_VS, sizeof(g_Hdr_VS), g_Hdr_PS, sizeof(g_Hdr_PS) },
     { "RayDebug", g_RayDebug_VS, sizeof(g_RayDebug_VS), g_RayDebug_PS, sizeof(g_RayDebug_PS) },
     { "PathComposite", g_PathComposite_VS, sizeof(g_PathComposite_VS), g_PathComposite_PS, sizeof(g_PathComposite_PS) },
+    { "AntiAlias", g_AntiAlias_VS, sizeof(g_AntiAlias_VS), g_AntiAlias_PS, sizeof(g_AntiAlias_PS) },
   };
 
   //! The general program's pixel shaders with the ambient light's part (XR_AMBIENT) by [cascades][HDR][velocity].
@@ -833,6 +837,8 @@ ComPtr<ID3D12PipelineState> CD3D12Pipeline::CreatePSO(const SPipelineKey &Key, b
       Desc.PS = { g_Hdr_Highlight_PS, sizeof(g_Hdr_Highlight_PS) };
     else if (bHighlight && Key.nProgram == eD3D12P_Post)
       Desc.PS = { g_Post_Highlight_PS, sizeof(g_Post_Highlight_PS) };
+    else if (bHighlight && Key.nProgram == eD3D12P_AntiAlias)
+      Desc.PS = { g_AntiAlias_Highlight_PS, sizeof(g_AntiAlias_Highlight_PS) };
   }
   // The water's reflection by rays (d3d12_RTReflections), by [HDR][velocity].
   if (bWater && Key.bRayTrace)

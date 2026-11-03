@@ -153,6 +153,10 @@ typedef float float4x4_t[16];
 #define POST_RM_COMPOSITE   0x00008000  //!< the scene copy tex0 plus (1 - its luminance) * the glare tex1, towards its luminance by vParams1.x; vParams1.y: cold (tex2 the 256 x 256 copy)
 #define POST_RM_CARTOON     0x00010000  //!< the cartoon's colours of the scene copy tex0 darkened at its edges
 
+// SDrawConstants::nFlags of the anti-aliasing program (AntiAlias.hlsl, PostAA.cpp): one mode
+#define AA_FXAA             0x00000001  //!< FXAA (Fxaa.hlsli) of the copy tex0 at the quality vParams1.x; the pixels it keeps are not written
+#define AA_DEBUG            0x80000000  //!< with the mode: its view of the edges (d3d12_AADebug 1)
+
 // SDrawConstants::nFlags of the HDR program (Hdr.hlsl, Hdr.cpp): one mode
 #define HDR_LUMINANCE       0x00000001  //!< the meter's first level: (w * log2 L, w) of the scene tex0 over the target's texel, w the centre weight
 #define HDR_REDUCE          0x00000002  //!< the mean of tex0 over the target's texel: vParams0.z x vParams0.z bilinear taps

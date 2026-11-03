@@ -57,6 +57,7 @@ enum ED3D12Program
   eD3D12P_Hdr,            //!< Shaders/Hdr.hlsl: exposure, bloom and tone mapping of the HDR scene (HDR_* flags)
   eD3D12P_RayDebug,       //!< Shaders/RayDebug.hlsl: the scene for rays seen from the main view's camera (d3d12_RTDebug)
   eD3D12P_PathComposite,  //!< Shaders/PathComposite.hlsl: the path tracer's light added to the picture (d3d12_PathTracing)
+  eD3D12P_AntiAlias,      //!< Shaders/AntiAlias.hlsl: the anti-aliasing of the finished picture (d3d12_AA, AA_* flags)
   eD3D12P_Num
 };
 

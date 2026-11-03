@@ -5,7 +5,7 @@
 //	File: TestHeaders.hlsl
 //	Description: The unit tests' kernels over the renderer's shader
 //	headers that stand alone (Shader Model 6.0): PathGBuffer.hlsli,
-//	HdrLight.hlsli, HdrToneMap.hlsli, HdrExposure.hlsli, HdrFrameAverage.hlsli, PathCache.hlsli, LightmapLight.hlsli and RenderMode.hlsli, included as the renderer's
+//	HdrLight.hlsli, HdrToneMap.hlsli, HdrExposure.hlsli, HdrFrameAverage.hlsli, PathCache.hlsli, LightmapLight.hlsli, RenderMode.hlsli and Fxaa.hlsli, included as the renderer's
 //	programs include them. Each kernel runs the tested functions on the
 //	items of g_TestIn and writes what they give to g_TestOut; ShaderTests.cpp
 //	checks it. One compile per kernel (Tests/CMakeLists.txt).
@@ -23,6 +23,17 @@
 #include "PathCache.hlsli"
 #include "LightmapLight.hlsli"
 #include "RenderMode.hlsli"
+
+//! The FXAA tests' picture (Fxaa.hlsli): g_Test.nTest.y x g_Test.nTest.z pixels, g_TestIn[y * width + x] the rgba of
+//! pixel (x, y) as floats, clamped to the picture as AntiAlias.hlsl clamps its loads.
+float4 FxaaLoad(int2 p)
+{
+  const int2 vSize = int2(g_Test.nTest.y, g_Test.nTest.z);
+  p = clamp(p, int2(0, 0), vSize - 1);
+  return TestIn(p.y * vSize.x + p.x);
+}
+
+#include "Fxaa.hlsli"
 
 //! PathOctEncode / PathOctDecode of the unit vector g_TestIn[i].xyz: out[3i] the map's point, out[3i + 1] its vector, out[3i + 2]
 //! the vector of the point as the 10 bits of R10G10B10A2 keep it.
@@ -250,4 +261,18 @@ void CSCachePoke(uint i : SV_DispatchThreadID)
 {
   if (i < g_Test.nTest.x)
     g_PathCache.Store(g_TestIn[i].x, g_TestIn[i].y);
+}
+
+//! FXAA (Fxaa.hlsli) of every pixel of the picture (FxaaLoad above, n = g_Test.nTest.x pixels) at the quality
+//! g_Test.nTest.w: out[i] the pixel's colour as AntiAlias.hlsl leaves it (the picture's where FXAA finds no edge or no
+//! blend: it does not write those), out[n + i] = (the blend, the step's x and y, 1 on an edge).
+[numthreads(64, 1, 1)]
+void CSFxaa(uint i : SV_DispatchThreadID)
+{
+  const uint n = g_Test.nTest.x, w = g_Test.nTest.y;
+  if (i >= n)
+    return;
+  const SFxaaResult r = Fxaa(int2(i % w, i / w), g_Test.nTest.w);
+  TestOut(i, r.bEdge && r.fBlend > 0 ? r.vColor : TestIn(i));
+  TestOut(n + i, float4(r.fBlend, r.vStep, r.bEdge ? 1 : 0));
 }

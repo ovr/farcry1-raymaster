@@ -397,20 +397,11 @@ bool CD3D12Renderer::EnsureRenderModeTargets()
   if (bQuarter && !m_pRmQuarter)
     m_pRmQuarter = m_pUpload->CreateRenderTarget(qw, qh, DXGI_FORMAT_R8G8B8A8_UNORM);
   // With the highlight layer its copy (the swap chain's size).
-  ID3D12Resource *pLayer = m_pDevice->HasLayer() ? m_pDevice->GetHighlight() : nullptr;
-  if (pLayer)
-  {
-    const D3D12_RESOURCE_DESC Desc = pLayer->GetDesc();
-    if (m_pRmLayer && (m_pRmLayer->m_nWidth != (int)Desc.Width || m_pRmLayer->m_nHeight != (int)Desc.Height))
-    {
-      m_pUpload->ReleaseTexture(m_pRmLayer);
-      m_pRmLayer = nullptr;
-    }
-    if (!m_pRmLayer)
-      m_pRmLayer = m_pUpload->CreateRenderTarget((int)Desc.Width, (int)Desc.Height, D3D12_HIGHLIGHT_FORMAT);
-  }
+  const bool bLayer = m_pDevice->HasLayer();
+  if (bLayer)
+    EnsureLayerCopy(m_pRmLayer);
   const auto Ok = [](const CD3D12Texture *p) { return p && p->m_nSRV >= 0; };
-  return Ok(m_pRmDown) && Ok(m_pRmGlare[0]) && Ok(m_pRmGlare[1]) && Ok(m_pRmAdapt) && (!pLayer || Ok(m_pRmLayer)) &&
+  return Ok(m_pRmDown) && Ok(m_pRmGlare[0]) && Ok(m_pRmGlare[1]) && Ok(m_pRmAdapt) && (!bLayer || Ok(m_pRmLayer)) &&
          (!bQuarter || Ok(m_pRmQuarter));
 }
 
@@ -498,13 +489,7 @@ void CD3D12Renderer::DrawRenderMode(int nMode)
   // Over the back buffer; with the highlight layer it gets the ratio its copy had for the scene's colour.
   ID3D12Resource *pLayer = m_pDevice->HasLayer() ? m_pDevice->GetHighlight() : nullptr;
   if (pLayer)
-  {
-    m_pDevice->Transition(pLayer, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, D3D12_RESOURCE_STATE_COPY_SOURCE);
-    m_pDevice->Transition(m_pRmLayer->m_pResource, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, D3D12_RESOURCE_STATE_COPY_DEST);
-    m_pDevice->GetCmdList()->CopyResource(m_pRmLayer->m_pResource, pLayer);
-    m_pDevice->Transition(m_pRmLayer->m_pResource, D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
-    m_pDevice->Transition(pLayer, D3D12_RESOURCE_STATE_COPY_SOURCE, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
-  }
+    CopyLayer(m_pRmLayer);
   m_pDevice->SetBackBufferTargets();
   SPipelineKey Key = {};
   Key.nProgram = eD3D12P_Post;
@@ -594,4 +579,5 @@ void CD3D12Renderer::ReleaseScreenEffects()
   m_bFlashGhost = false;
   ReleaseMotionHistory();
   ReleaseRenderModeTargets();
+  ReleasePostAA();
 }

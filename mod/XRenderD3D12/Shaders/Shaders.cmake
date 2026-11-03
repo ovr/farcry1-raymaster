@@ -114,6 +114,12 @@ xrender_d3d12_shader(Post_PS Post.hlsl ps_6_0 PSMain)
 # SPipelineKey::nTarget 4).
 xrender_d3d12_shader(Post_Highlight_PS Post.hlsl ps_6_0 PSHighlight)
 
+# The anti-aliasing of the finished picture (eD3D12P_AntiAlias, d3d12_AA, PostAA.cpp), and its pass writing the
+# highlight layer too (SPipelineKey::nTarget 4).
+xrender_d3d12_shader(AntiAlias_VS AntiAlias.hlsl vs_6_0 VSMain)
+xrender_d3d12_shader(AntiAlias_PS AntiAlias.hlsl ps_6_0 PSMain)
+xrender_d3d12_shader(AntiAlias_Highlight_PS AntiAlias.hlsl ps_6_0 PSHighlight)
+
 # Exposure, bloom and tone mapping of the HDR scene (eD3D12P_Hdr, r_HDRRendering).
 xrender_d3d12_shader(Hdr_VS Hdr.hlsl vs_6_0 VSMain)
 xrender_d3d12_shader(Hdr_PS Hdr.hlsl ps_6_0 PSMain)

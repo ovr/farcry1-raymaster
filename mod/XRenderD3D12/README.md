@@ -62,6 +62,45 @@ reference of its features and console variables.
   - For comparisons, DemoLevel with `-DemoArgs '--exec-at 1 "d3d12_Upscaler fsr|d3d12_UpscaleMode
     0"'` against the same run without it.
 
+## Anti-aliasing
+
+- `d3d12_AA` is the anti-aliasing of the main view's 3D scene without an upscaler: `none` (the
+  default; the frames are those of the renderer without it, DemoCompare difference 0) or `fxaa`.
+  An unknown value is logged once and acts as `none`. `d3d12_AAQuality` is 0 to 3 (low, medium,
+  high, ultra; 2), `d3d12_AADebug 1` shows what it changes. All of them change at run time. With
+  an upscaler that anti-aliases (FSR) `d3d12_AA` is not used (logged once); r_DisplayInfo's
+  `Anti-aliasing` row names the one that is (`FXAA (High)`, `FSR, temporal`, `none`) and the
+  frame dump has an `anti-aliasing:` line. The original's MSAA (`r_FSAA`, `EnumAAFormats`) is
+  not offered: the game's Anti-Aliasing list had None alone with this renderer.
+- The game's menu gets it from `assets/scripts/09-video-anti-aliasing.patch`: Video Options'
+  Anti-Aliasing list is None / FXAA (`d3d12_AA`) in place of the game's FSAA modes, on in a game
+  (the game greys it out there: the Direct3D 9 renderer had to relaunch) and greyed out while
+  the Upscaler is not None; Apply sets it without a restart.
+- It is drawn over the finished, tone mapped 3D scene in the back buffer (`DrawPostAA`,
+  `PostAA.cpp`, between `EndMainScene` and the screen effects): before the render modes, the
+  screen effects, the HUD and the 2D, so the text stays sharp. Its input is a copy of the back
+  buffer's colour (the water's scene copy); the alpha the HUD masks by stays. The program
+  `AntiAlias.hlsl` discards the pixels it keeps, so they stay bit for bit. With the HDR10
+  highlight layer each pixel's ratio is blended the same way as its colour (a copy of the layer).
+  The GPU time's section is `anti-aliasing`.
+- FXAA (`Shaders/Fxaa.hlsli`) is ours, written from the published description of FXAA 3.11's
+  quality algorithm (T. Lottes, NVIDIA): a pixel whose 4 neighbours' luminance range is above
+  max(t_min, t lmax) is on an edge; the larger second difference of the 3 x 3 luminance across
+  the rows or the columns gives its direction, the neighbour with the steeper step its side; the
+  search walks both ways along the edge (4, 7, 11 or 14 steps by the quality) to where the mean of
+  the pair across it leaves the edge's luminance by a quarter of the step; the pixel nearer the
+  end that leaves on the side against its own blends towards the neighbour across the edge by
+  0.5 - its distance / the edge's length, and a pixel unlike its 3 x 3 mean (a thin line, a
+  single pixel) by a subpixel share (0.25, 0.5, 0.75, 0.75 by the quality). The thresholds t:
+  0.25, 0.166, 0.166, 0.125 by the quality, t_min 0.0833, 0.0833, 0.0833, 0.0625 (High: FXAA's
+  own defaults). Against the same view supersampled 4 x (Training's islands from the hill, the
+  render tests' `aa`) every quality takes the error at the edges to 0.73-0.78 of none's; the
+  subpixel share is what softens the textures, the foliage's above all (High keeps 0.75-0.81 of
+  their detail; 0.0312 as t_min softened them to 0.69-0.78 for no better edges).
+  - Unit tests `Fxaa_*`: an edge drawn without anti-aliasing comes out nearer its exact coverage
+    (0.33-0.41 of the error without it at 8 pixel steps), along the edge's direction only; flat
+    pictures and the alpha stay bit for bit; an edge along the pixels' grid stays sharp.
+
 ## HDR
 
 - The game's own `r_HDRRendering` (0 by default) turns on the HDR pipeline of the main view
