@@ -1479,9 +1479,6 @@ void CD3D12Renderer::DrawLeafItem(const SRenderItem &it)
       continue;
     dc.nFlags = nFlags;
     dc.nFlags2 = DF2_NO_SUN | DF2_PROJECTOR | DF2_FOG_BLACK | (bTerrain ? DF2_TERRAIN_LIGHT : 0) | nFlags2;
-    if (pDiffuse)
-    {
-      dc.nFlags |= DF_TEX0;
     // d3d12_ProjectorSpecular: over a light map a specular bump template's pass of the projector has its highlight, as
     // the original's light-map shaders of those templates add it (Training's bunker's rusty plates under its lamp), with
     // the material's specular colour (times the texture's alpha for the gloss alpha ones).
@@ -1492,6 +1489,9 @@ void CD3D12Renderer::DrawLeafItem(const SRenderItem &it)
       dc.nFlags |= DF_SPECULAR;
       Set4(dc.vSpecular, Spec.r, Spec.g, Spec.b, Props.bGlossAlpha ? 1.0f : 0.0f);
     }
+    if (pDiffuse)
+    {
+      dc.nFlags |= DF_TEX0;
       dc.nTex0 = pDiffuse->GetSRV();
       dc.nSamplers = bTerrain ? XR_SAMPLER_LINEAR_CLAMP : pDiffuse->GetSampler();
     }
