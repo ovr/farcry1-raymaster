@@ -501,7 +501,7 @@ void CD3D12RayScene::DefaultMaterial(SRayInstance &Inst, const SDrawConstants &d
 {
   memcpy(Inst.vAlbedo, dc.vColor, sizeof(Inst.vAlbedo));
   memset(Inst.vSpecular, 0, sizeof(Inst.vSpecular));
-  Inst.nPath[0] = (dc.nFlags & DF_VCOLOR_X2) ? XR_PT_MAT_VEGETATION : (dc.nFlags & (DF_LIGHTING | DF_TEX1_LIGHTMAP)) ? XR_PT_MAT_LIT : XR_PT_MAT_UNLIT;
+  Inst.nPath[0] = (dc.nFlags & DF_VCOLOR_X2) ? XR_PT_VEGETATION_MATERIAL(dc.nFlags) : (dc.nFlags & (DF_LIGHTING | DF_TEX1_LIGHTMAP)) ? XR_PT_MAT_LIT : XR_PT_MAT_UNLIT;
   float vAmbient[3];
   PathAmbient(dc, vAmbient);
   Inst.nPath[1] = Inst.nPath[0] == XR_PT_MAT_UNLIT ? 0 : PathPackAmbient(vAmbient);

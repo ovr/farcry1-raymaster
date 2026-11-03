@@ -21,6 +21,7 @@
 #include "Test_Checkerboard.h"
 #include "Test_PixelSurface.h"
 #include "Test_TerrainShare.h"
+#include "Test_SurfaceNormal.h"
 
 #include "Shaders/Constants.h"
 
@@ -188,6 +189,58 @@ XR_TEST(PathTrace_LeafSide)
       continue;
     const SVec3 vWant = fSide < 0 ? -Faces[i] : Faces[i], vGot = Vec(Out, i);
     CHECK_MSG(vGot.x == vWant.x && vGot.y == vWant.y && vGot.z == vWant.z, "case " + std::to_string(i));
+  }
+}
+
+//! PathSurfaceNormal and XR_PT_VEGETATION_MATERIAL: the vegetation's opaque parts (DF_VCOLOR_X2 without DF_ALPHATEST: a trunk,
+//! its branches) take the face's normal and the lit material, its leaves (with DF_ALPHATEST) and every other draw the vertices'
+//! normal turned to the face's side (the leaves the vegetation's material). Why: Far Cry's plants carry the crown's normal,
+//! straight up, on all their vertices; a trunk's paths by it went up into the crown or, turned to the camera's side, down
+//! into the ground, and the leaves' material sent them through the trunk: the film's river-temple and swamp-path trunks were
+//! black in the path tracer (step 270).
+XR_TEST(PathTrace_SurfaceNormal)
+{
+  CHECK(XR_PT_VEGETATION_MATERIAL(DF_VCOLOR_X2) == XR_PT_MAT_LIT);
+  CHECK(XR_PT_VEGETATION_MATERIAL(DF_VCOLOR_X2 | DF_LIGHTING | DF_FOG) == XR_PT_MAT_LIT);
+  CHECK(XR_PT_VEGETATION_MATERIAL(DF_VCOLOR_X2 | DF_ALPHATEST) == XR_PT_MAT_VEGETATION);
+  NeedShaderModel65();
+  struct SCase
+  {
+    uint32 nFlags;
+    SVec3 vNormal, vFace;
+    bool bFace;     //!< the face's normal wanted, else the vertices' on its side
+  };
+  const uint32 Trunks[] = { DF_VCOLOR_X2, DF_VCOLOR_X2 | DF_LIGHTING | DF_FOG, DF_VCOLOR_X2 | DF_VCOLOR };
+  const uint32 Others[] = { 0, DF_VCOLOR_X2 | DF_ALPHATEST, DF_ALPHATEST, DF_VCOLOR, DF_LIGHTING | DF_TEX1_LIGHTMAP };
+  CRandom Rng(270);
+  std::vector<SCase> Cases;
+  for (int i = 0; i < 256; i++)
+  {
+    // The plants' normal straight up, and any other; faces of every side (a trunk's mostly level).
+    const SVec3 vNormal = i % 2 ? SVec3{ 0, 0, 1 } : Rng.Direction();
+    const SVec3 vFace = i % 3 ? Normalize({ Rng.Range(-1, 1), Rng.Range(-1, 1), Rng.Range(-0.2f, 0.2f) }) : Rng.Direction();
+    for (uint32 f : Trunks)
+      Cases.push_back({ f, vNormal, vFace, true });
+    for (uint32 f : Others)
+      Cases.push_back({ f, vNormal, vFace, false });
+  }
+  SDispatch d;
+  d.Shader = XR_BYTECODE(Test_SurfaceNormal);
+  d.Test.nTest[0] = (uint32)Cases.size();
+  d.nGroups[0] = Groups64(Cases.size());
+  for (const SCase &c : Cases)
+  {
+    Push(d.In, c.vNormal, Float(c.nFlags));
+    Push(d.In, c.vFace, 0);
+  }
+  d.nOut = Cases.size();
+  const std::vector<uint32> Out = Gpu().Run(d);
+  for (size_t i = 0; i < Cases.size(); i++)
+  {
+    const SCase &c = Cases[i];
+    const SVec3 vWant = c.bFace ? c.vFace : Dot(c.vNormal, c.vFace) < 0 ? -c.vNormal : c.vNormal, vGot = Vec(Out, i);
+    CHECK_MSG(vGot.x == vWant.x && vGot.y == vWant.y && vGot.z == vWant.z,
+              "case " + std::to_string(i) + ", flags " + std::to_string(c.nFlags));
   }
 }
 

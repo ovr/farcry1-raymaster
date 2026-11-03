@@ -145,6 +145,18 @@ float3 TerrainBakedLight(float3 vPos, float3 vNormal, float3 vFace, SPathShade P
   return P.vBakeLight * TerrainBakedShare(vPos, vNormal, vFace, P, fConeWidth);
 }
 
+//! A surface's normal for the paths at a hit of a draw of flags nFlags (DF_*), the vertices' normal vNormal and the face vFace
+//! (on the ray's side): the vertices' turned to the face's side; the vegetation's opaque parts' (a trunk, its branches:
+//! DF_VCOLOR_X2 without the alpha test) the face's, their vertices' are the crown's, straight up (a trunk's paths went up
+//! into the crown, or, turned to the face's side, down into the ground: the trunks were black), as the G-buffer's
+//! (General.hlsl).
+float3 PathSurfaceNormal(uint nFlags, float3 vNormal, float3 vFace)
+{
+  if ((nFlags & (DF_VCOLOR_X2 | DF_ALPHATEST)) == DF_VCOLOR_X2)
+    return vFace;
+  return dot(vNormal, vFace) < 0 ? -vNormal : vNormal;
+}
+
 //! The material at the hit (see the head of the file); fConeWidth the ray cone's width there.
 SPathSurface PathSurface(SRayHit Hit, float3 vRayDir, float fConeWidth, SPathShade P)
 {
@@ -154,7 +166,7 @@ SPathSurface PathSurface(SRayHit Hit, float3 vRayDir, float fConeWidth, SPathSha
   SPathSurface O;
   O.vPos = S.vPos;
   O.vFaceNormal = S.vFaceNormal;
-  O.vNormal = dot(S.vNormal, S.vFaceNormal) < 0 ? -S.vNormal : S.vNormal;
+  O.vNormal = PathSurfaceNormal(I.nMaterial.x, S.vNormal, S.vFaceNormal);
   O.vSpecular = I.vSpecular;
   O.nMaterial = I.nPath.x;
   O.vAmbient = PathUnpackAmbient(I.nPath.y);
