@@ -986,9 +986,14 @@ void CD3D12Renderer::DrawLeafItem(const SRenderItem &it)
     // the texture times the vertex colour, added by its alpha (SRCALPHA, ONE).
     // With r_HDRRendering brighter in its core than the game draws it (d3d12_HDRGlow), the stealth
     // effect not.
-    const float s = GetColorScale(pSh, pObj);
+    // TemplMuzzleFlash_Auto (Training's bunker's shafts of sunlight) as the original's shader: twice the texture, its
+    // planes fading out seen edge on (d3d12_MuzzleFlashAuto).
+    const bool bEdgeFade = Props.bEdgeFade && CV_d3d12_MuzzleFlashAuto;
+    const float s = GetColorScale(pSh, pObj) * (bEdgeFade ? 2.0f : 1.0f);
     const CFColor Color = eLighting == ELighting::Ambient ? LitColor() : CFColor(1, 1, 1, 1);
     Set4(dc.vColor, s * Color.r, s * Color.g, s * Color.b, 1);
+    if (bEdgeFade)
+      dc.vEdgeFade[0] = 1;
     Key.nState = GS_BLSRC_ONE | GS_BLDST_ONE;
     if (eLighting == ELighting::VColor)
     {
@@ -1453,7 +1458,8 @@ void CD3D12Renderer::DrawLeafItem(const SRenderItem &it)
   const bool bPixel = bTerrain || (CV_r_Quality_BumpMapping > 0 && Props.bPixelLighting && eLighting != ELighting::None);
   // d3d12_PixelLighting: the others per pixel too, the light as per vertex.
   const bool bVertexLights = !bPixel && CV_d3d12_PixelLighting;
-  // (A light-mapped draw's DF_SPECULAR is its light map lamps', d3d12_LightmapSpecular: not the projector's.)
+  // (A light-mapped draw's DF_SPECULAR is its light map lamps', d3d12_LightmapSpecular: not the projector's, whose
+  // highlight its pass sets below, d3d12_ProjectorSpecular.)
   const uint32 nKeep = bTerrain ? DF_TEXGEN_WORLD
                                 : DF_TEXMATRIX | DF_ALPHATEST | DF_ALPHATEST_LESS | (bPixel ? DF_BUMP | ((dc.nFlags & DF_TEX1_LIGHTMAP) ? 0 : DF_SPECULAR) : 0);
   const uint32 nFlags = (dc.nFlags & nKeep) | DF_LIGHTING | (bPixel || bVertexLights ? DF_PIXEL_LIGHTING : 0) | (m_bFog ? DF_FOG : 0);
@@ -1476,6 +1482,16 @@ void CD3D12Renderer::DrawLeafItem(const SRenderItem &it)
     if (pDiffuse)
     {
       dc.nFlags |= DF_TEX0;
+    // d3d12_ProjectorSpecular: over a light map a specular bump template's pass of the projector has its highlight, as
+    // the original's light-map shaders of those templates add it (Training's bunker's rusty plates under its lamp), with
+    // the material's specular colour (times the texture's alpha for the gloss alpha ones).
+    if (bPixel && !bTerrain && (nFlags & DF_PIXEL_LIGHTING) && !(nFlags & DF_SPECULAR) &&
+        CV_d3d12_ProjectorSpecular && Props.bSpecular && it.pRes && it.pRes->m_LMaterial)
+    {
+      const CFColor &Spec = it.pRes->m_LMaterial->Front.m_Specular;
+      dc.nFlags |= DF_SPECULAR;
+      Set4(dc.vSpecular, Spec.r, Spec.g, Spec.b, Props.bGlossAlpha ? 1.0f : 0.0f);
+    }
       dc.nTex0 = pDiffuse->GetSRV();
       dc.nSamplers = bTerrain ? XR_SAMPLER_LINEAR_CLAMP : pDiffuse->GetSampler();
     }

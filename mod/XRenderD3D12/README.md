@@ -357,6 +357,12 @@ reference of its features and console variables.
   reflected about N' (no N.L cut-off, as the original's). `d3d12_LightmapSpecular` (1) adds it
   (`AddLightmapLamps`: the lamps go into the draw's lights as `XR_LIGHT_LIGHTMAP_LAMP`, which light
   nothing else and cast no ray); 0: none, as before. Unit tests `LightmapLight_*`.
+- A bump template's light colour (`d3d12_LightColorScale`, 1): the original's bump shaders take
+  the light's colour times the material's and, where its largest channel is above 1, scale the
+  whole colour down by it (its hue kept), then add the lights' terms and clamp only their sum.
+  Training's bunker's lamp (1.81 2.22 1.31) on its concrete (0.59 0.65 0.65) gives 0.74 1 0.59;
+  each channel of the light clamped to 1 first, as before, gave 0.59 0.65 0.65, the lamp's green
+  lost. The highlight's colour likewise. 0: clamped as before.
 
 ## Depth prepass
 
@@ -1159,6 +1165,10 @@ and lists theirs (`NamesObjects`).
 - `LightStyle` of the block is read and not used: the original draws the colours as given.
 - Not in the water's reflection: the original draws the lamps' beams there as well, but the
   reflection's scene has no lamps here.
+- The shafts of sunlight in Training's bunker are planes of the `TemplMuzzleFlash_Auto` template.
+  The original's program draws them added, twice the texture, each vertex's colour times
+  min((2 |N.V|)^4, 1), so a plane fades out where it is seen edge on (`d3d12_MuzzleFlashAuto`,
+  1; `SDrawConstants::vEdgeFade`). 0: the texture alone, added, with hard plane edges.
 
 ## Projected lights
 
@@ -1176,8 +1186,44 @@ and lists theirs (`NamesObjects`).
     way: concrete walls, floors, doors and stairs under the hanging lamps.
 - The original draws these copies through the stencil of the lamp's shadow volumes. Here there
   are no shadow volumes, so the light is unshadowed.
+- Over a light-mapped specular bump template the projector's pass has the projector's highlight
+  too (`d3d12_ProjectorSpecular`, 1), as the original's light-map shaders of those templates add
+  it, with the material's specular colour (times the texture's alpha for the gloss alpha
+  templates): Training's bunker's rusty plates under its lamp. 0: the diffuse light alone.
 - With the lamps' shadows by rays (`d3d12_RTLightShadows`) and in the path tracer, the rays towards
   a projector end `d3d12_RTProjectorShadowGap` (0.5 m) short of it, not `d3d12_RTLightShadowGap`
   (0.1 m): the picture is the shape its fitting gives the light, so the fitting casts no shadow of
   its own (with 0.1 m the shade of Treehouse's hanging lamps cut a hard-edged trapezoid into their
   light on the walls, the floor and the door; the original has none). 0 takes the other lamps' gap.
+
+## Render modes
+
+- The video options' render mode (`r_RenderMode`, offered with `r_Glare` on: 1 Improved,
+  2 Paradise, 3 Cold, 4 Cartoon) is drawn over the finished 3D scene, before the other screen
+  effects and the 2D, as the original's screen process draws it (its passes traced at 1280 x 720;
+  `PostFx.cpp`, `Shaders/RenderMode.hlsli`). `d3d12_RenderMode` (1); 0: none, as before. The
+  player's `system.cfg` has `r_RenderMode 2` with `r_Glare 1`: without it Training's bunker had
+  0.70-0.76 of the original's light, its shafts of sunlight no glare.
+- Improved and Paradise: the scene reduced to 256 x 256 (D); the glare's source at 128 x 128,
+  2 (saturate(D - t) 0.8)^2 (1 - A), blurred by four passes of 4 taps farther and farther apart
+  (G); the scene F + (1 - L) G, then towards its luminance L (0.3 0.59 0.11) by k (t 0.25, k 0.2
+  Improved; t 0.1, k 0.1 Paradise). The targets have the original's fixed sizes, so the glare is
+  the same part of the screen at every resolution.
+- Cold: F first 2 saturate(0.75 F - 0.3 D), the source's gain 0.65, no blur, k 0.425.
+- Cartoon: (0.75 F + 0.225 L) (1.25 1.24 1.2), times saturate(1 - saturate(2 |a|^2) - 2 |b|^2),
+  a = 2 saturate(the pixel above - the one below), b = 2 saturate(the left one - the right one):
+  dark outlines where the colour falls downwards or to the right. The original also gives every
+  texture of the frame a mip bias of 1.5 in this mode (with `r_Glare` off too), so the textures
+  are softer and the outlines follow the shapes, not the textures' grain; the frame constants'
+  `vMipBias.x` carries it.
+- A, the adapted luminance, is a 1 x 1 RGBA8 target kept from frame to frame as the original's:
+  every 0.08 s (the original's 4 frames at 50 per second) it steps 5 % of the way to the luminance
+  of 4 m^2, m the scene at the four spots the original's 2 x 2 pass takes (a top left corner, the
+  top and left edges' middles, the middle; D3D9's pixel centres). Its 8 bits stop it within
+  about 10 / 255 of the target: in the dark bunker it stays near 22 / 255 and the glare is strong,
+  in daylight it rises to about 245 and the glare is faint. `d3d12_DumpFrame` gives its value.
+- With the HDR10 highlight layer the composite and the cartoon keep the ratio the layer had for
+  the scene's colour (a copy of the layer before the pass).
+- Checked against the original over Training's bunker (frames 210 and 490): each mode's effect on
+  the light, the chroma and the local contrast (and the cartoon's outlines) 0.95-1.01 of the
+  original's (render_tests' `rendermode`); unit tests `RenderMode_*`.

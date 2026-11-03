@@ -205,7 +205,12 @@ reference of the rest.
   writes the byte code of each vertex and pixel shader where it is first seen, eight hex tokens a
   line (`[d3d] ps code`), to read a shader the state does not explain. The `CCObject` dumps give
   its scissor rectangle, and the camera dump of `SetCamera` the camera's portal and scissor
-  rectangles when they are set.
+  rectangles when they are set. A texture stage's line gives its sampler's filters and addresses
+  and, when either is set, its mip bias and top mip (`mip bias 1.5 top mip 0`: the cartoon render
+  mode biases every stage). A render target texture of at most 4 x 4 texels in A8R8G8B8 or
+  X8R8G8B8 a draw uses is read back (`GetRenderTargetData`) and its texels written
+  (`[d3d] tex ... texels r g b a`) at every draw, not only where it is first seen: the render
+  modes' adapted luminance is such a 1 x 1 target, kept from frame to frame.
   `XRENDERTRACED_D3D_CUBESAVE=<path prefix>` saves level 0 of the six faces of every cube texture
   a draw uses as TGA files (DXT decoded, A8L8 and L8 as grey with their alpha; keep them in the
   scratchpad, never commit them).

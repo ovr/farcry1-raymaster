@@ -363,7 +363,17 @@ float3 DrawLighting(float3 vPos, float3 vN, bool bPerPixel, out float3 vNoSunLig
 #endif
     }
     float3 vColor = g_Draw.vLightColor[i].rgb;
-    if (bClamp)
+    // A bump template's light as the original's shaders take its colour (g_Frame.vLightmap.y, d3d12_LightColorScale): the
+    // light's colour times the material's (the draw's colour multiplies it below) scaled down by the largest channel where
+    // that is above 1, its hue kept, and its term added without a clamp of its own (the original's clamps the sum of all
+    // its terms times the texture). Else each channel of the light's colour clamped to 1.
+    const bool bScale = bClamp && g_Frame.vLightmap.y > 0;
+    if (bScale)
+    {
+      const float3 c = vColor * g_Draw.vColor.rgb;
+      vColor /= max(1, max(c.r, max(c.g, c.b)));
+    }
+    else if (bClamp)
       vColor = saturate(vColor);
     float3 vThis = vColor * saturate(dot(vN, vToLight)) * fAtten;
 #ifdef XR_RAY_LIGHT
@@ -379,14 +389,19 @@ float3 DrawLighting(float3 vPos, float3 vN, bool bPerPixel, out float3 vNoSunLig
     }
 #endif
     if (bSpecular)
-      vOtherSpec += saturate(g_Draw.vLightSpec[i].rgb) * (fAtten * Specular(vN, vToLight, vToEye));
-    if (i == 0)
+    {
+      const float3 s = g_Draw.vLightSpec[i].rgb;
+      vOtherSpec += (bScale ? s / max(1, max(s.r, max(s.g, s.b))) : saturate(s)) * (fAtten * Specular(vN, vToLight, vToEye));
+    }
+    if (i == 0 && !bScale)
     {
       vLight += vThis;
+    // Its highlight's colour: with bScale scaled down by its largest channel above 1, as the original's (its hue kept,
+    // times the material's specular colour after that); else each channel clamped to 1.
       vNoSun += vThis;
     }
     else
-      vOthers += saturate(vThis);
+      vOthers += bScale ? vThis : saturate(vThis);
   }
 #ifdef XR_AMBIENT
   // What each sum loses without the ambient colour.
@@ -801,6 +816,13 @@ SVertexOutput VSMain(SVertexInput In)
   {
     float3 vNoSunLight, vSunSpec, vOtherSpec;
     vColor.rgb *= DrawLighting(vWorldPos, SafeNormalize(vNormal), false, vNoSunLight, vSunSpec, vOtherSpec);
+  // TemplMuzzleFlash_Auto's planes (Training's bunker's shafts of sunlight), as the original's vertex program: faded
+  // out seen edge on, by min((2 |N.V|)^4, 1) at each vertex.
+  if (g_Draw.vEdgeFade.x > 0)
+  {
+    const float f = 2 * abs(dot(SafeNormalize(vNormal), SafeNormalize(vWorldPos - g_Frame.vCameraPos.xyz)));
+    vColor.rgb *= min(f * f * f * f, 1);
+  }
     vColorNoSun.rgb *= vNoSunLight;
   }
 

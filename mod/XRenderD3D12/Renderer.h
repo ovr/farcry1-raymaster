@@ -1578,8 +1578,18 @@ public:
   bool EnsurePostBlur(SPostBlur &Blur, int nFactor);
   //! The scene into Blur.pTex[0]: reduced, then a gaussian of fSigma of its texels across and down.
   void DrawPostBlur(SPostBlur &Blur, float fSigma);
-  //! A pass of the post program into pTarget (one of the blur targets).
-  void DrawPostPass(CD3D12Texture *pTarget, const SDrawConstants &dc);
+  //! A pass of the post program into pTarget (one of the blur targets), blended by nState's blend.
+  void DrawPostPass(CD3D12Texture *pTarget, const SDrawConstants &dc, uint32 nState = GS_NODEPTHTEST);
+  //! The render mode of the menu's video options (r_RenderMode with r_Glare on, d3d12_RenderMode): 1 improved,
+  //! 2 paradise, 3 cold, 4 cartoon; 0 none.
+  int RenderMode() const;
+  //! The mip bias the render mode gives every texture of the frame (the cartoon's softer textures), else 0.
+  float RenderModeMipBias() const;
+  //! The render mode nMode over the scene drawn, as the original's screen process draws it (PostFx.cpp).
+  void DrawRenderMode(int nMode);
+  //! The render modes' targets (made once). False: none.
+  bool EnsureRenderModeTargets();
+  void ReleaseRenderModeTargets();
   void ReleasePostBlur(SPostBlur &Blur);
   //! The share of the frame before in this one (r_MotionBlur, r_MotionBlurAmount, the frame time); 0: none.
   float MotionBlurShare();
@@ -1600,6 +1610,14 @@ public:
   ICVar *m_pMotionBlur = nullptr;           //!< r_MotionBlur, looked up on first use
   ICVar *m_pMotionBlurAmount = nullptr;     //!< r_MotionBlurAmount
 
+  mutable ICVar *m_pGlare = nullptr;        //!< r_Glare (the render modes need it on), looked up on first use
+  mutable ICVar *m_pRenderModeVar = nullptr; //!< r_RenderMode
+  CD3D12Texture *m_pRmDown = nullptr;       //!< the render modes: the scene at 256 x 256 (RGBA8)
+  CD3D12Texture *m_pRmGlare[2] = {};        //!< the glare at 128 x 128, and a scratch for its blur
+  CD3D12Texture *m_pRmAdapt = nullptr;      //!< the adapted luminance (1 x 1 RGBA8, kept between frames as the original's)
+  CD3D12Texture *m_pRmLayer = nullptr;      //!< with the highlight layer: its copy before the render mode's pass
+  bool m_bRmAdaptCleared = false;           //!< m_pRmAdapt holds a value (black at first)
+  float m_fRmAdaptTime = 0;                 //!< the time since its last step
   //////////////////////////////////////////////////////////////////////////
   // Flares.cpp: the sun's flare and the coronas of the lights
 
@@ -1823,6 +1841,10 @@ public:
   int CV_d3d12_LightmapSpecular = 1;        //!< 1: the specular bump templates over a dot3 light map get the highlights of the lamps baked into it (AddLightmapLamps)
   int CV_d3d12_NormalMapHeight = 1;         //!< 1: a height map in a material's EFTT_NORMALMAP is added to its EFTT_BUMP normal map (CShaderManager::LoadNormalMap)
   int CV_d3d12_ShadowCascades = 4;          //!< the sun's cascaded shadow maps: how many (0: none)
+  int CV_d3d12_MuzzleFlashAuto = 1;         //!< 1: TemplMuzzleFlash_Auto as the original's shader: twice the texture, faded out seen edge on (SDrawConstants::vEdgeFade)
+  int CV_d3d12_LightColorScale = 1;         //!< 1: a bump template's light per pixel times the material's colour scaled down by its largest channel above 1 (SFrameConstants::vLightmap.y)
+  int CV_d3d12_ProjectorSpecular = 1;       //!< 1: a projector's pass over a light-mapped specular bump template has its highlight (DrawLeafItem)
+  int CV_d3d12_RenderMode = 1;              //!< 1: the menu's render mode (r_RenderMode, r_Glare) over the scene (DrawRenderMode); 0: none
   float CV_d3d12_ShadowDistance = 120;      //!< how far they reach from the camera (m)
   int CV_d3d12_ShadowCascadeSize = 2048;    //!< the size of their maps
   int CV_d3d12_CascadeInstancing = 1;       //!< 1: a caster of the full set drawn once into all the slices it reaches (DrawCascadeItems)

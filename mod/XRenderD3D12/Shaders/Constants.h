@@ -146,6 +146,12 @@ typedef float float4x4_t[16];
 #define POST_SUN_MASK       0x00000200  //!< the sun's mask: the patch tex0 blurred towards its middle (SunMask, Post.hlsl)
 #define POST_DEPTH_VIEW     0x00000400  //!< the depth tex0 as grey: the distance from vParams1.x (near, black) to vParams1.y (far, white), log scale
 #define POST_AO_TAKEN       0x00000800  //!< the light the ambient occlusion takes (AoTaken, Post.hlsl): tex0 the visibility, tex1 the depth, tex2 the ambient light
+// The render modes (r_RenderMode, PostFx.cpp; Post.hlsl's RenderMode* functions)
+#define POST_RM_ADAPT       0x00001000  //!< the luminance of 4 m^2, m the mean of the scene copy tex0 at the four spots the original takes, alpha vParams1.x (blended into the 1 x 1 target)
+#define POST_RM_BRIGHT      0x00002000  //!< the glare's source: 2 (saturate(tex0 + vParams1.x) * vParams1.y)^2 * saturate(1 - the adapted luminance tex1)
+#define POST_RM_BLUR        0x00004000  //!< the mean of 4 bilinear taps of tex0 vParams1.x texels away along (1, 2) turned by right angles
+#define POST_RM_COMPOSITE   0x00008000  //!< the scene copy tex0 plus (1 - its luminance) * the glare tex1, towards its luminance by vParams1.x; vParams1.y: cold (tex2 the 256 x 256 copy)
+#define POST_RM_CARTOON     0x00010000  //!< the cartoon's colours of the scene copy tex0 darkened at its edges
 
 // SDrawConstants::nFlags of the HDR program (Hdr.hlsl, Hdr.cpp): one mode
 #define HDR_LUMINANCE       0x00000001  //!< the meter's first level: (w * log2 L, w) of the scene tex0 over the target's texel, w the centre weight
@@ -183,7 +189,8 @@ struct SFrameConstants
   XR_FLOAT4(vDepthParams);        //!< the projection's m22 (x) and m32 (y): distance along the view axis = y / (depth + x)
   XR_FLOAT4(vSunSpec);            //!< rgb: the sun's specular colour (DF_SPECULAR)
   XR_FLOAT4(vJitter);             //!< the upscaler's (Upscaler.h): xy its jitter in clip space (xy += vJitter.xy * w), zw the target's pixels per pixel of the engine (DF_SCREEN_POS); 0, 0, 1, 1 without one
-  XR_FLOAT4(vMipBias);            //!< x: the mip bias of the materials' textures (log2(render / display size) - 1 while upscaling, else 0);
+  XR_FLOAT4(vMipBias);            //!< x: the mip bias of the materials' textures (log2(render / display size) - 1 while upscaling, else 0;
+                                  //!< plus 1.5 in the cartoon render mode, PostFx.cpp);
                                   //!< yzw: DF2_AO_BAKED's share of the ambient light in a baked colour
   XR_FLOAT4(vHdr);                //!< x: the light of the sky towards the sun times this (SkyGlow; 1: as the game's, always outside HDR targets), y: the power of the cosine of the angle to the sun it falls off with
   XR_FLOAT4X4_ARRAY(mCascade, XR_MAX_CASCADES);  //!< world to the sun's cascade i (DF2_SUN_CASCADES): x, y -1..1 across its map, z depth 0..1 away from the sun
@@ -199,7 +206,10 @@ struct SFrameConstants
                                   //!< y z w the general program's rays (XR_RAY_REFL, XR_RAY_LIGHT; Draw.cpp): y their length, z RayMask with
                                   //!< the cube maps' mode in bits 16-23, the lamps' in 24-25, their number a pixel in 28-31 and their rays' gap at
                                   //!< the lamp in 9-15 (2 cm steps), w the ocean's level
-  XR_FLOAT4(vLightmap);           //!< x 1: a dot3 light map's N'.D mixed towards 1 by the light map's alpha (DF_LIGHTMAP_DIR, d3d12_LightmapDot3)
+  XR_FLOAT4(vLightmap);           //!< x 1: a dot3 light map's N'.D mixed towards 1 by the light map's alpha (DF_LIGHTMAP_DIR, d3d12_LightmapDot3);
+                                  //!< y 1: a bump template's light per pixel (DF_PIXEL_LIGHTING) times the material's colour scaled down by its
+                                  //!< largest channel above 1, the light's hue kept, its term not clamped (d3d12_LightColorScale; 0: each
+                                  //!< channel of the light's colour clamped to 1)
 };
 
 //! b1: per draw.
@@ -247,6 +257,8 @@ struct SDrawConstants
   XR_FLOAT4(vHeat);               //!< DF2_HEAT: x the heat 0 (cold) to 1 (hot), y 1 for an additive draw
   XR_FLOAT4X4(mPrevWorldViewProj);  //!< the motion vectors of an upscaler: object to clip in the frame before (all 0: as mWorldViewProj, still on the screen)
   XR_FLOAT4(vHdrCore);            //!< DF2_HDR_CORE: x the factor of the light in its core, y 1: the shape times tex0 a (a SRCALPHA blend)
+  XR_FLOAT4(vEdgeFade);           //!< x 1: the colour per vertex times min((2 |N.V|)^4, 1), N the vertex normal, V the view direction: planes
+                                  //!< fading out seen edge on (TemplMuzzleFlash_Auto, d3d12_MuzzleFlashAuto)
 };
 
 //! b0 of the ambient occlusion's resolve (AoResolve.hlsl, AmbientOcclusion.cpp).

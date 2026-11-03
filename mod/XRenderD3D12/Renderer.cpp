@@ -211,6 +211,26 @@ void CD3D12Renderer::RegisterVariables()
                      "1: a height map in a material's normal map slot (its displacement map, Research's cave rock) is added to the "
                      "normal map of its bump slot, as the original makes them one texture (alone: made a normal map as a height bump "
                      "map is); 0: it is used as a normal map. For the materials loaded after it is set");
+  iConsole->Register("d3d12_MuzzleFlashAuto", &CV_d3d12_MuzzleFlashAuto, 1, VF_DUMPTODISK,
+                     "1: the TemplMuzzleFlash_Auto planes (Training's bunker's shafts of sunlight) as the original's shader draws "
+                     "them: twice the texture, added, faded out seen edge on by min((2 |N.V|)^4, 1) at each vertex; 0: the texture "
+                     "alone, added");
+  iConsole->Register("d3d12_LightColorScale", &CV_d3d12_LightColorScale, 1, VF_DUMPTODISK,
+                     "1: a bump template's light per pixel as the original's shaders take its colour: the light's colour times the "
+                     "material's, scaled down by its largest channel where that is above 1 (the light's hue kept; Training's bunker's "
+                     "lamp (1.81 2.22 1.31) on its concrete (0.59 0.65 0.65): 0.74 1 0.59), its term not clamped by itself; 0: each "
+                     "channel of the light's colour clamped to 1, then times the material's (0.59 0.65 0.65). The highlight's "
+                     "colour: the light's specular colour scaled down by its largest channel above 1, then times the material's; 0: "
+                     "clamped");
+  iConsole->Register("d3d12_ProjectorSpecular", &CV_d3d12_ProjectorSpecular, 1, VF_DUMPTODISK,
+                     "1: a projected light's pass over a light-mapped specular bump template has the light's highlight, as the "
+                     "original's light-map shaders of those templates add it (Training's bunker's rusty plates under its lamp); 0: "
+                     "the pass's diffuse light alone");
+  iConsole->Register("d3d12_RenderMode", &CV_d3d12_RenderMode, 1, VF_DUMPTODISK,
+                     "1: the render mode of the video options (r_RenderMode, with r_Glare on) over the scene, as the original's "
+                     "screen process draws it: 1 improved and 2 paradise a glare of the scene's bright parts (less where the "
+                     "adapted luminance is high) and a little less saturation, 3 cold more contrast, a glare and less "
+                     "saturation, 4 cartoon flatter, warmer colours with dark edges; 0: none");
   iConsole->Register("d3d12_ShadowCascades", &CV_d3d12_ShadowCascades, 4, VF_DUMPTODISK,
                      "With e_shadow_maps, the sun's cascaded shadow maps around the camera: how many, 1 to 4 (0: none, the shadow maps of the objects alone)");
   iConsole->Register("d3d12_ShadowDistance", &CV_d3d12_ShadowDistance, 120.0f, VF_DUMPTODISK,

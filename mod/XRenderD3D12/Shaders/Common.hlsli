@@ -193,7 +193,7 @@ float2 MotionVector(float4 vCur, float4 vPrev)
 }
 
 //! Samples g_Textures[nIndex] with sampler nSampler (XR_SAMPLER_*), the mip level biased by
-//! vMipBias.x (sharper while an upscaler gathers the frames).
+//! vMipBias.x (sharper while an upscaler gathers the frames, softer in the cartoon render mode).
 float4 SampleTexture(uint nIndex, uint nSampler, float2 vUV)
 {
   float fBias = g_Frame.vMipBias.x;
