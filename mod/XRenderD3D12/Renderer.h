@@ -1932,6 +1932,7 @@ public:
   float CV_d3d12_WaterReflectionBlur = 0.1f; //!< how much the ripple finer than a pixel blurs the water's reflection (0: none)
   int CV_d3d12_WaterReflectionFlags = DLD_TERRAIN | DLD_TERRAIN_FULLRES | DLD_STATIC_OBJECTS | DLD_FAR_SPRITES;   //!< what the water reflects (EDrawLowDetailFlags)
   int CV_d3d12_SpriteRes = 128;             //!< size of the far vegetation sprites' textures (made at the level load)
+  float CV_d3d12_SpriteBlend = 0.2f;        //!< the part of the 15 degrees between the far vegetation sprites' pictures they are blended over (0: the original's change at once)
   int CV_d3d12_Shadows = 1;                 //!< 0: no shadow maps
   int CV_d3d12_ShadowMapSize = 1024;        //!< size of the shadow maps (0: the engine's, 512)
   int CV_d3d12_ShadowDebug = 0;             //!< non-zero: the shadow maps of the frame are shown

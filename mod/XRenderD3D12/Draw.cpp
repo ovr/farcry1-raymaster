@@ -126,7 +126,8 @@ void CD3D12Renderer::MakeFrameConstants(SFrameConstants &fc, bool bScene) const
   fc.vMipBias[0] = (bScene && m_pUpscaler && m_pUpscaler->GathersFrames() ? log2f(std::max(sx, 1e-3f)) - 1 : 0.0f) +
                    RenderModeMipBias();
   memcpy(&fc.vMipBias[1], m_AOBakedShare, sizeof(m_AOBakedShare));
-  Set4(fc.vTime, iTimer ? iTimer->GetCurrTime() : 0.0f, 0, 0, 0);
+  const bool bGathers = bScene && m_pUpscaler && m_pUpscaler->GathersFrames();
+  Set4(fc.vTime, iTimer ? iTimer->GetCurrTime() : 0.0f, bGathers ? (float)(m_nFrames & 63) : 0.0f, 0, 0);
   Set4(fc.vWorldColor, m_WorldColor[0], m_WorldColor[1], m_WorldColor[2], m_WorldColor[3]);
   Set4(fc.vDepthParams, m_ProjMatrix.data[10], m_ProjMatrix.data[14], 0, 0);
   Set4(fc.vHdr, HdrSkyGlow(), HdrSkyGlowPower(), 0, 0);

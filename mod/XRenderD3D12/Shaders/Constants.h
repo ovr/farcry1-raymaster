@@ -68,7 +68,7 @@ typedef float float4x4_t[16];
 #define DF_ALPHATEST_LESS   0x00008000  //!< with DF_ALPHATEST: clip when alpha >= fAlphaRef instead (GS_ALPHATEST_LESS128)
 #define DF_TEXGEN1_WORLD    0x00010000  //!< uv1 = (dot(world pos, vTexGen1U), dot(world pos, vTexGen1V)) (terrain detail)
 #define DF_ALPHA_ONE        0x00020000  //!< alpha 1 after the alpha test (the pictures of the far vegetation sprites)
-#define DF_TEX0_ARRAY       0x00040000  //!< tex0 is g_TextureArrays[nTex0]: slice floor(u / 2), sampled at (u - 2 * slice, v)
+#define DF_TEX0_ARRAY       0x00040000  //!< tex0 is g_TextureArrays[nTex0]: slice floor(u / 2), sampled at (u - 2 * slice, v); v = v' + 2 m + 0.5 (m 1 to 256): blended with the next slice by (m - 1) / 255 (ArrayCoords.hlsli)
 #define DF_TERRAIN_CLIFF    0x00100000  //!< rgb = 2 * rgb * lerp(1, 2 * tex2, w.x) * lerp(1, 2 * tex3, w.y), w = vertex colour rg * vTexGen1V.xy; uv of tex2 = (dot(world pos, vParams0), dot(.., vParams1)), of tex3 with vParams2 / 3
 #define DF_DETAIL_BUMP      0x00200000  //!< with DF_DETAIL_LAYER: tex0 *= clamp(1 + (sun N'.L - sun N.L) / (vParams1.x + saturate(N.L)), 0, 2), N' = the normal map tex1 (uv0) in the frame of N and the texgen rows, its y times vParams1.y
 #define DF_DECAL_FADE       0x00400000  //!< a *= 1 - f(r), r = saturate(2 * |uv0 - 0.5|), f(r) = (r + smoothstep(0, 1, r)) / 2: a decal fading out from its centre to a circle
@@ -190,7 +190,8 @@ struct SFrameConstants
   XR_FLOAT4(vFogColor);           //!< rgb
   XR_FLOAT4(vFogParams);          //!< x start, y end, z 1 / (end - start), w enabled
   XR_FLOAT4(vScreen);             //!< x width, y height, z 1 / width, w 1 / height (pixels)
-  XR_FLOAT4(vTime);               //!< x ITimer::GetCurrTime()
+  XR_FLOAT4(vTime);               //!< x ITimer::GetCurrTime(), y the frame's number (0 to 63) in the scene of a temporal
+                                  //!< anti-aliasing or upscaler, which gathers the frames, else 0 (ArrayCoords.hlsli's PictureNoise)
   XR_FLOAT4(vWorldColor);         //!< EF_SetWorldColor
   XR_FLOAT4(vDepthParams);        //!< the projection's m22 (x) and m32 (y): distance along the view axis = y / (depth + x)
   XR_FLOAT4(vSunSpec);            //!< rgb: the sun's specular colour (DF_SPECULAR)

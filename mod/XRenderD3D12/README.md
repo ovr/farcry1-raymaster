@@ -1290,6 +1290,26 @@ and lists theirs (`NamesObjects`).
   thinner than a texel fades out with the distance. Scaled to keep level 0's coverage, the vines of
   Pier's ancient trees were short dark lines in the air 600 m away; the crowns look the same either
   way.
+- An instance's quad shows the picture of the direction from the camera to the quad's centre (the
+  middle of the object's box), as the original's (`FarSpriteAngles.h`). Taken from the instance's
+  position, a palm's crown metres beside it, the picture changed frames away from the original's:
+  on Carrier the palm by the wreck 72 m away changed 14 frames later in the comparison film's flight,
+  a jump of its fronds where the original's had none. The original shows the picture of the 15
+  degrees the direction falls in, so the far trees change their outline at once every 15 degrees
+  as the camera goes round them (`d3d12_SpriteBlend 0`). `d3d12_SpriteBlend` (0.2, 0 to 1) is the
+  part of the 15 degrees about that change over which the two pictures are blended: outside it the
+  original's picture alone, the same pixels; inside it (3 degrees, 23 frames of the palm's
+  change in the flight) the weight goes from the one to the other, their colours blended where
+  both cover, the outline of the one dissolved into the other's by a noise over the pixels (alpha
+  tested, of the pixels only one of them covers as many are kept as its weight says). A temporal
+  anti-aliasing or upscaler (TAA, FSR) moves the noise along each frame; without one it stays put.
+  A dissolve is no clean blend either way, since TAA's clamp to the neighbours and FSR keep part of
+  the noise as a fine hatching on the leaves, and over all of the 15 degrees (1) the trees
+  were hatched all the time. Over a fifth of them it is seen only during a change, in place of the
+  jump. The quad's v gives the shaders the second picture's weight (`Shaders/ArrayCoords.hlsli`);
+  the rays take the nearer picture's outline. Test: `render_tests` suite `sprites` (the palm's
+  picture changes at the original's frame with 0, with and without TAA, and no jump with 0.2), unit
+  tests `FarSprite_*`.
 - The low detail terrain beyond the sectors (shader "terrainlowlod") has the level's low resolution
   cover texture over the whole terrain; the engine gives it u and v one whole texture further (an
   offset of 1), which wrapping does not see but the terrain's clamped sampling did: all the far land
