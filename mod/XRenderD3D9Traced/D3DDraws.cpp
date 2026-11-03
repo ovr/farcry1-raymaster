@@ -242,10 +242,11 @@ static void DecodeColorBlock(const BYTE *pBlock, bool bDXT1, BYTE *pOut, UINT nP
 static bool CanSaveFormat(D3DFORMAT eFormat)
 {
   return eFormat == D3DFMT_DXT1 || eFormat == D3DFMT_DXT3 || eFormat == D3DFMT_DXT5 || eFormat == D3DFMT_X8R8G8B8 ||
-    eFormat == D3DFMT_A8R8G8B8;
+    eFormat == D3DFMT_A8R8G8B8 || eFormat == D3DFMT_A8L8 || eFormat == D3DFMT_L8;
 }
 
-//! A locked level of one of the CanSaveFormat formats into B, G, R, A rows of Desc.Width * 4 bytes.
+//! A locked level of one of the CanSaveFormat formats into B, G, R, A rows of Desc.Width * 4 bytes
+//! (luminance formats: the luminance in B, G and R, alpha 255 for L8).
 static void DecodeLevel(const D3DSURFACE_DESC &Desc, const D3DLOCKED_RECT &Rect, BYTE *pPixels)
 {
   const BYTE *pSrc = (const BYTE *)Rect.pBits;
@@ -253,6 +254,21 @@ static void DecodeLevel(const D3DSURFACE_DESC &Desc, const D3DLOCKED_RECT &Rect,
   {
     for (UINT y = 0; y < Desc.Height; y++)
       memcpy(pPixels + y * Desc.Width * 4, pSrc + y * Rect.Pitch, Desc.Width * 4);
+    return;
+  }
+  if (Desc.Format == D3DFMT_A8L8 || Desc.Format == D3DFMT_L8)
+  {
+    const UINT nSize = Desc.Format == D3DFMT_A8L8 ? 2 : 1;
+    for (UINT y = 0; y < Desc.Height; y++)
+    {
+      for (UINT x = 0; x < Desc.Width; x++)
+      {
+        const BYTE *p = pSrc + y * Rect.Pitch + x * nSize;
+        BYTE *pOut = pPixels + (y * Desc.Width + x) * 4;
+        pOut[0] = pOut[1] = pOut[2] = p[0];
+        pOut[3] = nSize == 2 ? p[1] : 255;
+      }
+    }
     return;
   }
   const UINT nBlockSize = Desc.Format == D3DFMT_DXT1 ? 8 : 16;

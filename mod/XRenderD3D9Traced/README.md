@@ -207,7 +207,8 @@ reference of the rest.
   its scissor rectangle, and the camera dump of `SetCamera` the camera's portal and scissor
   rectangles when they are set.
   `XRENDERTRACED_D3D_CUBESAVE=<path prefix>` saves level 0 of the six faces of every cube texture
-  a draw uses as TGA files (DXT decoded; keep them in the scratchpad, never commit them).
+  a draw uses as TGA files (DXT decoded, A8L8 and L8 as grey with their alpha; keep them in the
+  scratchpad, never commit them).
   `XRENDERTRACED_D3D_TEXSAVE=<path prefix>` does the same for level 0 of every managed 2D texture
   a draw uses that is at most `XRENDERTRACED_D3D_TEXSAVE_MAX` (default 256) texels wide and high.
   `XRENDERTRACED_D3D_RT=1` writes the first `SetRenderTarget` of every frame to a surface other
