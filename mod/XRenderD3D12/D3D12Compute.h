@@ -31,6 +31,12 @@
 //	  static samplers s0..s4 as the draws' (XR_SAMPLER_*, the shadow maps'
 //	  comparison)
 //
+//	The kernels that bind more UAVs (CMAA2, third_party/cmaa2) have a third
+//	one, without constants (DispatchWide, DispatchWideIndirect):
+//	  0: descriptor table t0..t3, u0..u7 (WIDE_SRVS SRVs, then WIDE_UAVS
+//	     UAVs, one run of AllocRange)
+//	  static sampler s0 point clamp
+//
 //////////////////////////////////////////////////////////////////////
 
 #pragma once
@@ -92,6 +98,13 @@ enum ED3D12Kernel
   eD3D12K_SmaaWeightsMedium,
   eD3D12K_SmaaWeightsHigh,
   eD3D12K_SmaaWeightsUltra,
+  eD3D12K_Cmaa2EdgesLow,            //!< CMAA2's edges by quality (d3d12_AAQuality 0..3; Shaders/AntiAliasCmaa2.hlsl, wide)
+  eD3D12K_Cmaa2EdgesMedium,
+  eD3D12K_Cmaa2EdgesHigh,
+  eD3D12K_Cmaa2EdgesUltra,
+  eD3D12K_Cmaa2DispatchArgs,        //!< its indirect dispatches' arguments, its counters cleared
+  eD3D12K_Cmaa2Candidates,          //!< its shapes' new colours (indirect)
+  eD3D12K_Cmaa2Apply,               //!< those colours blended into its picture (indirect)
   eD3D12K_Num
 };
 
@@ -100,6 +113,9 @@ class CD3D12Compute
 public:
   static constexpr int COMPUTE_SRVS = 4;
   static constexpr int COMPUTE_UAVS = 5;
+  //! The table of the wide root signature: t0..t3, then u0..u7.
+  static constexpr int WIDE_SRVS = 4;
+  static constexpr int WIDE_UAVS = 8;
   //! The root parameter of the path tracer's lights in the root signature with rays.
   static constexpr UINT ROOT_RAY_LIGHTS = 6;
 
@@ -120,18 +136,31 @@ public:
   void DispatchRays(ID3D12GraphicsCommandList *pList, ED3D12Kernel eKernel, D3D12_GPU_VIRTUAL_ADDRESS FrameCB, D3D12_GPU_VIRTUAL_ADDRESS PassCB,
                     D3D12_GPU_VIRTUAL_ADDRESS nRayScene, D3D12_GPU_VIRTUAL_ADDRESS nRayInstances, int nUAVs, UINT nGroupsX, UINT nGroupsY,
                     D3D12_GPU_VIRTUAL_ADDRESS nLights = 0);
+  //! The same for a kernel of the wide root signature: its table from slot nTable (a run of
+  //! AllocRange of WIDE_SRVS + WIDE_UAVS).
+  void DispatchWide(ID3D12GraphicsCommandList *pList, ED3D12Kernel eKernel, int nTable, UINT nGroupsX, UINT nGroupsY, UINT nGroupsZ = 1);
+  //! And its dispatch by the arguments the GPU wrote (D3D12_DISPATCH_ARGUMENTS at nOffset of pArgs, in
+  //! INDIRECT_ARGUMENT).
+  void DispatchWideIndirect(ID3D12GraphicsCommandList *pList, ED3D12Kernel eKernel, int nTable, ID3D12Resource *pArgs, UINT64 nOffset = 0);
   //! Whether the kernel is built in and the device takes it (its pipeline state made).
   bool HasKernel(ED3D12Kernel eKernel) { return GetPSO(eKernel) != nullptr; }
 
 private:
   bool CreateRootSignature();
   bool CreateRayRootSignature();
+  //! The wide root signature and the command signature of its indirect dispatches; false (logged) leaves
+  //! its kernels unavailable.
+  bool CreateWideRootSignature();
+  //! Records the kernel's pipeline state and the wide root signature with its table; false: not available.
+  bool BindWide(ID3D12GraphicsCommandList *pList, ED3D12Kernel eKernel, int nTable);
   //! nullptr when the device refuses it (logged once).
   ID3D12PipelineState *GetPSO(ED3D12Kernel eKernel);
 
   ID3D12Device *m_pDevice = nullptr;
   Microsoft::WRL::ComPtr<ID3D12RootSignature> m_pRootSignature;
   Microsoft::WRL::ComPtr<ID3D12RootSignature> m_pRayRootSignature;
+  Microsoft::WRL::ComPtr<ID3D12RootSignature> m_pWideRootSignature;
+  Microsoft::WRL::ComPtr<ID3D12CommandSignature> m_pDispatchSignature;
   Microsoft::WRL::ComPtr<ID3D12PipelineState> m_pPSOs[eD3D12K_Num];
   bool m_bFailed[eD3D12K_Num] = {};
 };

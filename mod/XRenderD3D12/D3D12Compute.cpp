@@ -65,6 +65,13 @@
 #include "SmaaWeightsMedium_CS.h"
 #include "SmaaWeightsHigh_CS.h"
 #include "SmaaWeightsUltra_CS.h"
+#include "Cmaa2EdgesLow_CS.h"
+#include "Cmaa2EdgesMedium_CS.h"
+#include "Cmaa2EdgesHigh_CS.h"
+#include "Cmaa2EdgesUltra_CS.h"
+#include "Cmaa2DispatchArgs_CS.h"
+#include "Cmaa2Candidates_CS.h"
+#include "Cmaa2Apply_CS.h"
 #if XRENDERD3D12_NRD
 #include "PathNrdPack_CS.h"
 #include "PathNrdResolve_CS.h"
@@ -81,6 +88,7 @@ struct SKernel
   const void *pCS;
   size_t nCS;
   bool bRays;       //!< the root signature with rays (DispatchRays)
+  bool bWide;       //!< the wide root signature (DispatchWide)
 };
 const SKernel s_Kernels[eD3D12K_Num] =
 {
@@ -150,6 +158,13 @@ const SKernel s_Kernels[eD3D12K_Num] =
   { "SMAA weights (medium)", g_SmaaWeightsMedium_CS, sizeof(g_SmaaWeightsMedium_CS) },
   { "SMAA weights (high)", g_SmaaWeightsHigh_CS, sizeof(g_SmaaWeightsHigh_CS) },
   { "SMAA weights (ultra)", g_SmaaWeightsUltra_CS, sizeof(g_SmaaWeightsUltra_CS) },
+  { "CMAA2 edges (low)", g_Cmaa2EdgesLow_CS, sizeof(g_Cmaa2EdgesLow_CS), false, true },
+  { "CMAA2 edges (medium)", g_Cmaa2EdgesMedium_CS, sizeof(g_Cmaa2EdgesMedium_CS), false, true },
+  { "CMAA2 edges (high)", g_Cmaa2EdgesHigh_CS, sizeof(g_Cmaa2EdgesHigh_CS), false, true },
+  { "CMAA2 edges (ultra)", g_Cmaa2EdgesUltra_CS, sizeof(g_Cmaa2EdgesUltra_CS), false, true },
+  { "CMAA2 dispatch arguments", g_Cmaa2DispatchArgs_CS, sizeof(g_Cmaa2DispatchArgs_CS), false, true },
+  { "CMAA2 candidates", g_Cmaa2Candidates_CS, sizeof(g_Cmaa2Candidates_CS), false, true },
+  { "CMAA2 apply", g_Cmaa2Apply_CS, sizeof(g_Cmaa2Apply_CS), false, true },
 };
 static_assert(sizeof(s_Kernels) / sizeof(s_Kernels[0]) == eD3D12K_Num, "a kernel for each ED3D12Kernel");
 
@@ -179,7 +194,11 @@ bool CD3D12Compute::Init(ID3D12Device *pDevice)
 {
   Shutdown();
   m_pDevice = pDevice;
-  return CreateRootSignature() && CreateRayRootSignature();
+  if (!CreateRootSignature() || !CreateRayRootSignature())
+    return false;
+  // Without it only its kernels are missing (HasKernel).
+  CreateWideRootSignature();
+  return true;
 }
 
 void CD3D12Compute::Shutdown()
@@ -190,6 +209,8 @@ void CD3D12Compute::Shutdown()
     b = false;
   m_pRootSignature.Reset();
   m_pRayRootSignature.Reset();
+  m_pWideRootSignature.Reset();
+  m_pDispatchSignature.Reset();
   m_pDevice = nullptr;
 }
 
@@ -316,11 +337,67 @@ bool CD3D12Compute::CreateRayRootSignature()
   return true;
 }
 
+bool CD3D12Compute::CreateWideRootSignature()
+{
+  D3D12_DESCRIPTOR_RANGE Ranges[2] = {};
+  Ranges[0].RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_SRV;
+  Ranges[0].NumDescriptors = WIDE_SRVS;
+  Ranges[1].RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_UAV;
+  Ranges[1].NumDescriptors = WIDE_UAVS;
+  Ranges[1].OffsetInDescriptorsFromTableStart = WIDE_SRVS;
+
+  D3D12_ROOT_PARAMETER Param = {};
+  Param.ParameterType = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
+  Param.DescriptorTable.NumDescriptorRanges = 2;
+  Param.DescriptorTable.pDescriptorRanges = Ranges;
+  Param.ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
+  const D3D12_STATIC_SAMPLER_DESC Sampler = StaticSampler(0, D3D12_FILTER_MIN_MAG_MIP_POINT);
+
+  D3D12_ROOT_SIGNATURE_DESC Desc = {};
+  Desc.NumParameters = 1;
+  Desc.pParameters = &Param;
+  Desc.NumStaticSamplers = 1;
+  Desc.pStaticSamplers = &Sampler;
+
+  ComPtr<ID3DBlob> pBlob, pErrors;
+  HRESULT hr = D3D12SerializeRootSignature(&Desc, D3D_ROOT_SIGNATURE_VERSION_1, &pBlob, &pErrors);
+  if (FAILED(hr))
+  {
+    iLog->LogError("XRenderD3D12: D3D12SerializeRootSignature (compute, wide) failed (0x%08X): %s", (unsigned)hr,
+      pErrors ? (const char *)pErrors->GetBufferPointer() : "");
+    return false;
+  }
+  hr = m_pDevice->CreateRootSignature(0, pBlob->GetBufferPointer(), pBlob->GetBufferSize(), IID_PPV_ARGS(&m_pWideRootSignature));
+  if (FAILED(hr))
+  {
+    iLog->LogError("XRenderD3D12: CreateRootSignature (compute, wide) failed (0x%08X)", (unsigned)hr);
+    return false;
+  }
+  m_pWideRootSignature->SetName(L"XRenderD3D12 compute root signature, wide");
+
+  // The indirect dispatches change no root arguments, so the command signature has no root signature.
+  D3D12_INDIRECT_ARGUMENT_DESC Argument = {};
+  Argument.Type = D3D12_INDIRECT_ARGUMENT_TYPE_DISPATCH;
+  D3D12_COMMAND_SIGNATURE_DESC Signature = {};
+  Signature.ByteStride = sizeof(D3D12_DISPATCH_ARGUMENTS);
+  Signature.NumArgumentDescs = 1;
+  Signature.pArgumentDescs = &Argument;
+  hr = m_pDevice->CreateCommandSignature(&Signature, nullptr, IID_PPV_ARGS(&m_pDispatchSignature));
+  if (FAILED(hr))
+  {
+    iLog->LogError("XRenderD3D12: CreateCommandSignature (dispatch) failed (0x%08X)", (unsigned)hr);
+    m_pWideRootSignature.Reset();
+    return false;
+  }
+  return true;
+}
+
 ID3D12PipelineState *CD3D12Compute::GetPSO(ED3D12Kernel eKernel)
 {
   if (eKernel < 0 || eKernel >= eD3D12K_Num || m_bFailed[eKernel] || !s_Kernels[eKernel].pCS)
     return nullptr;
-  ID3D12RootSignature *pRootSignature = s_Kernels[eKernel].bRays ? m_pRayRootSignature.Get() : m_pRootSignature.Get();
+  ID3D12RootSignature *pRootSignature = s_Kernels[eKernel].bRays ? m_pRayRootSignature.Get()
+                                        : s_Kernels[eKernel].bWide ? m_pWideRootSignature.Get() : m_pRootSignature.Get();
   if (!pRootSignature)
     return nullptr;
   if (!m_pPSOs[eKernel])
@@ -357,6 +434,31 @@ void CD3D12Compute::Dispatch(ID3D12GraphicsCommandList *pList, ED3D12Kernel eKer
   if (nUAVs >= 0)
     pList->SetComputeRootDescriptorTable(2, pDescriptors->GetGPU(nUAVs));
   pList->Dispatch(nGroupsX, nGroupsY, nGroupsZ);
+}
+
+bool CD3D12Compute::BindWide(ID3D12GraphicsCommandList *pList, ED3D12Kernel eKernel, int nTable)
+{
+  ID3D12PipelineState *pPSO = GetPSO(eKernel);
+  CD3D12Descriptors *pDescriptors = g_pRenderer->m_pDescriptors.get();
+  if (!pList || !pPSO || !s_Kernels[eKernel].bWide || !pDescriptors || nTable < 0)
+    return false;
+  g_pRenderer->m_pDevice->ForgetDrawState();
+  pList->SetComputeRootSignature(m_pWideRootSignature.Get());
+  pList->SetPipelineState(pPSO);
+  pList->SetComputeRootDescriptorTable(0, pDescriptors->GetGPU(nTable));
+  return true;
+}
+
+void CD3D12Compute::DispatchWide(ID3D12GraphicsCommandList *pList, ED3D12Kernel eKernel, int nTable, UINT nGroupsX, UINT nGroupsY, UINT nGroupsZ)
+{
+  if (nGroupsX && nGroupsY && nGroupsZ && BindWide(pList, eKernel, nTable))
+    pList->Dispatch(nGroupsX, nGroupsY, nGroupsZ);
+}
+
+void CD3D12Compute::DispatchWideIndirect(ID3D12GraphicsCommandList *pList, ED3D12Kernel eKernel, int nTable, ID3D12Resource *pArgs, UINT64 nOffset)
+{
+  if (pArgs && m_pDispatchSignature && BindWide(pList, eKernel, nTable))
+    pList->ExecuteIndirect(m_pDispatchSignature.Get(), 1, pArgs, nOffset, nullptr, 0);
 }
 
 void CD3D12Compute::DispatchRays(ID3D12GraphicsCommandList *pList, ED3D12Kernel eKernel, D3D12_GPU_VIRTUAL_ADDRESS FrameCB, D3D12_GPU_VIRTUAL_ADDRESS PassCB,

@@ -120,6 +120,8 @@ set(XRENDERD3D12_SHADER_HEADERS "")
 set(XRENDERD3D12_XEGTAO_DIR "${CMAKE_SOURCE_DIR}/third_party/xegtao/Source/Rendering/Shaders")
 # SMAA (third_party/smaa): its shader for the anti-aliasing's kernels, its precomputed textures for PostAA.cpp.
 set(XRENDERD3D12_SMAA_DIR "${CMAKE_SOURCE_DIR}/third_party/smaa")
+# CMAA2 (third_party/cmaa2): its shader for the anti-aliasing's kernels.
+set(XRENDERD3D12_CMAA2_DIR "${CMAKE_SOURCE_DIR}/third_party/cmaa2/Projects/CMAA2/CMAA2")
 # More directories to include from, set around the xrender_d3d12_shader calls of the programs that want them (NRD.hlsli).
 set(XRENDERD3D12_SHADER_INCLUDES "")
 

@@ -5,7 +5,7 @@
 //	File: GpuHarness.cpp
 //	Description: The unit tests' compute harness (GpuHarness.h): the
 //	device, the root signature, a scene for rays, a run of a kernel and
-//	its read back.
+//	its read back, a run of the renderer's CMAA2 kernels.
 //
 //////////////////////////////////////////////////////////////////////
 
@@ -287,34 +287,8 @@ void XrTest::CGpu::UploadTexture(const STestTexture &Texture, UINT nSlot, std::v
   const size_t nRow = (size_t)Texture.nWidth * nTexel;
   if (!Texture.nWidth || !Texture.nHeight || Texture.Data.size() != nRow * Texture.nHeight)
     throw std::runtime_error("a test texture's size does not match its data");
-  D3D12_HEAP_PROPERTIES Heap = {};
-  Heap.Type = D3D12_HEAP_TYPE_DEFAULT;
-  D3D12_RESOURCE_DESC Desc = {};
-  Desc.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
-  Desc.Width = Texture.nWidth;
-  Desc.Height = Texture.nHeight;
-  Desc.DepthOrArraySize = 1;
-  Desc.MipLevels = 1;
-  Desc.Format = Texture.Format;
-  Desc.SampleDesc.Count = 1;
-  ComPtr<ID3D12Resource> pTexture;
-  Ok(m_pDevice->CreateCommittedResource(&Heap, D3D12_HEAP_FLAG_NONE, &Desc, D3D12_RESOURCE_STATE_COPY_DEST, nullptr, IID_PPV_ARGS(&pTexture)),
-     "CreateCommittedResource (texture)");
-  // The rows at the pitch a copy wants.
-  D3D12_PLACED_SUBRESOURCE_FOOTPRINT Layout = {};
-  UINT64 nBytes = 0;
-  m_pDevice->GetCopyableFootprints(&Desc, 0, 1, 0, &Layout, nullptr, nullptr, &nBytes);
-  std::vector<uint8_t> Rows((size_t)nBytes);
-  for (UINT y = 0; y < Texture.nHeight; y++)
-    memcpy(Rows.data() + (size_t)Layout.Offset + (size_t)y * Layout.Footprint.RowPitch, Texture.Data.data() + y * nRow, nRow);
-  ComPtr<ID3D12Resource> pStaging = Upload(Rows.data(), Rows.size());
-  D3D12_TEXTURE_COPY_LOCATION Dst = {}, Src = {};
-  Dst.pResource = pTexture.Get();
-  Dst.Type = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
-  Src.pResource = pStaging.Get();
-  Src.Type = D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT;
-  Src.PlacedFootprint = Layout;
-  m_pList->CopyTextureRegion(&Dst, 0, 0, 0, &Src, nullptr);
+  ComPtr<ID3D12Resource> pTexture = Texture2D(Texture.nWidth, Texture.nHeight, Texture.Format, D3D12_RESOURCE_STATE_COPY_DEST, false);
+  CopyRows(pTexture.Get(), Texture, nRow, Keep);
   const D3D12_RESOURCE_BARRIER Read = Transition(pTexture.Get(), D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
   m_pList->ResourceBarrier(1, &Read);
   D3D12_SHADER_RESOURCE_VIEW_DESC View = {};
@@ -323,7 +297,47 @@ void XrTest::CGpu::UploadTexture(const STestTexture &Texture, UINT nSlot, std::v
   View.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
   View.Texture2D.MipLevels = 1;
   m_pDevice->CreateShaderResourceView(pTexture.Get(), &View, CpuHandle(nSlot));
-  Keep.insert(Keep.end(), { pTexture, pStaging });
+  Keep.push_back(pTexture);
+}
+
+XrTest::ComPtr<ID3D12Resource> XrTest::CGpu::Texture2D(UINT nWidth, UINT nHeight, DXGI_FORMAT Format, D3D12_RESOURCE_STATES eState, bool bUav)
+{
+  D3D12_HEAP_PROPERTIES Heap = {};
+  Heap.Type = D3D12_HEAP_TYPE_DEFAULT;
+  D3D12_RESOURCE_DESC Desc = {};
+  Desc.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
+  Desc.Width = nWidth;
+  Desc.Height = nHeight;
+  Desc.DepthOrArraySize = 1;
+  Desc.MipLevels = 1;
+  Desc.Format = Format;
+  Desc.SampleDesc.Count = 1;
+  Desc.Flags = bUav ? D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS : D3D12_RESOURCE_FLAG_NONE;
+  ComPtr<ID3D12Resource> pTexture;
+  Ok(m_pDevice->CreateCommittedResource(&Heap, D3D12_HEAP_FLAG_NONE, &Desc, eState, nullptr, IID_PPV_ARGS(&pTexture)),
+     "CreateCommittedResource (texture)");
+  return pTexture;
+}
+
+void XrTest::CGpu::CopyRows(ID3D12Resource *pTexture, const STestTexture &Texture, size_t nRow, std::vector<ComPtr<ID3D12Resource>> &Keep)
+{
+  // The rows at the pitch a copy wants.
+  const D3D12_RESOURCE_DESC Desc = pTexture->GetDesc();
+  D3D12_PLACED_SUBRESOURCE_FOOTPRINT Layout = {};
+  UINT64 nBytes = 0;
+  m_pDevice->GetCopyableFootprints(&Desc, 0, 1, 0, &Layout, nullptr, nullptr, &nBytes);
+  std::vector<uint8_t> Rows((size_t)nBytes);
+  for (UINT y = 0; y < Texture.nHeight; y++)
+    memcpy(Rows.data() + (size_t)Layout.Offset + (size_t)y * Layout.Footprint.RowPitch, Texture.Data.data() + y * nRow, nRow);
+  ComPtr<ID3D12Resource> pStaging = Upload(Rows.data(), Rows.size());
+  D3D12_TEXTURE_COPY_LOCATION Dst = {}, Src = {};
+  Dst.pResource = pTexture;
+  Dst.Type = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
+  Src.pResource = pStaging.Get();
+  Src.Type = D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT;
+  Src.PlacedFootprint = Layout;
+  m_pList->CopyTextureRegion(&Dst, 0, 0, 0, &Src, nullptr);
+  Keep.push_back(pStaging);
 }
 
 XrTest::ComPtr<ID3D12Resource> XrTest::CGpu::Upload(const void *pData, size_t nBytes)
@@ -532,6 +546,236 @@ std::vector<uint32> XrTest::CGpu::Run(const SDispatch &d)
   D3D12_RANGE Range = { 0, nOutBytes };
   Ok(pReadback->Map(0, &Range, &p), "Map");
   memcpy(Out.data(), p, nOutBytes);
+  D3D12_RANGE None = { 0, 0 };
+  pReadback->Unmap(0, &None);
+  return Out;
+}
+
+bool XrTest::CGpu::HasTypedStore(DXGI_FORMAT Format)
+{
+  D3D12_FEATURE_DATA_FORMAT_SUPPORT Support = { Format };
+  return SUCCEEDED(m_pDevice->CheckFeatureSupport(D3D12_FEATURE_FORMAT_SUPPORT, &Support, sizeof(Support))) &&
+         (Support.Support1 & D3D12_FORMAT_SUPPORT1_TYPED_UNORDERED_ACCESS_VIEW) && (Support.Support2 & D3D12_FORMAT_SUPPORT2_UAV_TYPED_STORE);
+}
+
+void XrTest::CGpu::CreateWide()
+{
+  if (m_pWideRootSignature)
+    return;
+  // D3D12Compute.cpp's CreateWideRootSignature: t0..t3, then u0..u7, in one table; s0 point clamp.
+  constexpr UINT SRVS = 4, UAVS = 8;
+  D3D12_DESCRIPTOR_RANGE Ranges[2] = {};
+  Ranges[0].RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_SRV;
+  Ranges[0].NumDescriptors = SRVS;
+  Ranges[1].RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_UAV;
+  Ranges[1].NumDescriptors = UAVS;
+  Ranges[1].OffsetInDescriptorsFromTableStart = SRVS;
+  D3D12_ROOT_PARAMETER Param = {};
+  Param.ParameterType = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
+  Param.DescriptorTable.NumDescriptorRanges = 2;
+  Param.DescriptorTable.pDescriptorRanges = Ranges;
+  Param.ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
+  D3D12_STATIC_SAMPLER_DESC Sampler = {};
+  Sampler.Filter = D3D12_FILTER_MIN_MAG_MIP_POINT;
+  Sampler.AddressU = Sampler.AddressV = Sampler.AddressW = D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
+  Sampler.MaxLOD = D3D12_FLOAT32_MAX;
+  Sampler.ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
+  D3D12_ROOT_SIGNATURE_DESC Rs = {};
+  Rs.NumParameters = 1;
+  Rs.pParameters = &Param;
+  Rs.NumStaticSamplers = 1;
+  Rs.pStaticSamplers = &Sampler;
+  ComPtr<ID3DBlob> pBlob, pError;
+  Ok(D3D12SerializeRootSignature(&Rs, D3D_ROOT_SIGNATURE_VERSION_1, &pBlob, &pError), "D3D12SerializeRootSignature (wide)");
+  Ok(m_pDevice->CreateRootSignature(0, pBlob->GetBufferPointer(), pBlob->GetBufferSize(), IID_PPV_ARGS(&m_pWideRootSignature)),
+     "CreateRootSignature (wide)");
+  D3D12_DESCRIPTOR_HEAP_DESC HeapDesc = {};
+  HeapDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
+  HeapDesc.NumDescriptors = SRVS + UAVS;
+  HeapDesc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
+  Ok(m_pDevice->CreateDescriptorHeap(&HeapDesc, IID_PPV_ARGS(&m_pWideHeap)), "CreateDescriptorHeap (wide)");
+  D3D12_INDIRECT_ARGUMENT_DESC Arg = {};
+  Arg.Type = D3D12_INDIRECT_ARGUMENT_TYPE_DISPATCH;
+  D3D12_COMMAND_SIGNATURE_DESC Sig = {};
+  Sig.ByteStride = sizeof(D3D12_DISPATCH_ARGUMENTS);
+  Sig.NumArgumentDescs = 1;
+  Sig.pArgumentDescs = &Arg;
+  Ok(m_pDevice->CreateCommandSignature(&Sig, nullptr, IID_PPV_ARGS(&m_pDispatchSignature)), "CreateCommandSignature");
+}
+
+ID3D12PipelineState *XrTest::CGpu::WidePipeline(const SBytecode &Shader)
+{
+  ComPtr<ID3D12PipelineState> &pPso = m_WidePipelines[Shader.pData];
+  if (!pPso)
+  {
+    D3D12_COMPUTE_PIPELINE_STATE_DESC Desc = {};
+    Desc.pRootSignature = m_pWideRootSignature.Get();
+    Desc.CS = { Shader.pData, Shader.nSize };
+    Ok(m_pDevice->CreateComputePipelineState(&Desc, IID_PPV_ARGS(&pPso)), "CreateComputePipelineState (wide)");
+  }
+  return pPso.Get();
+}
+
+std::vector<uint8_t> XrTest::CGpu::RunCmaa2(const STestTexture &Picture, const SCmaa2Kernels &Kernels, int nFrames)
+{
+  const UINT w = Picture.nWidth, h = Picture.nHeight;
+  DXGI_FORMAT Typeless, Srgb;
+  if (Picture.Format == DXGI_FORMAT_R8G8B8A8_UNORM)
+  {
+    Typeless = DXGI_FORMAT_R8G8B8A8_TYPELESS;
+    Srgb = DXGI_FORMAT_R8G8B8A8_UNORM_SRGB;
+  }
+  else if (Picture.Format == DXGI_FORMAT_B8G8R8A8_UNORM)
+  {
+    Typeless = DXGI_FORMAT_B8G8R8A8_TYPELESS;
+    Srgb = DXGI_FORMAT_B8G8R8A8_UNORM_SRGB;
+  }
+  else
+    throw std::runtime_error("CMAA2's picture is not R8G8B8A8_UNORM or B8G8R8A8_UNORM");
+  const size_t nRow = (size_t)w * 4;
+  if (!w || !h || Picture.Data.size() != nRow * h || nFrames < 1)
+    throw std::runtime_error("CMAA2's picture's size does not match its data");
+  if (!HasTypedStore(Picture.Format))
+    throw std::runtime_error("no typed UAV store of CMAA2's picture's format");
+  CreateWide();
+
+  // PostAA.cpp's buffers: the shapes (u2), the quads (u3), the colours (u4), the counters (u6), the arguments (u7).
+  const UINT64 nPixels = (UINT64)w * h;
+  const UINT64 Bytes[5] = { nPixels / 4 * 4, (nPixels + 5) / 6 * 4, nPixels / 2 * 8, 16 * 4, 4 * 4 };
+  ComPtr<ID3D12Resource> Buffers[5];
+  for (int i = 0; i < 5; i++)
+    Buffers[i] = Buffer(D3D12_HEAP_TYPE_DEFAULT, (size_t)Bytes[i], D3D12_RESOURCE_STATE_COMMON, true);
+  ID3D12Resource *pArgs = Buffers[4].Get();
+  // The picture as uploaded (each frame's copy source), CMAA2's picture, the edges (4 bits a pixel), the lists' heads.
+  ComPtr<ID3D12Resource> pSource = Texture2D(w, h, Typeless, D3D12_RESOURCE_STATE_COPY_DEST, false);
+  ComPtr<ID3D12Resource> pColor = Texture2D(w, h, Typeless, D3D12_RESOURCE_STATE_COPY_DEST, true);
+  ComPtr<ID3D12Resource> pEdges = Texture2D((w + 1) / 2, h, DXGI_FORMAT_R8_TYPELESS, D3D12_RESOURCE_STATE_UNORDERED_ACCESS, true);
+  ComPtr<ID3D12Resource> pHeads = Texture2D((w + 1) / 2, (h + 1) / 2, DXGI_FORMAT_R32_UINT, D3D12_RESOURCE_STATE_UNORDERED_ACCESS, true);
+
+  // The table: t0 the picture (sRGB), t1..t3 null; u0 the picture (UNORM), u1 the edges, u2..u4 the lists, u5 the heads,
+  // u6 the counters, u7 the arguments.
+  const D3D12_CPU_DESCRIPTOR_HANDLE Base = m_pWideHeap->GetCPUDescriptorHandleForHeapStart();
+  auto Slot = [&](UINT n) {
+    D3D12_CPU_DESCRIPTOR_HANDLE c = Base;
+    c.ptr += (SIZE_T)n * m_nDescriptorSize;
+    return c;
+  };
+  D3D12_SHADER_RESOURCE_VIEW_DESC SRV = {};
+  SRV.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+  SRV.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
+  SRV.Texture2D.MipLevels = 1;
+  SRV.Format = Srgb;
+  m_pDevice->CreateShaderResourceView(pColor.Get(), &SRV, Slot(0));
+  SRV.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+  for (UINT i = 1; i < 4; i++)
+    m_pDevice->CreateShaderResourceView(nullptr, &SRV, Slot(i));
+  D3D12_UNORDERED_ACCESS_VIEW_DESC UAV = {};
+  UAV.ViewDimension = D3D12_UAV_DIMENSION_TEXTURE2D;
+  UAV.Format = Picture.Format;
+  m_pDevice->CreateUnorderedAccessView(pColor.Get(), nullptr, &UAV, Slot(4));
+  UAV.Format = DXGI_FORMAT_R8_UINT;
+  m_pDevice->CreateUnorderedAccessView(pEdges.Get(), nullptr, &UAV, Slot(5));
+  UAV.Format = DXGI_FORMAT_R32_UINT;
+  m_pDevice->CreateUnorderedAccessView(pHeads.Get(), nullptr, &UAV, Slot(9));
+  UAV = {};
+  UAV.ViewDimension = D3D12_UAV_DIMENSION_BUFFER;
+  const UINT Strides[3] = { 4, 4, 8 };
+  for (UINT i = 0; i < 3; i++)
+  {
+    UAV.Buffer.StructureByteStride = Strides[i];
+    UAV.Buffer.NumElements = (UINT)(Bytes[i] / Strides[i]);
+    m_pDevice->CreateUnorderedAccessView(Buffers[i].Get(), nullptr, &UAV, Slot(6 + i));
+  }
+  UAV.Buffer.StructureByteStride = 0;
+  UAV.Format = DXGI_FORMAT_R32_TYPELESS;
+  UAV.Buffer.Flags = D3D12_BUFFER_UAV_FLAG_RAW;
+  UAV.Buffer.NumElements = 16;
+  m_pDevice->CreateUnorderedAccessView(Buffers[3].Get(), nullptr, &UAV, Slot(10));
+  UAV.Buffer.NumElements = 4;
+  m_pDevice->CreateUnorderedAccessView(pArgs, nullptr, &UAV, Slot(11));
+
+  const D3D12_RESOURCE_DESC ColorDesc = pColor->GetDesc();
+  D3D12_PLACED_SUBRESOURCE_FOOTPRINT Layout = {};
+  UINT64 nReadBytes = 0;
+  m_pDevice->GetCopyableFootprints(&ColorDesc, 0, 1, 0, &Layout, nullptr, nullptr, &nReadBytes);
+  ComPtr<ID3D12Resource> pReadback = Buffer(D3D12_HEAP_TYPE_READBACK, (size_t)nReadBytes, D3D12_RESOURCE_STATE_COPY_DEST, false);
+
+  Ok(m_pAllocator->Reset(), "Reset");
+  Ok(m_pList->Reset(m_pAllocator.Get(), nullptr), "Reset");
+  std::vector<ComPtr<ID3D12Resource>> Keep;
+  CopyRows(pSource.Get(), Picture, nRow, Keep);
+  auto Move = [&](ID3D12Resource *p, D3D12_RESOURCE_STATES eFrom, D3D12_RESOURCE_STATES eTo) {
+    const D3D12_RESOURCE_BARRIER t = Transition(p, eFrom, eTo);
+    m_pList->ResourceBarrier(1, &t);
+  };
+  auto UavBarrier = [&]() {
+    D3D12_RESOURCE_BARRIER u = {};
+    u.Type = D3D12_RESOURCE_BARRIER_TYPE_UAV;
+    m_pList->ResourceBarrier(1, &u);
+  };
+  auto Dispatch = [&](const SBytecode &k, UINT x, UINT y) {
+    m_pList->SetPipelineState(WidePipeline(k));
+    m_pList->Dispatch(x, y, 1);
+  };
+  auto Indirect = [&](const SBytecode &k) {
+    m_pList->SetPipelineState(WidePipeline(k));
+    m_pList->ExecuteIndirect(m_pDispatchSignature.Get(), 1, pArgs, 0, nullptr, 0);
+  };
+  Move(pSource.Get(), D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_COPY_SOURCE);
+  ID3D12DescriptorHeap *pHeaps[] = { m_pWideHeap.Get() };
+  m_pList->SetDescriptorHeaps(1, pHeaps);
+  m_pList->SetComputeRootSignature(m_pWideRootSignature.Get());
+  m_pList->SetComputeRootDescriptorTable(0, m_pWideHeap->GetGPUDescriptorHandleForHeapStart());
+  constexpr D3D12_RESOURCE_STATES UAV_STATE = D3D12_RESOURCE_STATE_UNORDERED_ACCESS, ARGS = D3D12_RESOURCE_STATE_INDIRECT_ARGUMENT;
+  constexpr D3D12_RESOURCE_STATES READ = D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE;
+  for (int f = 0; f < nFrames; f++)
+  {
+    // As DrawCmaa2Passes: the picture copied in, the counters cleared once, the edges, the shapes and the colours by the
+    // arguments of their counts (a barrier between frames: the renderer's are separate submissions).
+    if (f > 0)
+    {
+      Move(pColor.Get(), UAV_STATE, D3D12_RESOURCE_STATE_COPY_DEST);
+      UavBarrier();
+    }
+    m_pList->CopyResource(pColor.Get(), pSource.Get());
+    Move(pColor.Get(), D3D12_RESOURCE_STATE_COPY_DEST, READ);
+    Move(pArgs, D3D12_RESOURCE_STATE_COMMON, UAV_STATE);
+    if (f == 0)
+    {
+      Dispatch(Kernels.DispatchArgs, 1, 2);
+      UavBarrier();
+    }
+    Dispatch(Kernels.Edges, (w + 27) / 28, (h + 27) / 28);
+    UavBarrier();
+    Dispatch(Kernels.DispatchArgs, 2, 1);
+    Move(pArgs, UAV_STATE, ARGS);
+    UavBarrier();
+    Indirect(Kernels.Candidates);
+    Move(pArgs, ARGS, UAV_STATE);
+    UavBarrier();
+    Dispatch(Kernels.DispatchArgs, 1, 2);
+    Move(pArgs, UAV_STATE, ARGS);
+    UavBarrier();
+    Move(pColor.Get(), READ, UAV_STATE);
+    Indirect(Kernels.Apply);
+    Move(pArgs, ARGS, D3D12_RESOURCE_STATE_COMMON);
+  }
+  Move(pColor.Get(), UAV_STATE, D3D12_RESOURCE_STATE_COPY_SOURCE);
+  D3D12_TEXTURE_COPY_LOCATION Dst = {}, Src = {};
+  Dst.pResource = pReadback.Get();
+  Dst.Type = D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT;
+  Dst.PlacedFootprint = Layout;
+  Src.pResource = pColor.Get();
+  Src.Type = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
+  m_pList->CopyTextureRegion(&Dst, 0, 0, 0, &Src, nullptr);
+  Execute();
+
+  std::vector<uint8_t> Out(nRow * h);
+  void *p = nullptr;
+  D3D12_RANGE Range = { 0, (SIZE_T)nReadBytes };
+  Ok(pReadback->Map(0, &Range, &p), "Map");
+  for (UINT y = 0; y < h; y++)
+    memcpy(Out.data() + y * nRow, (const uint8_t *)p + (size_t)Layout.Offset + (size_t)y * Layout.Footprint.RowPitch, nRow);
   D3D12_RANGE None = { 0, 0 };
   pReadback->Unmap(0, &None);
   return Out;

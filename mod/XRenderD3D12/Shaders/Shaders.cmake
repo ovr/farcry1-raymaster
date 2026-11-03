@@ -127,6 +127,17 @@ foreach(q Low Medium High Ultra)
     xrender_d3d12_shader(SmaaEdges${q}_CS AntiAliasSmaa.hlsl cs_6_0 CSEdges SMAA_PRESET_${preset})
     xrender_d3d12_shader(SmaaWeights${q}_CS AntiAliasSmaa.hlsl cs_6_0 CSWeights SMAA_PRESET_${preset})
 endforeach()
+# CMAA2 (d3d12_AA cmaa2): the kernels of CMAA2.hlsl of third_party/cmaa2 with its entry points, the edges' by
+# d3d12_AAQuality's preset (the other three do not depend on it); the picture back into the frame is AntiAlias.hlsl's.
+set(XRENDERD3D12_SHADER_INCLUDES "${XRENDERD3D12_CMAA2_DIR}")
+set(preset 0)
+foreach(q Low Medium High Ultra)
+    xrender_d3d12_shader(Cmaa2Edges${q}_CS AntiAliasCmaa2.hlsl cs_6_0 EdgesColor2x2CS CMAA2_STATIC_QUALITY_PRESET=${preset})
+    math(EXPR preset "${preset} + 1")
+endforeach()
+xrender_d3d12_shader(Cmaa2DispatchArgs_CS AntiAliasCmaa2.hlsl cs_6_0 ComputeDispatchArgsCS)
+xrender_d3d12_shader(Cmaa2Candidates_CS AntiAliasCmaa2.hlsl cs_6_0 ProcessCandidatesCS)
+xrender_d3d12_shader(Cmaa2Apply_CS AntiAliasCmaa2.hlsl cs_6_0 DeferredColorApply2x2CS)
 set(XRENDERD3D12_SHADER_INCLUDES "")
 
 # Exposure, bloom and tone mapping of the HDR scene (eD3D12P_Hdr, r_HDRRendering).

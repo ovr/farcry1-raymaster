@@ -6,7 +6,7 @@
 # A console program of its own: it is not deployed (it stays in the build's bin folder, XRENDER_OUTPUT_DIR is not
 # touched) and does not depend on the XRenderD3D12 target, so building it neither builds nor redeploys the renderer's
 # DLL. Its kernels (Shaders/Test*.hlsl, which include the renderer's shader headers and PathTrace.hlsl as they are) and
-# the renderer's own CSCacheResolve are compiled here by the same dxc with the same options as Shaders.cmake's, into
+# the renderer's own CSCacheResolve and CMAA2 kernels are compiled here by the same dxc with the same options as Shaders.cmake's, into
 # headers of this target's build folder (Shaders/Test_<name>.h, array g_Test_<name>).
 #   cmake --build --preset x64-release --target XRenderD3D12Tests
 #   ctest --preset x64-release      (or bin/Release/XRenderD3D12Tests.exe [--warp] [--debug] [name ...])
@@ -24,13 +24,13 @@ function(xrender_d3d12_test_shader name file profile entry)
     set(out "${XRENDERD3D12_TESTS_SHADER_DIR}/Test_${name}.h")
     file(GLOB includes "${XRENDERD3D12_SHADER_SOURCE_DIR}/*.hlsl" "${XRENDERD3D12_SHADER_SOURCE_DIR}/*.hlsli"
         "${XRENDERD3D12_SHADER_SOURCE_DIR}/*.h" "${CMAKE_CURRENT_SOURCE_DIR}/Shaders/*.hlsli" "${XRENDERD3D12_XEGTAO_DIR}/*.hlsli"
-        "${XRENDERD3D12_XEGTAO_DIR}/*.h" "${XRENDERD3D12_SMAA_DIR}/*.hlsl")
+        "${XRENDERD3D12_XEGTAO_DIR}/*.h" "${XRENDERD3D12_SMAA_DIR}/*.hlsl" "${XRENDERD3D12_CMAA2_DIR}/*.hlsl")
     add_custom_command(
         OUTPUT "${out}"
         COMMAND "${CMAKE_COMMAND}" -E make_directory "${XRENDERD3D12_TESTS_SHADER_DIR}"
         COMMAND "${XRENDERD3D12_DXC}" -nologo -T ${profile} -E ${entry} -Zpr -O3 -Qstrip_reflect
                 -I "${XRENDERD3D12_SHADER_SOURCE_DIR}" -I "${CMAKE_CURRENT_SOURCE_DIR}/Shaders" -I "${XRENDERD3D12_XEGTAO_DIR}"
-                -I "${XRENDERD3D12_SMAA_DIR}" ${defines} -Vn "g_Test_${name}" -Fh "${out}" "${file}"
+                -I "${XRENDERD3D12_SMAA_DIR}" -I "${XRENDERD3D12_CMAA2_DIR}" ${defines} -Vn "g_Test_${name}" -Fh "${out}" "${file}"
         MAIN_DEPENDENCY "${file}"
         DEPENDS ${includes}
         COMMENT "dxc (tests) ${entry} -> Test_${name}.h"
@@ -54,6 +54,17 @@ foreach(q Low High Ultra)
     string(TOUPPER "${q}" preset)
     xrender_d3d12_test_shader(SmaaWeights${q} "${smaa}" cs_6_0 CSSmaaWeights SMAA_PRESET_${preset})
 endforeach()
+# CMAA2: the renderer's own kernels (AntiAliasCmaa2.hlsl with third_party/cmaa2's CMAA2.hlsl), the edges' at each of
+# its four presets (GpuHarness.h's RunCmaa2 runs them as PostAA.cpp does).
+set(cmaa2 "${XRENDERD3D12_SHADER_SOURCE_DIR}/AntiAliasCmaa2.hlsl")
+set(preset 0)
+foreach(q Low Medium High Ultra)
+    xrender_d3d12_test_shader(Cmaa2Edges${q} "${cmaa2}" cs_6_0 EdgesColor2x2CS CMAA2_STATIC_QUALITY_PRESET=${preset})
+    math(EXPR preset "${preset} + 1")
+endforeach()
+xrender_d3d12_test_shader(Cmaa2DispatchArgs "${cmaa2}" cs_6_0 ComputeDispatchArgsCS)
+xrender_d3d12_test_shader(Cmaa2Candidates "${cmaa2}" cs_6_0 ProcessCandidatesCS)
+xrender_d3d12_test_shader(Cmaa2Apply "${cmaa2}" cs_6_0 DeferredColorApply2x2CS)
 # The path tracer's functions, PathTrace.hlsl included as it is (Shader Model 6.5, as Shaders.cmake compiles it).
 set(pathtrace "${CMAKE_CURRENT_SOURCE_DIR}/Shaders/TestPathTrace.hlsl")
 foreach(k LeafSide Cosine Checkerboard Layout PixelSurface TerrainShare SurfaceNormal LampLight LampShadow LightmapFill)

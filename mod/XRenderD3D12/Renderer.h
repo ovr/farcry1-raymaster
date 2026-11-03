@@ -628,11 +628,12 @@ public:
     None,
     Fxaa,                                   //!< FXAA (Shaders/Fxaa.hlsli)
     Smaa,                                   //!< SMAA 1x (third_party/smaa; Shaders/Smaa.hlsli, SmaaBlend.hlsli)
+    Cmaa2,                                  //!< CMAA2 (third_party/cmaa2; Shaders/AntiAliasCmaa2.hlsl)
   };
   //! What d3d12_AA asks for; an unknown value is logged once and acts as None.
   EAntiAlias AntiAliasing();
   //! After the main view's EndMainScene, before the render mode and the screen effects: the anti-aliasing of the
-  //! finished picture (FXAA, SMAA) from a copy of the back buffer into it, the highlight layer too. Not with an upscaler
+  //! finished picture (FXAA, SMAA, CMAA2) from a copy of the back buffer into it, the highlight layer too. Not with an upscaler
   //! that gathers the frames (FSR anti-aliases).
   void DrawPostAA();
   //! SMAA 1x's first two passes, compute kernels (Shaders/AntiAliasSmaa.hlsl) at the quality nQuality (0..3) over the
@@ -641,6 +642,13 @@ public:
   bool DrawSmaaPasses(ID3D12Resource *pCopy, int w, int h, int nQuality);
   //! SMAA's targets and tables (bAll: its precomputed textures too).
   void ReleaseSmaa(bool bAll);
+  //! CMAA2's kernels (Shaders/AntiAliasCmaa2.hlsl, the wide root signature) at the quality nQuality (0..3) over the copy
+  //! pCopy (w x h; B8G8R8A8_UNORM or R8G8B8A8_UNORM) of the picture: the copy into m_pCmaa2Color, which they anti-alias
+  //! in place; it and its edges m_pCmaa2Edges left in PIXEL_SHADER_RESOURCE for the pass. False: not available (the
+  //! kernels, the format's typed UAV stores, the targets).
+  bool DrawCmaa2Passes(ID3D12Resource *pCopy, int w, int h, int nQuality);
+  //! CMAA2's targets, working buffers and table.
+  void ReleaseCmaa2();
   //! For r_DisplayInfo without an upscaler: "none", or the anti-aliasing and its quality ("FXAA (High)"), and when this
   //! frame did not get it.
   std::string PostAAInfo();
@@ -663,6 +671,12 @@ public:
   CD3D12Texture *m_pSmaaSearch = nullptr;   //!< and search texture (SearchTex.h)
   int m_nSmaaTables = -1;                   //!< the descriptor tables of its two kernels (AllocRange)
   ComPtr<ID3D12Resource> m_pSmaaSource;     //!< the copy of the picture the edges kernel's table has
+  CD3D12Texture *m_pCmaa2Color = nullptr;   //!< CMAA2's picture (typeless; t0 its sRGB view, u0 its UNORM view; m_nSRV UNORM)
+  CD3D12Texture *m_pCmaa2Edges = nullptr;   //!< its edges (R8_TYPELESS, half the width: u1 R8_UINT; m_nSRV R8_UNORM)
+  CD3D12Texture *m_pCmaa2Heads = nullptr;   //!< the heads of its lists of colours, one a 2 x 2 quad (R32_UINT)
+  ComPtr<ID3D12Resource> m_pCmaa2Buffers[5];  //!< its shapes, quads, colours, counters and indirect arguments (u2, u3, u4, u6, u7)
+  int m_nCmaa2Table = -1;                   //!< the wide table of its kernels (AllocRange)
+  bool m_bCmaa2Cleared = false;             //!< its counters cleared since its buffers were made
 
   //////////////////////////////////////////////////////////////////////////
   // AmbientOcclusion.cpp: the ambient occlusion of the main view (d3d12_AO, AmbientOcclusion.h)

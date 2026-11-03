@@ -65,16 +65,16 @@ reference of its features and console variables.
 ## Anti-aliasing
 
 - `d3d12_AA` is the anti-aliasing of the main view's 3D scene without an upscaler: `none` (the
-  default; the frames are those of the renderer without it, DemoCompare difference 0), `fxaa` or
-  `smaa`. An unknown value is logged once and acts as `none`. `d3d12_AAQuality` is 0 to 3 (low,
+  default; the frames are those of the renderer without it, DemoCompare difference 0), `fxaa`,
+  `smaa` or `cmaa2`. An unknown value is logged once and acts as `none`. `d3d12_AAQuality` is 0 to 3 (low,
   medium, high, ultra; 2), `d3d12_AADebug 1` shows what it changes (the picture grey, red by how
-  much a pixel is blended; SMAA's edges too). All of them change at run time. With an upscaler
+  much a pixel is blended; SMAA's and CMAA2's edges too). All of them change at run time. With an upscaler
   that anti-aliases (FSR) `d3d12_AA` is not used (logged once); r_DisplayInfo's `Anti-aliasing`
-  row names the one that is (`FXAA (High)`, `SMAA 1x (High)`, `FSR, temporal`, `none`) and the
+  row names the one that is (`FXAA (High)`, `SMAA 1x (High)`, `CMAA2 (High)`, `FSR, temporal`, `none`) and the
   frame dump has an `anti-aliasing:` line. The original's MSAA (`r_FSAA`, `EnumAAFormats`) is
   not offered: the game's Anti-Aliasing list had None alone with this renderer.
 - The game's menu gets it from `assets/scripts/09-video-anti-aliasing.patch`: Video Options'
-  Anti-Aliasing list is None / FXAA / SMAA 1x (`d3d12_AA`) in place of the game's FSAA modes, on
+  Anti-Aliasing list is None / FXAA / SMAA 1x / CMAA2 (`d3d12_AA`) in place of the game's FSAA modes, on
   in a game (the game greys it out there: the Direct3D 9 renderer had to relaunch) and greyed out
   while the Upscaler is not None; Apply sets it without a restart.
 - It is drawn over the finished, tone mapped 3D scene in the back buffer (`DrawPostAA`,
@@ -123,6 +123,32 @@ reference of its features and console variables.
     comes out at 0.22-0.27 of the error without it at 8 pixel steps (in linear light), across the
     edge only; on 32 pixel steps ultra 0.21, low 0.60; the edges at the threshold; the blending in
     linear light; flat pictures, an edge along the grid and the alpha stay.
+- CMAA2 (`cmaa2`) is Intel's (F. Strugar, `third_party/cmaa2`, Apache-2.0): its four compute
+  kernels of its `CMAA2.hlsl` as it is (`Shaders/AntiAliasCmaa2.hlsl`, the host `DrawCmaa2Passes`):
+  - the edges and the shapes to process (the kernel compiled at each preset), the next dispatch's
+    arguments, the shapes' new colours and those colours into the picture, the last two by
+    ExecuteIndirect, bound by the wide root signature of `D3D12Compute.h` (one table of 4 SRVs and
+    8 UAVs; CMAA2 has 7 UAVs). It anti-aliases a copy of the picture in place, a typeless texture:
+    its sRGB view for the reads (it works in linear light), its UNORM view for the typed stores
+    (converted to sRGB). Its working buffers have its sample's sizes (the shapes a quarter of the
+    pixels, the colours half, the quads a sixth); its counters are cleared once, then by its own
+    kernel for the next frame.
+  - The `AntiAlias` program's pass writes the pixels CMAA2 changed, with the copy's alpha (CMAA2
+    writes 0), and keeps the picture's border: CMAA2's loads outside the picture read black, so it
+    darkens the corners. Without a typed UAV store of the back buffer's format (B8G8R8A8_UNORM)
+    it is logged and acts as `none`.
+  - `d3d12_AAQuality` is CMAA2's preset (`CMAA2_STATIC_QUALITY_PRESET`, edge threshold 0.15, 0.10,
+    0.07, 0.05). Against the reference of the render tests' `aa` the error at the edges is
+    0.63-0.69 of none's at High (0.63-0.75 at the four presets) and the textures keep 0.87-0.92 of
+    their detail (0.85-0.97): about SMAA's edges (0.62-0.67) with a little more of the detail
+    (0.85-0.91). At 3840 x 2160 its GPU section `anti-aliasing` (with the copies of the picture)
+    takes 0.15, 0.16, 0.17 and 0.18 ms (low to ultra; SMAA 0.15-0.22 ms).
+  - Unit tests `Cmaa2_*` (the renderer's kernels, run as `DrawCmaa2Passes` runs them by the test
+    harness's `RunCmaa2`): an edge drawn without anti-aliasing comes out at 0.23 of the error
+    without it at 8 pixel steps (in linear light), next to the edge only; flat pictures stay bit
+    for bit but for the corners; an edge along the grid stays sharp; a faint edge is one at high
+    and none at low; the third frame on the same buffers is the first; B8G8R8A8 as R8G8B8A8; the
+    pixels it writes get the alpha 0.
 
 ## HDR
 

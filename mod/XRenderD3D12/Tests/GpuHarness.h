@@ -94,6 +94,12 @@ namespace XrTest
     SRayInstance Instance{};      //!< g_RayInstances[0]
   };
 
+  //! The renderer's CMAA2 kernels (AntiAliasCmaa2.hlsl; the edges' at one preset) for CGpu::RunCmaa2.
+  struct SCmaa2Kernels
+  {
+    SBytecode Edges, DispatchArgs, Candidates, Apply;
+  };
+
   //! What a run binds; the output is nOut uint4 items, zeroed before the kernel runs.
   struct SDispatch
   {
@@ -129,6 +135,14 @@ namespace XrTest
 
     //! Runs a kernel; the words it wrote to u0 space9 (4 an item).
     std::vector<uint32> Run(const SDispatch &d);
+    //! CMAA2 over a picture (R8G8B8A8_UNORM or B8G8R8A8_UNORM, the back buffer's) as PostAA.cpp's DrawCmaa2Passes runs
+    //! it: the wide root signature of D3D12Compute.h, its buffers' sizes and views, its kernels in its order (the last two
+    //! by ExecuteIndirect), nFrames times on the same buffers with the picture copied in each time (the counters cleared
+    //! once, before the first). The picture the last frame leaves, its texels as Picture's. Throws when the device has no
+    //! typed UAV store of the format (the renderer leaves the picture then).
+    std::vector<uint8_t> RunCmaa2(const STestTexture &Picture, const SCmaa2Kernels &Kernels, int nFrames = 1);
+    //! Whether the device stores the format through a typed UAV (CMAA2's output).
+    bool HasTypedStore(DXGI_FORMAT Format);
     //! The radiance cache emptied (every word 0).
     void ClearCache();
 
@@ -141,6 +155,14 @@ namespace XrTest
     //! The texture uploaded by the open list into a resource of its own (kept in Keep until the run ends), its SRV in
     //! the heap's slot nSlot.
     void UploadTexture(const STestTexture &Texture, UINT nSlot, std::vector<ComPtr<ID3D12Resource>> &Keep);
+    //! A 2D texture of one level in the default heap.
+    ComPtr<ID3D12Resource> Texture2D(UINT nWidth, UINT nHeight, DXGI_FORMAT Format, D3D12_RESOURCE_STATES eState, bool bUav);
+    //! nRow bytes a row of Texture's data copied by the open list into pTexture (in COPY_DEST; the staging buffer kept in
+    //! Keep).
+    void CopyRows(ID3D12Resource *pTexture, const STestTexture &Texture, size_t nRow, std::vector<ComPtr<ID3D12Resource>> &Keep);
+    //! The wide root signature, its heap and the command signature of an indirect dispatch (RunCmaa2), made at the first.
+    void CreateWide();
+    ID3D12PipelineState *WidePipeline(const SBytecode &Shader);
     //! A null 2D texture's SRV in the heap's slot nSlot.
     void NullTexture(UINT nSlot);
     D3D12_CPU_DESCRIPTOR_HANDLE CpuHandle(UINT n) const;
@@ -167,6 +189,10 @@ namespace XrTest
     ComPtr<ID3D12DescriptorHeap> m_pHeap;           //!< shader visible: 0 g_Buffers[0], 1-4 null textures, TEXTURE_SLOT.. the
                                                     //!< run's g_Textures (null ones after them)
     UINT m_nDescriptorSize = 0;
+    ComPtr<ID3D12RootSignature> m_pWideRootSignature;   //!< D3D12Compute.h's: one table t0..t3, u0..u7; s0 point clamp
+    ComPtr<ID3D12DescriptorHeap> m_pWideHeap;           //!< shader visible, that table
+    ComPtr<ID3D12CommandSignature> m_pDispatchSignature;
+    std::map<const void *, ComPtr<ID3D12PipelineState>> m_WidePipelines;
   };
 
   //! The tests' device, made at the first use (throws std::runtime_error when there is none).

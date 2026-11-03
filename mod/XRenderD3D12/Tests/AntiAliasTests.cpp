@@ -4,10 +4,12 @@
 //
 //	File: AntiAliasTests.cpp
 //	Description: Unit tests of the anti-aliasing without an upscaler on
-//	the GPU (d3d12_AA, PostAA.cpp): FXAA (Shaders/Fxaa.hlsli) and SMAA 1x
+//	the GPU (d3d12_AA, PostAA.cpp): FXAA (Shaders/Fxaa.hlsli), SMAA 1x
 //	(Shaders/Smaa.hlsli with third_party/smaa, SmaaBlend.hlsli; its three
 //	passes in turn, each one's output the next one's texture as the
-//	renderer's targets store it) on small pictures of edges drawn without
+//	renderer's targets store it) and CMAA2 (the renderer's own kernels of
+//	Shaders/AntiAliasCmaa2.hlsl with third_party/cmaa2, run as PostAA.cpp
+//	runs them: GpuHarness.h's RunCmaa2) on small pictures of edges drawn without
 //	anti-aliasing (a pixel white where its centre is on the white side),
 //	against the exact coverage of each pixel by the white side.
 //
@@ -23,6 +25,13 @@
 #include "Test_SmaaWeightsHigh.h"
 #include "Test_SmaaWeightsUltra.h"
 #include "Test_SmaaBlend.h"
+#include "Test_Cmaa2EdgesLow.h"
+#include "Test_Cmaa2EdgesMedium.h"
+#include "Test_Cmaa2EdgesHigh.h"
+#include "Test_Cmaa2EdgesUltra.h"
+#include "Test_Cmaa2DispatchArgs.h"
+#include "Test_Cmaa2Candidates.h"
+#include "Test_Cmaa2Apply.h"
 // SMAA's precomputed textures, as PostAA.cpp uploads them.
 #include "Textures/AreaTex.h"
 #include "Textures/SearchTex.h"
@@ -267,6 +276,68 @@ namespace
   {
     return Error(e.Exact, e.Aliased.w, e.Aliased.h, [&](size_t i) { return (float)ToLinear(r.Color[i].r); });
   }
+
+  //! CMAA2 of the picture at a preset (0 low to 3 ultra, d3d12_AAQuality), nFrames frames on the same buffers, in
+  //! R8G8B8A8_UNORM or in the back buffer's B8G8R8A8_UNORM: the picture it leaves.
+  SPicture Cmaa2(const SPicture &In, int nPreset, int nFrames = 1, bool bBgra = false)
+  {
+    const SBytecode Edges[4] = { XR_BYTECODE(Test_Cmaa2EdgesLow), XR_BYTECODE(Test_Cmaa2EdgesMedium), XR_BYTECODE(Test_Cmaa2EdgesHigh),
+                                 XR_BYTECODE(Test_Cmaa2EdgesUltra) };
+    const SCmaa2Kernels k = { Edges[nPreset], XR_BYTECODE(Test_Cmaa2DispatchArgs), XR_BYTECODE(Test_Cmaa2Candidates),
+                              XR_BYTECODE(Test_Cmaa2Apply) };
+    STestTexture t = PictureTexture(In);
+    if (bBgra)
+    {
+      t.Format = DXGI_FORMAT_B8G8R8A8_UNORM;
+      for (size_t i = 0; i < t.Data.size(); i += 4)
+        std::swap(t.Data[i], t.Data[i + 2]);
+    }
+    const std::vector<uint8_t> Out = Gpu().RunCmaa2(t, k, nFrames);
+    SPicture r;
+    r.w = In.w;
+    r.h = In.h;
+    for (size_t i = 0; i < Out.size(); i += 4)
+    {
+      const uint8_t *p = &Out[i];
+      r.Px.push_back({ p[bBgra ? 2 : 0] / 255.0f, p[1] / 255.0f, p[bBgra ? 0 : 2] / 255.0f, p[3] / 255.0f });
+    }
+    return r;
+  }
+
+  //! Whether CMAA2 wrote the pixel i (its colour differs from the picture's as the target stores it).
+  bool Changed(const SPicture &In, const SPicture &Out, size_t i)
+  {
+    const SRgba &a = In.Px[i], &b = Out.Px[i];
+    return Unorm8(a.r) != Unorm8(b.r) || Unorm8(a.g) != Unorm8(b.g) || Unorm8(a.b) != Unorm8(b.b);
+  }
+
+  //! Whether the pixel i is on the picture's border, which AntiAlias.hlsl keeps from CMAA2 (it reads black outside).
+  bool OnBorder(const SPicture &In, size_t i)
+  {
+    const int x = (int)(i % In.w), y = (int)(i / In.w);
+    return x == 0 || y == 0 || x == In.w - 1 || y == In.h - 1;
+  }
+
+  //! CMAA2 blends in linear light (its sRGB view of the picture): the light of its red against the exact coverage.
+  double Cmaa2Error(const SEdge &e, const SPicture &Out)
+  {
+    return Error(e.Exact, e.Aliased.w, e.Aliased.h, [&](size_t i) { return (float)ToLinear(Out.Px[i].r); });
+  }
+
+  //! A picture of a grey with a faint pattern (a texture's grain below every preset's edge threshold).
+  SPicture FlatPicture(float fGrain)
+  {
+    SPicture In;
+    In.w = 32;
+    In.h = 16;
+    for (int y = 0; y < In.h; y++)
+      for (int x = 0; x < In.w; x++)
+      {
+        const float v = 0.4f + fGrain * (float)((x * 7 + y * 13) % 5) / 4;
+        In.Px.push_back({ v, v * 0.9f, v * 0.8f, 1 });
+      }
+    return In;
+  }
 }
 
 //! A picture without edges stays as it is, bit for bit, at every quality: a grey with a faint pattern (a texture's grain
@@ -374,15 +445,7 @@ XR_TEST(Fxaa_AlphaKept)
 //! edges" where SMAA's pixel shader would discard).
 XR_TEST(Smaa_FlatPictureStays)
 {
-  SPicture In;
-  In.w = 32;
-  In.h = 16;
-  for (int y = 0; y < In.h; y++)
-    for (int x = 0; x < In.w; x++)
-    {
-      const float v = 0.4f + 0.02f * (float)((x * 7 + y * 13) % 5) / 4;
-      In.Px.push_back({ v, v * 0.9f, v * 0.8f, 1 });
-    }
+  const SPicture In = FlatPicture(0.02f);
   for (SBytecode Weights : { XR_BYTECODE(Test_SmaaWeightsLow), XR_BYTECODE(Test_SmaaWeightsHigh), XR_BYTECODE(Test_SmaaWeightsUltra) })
   {
     const SSmaa r = Smaa(In, Weights);
@@ -552,4 +615,157 @@ XR_TEST(Fxaa_QualityFollowsLongEdges)
   const double fLow = FxaaError(e, Run(e.Aliased, 0)), fUltra = FxaaError(e, Run(e.Aliased, 3));
   CHECK_MSG(fUltra < fLow, std::to_string(fUltra) + " against " + std::to_string(fLow));
   CHECK(fUltra < 0.7 * AliasedError(e));
+}
+
+//! A picture without edges keeps every pixel bit for bit, alpha too, at every preset, but for its four corners: a grey
+//! with a faint pattern below CMAA2's thresholds. Why: CMAA2 must not soften what is not an edge; it writes only the
+//! pixels it blends and AntiAlias.hlsl only those that differ from the copy, so the back buffer keeps the rest exactly.
+//! The corners: CMAA2's loads outside the picture read black, so each corner is an edge on two sides that it blends
+//! with the black; AntiAlias.hlsl keeps the border's pixels for this (were CMAA2 to stop, the rule could go).
+XR_TEST(Cmaa2_FlatPictureStays)
+{
+  const SPicture In = FlatPicture(0.02f);
+  for (int q = 0; q <= 3; q++)
+  {
+    const SPicture Out = Cmaa2(In, q);
+    for (size_t i = 0; i < In.Px.size(); i++)
+    {
+      const int x = (int)(i % In.w), y = (int)(i / In.w);
+      const bool bCorner = (x == 0 || x == In.w - 1) && (y == 0 || y == In.h - 1);
+      CHECK_MSG(Changed(In, Out, i) == bCorner, "preset " + std::to_string(q) + ", pixel " + std::to_string(i));
+      if (!bCorner)
+        CHECK(Unorm8(Out.Px[i].a) == Unorm8(In.Px[i].a));
+      else
+        CHECK(Out.Px[i].r < In.Px[i].r);
+    }
+  }
+}
+
+//! A nearly horizontal edge (steps 8 pixels long) comes out much nearer the exact coverage than drawn without
+//! anti-aliasing, at every preset: only the pixels next to the edge change (away from the border, which the pass keeps). Why: this is what CMAA2 is for, the jagged
+//! silhouettes of the scene; it finds the steps' shapes along the edge and blends their pixels by the line through them.
+XR_TEST(Cmaa2_ShallowStaircase)
+{
+  const SEdge e = ShallowEdge(64, 24, 8.3, 8);
+  const double fAliased = AliasedError(e);
+  for (int q = 0; q <= 3; q++)
+  {
+    const SPicture Out = Cmaa2(e.Aliased, q);
+    const double fCmaa2 = Cmaa2Error(e, Out);
+    CHECK_MSG(fCmaa2 < 0.6 * fAliased, "preset " + std::to_string(q) + ": " + std::to_string(fCmaa2) + " against " + std::to_string(fAliased));
+    int nChanged = 0;
+    for (int y = 0; y < e.Aliased.h; y++)
+      for (int x = 0; x < e.Aliased.w; x++)
+      {
+        if (Changed(e.Aliased, Out, (size_t)y * e.Aliased.w + x) && !OnBorder(e.Aliased, (size_t)y * e.Aliased.w + x))
+        {
+          CHECK_MSG(std::fabs(y + 0.5 - (8.3 + (x + 0.5) / 8)) < 1.6, "preset " + std::to_string(q) + ": " + std::to_string(x) + ", " + std::to_string(y));
+          nChanged++;
+        }
+      }
+    CHECK(nChanged > 0);
+  }
+}
+
+//! The same edge turned by a right angle (nearly vertical, steps 8 pixels high). Why: CMAA2 follows edges both ways; an
+//! edge it read only along the rows would stay jagged on the posts, trunks and walls of the scene.
+XR_TEST(Cmaa2_SteepStaircase)
+{
+  const SEdge e = Edge(24, 64, [](double x, double y) { return x > 8.3 + y / 8; });
+  const SPicture Out = Cmaa2(e.Aliased, 2);
+  const double fCmaa2 = Cmaa2Error(e, Out), fAliased = AliasedError(e);
+  CHECK_MSG(fCmaa2 < 0.6 * fAliased, std::to_string(fCmaa2) + " against " + std::to_string(fAliased));
+  for (int y = 0; y < e.Aliased.h; y++)
+    for (int x = 0; x < e.Aliased.w; x++)
+    {
+      if (Changed(e.Aliased, Out, (size_t)y * e.Aliased.w + x) && !OnBorder(e.Aliased, (size_t)y * e.Aliased.w + x))
+        CHECK_MSG(std::fabs(x + 0.5 - (8.3 + (y + 0.5) / 8)) < 1.6, std::to_string(x) + ", " + std::to_string(y));
+    }
+}
+
+//! An edge along the pixels' grid (a column black, the next white) stays sharp: no pixel changes by more than 0.1, at
+//! every preset. Why: such an edge is not aliased (no steps, so no shape to blend); softening it would only blur the
+//! picture, and CMAA2 is meant to keep the picture's sharpness.
+XR_TEST(Cmaa2_StraightEdgeStaysSharp)
+{
+  const SEdge e = Edge(32, 16, [](double x, double) { return x > 16; });
+  for (int q = 0; q <= 3; q++)
+  {
+    const SPicture Out = Cmaa2(e.Aliased, q);
+    for (size_t i = 0; i < Out.Px.size(); i++)
+      CHECK_MSG(std::fabs(Out.Px[i].r - e.Aliased.Px[i].r) <= 0.1, "preset " + std::to_string(q) + ", pixel " + std::to_string(i));
+  }
+}
+
+//! A faint edge (the same steps between the greys 0.40 and 0.50, a luma step near 0.1) is an edge at the high and ultra
+//! presets (thresholds 0.07 and 0.05) and none at the low one (0.15). Why: d3d12_AAQuality picks the edges' preset at
+//! CMAA2's own thresholds; the low preset leaves the faint edges (and the grain of the textures) alone.
+XR_TEST(Cmaa2_PresetThreshold)
+{
+  SEdge e = ShallowEdge(64, 24, 8.3, 8);
+  for (SRgba &p : e.Aliased.Px)
+    p.r = p.g = p.b = p.r > 0.5f ? 0.5f : 0.4f;
+  int nChanged[4] = {};
+  for (int q : { 0, 2, 3 })
+  {
+    const SPicture Out = Cmaa2(e.Aliased, q);
+    for (size_t i = 0; i < Out.Px.size(); i++)
+      nChanged[q] += Changed(e.Aliased, Out, i) && !OnBorder(e.Aliased, i) ? 1 : 0;
+  }
+  CHECK_MSG(nChanged[0] == 0, std::to_string(nChanged[0]));
+  CHECK_MSG(nChanged[2] > 0 && nChanged[3] >= nChanged[2], std::to_string(nChanged[2]) + ", " + std::to_string(nChanged[3]));
+}
+
+//! The third frame on the same buffers is the first's, bit for bit. Why: the renderer keeps CMAA2's buffers from frame
+//! to frame and clears its counters once; the kernel of the colours' arguments clears them for the next frame and the
+//! edges' kernel the lists' heads, so a frame never sees the last one's shapes (which would blend stale colours in).
+XR_TEST(Cmaa2_FramesRepeat)
+{
+  const SEdge e = ShallowEdge(64, 24, 8.3, 8);
+  const SPicture One = Cmaa2(e.Aliased, 2, 1), Three = Cmaa2(e.Aliased, 2, 3);
+  int nChanged = 0;
+  for (size_t i = 0; i < One.Px.size(); i++)
+  {
+    CHECK_MSG(!Changed(One, Three, i), "pixel " + std::to_string(i));
+    nChanged += Changed(e.Aliased, One, i) ? 1 : 0;
+  }
+  CHECK(nChanged > 0);
+}
+
+//! The picture in the back buffer's B8G8R8A8_UNORM comes out as in R8G8B8A8_UNORM, bit for bit (a red and blue edge,
+//! the channels apart). Why: the renderer runs CMAA2 on the copy of the back buffer, B8G8R8A8; its sRGB view and its
+//! typed UNORM store must read and write the channels in place.
+XR_TEST(Cmaa2_BackBufferFormat)
+{
+  if (!Gpu().HasTypedStore(DXGI_FORMAT_B8G8R8A8_UNORM))
+    XR_SKIP("no typed UAV store of B8G8R8A8_UNORM (the renderer leaves the picture)");
+  SEdge e = ShallowEdge(64, 24, 8.3, 8);
+  for (SRgba &p : e.Aliased.Px)
+    p = p.r > 0.5f ? SRgba{ 0.9f, 0.6f, 0.1f, 1 } : SRgba{ 0.1f, 0.2f, 0.7f, 1 };
+  const SPicture Rgba = Cmaa2(e.Aliased, 2), Bgra = Cmaa2(e.Aliased, 2, 1, true);
+  int nChanged = 0;
+  for (size_t i = 0; i < Rgba.Px.size(); i++)
+  {
+    CHECK_MSG(!Changed(Rgba, Bgra, i), "pixel " + std::to_string(i));
+    nChanged += Changed(e.Aliased, Rgba, i) ? 1 : 0;
+  }
+  CHECK(nChanged > 0);
+}
+
+//! The pixels CMAA2 writes get the alpha 0, the others keep theirs. Why: AntiAlias.hlsl takes the alpha from the copy of
+//! the back buffer (the HUD masks through it) and CMAA2's colour alone; it tells CMAA2's pixels by their colour.
+XR_TEST(Cmaa2_AlphaOfItsPixels)
+{
+  SEdge e = ShallowEdge(64, 24, 8.3, 8);
+  for (size_t i = 0; i < e.Aliased.Px.size(); i++)
+    e.Aliased.Px[i].a = 0.25f + (float)(i % 61) / 128;
+  const SPicture Out = Cmaa2(e.Aliased, 2);
+  int nChanged = 0;
+  for (size_t i = 0; i < Out.Px.size(); i++)
+  {
+    const bool bChanged = Changed(e.Aliased, Out, i);
+    CHECK(Unorm8(Out.Px[i].a) == (bChanged ? 0 : Unorm8(e.Aliased.Px[i].a)));
+    nChanged += bChanged ? 1 : 0;
+  }
+  CHECK(nChanged > 0);
 }
