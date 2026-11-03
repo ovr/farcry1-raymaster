@@ -87,9 +87,14 @@ float TaaExposure()
 //! The exposure of the picture CAS loads (TaaExposure, once a thread).
 static float s_fCasExposure;
 
-float3 TaaCasLoad(int2 p)
+float3 TaaCasPicture(int2 p)
 {
-  return TaaToCas(g_Resolved.Load(int3(TaaClamp(p), 0)).rgb, s_fCasExposure);
+  return g_Resolved.Load(int3(TaaClamp(p), 0)).rgb;
+}
+
+float TaaCasExposure()
+{
+  return s_fCasExposure;
 }
 
 #include "TaaCas.hlsli"
@@ -111,6 +116,6 @@ void CSMain(uint2 vPixel : SV_DispatchThreadID)
     g_Output[p] = float4((g_Taa.vFlags.x & TAA_DEBUG) ? TaaDebug(r, fExposure) : r.vColor, 1);
 #else
   s_fCasExposure = TaaExposure();
-  g_Output[p] = float4(TaaFromCas(TaaCas(p, g_Taa.vCas0, g_Taa.vCas1), s_fCasExposure), 1);
+  g_Output[p] = float4(TaaCas(p, g_Taa.vCas0, g_Taa.vCas1), 1);
 #endif
 }

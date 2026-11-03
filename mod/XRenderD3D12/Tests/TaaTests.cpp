@@ -422,7 +422,8 @@ namespace
   }
 
   //! CAS's filter of pixel (x, y) as ffx_cas.h writes it (sharpen only, CAS_BETTER_DIAGONALS, CAS_GO_SLOWER, the green
-  //! channel's weight for all three), on the CPU, the picture's loads clamped into it: in CAS's space.
+  //! channel's weight for all three), on the CPU, the picture's loads clamped into it: in CAS's space (TaaCas then keeps
+  //! it within the picture's range, which CasRange gives).
   void CasReference(const SImage &Picture, int x, int y, double fSharpness, double fExposure, double Out[3])
   {
     double v[3][3][3];
@@ -455,6 +456,20 @@ namespace
       Out[k] = std::clamp((w * (v[0][1][k] + v[1][0][k] + v[1][2][k] + v[2][1][k]) + v[1][1][k]) / (1 + 4 * w), 0.0, 1.0);
   }
 
+  //! The range of channel k of pixel (x, y)'s 3 x 3 in the picture (its loads clamped into it).
+  void CasRange(const SImage &Picture, int x, int y, int k, float &fLo, float &fHi)
+  {
+    fLo = 1e30f;
+    fHi = 0;
+    for (int j = -1; j <= 1; j++)
+      for (int i = -1; i <= 1; i++)
+      {
+        const float f = std::max(Picture.At(std::clamp(x + i, 0, Picture.w - 1), std::clamp(y + j, 0, Picture.h - 1))[k], 0.0f);
+        fLo = std::min(fLo, f);
+        fHi = std::max(fHi, f);
+      }
+  }
+
   //! A soft texture of w x h, its colour from 0.25 to 0.75 (times fScale) by a hash of the texel, blurred by 3 x 3.
   SImage SoftTexture(int w, int h, float fScale)
   {
@@ -481,7 +496,8 @@ namespace
 }
 
 //! TAA's sharpening is AMD FidelityFX CAS's filter as ffx_cas.h describes it, with UpscalerTaa.cpp's constants of
-//! the sharpness (CasSetup on the CPU): a texture sharpened on the GPU matches the filter worked out on the CPU, for the
+//! the sharpness (CasSetup on the CPU): a texture sharpened on the GPU matches the filter worked out on the CPU (and kept
+//! within the 3 x 3's range of the picture's colours), for the
 //! LDR colours (in linear light) and the HDR light (exposed and compressed as the history blends it), at the sharpness's
 //! least, middle and most. Why: the constants made on the CPU are the shader's only input of the sharpness, and a wrong
 //! space (gamma encoded colours, or the HDR light uncompressed) over-sharpens or clips.
@@ -498,12 +514,23 @@ XR_TEST(Taa_CasMatchesItsFilter)
       for (int y = 0; y < h; y++)
         for (int x = 0; x < w; x++)
         {
-          double Want[3];
+          // CAS's result back in the picture's colours (TaaFromCas), kept within its 3 x 3's range there; compared in
+          // CAS's space.
+          double Want[3], WantColor[3];
           CasReference(Picture, x, y, fSharpness, fExposure, Want);
+          const double fWantMax = std::max(Want[0], std::max(Want[1], Want[2]));
+          for (int k = 0; k < 3; k++)
+          {
+            float fLo, fHi;
+            CasRange(Picture, x, y, k, fLo, fHi);
+            WantColor[k] = fExposure > 0 ? Want[k] / (std::max(1 - fWantMax, 1.0 / 65536) * fExposure) : std::pow(Want[k], 1 / 2.2);
+            WantColor[k] = std::clamp(WantColor[k], (double)fLo, (double)fHi);
+          }
           const float *Got = r.At(x, y);
           const double fMax = std::max(Got[0], std::max(Got[1], Got[2]));
+          const double fWantColorMax = std::max(WantColor[0], std::max(WantColor[1], WantColor[2]));
           for (int k = 0; k < 3; k++)
-            fWorst = std::max(fWorst, std::fabs(ToCas(Got[k], fMax, fExposure) - Want[k]));
+            fWorst = std::max(fWorst, std::fabs(ToCas(Got[k], fMax, fExposure) - ToCas(WantColor[k], fWantColorMax, fExposure)));
           CHECK_NEAR(Got[3], 1, 0);
         }
       CHECK_MSG(fWorst < 2e-4, "exposure " + std::to_string(fExposure) + ", sharpness " + std::to_string(fSharpness) + ": " +
@@ -547,4 +574,50 @@ XR_TEST(Taa_CasSharpensTexturesNotFlat)
     for (size_t i = 0; i < r.v.size(); i++)
       CHECK(r.v[i] >= 0 && r.v[i] <= 1);
   }
+}
+
+//! The HDR light sharpened is never brighter than the brightest of its 3 x 3 nor darker than the darkest: a soft texture
+//! of a bright sky (250 to 750 at the exposures 1 and 4, near the top of TaaToCas's compression) and a cave's opening
+//! (1000 next to 0.2), at the sharpness's middle and most. Why: CAS's lobe takes a pixel a little past its neighbours,
+//! and undoing the compression made of that the light's many times near its top (up to 65536 times: the sky at Training's
+//! start in its cave and a window seen from a dark bunker went white, with a bloom over half the picture).
+XR_TEST(Taa_CasKeepsHighlights)
+{
+  const int w = 16, h = 12;
+  SImage Opening(w, h);
+  for (int y = 0; y < h; y++)
+    for (int x = 0; x < w; x++)
+    {
+      const float f = x + y < 12 ? 1000.0f : 0.2f;
+      float *c = Opening.At(x, y);
+      c[0] = c[1] = c[2] = f;
+      c[3] = 1;
+    }
+  const SImage Sky = SoftTexture(w, h, 1000);
+  const SImage *Pictures[] = { &Sky, &Opening };
+  for (const SImage *pPicture : Pictures)
+    for (const float fExposure : { 1.0f, 4.0f })
+      for (const float fSharpness : { 0.5f, 1.0f })
+      {
+        const SImage r = Sharpen(*pPicture, fSharpness, fExposure);
+        double fWorst = 0;
+        for (int y = 0; y < h; y++)
+          for (int x = 0; x < w; x++)
+            for (int k = 0; k < 3; k++)
+            {
+              float fLo = 1e30f, fHi = 0;
+              for (int j = -1; j <= 1; j++)
+                for (int i = -1; i <= 1; i++)
+                {
+                  const float f = pPicture->At(std::clamp(x + i, 0, w - 1), std::clamp(y + j, 0, h - 1))[k];
+                  fLo = std::min(fLo, f);
+                  fHi = std::max(fHi, f);
+                }
+              const float f = r.At(x, y)[k];
+              CHECK(std::isfinite(f));
+              fWorst = std::max(fWorst, (double)std::max(f / fHi - 1, fLo / std::max(f, 1e-30f) - 1));
+            }
+        CHECK_MSG(fWorst < 2e-3, std::string(pPicture == &Sky ? "sky" : "opening") + ", exposure " + std::to_string(fExposure) +
+                                     ", sharpness " + std::to_string(fSharpness) + ": " + std::to_string(fWorst) + " past the 3 x 3's range");
+      }
 }
