@@ -1275,16 +1275,20 @@ void CD3D12Renderer::DrawLeafItem(const SRenderItem &it)
     return;
   }
   // A light pass: the light alone (no ambient, sun or light map), added where the first pass is
-  // (blended objects: where they are seen, by their alpha), fogged towards black.
+  // (blended objects: where they are seen, by their alpha), fogged towards black. A projected
+  // light's is the projector's draw below (SetObjectLights leaves those lights out), so a light pass
+  // with no other light draws nothing of its own: Treehouse's corridor, light mapped and lit in
+  // passes, has each of its lamps (projectors casting shadow volumes) in a pass of its own.
+  const bool bItemBlended = (Key.nState & GS_BLEND_MASK) != 0;
   if (bLightPass)
   {
-    if (!(dc.nFlags & DF_LIGHTING) || !dc.nLights)
+    if (!(dc.nFlags & DF_LIGHTING))
       return;
+    bFirstPass = bFirstPass && dc.nLights > 0;
     dc.nFlags &= ~(DF_SHADOWS | DF_SHADOW_DEBUG);
     dc.nFlags2 = (dc.nFlags2 & ~(DF2_SUN_CASCADES | DF2_CASCADES_LIVE | DF2_SHADOW_TINT)) | DF2_NO_SUN | DF2_FOG_BLACK;
     Set4(dc.vAmbient, 0, 0, 0, dc.vAmbient[3]);
-    const bool bBlended = (Key.nState & GS_BLEND_MASK) != 0;
-    Key.nState = bBlended ? GS_BLSRC_SRCALPHA | GS_BLDST_ONE : GS_BLSRC_ONE | GS_BLDST_ONE | GS_DEPTHFUNC_EQUAL;
+    Key.nState = bItemBlended ? GS_BLSRC_SRCALPHA | GS_BLDST_ONE : GS_BLSRC_ONE | GS_BLDST_ONE | GS_DEPTHFUNC_EQUAL;
   }
   // An added draw fogged towards black (as the sprites, DrawSprites).
   if (m_bFog)
@@ -1413,7 +1417,8 @@ void CD3D12Renderer::DrawLeafItem(const SRenderItem &it)
   }
 
   // The projected lights of the object's m_DynLMMask (DLF_PROJECT with an image, a cube with the
-  // picture on +X): the object once more for each, where its first pass is (blended objects: by
+  // picture on +X; a light pass's too, which has that light alone in its mask, the first pass
+  // none): the object once more for each, where its first pass is (blended objects: by
   // their alpha, where they are seen): the diffuse texture times the material's colour lit by the
   // light alone (no ambient, sun or light map) times twice the cube at the point's lookup vector
   // (the light's m_TextureMatrix), alpha times the cube's, fogged towards black. The light: per
@@ -1423,11 +1428,11 @@ void CD3D12Renderer::DrawLeafItem(const SRenderItem &it)
   // under the light (eDC_TerrainLight): 0.75 * texture + 0.25 lit per pixel, falling off linearly to
   // the radius, added.
   const bool bTerrain = eDC == eDC_TerrainLight;
-  if (bLightPass || bPathDraw || m_bSpritePass || m_bReflectionPass || !HasNormal(nFormat) ||
+  if (bPathDraw || m_bSpritePass || m_bReflectionPass || !HasNormal(nFormat) ||
       (eDC != eDC_Opaque && eDC != eDC_AlphaTest && eDC != eDC_AlphaBlend && !bTerrain))
     return;
   const std::span<CDLight *const> Lights = m_pScene->GetLights();
-  const bool bBlended = (Key.nState & GS_BLEND_MASK) != 0 && !bTerrain;
+  const bool bBlended = bItemBlended && !bTerrain;
   const bool bPixel = bTerrain || (CV_r_Quality_BumpMapping > 0 && Props.bPixelLighting && eLighting != ELighting::None);
   // d3d12_PixelLighting: the others per pixel too, the light as per vertex.
   const bool bVertexLights = !bPixel && CV_d3d12_PixelLighting;

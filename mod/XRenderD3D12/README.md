@@ -1127,3 +1127,20 @@ and lists theirs (`NamesObjects`).
 - `LightStyle` of the block is read and not used: the original draws the colours as given.
 - Not in the water's reflection: the original draws the lamps' beams there as well, but the
   reflection's scene has no lamps here.
+
+## Projected lights
+
+- A projector (`DLF_PROJECT` with its image, a cube with the picture on +X) lights an object in a
+  draw of its own after the object's first pass: the object's diffuse texture and material colour,
+  lit by that light alone (per pixel with the normal map and specular where bump mapping lights the
+  object, else as a point light of its radius), times twice the cube at the point's lookup vector
+  (`m_TextureMatrix`), added where the first pass is (depth `EQUAL`) and fogged towards black.
+- The light comes in one of two ways, by the object's light mask:
+  - the object's own pass, whose mask holds the projector among its lights;
+  - a light pass. The engine lights an object with a light map in passes when a lamp in reach
+    casts shadow volumes: first the light map (`FOB_ZPASS`, an empty mask), then a copy for each
+    such lamp (`FOB_LIGHTPASS`, that lamp alone in the mask, no ambient). The copy of a projector
+    has no light of its own to draw, only the projector's draw. Treehouse's corridors are lit this
+    way: concrete walls, floors, doors and stairs under the hanging lamps.
+- The original draws these copies through the stencil of the lamp's shadow volumes. Here there
+  are no shadow volumes, so the light is unshadowed.
