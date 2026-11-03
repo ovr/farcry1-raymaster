@@ -1613,6 +1613,7 @@ public:
   mutable ICVar *m_pGlare = nullptr;        //!< r_Glare (the render modes need it on), looked up on first use
   mutable ICVar *m_pRenderModeVar = nullptr; //!< r_RenderMode
   CD3D12Texture *m_pRmDown = nullptr;       //!< the render modes: the scene at 256 x 256 (RGBA8)
+  CD3D12Texture *m_pRmQuarter = nullptr;    //!< on a large screen its quarter first (RGBA8)
   CD3D12Texture *m_pRmGlare[2] = {};        //!< the glare at 128 x 128, and a scratch for its blur
   CD3D12Texture *m_pRmAdapt = nullptr;      //!< the adapted luminance (1 x 1 RGBA8, kept between frames as the original's)
   CD3D12Texture *m_pRmLayer = nullptr;      //!< with the highlight layer: its copy before the render mode's pass
