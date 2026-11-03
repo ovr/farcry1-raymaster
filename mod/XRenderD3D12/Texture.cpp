@@ -21,6 +21,7 @@
 #include "D3D12Upload.h"
 #include "D3D12Descriptors.h"
 #include "Texture.h"
+#include "NormalMapHeight.h"
 #include "Shaders/Constants.h"
 
 namespace
@@ -136,32 +137,26 @@ namespace
   //! The levels below are made again from it.
   void HeightToNormalMap(SImage &Image)
   {
-    const int w = Image.nWidth, h = Image.nHeight;
-    const byte *pSrc = Image.Bits(0, 0);
-    std::vector<int> Heights((size_t)w * h);
-    for (size_t i = 0; i < Heights.size(); i++)
-      Heights[i] = (pSrc[i * 4] + pSrc[i * 4 + 1] + pSrc[i * 4 + 2]) / 3;
-    auto At = [&](int x, int y) { return Heights[(size_t)(y % h) * w + x % w] / 255.0f; };
-    auto Encode = [](float v) { return (byte)std::clamp(std::lround(v * 127.5f + 127.5f), 0L, 255L); };
-
     SImage Out;
-    Out.Allocate(DXGI_FORMAT_B8G8R8A8_UNORM, w, h, 1, 1);
+    Out.Allocate(DXGI_FORMAT_B8G8R8A8_UNORM, Image.nWidth, Image.nHeight, 1, 1);
     Out.nSrcFlags = FT_HASALPHA;
-    byte *pDst = Out.Bits(0, 0);
-    for (int y = 0; y < h; y++)
-      for (int x = 0; x < w; x++)
-      {
-        const float sx = 4 * 0.5f * ((At(x + 1, y) - At(x, y)) + (At(x + 1, y + 1) - At(x, y + 1)));
-        const float sy = 4 * (At(x, y + 1) - At(x, y));
-        const float fInvLen = 1 / sqrtf(sx * sx + sy * sy + 1);
-        byte *p = pDst + ((size_t)y * w + x) * 4;
-        p[0] = Encode(fInvLen);
-        p[1] = Encode(-sy * fInvLen);
-        p[2] = Encode(-sx * fInvLen);
-        p[3] = (byte)Heights[(size_t)y * w + x];
-      }
+    NormalMapHeight::HeightToNormal(Image.Bits(0, 0), Image.nWidth, Image.nHeight, Out.Bits(0, 0));
     Img::GenerateMips(Out);
     Image = std::move(Out);
+  }
+
+  //! Level 0 of the normal map Normal (B8G8R8A8) with the slopes of the height map Height (B8G8R8A8) added, as the
+  //! original's (CTextureManager::LoadNormalWithHeight, NormalMapHeight::AddSlopes). The levels below are made again
+  //! from it.
+  void AddHeightSlopes(SImage &Normal, const SImage &Height)
+  {
+    SImage Out;
+    Out.Allocate(DXGI_FORMAT_B8G8R8A8_UNORM, Normal.nWidth, Normal.nHeight, 1, 1);
+    Out.nSrcFlags = FT_HASALPHA;
+    NormalMapHeight::AddSlopes(Normal.Bits(0, 0), Normal.nWidth, Normal.nHeight, Height.Bits(0, 0), Height.nWidth, Height.nHeight,
+                               Out.Bits(0, 0));
+    Img::GenerateMips(Out);
+    Normal = std::move(Out);
   }
 
   //! Drops the nDrop largest levels (r_TexResolution and friends): the smallest level kept is at
@@ -793,8 +788,7 @@ CTexture *CTextureManager::Load(const char *szName, const char *szTexturePath, u
   const bool bCube = (eTT == eTT_Cubemap) || (nFlags2 & FT2_FORCECUBEMAP);
   // A bump map whose name is no normal map's (*_ddn*, *.ddn*) is a height map, made a normal map;
   // a compressed one is not loaded.
-  const bool bHeightBump = eTT == eTT_Bumpmap && !bCube && Base.find("_ddn") == std::string::npos &&
-    Base.find(".ddn") == std::string::npos;
+  const bool bHeightBump = eTT == eTT_Bumpmap && !bCube && IsHeightMapName(Base.c_str());
   const std::string Suffix = bCube ? g_CubeKey : bHeightBump ? "#height" : "";
   const std::string Key = Base + Suffix;
   // A name searched in a material's folder as well: its answer depends on the folder.
@@ -893,6 +887,71 @@ CTexture *CTextureManager::LoadMaterialTexture(const char *szName, const char *s
   CTexture *pTex = Load(szName, szTexturePath, nFlags, nFlags2, eTT, true, false);
   if (!pTex && (pTex = GetPlaceholder()) != nullptr)
     pTex->AddRef();
+  return pTex;
+}
+
+bool CTextureManager::IsHeightMapName(const char *szName)
+{
+  return NormalMapHeight::IsHeightMapName(NormalizePath(szName ? szName : ""));
+}
+
+CTexture *CTextureManager::LoadNormalWithHeight(const char *szNormal, const char *szHeight, const char *szTexturePath, uint nFlags)
+{
+  if (!m_pPlaceholder)
+    Init();
+  if (!szNormal || !szNormal[0] || !szHeight || !szHeight[0])
+    return nullptr;
+  const std::string NormalBase = StripExtension(NormalizePath(szNormal)), HeightBase = StripExtension(NormalizePath(szHeight));
+  std::string Dir = NormalizePath(szTexturePath ? szTexturePath : "");
+  if (!Dir.empty() && Dir.back() != '/')
+    Dir += '/';
+  const std::string Key = NormalBase + "#plus#" + HeightBase + (Dir.empty() ? std::string() : "|" + Dir);
+  if (CTexture *pTex = FindKey(Key))
+  {
+    pTex->m_nRefs++;
+    pTex->m_nFlags2 |= FT2_WASFOUND;
+    return pTex;
+  }
+  if (m_Missing.count(Key))
+    return nullptr;
+
+  SImage Normal, Height;
+  SSearch NormalRes, HeightRes;
+  std::vector<std::string> Bases;
+  size_t nPlain = Candidates(NormalBase, Dir, Bases);
+  bool bOk = Search(Bases, nPlain, Normal, NormalRes) && Normal.nFaces == 1;
+  if (bOk)
+  {
+    nPlain = Candidates(HeightBase, Dir, Bases);
+    bOk = Search(Bases, nPlain, Height, HeightRes) && Height.nFaces == 1 && Height.Format == DXGI_FORMAT_B8G8R8A8_UNORM;
+  }
+  // The normal map itself a height map: made one as a bump map is (an uncompressed one only).
+  const bool bNormalIsHeight = IsHeightMapName(NormalBase.c_str());
+  if (bOk && Img::IsBC(Normal.Format))
+    bOk = !bNormalIsHeight && Img::Decompress(Normal);
+  bOk = bOk && Normal.Format == DXGI_FORMAT_B8G8R8A8_UNORM;
+  if (!bOk)
+  {
+    m_Missing.insert(Key);
+    if (iLog && m_Warned.insert(Key).second)
+      iLog->LogWarning("Texture '%s' with the height map '%s': not made (a file missing, or a format not read)", szNormal, szHeight);
+    return nullptr;
+  }
+  if (bNormalIsHeight)
+    HeightToNormalMap(Normal);
+  AddHeightSlopes(Normal, Height);
+  if (!(nFlags & FT_NORESIZE))
+    DropLevels(Normal, GetCVarInt("r_TexBumpResolution", 0));
+
+  CTexture *pTex = NewTexture(szNormal);
+  if (!pTex)
+    return nullptr;
+  Upload(pTex, Normal);
+  pTex->m_nFlags = (int)(nFlags & ~FT_NOTFOUND) | Normal.nSrcFlags | (Normal.nMips > 1 ? FT_HASMIPS : 0) | FT_HASNORMALMAP;
+  pTex->m_nFlags2 = FT2_WASLOADED;
+  pTex->m_bClamp = (nFlags & FT_CLAMP) != 0;
+  pTex->m_bLoaded = (pTex->m_pGPU != nullptr);
+  AddKey(pTex, Key);
   return pTex;
 }
 

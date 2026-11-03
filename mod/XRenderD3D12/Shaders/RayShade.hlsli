@@ -42,6 +42,7 @@
 
 #include "Common.hlsli"
 #include "RayConstants.h"
+#include "LightmapLight.hlsli"
 
 RaytracingAccelerationStructure g_RayScene : register(t0, space5);
 StructuredBuffer<SRayInstance> g_RayInstances : register(t1, space5);
@@ -465,11 +466,13 @@ float4 RayShade(SRayHit Hit, float3 vRayDir, float fConeWidth, bool bShadows, ui
     vColor.a = vTex.a;
   if (nFlags & DF_TEX1_LIGHTMAP)
   {
-    float3 vLight = RaySampleTexture(I.nMaterial.w, nSampler1, S.vTex1, S.fLod1).rgb;
+    const float4 vLightMap = RaySampleTexture(I.nMaterial.w, nSampler1, S.vTex1, S.fLod1);
+    float3 vLight = vLightMap.rgb;
     if (nFlags & DF_LIGHTMAP_DIR)
     {
+      // As the raster's (General.hlsl) with the vertex's normal: d3d12_LightmapDot3 mixes D.z towards 1 by the map's alpha.
       const float4 vDir = RaySampleTexture(I.nMaterial2.w, nSampler1, S.vTex1, S.fLod1);
-      vLight *= saturate(vDir.z * 2 - 1) * vDir.a;
+      vLight *= LightmapDot3(saturate(vDir.z * 2 - 1), vLightMap.a, g_Frame.vLightmap.x > 0) * vDir.a;
     }
     vColor.rgb *= 4 * fSun * vLight + I.vAmbient.rgb;
   }

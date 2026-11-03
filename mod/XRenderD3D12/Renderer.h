@@ -487,6 +487,9 @@ public:
   float ItemHeat(const SRenderItem &it) const;
   //! The lights of an object besides the sun as the draw's own lights (SDrawConstants::vLightPos).
   void SetObjectLights(SDrawConstants &dc, const CCObject *pObj, const Matrix44 &World, CLeafBuffer *pLB);
+  //! d3d12_LightmapSpecular: the lamps baked into the object's light map after the draw's lights, for their highlights
+  //! alone (XR_LIGHT_LIGHTMAP_LAMP); false with none.
+  bool AddLightmapLamps(SDrawConstants &dc, const CCObject *pObj, const Matrix44 &World, CLeafBuffer *pLB);
   //! The path tracer's G-buffer draw of a lit object: its fill lights (DLF_AMBIENT_LIGHT, directional) as its lights,
   //! none with d3d12_PTFillLights (General.hlsl XR_PT adds them to its ambient light).
   void SetPathFillLights(SDrawConstants &dc, const CCObject *pObj, const Matrix44 &World, CLeafBuffer *pLB);
@@ -1816,6 +1819,9 @@ public:
   int CV_d3d12_ShadowMapSize = 1024;        //!< size of the shadow maps (0: the engine's, 512)
   int CV_d3d12_ShadowDebug = 0;             //!< non-zero: the shadow maps of the frame are shown
   int CV_d3d12_PixelLighting = 1;           //!< 1: every lit material is lit per pixel, the light mapped ones by the dynamic lights too (DrawLeafItem)
+  int CV_d3d12_LightmapDot3 = 1;            //!< 1: a dot3 light map's N'.D mixed towards 1 by the light map's alpha, as the original's shaders (0: N'.D alone)
+  int CV_d3d12_LightmapSpecular = 1;        //!< 1: the bump templates over a dot3 light map get the highlights of the lamps baked into it (AddLightmapLamps)
+  int CV_d3d12_NormalMapHeight = 1;         //!< 1: a height map in a material's EFTT_NORMALMAP is added to its EFTT_BUMP normal map (CShaderManager::LoadNormalMap)
   int CV_d3d12_ShadowCascades = 4;          //!< the sun's cascaded shadow maps: how many (0: none)
   float CV_d3d12_ShadowDistance = 120;      //!< how far they reach from the camera (m)
   int CV_d3d12_ShadowCascadeSize = 2048;    //!< the size of their maps

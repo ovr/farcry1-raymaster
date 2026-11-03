@@ -64,6 +64,7 @@ set(XRENDERD3D12_SOURCES
     Texture.h
     Texture.cpp
     ImageLoaders.cpp
+    NormalMapHeight.h
     RendererTextures.cpp
     Shader.h
     Shader.cpp

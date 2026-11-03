@@ -229,7 +229,9 @@ instructions and is not committed (git-ignored). The references of the modules a
   its test `d3d12_HDROutputDebug 3` and the display's read only `d3d12_HDRDisplay*`, the sky's glow round the sun `d3d12_HDRSkyAngle`, the statistics' panel
   `d3d12_DisplayHDR` and log `d3d12_HDRLog`); the volumetric light (`d3d12_VolumetricLight`, the
   sun's shafts alone `d3d12_VolumetricLightShafts`); per pixel lighting (`d3d12_PixelLighting`, the bump
-  mapping's tangent frames `TangentFrame.h`); the depth prepass
+  mapping's tangent frames `TangentFrame.h`, a material's height map with its normal map
+  `d3d12_NormalMapHeight` `NormalMapHeight.h`, the dot3 light maps' mix and their lamps' highlights
+  `d3d12_LightmapDot3`, `d3d12_LightmapSpecular`, `Shaders/LightmapLight.hlsli`); the depth prepass
   (`d3d12_DepthPrepass`); the sun's shadow cascades (`d3d12_ShadowCascades`,
   `d3d12_CascadeInstancing`); ambient occlusion (`d3d12_AO`:
   XeGTAO, CACAO or by rays, `rt`); ray tracing (`d3d12_RTReflections` with the cube maps'

@@ -844,6 +844,20 @@ void CD3D12Renderer::DrawLeafItem(const SRenderItem &it)
         dc.nTex3 = pBump->GetSRV();
         dc.vParams1[1] = 1;
       }
+      // d3d12_LightmapSpecular: over a dot3 light map the original's bump shaders add the highlight of a lamp baked
+      // into it (Research's cyan wall lamp on the cave's rock and the machines below it), with the material's specular
+      // colour (white for the templates without one) and the texture's alpha as the gloss, whatever the template; the
+      // main view's draws only (not the paths' G-buffer nor the scene for rays).
+      if (!(dc.nFlags & DF_LIGHTING) && CV_d3d12_LightmapSpecular && !bPathDraw && !m_bDepthPrepass && !m_bRayCaptureWalk &&
+          !(pObj->m_ObjFlags & FOB_ZPASS) && HasNormal(nFormat))
+      {
+        const CFColor Spec = Props.bSpecular && it.pRes && it.pRes->m_LMaterial ? it.pRes->m_LMaterial->Front.m_Specular : CFColor(1, 1, 1, 1);
+        if (AddLightmapLamps(dc, pObj, World, pLB))
+        {
+          dc.nFlags |= DF_SPECULAR;
+          Set4(dc.vSpecular, Spec.r, Spec.g, Spec.b, 1);
+        }
+      }
     }
     // d3d12_PixelLighting: the other lit materials per pixel too, with the lights as their vertex
     // lighting has them (static objects falling off by the curve their attenuation is fitted to);
@@ -1353,7 +1367,8 @@ void CD3D12Renderer::DrawLeafItem(const SRenderItem &it)
       for (int c = 0; c < 3; c++)
         vAlbedo[c] *= dc.vAmbient[3] / 2;
     }
-    if (dc.nFlags & DF_SPECULAR)
+    // (Not the light map lamps' highlights of d3d12_LightmapSpecular, the raster's alone.)
+    if ((dc.nFlags & (DF_SPECULAR | DF_TEX1_LIGHTMAP)) == DF_SPECULAR)
       Set4(vSpecular, dc.vSpecular[0], dc.vSpecular[1], dc.vSpecular[2], 32);
     else if (dc.nFlags2 & DF2_MATERIAL_LIGHT)
       Set4(vSpecular, dc.vSpecular[0], dc.vSpecular[1], dc.vSpecular[2], dc.vParams3[0]);
@@ -1438,7 +1453,9 @@ void CD3D12Renderer::DrawLeafItem(const SRenderItem &it)
   const bool bPixel = bTerrain || (CV_r_Quality_BumpMapping > 0 && Props.bPixelLighting && eLighting != ELighting::None);
   // d3d12_PixelLighting: the others per pixel too, the light as per vertex.
   const bool bVertexLights = !bPixel && CV_d3d12_PixelLighting;
-  const uint32 nKeep = bTerrain ? DF_TEXGEN_WORLD : DF_TEXMATRIX | DF_ALPHATEST | DF_ALPHATEST_LESS | (bPixel ? DF_BUMP | DF_SPECULAR : 0);
+  // (A light-mapped draw's DF_SPECULAR is its light map lamps', d3d12_LightmapSpecular: not the projector's.)
+  const uint32 nKeep = bTerrain ? DF_TEXGEN_WORLD
+                                : DF_TEXMATRIX | DF_ALPHATEST | DF_ALPHATEST_LESS | (bPixel ? DF_BUMP | ((dc.nFlags & DF_TEX1_LIGHTMAP) ? 0 : DF_SPECULAR) : 0);
   const uint32 nFlags = (dc.nFlags & nKeep) | DF_LIGHTING | (bPixel || bVertexLights ? DF_PIXEL_LIGHTING : 0) | (m_bFog ? DF_FOG : 0);
   const uint32 nFlags2 = bVertexLights ? DF2_VERTEX_LIGHTS | (pObj->m_pCharInstance ? 0 : DF2_SMOOTH_FALLOFF) : 0;
   Vec3 vCenter;
@@ -1758,6 +1775,39 @@ void CD3D12Renderer::SetObjectLights(SDrawConstants &dc, const CCObject *pObj, c
     SetPointLight(dc, n++, pLight, pObj, vCenter, r);
   }
   dc.nLights = n;
+}
+
+bool CD3D12Renderer::AddLightmapLamps(SDrawConstants &dc, const CCObject *pObj, const Matrix44 &World, CLeafBuffer *pLB)
+{
+  // The lamps baked into the object's light map (DLF_LM, not the sun nor a projector) of its m_DynLMMask after the
+  // draw's lights (XR_LIGHT_LIGHTMAP_LAMP: General.hlsl takes their highlights alone, no light and no ray), while there
+  // is room. With none of the draw's own lights the light map's draw takes the lights' path (DF2_LIGHTMAP_LIGHTS), which
+  // with these alone gives the light of its vAmbient as before.
+  const std::span<CDLight *const> Lights = m_pScene->GetLights();
+  Vec3 vCenter;
+  float r;
+  GetLightSphere(World, pLB, vCenter, r);
+  const uint32 nBefore = (dc.nFlags2 & DF2_LIGHTMAP_LIGHTS) ? dc.nLights : 0;
+  uint32 n = nBefore;
+  for (size_t i = 0; i < Lights.size() && i < 32 && n < XR_MAX_DRAW_LIGHTS; i++)
+  {
+    const CDLight *pLight = Lights[i];
+    if (!pLight || !(pLight->m_Flags & DLF_LM) || (pLight->m_Flags & (DLF_SUN | DLF_PROJECT | DLF_DIRECTIONAL)) ||
+        (pLight->m_Flags & (DLF_HEATSOURCE | DLF_LIGHTSOURCE)) == DLF_HEATSOURCE || !(pObj->m_DynLMMask & (1u << i)))
+      continue;
+    // Not where it cannot reach (its sphere off the object's).
+    if ((pLight->m_Origin - vCenter).GetLength() > pLight->m_fRadius + r)
+      continue;
+    SetPointLight(dc, n, pLight, pObj, vCenter, r);
+    dc.vLightPos[n][3] = XR_LIGHT_LIGHTMAP_LAMP;
+    Set4(dc.vLightColor[n], 0, 0, 0, 0);
+    n++;
+  }
+  if (n == nBefore)
+    return false;
+  dc.nLights = n;
+  dc.nFlags2 |= DF2_LIGHTMAP_LIGHTS | DF2_VERTEX_LIGHTS | DF2_SMOOTH_FALLOFF;
+  return true;
 }
 
 void CD3D12Renderer::SetPathFillLights(SDrawConstants &dc, const CCObject *pObj, const Matrix44 &World, CLeafBuffer *pLB)

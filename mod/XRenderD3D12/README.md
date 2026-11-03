@@ -328,6 +328,32 @@ reference of its features and console variables.
   from a pixel to the next: noise all over the shelves (normals turned over on 5.8 % of a shelf's
   pixels, 0.6 % now). The raster lights them with no lamp, so its frames were the same. Meshes
   whose normals fit keep their frames bit for bit (unit tests `TangentFrame_*`).
+- Normal maps and height maps (`NormalMapHeight.h`, `CShaderManager::LoadNormalMap`): a bump map
+  whose name is no normal map's (not `*_ddn*` or `*.ddn*`) is a height map, made a normal map
+  when it loads (the slopes 4 times the height's forward differences, the height in alpha). A
+  material may name a normal map in its bump slot (`EFTT_BUMP`) and a height map in its normal
+  map slot (`EFTT_NORMALMAP`, which the material loader fills from the displacement map):
+  Research's cave rock has `cave_wall12_ddn` / `cave_22_ddn` and the grey `cave_bump`. The
+  original makes the two one texture; traced, its texture is the normal map with the height map's
+  slopes (the same slopes) added to x and y and normalised, the height map repeating over the
+  normal map's texels (its 256 x 256 twice each way over 512 x 512), alpha the mean of the normal
+  map's and the height (to the 8-bit level: correlation 0.99 per channel). `d3d12_NormalMapHeight`
+  (1) does the same (`CTextureManager::LoadNormalWithHeight`; a height map alone in that slot is
+  made a normal map as a height bump map is). Before, the grey height map was taken for a normal
+  map: the bumps' normals were noise, the cave rock under Research's lamps 0.22-0.47 of the
+  original's light and 1.6-2.6 times its local contrast (now 0.99-1.01 and 0.91). 0: as before,
+  for the materials loaded after it is set. Unit tests `NormalMapHeight_*`.
+- Dot3 light maps (`Shaders/LightmapLight.hlsli`): the original's light-map bump shaders take the
+  light map's light times its direction map's alpha times N'.D mixed towards 1 by the light map's
+  alpha (where that is 0 the bumps do not shade its light), plus the texture times the ambient
+  colour. `d3d12_LightmapDot3` (1) mixes the same (0: N'.D alone, as before). A lamp baked into the
+  light map (`DLF_LM`) in reach of the object gives a highlight there, added after the light map:
+  2 times the lamp's specular colour times the material's, the texture's alpha (the gloss), the
+  falloff of the original's attenuation texture where those shaders look it up (half of (1 - d / r)^2
+  and half of min(1, 1.5 (1 - d / r))) and saturate(R.V)^32 with R the direction to the lamp
+  reflected about N' (no N.L cut-off, as the original's). `d3d12_LightmapSpecular` (1) adds it
+  (`AddLightmapLamps`: the lamps go into the draw's lights as `XR_LIGHT_LIGHTMAP_LAMP`, which light
+  nothing else and cast no ray); 0: none, as before. Unit tests `LightmapLight_*`.
 
 ## Depth prepass
 
