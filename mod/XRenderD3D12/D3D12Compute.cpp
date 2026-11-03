@@ -72,6 +72,9 @@
 #include "Cmaa2DispatchArgs_CS.h"
 #include "Cmaa2Candidates_CS.h"
 #include "Cmaa2Apply_CS.h"
+#include "TaaDilate_CS.h"
+#include "TaaResolve_CS.h"
+#include "TaaSharpen_CS.h"
 #if XRENDERD3D12_NRD
 #include "PathNrdPack_CS.h"
 #include "PathNrdResolve_CS.h"
@@ -165,6 +168,9 @@ const SKernel s_Kernels[eD3D12K_Num] =
   { "CMAA2 dispatch arguments", g_Cmaa2DispatchArgs_CS, sizeof(g_Cmaa2DispatchArgs_CS), false, true },
   { "CMAA2 candidates", g_Cmaa2Candidates_CS, sizeof(g_Cmaa2Candidates_CS), false, true },
   { "CMAA2 apply", g_Cmaa2Apply_CS, sizeof(g_Cmaa2Apply_CS), false, true },
+  { "TAA motion", g_TaaDilate_CS, sizeof(g_TaaDilate_CS) },
+  { "TAA resolve", g_TaaResolve_CS, sizeof(g_TaaResolve_CS) },
+  { "TAA sharpening", g_TaaSharpen_CS, sizeof(g_TaaSharpen_CS) },
 };
 static_assert(sizeof(s_Kernels) / sizeof(s_Kernels[0]) == eD3D12K_Num, "a kernel for each ED3D12Kernel");
 

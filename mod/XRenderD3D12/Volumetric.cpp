@@ -82,18 +82,6 @@ float HdrDecode(float c)
   return c > 1 ? 1 + 2.2f * (c - 1) : powf(std::max(c, 0.0f), 2.2f);
 }
 
-//! Element i (from 1) of the Halton sequence of base b.
-float Halton(int i, int b)
-{
-  float f = 1, r = 0;
-  for (; i > 0; i /= b)
-  {
-    f /= (float)b;
-    r += f * (float)(i % b);
-  }
-  return r;
-}
-
 D3D12_SHADER_RESOURCE_VIEW_DESC VolumeSRV()
 {
   D3D12_SHADER_RESOURCE_VIEW_DESC SRV = {};

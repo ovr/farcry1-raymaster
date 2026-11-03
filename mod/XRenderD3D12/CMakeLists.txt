@@ -82,6 +82,7 @@ set(XRENDERD3D12_SOURCES
     Upscaler.h
     Upscale.cpp
     UpscalerFsr.cpp
+    UpscalerTaa.cpp
     D3D12Compute.h
     D3D12Compute.cpp
     AmbientOcclusion.h

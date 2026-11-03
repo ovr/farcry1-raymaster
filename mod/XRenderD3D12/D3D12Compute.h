@@ -105,6 +105,9 @@ enum ED3D12Kernel
   eD3D12K_Cmaa2DispatchArgs,        //!< its indirect dispatches' arguments, its counters cleared
   eD3D12K_Cmaa2Candidates,          //!< its shapes' new colours (indirect)
   eD3D12K_Cmaa2Apply,               //!< those colours blended into its picture (indirect)
+  eD3D12K_TaaDilate,                //!< TAA: each pixel's motion, the nearest of its 3 x 3's (Shaders/Taa.hlsl; d3d12_AA taa)
+  eD3D12K_TaaResolve,               //!< the frame blended into its history
+  eD3D12K_TaaSharpen,               //!< the history sharpened into the picture
   eD3D12K_Num
 };
 

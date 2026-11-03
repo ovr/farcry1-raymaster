@@ -65,6 +65,11 @@ endforeach()
 xrender_d3d12_test_shader(Cmaa2DispatchArgs "${cmaa2}" cs_6_0 ComputeDispatchArgsCS)
 xrender_d3d12_test_shader(Cmaa2Candidates "${cmaa2}" cs_6_0 ProcessCandidatesCS)
 xrender_d3d12_test_shader(Cmaa2Apply "${cmaa2}" cs_6_0 DeferredColorApply2x2CS)
+# TAA (Taa.hlsli as Taa.hlsl's kernels use it).
+set(taa "${CMAKE_CURRENT_SOURCE_DIR}/Shaders/TestTaa.hlsl")
+foreach(k Resolve Dilate Sharpen Working)
+    xrender_d3d12_test_shader(Taa${k} "${taa}" cs_6_0 CSTaa${k})
+endforeach()
 # The path tracer's functions, PathTrace.hlsl included as it is (Shader Model 6.5, as Shaders.cmake compiles it).
 set(pathtrace "${CMAKE_CURRENT_SOURCE_DIR}/Shaders/TestPathTrace.hlsl")
 foreach(k LeafSide Cosine Checkerboard Layout PixelSurface TerrainShare SurfaceNormal LampLight LampShadow LightmapFill)
@@ -93,6 +98,7 @@ set(XRENDERD3D12_TESTS_SOURCES
     NormalMapHeightTests.cpp
     RenderModeTests.cpp
     AntiAliasTests.cpp
+    TaaTests.cpp
     LightImageTests.cpp
 )
 file(GLOB XRENDERD3D12_TESTS_HLSL "${CMAKE_CURRENT_SOURCE_DIR}/Shaders/*.hlsl" "${CMAKE_CURRENT_SOURCE_DIR}/Shaders/*.hlsli")

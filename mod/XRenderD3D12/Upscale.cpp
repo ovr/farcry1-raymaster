@@ -21,7 +21,8 @@
 //	The path tracer (d3d12_PathTracing) wants the motion vectors without an
 //	upscaler too: with d3d12_Upscaler none it gets the scene targets of the
 //	display's size, without jitter, and the picture is the scene's as it is
-//	(CNativeScene).
+//	(CNativeScene). With d3d12_Upscaler none and d3d12_AA taa the upscaler
+//	is TAA (UpscalerTaa.cpp), of the display's size, the path tracer's too.
 //
 //////////////////////////////////////////////////////////////////////
 
@@ -72,6 +73,8 @@ private:
 
 //! The d3d12_Upscaler the path tracer gets in place of none (CNativeScene).
 const char *const NATIVE_SCENE = "native";
+//! The one d3d12_AA taa gets in place of none (UpscalerTaa.cpp).
+const char *const TAA_SCENE = "taa";
 
 //! The upscaler of a d3d12_Upscaler value; nullptr for "none" and unknown names.
 std::unique_ptr<IUpscaler> CreateUpscaler(const char *szName)
@@ -80,6 +83,8 @@ std::unique_ptr<IUpscaler> CreateUpscaler(const char *szName)
     return CreateUpscalerFsr();
   if (!_stricmp(szName, NATIVE_SCENE))
     return std::make_unique<CNativeScene>();
+  if (!_stricmp(szName, TAA_SCENE))
+    return CreateUpscalerTaa();
   return nullptr;
 }
 
@@ -131,7 +136,9 @@ bool CD3D12Renderer::UpdateUpscaler()
   if (!m_pUpscalerVar)
     m_pUpscalerVar = iConsole->GetCVar("d3d12_Upscaler");
   const char *szName = m_pUpscalerVar && m_pUpscalerVar->GetString() ? m_pUpscalerVar->GetString() : "none";
-  // The path tracer's motion vectors without an upscaler.
+  // TAA without an upscaler (the path tracer gets its scene targets, jittered); else the path tracer's motion vectors.
+  if (!_stricmp(szName, "none") && AntiAliasing() == EAntiAlias::Taa)
+    szName = TAA_SCENE;
   if (!_stricmp(szName, "none") && WantsPathTracing())
     szName = NATIVE_SCENE;
   const int w = m_pDevice->GetWidth(), h = m_pDevice->GetHeight();
@@ -168,8 +175,9 @@ bool CD3D12Renderer::UpdateUpscaler()
   if (!m_pUpscaler)
     return false;
 
-  // The scene targets of the mode, their colour HDR or not (the path tracer's of the display's size).
-  const int nMode = _stricmp(m_UpscalerName.c_str(), NATIVE_SCENE) ? std::clamp(CV_d3d12_UpscaleMode, 0, eUM_Num - 1) : (int)eUM_NativeAA;
+  // The scene targets of the mode, their colour HDR or not (the path tracer's and TAA's of the display's size).
+  const bool bDisplaySize = !_stricmp(m_UpscalerName.c_str(), NATIVE_SCENE) || !_stricmp(m_UpscalerName.c_str(), TAA_SCENE);
+  const int nMode = bDisplaySize ? (int)eUM_NativeAA : std::clamp(CV_d3d12_UpscaleMode, 0, eUM_Num - 1);
   if (nMode != m_nUpscaleMode || m_bHdrScene != m_bUpscaleHdr)
   {
     if (m_nUpscaleOutputSRV >= 0)
@@ -209,8 +217,8 @@ CD3D12Renderer::SUpscaleInfo CD3D12Renderer::UpscaleInfo() const
   ICVar *pVar = m_pUpscalerVar ? m_pUpscalerVar : (iConsole ? iConsole->GetCVar("d3d12_Upscaler") : nullptr);
   if (pVar && pVar->GetString())
     Info.szWanted = pVar->GetString();
-  // The path tracer's scene targets (CNativeScene) are not an upscaler for the statistics.
-  if (m_pUpscaler && m_pUpscaler->GathersFrames() && m_nUpscaleMode >= 0 && m_pDevice)
+  // The path tracer's scene targets (CNativeScene) and TAA (d3d12_AA's) are not an upscaler for the statistics.
+  if (m_pUpscaler && m_pUpscaler->GathersFrames() && !m_pUpscaler->IsAntiAliasing() && m_nUpscaleMode >= 0 && m_pDevice)
   {
     Info.szName = m_pUpscaler->GetName();
     Info.szMode = s_ModeNames[m_nUpscaleMode];
@@ -362,8 +370,10 @@ void CD3D12Renderer::UpscaleScene()
   In.fFovY = 2 * atanf(1 / std::max(p[5], 1e-6f));
   In.fFrameMs = iTimer ? std::clamp(iTimer->GetFrameTime() * 1000.0f, 0.1f, 1000.0f) : 16.7f;
   In.fSharpness = std::clamp(CV_d3d12_UpscaleSharpness, 0.0f, 1.0f);
+  In.nQuality = std::clamp(CV_d3d12_AAQuality, 0, 3);
   In.bReset = m_bUpscaleHistoryReset;
-  In.bDebugView = CV_d3d12_UpscaleDebug == 1;
+  // TAA's debug view is the anti-aliasing's (d3d12_AADebug).
+  In.bDebugView = m_pUpscaler->IsAntiAliasing() ? CV_d3d12_AADebug != 0 : CV_d3d12_UpscaleDebug == 1;
   const bool bUpscaled = m_pUpscaler->Dispatch(In);
   m_pDevice->BindRootSignature();
   if (pLight)
