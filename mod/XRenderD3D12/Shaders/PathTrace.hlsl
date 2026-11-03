@@ -25,7 +25,10 @@
 //	    that finds nothing nearer than vFill.y brings the ambient light of
 //	    the point it leaves (the G-buffer's, then the hit's) times vFill.x,
 //	    as the raster's ambient times its occlusion (where it finds nothing
-//	    at all, the brighter of that and the sky). The sun's light on the
+//	    at all, the brighter of that and the sky). With vFill.z (where the
+//	    frame has no sun) the pixel's light map adds what it lights beyond
+//	    the lamps baked into it (PathLightmapFill, the G-buffer's
+//	    nTextures4.x), times vFill.z. The sun's light on the
 //	    pixel's own surface is not in it: the composite takes the
 //	    visibility the raster found
 //	    (the G-buffer's). With the radiance cache (nCache.x;
@@ -334,6 +337,10 @@ void CSTrace(uint3 vId : SV_DispatchThreadID)
   const float fLuminance = PathLuminance(vLight);
   if (g_PT.vParams.w > 0 && fLuminance > g_PT.vParams.w)
     vLight *= g_PT.vParams.w / fLuminance;
+  // d3d12_PTLightMaps, where the frame has no sun: what the pixel's light map lights it with beyond the lamps.
+  if (g_PT.vFill.z > 0)
+    vLight += g_PT.vFill.z * PathLightmapFill(g_Textures[g_PT.nTextures4.x].Load(int3(p, 0)).rgb,
+                                              g_Textures[g_PT.nTextures2.w].Load(int3(p, 0)).gba, vPos, vN, P);
   g_Out[p] = float4(max(vLight, 0), d);
   g_HitDistance[p] = fHitDistance;
 }

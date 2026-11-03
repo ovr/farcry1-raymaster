@@ -360,6 +360,10 @@ void CD3D12Renderer::RegisterVariables()
   iConsole->Register("d3d12_PTBakedFalloff", &CV_d3d12_PTBakedFalloff, 0.0f, VF_DUMPTODISK,
                      "With d3d12_PathTracing, the falloff of the lamps baked into the light maps: 0 the raster's dynamic light's "
                      "(1 - smoothstep(0, 0.9, d / r)), > 0 the light maps' (1 - d / r) to this power over the whole radius");
+  iConsole->Register("d3d12_PTLightMaps", &CV_d3d12_PTLightMaps, 1.0f, VF_DUMPTODISK,
+                     "With d3d12_PathTracing, where the frame has no sun (indoors), the light a surface's light map gives beyond the "
+                     "path tracer's own light of its lamps (unshadowed) and the ambient light, times this: the light maps' flat "
+                     "light in the halls they light, the path tracer's light and shadows by the lamps (0: its lamps alone)");
   iConsole->Register("d3d12_PTEmission", &CV_d3d12_PTEmission, 1.0f, VF_DUMPTODISK, "With d3d12_PathTracing, the light of what glows");
   iConsole->Register("d3d12_PTTerrainDelight", &CV_d3d12_PTTerrainDelight, 2.0f, VF_DUMPTODISK,
                      "With d3d12_PathTracing, the light the editor baked into the terrain's texture, taken off for its albedo: how "
@@ -657,6 +661,7 @@ WIN_HWND CD3D12Renderer::Init(int x,int y,int width,int height,unsigned int cbpp
     iConsole->UnregisterVariable("d3d12_PTSun", true);
     iConsole->UnregisterVariable("d3d12_PTLamps", true);
     iConsole->UnregisterVariable("d3d12_PTBakedFalloff", true);
+    iConsole->UnregisterVariable("d3d12_PTLightMaps", true);
     iConsole->UnregisterVariable("d3d12_PTEmission", true);
     iConsole->UnregisterVariable("d3d12_PTTerrainDelight", true);
     iConsole->UnregisterVariable("d3d12_PTDebug", true);

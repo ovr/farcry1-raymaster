@@ -782,7 +782,7 @@ reference of its features and console variables.
   lamp a cave's roof hid it). The frame dump lists them (`pt lights:`).
 - The lamps fall off as the raster's dynamic light, (1 - smoothstep(0, 0.9, d / r))^2.2, nothing from
   0.9 r on (`PathLampFalloff`). The light maps were baked with a flatter falloff that reaches the whole
-  radius, so a room lit by its maps is darker in the path tracer. `d3d12_PTBakedFalloff` k > 0 (0 by
+  radius, so a room lit by its maps is darker in the path tracer (the light maps fill it in, below). `d3d12_PTBakedFalloff` k > 0 (0 by
   default: the picture as it was) makes the lamps baked into the light maps (`XR_PT_LIGHT_LM`) fall off
   as ((1 - d / r)^k)^2.2 to the radius. On Research's SUB-LEVEL wall (step 271: `Film_research-lamp.ini`
   frames 400 and 460, HDR with the exposure fixed and a clamp) the raster has 2.3 times the path
@@ -790,6 +790,19 @@ reference of its features and console variables.
   darker, and the game's ambient unoccluded (`d3d12_PTAmbientRange 0`) does not change it. Near the
   lamps k = 1 is brighter than the maps (a still view: 19.5 % of its pixels, 7.4 % with 0). Test: unit
   test `PathTrace_LampFalloff`.
+- Where the frame has no sun (indoors) the light maps give the light their lamps do not
+  (`d3d12_PTLightMaps` 1 times it, 0 none: the path tracer's picture as before): the G-buffer keeps the
+  light map's light (its sixth target, below), and `CSTrace` adds to the paths' light that of the raster
+  (the light map's 4 x light + the ambient, as light: `PathLightmapFill`) less the ambient the paths fill
+  in with and less the light each lamp baked into the light maps (`XR_PT_LIGHT_LM`) gives there
+  unshadowed, nothing below 0. Where a lamp reaches its light and its shadows stay the path tracer's;
+  beyond its reach, in the shadows the maps were baked with and where their light is flatter than the
+  lamps', the light is the maps'. On Research's SUB-LEVEL wall (as above) the raster has 1.07 and 1.08
+  times the path tracer's light (2.46 and 2.58 without it); Training's bunker, which the lamps light
+  about as the raster, stays so (`Film_training-bunker.ini` frames 310 and 490: 0.86 and 1.10, 0.89 and
+  1.28 without it). A frame with the sun has the path tracer's own sun and sky and no light maps. It
+  costs 0.27 ms of the paths at 2560x1440 where it is on (Research), its target 0.02 to 0.09 ms of the
+  opaque list. Test: unit test `PathTrace_LightmapFill`, `render_tests` suite `ptlightmap`.
 - The scene for rays has its materials (`SRayInstance` `vAlbedo`, `vSpecular`, `nPath`, set while the
   opaque list is captured): its hits are shaded by `Shaders/PathShade.hlsli` in linear light (the HDR
   target's, `HdrDecode`): the albedo is the draw's colour without its light (no light map, ambient or
@@ -837,7 +850,8 @@ reference of its features and console variables.
   cascades' shadow at least its light in the sun times the terrain's shadow colour, as the raster's
   Sun shadow cascades), a fifth its highlights'
   colour (RGBA8, half of the raster's 2 x specular colour x gloss of the specular templates; it blends
-  as the albedo). Its lit draws lose their light (the light maps, the sun, the lamps and their passes,
+  as the albedo), a sixth the light map's light (RGBA8: the light map times its dot3 share, a quarter of
+  the raster's light from it; with `d3d12_PTLightMaps`). Its lit draws lose their light (the light maps, the sun, the lamps and their passes,
   the ambient and the baked AO); the screen space AO, the rays' GI and the projectors' passes are not
   drawn.
 - After the opaque list its kernels (`Shaders/PathTrace.hlsl`, compute with rays, at the scene's size)
@@ -896,8 +910,9 @@ reference of its features and console variables.
   terrain's share of the light baked into its texture as the composite divides its albedo by it (grey, 1 on
   a lit face towards the sun; what is not the terrain black).
 - Open places are as bright as the raster, a hut or a tunnel lit through an opening about as bright
-  (without the ambient light far darker, the reference too); a hall lit by its light maps' lamps is
-  darker, the crowns of the trees seen from below too (their leaves pass no light). The highlights are
+  (without the ambient light far darker, the reference too); a hall lit by its light maps' lamps about
+  as bright with the light maps' light (without it 2.3 times darker), the crowns of the trees seen from
+  below darker (their leaves pass no light). The highlights are
   where the raster has them (the specular templates: characters, some rocks and machines) and from the
   light maps' lamps too. On a Radeon RX 7900 XTX at 3840x2160 with FSR Quality the flights over Pier,
   River and Swamp run at 107, 99 and 93 FPS with NRD, the radiance cache and the checkerboard (1 % lows

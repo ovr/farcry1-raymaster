@@ -108,7 +108,7 @@ struct SPipelineKey
   uint8 bDepthOnly;       //!< no pixel shader and no colour writes (DrawGeometry sets it for a shadow map's caster that
                           //!< discards nothing and for the main view's depth prepass)
   uint8 bPathTrace;       //!< nTarget 3 with the path tracer's G-buffer bound (CD3D12Device::BindPathTargets, the fourth to
-                          //!< seventh targets): the general program writes it (XR_PT, PathGBuffer.hlsli), the albedo and the
+                          //!< eighth targets): the general program writes it (XR_PT, PathGBuffer.hlsli), the albedo and the
                           //!< highlights' colour blended as the colour, the normal and the sun by the draws that are not
                           //!< blended; DrawGeometry sets it
 };

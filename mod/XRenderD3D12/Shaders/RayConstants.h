@@ -246,7 +246,8 @@ struct SPathTraceConstants
   XR_FLOAT4(vShade);              //!< x d3d12_PTTerrainDelight, y the lamps' rays' gap (d3d12_RTLightShadowGap), z
                                   //!< d3d12_PTBakedFalloff
   XR_FLOAT4(vFill);               //!< x d3d12_PTAmbient (the game's ambient light a path's ray brings beyond y), y
-                                  //!< d3d12_PTAmbientRange (m)
+                                  //!< d3d12_PTAmbientRange (m), z d3d12_PTLightMaps where the frame has no sun (0: no light
+                                  //!< maps' light, PathLightmapFill)
   XR_FLOAT4(vSpecular);           //!< rgb the sun's highlights' colour (its specular colour times d3d12_PTSpecular; 0 indoors), w
                                   //!< the lamps' highlights' scale (CSSpecular)
   XR_UINT4(nTextures);            //!< texture table indices: x the depth buffer, y CSTrace's paths, z the history of the frame
@@ -271,6 +272,8 @@ struct SPathTraceConstants
                                   //!< for each two pixels of a row), y those it traces: ((x ^ y) & 1) == y
   XR_FLOAT4(vBakeLight);          //!< rgb the light baked into the terrain on a lit open face towards the sun, each channel
                                   //!< (SPathShade::vBakeLight)
+  XR_UINT4(nTextures4);           //!< texture table indices: x the G-buffer's light map light (D3D12_PT_LIGHTMAP_FORMAT), y z w
+                                  //!< unused
 };
 
 #endif

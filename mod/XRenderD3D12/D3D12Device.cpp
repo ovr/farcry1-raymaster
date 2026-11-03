@@ -751,10 +751,10 @@ void CD3D12Device::SetBackBufferTargets()
   if (m_bInScene && m_hPathRTV[0].ptr)
   {
     // The path tracer's G-buffer in the places of the ambient light and after it.
-    const D3D12_CPU_DESCRIPTOR_HANDLE hRTV[7] = { SceneRTV(0), SceneRTV(1), SceneRTV(2), m_hPathRTV[0], m_hPathRTV[1], m_hPathRTV[2],
-                                                  m_hPathRTV[3] };
+    const D3D12_CPU_DESCRIPTOR_HANDLE hRTV[8] = { SceneRTV(0),   SceneRTV(1),   SceneRTV(2),   m_hPathRTV[0],
+                                                  m_hPathRTV[1], m_hPathRTV[2], m_hPathRTV[3], m_hPathRTV[4] };
     const D3D12_CPU_DESCRIPTOR_HANDLE hDSV = m_bDepthReadOnly ? ReadOnlyDSV(true) : SceneDSV();
-    m_pCmdList->OMSetRenderTargets(7, hRTV, FALSE, &hDSV);
+    m_pCmdList->OMSetRenderTargets(8, hRTV, FALSE, &hDSV);
   }
   else if (m_bInScene)
   {
@@ -783,12 +783,13 @@ void CD3D12Device::BindAmbient(D3D12_CPU_DESCRIPTOR_HANDLE hRTV)
 }
 
 void CD3D12Device::BindPathTargets(D3D12_CPU_DESCRIPTOR_HANDLE hAlbedo, D3D12_CPU_DESCRIPTOR_HANDLE hNormal, D3D12_CPU_DESCRIPTOR_HANDLE hSun,
-                                   D3D12_CPU_DESCRIPTOR_HANDLE hSpecular)
+                                   D3D12_CPU_DESCRIPTOR_HANDLE hSpecular, D3D12_CPU_DESCRIPTOR_HANDLE hLightmap)
 {
   m_hPathRTV[0] = hAlbedo;
   m_hPathRTV[1] = hNormal;
   m_hPathRTV[2] = hSun;
   m_hPathRTV[3] = hSpecular;
+  m_hPathRTV[4] = hLightmap;
   if (m_bInFrame && !m_pOffscreen)
     SetBackBufferTargets();
 }
