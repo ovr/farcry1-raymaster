@@ -177,6 +177,15 @@ public:
   //! as szTexturePath (the folder of the object, may be NULL or "") + the whole name and as
   //! szTexturePath + the file name. Never NULL; one reference for the caller.
   CTexture *LoadMaterialTexture(const char *szName, const char *szTexturePath, uint nFlags, uint nFlags2, byte eTT);
+  //! A material's normal map szNormal (a height map is made one first, as a bump map) with the slopes of the height map
+  //! szHeight added, as the original makes a material's EFTT_BUMP and a height map in its EFTT_NORMALMAP one texture:
+  //! the slopes as a height bump map's (HeightToNormalMap) of the height map repeated over the normal map's texels, n =
+  //! normalize(N.x - sx, N.y - sy, N.z), alpha the mean of N's and the height. Searched as LoadMaterialTexture; NULL
+  //! when either file is missing, either has more than one face, the height map is compressed or the normal map's
+  //! format cannot be read. One reference for the caller.
+  CTexture *LoadNormalWithHeight(const char *szNormal, const char *szHeight, const char *szTexturePath, uint nFlags);
+  //! A texture name that is no normal map's (*_ddn*, *.ddn*): a bump map of that name is a height map.
+  static bool IsHeightMapName(const char *szName);
 
   //! IRenderer::LoadTexture: the ID, or nDefault when no file is found (no placeholder); a name
   //! seen before gets the same answer without reading a file. One reference for the caller.

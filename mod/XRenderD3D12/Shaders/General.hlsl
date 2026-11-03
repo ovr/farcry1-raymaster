@@ -41,8 +41,9 @@
 //	    tex1 with uv1 (any of DF_TEX1, DF_TEX1_DETAIL, DF_TEX1_LIGHTMAP;
 //	      sampler from bits 4-7): DF_TEX1_LIGHTMAP rgb *= 4 * tex1 + vAmbient
 //	      (DF_LIGHTMAP_DIR, a dot3 light map: tex1 * saturate(D.z) * D.a, D =
-//	      tex2 at uv1, rgb * 2 - 1), DF_TEX1_DETAIL rgb = 2 * rgb + tex1 - 0.5,
-//	      else *= tex1
+//	      tex2 at uv1, rgb * 2 - 1; with g_Frame.vLightmap.x, d3d12_LightmapDot3,
+//	      tex1 * lerp(1, saturate(D.z), tex1 a) * D.a as the original's),
+//	      DF_TEX1_DETAIL rgb = 2 * rgb + tex1 - 0.5, else *= tex1
 //	    DF2_ALPHA_GLOW: rgb += tex0 rgb * tex0 a (the texture's alpha its
 //	      glow, unlit)
 //	    DF2_AMBIENT_CUBE: rgb += 0.25 * (the cube g_Cubes[nTex6] at the view
@@ -142,7 +143,12 @@
 //	  DF2_LIGHTMAP_LIGHTS (with DF_TEX1_LIGHTMAP, without DF_LIGHTING): the
 //	  draw's lights without the sun (DrawLighting per pixel with
 //	  DF2_VERTEX_LIGHTS, the normal as for DF_PIXEL_LIGHTING) take vAmbient's
-//	  place under the light map: rgb *= 4 * v * tex1 + those lights.
+//	  place under the light map: rgb *= 4 * v * tex1 + those lights. With
+//	  DF_SPECULAR (d3d12_LightmapSpecular, the bump templates over a dot3 light
+//	  map) the lamps baked into it among them (XR_LIGHT_LIGHTMAP_LAMP) add their
+//	  highlights after that, as the original's light-map bump shaders: rgb +=
+//	  2 * vSpecular.rgb * gloss * their specular colour * LightmapLampFalloff(d
+//	  / radius) * saturate(R.V)^32; nothing else of them.
 //	  DF2_SHADER_FX (the glass of a scope, a mirror, heat haze, the templates
 //	  of special lighting) replaces the pixel shader with ShaderFx; the fur's
 //	  shells and the bubble also move the vertices out along the normal.
@@ -218,6 +224,7 @@
 //////////////////////////////////////////////////////////////////////
 
 #include "Common.hlsli"
+#include "LightmapLight.hlsli"
 #if defined(XR_RAY_REFL) || defined(XR_RAY_LIGHT)
 #include "RayShade.hlsli"
 #endif
@@ -307,7 +314,8 @@ float3 DrawLighting(float3 vPos, float3 vN, bool bPerPixel, out float3 vNoSunLig
   float3 vLight = g_Draw.vAmbient.rgb / fScale + (bSun ? g_Frame.vSunColor.rgb * saturate(dot(vN, g_Frame.vSunDir.xyz)) : 0);
   float3 vNoSun = g_Draw.vAmbient.rgb / fScale;
   float3 vOthers = 0;
-  bool bSpecular = bPerPixel && HasFlag(DF_SPECULAR);
+  // With a light map (DF_TEX1_LIGHTMAP) the highlights are its lamps' alone (XR_LIGHT_LIGHTMAP_LAMP, below).
+  bool bSpecular = bPerPixel && HasFlag(DF_SPECULAR) && !HasFlag(DF_TEX1_LIGHTMAP);
   // The per pixel lights of the bump templates; DF2_VERTEX_LIGHTS: those of the vertex lighting.
   bool bClamp = bPerPixel && !HasFlag2(DF2_VERTEX_LIGHTS);
   float3 vToEye = SafeNormalize(g_Frame.vCameraPos.xyz - vPos);
@@ -317,6 +325,20 @@ float3 DrawLighting(float3 vPos, float3 vN, bool bPerPixel, out float3 vNoSunLig
   {
     float4 vLightPos = g_Draw.vLightPos[i];
     float4 vAtten = g_Draw.vLightAtten[i];
+    // A lamp baked into the light map (d3d12_LightmapSpecular): no light (the light map has it, with its shadows), its
+    // highlight as the original's light-map bump shaders give it: R.V^32 with R the light reflected about N', nothing
+    // left out where N'.L < 0, no ray (the original's has no shadow).
+    if (vLightPos.w == XR_LIGHT_LIGHTMAP_LAMP)
+    {
+      if (bPerPixel && HasFlag(DF_SPECULAR) && HasFlag(DF_TEX1_LIGHTMAP))
+      {
+        const float3 vTo = vLightPos.xyz - vPos;
+        const float fDist = length(vTo);
+        vOtherSpec += saturate(g_Draw.vLightSpec[i].rgb) *
+                      (LightmapLampFalloff(fDist * vAtten.w) * LightmapLampHighlight(vN, vTo / max(fDist, 1e-4), vToEye));
+      }
+      continue;
+    }
     float3 vToLight = vLightPos.xyz;
     float fAtten = 1;
 #ifdef XR_RAY_LIGHT
@@ -398,6 +420,8 @@ void MaterialLighting(float3 vPos, float3 vN, float fSun, out float3 vDiffuse, o
   {
     float4 vLightPos = g_Draw.vLightPos[i];
     float4 vAtten = g_Draw.vLightAtten[i];
+    if (vLightPos.w == XR_LIGHT_LIGHTMAP_LAMP)
+      continue;
     float3 vToLight = vLightPos.xyz;
     float fAtten = 1;
 #ifdef XR_RAY_LIGHT
@@ -1209,7 +1233,8 @@ float4 ShadePixel(SVertexOutput In)
       if (HasFlag(DF_LIGHTMAP_DIR))
       {
         float4 vDir = SampleTexture(g_Draw.nTex2, nSampler1, In.vTex1);
-        vLight *= saturate(dot(vMap, vDir.xyz * 2 - 1)) * vDir.a;
+        // d3d12_LightmapDot3: as the original's light-map bump shaders, N'.D towards 1 by the light map's alpha.
+        vLight *= LightmapDot3(saturate(dot(vMap, vDir.xyz * 2 - 1)), vTex1.a, g_Frame.vLightmap.x > 0) * vDir.a;
       }
 #ifdef XR_AMBIENT
       // The colour is unlit here: its light is the light map's and the ambient colour under it.
@@ -1223,6 +1248,9 @@ float4 ShadePixel(SVertexOutput In)
         vAmb = vColor.rgb * s_vAmbientNoSun;
 #endif
         vColor.rgb *= 4 * fSun * vLight + vNoSunLight;
+        // The highlights of the light map's lamps (DF_SPECULAR, d3d12_LightmapSpecular), added after it as the original's.
+        if (HasFlag(DF_SPECULAR))
+          vColor.rgb += 2 * g_Draw.vSpecular.rgb * (g_Draw.vSpecular.w > 0 ? vTex.a : 1) * vOtherSpec;
       }
       else
         vColor.rgb *= 4 * fSun * vLight + g_Draw.vAmbient.rgb;

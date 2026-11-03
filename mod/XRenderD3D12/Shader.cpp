@@ -1453,6 +1453,21 @@ CTexture *CShaderManager::LoadResourceTexture(SRenderShaderResources *pRes, int 
 CTexture *CShaderManager::LoadNormalMap(SRenderShaderResources *pRes)
 {
   auto Usable = [](CTexture *p) { return p && !p->IsCube() && !(p->GetFlags() & FT_NOTFOUND) && p->IsTextureLoaded(); };
+  // d3d12_NormalMapHeight: a height map in EFTT_NORMALMAP (the material's displacement map, its name no normal map's;
+  // Research's cave rock) is no normal map. With a normal map in EFTT_BUMP the slot gets one texture of both, as the
+  // original's (CTextureManager::LoadNormalWithHeight); alone it is made a normal map as a height bump map is. Once,
+  // when the slot has no texture yet.
+  SEfResTexture *pNormal = pRes ? pRes->m_Textures[EFTT_NORMALMAP] : nullptr;
+  if (pNormal && !pNormal->m_TU.m_ITexPic && !pNormal->m_TU.m_AnimInfo && !pNormal->m_Name.empty() && g_pRenderer &&
+      g_pRenderer->CV_d3d12_NormalMapHeight && CTextureManager::IsHeightMapName(pNormal->m_Name.c_str()))
+  {
+    const SEfResTexture *pBump = pRes->m_Textures[EFTT_BUMP];
+    if (pBump && !pBump->m_Name.empty() && g_pRenderer->m_pTextures)
+      pNormal->m_TU.m_ITexPic = g_pRenderer->m_pTextures->LoadNormalWithHeight(pBump->m_Name.c_str(), pNormal->m_Name.c_str(),
+                                                                               pRes->m_TexturePath.c_str(), pBump->m_TU.GetTexFlags());
+    if (!pNormal->m_TU.m_ITexPic)
+      pNormal->m_TU.m_eTexType = eTT_Bumpmap;
+  }
   CTexture *pMap = LoadResourceTexture(pRes, EFTT_NORMALMAP);
   if (!Usable(pMap))
     pMap = LoadResourceTexture(pRes, EFTT_BUMP);

@@ -5,7 +5,7 @@
 //	File: TestHeaders.hlsl
 //	Description: The unit tests' kernels over the renderer's shader
 //	headers that stand alone (Shader Model 6.0): PathGBuffer.hlsli,
-//	HdrLight.hlsli, HdrToneMap.hlsli, HdrExposure.hlsli, HdrFrameAverage.hlsli and PathCache.hlsli, included as the renderer's
+//	HdrLight.hlsli, HdrToneMap.hlsli, HdrExposure.hlsli, HdrFrameAverage.hlsli, PathCache.hlsli and LightmapLight.hlsli, included as the renderer's
 //	programs include them. Each kernel runs the tested functions on the
 //	items of g_TestIn and writes what they give to g_TestOut; ShaderTests.cpp
 //	checks it. One compile per kernel (Tests/CMakeLists.txt).
@@ -21,6 +21,7 @@
 #include "HdrExposure.hlsli"
 #include "HdrFrameAverage.hlsli"
 #include "PathCache.hlsli"
+#include "LightmapLight.hlsli"
 
 //! PathOctEncode / PathOctDecode of the unit vector g_TestIn[i].xyz: out[3i] the map's point, out[3i + 1] its vector, out[3i + 2]
 //! the vector of the point as the 10 bits of R10G10B10A2 keep it.
@@ -82,6 +83,20 @@ void CSHdrOutput(uint i : SV_DispatchThreadID)
   const float k = g_Test.vTest.x, P = g_Test.vTest.y;
   TestOut(2 * i, float4(HdrOutputToneMap(vLight, k, P, g_Test.vTest.z, g_Test.vTest.w), 0));
   TestOut(2 * i + 1, float4(NeutralToneMap(vLight, k, 1, g_Test.vTest.z), 0));
+}
+
+//! A dot3 light map's light (LightmapLight.hlsli): out[i] = (LightmapLampFalloff(g_TestIn[i].x), LightmapDot3 of the
+//! N'.D g_TestIn[i].y and the light map's alpha g_TestIn[i].z mixed and not, LightmapLampHighlight of the normal
+//! g_TestIn[i + n], the direction to the lamp g_TestIn[i + 2n] and to the eye g_TestIn[i + 3n]), n = g_Test.nTest.x.
+[numthreads(64, 1, 1)]
+void CSLightmapLight(uint i : SV_DispatchThreadID)
+{
+  const uint n = g_Test.nTest.x;
+  if (i >= n)
+    return;
+  const float4 v = TestIn(i);
+  TestOut(i, float4(LightmapLampFalloff(v.x), LightmapDot3(v.y, v.z, true), LightmapDot3(v.y, v.z, false),
+                    LightmapLampHighlight(TestIn(i + n).xyz, TestIn(i + 2 * n).xyz, TestIn(i + 3 * n).xyz)));
 }
 
 //! The sky's glow towards the sun (HdrLight.hlsli): out[i] = (HdrSkyGlow(g_TestIn[i].x the cosine, y the glow, z the power), 0, 0, 0).

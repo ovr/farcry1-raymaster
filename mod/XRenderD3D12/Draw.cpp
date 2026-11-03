@@ -129,6 +129,7 @@ void CD3D12Renderer::MakeFrameConstants(SFrameConstants &fc, bool bScene) const
   Set4(fc.vWorldColor, m_WorldColor[0], m_WorldColor[1], m_WorldColor[2], m_WorldColor[3]);
   Set4(fc.vDepthParams, m_ProjMatrix.data[10], m_ProjMatrix.data[14], 0, 0);
   Set4(fc.vHdr, HdrSkyGlow(), HdrSkyGlowPower(), 0, 0);
+  Set4(fc.vLightmap, CV_d3d12_LightmapDot3 ? 1.0f : 0.0f, 0, 0, 0);
   SetCascadeConstants(fc);
   const float fFoliageEnd = std::max(CV_d3d12_FoliageTranslucencyDistance, 1.0f);
   Set4(fc.vFoliage, std::max(CV_d3d12_FoliageTranslucency, 0.0f), std::max(CV_d3d12_FoliageTranslucencyPower, 0.1f), fFoliageEnd, 2 / fFoliageEnd);

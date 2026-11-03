@@ -43,6 +43,7 @@ typedef float float4x4_t[16];
 
 //! The most lights SDrawConstants holds besides the sun.
 #define XR_MAX_DRAW_LIGHTS 16
+#define XR_LIGHT_LIGHTMAP_LAMP 3  //!< SDrawConstants::vLightPos[i].w: a lamp baked into the draw's light map, its highlight alone (DF_SPECULAR)
 //! The most shadow maps a draw samples (DF_SHADOWS).
 #define XR_MAX_DRAW_SHADOWS 4
 //! The most cascades of the sun's shadow (DF2_SUN_CASCADES).
@@ -76,10 +77,12 @@ typedef float float4x4_t[16];
 #define DF_SHADOW_DEBUG     0x02000000  //!< with DF_SHADOWS: the result is the sun's visibility in grey (d3d12_ShadowDebug 2)
 #define DF_CAUSTICS         0x10000000  //!< rgb = 0.5 + 0.5 * k * (I - 1), I the caustics (tex0, see General.hlsl), for 2 * dst * src
 #define DF_VALPHA_ONLY      0x08000000  //!< with DF_VCOLOR: only the vertex colour's alpha counts (rgb white)
-#define DF_LIGHTMAP_DIR     0x04000000  //!< with DF_TEX1_LIGHTMAP, a dot3 light map: the light map times saturate(D.z) * D.a, D = tex2 at uv1 (rgb * 2 - 1: the light's dominant direction in the surface's tangent space, a: its strength)
+#define DF_LIGHTMAP_DIR     0x04000000  //!< with DF_TEX1_LIGHTMAP, a dot3 light map: the light map times saturate(D.z) * D.a, D = tex2 at uv1 (rgb * 2 - 1: the light's dominant direction in the surface's tangent space, a: its strength);
+                                        //!< with SFrameConstants::vLightmap.x (d3d12_LightmapDot3) times lerp(1, saturate(D.z), the light map's alpha) * D.a instead, as the original's
 #define DF_DETAIL_LAYER     0x00080000  //!< rgb = lerp(0.5, tex0, colour a * saturate((vParams0.y - d) * vParams0.z)), a = 1, fogged towards 0.5 (d: distance to the camera)
 #define DF_PIXEL_LIGHTING   0x40000000  //!< with DF_LIGHTING: lit per pixel (each light's colour clamped to 1, point lights falling off as saturate(1 - d * vLightAtten.w); DF2_VERTEX_LIGHTS: as per vertex), with the vertex normal or N' (DF_BUMP)
-#define DF_SPECULAR         0x80000000  //!< with DF_PIXEL_LIGHTING: + 2 * vSpecular.rgb * gloss * sum of the lights' specular colour (clamped to 1) * falloff * saturate(R.V)^32, R the light reflected about N', where N'.L > 0
+#define DF_SPECULAR         0x80000000  //!< with DF_PIXEL_LIGHTING: + 2 * vSpecular.rgb * gloss * sum of the lights' specular colour (clamped to 1) * falloff * saturate(R.V)^32, R the light reflected about N', where N'.L > 0;
+                                        //!< with DF_TEX1_LIGHTMAP (d3d12_LightmapSpecular): the same of its light map's lamps (XR_LIGHT_LIGHTMAP_LAMP) alone, after the light map, falling off as the original's (LightmapLampFalloff)
 #define DF_BUMP             0x20000000  //!< bump mapping: N' = the normal map tex3 at uv0 (rgb * 2 - 1, its green times vParams1.y) in the vertex's tangent frame (TANGENT, BINORMAL, TNORMAL) for DF_PIXEL_LIGHTING; DF_LIGHTMAP_DIR takes saturate(dot(N', D)) for D.z
 
 // SDrawConstants::nFlags2
@@ -196,6 +199,7 @@ struct SFrameConstants
                                   //!< y z w the general program's rays (XR_RAY_REFL, XR_RAY_LIGHT; Draw.cpp): y their length, z RayMask with
                                   //!< the cube maps' mode in bits 16-23, the lamps' in 24-25, their number a pixel in 28-31 and their rays' gap at
                                   //!< the lamp in 9-15 (2 cm steps), w the ocean's level
+  XR_FLOAT4(vLightmap);           //!< x 1: a dot3 light map's N'.D mixed towards 1 by the light map's alpha (DF_LIGHTMAP_DIR, d3d12_LightmapDot3)
 };
 
 //! b1: per draw.
@@ -209,7 +213,8 @@ struct SDrawConstants
   XR_FLOAT4(vTexGenV);
   XR_FLOAT4(vTexMat0);            //!< DF_TEXMATRIX: u' = dot(float3(u, v, 1), vTexMat0.xyz); w: tex4's u offset (DF2_ADD_TEX4, DF2_TEX4_LAYER)
   XR_FLOAT4(vTexMat1);            //!<               v' = dot(float3(u, v, 1), vTexMat1.xyz); w: tex4's v offset
-  XR_FLOAT4_ARRAY(vLightPos, XR_MAX_DRAW_LIGHTS);   //!< DF_LIGHTING, the draw's lights: w 1 a point light at xyz (world), w 2 a directional light from xyz
+  XR_FLOAT4_ARRAY(vLightPos, XR_MAX_DRAW_LIGHTS);   //!< DF_LIGHTING, the draw's lights: w 1 a point light at xyz (world), w 2 a directional light from xyz,
+                                                    //!< w 3 (XR_LIGHT_LIGHTMAP_LAMP) a lamp baked into the draw's light map at xyz: its highlight alone (DF_SPECULAR)
   XR_FLOAT4_ARRAY(vLightColor, XR_MAX_DRAW_LIGHTS); //!< rgb: the light's colour; w a point light's least gap short of it its rays end (XR_RAY_LIGHT, m:
                                                     //!< a projector's d3d12_RTProjectorShadowGap, else 0: the frame's)
   XR_FLOAT4_ARRAY(vLightAtten, XR_MAX_DRAW_LIGHTS); //!< a point light's attenuation 1 / (x + y d) at the distance d, 0 from z (the range) on; w 1 / its radius (DF_BUMP)
