@@ -22,6 +22,8 @@ Mods for Far Cry, built with the CryENGINE MOD SDK for Far Cry:
   XRenderD3D12's anti-aliasing.
 - `third_party/cmaa2` - Intel's CMAA2 (Conservative Morphological Anti-Aliasing 2.0), the CMAA2 of
   XRenderD3D12's anti-aliasing.
+- `third_party/fidelityfx-cas` - AMD FidelityFX CAS (Contrast Adaptive Sharpening), the sharpening
+  of XRenderD3D12's TAA.
 - `third_party/nrd`, `third_party/shadermake`, `third_party/mathlib` - git submodules: NVIDIA's NRD,
   the denoiser of XRenderD3D12's path tracer, with the tool that builds its shaders and its math
   library. The repository has their links, not their files: clone it with `--recurse-submodules`
@@ -93,7 +95,8 @@ its MIT license (`LICENSE`, `license.txt`, `LICENSE` in its folder). `third_part
 shader and precomputed textures by Jorge Jimenez, Jose I. Echevarria, Belen Masia, Fernando Navarro
 and Diego Gutierrez, under its MIT license (`LICENSE.txt` in its folder). `third_party/cmaa2/`
 holds CMAA2's shader by Intel Corporation, under the Apache License 2.0 (`license.txt` in its
-folder).
+folder). `third_party/fidelityfx-cas/` holds FidelityFX CAS's headers by Advanced Micro Devices,
+Inc., under its MIT license (`LICENSE.txt` in its folder).
 
 `third_party/nrd`, `third_party/shadermake` and `third_party/mathlib` are git submodules: links to
 NVIDIA's repositories of NRD (NVIDIA Real-time Denoisers) at the tag v4.18.0 and of ShaderMake and

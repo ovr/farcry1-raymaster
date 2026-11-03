@@ -23,11 +23,11 @@ reference of its features and console variables.
   FSR 4 on the AMD GPUs it supports, FSR 3.1 on the others). An unknown or unavailable one is
   logged once and acts as `none`. `d3d12_UpscaleMode` is the render size: 0 Native AA (the
   display's size, anti-aliasing only), 1 Quality, 2 Balanced, 3 Performance, 4 Ultra
-  Performance. `d3d12_UpscaleSharpness` is 0 to 1 (0.5; 0 turns sharpening off).
-  `d3d12_UpscaleVersion` is the upscaler's major version: 0 (the default) the one it picks for the
-  GPU, 3 or 4 (FSR 3.1 or FSR 4, the newest of that major the upscaler DLL has; one it does not
-  have is logged and acts as 0); a new value makes the upscaler anew. On a Radeon RX 7900 XTX
-  (RDNA 3; FSR 4 is made for RDNA 4), Native AA at 3840 x 2160 takes the GPU some
+  Performance. `d3d12_UpscaleSharpness` is 0 to 1 (0.5; 0 turns sharpening off; TAA's is CAS's
+  sharpness). `d3d12_UpscaleVersion` is the upscaler's major version: 0 (the default) the one it
+  picks for the GPU, 3 or 4 (FSR 3.1 or FSR 4, the newest of that major the upscaler DLL has; one it
+  does not have is logged and acts as 0); a new value makes the upscaler anew. On a Radeon RX 7900
+  XTX (RDNA 3; FSR 4 is made for RDNA 4), Native AA at 3840 x 2160 takes the GPU some
   4 ms a frame with FSR 4 and 1.6 to 1.75 ms with FSR 3.1 (DemoLevel sweeps of Swamp and Pier:
   369 and 424 FPS without it, 154 and 163 with FSR 4, 235 and 257 with FSR 3.1).
   `d3d12_UpscaleDebug 1` shows FSR's debug view (FSR 4: the motion vectors at the top left, the
@@ -164,24 +164,39 @@ reference of its features and console variables.
     (the history's alpha counts them, up to 32), at least 1 / 5, 1 / 7, 1 / 10, 1 / 14 by
     `d3d12_AAQuality` and up to 1.5 times it from a pixel's motion a frame on (the history,
     resampled every frame, blurs as it moves); then the sharpening, `d3d12_UpscaleSharpness` (0.5;
-    0 turns it off and the resolve writes the picture), a clamped unsharp mask that fades out
-    where the 4 neighbours' luma range is above 0.3 (the silhouettes: there it brought the jaggies
-    back). The history is two R16G16B16A16_FLOAT targets of the display's size in turn; the HDR
-    light is blended exposed and compressed (c / (1 + max(r, g, b)), undone after).
+    0 turns it off and the resolve writes the picture). The history is two R16G16B16A16_FLOAT
+    targets of the display's size in turn; the HDR light is blended exposed and compressed
+    (c / (1 + max(r, g, b)), undone after).
+  - The sharpening is AMD FidelityFX CAS (T. Lottes's Contrast Adaptive Sharpening,
+    `third_party/fidelityfx-cas`, its `ffx_cas.h` as it is; `Shaders/TaaCas.hlsli`) in its
+    sharpen-only form, 32-bit, with the 3 x 3's diagonals in its soft minimum and maximum
+    (`CAS_BETTER_DIAGONALS`) and the exact reciprocals and square root (`CAS_GO_SLOWER`): a
+    negative lobe of -1/8 to -1/5 around the pixel by its sharpness (`d3d12_UpscaleSharpness`,
+    `CasSetup` on the CPU), scaled by the 3 x 3's distance to black and to white over its maximum,
+    so that the textures' small contrasts get the most of it. It takes linear light from 0 to 1:
+    the HDR light exposed and compressed as the history blends it, the LDR colours decoded (c^2.2)
+    and encoded again. The history stays unsharpened; only the picture is.
   - Against the reference of the render tests' `aa` (Training's islands from the hill) the error at
-    the edges is 0.64-0.67 of none's and the textures keep 1.03 of their detail (without the
-    sharpening 0.48-0.52 and 0.81-0.83; FSR's Native AA at 0.5 0.69-0.75 and 0.95-1.04). In motion
-    (DemoLevelAAMove, the camera turning over the islands) the edges are 0.67-0.76 of none's, the
-    textures keep 0.75-0.79 of the reference's detail (none 1.03-1.04) and the flicker's high part
-    (`flicker.py` over 118 frames) is 0.79 of none's. At 3840 x 2160 its GPU section `upscale`
-    takes 0.55-0.56 ms (without the sharpening 0.50-0.52; FSR 4's Native AA 4.10-4.15) and the
-    frame's GPU time goes from 3.96 to 4.73 ms and from 3.66 to 4.47 (PerfSweep Swamp and Pier,
-    with the scene's light for it in `hdr` and the motion vectors).
+    the edges is 0.69-0.76 of none's and the textures have 1.35-1.39 of its detail: CAS at 0.5 is
+    sharper than the view supersampled 4 x (at 0.25 0.65-0.71 and 1.25-1.28, at 1 1.00-1.03 and
+    1.82-1.87; without the sharpening 0.48-0.51 and 0.81-0.83; the sharpening of our own it
+    replaced, a clamped unsharp mask that left the silhouettes, 0.65-0.68 and 1.03; FSR's Native AA
+    at 0.5 0.69-0.75 and 0.95-1.04). In motion (DemoLevelAAMove, the camera turning over the
+    islands) the edges are 0.72-0.80 of none's, the textures keep 0.92-0.97 of the reference's
+    detail (none 1.03-1.04; with our own sharpening 0.75-0.79) and the flicker's high part
+    (`flicker.py` over 118 frames) is 0.91 of none's (0.87 at 0.25; 0.79 with our own sharpening):
+    the sharper textures flicker more. At 3840 x 2160 its GPU section `upscale` takes 0.59 ms (in
+    the same runs 0.56 with the sharpening of our own and 0.49-0.51 without the sharpening, the
+    frame's GPU time 5.04 and 4.62 ms against 5.00 and 4.64; FSR 4's Native AA 4.10-4.15;
+    PerfSweep Swamp and Pier, with the scene's light for it in `hdr` and the motion vectors).
   - Unit tests `Taa_*`: the jitter covers the pixel; a still edge gathers the frames (under half
     of the error without it after 48 frames at every quality); a reset takes the frame; the history
     follows the motion (by the nearest of the 3 x 3) and is ignored off the picture; a stale history
     is clipped; the HDR light comes back as it was; a highlight of one frame weighs less; the
-    sharpening sharpens a texture and leaves a silhouette, within the neighbours' range.
+    sharpening is CAS's filter as `ffx_cas.h` writes it (worked out on the CPU, for the LDR colours
+    and the HDR light, at the sharpness 0, 0.5 and 1) with `UpscalerTaa.cpp`'s constants
+    (`CasSetup`), leaves flat pictures as they are to their border and raises a texture's
+    contrast, more the higher the sharpness.
 
 ## HDR
 

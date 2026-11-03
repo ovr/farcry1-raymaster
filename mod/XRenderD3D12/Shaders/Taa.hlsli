@@ -31,7 +31,8 @@
 //	  - The HDR scene's light is blended exposed and compressed
 //	    (TaaToWorking: c / (1 + max(r, g, b)), undone after), a highlight
 //	    weighing as much as a white.
-//	TaaSharpen is the sharpening after it (d3d12_UpscaleSharpness).
+//	The sharpening after it (d3d12_UpscaleSharpness) is AMD FidelityFX
+//	CAS's (TaaCas.hlsli) in TaaToCas's space.
 //	The includer defines the loads first:
 //	  float3 TaaLoadColor(int2 p)         the frame's colour of pixel p
 //	  float TaaLoadDepth(int2 p)          its depth (0 near, 1 far)
@@ -208,18 +209,18 @@ float3 TaaDebug(STaaPixel r, float fExposure)
   return TaaFromWorking(min(v, 0.95), fExposure);
 }
 
-//! The luma range of the five pixels above which TaaSharpen leaves them as they are.
-#define TAA_SHARPEN_RANGE 0.3
-
-//! The sharpening of a pixel c by its four neighbours n, s, w, e (TaaToWorking's space) by k (0 none to 1): c pushed
-//! away from their mean by up to twice its difference from it, never beyond the range of the five (no halo), and less
-//! the larger their range is (none from TAA_SHARPEN_RANGE on): the textures' small contrasts get it, a silhouette's
-//! step, anti-aliased now, stays as it is.
-float3 TaaSharpen(float3 c, float3 n, float3 s, float3 w, float3 e, float k)
+//! The picture's colour as the sharpening (CAS, TaaCas.hlsli) takes it, linear light from 0 to 1: the HDR light exposed
+//! and compressed as the history blends it (TaaToWorking, fExposure > 0), the LDR colours (the game's, gamma encoded)
+//! decoded.
+float3 TaaToCas(float3 c, float fExposure)
 {
-  const float3 vMin = min(c, min(min(n, s), min(w, e))), vMax = max(c, max(max(n, s), max(w, e)));
-  const float f = saturate(1 - dot(vMax - vMin, float3(0.25, 0.5, 0.25)) / TAA_SHARPEN_RANGE);
-  return clamp(c + 2 * k * f * (c - 0.25 * (n + s + w + e)), vMin, vMax);
+  return fExposure > 0 ? TaaToWorking(c, fExposure) : pow(saturate(c), 2.2);
+}
+
+//! And back.
+float3 TaaFromCas(float3 c, float fExposure)
+{
+  return fExposure > 0 ? TaaFromWorking(c, fExposure) : pow(saturate(c), 1 / 2.2);
 }
 
 #endif
