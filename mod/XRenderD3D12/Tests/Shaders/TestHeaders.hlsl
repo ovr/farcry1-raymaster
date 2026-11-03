@@ -329,6 +329,18 @@ void CSWaterGlint(uint i : SV_DispatchThreadID)
                     WaterFresnel(dot(V, H))));
 }
 
+//! WaterCrestLight (WaterLight.hlsli) of the normal g_TestIn[4i].xyz with the height g_TestIn[4i].w, the direction
+//! to the camera g_TestIn[4i + 1].xyz with the waves' RMS slope g_TestIn[4i + 1].w and to the sun g_TestIn[4i + 2].xyz,
+//! and WaterCrestColor of the deep water's colour g_TestIn[4i + 3].rgb: out[i] = (the light, the colour).
+[numthreads(64, 1, 1)]
+void CSWaterCrest(uint i : SV_DispatchThreadID)
+{
+  if (i >= g_Test.nTest.x)
+    return;
+  const float4 n = TestIn(i * 4), v = TestIn(i * 4 + 1);
+  TestOut(i, float4(WaterCrestLight(n.xyz, v.xyz, TestIn(i * 4 + 2).xyz, n.w, v.w), WaterCrestColor(TestIn(i * 4 + 3).rgb)));
+}
+
 //! WaterCapLight (WaterLight.hlsli) of the light g_TestIn[i].rgb at most g_TestIn[i].w: out[i].rgb.
 [numthreads(64, 1, 1)]
 void CSWaterCap(uint i : SV_DispatchThreadID)

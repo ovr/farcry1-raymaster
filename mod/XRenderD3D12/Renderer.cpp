@@ -161,7 +161,7 @@ void CD3D12Renderer::RegisterVariables()
                      "Water surfaces show one term: 1 refraction, 2 reflection, 3 water thickness (0-2 m: black-white), 4 normal, 5 screen space reflection hits, 6 their colour, 7 the planar reflection, "
                      "8 the scene behind, 9 view path (red, 0-32 m), depth (green, 0-16 m) and fresnel (blue), 10 the vertex colour, 11 its alpha, "
                      "12 the RMS of the wave slopes finer than a pixel (white: 0.1); with d3d12_RTReflections: 13 the rays' hits, 14 their distance "
-                     "(blue near, red at d3d12_RTDistance), 15 how much they count; 16 the sun's glint, 18 the variance of its slopes (white: 0.05), 19 the sun's shadow on the water (black)");
+                     "(blue near, red at d3d12_RTDistance), 15 how much they count; 16 the sun's glint, 17 its light through the crests, 18 the variance of its slopes (white: 0.05), 19 the sun's shadow on the water (black)");
   iConsole->Register("d3d12_Caustics", &CV_d3d12_Caustics, 1, VF_DUMPTODISK, "Caustics on the terrain under the ocean; 0 off");
   // Not saved (d3d12_WaterSunGlint before it was, at 0).
   iConsole->Register("d3d12_WaterGlint", &CV_d3d12_WaterGlint, 1.0f, 0,
@@ -170,6 +170,9 @@ void CD3D12Renderer::RegisterVariables()
   iConsole->Register("d3d12_WaterGlintRoughness", &CV_d3d12_WaterGlintRoughness, 0.004f, 0,
                      "The variance of the slopes of the water's ripple finer than its wave texture, which widens the sun's glint "
                      "(added to that of the ripple finer than a pixel)");
+  iConsole->Register("d3d12_WaterCrestLight", &CV_d3d12_WaterCrestLight, 1.0f, 0,
+                     "The sun's light through the thin crests of the waves, turquoise, seen against the sun: its strength (0: none, "
+                     "as the game draws water)");
   iConsole->Register("d3d12_GpuTimes", &CV_d3d12_GpuTimes, 0, 0,
                      "N: every N frames, the average GPU time of the frame's sections (shadow maps, water reflection, opaque, "
                      "water, blended, ...) and the time between frames to the console and XRenderD3D12_gpu.txt; 0 off");

@@ -49,6 +49,11 @@
 //	    sun's path far away; light added to the colour's, in the HDR targets
 //	    up to the sun's flare (d3d12_HDRSun), none in the sun's shadow (the
 //	    cascades, or a ray with d3d12_RTSunShadows);
+//	  - the sun's light through the thin crests of the waves (WaterLight.hlsli;
+//	    d3d12_WaterCrestLight 0 leaves it out): turquoise, half in the deep
+//	    water's hue, on the upper part of the ripple (the wave texture's
+//	    height), more on its faces turned away from the sun, seen against it
+//	    at a slant; light added as the glint's, in the sun's shadow none;
 //	  - near the shore (close to the camera) the surface fades into the
 //	    scene behind it, so the water has no hard edge; seen from below,
 //	    the ocean shows the scene above bent by large swells, in its fog
@@ -76,7 +81,9 @@
 //	buffer, but it is what the upscaler sees there.
 //
 //	SDrawConstants:
-//	  vParams0  x wave slope scale, y reflection amount, z d3d12_WaterDebug
+//	  vParams0  x wave slope scale, y reflection amount, z d3d12_WaterDebug,
+//	            w the strength of the light through the crests
+//	            (d3d12_WaterCrestLight; 0: none)
 //	  vParams1  x z1 of the sky box sides, y 1 when there is a sky box,
 //	            z the sky box's alpha (blends it towards the fog colour),
 //	            w 1 when there is a planar reflection
@@ -90,7 +97,8 @@
 //	            upscaler's scene)
 //	  nTex2..4  the sky box textures: top, _12, _34
 //	  nTex5     the wave slopes (red dH/du, green dH/dv; 128 flat, 32 the RMS;
-//	            alpha their square, 16 at 1)
+//	            alpha their square, 16 at 1), blue the height (128: 0, 32 the
+//	            RMS)
 //	  nTex6     the planar reflection (with mip levels), mParams0 its camera's
 //	            world to clip
 //	  vTexGenU  x the factor of the variance of the slopes finer than a pixel
@@ -159,8 +167,12 @@ float LinearDepth(float fDepth)
 //! texture's u), tile size in metres and speed in metres per second. The texture's mip levels
 //! smooth the waves out where they get finer than a pixel; fLostVar: the variance of the slopes
 //! (across and along together) they smoothed out of this pixel, the mean of the squared slope
-//! (the texture's alpha) less the square of the mean slope, for each layer.
-float3 WaveNormal(float2 vPos, float fTime, float fScale, out float fLostVar)
+//! (the texture's alpha) less the square of the mean slope, for each layer; fHeight: the height of
+//! the waves (the texture's blue) in the shape of the waves the normal shows, each layer's in the
+//! weight of its slopes (the long waves' metres would make patches tens of metres wide of what the
+//! light through the crests, WaterCrestLight, finds on the short waves' sharper crests), RMS 1 (as
+//! far as the mip levels leave it).
+float3 WaveNormal(float2 vPos, float fTime, float fScale, out float fLostVar, out float fHeight)
 {
   static const float4 Layers[3] =
   {
@@ -169,20 +181,35 @@ float3 WaveNormal(float2 vPos, float fTime, float fScale, out float fLostVar)
     float4(-0.60,  0.80,  5.9, 0.35),
   };
   static const float Weights[3] = { 0.55, 0.40, 0.30 };
+  // 1 / the RMS of the layers' heights together: sqrt of the sum of Weights[i]^2.
+  static const float HEIGHT_NORM = 1 / 0.743;
   float2 vSlope = 0;
   fLostVar = 0;
+  fHeight = 0;
   [unroll]
   for (int i = 0; i < 3; i++)
   {
     float2 d = Layers[i].xy, e = float2(-d.y, d.x);
     float2 vUV = float2(dot(vPos, d) - fTime * Layers[i].w, dot(vPos, e)) / Layers[i].z;
-    float3 t = g_Textures[g_Draw.nTex5].Sample(g_SamplerLinearWrap, vUV).rga;
-    float2 s = (t.xy * 255 - 128) / 32;
+    float4 t = g_Textures[g_Draw.nTex5].Sample(g_SamplerLinearWrap, vUV);
+    float2 s = (t.rg * 255 - 128) / 32;
     vSlope += (s.x * d + s.y * e) * Weights[i];
-    fLostVar += max(t.z * 16 - dot(s, s), 0) * (Weights[i] * Weights[i]);
+    fLostVar += max(t.a * 16 - dot(s, s), 0) * (Weights[i] * Weights[i]);
+    fHeight += (t.b * 255 - 128) / 32 * Weights[i];
   }
   fLostVar *= fScale * fScale;
+  fHeight *= HEIGHT_NORM;
   return normalize(float3(-vSlope * fScale, 1));
+}
+
+//! The RMS along one axis of WaveNormal's slopes before fScale: the layers' together, sqrt of the
+//! sum of Weights^2.
+static const float WAVE_SLOPE_RMS = 0.743;
+
+float3 WaveNormal(float2 vPos, float fTime, float fScale, out float fLostVar)
+{
+  float fHeight;
+  return WaveNormal(vPos, fTime, fScale, fLostVar, fHeight);
 }
 
 float3 WaveNormal(float2 vPos, float fTime, float fScale)
@@ -505,8 +532,8 @@ float4 ShadeWater(SWaterOutput In)
   float fPixelAngle = max(length(ddx(V)), length(ddy(V)));
 #endif
 
-  float fLostVar;
-  float3 N = WaveNormal(In.vWorldPos.xy, g_Frame.vTime.x, g_Draw.vParams0.x, fLostVar);
+  float fLostVar, fHeight;
+  float3 N = WaveNormal(In.vWorldPos.xy, g_Frame.vTime.x, g_Draw.vParams0.x, fLostVar, fHeight);
   if (bBelow)
     N = -N;
 
@@ -643,33 +670,47 @@ float4 ShadeWater(SWaterOutput In)
     // the pixel's waves and the slopes about them of the ripple finer than a pixel (the variance
     // fLostVar at full strength, d3d12_WaterReflectionBlur is the reflection's) and of the ripple
     // finer than the texture (d3d12_WaterGlintRoughness, vSpecular.y); times the reflection amount,
-    // fading out as the sun sets (below 6 degrees), at most the sun's flare (vSpecular.z); in the
-    // sun's shadow (WaterSunShadow, looked up only where there is a glint to shade) none.
+    // fading out as the sun sets (below 6 degrees), at most the sun's flare (vSpecular.z). The sun's
+    // light through the thin crests (d3d12_WaterCrestLight, vParams0.w; WaterCrestLight), what the
+    // surface does not reflect of it (1 - F), fading out as the glint. In the sun's shadow
+    // (WaterSunShadow, looked up only where there is light to shade) neither.
     const float fGlintVar = fLostVar + g_Draw.vSpecular.y;
-    float3 vGlint = 0;
+    const float fSunUp = saturate(L.z * 10);
+    float3 vGlint = 0, vCrest = 0;
     if (g_Draw.vSpecular.x > 0)
     {
-      const float fGlint = WaterGlint(N, V, L, fGlintVar) * g_Draw.vSpecular.x * g_Draw.vParams0.y * saturate(L.z * 10);
+      const float fGlint = WaterGlint(N, V, L, fGlintVar) * g_Draw.vSpecular.x * g_Draw.vParams0.y * fSunUp;
       vGlint = WaterCapLight(WaterSunLight() * fGlint, g_Draw.vSpecular.z);
+    }
+    if (g_Draw.vParams0.w > 0)
+      vCrest = WaterSunLight() * WaterCrestColor(g_Draw.vParams3.rgb) *
+               (WaterCrestLight(N, V, L, fHeight, g_Draw.vParams0.x * WAVE_SLOPE_RMS) * g_Draw.vParams0.w * (1 - F) * fSunUp);
+    {
 #ifdef XR_RAYTRACE
       const float fCone = fDistance * fPixelAngle;
 #else
       const float fCone = 0;
 #endif
-      if (max(vGlint.r, max(vGlint.g, vGlint.b)) > 1e-3)
-        vGlint *= WaterSunShadow(In.vWorldPos, fCone);
+      const float3 vSun = vGlint + vCrest;
+      if (max(vSun.r, max(vSun.g, vSun.b)) > 1e-3)
+      {
+        const float fShadow = WaterSunShadow(In.vWorldPos, fCone);
+        vGlint *= fShadow;
+        vCrest *= fShadow;
+      }
       else
-        vGlint = 0;
+        vGlint = vCrest = 0;
     }
 
     // The shore: the surface fades in over the first 15 cm of water, up to 40 m away; beyond 100 m
     // it covers everything (the coarse distant terrain comes close to the surface in places).
-    // The glint is light added to the colour's (HdrDecode: the game's colours are gamma encoded).
+    // The glint and the crests' light are light added to the colour's (HdrDecode: the game's colours
+    // are gamma encoded).
     float fShore = saturate(fThick0 * 6.6 + saturate((fSurface - 40) / 60));
     vColor = lerp(vRefracted, vReflected, F);
-    if (any(vGlint > 0))
+    if (any(vGlint + vCrest > 0))
     {
-      const float3 vLight = float3(HdrDecode(vColor.r), HdrDecode(vColor.g), HdrDecode(vColor.b)) + vGlint * fShore;
+      const float3 vLight = float3(HdrDecode(vColor.r), HdrDecode(vColor.g), HdrDecode(vColor.b)) + (vGlint + vCrest) * fShore;
       vColor = float3(HdrEncode(vLight.r), HdrEncode(vLight.g), HdrEncode(vLight.b));
     }
     vColor = lerp(vScene0, vColor, fShore);
@@ -699,6 +740,8 @@ float4 ShadeWater(SWaterOutput In)
       return float4(saturate(sqrt(fLostVar) * 10).xxx, 1);
     if (g_Draw.vParams0.z == 16)
       return float4(HdrEncode(vGlint.r), HdrEncode(vGlint.g), HdrEncode(vGlint.b), 1);
+    if (g_Draw.vParams0.z == 17)
+      return float4(HdrEncode(vCrest.r), HdrEncode(vCrest.g), HdrEncode(vCrest.b), 1);
     if (g_Draw.vParams0.z == 18)
       return float4(saturate(fGlintVar / 0.05).xxx, 1);
     if (g_Draw.vParams0.z == 19)

@@ -7,7 +7,7 @@
 //	(Shaders/WaterLight.hlsli on the GPU, TestHeaders.hlsl): the glint's
 //	distribution of the facets, its light against the sun's, the slopes
 //	finer than a pixel (LEAN) as the facets they average, its lobe, and
-//	its cap.
+//	its cap; the light through the crests and its colour.
 //
 //////////////////////////////////////////////////////////////////////
 
@@ -17,6 +17,7 @@
 
 #include "Test_WaterGlint.h"
 #include "Test_WaterCap.h"
+#include "Test_WaterCrest.h"
 
 #include <algorithm>
 #include <cmath>
@@ -305,4 +306,118 @@ XR_TEST(Water_GlintCap)
   for (size_t i = 0; i < std::size(Cases); i++)
     for (int k = 0; k < 3; k++)
       CHECK_NEAR(At(Out, i, k), Cases[i].Out[k], 1e-6);
+}
+
+namespace
+{
+  //! One item of the crests' kernel.
+  struct SCrestItem
+  {
+    SVec3 N, V, L;
+    float fHeight;
+    SVec3 Deep;
+    float fSlopeRMS = 0.3f;
+  };
+
+  //! The kernel's (light, colour) of each item.
+  std::vector<uint32> RunCrest(const std::vector<SCrestItem> &Items)
+  {
+    SDispatch d;
+    d.Shader = XR_BYTECODE(Test_WaterCrest);
+    d.Test.nTest[0] = (uint32)Items.size();
+    d.nGroups[0] = Groups64(Items.size());
+    for (const SCrestItem &it : Items)
+    {
+      Push(d.In, it.N, it.fHeight);
+      Push(d.In, it.V, it.fSlopeRMS);
+      Push(d.In, it.L, 0);
+      Push(d.In, it.Deep, 0);
+    }
+    d.nOut = Items.size();
+    return Gpu().Run(d);
+  }
+}
+
+// Why: the light through a crest is the sun's crossing the thin top of a wave lit from behind; it must come only where
+// that happens (looking towards the sun, on a crest, more on its face turned away from the sun than on a level one,
+// none on a face turned to the sun), none in the troughs, with the sun behind the camera or set, and grow towards the
+// crest and towards the sun, never above the sun's.
+XR_TEST(Water_CrestLight)
+{
+  const double D = PI / 180;
+  // The sun at azimuth 0 (+x) 20 degrees up; the camera on the -x side looking at it 10 degrees down; the face sloping
+  // up towards the sun (turned towards the camera, away from the sun) by the waves' RMS slope 0.3.
+  const SVec3 L = Direction(20 * D, 0), V = Direction(10 * D, PI), Back = FacetNormal(0.3, 0), Flat = { 0, 0, 1 };
+  const SVec3 Deep = { 0.18f, 0.35f, 0.57f };
+  std::vector<SCrestItem> Items = {
+    { Back, V, L, 0.5f, Deep },                     // 0: a low crest against the sun
+    { Back, V, Direction(20 * D, PI), 2.5f, Deep }, // 1: the sun behind the camera
+    { Back, V, L, 0.0f, Deep },                     // 2: the waves' mean height
+    { Back, V, L, -1.0f, Deep },                    // 3: the trough
+    { Flat, V, L, 0.5f, Deep },                     // 4: a level face of the low crest
+    { Back, V, Direction(-2 * D, 0), 2.5f, Deep },  // 5: the sun set
+    { FacetNormal(-0.4, 0), V, L, 2.5f, Deep },     // 6: a face turned to the sun by more than the RMS
+    { Back, V, L, 2.0f, Deep },                     // 7: twice the RMS high: all of it, at most 1
+    { Back, V, Direction(90 * D, 0), 2.5f, Deep },  // 8: the sun overhead
+    { Back, V, L, 2.5f, Deep, 0.0f },               // 9: no waves
+    { Back, V, L, 3.5f, Deep },                     // 10: higher as at twice the RMS
+  };
+  const size_t nHeights = Items.size();
+  for (float h : { 0.1f, 0.2f, 0.3f, 0.4f })
+    Items.push_back({ Back, V, L, h, Deep });
+  const size_t nAzimuths = Items.size();
+  for (double a : { 0.0, 20.0, 40.0, 60.0 })
+    Items.push_back({ Back, V, Direction(20 * D, a * D), 0.5f, Deep });
+  const size_t nSlopes = Items.size();
+  for (float s : { 0.6f, 0.45f, 0.3f })
+    Items.push_back({ Back, V, L, 0.5f, Deep, s });
+  const std::vector<uint32> Out = RunCrest(Items);
+  // 0: the closed form: 8 times the crest's smoothstep at a quarter (0.156), the forward cosine 0.866 squared, a half
+  // and the face's slope away from the sun (0.287 / 0.958) over twice the RMS 0.3 (0.999), the slant 1 - 0.449: 0.516.
+  CHECK(At(Out, 0, 0) > 0.50f && At(Out, 0, 0) < 0.53f);
+  // 4: the level face half of that at its slant 1 - 0.174: 0.387.
+  CHECK(At(Out, 4, 0) > 0.37f && At(Out, 4, 0) < 0.40f);
+  for (size_t i : { 1, 2, 3, 5, 6, 8, 9 })
+    CHECK_NEAR(At(Out, i, 0), 0, 0);
+  CHECK_NEAR(At(Out, 7, 0), 1, 1e-6);
+  CHECK_NEAR(At(Out, 10, 0), 1, 1e-6);
+  // The same face against calmer waves is more of a crest's back (relative to their slopes).
+  for (size_t i = nSlopes + 1; i < Items.size(); i++)
+    CHECK(At(Out, i, 0) > At(Out, i - 1, 0));
+  CHECK_NEAR(At(Out, Items.size() - 1, 0), At(Out, 0, 0), 1e-6);
+  for (size_t i = nHeights + 1; i < nAzimuths; i++)
+    CHECK(At(Out, i, 0) > At(Out, i - 1, 0));
+  for (size_t i = nAzimuths + 1; i < nSlopes; i++)
+    CHECK(At(Out, i, 0) < At(Out, i - 1, 0));
+  for (size_t i = 0; i < Items.size(); i++)
+    CHECK(At(Out, i, 0) >= 0 && At(Out, i, 0) <= 1);
+}
+
+// Why: the crests' light is turquoise (the water absorbs the red on the way through), and half of it takes the hue of
+// the level's deep water so that a lagoon and the open sea keep their own colours: a deep water in the turquoise's
+// hue leaves it as it is, no deep colour gives the turquoise, any other lies halfway in hue.
+XR_TEST(Water_CrestColor)
+{
+  const double D = PI / 180;
+  const SVec3 L = Direction(20 * D, 0), V = Direction(10 * D, PI), N = FacetNormal(0.3, 0);
+  const std::vector<SCrestItem> Items = {
+    { N, V, L, 2.5f, { 0.10f, 0.62f, 0.50f } },
+    { N, V, L, 2.5f, { 0.05f, 0.31f, 0.25f } },
+    { N, V, L, 2.5f, { 0, 0, 0 } },
+    { N, V, L, 2.5f, { 0.18f, 0.35f, 0.57f } },
+  };
+  const std::vector<uint32> Out = RunCrest(Items);
+  // WATER_CREST_PEAK (4) times the turquoise.
+  const float k = 4;
+  for (size_t i = 0; i < 3; i++)
+  {
+    CHECK_NEAR(At(Out, i, 1), k * 0.10f, 1e-5);
+    CHECK_NEAR(At(Out, i, 2), k * 0.62f, 1e-5);
+    CHECK_NEAR(At(Out, i, 3), k * 0.50f, 1e-5);
+  }
+  // The deep blue (0.18, 0.35, 0.57) scaled to 0.62 at its brightest, halfway: (0.148, 0.500, 0.560).
+  CHECK_NEAR(At(Out, 3, 1), k * 0.5f * (0.10f + 0.18f * 0.62f / 0.57f), 1e-4);
+  CHECK_NEAR(At(Out, 3, 2), k * 0.5f * (0.62f + 0.35f * 0.62f / 0.57f), 1e-4);
+  CHECK_NEAR(At(Out, 3, 3), k * 0.5f * (0.50f + 0.62f), 1e-4);
+  CHECK(At(Out, 3, 1) < At(Out, 3, 2));
 }

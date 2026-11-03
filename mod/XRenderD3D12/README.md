@@ -1200,8 +1200,9 @@ and lists theirs (`NamesObjects`).
   2 reflection, 3 water thickness (black to white over 0-2 m), 4 normal, 5 where the screen space
   reflection hits, 6 its colour, 7 the planar reflection (blurred as the water uses it), 12 the
   RMS of the wave slopes finer than a pixel (white: 0.1; the finest of the three wave layers is
-  already lost close to the camera, so it is grey over most of the sea), 16 the sun's glint, 18 the
-  variance of its slopes (white: 0.05), 19 the sun's shadow on the water (black).
+  already lost close to the camera, so it is grey over most of the sea), 16 the sun's glint, 17 the
+  sun's light through the crests, 18 the variance of the glint's slopes (white: 0.05), 19 the sun's
+  shadow on the water (black).
 - The sun's glint (`d3d12_WaterGlint`, 1; 0 draws the frames of the water before it; not saved;
   `d3d12_WaterSunGlint`, a highlight fitted by eye and off as in the game, is gone with it) is the
   sun mirrored by the waves' facets (`Shaders/WaterLight.hlsli`): Beckmann's distribution of the
@@ -1218,6 +1219,24 @@ and lists theirs (`NamesObjects`).
   glint to shade. None in the environment cubes and in heat vision. The water costs 0.04-0.07 ms
   more at 3840 x 2160 (Bunker's sunset 0.56 -> 0.60 ms, Carrier towards the sun 1.01 -> 1.07, with
   the rays' shadows and reflections 1.22 -> 1.29).
+- The sun's light through the thin crests of the waves (`d3d12_WaterCrestLight`, 1, its strength;
+  0 draws the frames of the water before it; not saved; `Shaders/WaterLight.hlsli`): lit from
+  behind, the top of a wave scatters the sun's light forwards, towards a camera that looks at the
+  sun past it, turquoise (the red absorbed on the way). A model fitted by eye, not a simulation of
+  the light in the water: the upper part of the ripple (the wave texture's height, each layer's in
+  the weight of its slopes, so that the light lies on the waves the normal shows, not in patches of
+  the 61 m layer tens of metres wide; above the mean height, all of it from twice the RMS), the
+  square of the cosine between the view's ray and the sun's, more on the faces turned away from
+  the sun (half on a level face, all from the waves' RMS slope away from it, none from it towards
+  it), the slant (1 - N.V); 8 times that, at most 1, times 4 the light of a white face turned to
+  the sun (at 1 it hardly shows against the sky the water mirrors at a slant), times what the
+  surface does not reflect (1 - F). Its colour a turquoise (0.10, 0.62, 0.50) half in the hue of
+  the level's deep water, times the sun's light: blue-green by day (Carrier, most where the water
+  mirrors a dark rock), green-gold at Bunker's sunset. None with the sun behind the camera or set,
+  in its shadow (the glint's), in the environment cubes and in heat vision. It costs the water
+  0.03-0.08 ms more at 3840 x 2160 (Bunker's sunset 0.62 -> 0.65 ms, Carrier towards the sun 1.09 ->
+  1.13; with the rays' shadows and reflections 0.75 -> 0.82 and 1.30 -> 1.38, the shadow's ray now
+  cast for more of the water).
 - With `r_WaterReflections 1` the ocean reflects the scene seen by the camera mirrored in the water
   plane, which the 3D engine renders with `I3DEngine::DrawLowDetail` before the main view;
   `d3d12_WaterReflectionFlags` are the `EDrawLowDetailFlags` it gets (default 4184: the sky, the

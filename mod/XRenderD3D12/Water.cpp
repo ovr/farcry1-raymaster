@@ -935,11 +935,13 @@ bool CD3D12Renderer::SetupWaterDraw(SPipelineKey &Key, SDrawConstants &dc, const
   const float fReflect = std::clamp(GetObjectParam(pObj, "reflectamount", 1.0f), 0.0f, 1.0f);
   const bool bVolume = !IsOcean(it);
   const SFogVolume *pFV = bVolume ? nullptr : m_pScene->GetOceanFogVolume();
-  Set4(dc.vParams0, (fBumpX + fBumpY) * 1.2f, fReflect, (float)CV_d3d12_WaterDebug, 0);
+  // The sun's glint and its light through the crests: none in an environment cube (they are the
+  // camera's) or in heat vision; the glint at most the sun's flare in the HDR targets.
+  const bool bSunLight = !m_bEnvCubePass && !m_bHeatPass;
+  const bool bGlint = CV_d3d12_WaterGlint > 0 && bSunLight;
+  Set4(dc.vParams0, (fBumpX + fBumpY) * 1.2f, fReflect, (float)CV_d3d12_WaterDebug,
+       CV_d3d12_WaterCrestLight > 0 && bSunLight ? CV_d3d12_WaterCrestLight : 0.0f);
   dc.nTex5 = GetWaveTexture();
-  // The sun's glint: none in an environment cube (it is the camera's) or in heat vision; at most the
-  // sun's flare in the HDR targets.
-  const bool bGlint = CV_d3d12_WaterGlint > 0 && !m_bEnvCubePass && !m_bHeatPass;
   Set4(dc.vSpecular, bGlint ? CV_d3d12_WaterGlint : 0.0f, std::max(CV_d3d12_WaterGlintRoughness, 1e-5f),
        IsHdrTarget() ? std::max(CV_d3d12_HDRSun, 1.0f) : 1.0f, 1);
 
