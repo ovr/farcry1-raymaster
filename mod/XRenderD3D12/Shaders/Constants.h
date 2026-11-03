@@ -210,7 +210,8 @@ struct SDrawConstants
   XR_FLOAT4(vTexMat0);            //!< DF_TEXMATRIX: u' = dot(float3(u, v, 1), vTexMat0.xyz); w: tex4's u offset (DF2_ADD_TEX4, DF2_TEX4_LAYER)
   XR_FLOAT4(vTexMat1);            //!<               v' = dot(float3(u, v, 1), vTexMat1.xyz); w: tex4's v offset
   XR_FLOAT4_ARRAY(vLightPos, XR_MAX_DRAW_LIGHTS);   //!< DF_LIGHTING, the draw's lights: w 1 a point light at xyz (world), w 2 a directional light from xyz
-  XR_FLOAT4_ARRAY(vLightColor, XR_MAX_DRAW_LIGHTS); //!< rgb: the light's colour
+  XR_FLOAT4_ARRAY(vLightColor, XR_MAX_DRAW_LIGHTS); //!< rgb: the light's colour; w a point light's least gap short of it its rays end (XR_RAY_LIGHT, m:
+                                                    //!< a projector's d3d12_RTProjectorShadowGap, else 0: the frame's)
   XR_FLOAT4_ARRAY(vLightAtten, XR_MAX_DRAW_LIGHTS); //!< a point light's attenuation 1 / (x + y d) at the distance d, 0 from z (the range) on; w 1 / its radius (DF_BUMP)
   XR_FLOAT4(vTexGen1U);           //!< DF_TEXGEN1_WORLD
   XR_FLOAT4(vTexGen1V);           //!< (DF_TERRAIN_CLIFF: xy 1 where tex2 / tex3 is set)

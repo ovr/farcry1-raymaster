@@ -137,7 +137,8 @@ struct SRayInstance
 struct SPTLight
 {
   XR_FLOAT4(vPos);        //!< xyz the world position (point, projector) or the direction towards the light (directional), w its radius (m)
-  XR_FLOAT4(vColor);      //!< rgb the game's colour (m_Color: the shaders linearise it), w unused
+  XR_FLOAT4(vColor);      //!< rgb the game's colour (m_Color: the shaders linearise it), w the least gap short of it the rays towards it
+                          //!< end (m; a projector's d3d12_RTProjectorShadowGap, else 0: SPathShade::fLightGap)
   XR_FLOAT4(vSpecular);   //!< rgb its highlights' colour (m_SpecColor, the game's colour), w unused
   XR_UINT4(nParams);      //!< x the kind (XR_PT_LIGHT_*), y XR_PT_LIGHT_* bits, z the projector's cube (texture table, XR_RAY_NONE none),
                           //!< w the light's index in the frame's lights (its bit in the objects' light masks; XR_RAY_NONE: a static

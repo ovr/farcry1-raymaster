@@ -193,9 +193,10 @@
 //	towards each point light that lights it (TraceLight), up to nRaySun.z >>
 //	28 of them a pixel, and leave out the light of those it does not reach:
 //	the lamps' hard shadows, ending nRaySun.z >> 9 & 127 times 2 cm short of
-//	the lamp. nRaySun.z >> 24 & 3: 0 none, 2 the light taken away red, 3 the
-//	light taken away green where the ray hits next to the surface to red next
-//	to the lamp.
+//	the lamp, or the light's vLightColor.w where that is more (a projector:
+//	its picture draws its fitting's shade). nRaySun.z >> 24 & 3: 0 none, 2
+//	the light taken away red, 3 the light taken away green where the ray
+//	hits next to the surface to red next to the lamp.
 //	Compiled with XR_PT (the main view's opaque list into the path tracer's
 //	G-buffer, PathGBuffer.hlsli; the HDR scene targets) the pixel shader
 //	also writes the albedo to SV_Target3, the normal, the fog's share and
@@ -268,14 +269,16 @@ static float s_fRayWidth;
 static uint s_nRayLightsLeft;
 
 //! Whether a point light fDistance away along vToLight reaches vPos (TraceLight; 1 past the pixel's
-//! rays); fHit: where its ray hits, of the way to the lamp.
-float LightVisible(float3 vPos, float3 vToLight, float fDistance, out float fHit)
+//! rays), its ray ending the frame's gap short of it, or fMinGap where that is more (a projector's,
+//! vLightColor.w); fHit: where its ray hits, of the way to the lamp.
+float LightVisible(float3 vPos, float3 vToLight, float fDistance, float fMinGap, out float fHit)
 {
   fHit = 1;
   if (!s_bRayLights || s_nRayLightsLeft == 0)
     return 1;
   s_nRayLightsLeft--;
-  return TraceLight(vPos, s_vRayFace, vToLight, fDistance, ((g_Frame.nRaySun.z >> 9) & 127) * 0.02, g_Frame.nRaySun.z & 0xff, s_fRayWidth, fHit, 4);
+  const float fGap = max(((g_Frame.nRaySun.z >> 9) & 127) * 0.02, fMinGap);
+  return TraceLight(vPos, s_vRayFace, vToLight, fDistance, fGap, g_Frame.nRaySun.z & 0xff, s_fRayWidth, fHit, 4);
 }
 #endif
 
@@ -344,7 +347,7 @@ float3 DrawLighting(float3 vPos, float3 vN, bool bPerPixel, out float3 vNoSunLig
 #ifdef XR_RAY_LIGHT
     // A point light the pixel's ray does not reach: none of its light, nor its highlight.
     float fHit;
-    if (vLightPos.w == 1 && any(vThis > 0) && LightVisible(vPos, vToLight, fLightDist, fHit) == 0)
+    if (vLightPos.w == 1 && any(vThis > 0) && LightVisible(vPos, vToLight, fLightDist, g_Draw.vLightColor[i].w, fHit) == 0)
     {
       // d3d12_RTLightShadows 2: what it takes away red; 3: by where the ray hits, green at the surface to red at the lamp.
       const uint nMode = (g_Frame.nRaySun.z >> 24) & 3;
@@ -414,7 +417,7 @@ void MaterialLighting(float3 vPos, float3 vN, float fSun, out float3 vDiffuse, o
 #ifdef XR_RAY_LIGHT
     float fHit;
     if (vLightPos.w == 1 && fNL > 0 && fAtten > 0)
-      fAtten *= LightVisible(vPos, vToLight, fLightDist, fHit);
+      fAtten *= LightVisible(vPos, vToLight, fLightDist, g_Draw.vLightColor[i].w, fHit);
 #endif
     vLight += g_Draw.vLightColor[i].rgb * saturate(fNL) * fAtten;
     if (fNL > 0)

@@ -690,7 +690,10 @@ reference of its features and console variables.
   the pixel shader trace a ray from the pixel's point, a little off its face on the lamp's side,
   towards each point light that lights it (`TraceLight`, the first hit ends it, 4 alpha tests), up to
   `d3d12_RTLightShadowsMax` (4) of them a pixel, ending `d3d12_RTLightShadowGap` (0.1 m) short of the
-  lamp (not its own fitting); where it hits, the light and its specular are left out. Directional
+  lamp (not its own fitting), a projector's `d3d12_RTProjectorShadowGap` (0.5 m) short where that is
+  more (the draw light's `vLightColor.w`): its picture draws the shade of its fitting already, which
+  otherwise cut a hard edge into it (Treehouse's hanging lamps lit the corridor's walls and floor in
+  a sharp trapezoid); where it hits, the light and its specular are left out. Directional
   lights, the per vertex lighting and the vegetation are as they were. 2 shows the light taken away
   in red, 3 by where the ray hits (green next to the surface, red next to the lamp). The frame
   constants' `nRaySun.z` carries the mode, the number and the gap beside the cube maps' mode; a frame
@@ -733,8 +736,8 @@ reference of its features and console variables.
   the one), the motion
   vectors (the scene targets without an upscaler, Upscaler), and the lights for its kernels and the
   programs with rays: `SPTLight` (`Shaders/RayConstants.h`), the root SRV t2 space5, the point lights,
-  the directional ones and the projectors with their cube. They are the frame's lights and the level's
-  static ones (`I3DEngine::GetStaticLightSources`, the lamps the light maps were baked with: the frame
+  the directional ones and the projectors with their cube (and their rays' gap, Projected lights).
+  They are the frame's lights and the level's static ones (`I3DEngine::GetStaticLightSources`, the lamps the light maps were baked with: the frame
   has only those whose sphere reaches the view, one or two of the 85 of Research, and many are
   `DLF_FAKE | DLF_LM`, never in a frame), the nearest 128 within `d3d12_PTLightDistance` (60 m); not the sun, a
   fake light the light maps do not have, a heat source that gives no light, the characters' fill lights
@@ -1144,3 +1147,8 @@ and lists theirs (`NamesObjects`).
     way: concrete walls, floors, doors and stairs under the hanging lamps.
 - The original draws these copies through the stencil of the lamp's shadow volumes. Here there
   are no shadow volumes, so the light is unshadowed.
+- With the lamps' shadows by rays (`d3d12_RTLightShadows`) and in the path tracer, the rays towards
+  a projector end `d3d12_RTProjectorShadowGap` (0.5 m) short of it, not `d3d12_RTLightShadowGap`
+  (0.1 m): the picture is the shape its fitting gives the light, so the fitting casts no shadow of
+  its own (with 0.1 m the shade of Treehouse's hanging lamps cut a hard-edged trapezoid into their
+  light on the walls, the floor and the door; the original has none). 0 takes the other lamps' gap.

@@ -104,6 +104,26 @@ void CSLampLight(uint i : SV_DispatchThreadID)
   TestOut(i, float4(vLight, fDistance));
 }
 
+//! The shadow of lamp g_TestIn[2i].w (its index, bits) on the point g_TestIn[2i].xyz with the face g_TestIn[2i + 1].xyz, as
+//! PathDirect takes it: out[i].x TraceLight's visibility among the scene's instances (g_PT's mask) with the lamp's gap
+//! (PathLampGap of g_PTLights and g_PT's d3d12_RTLightShadowGap), y that gap, z where its ray hits (of the way to the lamp).
+[numthreads(64, 1, 1)]
+void CSLampShadow(uint i : SV_DispatchThreadID)
+{
+  if (i >= g_Test.nTest.x)
+    return;
+  const SPathShade P = PathShadeParams(4);
+  const SPTLight L = g_PTLights[g_TestIn[2 * i].w];
+  const float3 vPos = TestIn(2 * i).xyz;
+  float3 vToLight = L.vPos.xyz - vPos;
+  const float fDistance = length(vToLight);
+  vToLight /= fDistance;
+  const float fGap = PathLampGap(L, P);
+  float fHit;
+  const float fSeen = TraceLight(vPos, TestIn(2 * i + 1).xyz, vToLight, fDistance, fGap, P.nMask, 0, fHit, P.nMaxTests);
+  TestOut(i, float4(fSeen, fGap, fHit, 0));
+}
+
 //! PathTraced over a g_Test.nTest.x x g_Test.nTest.y grid of pixels, with g_PT as the test binds it: out[x + y * w].x 1 where traced.
 [numthreads(8, 8, 1)]
 void CSCheckerboard(uint2 p : SV_DispatchThreadID)

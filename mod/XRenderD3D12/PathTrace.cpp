@@ -316,7 +316,8 @@ void CD3D12Renderer::UpdatePathLights(std::span<CDLight *const> Lights)
     else
       Set4(L.vPos, pLight->m_Origin.x, pLight->m_Origin.y, pLight->m_Origin.z, std::max(pLight->m_fRadius, 0.01f));
     const CFColor &c = pLight->m_Color, &s = pLight->m_SpecColor;
-    Set4(L.vColor, c.r, c.g, c.b, 0);
+    // w: a projector's rays end further short of it (its picture draws its fitting's shade; PathLampGap).
+    Set4(L.vColor, c.r, c.g, c.b, nKind == XR_PT_LIGHT_PROJECTOR ? std::max(CV_d3d12_RTProjectorShadowGap, 0.0f) : 0.0f);
     Set4(L.vSpecular, s.r, s.g, s.b, 0);
     L.nParams[0] = nKind;
     L.nParams[1] = ((nFlags & DLF_LM) ? XR_PT_LIGHT_LM : 0u) | ((nFlags & DLF_AMBIENT_LIGHT) ? XR_PT_LIGHT_FILL : 0u) |
