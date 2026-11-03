@@ -97,6 +97,8 @@ float3 SafeNormalize(float3 v)
 
 // HdrDecode, HdrEncode: the light of a colour of the game and back.
 #include "HdrLight.hlsli"
+// ArrayCoords, BlendPictures, DissolvePictures, PictureNoise: DF_TEX0_ARRAY's slices (SampleTextureArrayCoords).
+#include "ArrayCoords.hlsli"
 
 // The highlight layer's fingerprint (HighlightFingerprint) is in HdrLight.hlsli.
 
@@ -226,6 +228,18 @@ float4 SampleTextureArray(uint nIndex, uint nSampler, float3 vUVW)
   default:
     return g_TextureArrays[nIndex].SampleBias(g_SamplerLinearWrap, vUVW, fBias);
   }
+}
+
+//! Texture 0 of a DF_TEX0_ARRAY draw at vTex (ArrayCoords.hlsli): its slice, or it dissolved into the next one by the
+//! pixel's noise fNoise (PictureNoise). Both are sampled outside any branch (the blend changes from quad to quad).
+float4 SampleTextureArrayCoords(uint nIndex, uint nSampler, float2 vTex, float fNoise)
+{
+  uint nWidth, nHeight, nSlices;
+  g_TextureArrays[nIndex].GetDimensions(nWidth, nHeight, nSlices);
+  const SArrayCoords c = ArrayCoords(vTex, nSlices);
+  const float4 a = SampleTextureArray(nIndex, nSampler, c.vA);
+  const float4 b = SampleTextureArray(nIndex, nSampler, c.vB);
+  return DissolvePictures(a, b, c.fW, fNoise);
 }
 
 //! How much of the sun reaches world position vPos (normal vNormal, may be zero) through the

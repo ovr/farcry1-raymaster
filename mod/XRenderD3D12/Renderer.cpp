@@ -191,6 +191,10 @@ void CD3D12Renderer::RegisterVariables()
                      "the animation of what the main view then draws)");
   iConsole->Register("d3d12_SpriteRes", &CV_d3d12_SpriteRes, 128, VF_DUMPTODISK,
                      "Size of the far vegetation sprites' textures, 32 to 256 (made when a level is loaded)");
+  iConsole->Register("d3d12_SpriteBlend", &CV_d3d12_SpriteBlend, 0.2f, VF_DUMPTODISK,
+                     "The part (0 to 1) of the 15 degrees between two pictures of a far vegetation sprite they are blended "
+                     "over, about where the original changes from one to the other, so that the far trees do not change "
+                     "their outline at once (0.2: 3 degrees); 0 the original's change at once");
   iConsole->Register("d3d12_Shadows", &CV_d3d12_Shadows, 1, VF_DUMPTODISK, "Shadow maps of the static objects (e_shadow_maps); 0 off");
   iConsole->Register("d3d12_ShadowMapSize", &CV_d3d12_ShadowMapSize, 1024, VF_DUMPTODISK,
                      "Size of the shadow maps, 128 to 4096 (0: the engine's); the maps made from then on");

@@ -29,7 +29,8 @@
 //	      + tex4 * vAddColor.rgb, both at uv0; DF2_CUBE_SHADER: as the original's
 //	      shader of the template, by the mode vParams3.w, CubeShader), else
 //	      DF_TEX0_ARRAY
-//	      (g_TextureArrays, slice floor(u / 2) at (u - 2 * slice, v)), else DF_TEX0
+//	      (g_TextureArrays, slice floor(u / 2) at (u - 2 * slice, v), or two
+//	      slices, one dissolved into the other, ArrayCoords.hlsli), else DF_TEX0
 //	      (g_Textures; DF2_BUMP_OFFSET at uv0 + (tex3 at uv1 rg * 2 - 1) *
 //	      vParams0.x), else white; sampler from nSamplers bits 0-3
 //	      (DF2_TERRAIN_LIGHT, the terrain under dynamic lights: rgb as 0.75 *
@@ -1117,10 +1118,7 @@ float4 ShadePixel(SVertexOutput In)
         SampleTexture(g_Draw.nTex4, XR_SAMPLER_LINEAR_WRAP, In.vTex0).rgb * g_Draw.vAddColor.rgb;
   }
   else if (HasFlag(DF_TEX0_ARRAY))
-  {
-    float fSlice = floor(In.vTex0.x * 0.5);
-    vTex = SampleTextureArray(g_Draw.nTex0, nSampler0, float3(In.vTex0.x - 2 * fSlice, In.vTex0.y, fSlice));
-  }
+    vTex = SampleTextureArrayCoords(g_Draw.nTex0, nSampler0, In.vTex0, PictureNoise(In.vPos.xy, g_Frame.vTime.y));
   else if (HasFlag(DF_TEX0))
   {
     float2 vUV0 = In.vTex0;

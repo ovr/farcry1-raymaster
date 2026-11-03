@@ -28,7 +28,10 @@
 //	and the groups: RendererStructures.h, "Far vegetation sprites"): one
 //	quad per instance, standing on the object's box, as wide as the
 //	object turning about its axis, facing the camera, with the picture
-//	of the direction it is seen from; one draw per object.
+//	of the direction its centre is seen in (FarSpriteAngles.h: the one of
+//	its 15 degrees as the original's, the pictures of the two nearest
+//	directions blended over the part d3d12_SpriteBlend of them about the
+//	change); one draw per object.
 //
 //////////////////////////////////////////////////////////////////////
 
@@ -38,6 +41,7 @@
 #include "D3D12Descriptors.h"
 #include "Texture.h"
 #include "Scene.h"
+#include "FarSpriteAngles.h"
 
 #include <atomic>
 #include <chrono>
@@ -59,32 +63,7 @@ constexpr float SPRITE_ALPHA_REF = 128.0f / 255.0f;
 //! The colour the objects are drawn with into the pictures (DrawObjSprites doubles it).
 constexpr float SPRITE_COLOR = 0.5f;
 
-//! The index (0 to 23) of MakeSprite's angle: 90 to 435 degrees in steps of 15.
-int SpriteAngleIndex(float fAngle)
-{
-  int n = (int)lroundf((fAngle - 90) / 15) % CD3D12Renderer::SPRITE_ANGLES;
-  return n < 0 ? n + CD3D12Renderer::SPRITE_ANGLES : n;
-}
-
-//! The index of the sprite of an instance seen in the horizontal direction fDegrees (from the
-//! camera to the instance, 0 to 360): the one of fAngle = 165 - 15 * floor(fDegrees / 15),
-//! brought into 90 to 435.
-int SpriteIndexOfDirection(float fDegrees)
-{
-  int nAngle = 165 - 15 * (int)floorf(fDegrees / 15);
-  while (nAngle < 90)
-    nAngle += 360;
-  while (nAngle >= 450)
-    nAngle -= 360;
-  return (nAngle - 90) / 15;
-}
-
-//! The direction the picture of index n shows the object in (radians, from the camera to the
-//! object): the middle of the directions SpriteIndexOfDirection gives n for.
-float SpriteViewAngle(int n)
-{
-  return DEG2RAD(172.5f - (90.0f + 15.0f * n));
-}
+static_assert(FarSpriteAngles::COUNT == CD3D12Renderer::SPRITE_ANGLES, "the pictures of an object");
 
 //! A texel of a sprite being made: the colour (not multiplied by alpha) and the covered part.
 struct SPixelF
@@ -268,7 +247,7 @@ unsigned int CD3D12Renderer::MakeSprite(float object_scale, int tex_size, float 
   if (!pStatObj || !m_pTextures)
     return 0;
   SSpriteSet &Set = m_Sprites[pStatObj];
-  const int n = SpriteAngleIndex(angle);
+  const int n = FarSpriteAngles::SliceOfAngle(angle);
   if (Set.nID[n] && m_pTextures->GetByID(Set.nID[n]) == Set.pTex[n] && Set.pTex[n])
     Set.pTex[n]->AddRef();
   else
@@ -450,7 +429,7 @@ void CD3D12Renderer::BakeSpriteObject(IStatObj *pObj, int nFirstTile, int nTiles
   for (int n = 0; n < SPRITE_ANGLES; n++)
   {
     // Looking along d (horizontal), x to the right (d x z), y up, z back.
-    const float a = SpriteViewAngle(n);
+    const float a = DEG2RAD(FarSpriteAngles::ViewDirection(n));
     const Vec3 d(cosf(a), sinf(a), 0), e(sinf(a), -cosf(a), 0), up(0, 0, 1), back = -d;
     const Vec3 vEye = vCenter - d * (fRadius + 1);
     Matrix44 View;
@@ -605,42 +584,61 @@ void CD3D12Renderer::DrawObjSprites(list2<CStatObjInst*> *pList, float fMaxViewD
     if (k <= 0)
       continue;
 
-    // The picture of the direction from the camera to the instance.
-    const float dx = vPos.x - vCam.x, dy = vPos.y - vCam.y;
+    // Standing on the box (scaled about the instance's position).
+    const SSpriteSet &Set = *g.pSet;
+    const float cx = vPos.x + k * (Set.vBoxMin.x + Set.vBoxMax.x) * 0.5f, cy = vPos.y + k * (Set.vBoxMin.y + Set.vBoxMax.y) * 0.5f;
+    const float z0 = vPos.z + k * Set.vBoxMin.z, z1 = vPos.z + k * Set.vBoxMax.z;
+
+    // The picture of the direction from the camera to the quad's centre, as the original's: a palm's crown, its box, is
+    // metres beside its position, and from the position the picture changed frames away from the original's (Carrier's
+    // palm 72 m away 14 frames later in the comparison film's flight). d3d12_SpriteBlend: the pictures of the two nearest
+    // directions blended over that part of the 15 degrees about the change, so that the trees do not change their outline
+    // at once.
+    const float dx = cx - vCam.x, dy = cy - vCam.y;
     const float fLen = sqrtf(dx * dx + dy * dy);
     if (fLen < 1e-3f)
       continue;
     float fDegrees = RAD2DEG(atan2f(dy, dx));
     if (fDegrees < 0)
       fDegrees += 360;
-    const int n = SpriteIndexOfDirection(fDegrees);
-    const SSpriteSet &Set = *g.pSet;
-    if (!Set.pTex[n] || m_pTextures->GetByID(Set.nID[n]) != Set.pTex[n] || m_pTextures->GetByID(Set.nArrayID) != Set.pArray ||
+    FarSpriteAngles::SBlend Blend;
+    if (CV_d3d12_SpriteBlend > 0)
+      Blend = FarSpriteAngles::BandBlend(FarSpriteAngles::BlendOfDirection(fDegrees), CV_d3d12_SpriteBlend);
+    else
+      Blend.n0 = Blend.n1 = FarSpriteAngles::SliceOfDirection(fDegrees);
+    if (!Set.pTex[Blend.n0] || m_pTextures->GetByID(Set.nID[Blend.n0]) != Set.pTex[Blend.n0] || !Set.pTex[Blend.n1] ||
+        m_pTextures->GetByID(Set.nID[Blend.n1]) != Set.pTex[Blend.n1] || m_pTextures->GetByID(Set.nArrayID) != Set.pArray ||
         !Set.pArray->m_pGPU)
       continue;
 
-    // Standing on the box (scaled about the instance's position), facing the camera.
+    // Facing the camera.
     const float ex = dy / fLen, ey = -dx / fLen;
-    const float cx = vPos.x + k * (Set.vBoxMin.x + Set.vBoxMax.x) * 0.5f, cy = vPos.y + k * (Set.vBoxMin.y + Set.vBoxMax.y) * 0.5f;
-    const float z0 = vPos.z + k * Set.vBoxMin.z, z1 = vPos.z + k * Set.vBoxMax.z;
     const float r = k * Set.fRadius;
     const uint8 b = (uint8)std::lround(std::clamp(g.fBrightness * nBrightness / 100.0f, 0.0f, 1.0f) * 255);
     UCol Color;
     Color.dcolor = 0xFF000000u | ((uint32)b << 16) | ((uint32)b << 8) | b;
     SSpriteQuad &q = m_SpriteQuads.emplace_back();
-    // u from 2 n to 2 n + 1: slice n (DF_TEX0_ARRAY).
-    const float u = 2.0f * n;
+    // u from 2 n0 to 2 n0 + 1: slice n0 (DF_TEX0_ARRAY); v from 0 to 1, or with the blend into the next slice its weight
+    // in v as well (ArrayCoords.hlsli).
+    const bool bBlend = Blend.n1 != Blend.n0;
+    const float u = 2.0f * Blend.n0;
+    const float v0 = bBlend ? FarSpriteAngles::BlendV(0, Blend.fW) : 0.0f;
+    const float v1 = bBlend ? FarSpriteAngles::BlendV(1, Blend.fW) : 1.0f;
     q.nSRV = Set.pArray->GetSRV();
-    q.v[0] = { Vec3(cx - r * ex, cy - r * ey, z1), Color, { u, 0 } };
-    q.v[1] = { Vec3(cx + r * ex, cy + r * ey, z1), Color, { u + 1, 0 } };
-    q.v[2] = { Vec3(cx - r * ex, cy - r * ey, z0), Color, { u, 1 } };
-    q.v[3] = { Vec3(cx + r * ex, cy + r * ey, z0), Color, { u + 1, 1 } };
+    q.v[0] = { Vec3(cx - r * ex, cy - r * ey, z1), Color, { u, v0 } };
+    q.v[1] = { Vec3(cx + r * ex, cy + r * ey, z1), Color, { u + 1, v0 } };
+    q.v[2] = { Vec3(cx - r * ex, cy - r * ey, z0), Color, { u, v1 } };
+    q.v[3] = { Vec3(cx + r * ex, cy + r * ey, z0), Color, { u + 1, v1 } };
     if (m_pFrameDump && !m_bRayCaptureWalk)
     {
       SDumpGroup &d = DumpGroup(q.nSRV);
       d.szName = g.szName;
       d.fMin = std::min(d.fMin, fLen);
       d.fMax = std::max(d.fMax, fLen);
+      const char *szFile = strrchr(g.szName, '\\');
+      fprintf(m_pFrameDump.get(), "    sprite quad: '%s' pos (%.2f %.2f %.2f) centre (%.2f %.2f) %.1f m (engine %.1f), direction %.2f, slice %d + %d %.3f, scale %.3f fade %.3f\n",
+              szFile ? szFile + 1 : g.szName, vPos.x, vPos.y, vPos.z, cx, cy, fLen, fDistance, fDegrees, Blend.n0, Blend.n1,
+              Blend.fW, fScale, f);
     }
   }
   if (m_SpriteQuads.empty())

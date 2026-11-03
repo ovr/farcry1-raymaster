@@ -5,7 +5,7 @@
 //	File: TestHeaders.hlsl
 //	Description: The unit tests' kernels over the renderer's shader
 //	headers that stand alone (Shader Model 6.0): PathGBuffer.hlsli,
-//	HdrLight.hlsli, HdrToneMap.hlsli, HdrExposure.hlsli, HdrFrameAverage.hlsli, PathCache.hlsli, LightmapLight.hlsli, RenderMode.hlsli and Fxaa.hlsli, included as the renderer's
+//	HdrLight.hlsli, HdrToneMap.hlsli, HdrExposure.hlsli, HdrFrameAverage.hlsli, PathCache.hlsli, LightmapLight.hlsli, RenderMode.hlsli, ArrayCoords.hlsli and Fxaa.hlsli, included as the renderer's
 //	programs include them. Each kernel runs the tested functions on the
 //	items of g_TestIn and writes what they give to g_TestOut; ShaderTests.cpp
 //	checks it. One compile per kernel (Tests/CMakeLists.txt).
@@ -23,6 +23,7 @@
 #include "PathCache.hlsli"
 #include "LightmapLight.hlsli"
 #include "RenderMode.hlsli"
+#include "ArrayCoords.hlsli"
 
 //! The FXAA tests' picture (Fxaa.hlsli): g_Test.nTest.y x g_Test.nTest.z pixels, g_TestIn[y * width + x] the rgba of
 //! pixel (x, y) as floats, clamped to the picture as AntiAlias.hlsl clamps its loads.
@@ -275,4 +276,39 @@ void CSFxaa(uint i : SV_DispatchThreadID)
   const SFxaaResult r = Fxaa(int2(i % w, i / w), g_Test.nTest.w);
   TestOut(i, r.bEdge && r.fBlend > 0 ? r.vColor : TestIn(i));
   TestOut(n + i, float4(r.fBlend, r.vStep, r.bEdge ? 1 : 0));
+}
+
+//! ArrayCoords (ArrayCoords.hlsli) of the quad's coordinates g_TestIn[i].xy in an array of g_TestIn[i].z slices (a uint
+//! as a float): out[2i] = (vA, the weight), out[2i + 1] = (vB, 0).
+[numthreads(64, 1, 1)]
+void CSArrayCoords(uint i : SV_DispatchThreadID)
+{
+  if (i >= g_Test.nTest.x)
+    return;
+  const float4 a = TestIn(i);
+  const SArrayCoords c = ArrayCoords(a.xy, (uint)a.z);
+  TestOut(i * 2, float4(c.vA, c.fW));
+  TestOut(i * 2 + 1, float4(c.vB, 0));
+}
+
+//! BlendPictures and DissolvePictures (ArrayCoords.hlsli) of the pictures' texels g_TestIn[3i] and g_TestIn[3i + 1] by
+//! the weight g_TestIn[3i + 2].x, the noise g_TestIn[3i + 2].y: out[2i] the blend, out[2i + 1] the dissolve.
+[numthreads(64, 1, 1)]
+void CSBlendPictures(uint i : SV_DispatchThreadID)
+{
+  if (i >= g_Test.nTest.x)
+    return;
+  const float4 a = TestIn(i * 3), b = TestIn(i * 3 + 1), w = TestIn(i * 3 + 2);
+  TestOut(i * 2, BlendPictures(a, b, w.x));
+  TestOut(i * 2 + 1, DissolvePictures(a, b, w.x, w.y));
+}
+
+//! PictureNoise (ArrayCoords.hlsli) of the pixel g_TestIn[i].xy in the frame g_TestIn[i].z: out[i].x.
+[numthreads(64, 1, 1)]
+void CSPictureNoise(uint i : SV_DispatchThreadID)
+{
+  if (i >= g_Test.nTest.x)
+    return;
+  const float4 a = TestIn(i);
+  TestOut(i, float4(PictureNoise(a.xy, a.z), 0, 0, 0));
 }

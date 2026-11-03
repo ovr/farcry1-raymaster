@@ -68,6 +68,7 @@ set(XRENDERD3D12_SOURCES
     ImageLoaders.cpp
     NormalMapHeight.h
     LightImage.h
+    FarSpriteAngles.h
     RendererTextures.cpp
     Shader.h
     Shader.cpp

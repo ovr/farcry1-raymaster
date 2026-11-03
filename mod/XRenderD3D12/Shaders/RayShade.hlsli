@@ -279,8 +279,12 @@ float4 RayTexture0(SRayInstance I, SRaySurface S, float3 vRayDir)
     return g_Cubes[NonUniformResourceIndex(I.nMaterial.z)].SampleLevel(g_SamplerLinearWrap, reflect(vRayDir, S.vNormal), 0);
   if (nFlags & DF_TEX0_ARRAY)
   {
-    const float fSlice = floor(S.vTex0.x * 0.5);
-    return RaySampleTextureArray(I.nMaterial.z, nSampler, float3(S.vTex0.x - 2 * fSlice, S.vTex0.y, fSlice), S.fLod);
+    // Its slice, or it blended with the next one, the outline the nearer one's (ArrayCoords.hlsli).
+    uint nWidth, nHeight, nSlices, nLevels;
+    g_TextureArrays[NonUniformResourceIndex(I.nMaterial.z)].GetDimensions(0, nWidth, nHeight, nSlices, nLevels);
+    const SArrayCoords c = ArrayCoords(S.vTex0, nSlices);
+    const float4 a = RaySampleTextureArray(I.nMaterial.z, nSampler, c.vA, S.fLod);
+    return c.fW > 0 ? DissolvePictures(a, RaySampleTextureArray(I.nMaterial.z, nSampler, c.vB, S.fLod), c.fW, 0.5) : a;
   }
   if (nFlags & DF_TEX0)
     return RaySampleTexture(I.nMaterial.z, nSampler, S.vTex0, S.fLod);
