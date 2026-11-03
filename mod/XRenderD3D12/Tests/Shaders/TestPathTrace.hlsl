@@ -8,7 +8,8 @@
 //	PathTrace.hlsl is included as it is: its own kernels and the
 //	resources only they use are left out of a compile of one of these
 //	entry points, so the tests run its real functions (PathLeafSide,
-//	CosineDirection, PathCheckerboard.hlsli's PathTraced with its real
+//	PathSurfaceNormal, CosineDirection, PathCheckerboard.hlsli's
+//	PathTraced with its real
 //	g_PT), and with a scene for rays of the harness's (GpuHarness.h
 //	SRayScene) PixelSurface and PixelTerrainShare. The layout kernel reads
 //	the structures C++ shares with HLSL (RayConstants.h) as HLSL lays them
@@ -79,6 +80,15 @@ void CSTerrainShare(uint i : SV_DispatchThreadID)
   const float4 a = TestIn(2 * i);
   const float3 vN = TestIn(2 * i + 1).xyz;
   TestOut(i, float4(PixelTerrainShare(a.xyz, vN, vN, a.w), TerrainBakedShare(a.xyz, vN, vN, PathShadeParams(0), a.w * g_PT.vParams.y), 0, 0));
+}
+
+//! PathSurfaceNormal(flags g_TestIn[2i].w, its bits; the vertices' normal g_TestIn[2i].xyz, the face g_TestIn[2i + 1].xyz)
+//! into out[i].
+[numthreads(64, 1, 1)]
+void CSSurfaceNormal(uint i : SV_DispatchThreadID)
+{
+  if (i < g_Test.nTest.x)
+    TestOut(i, float4(PathSurfaceNormal(g_TestIn[2 * i].w, TestIn(2 * i).xyz, TestIn(2 * i + 1).xyz), 0));
 }
 
 //! PathTraced over a g_Test.nTest.x x g_Test.nTest.y grid of pixels, with g_PT as the test binds it: out[x + y * w].x 1 where traced.

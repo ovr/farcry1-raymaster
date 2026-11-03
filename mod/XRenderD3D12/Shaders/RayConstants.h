@@ -108,6 +108,10 @@ struct SRayInstance
 #define XR_PT_MAT_VEGETATION  2   //!< the vegetation: the vertex colour times 2 (DF_VCOLOR_X2), the light the renderer bakes into it left
                                   //!< out with d3d12_PathTracing (LeafBuffer.cpp)
 #define XR_PT_MAT_UNLIT       3   //!< drawn without light (the templates of no lights, the vertex colour alone): its colour is its emission
+//! The material of a draw of the vegetation (DF_VCOLOR_X2) by its flags (DF_*, Constants.h): its leaves (alpha tested: thin, a
+//! path goes through them, PathLeafSide) XR_PT_MAT_VEGETATION, the rest of the plant (a trunk, its branches: opaque and closed, a
+//! path through its face went into it and came back dark) XR_PT_MAT_LIT.
+#define XR_PT_VEGETATION_MATERIAL(nFlags) (((nFlags) & DF_ALPHATEST) ? XR_PT_MAT_VEGETATION : XR_PT_MAT_LIT)
 
 //! The path tracer's lights (d3d12_PathTracing, PathTrace.cpp): the frame's lights besides the sun and the level's static ones,
 //! the nearest at most this many a frame.

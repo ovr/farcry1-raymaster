@@ -1426,6 +1426,11 @@ SPixelOutput PSMain(SVertexOutput In)
   Out.fDepth = In.vPos.z;
 #endif
   Out.vAlbedo = float4(max(s_vPTAlbedo, 0), Out.vColor.a);
+  // The vegetation's opaque parts (a trunk, its branches: DF_VCOLOR_X2 without the alpha test, XR_PT_VEGETATION_MATERIAL):
+  // the vertices' normals are the crown's, straight up, the triangle's own instead (a trunk's paths went up into the
+  // crown, or, the normal turned to the camera's side, down into the ground).
+  if (HasFlag(DF_VCOLOR_X2) && !HasFlag(DF_ALPHATEST))
+    s_vPTNormal = s_vPTFace;
   Out.vNormal = PathGBufferNormal(s_vPTNormal, s_vPTFace, s_fPTFog, (g_Draw.nFlags2 & DF2_PT_MASK) >> DF2_PT_SHIFT);
   float3 vAmbient = g_Draw.vAmbient.rgb;
   // A lit object's fill lights (Draw3D.cpp SetPathFillLights: directional, the characters' light from above), as the

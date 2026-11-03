@@ -774,7 +774,12 @@ reference of its features and console variables.
   hits take it, but the vegetation's as it is: its normals are the crown's, most of them up, which the
   raster lights both sides of a leaf by, and a path from a leaf goes through it where it is under the
   leaf's face (turned by the view's direction, a crown's turned over at the eyes' height, a line that
-  moved over the leaves with the camera; by the leaf's side, every other leaf), a fourth the sun's
+  moved over the leaves with the camera; by the leaf's side, every other leaf); the plants' opaque
+  parts (a trunk, its branches: `DF_VCOLOR_X2` without the alpha test) the triangle's normal and the
+  lit material (`XR_PT_VEGETATION_MATERIAL`, `PathSurfaceNormal` at the rays' hits): their vertices
+  carry the crown's normal too, and a trunk's paths went up into the crown or, turned to the camera,
+  down into the ground, through the trunk as from a leaf: the trunks were black (the film's river-temple
+  and swamp-path; test: unit test `PathTrace_SurfaceNormal`, `render_tests` suite `pttrunk`), a fourth the sun's
   visibility as the raster finds it (RGBA8, r: its shadow maps, the sun's cascades and their mask by
   rays, which the path tracer turns on, from all the casters; 0 where the raster has no sun) and the
   game's ambient light on the surface (gba: what the object's ambient colour adds to its light maps or
@@ -861,7 +866,7 @@ reference of its features and console variables.
   with `--warp` or without one; `--debug` fails a test on a debug layer message): the G-buffer's
   normal (the octahedral map, the side it is turned to, the vegetation's left as it is), its fog and
   material fields, the HDR targets' light curve, the radiance cache (cells, keys, insertion from many
-  threads, the samples' sum and `CSCacheResolve` itself), `PathLeafSide`, the cosine directions, the
+  threads, the samples' sum and `CSCacheResolve` itself), `PathLeafSide`, a trunk's normal and material, the cosine directions, the
   checkerboard, the structures C++ shares with the shaders word for word, and on a scene for rays of
   their own (a BLAS of the test's triangles in a TLAS, the bindless buffers and samplers as the
   renderer's) the pixel's point snapped onto it and the terrain's share at a hill side 300 m away with

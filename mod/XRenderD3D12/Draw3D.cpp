@@ -1335,7 +1335,7 @@ void CD3D12Renderer::DrawLeafItem(const SRenderItem &it)
       memcpy(vPathAmbient, &vOutdoor.x, sizeof(vPathAmbient));
     }
     else if (dc.nFlags & DF_VCOLOR_X2)
-      nMaterial = XR_PT_MAT_VEGETATION;
+      nMaterial = XR_PT_VEGETATION_MATERIAL(dc.nFlags);
     else if (eLighting == ELighting::Ambient || eLighting == ELighting::Ambient2)
       Set4(vAlbedo, pObj->m_Color.r, pObj->m_Color.g, pObj->m_Color.b, dc.vColor[3]);
     else if (eDC == eDC_Decal)
