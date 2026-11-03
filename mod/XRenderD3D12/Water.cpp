@@ -538,7 +538,11 @@ bool CD3D12Renderer::CopySceneForWater(const int *pRect)
     m_pDevice->CopyTargets(Copy.pColor.Get(), nullptr, &Box);
   }
   else
+  {
+    // With MSAA the depth buffer's nearest samples first (Msaa.cpp; CopyTargets resolves the colour).
+    ResolveMsaaDepth();
     m_pDevice->CopyTargets(Copy.pColor.Get(), Copy.pDepth.Get());
+  }
   m_nSceneColorSRV = Copy.nColorSRV;
   m_nSceneDepthSRV = Copy.nDepthSRV;
   m_bSceneCopied = !pRect;

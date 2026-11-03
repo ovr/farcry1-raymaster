@@ -227,7 +227,7 @@ instructions and is not committed (git-ignored). The references of the modules a
   screen (`r_Width`, `r_Height`, `r_Fullscreen` applied while the game runs); the upscaler
   (`d3d12_Upscaler`, AMD FSR, on the HDR scene's light `d3d12_UpscaleHdr`); the anti-aliasing
   without an upscaler (`d3d12_AA`: FXAA `Shaders/Fxaa.hlsli`, SMAA 1x `third_party/smaa` with
-  `Shaders/Smaa.hlsli`, `SmaaBlend.hlsli`, `AntiAliasSmaa.hlsl`, CMAA2 `third_party/cmaa2` with `Shaders/AntiAliasCmaa2.hlsl`, TAA of our own as an upscaler of the display's size `UpscalerTaa.cpp`, `Shaders/Taa.hlsli`, `Taa.hlsl`, its sharpening AMD FidelityFX CAS `third_party/fidelityfx-cas` with `Shaders/TaaCas.hlsli`; `d3d12_AAQuality`, `PostAA.cpp`); HDR (`r_HDRRendering`, `d3d12_ToneMap` with the neutral tone map
+  `Shaders/Smaa.hlsli`, `SmaaBlend.hlsli`, `AntiAliasSmaa.hlsl`, CMAA2 `third_party/cmaa2` with `Shaders/AntiAliasCmaa2.hlsl`, TAA of our own as an upscaler of the display's size `UpscalerTaa.cpp`, `Shaders/Taa.hlsli`, `Taa.hlsl`, its sharpening AMD FidelityFX CAS `third_party/fidelityfx-cas` with `Shaders/TaaCas.hlsli`, MSAA 2x / 4x / 8x of the main view's scene `Msaa.cpp`, `Shaders/Msaa.hlsli`, `Msaa.hlsl`; `d3d12_AAQuality`, `PostAA.cpp`); HDR (`r_HDRRendering`, `d3d12_ToneMap` with the neutral tone map
   that keeps the hue, `Shaders/HdrToneMap.hlsli`, the automatic exposure's meter by a histogram
   with the sky kept below the knee `d3d12_ExposureMeter`, `Shaders/HdrExposure.hlsli`, the bloom,
   colour grading, the HDR output `d3d12_HDROutput` with its highlights above the game's white

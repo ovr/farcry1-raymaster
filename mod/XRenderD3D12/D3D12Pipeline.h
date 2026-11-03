@@ -112,6 +112,9 @@ struct SPipelineKey
                           //!< eighth targets): the general program writes it (XR_PT, PathGBuffer.hlsli), the albedo and the
                           //!< highlights' colour blended as the colour, the normal and the sun by the draws that are not
                           //!< blended; DrawGeometry sets it
+  uint8 nSamples;         //!< nTarget 0 with MSAA's targets bound (CD3D12Device::BeginMsaa): their samples, 2, 4 or 8;
+                          //!< 0 one; DrawGeometry sets it
+  uint8 nUnused[3];       //!< 0: the key has no padding (it is hashed and compared as bytes)
 };
 
 //! SPipelineKey::nColorFormat.

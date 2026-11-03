@@ -67,16 +67,16 @@ reference of its features and console variables.
 - `d3d12_AA` is the anti-aliasing of the main view's 3D scene without an upscaler (by default
   `taa`, its CAS sharpening at 0.5): `none` (the frames are those of the renderer without it,
   DemoCompare difference 0), `fxaa`,
-  `smaa`, `cmaa2` or `taa`. An unknown value is logged once and acts as `none`. `d3d12_AAQuality` is 0 to 3 (low,
-  medium, high, ultra; 2), `d3d12_AADebug 1` shows what it changes (the picture grey, red by how
+  `smaa`, `cmaa2`, `taa`, `msaa2`, `msaa4` or `msaa8`. An unknown value is logged once and acts as `none`.
+  `d3d12_AAQuality` is 0 to 3 (low, medium, high, ultra; 2; MSAA has none), `d3d12_AADebug 1` shows what it changes (the picture grey, red by how
   much a pixel is blended; SMAA's and CMAA2's edges too; TAA's red where its history goes, yellow
   where it is clipped). All of them change at run time. With an upscaler
   that anti-aliases (FSR) `d3d12_AA` is not used (logged once); r_DisplayInfo's `Anti-aliasing`
   row names the one that is (`FXAA (High)`, `SMAA 1x (High)`, `CMAA2 (High)`, `TAA (High, HDR input)`,
-  `FSR, temporal`, `none`) and the frame dump has an `anti-aliasing:` line. The original's MSAA (`r_FSAA`, `EnumAAFormats`) is
-  not offered: the game's Anti-Aliasing list had None alone with this renderer.
+  `MSAA 4x`, `FSR, temporal`, `none`) and the frame dump has an `anti-aliasing:` line. The original's FSAA modes
+  (`r_FSAA`, `EnumAAFormats`) are not offered: MSAA is `d3d12_AA`'s.
 - The game's menu gets it from `assets/scripts/09-video-anti-aliasing.patch`: Video Options'
-  Anti-Aliasing list is None / FXAA / SMAA 1x / CMAA2 / TAA (`d3d12_AA`) in place of the game's FSAA modes, on
+  Anti-Aliasing list is None / FXAA / SMAA 1x / CMAA2 / TAA / MSAA 2x / 4x / 8x (`d3d12_AA`) in place of the game's FSAA modes, on
   in a game (the game greys it out there: the Direct3D 9 renderer had to relaunch) and greyed out
   while the Upscaler is not None; Apply sets it without a restart.
 - FXAA, SMAA and CMAA2 are drawn over the finished, tone mapped 3D scene in the back buffer (`DrawPostAA`,

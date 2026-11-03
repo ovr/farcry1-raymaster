@@ -131,7 +131,7 @@ namespace
   constexpr const char *PIPELINE_KEY_FILE = "XRenderD3D12_pipelines.bin";
   constexpr uint32 PIPELINE_KEY_MAGIC = 0x4B535058;   // "XPSK"
   //! One more when a member of SPipelineKey changes its meaning.
-  constexpr uint32 PIPELINE_KEY_VERSION = 1;
+  constexpr uint32 PIPELINE_KEY_VERSION = 2;
   constexpr size_t MAX_PIPELINE_KEYS = 4096;
 
   //! Writes keys to the file: szMode "wb" the whole file, "ab" after the keys in it (and the header
@@ -352,7 +352,7 @@ namespace
   static_assert(sizeof(struct_VERTEX_FORMAT_P3F_N_COL4UB_COL4UB_TEX2F) == 40);
   static_assert(sizeof(SPipTangents) == 36);
   static_assert(sizeof(SDefaultStream) == 72);
-  static_assert(sizeof(SPipelineKey) == 20, "SPipelineKey is hashed and compared as bytes");
+  static_assert(sizeof(SPipelineKey) == 24, "SPipelineKey is hashed and compared as bytes");
 
   //! The most elements of an input layout.
   constexpr int MAX_INPUT_ELEMENTS = 9;
@@ -1005,7 +1005,7 @@ ComPtr<ID3D12PipelineState> CD3D12Pipeline::CreatePSO(const SPipelineKey &Key, b
   // The sun's cascades (bDepthBias 2): what is nearer to the sun than a map's range is drawn at its
   // near end (the depth clamped, not clipped), so that it still casts its shadow.
   Raster.DepthClipEnable = bShadowMap && Key.bDepthBias == 2 ? FALSE : TRUE;
-  Raster.MultisampleEnable = FALSE;
+  Raster.MultisampleEnable = Key.nSamples > 1 ? TRUE : FALSE;
   Raster.AntialiasedLineEnable = FALSE;
   Raster.ForcedSampleCount = 0;
   Raster.ConservativeRaster = D3D12_CONSERVATIVE_RASTERIZATION_MODE_OFF;
@@ -1061,7 +1061,7 @@ ComPtr<ID3D12PipelineState> CD3D12Pipeline::CreatePSO(const SPipelineKey &Key, b
   Desc.RTVFormats[6] = bPath ? D3D12_PT_SPECULAR_FORMAT : DXGI_FORMAT_UNKNOWN;
   Desc.RTVFormats[7] = bPath ? D3D12_PT_LIGHTMAP_FORMAT : DXGI_FORMAT_UNKNOWN;
   Desc.DSVFormat = bShadowMap ? D3D12_SHADOW_MAP_FORMAT : bScene ? D3D12_SCENE_DEPTH_FORMAT : bDepth ? D3D12_DEPTH_FORMAT : DXGI_FORMAT_UNKNOWN;
-  Desc.SampleDesc.Count = 1;
+  Desc.SampleDesc.Count = Key.nSamples > 1 ? Key.nSamples : 1;
   Desc.SampleDesc.Quality = 0;
   Desc.NodeMask = 0;
   Desc.Flags = D3D12_PIPELINE_STATE_FLAG_NONE;
@@ -1073,9 +1073,11 @@ ComPtr<ID3D12PipelineState> CD3D12Pipeline::CreatePSO(const SPipelineKey &Key, b
     if (!bLog)
       return nullptr;
     iLog->LogError("XRenderD3D12: CreateGraphicsPipelineState failed (0x%08X): program %s, vertex format %d, state 0x%08X, "
-      "cull %d, topology %d, target %d, depth bias %d, streams %d, wireframe %d, colour format %d, ambient %d, blend op %d, rays %d, path %d", (unsigned)hr,
+      "cull %d, topology %d, target %d, depth bias %d, streams %d, wireframe %d, colour format %d, ambient %d, blend op %d, rays %d, path %d, "
+      "samples %d", (unsigned)hr,
       Program.szName, (int)Key.nVertexFormat, nState, (int)Key.nCull, nTopology, (int)Key.nTarget, (int)Key.bDepthBias,
-      (int)Key.nStreams, (int)Key.bWireframe, (int)Key.nColorFormat, (int)Key.bAmbient, (int)Key.nBlendOp, (int)Key.bRayTrace, (int)Key.bPathTrace);
+      (int)Key.nStreams, (int)Key.bWireframe, (int)Key.nColorFormat, (int)Key.bAmbient, (int)Key.nBlendOp, (int)Key.bRayTrace, (int)Key.bPathTrace,
+      (int)Key.nSamples);
     return nullptr;
   }
   return pPSO;

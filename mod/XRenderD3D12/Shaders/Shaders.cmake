@@ -146,6 +146,10 @@ xrender_d3d12_shader(TaaResolve_CS Taa.hlsl cs_6_0 CSMain XR_TAA_RESOLVE)
 set(XRENDERD3D12_SHADER_INCLUDES "${XRENDERD3D12_CAS_DIR}")
 xrender_d3d12_shader(TaaSharpen_CS Taa.hlsl cs_6_0 CSMain)
 set(XRENDERD3D12_SHADER_INCLUDES "")
+# MSAA (d3d12_AA msaa2, msaa4, msaa8, Msaa.cpp, Msaa.hlsli): the HDR light's and the depth's resolve.
+xrender_d3d12_shader(MsaaResolve_VS Msaa.hlsl vs_6_0 VSMain)
+xrender_d3d12_shader(MsaaColor_PS Msaa.hlsl ps_6_0 PSColor)
+xrender_d3d12_shader(MsaaDepth_PS Msaa.hlsl ps_6_0 PSDepth XR_MSAA_DEPTH)
 
 # Exposure, bloom and tone mapping of the HDR scene (eD3D12P_Hdr, r_HDRRendering).
 xrender_d3d12_shader(Hdr_VS Hdr.hlsl vs_6_0 VSMain)

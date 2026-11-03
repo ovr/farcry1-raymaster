@@ -67,6 +67,9 @@ const SAntiAliasName s_AntiAliasNames[] = {
   { "smaa", CD3D12Renderer::EAntiAlias::Smaa, "SMAA 1x" },
   { "cmaa2", CD3D12Renderer::EAntiAlias::Cmaa2, "CMAA2" },
   { "taa", CD3D12Renderer::EAntiAlias::Taa, "TAA" },
+  { "msaa2", CD3D12Renderer::EAntiAlias::Msaa2, "MSAA 2x" },
+  { "msaa4", CD3D12Renderer::EAntiAlias::Msaa4, "MSAA 4x" },
+  { "msaa8", CD3D12Renderer::EAntiAlias::Msaa8, "MSAA 8x" },
 };
 
 const char *const s_QualityNames[4] = { "Low", "Medium", "High", "Ultra" };
@@ -95,7 +98,7 @@ CD3D12Renderer::EAntiAlias CD3D12Renderer::AntiAliasing()
   }
   if (_stricmp(szValue, m_AAWarned.c_str()) != 0)
   {
-    iLog->LogWarning("XRenderD3D12: d3d12_AA %s: no such anti-aliasing (none, fxaa, smaa, cmaa2, taa); none", szValue);
+    iLog->LogWarning("XRenderD3D12: d3d12_AA %s: no such anti-aliasing (none, fxaa, smaa, cmaa2, taa, msaa2, msaa4, msaa8); none", szValue);
     m_AAWarned = szValue;
   }
   return EAntiAlias::None;
@@ -124,6 +127,13 @@ void CD3D12Renderer::DrawPostAA()
     return;
   }
   m_bAAUpscalerLogged = false;
+  // MSAA anti-aliased the scene (Msaa.cpp).
+  if (MsaaSamples(eAA))
+  {
+    if (m_nMsaaFrame == m_nFrames && m_pFrameDump)
+      fprintf(m_pFrameDump.get(), "anti-aliasing: %s\n", AntiAliasName(eAA).szName);
+    return;
+  }
   const int nQuality = std::clamp(CV_d3d12_AAQuality, 0, 3);
   // TAA anti-aliased the scene as an upscaler (UpscaleScene).
   if (eAA == EAntiAlias::Taa)
@@ -196,6 +206,14 @@ std::string CD3D12Renderer::PostAAInfo()
   if (eAA == EAntiAlias::None)
     return "none";
   char szText[64];
+  // MSAA has no quality preset.
+  if (MsaaSamples(eAA))
+  {
+    const bool bThisFrame = m_nMsaaFrame == m_nFrames;
+    snprintf(szText, sizeof(szText), "%s%s%s%s", AntiAliasName(eAA).szName, bThisFrame ? "" : " (",
+             bThisFrame ? "" : m_szMsaaOff ? m_szMsaaOff : "no 3D scene now", bThisFrame ? "" : ")");
+    return szText;
+  }
   if (eAA == EAntiAlias::Taa)
   {
     // TAA as the upscaler (UpscaleScene; the statistics run before Update counts the frame). Not made yet (the menu before a 3D
@@ -562,6 +580,7 @@ void CD3D12Renderer::ReleasePostAA()
   m_pAaLayer = nullptr;
   ReleaseSmaa(true);
   ReleaseCmaa2();
+  ReleaseMsaa();
   m_ePostAA = EAntiAlias::None;
   m_nPostAAFrame = -1;
 }

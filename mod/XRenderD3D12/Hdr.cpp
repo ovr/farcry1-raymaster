@@ -169,6 +169,8 @@ void CD3D12Renderer::BeginMainScene()
   else if (m_Hdr.pHdrColor)
     ReleaseHdrColor();        // an upscaler's scene targets instead
   m_bHdrScene = m_pDevice->GetMainColorFormat() == D3D12_HDR_FORMAT;
+  // d3d12_AA's MSAA in the main view's place (Msaa.cpp).
+  BeginMsaa();
 }
 
 void CD3D12Renderer::EndMainScene()
@@ -176,6 +178,8 @@ void CD3D12Renderer::EndMainScene()
   FUNCTION_PROFILER(iSystem, PROFILE_RENDERER);
   // The path tracer's G-buffer, if a list left it bound.
   EndPathTargets();
+  // MSAA's samples into the main view's targets (Msaa.cpp).
+  EndMsaa();
   if (m_bUpscaling)
     UpscaleScene();
   else if (m_pDevice && m_pDevice->IsInHdr())

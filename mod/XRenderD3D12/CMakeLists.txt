@@ -40,6 +40,7 @@ set(XRENDERD3D12_SOURCES
     Shadows.cpp
     Cascades.cpp
     PostAA.cpp
+    Msaa.cpp
     PostFx.cpp
     Hdr.cpp
     Volumetric.cpp

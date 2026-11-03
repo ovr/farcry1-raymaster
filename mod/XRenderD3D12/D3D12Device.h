@@ -250,10 +250,37 @@ public:
   //! the main view's size in D3D12_AMBIENT_FORMAT: from here (in a frame) SetBackBufferTargets binds
   //! hRTV as the fourth colour target of the main view (SV_Target3, SPipelineKey::bAmbient), after the
   //! scene's motion vectors and the upscaler's depth or, without an upscaler, two null targets of their
-  //! formats; an empty handle unbinds it. The caller makes its transitions.
-  void BindAmbient(D3D12_CPU_DESCRIPTOR_HANDLE hRTV);
+  //! formats; an empty handle unbinds it. The caller makes its transitions. With MSAA (BeginMsaa) the draws
+  //! write a multisampled ambient light in its place, cleared when bound and resolved into pResource (its
+  //! resource, in D3D12_RESOURCE_STATE_RENDER_TARGET) when unbound.
+  void BindAmbient(D3D12_CPU_DESCRIPTOR_HANDLE hRTV, ID3D12Resource *pResource = nullptr);
   //! The main view's draws write the ambient light too (bound, not off screen).
   bool IsAmbientBound() const { return m_hAmbientRTV.ptr && !m_pOffscreen; }
+  //! MSAA of the main view's scene (d3d12_AA msaa2, msaa4, msaa8; Msaa.cpp): multisampled targets of the main view's
+  //! size with nSamples samples, the colour in ColorFormat (the back buffer's or the HDR target's), the depth
+  //! buffer's (R24G8_TYPELESS, drawn as D3D12_DEPTH_FORMAT) and the ambient light's (D3D12_AMBIENT_FORMAT); made
+  //! anew for another count, format or size (GetMsaaGeneration counts them). nSamples 0 releases them. False:
+  //! the GPU has not that count for one of the formats, or no resolve of the colour's or the ambient light's
+  //! (none made).
+  bool SetMsaaTargets(int nSamples, DXGI_FORMAT ColorFormat);
+  //! From here (in a frame, not in an upscaler's scene) SetBackBufferTargets binds the multisampled targets in
+  //! place of the main view's colour, depth buffer and ambient light, ClearColor and ClearDepth clear them, and
+  //! CopyTargets resolves the colour (the depth from the depth buffer, which the caller resolves first).
+  void BeginMsaa();
+  //! The main view's own targets bound again; the caller resolved the multisampled ones into them.
+  void EndMsaa();
+  bool IsInMsaa() const { return m_bInMsaa; }
+  int GetMsaaSamples() const { return m_nMsaaSamples; }
+  uint32 GetMsaaGeneration() const { return m_nMsaaGeneration; }
+  //! The samples of the targets the draws go to: SPipelineKey::nSamples (1 off screen and without MSAA).
+  int GetBoundSamples() const { return m_bInMsaa && !m_pOffscreen ? m_nMsaaSamples : 1; }
+  //! The multisampled colour (in D3D12_RESOURCE_STATE_RENDER_TARGET) and depth buffer (in
+  //! D3D12_RESOURCE_STATE_DEPTH_WRITE) between frames and passes.
+  ID3D12Resource *GetMsaaColor() const { return m_pMsaaColor.Get(); }
+  ID3D12Resource *GetMsaaDepth() const { return m_pMsaaDepth.Get(); }
+  //! For Msaa.cpp's passes: the main view's own colour target alone (bColor: the HDR target or the back buffer)
+  //! or its depth buffer alone, with the viewport of the main view.
+  void BindMsaaResolveTarget(bool bColor);
   //! The path tracer's G-buffer (PathTrace.cpp, Shaders/PathGBuffer.hlsli), targets of the scene's size: from here
   //! (in a frame, in the scene) SetBackBufferTargets binds hAlbedo (D3D12_PT_ALBEDO_FORMAT), hNormal
   //! (D3D12_PT_NORMAL_FORMAT), hSun (D3D12_PT_SUN_FORMAT), hSpecular (D3D12_PT_SPECULAR_FORMAT) and hLightmap
@@ -420,8 +447,14 @@ private:
   void SetFrameState(D3D12_RESOURCE_STATES State);
   //! The views after the back buffers': n 0 the scene's colour, 1 its motion vectors, 2 the
   //! upscaler's depth; 3 the HDR target; 4 the frame target, 5 the highlight layer; 6 and 7 null
-  //! views of the motion vectors' and the upscaler depth's formats (BindAmbient).
+  //! views of the motion vectors' and the upscaler depth's formats (BindAmbient); 8 MSAA's colour,
+  //! 9 its ambient light, 10 and 11 the null views of 6 and 7 multisampled.
   D3D12_CPU_DESCRIPTOR_HANDLE SceneRTV(int n) const;
+  //! MSAA's depth buffer's view, read only or not.
+  D3D12_CPU_DESCRIPTOR_HANDLE MsaaDSV(bool bReadOnly) const;
+  //! pSrc (multisampled, in SrcState) resolved into pDst (in DstState) as Format; both back in their states.
+  void ResolveInto(ID3D12Resource *pDst, D3D12_RESOURCE_STATES DstState, ID3D12Resource *pSrc, D3D12_RESOURCE_STATES SrcState,
+                   DXGI_FORMAT Format);
   //! The swap chain's current buffer's view.
   D3D12_CPU_DESCRIPTOR_HANDLE SwapChainRTV() const;
   D3D12_CPU_DESCRIPTOR_HANDLE SceneDSV() const;
@@ -507,6 +540,12 @@ private:
   ComPtr<ID3D12Resource> m_pHdrColor;               //!< SetHdrTarget
   bool m_bInHdr = false;                            //!< BeginHdr .. EndHdr
   D3D12_CPU_DESCRIPTOR_HANDLE m_hAmbientRTV = {};   //!< BindAmbient
+  ID3D12Resource *m_pAmbientResource = nullptr;     //!< BindAmbient: what the multisampled ambient light resolves into
+  ComPtr<ID3D12Resource> m_pMsaaColor, m_pMsaaDepth, m_pMsaaAmbient;   //!< SetMsaaTargets
+  int m_nMsaaSamples = 0;                           //!< of m_pMsaaColor (0: none)
+  DXGI_FORMAT m_MsaaColorFormat = DXGI_FORMAT_UNKNOWN;
+  uint32 m_nMsaaGeneration = 0;                     //!< GetMsaaGeneration
+  bool m_bInMsaa = false;                           //!< BeginMsaa .. EndMsaa
   D3D12_CPU_DESCRIPTOR_HANDLE m_hPathRTV[5] = {};   //!< BindPathTargets
   bool m_bDepthReadOnly = false;                    //!< SetDepthReadOnly
 
