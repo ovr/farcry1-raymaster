@@ -1820,7 +1820,7 @@ public:
   int CV_d3d12_ShadowDebug = 0;             //!< non-zero: the shadow maps of the frame are shown
   int CV_d3d12_PixelLighting = 1;           //!< 1: every lit material is lit per pixel, the light mapped ones by the dynamic lights too (DrawLeafItem)
   int CV_d3d12_LightmapDot3 = 1;            //!< 1: a dot3 light map's N'.D mixed towards 1 by the light map's alpha, as the original's shaders (0: N'.D alone)
-  int CV_d3d12_LightmapSpecular = 1;        //!< 1: the bump templates over a dot3 light map get the highlights of the lamps baked into it (AddLightmapLamps)
+  int CV_d3d12_LightmapSpecular = 1;        //!< 1: the specular bump templates over a dot3 light map get the highlights of the lamps baked into it (AddLightmapLamps)
   int CV_d3d12_NormalMapHeight = 1;         //!< 1: a height map in a material's EFTT_NORMALMAP is added to its EFTT_BUMP normal map (CShaderManager::LoadNormalMap)
   int CV_d3d12_ShadowCascades = 4;          //!< the sun's cascaded shadow maps: how many (0: none)
   float CV_d3d12_ShadowDistance = 120;      //!< how far they reach from the camera (m)

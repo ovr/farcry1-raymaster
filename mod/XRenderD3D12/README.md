@@ -346,8 +346,11 @@ reference of its features and console variables.
 - Dot3 light maps (`Shaders/LightmapLight.hlsli`): the original's light-map bump shaders take the
   light map's light times its direction map's alpha times N'.D mixed towards 1 by the light map's
   alpha (where that is 0 the bumps do not shade its light), plus the texture times the ambient
-  colour. `d3d12_LightmapDot3` (1) mixes the same (0: N'.D alone, as before). A lamp baked into the
-  light map (`DLF_LM`) in reach of the object gives a highlight there, added after the light map:
+  colour. `d3d12_LightmapDot3` (1) mixes the same (0: N'.D alone, as before). On the specular bump
+  templates (a template name with "spec": the cave's rock and the machines below Research's lamps;
+  not the diffuse ones, such as Research's concrete walls, which the original draws with the light
+  map's shader alone) a lamp baked into the light map (`DLF_LM`) in reach of the object gives a
+  highlight there, added after the light map:
   2 times the lamp's specular colour times the material's, the texture's alpha (the gloss), the
   falloff of the original's attenuation texture where those shaders look it up (half of (1 - d / r)^2
   and half of min(1, 1.5 (1 - d / r))) and saturate(R.V)^32 with R the direction to the lamp

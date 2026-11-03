@@ -205,8 +205,8 @@ void CD3D12Renderer::RegisterVariables()
                      "1: a dot3 light map's light as the original's shaders take it: N'.D mixed towards 1 by the light map's alpha; "
                      "0: N'.D alone (darker where the bumps face away from its light)");
   iConsole->Register("d3d12_LightmapSpecular", &CV_d3d12_LightmapSpecular, 1, VF_DUMPTODISK,
-                     "1: the bump templates over a dot3 light map get the highlights of the lamps baked into it, as the original's "
-                     "(per pixel with their normal maps, the texture's alpha the gloss); 0: none");
+                     "1: the specular bump templates over a dot3 light map get the highlights of the lamps baked into it, as the "
+                     "original's (per pixel with their normal maps, the texture's alpha the gloss; the diffuse ones none); 0: none");
   iConsole->Register("d3d12_NormalMapHeight", &CV_d3d12_NormalMapHeight, 1, VF_DUMPTODISK,
                      "1: a height map in a material's normal map slot (its displacement map, Research's cave rock) is added to the "
                      "normal map of its bump slot, as the original makes them one texture (alone: made a normal map as a height bump "

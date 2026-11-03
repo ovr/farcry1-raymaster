@@ -144,8 +144,8 @@
 //	  draw's lights without the sun (DrawLighting per pixel with
 //	  DF2_VERTEX_LIGHTS, the normal as for DF_PIXEL_LIGHTING) take vAmbient's
 //	  place under the light map: rgb *= 4 * v * tex1 + those lights. With
-//	  DF_SPECULAR (d3d12_LightmapSpecular, the bump templates over a dot3 light
-//	  map) the lamps baked into it among them (XR_LIGHT_LIGHTMAP_LAMP) add their
+//	  DF_SPECULAR (d3d12_LightmapSpecular, the specular bump templates over a
+//	  dot3 light map) the lamps baked into it among them (XR_LIGHT_LIGHTMAP_LAMP) add their
 //	  highlights after that, as the original's light-map bump shaders: rgb +=
 //	  2 * vSpecular.rgb * gloss * their specular colour * LightmapLampFalloff(d
 //	  / radius) * saturate(R.V)^32; nothing else of them.
