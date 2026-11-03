@@ -64,8 +64,9 @@ reference of its features and console variables.
 
 ## Anti-aliasing
 
-- `d3d12_AA` is the anti-aliasing of the main view's 3D scene without an upscaler: `none` (the
-  default; the frames are those of the renderer without it, DemoCompare difference 0), `fxaa`,
+- `d3d12_AA` is the anti-aliasing of the main view's 3D scene without an upscaler (by default
+  `taa`, its CAS sharpening at 0.5): `none` (the frames are those of the renderer without it,
+  DemoCompare difference 0), `fxaa`,
   `smaa`, `cmaa2` or `taa`. An unknown value is logged once and acts as `none`. `d3d12_AAQuality` is 0 to 3 (low,
   medium, high, ultra; 2), `d3d12_AADebug 1` shows what it changes (the picture grey, red by how
   much a pixel is blended; SMAA's and CMAA2's edges too; TAA's red where its history goes, yellow
