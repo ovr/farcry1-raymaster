@@ -388,6 +388,8 @@ float3 DrawLighting(float3 vPos, float3 vN, bool bPerPixel, out float3 vNoSunLig
       fAtten = 0;
     }
 #endif
+    // Its highlight's colour: with bScale scaled down by its largest channel above 1, as the original's (its hue kept,
+    // times the material's specular colour after that); else each channel clamped to 1.
     if (bSpecular)
     {
       const float3 s = g_Draw.vLightSpec[i].rgb;
@@ -396,8 +398,6 @@ float3 DrawLighting(float3 vPos, float3 vN, bool bPerPixel, out float3 vNoSunLig
     if (i == 0 && !bScale)
     {
       vLight += vThis;
-    // Its highlight's colour: with bScale scaled down by its largest channel above 1, as the original's (its hue kept,
-    // times the material's specular colour after that); else each channel clamped to 1.
       vNoSun += vThis;
     }
     else
@@ -811,11 +811,6 @@ SVertexOutput VSMain(SVertexInput In)
       vVertexColor.rgb = 1;
     vColor *= vVertexColor;
   }
-  float4 vColorNoSun = vColor;
-  if (HasFlag(DF_LIGHTING) && !HasFlag(DF_PIXEL_LIGHTING) && !HasFlag2(DF2_MATERIAL_LIGHT))
-  {
-    float3 vNoSunLight, vSunSpec, vOtherSpec;
-    vColor.rgb *= DrawLighting(vWorldPos, SafeNormalize(vNormal), false, vNoSunLight, vSunSpec, vOtherSpec);
   // TemplMuzzleFlash_Auto's planes (Training's bunker's shafts of sunlight), as the original's vertex program: faded
   // out seen edge on, by min((2 |N.V|)^4, 1) at each vertex.
   if (g_Draw.vEdgeFade.x > 0)
@@ -823,6 +818,11 @@ SVertexOutput VSMain(SVertexInput In)
     const float f = 2 * abs(dot(SafeNormalize(vNormal), SafeNormalize(vWorldPos - g_Frame.vCameraPos.xyz)));
     vColor.rgb *= min(f * f * f * f, 1);
   }
+  float4 vColorNoSun = vColor;
+  if (HasFlag(DF_LIGHTING) && !HasFlag(DF_PIXEL_LIGHTING) && !HasFlag2(DF2_MATERIAL_LIGHT))
+  {
+    float3 vNoSunLight, vSunSpec, vOtherSpec;
+    vColor.rgb *= DrawLighting(vWorldPos, SafeNormalize(vNormal), false, vNoSunLight, vSunSpec, vOtherSpec);
     vColorNoSun.rgb *= vNoSunLight;
   }
 
