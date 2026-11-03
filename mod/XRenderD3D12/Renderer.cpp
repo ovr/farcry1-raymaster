@@ -264,13 +264,13 @@ void CD3D12Renderer::RegisterVariables()
   // The anti-aliasing without an upscaler (PostAA.cpp).
   iConsole->CreateVariable("d3d12_AA", "none", VF_DUMPTODISK,
                            "The anti-aliasing of the 3D scene without an upscaler (with d3d12_Upscaler fsr FSR anti-aliases): none, "
-                           "fxaa (FXAA over the finished picture) or smaa (SMAA 1x over it)");
+                           "fxaa (FXAA over the finished picture), smaa (SMAA 1x over it) or cmaa2 (CMAA2 over it)");
   iConsole->Register("d3d12_AAQuality", &CV_d3d12_AAQuality, 2, VF_DUMPTODISK,
                      "The anti-aliasing's quality, 0 (low) to 3 (ultra): FXAA's edge thresholds and how far it follows an edge, "
-                     "SMAA's preset");
+                     "SMAA's and CMAA2's presets");
   iConsole->Register("d3d12_AADebug", &CV_d3d12_AADebug, 0, 0,
-                     "1: the anti-aliasing's view of the edges (grey where it leaves the picture, red by how much it blends; SMAA: "
-                     "also the edges it found)");
+                     "1: the anti-aliasing's view of the edges (grey where it leaves the picture, red by how much it blends; SMAA and "
+                     "CMAA2: also the edges they found)");
   // The ambient occlusion (AmbientOcclusion.cpp).
   iConsole->CreateVariable("d3d12_AO", "cacao", VF_DUMPTODISK,
                            "Ambient occlusion of the 3D scene: none, gtao (Intel XeGTAO), cacao (AMD FidelityFX CACAO), both in screen "

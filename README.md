@@ -20,6 +20,8 @@ Mods for Far Cry, built with the CryENGINE MOD SDK for Far Cry:
   headers, which CACAO needs.
 - `third_party/smaa` - SMAA (Enhanced Subpixel Morphological Antialiasing), the SMAA 1x of
   XRenderD3D12's anti-aliasing.
+- `third_party/cmaa2` - Intel's CMAA2 (Conservative Morphological Anti-Aliasing 2.0), the CMAA2 of
+  XRenderD3D12's anti-aliasing.
 - `third_party/nrd`, `third_party/shadermake`, `third_party/mathlib` - git submodules: NVIDIA's NRD,
   the denoiser of XRenderD3D12's path tracer, with the tool that builds its shaders and its math
   library. The repository has their links, not their files: clone it with `--recurse-submodules`
@@ -66,7 +68,7 @@ Mods for Far Cry, built with the CryENGINE MOD SDK for Far Cry:
     at the peak, which disappears once the peak is the display's, and patches at the SDR
     brightness, twice and four times that and at the peak.
   - `09-video-anti-aliasing.patch` - Anti-Aliasing in Video Options with XRenderD3D12: None,
-    FXAA or SMAA 1x, which sets `d3d12_AA`, its anti-aliasing of the 3D scene without an upscaler, in place
+    FXAA, SMAA 1x or CMAA2, which sets `d3d12_AA`, its anti-aliasing of the 3D scene without an upscaler, in place
     of the game's FSAA modes; on in a game and applied without a relaunch, greyed out while the
     Upscaler is not None (FSR anti-aliases then).
 
@@ -89,7 +91,9 @@ Corporation, `third_party/fidelityfx-cacao/` parts of FidelityFX CACAO by Advanc
 Inc., and `third_party/directx-headers/` parts of DirectX-Headers by Microsoft Corporation, each under
 its MIT license (`LICENSE`, `license.txt`, `LICENSE` in its folder). `third_party/smaa/` holds SMAA's
 shader and precomputed textures by Jorge Jimenez, Jose I. Echevarria, Belen Masia, Fernando Navarro
-and Diego Gutierrez, under its MIT license (`LICENSE.txt` in its folder).
+and Diego Gutierrez, under its MIT license (`LICENSE.txt` in its folder). `third_party/cmaa2/`
+holds CMAA2's shader by Intel Corporation, under the Apache License 2.0 (`license.txt` in its
+folder).
 
 `third_party/nrd`, `third_party/shadermake` and `third_party/mathlib` are git submodules: links to
 NVIDIA's repositories of NRD (NVIDIA Real-time Denoisers) at the tag v4.18.0 and of ShaderMake and
