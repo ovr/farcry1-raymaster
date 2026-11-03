@@ -15,7 +15,8 @@
 //	             exposure (R32_FLOAT, 1 x 1); u0 the new history, u1 with
 //	             TAA_OUTPUT the picture (its debug view with TAA_DEBUG)
 //	  CSSharpen  t0 the new history, t1 as CSResolve's t3; u0 the picture,
-//	             the history sharpened by vParams.y (TaaSharpen)
+//	             the history sharpened by AMD FidelityFX CAS (TaaCas.hlsli)
+//	             with the constants vCas0, vCas1 of its sharpness
 //	Bindings (D3D12Compute.h): b0 STaaConstants, s1 linear clamp.
 //
 //////////////////////////////////////////////////////////////////////
@@ -82,6 +83,18 @@ float TaaExposure()
 #endif
 }
 
+#if !defined(XR_TAA_DILATE) && !defined(XR_TAA_RESOLVE)
+//! The exposure of the picture CAS loads (TaaExposure, once a thread).
+static float s_fCasExposure;
+
+float3 TaaCasLoad(int2 p)
+{
+  return TaaToCas(g_Resolved.Load(int3(TaaClamp(p), 0)).rgb, s_fCasExposure);
+}
+
+#include "TaaCas.hlsli"
+#endif
+
 [numthreads(XR_TAA_GROUP, XR_TAA_GROUP, 1)]
 void CSMain(uint2 vPixel : SV_DispatchThreadID)
 {
@@ -97,12 +110,7 @@ void CSMain(uint2 vPixel : SV_DispatchThreadID)
   if (g_Taa.vFlags.x & TAA_OUTPUT)
     g_Output[p] = float4((g_Taa.vFlags.x & TAA_DEBUG) ? TaaDebug(r, fExposure) : r.vColor, 1);
 #else
-  const float fExposure = TaaExposure();
-  const float3 c = TaaToWorking(g_Resolved.Load(int3(p, 0)).rgb, fExposure);
-  const float3 n = TaaToWorking(g_Resolved.Load(int3(TaaClamp(p + int2(0, -1)), 0)).rgb, fExposure);
-  const float3 s = TaaToWorking(g_Resolved.Load(int3(TaaClamp(p + int2(0, 1)), 0)).rgb, fExposure);
-  const float3 w = TaaToWorking(g_Resolved.Load(int3(TaaClamp(p + int2(-1, 0)), 0)).rgb, fExposure);
-  const float3 e = TaaToWorking(g_Resolved.Load(int3(TaaClamp(p + int2(1, 0)), 0)).rgb, fExposure);
-  g_Output[p] = float4(TaaFromWorking(TaaSharpen(c, n, s, w, e, g_Taa.vParams.y), fExposure), 1);
+  s_fCasExposure = TaaExposure();
+  g_Output[p] = float4(TaaFromCas(TaaCas(p, g_Taa.vCas0, g_Taa.vCas1), s_fCasExposure), 1);
 #endif
 }

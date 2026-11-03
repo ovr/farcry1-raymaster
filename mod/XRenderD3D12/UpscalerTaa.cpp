@@ -15,7 +15,8 @@
 //	     targets, one read and the other written in turn; into the picture
 //	     too without sharpening, or with the debug view (d3d12_AADebug);
 //	  3. with d3d12_UpscaleSharpness, the new history sharpened into the
-//	     picture.
+//	     picture by AMD FidelityFX CAS (third_party/fidelityfx-cas,
+//	     Shaders/TaaCas.hlsli), its sharpness d3d12_UpscaleSharpness.
 //	d3d12_AAQuality is the frame's least share in the picture: low 1/5
 //	to ultra 1/14, how many frames it gathers.
 //
@@ -27,6 +28,11 @@
 #include "D3D12Compute.h"
 #include "D3D12Descriptors.h"
 #include "D3D12Upload.h"
+
+// AMD FidelityFX CAS's constants on the CPU (CasSetup).
+#define A_CPU 1
+#include "ffx_a.h"
+#include "ffx_cas.h"
 
 namespace
 {
@@ -204,6 +210,12 @@ public:
     Consts.vParams[3] = s_MovingShare[nQuality];
     Consts.vFlags[0] = (In.bReset || !m_bHistory ? TAA_RESET : 0) | (m_bHdr ? TAA_HDR : 0) | (m_bHdr && In.pExposure ? TAA_EXPOSURE : 0) |
                        (bSharpen ? 0 : TAA_OUTPUT) | (In.bDebugView ? TAA_DEBUG : 0);
+    // CAS's sharpness is d3d12_UpscaleSharpness (0 its least, which 0 turns off here, 1 its most), at the picture's size.
+    AU1 Cas0[4], Cas1[4];
+    CasSetup(Cas0, Cas1, Consts.vParams[1], (AF1)m_nWidth, (AF1)m_nHeight, (AF1)m_nWidth, (AF1)m_nHeight);
+    static_assert(sizeof(Cas0) == sizeof(Consts.vCas0) && sizeof(Cas1) == sizeof(Consts.vCas1), "CAS's constants");
+    memcpy(Consts.vCas0, Cas0, sizeof(Cas0));
+    memcpy(Consts.vCas1, Cas1, sizeof(Cas1));
     const SD3D12FrameAlloc CB = g_pRenderer->m_pUpload->AllocFrame(sizeof(Consts), 256);
     if (!CB.pCPU)
       return false;

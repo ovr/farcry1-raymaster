@@ -7,7 +7,9 @@
 //	GPU: Shaders/Taa.hlsli as Taa.hlsl's kernels use it (TestTaa.hlsl), on
 //	small pictures, frame after frame with each frame's picture the next
 //	one's history as the renderer's history targets keep it, and its
-//	jitter (Upscaler.h's Halton).
+//	jitter (Upscaler.h's Halton); its sharpening, AMD FidelityFX CAS
+//	(TaaCas.hlsli), with the constants of CasSetup on the CPU as
+//	UpscalerTaa.cpp makes them.
 //
 //////////////////////////////////////////////////////////////////////
 
@@ -27,6 +29,10 @@
 #include <functional>
 #include <string>
 #include <vector>
+
+#define A_CPU 1
+#include "ffx_a.h"
+#include "ffx_cas.h"
 
 using namespace XrTest;
 
@@ -380,56 +386,165 @@ XR_TEST(Taa_HighlightOfOneFrameWeighsLess)
   CHECK_NEAR(r.Picture.At(0, 0)[0], 0.5, 1e-4);
 }
 
-//! The sharpening pushes a soft low-contrast step's pixels apart (a texture's detail) but never beyond their
-//! neighbours' range (no halo), leaves a silhouette's high-contrast step as it is, and 0 leaves the picture as it is.
-//! Why: TAA's picture is a little softer than one frame; the sharpening gives the textures that back without the bright
-//! and dark rims of an unsharp mask, and without making the edges it has just anti-aliased jagged again.
-XR_TEST(Taa_SharpeningStaysInRange)
+namespace
 {
-  // Two steps blurred, S-shaped runs: a texture's from 0.4 to 0.55 and a silhouette's from 0.2 to 0.8.
-  const float Texture[] = { 0.4f, 0.4f, 0.4f, 0.41f, 0.43f, 0.475f, 0.52f, 0.54f, 0.55f, 0.55f, 0.55f, 0.55f };
-  const float Silhouette[] = { 0.2f, 0.2f, 0.2f, 0.2f, 0.25f, 0.5f, 0.75f, 0.8f, 0.8f, 0.8f, 0.8f, 0.8f };
-  const int w = 12, h = 5;
-  for (const float *pProfile : { Texture, Silhouette })
+  //! The picture sharpened by TAA's sharpening (CSTaaSharpen: CAS) at fSharpness, the HDR light at fExposure (0: LDR).
+  SImage Sharpen(const SImage &Picture, float fSharpness, float fExposure)
   {
-    SImage Soft(w, h);
+    SDispatch d;
+    d.Shader = XR_BYTECODE(Test_TaaSharpen);
+    const size_t n = (size_t)Picture.w * Picture.h;
+    d.Test.nTest[0] = (uint32)n;
+    d.Test.nTest[1] = (uint32)Picture.w;
+    d.Test.nTest[2] = (uint32)Picture.h;
+    d.Test.nTest[3] = fExposure > 0 ? HDR : 0;
+    d.Test.vTest[1] = fExposure;
+    d.nGroups[0] = Groups64(n);
+    d.Textures = { Texture(Picture) };
+    // CAS's constants as UpscalerTaa.cpp makes them.
+    uint32 c0[4], c1[4];
+    CasSetup(c0, c1, fSharpness, (float)Picture.w, (float)Picture.h, (float)Picture.w, (float)Picture.h);
+    d.In.insert(d.In.end(), c0, c0 + 4);
+    d.In.insert(d.In.end(), c1, c1 + 4);
+    d.nOut = n;
+    const std::vector<uint32> Out = Gpu().Run(d);
+    SImage r(Picture.w, Picture.h);
+    for (size_t i = 0; i < n; i++)
+      for (int k = 0; k < 4; k++)
+        r.v[i * 4 + k] = At(Out, i, k);
+    return r;
+  }
+
+  //! A colour in CAS's space (TaaToCas) and back (TaaFromCas), on the CPU.
+  double ToCas(double c, double fMax, double fExposure)
+  {
+    return fExposure > 0 ? std::max(c * fExposure, 0.0) / (1 + std::max(fMax * fExposure, 0.0)) : std::pow(std::clamp(c, 0.0, 1.0), 2.2);
+  }
+
+  //! CAS's filter of pixel (x, y) as ffx_cas.h writes it (sharpen only, CAS_BETTER_DIAGONALS, CAS_GO_SLOWER, the green
+  //! channel's weight for all three), on the CPU, the picture's loads clamped into it: in CAS's space.
+  void CasReference(const SImage &Picture, int x, int y, double fSharpness, double fExposure, double Out[3])
+  {
+    double v[3][3][3];
+    for (int j = -1; j <= 1; j++)
+      for (int i = -1; i <= 1; i++)
+      {
+        const float *c = Picture.At(std::clamp(x + i, 0, Picture.w - 1), std::clamp(y + j, 0, Picture.h - 1));
+        const double fMax = std::max(c[0], std::max(c[1], c[2]));
+        for (int k = 0; k < 3; k++)
+          v[j + 1][i + 1][k] = ToCas(c[k], fMax, fExposure);
+      }
+    // The green channel's soft minimum and maximum (the cross plus the 3 x 3), its amount.
+    double mnCross = 1e30, mxCross = -1e30, mnBox = 1e30, mxBox = -1e30;
+    for (int j = 0; j < 3; j++)
+      for (int i = 0; i < 3; i++)
+      {
+        const double g = v[j][i][1];
+        mnBox = std::min(mnBox, g);
+        mxBox = std::max(mxBox, g);
+        if (i == 1 || j == 1)
+        {
+          mnCross = std::min(mnCross, g);
+          mxCross = std::max(mxCross, g);
+        }
+      }
+    const double mn = mnCross + mnBox, mx = mxCross + mxBox;
+    const double fAmp = mx > 0 ? std::sqrt(std::clamp(std::min(mn, 2 - mx) / mx, 0.0, 1.0)) : 0;
+    const double w = fAmp * -1 / (8 + (5 - 8) * std::clamp(fSharpness, 0.0, 1.0));
+    for (int k = 0; k < 3; k++)
+      Out[k] = std::clamp((w * (v[0][1][k] + v[1][0][k] + v[1][2][k] + v[2][1][k]) + v[1][1][k]) / (1 + 4 * w), 0.0, 1.0);
+  }
+
+  //! A soft texture of w x h, its colour from 0.25 to 0.75 (times fScale) by a hash of the texel, blurred by 3 x 3.
+  SImage SoftTexture(int w, int h, float fScale)
+  {
+    SImage Raw(w, h);
+    uint32 s = 12345;
+    for (float &f : Raw.v)
+    {
+      s = s * 1664525u + 1013904223u;
+      f = (0.25f + 0.5f * (float)(s >> 8) / 16777216.0f) * fScale;
+    }
+    SImage r(w, h);
     for (int y = 0; y < h; y++)
       for (int x = 0; x < w; x++)
-      {
-        float *p = Soft.At(x, y);
-        p[0] = p[1] = p[2] = pProfile[x];
-        p[3] = 1;
-      }
-    for (const float k : { 0.0f, 0.5f, 1.0f })
+        for (int k = 0; k < 4; k++)
+        {
+          float f = 0;
+          for (int j = -1; j <= 1; j++)
+            for (int i = -1; i <= 1; i++)
+              f += Raw.At(std::clamp(x + i, 0, w - 1), std::clamp(y + j, 0, h - 1))[k] / 9;
+          r.At(x, y)[k] = k == 3 ? 1 : f;
+        }
+    return r;
+  }
+}
+
+//! TAA's sharpening is AMD FidelityFX CAS's filter as ffx_cas.h describes it, with UpscalerTaa.cpp's constants of
+//! the sharpness (CasSetup on the CPU): a texture sharpened on the GPU matches the filter worked out on the CPU, for the
+//! LDR colours (in linear light) and the HDR light (exposed and compressed as the history blends it), at the sharpness's
+//! least, middle and most. Why: the constants made on the CPU are the shader's only input of the sharpness, and a wrong
+//! space (gamma encoded colours, or the HDR light uncompressed) over-sharpens or clips.
+XR_TEST(Taa_CasMatchesItsFilter)
+{
+  const int w = 12, h = 9;
+  for (const float fExposure : { 0.0f, 0.7f, 4.0f })
+  {
+    const SImage Picture = SoftTexture(w, h, fExposure > 0 ? 3.0f : 1.0f);
+    for (const float fSharpness : { 0.0f, 0.5f, 1.0f })
     {
-      SDispatch d;
-      d.Shader = XR_BYTECODE(Test_TaaSharpen);
-      const size_t n = (size_t)w * h;
-      d.Test.nTest[0] = (uint32)n;
-      d.Test.nTest[1] = (uint32)w;
-      d.Test.nTest[2] = (uint32)h;
-      d.Test.vTest[2] = k;
-      d.nGroups[0] = Groups64(n);
-      d.Textures = { ::Texture(Soft) };
-      d.nOut = n;
-      const std::vector<uint32> Out = Gpu().Run(d);
-      double fMoved = 0;
+      const SImage r = Sharpen(Picture, fSharpness, fExposure);
+      double fWorst = 0;
       for (int y = 0; y < h; y++)
         for (int x = 0; x < w; x++)
         {
-          const float v = At(Out, (size_t)y * w + x, 0), s = Soft.At(x, y)[0];
-          const float l = Soft.At(std::max(x - 1, 0), y)[0], r = Soft.At(std::min(x + 1, w - 1), y)[0];
-          CHECK(v >= std::min(l, s) - 1e-6f && v <= std::max(r, s) + 1e-6f);
-          fMoved = std::max(fMoved, (double)fabs(v - s));
+          double Want[3];
+          CasReference(Picture, x, y, fSharpness, fExposure, Want);
+          const float *Got = r.At(x, y);
+          const double fMax = std::max(Got[0], std::max(Got[1], Got[2]));
+          for (int k = 0; k < 3; k++)
+            fWorst = std::max(fWorst, std::fabs(ToCas(Got[k], fMax, fExposure) - Want[k]));
+          CHECK_NEAR(Got[3], 1, 0);
         }
-      if (k == 0 || pProfile == Silhouette)
-        CHECK_MSG(fMoved < 1e-6, std::to_string(fMoved));
-      else
-      {
-        CHECK_MSG(fMoved > 0.006 * k, std::to_string(fMoved));
-        // Apart: the pixels below the middle darker, those above it brighter.
-        CHECK(At(Out, 4, 0) <= Soft.At(4, 0)[0] && At(Out, 6, 0) >= Soft.At(6, 0)[0]);
-      }
+      CHECK_MSG(fWorst < 2e-4, "exposure " + std::to_string(fExposure) + ", sharpness " + std::to_string(fSharpness) + ": " +
+                                   std::to_string(fWorst));
     }
+  }
+}
+
+//! CAS leaves a flat picture as it is to its border (its loads clamped into the picture), a dark one, a white one and
+//! the HDR light of a lamp too; it raises a soft texture's contrast, more the higher the sharpness, within the colours'
+//! range of the LDR picture. Why: the sharpening runs on every pixel of TAA's picture, where most of it is flat; and the
+//! textures are what it is for.
+XR_TEST(Taa_CasSharpensTexturesNotFlat)
+{
+  const int w = 10, h = 7;
+  for (const float fExposure : { 0.0f, 4.0f })
+    for (const float fLevel : { 0.0f, 0.03f, 0.5f, 1.0f, 1000.0f })
+    {
+      if (fExposure == 0 && fLevel > 1)
+        continue;
+      const SImage r = Sharpen(SImage(w, h, fLevel, fLevel, fLevel, 1), 1, fExposure);
+      for (size_t i = 0; i < r.v.size(); i += 4)
+        CHECK_NEAR(r.v[i + 1], fLevel, 2e-5 + 2e-4 * fLevel);
+    }
+  const SImage Picture = SoftTexture(24, 16, 1);
+  auto Contrast = [](const SImage &p)
+  {
+    double f = 0;
+    for (int y = 1; y + 1 < p.h; y++)
+      for (int x = 1; x + 1 < p.w; x++)
+        f += std::fabs(p.At(x, y)[1] - 0.25 * (p.At(x - 1, y)[1] + p.At(x + 1, y)[1] + p.At(x, y - 1)[1] + p.At(x, y + 1)[1]));
+    return f;
+  };
+  double fPrev = Contrast(Picture);
+  for (const float fSharpness : { 0.0f, 0.5f, 1.0f })
+  {
+    const SImage r = Sharpen(Picture, fSharpness, 0);
+    const double f = Contrast(r);
+    CHECK_MSG(f > 1.05 * fPrev, std::to_string(fSharpness) + ": " + std::to_string(f) + " after " + std::to_string(fPrev));
+    fPrev = f;
+    for (size_t i = 0; i < r.v.size(); i++)
+      CHECK(r.v[i] >= 0 && r.v[i] <= 1);
   }
 }

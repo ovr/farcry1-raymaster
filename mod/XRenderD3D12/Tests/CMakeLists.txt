@@ -24,13 +24,14 @@ function(xrender_d3d12_test_shader name file profile entry)
     set(out "${XRENDERD3D12_TESTS_SHADER_DIR}/Test_${name}.h")
     file(GLOB includes "${XRENDERD3D12_SHADER_SOURCE_DIR}/*.hlsl" "${XRENDERD3D12_SHADER_SOURCE_DIR}/*.hlsli"
         "${XRENDERD3D12_SHADER_SOURCE_DIR}/*.h" "${CMAKE_CURRENT_SOURCE_DIR}/Shaders/*.hlsli" "${XRENDERD3D12_XEGTAO_DIR}/*.hlsli"
-        "${XRENDERD3D12_XEGTAO_DIR}/*.h" "${XRENDERD3D12_SMAA_DIR}/*.hlsl" "${XRENDERD3D12_CMAA2_DIR}/*.hlsl")
+        "${XRENDERD3D12_XEGTAO_DIR}/*.h" "${XRENDERD3D12_SMAA_DIR}/*.hlsl" "${XRENDERD3D12_CMAA2_DIR}/*.hlsl"
+        "${XRENDERD3D12_CAS_DIR}/*.h")
     add_custom_command(
         OUTPUT "${out}"
         COMMAND "${CMAKE_COMMAND}" -E make_directory "${XRENDERD3D12_TESTS_SHADER_DIR}"
         COMMAND "${XRENDERD3D12_DXC}" -nologo -T ${profile} -E ${entry} -Zpr -O3 -Qstrip_reflect
                 -I "${XRENDERD3D12_SHADER_SOURCE_DIR}" -I "${CMAKE_CURRENT_SOURCE_DIR}/Shaders" -I "${XRENDERD3D12_XEGTAO_DIR}"
-                -I "${XRENDERD3D12_SMAA_DIR}" -I "${XRENDERD3D12_CMAA2_DIR}" ${defines} -Vn "g_Test_${name}" -Fh "${out}" "${file}"
+                -I "${XRENDERD3D12_SMAA_DIR}" -I "${XRENDERD3D12_CMAA2_DIR}" -I "${XRENDERD3D12_CAS_DIR}" ${defines} -Vn "g_Test_${name}" -Fh "${out}" "${file}"
         MAIN_DEPENDENCY "${file}"
         DEPENDS ${includes}
         COMMENT "dxc (tests) ${entry} -> Test_${name}.h"
@@ -65,7 +66,7 @@ endforeach()
 xrender_d3d12_test_shader(Cmaa2DispatchArgs "${cmaa2}" cs_6_0 ComputeDispatchArgsCS)
 xrender_d3d12_test_shader(Cmaa2Candidates "${cmaa2}" cs_6_0 ProcessCandidatesCS)
 xrender_d3d12_test_shader(Cmaa2Apply "${cmaa2}" cs_6_0 DeferredColorApply2x2CS)
-# TAA (Taa.hlsli as Taa.hlsl's kernels use it).
+# TAA (Taa.hlsli as Taa.hlsl's kernels use it; its sharpening TaaCas.hlsli with third_party/fidelityfx-cas's CAS).
 set(taa "${CMAKE_CURRENT_SOURCE_DIR}/Shaders/TestTaa.hlsl")
 foreach(k Resolve Dilate Sharpen Working)
     xrender_d3d12_test_shader(Taa${k} "${taa}" cs_6_0 CSTaa${k})
@@ -109,7 +110,7 @@ source_group("Shaders\\Generated" FILES ${XRENDERD3D12_TESTS_SHADER_HEADERS})
 add_executable(XRenderD3D12Tests ${XRENDERD3D12_TESTS_SOURCES} ${XRENDERD3D12_TESTS_HLSL} ${XRENDERD3D12_TESTS_SHADER_HEADERS})
 set_target_properties(XRenderD3D12Tests PROPERTIES FOLDER "Renderer")
 target_include_directories(XRenderD3D12Tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}" "${CMAKE_CURRENT_SOURCE_DIR}/.."
-    "${XRENDERD3D12_TESTS_SHADER_DIR}" "${XRENDERD3D12_SMAA_DIR}")
+    "${XRENDERD3D12_TESTS_SHADER_DIR}" "${XRENDERD3D12_SMAA_DIR}" "${XRENDERD3D12_CAS_DIR}")
 target_compile_definitions(XRenderD3D12Tests PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX)
 target_compile_options(XRenderD3D12Tests PRIVATE /W4)
 target_link_libraries(XRenderD3D12Tests PRIVATE d3d12 dxgi)

@@ -18,8 +18,10 @@
 //	                motion TaaDilate's, as its first kernel gives it),
 //	                out[n + i] = (the frame's share, the clip, the luma, 0)
 //	  CSTaaDilate   the same textures [1] and [2]: out[i] = (TaaDilate, 0, 0)
-//	  CSTaaSharpen  g_Textures[0] the picture: out[i] = its pixel sharpened
-//	                as Taa.hlsl's last kernel sharpens it
+//	  CSTaaSharpen  g_Textures[0] the picture, g_TestIn[0] and [1] CAS's
+//	                constants (CasSetup's const0, const1 as uint4): out[i]
+//	                = its pixel sharpened as Taa.hlsl's last kernel
+//	                sharpens it (TaaCas.hlsli)
 //	  CSTaaWorking  g_TestIn[i] a colour: out[i] = TaaToWorking of it,
 //	                out[n + i] = TaaFromWorking of that
 //
@@ -59,6 +61,13 @@ float TestTaaExposure()
   return (g_Test.nTest.w & 2) ? g_Test.vTest.y : 0;
 }
 
+float3 TaaCasLoad(int2 p)
+{
+  return TaaToCas(TaaLoadColor(p), TestTaaExposure());
+}
+
+#include "TaaCas.hlsli"
+
 [numthreads(64, 1, 1)]
 void CSTaaResolve(uint i : SV_DispatchThreadID)
 {
@@ -82,12 +91,8 @@ void CSTaaSharpen(uint i : SV_DispatchThreadID)
 {
   if (i >= g_Test.nTest.x)
     return;
-  const int2 p = TestTaaPixel(i);
-  const float e = TestTaaExposure();
-  const float3 c = TaaToWorking(TaaLoadColor(p), e);
-  const float3 n = TaaToWorking(TaaLoadColor(p + int2(0, -1)), e), s = TaaToWorking(TaaLoadColor(p + int2(0, 1)), e);
-  const float3 w = TaaToWorking(TaaLoadColor(p + int2(-1, 0)), e), ea = TaaToWorking(TaaLoadColor(p + int2(1, 0)), e);
-  TestOut(i, float4(TaaFromWorking(TaaSharpen(c, n, s, w, ea, g_Test.vTest.z), e), 1));
+  const uint4 vConst0 = g_TestIn[0], vConst1 = g_TestIn[1];
+  TestOut(i, float4(TaaFromCas(TaaCas(TestTaaPixel(i), vConst0, vConst1), TestTaaExposure()), 1));
 }
 
 [numthreads(64, 1, 1)]

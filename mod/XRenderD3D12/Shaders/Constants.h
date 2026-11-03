@@ -431,6 +431,8 @@ struct STaaConstants
                                   //!< (0..1, d3d12_UpscaleSharpness), z the exposure without TAA_EXPOSURE, w the least share from a
                                   //!< pixel's motion a frame on
   XR_UINT4(vFlags);               //!< x TAA_*
+  XR_UINT4(vCas0);                //!< the sharpening's CAS constants of its sharpness (CasSetup's const0, const1; TaaCas.hlsli)
+  XR_UINT4(vCas1);
 };
 
 #endif
