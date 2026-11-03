@@ -331,7 +331,8 @@ void CD3D12Renderer::RegisterVariables()
                      "4 the material (lit grey, the terrain green, the vegetation yellow; none black); 5 the light of its paths "
                      "(on grey), 6 one frame's paths, 7 the sun's visibility, 8 the game's ambient light the paths fill in with, "
                      "9 the highlights' colour (the material's specular colour times its gloss), 10 the highlights, 11 the "
-                     "radiance cache's light at the surfaces (d3d12_PTCache; its cells)");
+                     "radiance cache's light at the surfaces (d3d12_PTCache; its cells), 12 the terrain's share of the light baked "
+                     "into its texture (d3d12_PTTerrainDelight)");
   iConsole->Register("d3d12_PTSky", &CV_d3d12_PTSky, 1.0f, VF_DUMPTODISK,
                      "With d3d12_PathTracing, the sky's light where a path leaves the scene: times the level's outdoor ambient");
   iConsole->Register("d3d12_PTBounces", &CV_d3d12_PTBounces, 1, VF_DUMPTODISK,

@@ -42,7 +42,7 @@ foreach(k Oct GBufferNormal Hdr HdrStats ToneMap HdrOutput SkyGlow FrameAverage 
 endforeach()
 # The path tracer's functions, PathTrace.hlsl included as it is (Shader Model 6.5, as Shaders.cmake compiles it).
 set(pathtrace "${CMAKE_CURRENT_SOURCE_DIR}/Shaders/TestPathTrace.hlsl")
-foreach(k LeafSide Cosine Checkerboard Layout)
+foreach(k LeafSide Cosine Checkerboard Layout PixelSurface TerrainShare)
     xrender_d3d12_test_shader(${k} "${pathtrace}" cs_6_5 CS${k})
 endforeach()
 # The renderer's own kernel, from its own source.

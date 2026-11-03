@@ -18,6 +18,16 @@
 //	  5  UAV u0 space9  the output (uint4 words)
 //	  6  UAV u3         the radiance cache (g_PathCache of PathCache.hlsli,
 //	                    XR_PT_CACHE_BYTES), kept from run to run
+//	  7  CBV b0         SFrameConstants (g_Frame of Common.hlsli)
+//	  8  SRV t0 space5  the scene for rays (g_RayScene of RayShade.hlsli):
+//	                    the TLAS of SDispatch::pScene
+//	  9  SRV t1 space5  its SRayInstance (g_RayInstances)
+//	  10 SRV t2 space5  SPTLight[] (g_PTLights of PathShade.hlsli), the
+//	                    same as 4
+//	  11 tables of the descriptor heap, unbounded: t0 space4 the raw
+//	  .. buffers (g_Buffers: 0 the scene's corners), t0 space1, 2, 3 and 6
+//	  15 the textures (null ones)
+//	  static samplers s0-s4 as Common.hlsli has them
 //	Every run waits for the GPU: the tests are small.
 //
 //////////////////////////////////////////////////////////////////////
@@ -63,6 +73,16 @@ namespace XrTest
     float vTest2[4] = {};
   };
 
+  //! A scene for rays: one instance of triangles (three corners each, not indexed, opaque) with the identity transform,
+  //! its BLAS and TLAS built for the run. Its corners are g_Buffers[0] (12 bytes each), which Instance.nGeom and
+  //! Instance.nLayout name as the renderer's would.
+  struct SRayScene
+  {
+    std::vector<float> Corners;   //!< x y z of each corner, three a triangle
+    uint32 nMask = 0xff;          //!< the instance's mask
+    SRayInstance Instance{};      //!< g_RayInstances[0]
+  };
+
   //! What a run binds; the output is nOut uint4 items, zeroed before the kernel runs.
   struct SDispatch
   {
@@ -73,8 +93,10 @@ namespace XrTest
     std::vector<uint32> In;               //!< t0 space9, uint4 items
     const void *pInstances = nullptr;     //!< t1 space9
     size_t nInstanceBytes = 0;
-    const void *pLights = nullptr;        //!< t2 space9
+    const void *pLights = nullptr;        //!< t2 space9 and t2 space5
     size_t nLightBytes = 0;
+    const void *pFrame = nullptr;         //!< b0: an SFrameConstants (else zeros)
+    const SRayScene *pScene = nullptr;    //!< t0, t1 space5 and g_Buffers (needs HasRaytracing)
     size_t nOut = 1;
   };
 
@@ -90,6 +112,8 @@ namespace XrTest
     bool HasDebugLayer() const { return m_pInfoQueue != nullptr; }
     //! Whether the device runs Shader Model 6.5 (the path tracer's kernels).
     bool HasShaderModel65() const { return m_nShaderModel >= D3D_SHADER_MODEL_6_5; }
+    //! Whether it builds scenes for rays and runs inline RayQuery (raytracing tier 1.1; SDispatch::pScene).
+    bool HasRaytracing() const { return m_pDevice5 && m_pList4 && HasShaderModel65(); }
 
     //! Runs a kernel; the words it wrote to u0 space9 (4 an item).
     std::vector<uint32> Run(const SDispatch &d);
@@ -100,6 +124,10 @@ namespace XrTest
     ComPtr<ID3D12Resource> Buffer(D3D12_HEAP_TYPE eHeap, size_t nBytes, D3D12_RESOURCE_STATES eState, bool bUav);
     ComPtr<ID3D12Resource> Upload(const void *pData, size_t nBytes);
     ID3D12PipelineState *Pipeline(const SBytecode &Shader);
+    //! The scene's BLAS and TLAS built into the open list (the buffers kept in Keep until the run ends); the TLAS.
+    D3D12_GPU_VIRTUAL_ADDRESS BuildScene(const SRayScene &Scene, std::vector<ComPtr<ID3D12Resource>> &Keep);
+    D3D12_CPU_DESCRIPTOR_HANDLE CpuHandle(UINT n) const;
+    D3D12_GPU_DESCRIPTOR_HANDLE GpuHandle(UINT n) const;
     void Execute();
     void CheckDebugMessages();
 
@@ -117,6 +145,10 @@ namespace XrTest
     std::map<const void *, ComPtr<ID3D12PipelineState>> m_Pipelines;
     ComPtr<ID3D12Resource> m_pCache;
     ComPtr<ID3D12InfoQueue> m_pInfoQueue;
+    ComPtr<ID3D12Device5> m_pDevice5;               //!< with raytracing tier 1.1, else null
+    ComPtr<ID3D12GraphicsCommandList4> m_pList4;
+    ComPtr<ID3D12DescriptorHeap> m_pHeap;           //!< shader visible: 0 g_Buffers[0], 1-4 null textures
+    UINT m_nDescriptorSize = 0;
   };
 
   //! The tests' device, made at the first use (throws std::runtime_error when there is none).

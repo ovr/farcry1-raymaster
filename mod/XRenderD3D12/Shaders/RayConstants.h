@@ -64,6 +64,8 @@
 #define XR_RAY_DEBUG_GB_SPECULAR 24 //!< the highlights' colour (the G-buffer's: the material's specular colour times its gloss, times 2)
 #define XR_RAY_DEBUG_GB_HIGHLIGHTS 25 //!< the highlights of the sun and the lamps the composite adds (CSSpecular), the game's colour
 #define XR_RAY_DEBUG_GB_CACHE   26  //!< the radiance cache's light at the surfaces (CSTrace with SPathTraceConstants::nCache.z), grey
+#define XR_RAY_DEBUG_GB_TERRAIN 27  //!< the terrain's share of the light baked into its texture as the composite takes it (CSFilter), grey;
+                                    //!< what is not the terrain black
 
 //! SRayInstance: no view, no stream.
 #define XR_RAY_NONE         0xffffffff

@@ -753,7 +753,15 @@ reference of its features and console variables.
   sun and sky on an open face towards the sun (each channel: the texture has the light's colour too)
   times ((1 + (r - 1) N.L V) / r)^2.2, V the sun's visibility over the terrain alone, r
   `d3d12_PTTerrainDelight` (a lit face over a shadowed one): a lit face is as bright as the editor had
-  it, and of its colour (Rebellion's sand under the blue moon is not blue twice). While the path tracer is on the vegetation's vertex colours
+  it, and of its colour (Rebellion's sand under the blue moon is not blue twice). A pixel's point (where
+  its paths start, the sun's ray of that share) is the raster's depth snapped onto the scene for rays
+  (`PixelSurface`, `PixelTerrain`): a ray from the camera through it within 0.02 m + 0.2 % of its
+  distance, the face's normal the triangle's it hits. The raster's depth is off by about 0.02-0.08 % of
+  the distance (float transforms at a level's 1000 m, the near plane at 0.25 m), tenths of a metre at
+  300 m, and a point under the terrain shaded its sun ray along the terrain: the share fell, the albedo
+  divided by it flashed bright from frame to frame, in stripes (Pier's canyon; test: unit tests
+  `PathTrace_PixelSurface`, `PathTrace_TerrainShare`, `render_tests` suite `ptshare`). The leaves keep
+  the raster's point (they bend in the wind, the rays' scene's do not). While the path tracer is on the vegetation's vertex colours
   are baked without the light (the engine's values again on a change), and the grass that fades in or
   out is alpha tested among the opaque surfaces (its alpha times the fade: it thins out), not blended
   after them.
@@ -829,7 +837,9 @@ reference of its features and console variables.
   filter. `d3d12_PTDebug` shows it: 1 the albedo, 2 the normal, 3 the fog's share, 4 the material, 5 the
   paths' light on the game's grey 0.5, 6 one frame's paths (with the checkerboard half of them the frame
   before's), 7 the sun's visibility, 8 the ambient light,
-  9 the highlights' colour, 10 the highlights, 11 the radiance cache's light at the surfaces.
+  9 the highlights' colour, 10 the highlights, 11 the radiance cache's light at the surfaces, 12 the
+  terrain's share of the light baked into its texture as the composite divides its albedo by it (grey, 1 on
+  a lit face towards the sun; what is not the terrain black).
 - Open places are as bright as the raster, a hut or a tunnel lit through an opening about as bright
   (without the ambient light far darker, the reference too); a hall lit by its light maps' lamps is
   darker, the crowns of the trees seen from below too (their leaves pass no light). The highlights are
@@ -852,7 +862,10 @@ reference of its features and console variables.
   normal (the octahedral map, the side it is turned to, the vegetation's left as it is), its fog and
   material fields, the HDR targets' light curve, the radiance cache (cells, keys, insertion from many
   threads, the samples' sum and `CSCacheResolve` itself), `PathLeafSide`, the cosine directions, the
-  checkerboard, and the structures C++ shares with the shaders word for word.
+  checkerboard, the structures C++ shares with the shaders word for word, and on a scene for rays of
+  their own (a BLAS of the test's triangles in a TLAS, the bindless buffers and samplers as the
+  renderer's) the pixel's point snapped onto it and the terrain's share at a hill side 300 m away with
+  the raster's depth off by up to 0.16 %.
 
 ## Pipeline states
 

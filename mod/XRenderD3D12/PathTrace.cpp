@@ -968,13 +968,15 @@ void CD3D12Renderer::DrawPathTrace()
 
 void CD3D12Renderer::DrawPathDebug()
 {
-  if (CV_d3d12_PTDebug <= 0 || CV_d3d12_PTDebug > 11 || m_PathTrace.nGBufferFrame != m_nFrames || !m_PathTrace.pAlbedo || !m_pDevice ||
+  if (CV_d3d12_PTDebug <= 0 || CV_d3d12_PTDebug > 12 || m_PathTrace.nGBufferFrame != m_nFrames || !m_PathTrace.pAlbedo || !m_pDevice ||
       m_pDevice->IsOffscreen() || !m_pRayScene || !m_pRayScene->GetTLAS())
     return;
-  // The paths' light and the highlights: of this frame's (the radiance cache's: CSTrace's output in the paths' place).
-  CD3D12Texture *pLight = CV_d3d12_PTDebug == 5 ? m_PathTrace.pLight : CV_d3d12_PTDebug == 6 || CV_d3d12_PTDebug == 11 ? m_PathTrace.pRays :
+  // The paths' light (12: its w, the terrain's share of its baked light) and the highlights: of this frame's (the radiance
+  // cache's: CSTrace's output in the paths' place).
+  CD3D12Texture *pLight = CV_d3d12_PTDebug == 5 || CV_d3d12_PTDebug == 12 ? m_PathTrace.pLight :
+                          CV_d3d12_PTDebug == 6 || CV_d3d12_PTDebug == 11 ? m_PathTrace.pRays :
                           CV_d3d12_PTDebug == 10 ? m_PathTrace.pHighlights : nullptr;
-  const bool bKernel = CV_d3d12_PTDebug == 5 || CV_d3d12_PTDebug == 6 || CV_d3d12_PTDebug == 10 || CV_d3d12_PTDebug == 11;
+  const bool bKernel = CV_d3d12_PTDebug == 5 || CV_d3d12_PTDebug == 6 || CV_d3d12_PTDebug == 10 || CV_d3d12_PTDebug == 11 || CV_d3d12_PTDebug == 12;
   if (bKernel && (!pLight || m_PathTrace.nLightFrame != m_nFrames))
     return;
   if (pLight)

@@ -152,6 +152,8 @@ float4 GBufferView(uint nView, float2 vPixel)
     return float4(0, 0, 0, 1);
   if (nView == XR_RAY_DEBUG_GB_NORMAL)
     return float4(PathOctDecode(vNormal.rg) * 0.5 + 0.5, 1);
+  if (nView == XR_RAY_DEBUG_GB_TERRAIN)
+    return float4(nMaterial == XR_PT_MAT_TERRAIN + 1 ? saturate(g_Textures[g_Draw.nTex2].Load(vAt).www) : 0, 1);
   if (nView == XR_RAY_DEBUG_GB_LIGHT || nView == XR_RAY_DEBUG_GB_RAYS || nView == XR_RAY_DEBUG_GB_CACHE)
     return float4(pow(saturate(pow(0.5, HDR_GAMMA) * g_Textures[g_Draw.nTex2].Load(vAt).rgb), 1 / HDR_GAMMA), 1);
   const float3 vColor = nMaterial == 2 ? float3(0.3, 0.9, 0.3) : nMaterial == 3 ? float3(0.9, 0.9, 0.2) : float3(0.8, 0.8, 0.8);

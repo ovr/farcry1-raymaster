@@ -9,8 +9,10 @@
 //	resources only they use are left out of a compile of one of these
 //	entry points, so the tests run its real functions (PathLeafSide,
 //	CosineDirection, PathCheckerboard.hlsli's PathTraced with its real
-//	g_PT) without the scene for rays. The layout kernel reads the
-//	structures C++ shares with HLSL (RayConstants.h) as HLSL lays them out.
+//	g_PT), and with a scene for rays of the harness's (GpuHarness.h
+//	SRayScene) PixelSurface and PixelTerrainShare. The layout kernel reads
+//	the structures C++ shares with HLSL (RayConstants.h) as HLSL lays them
+//	out.
 //
 //////////////////////////////////////////////////////////////////////
 
@@ -52,6 +54,31 @@ void CSCosine(uint i : SV_DispatchThreadID)
     v = TestIn(i * 2 + 1).y;
   }
   TestOut(i, float4(CosineDirection(n, u, v), 0));
+}
+
+//! PixelSurface of the points g_TestIn[2i].xyz (w: their material as PathGBufferMaterial gives it, its bits) with the faces
+//! g_TestIn[2i + 1].xyz among the instances of mask g_Test.nTest.y, with g_PT's camera: out[2i] the point, out[2i + 1] the face.
+[numthreads(64, 1, 1)]
+void CSPixelSurface(uint i : SV_DispatchThreadID)
+{
+  if (i >= g_Test.nTest.x)
+    return;
+  float3 vPos = TestIn(2 * i).xyz, vFace = TestIn(2 * i + 1).xyz;
+  PixelSurface(vPos, vFace, g_TestIn[2 * i].w, g_Test.nTest.y);
+  TestOut(2 * i, float4(vPos, 0));
+  TestOut(2 * i + 1, float4(vFace, 0));
+}
+
+//! The terrain's share of its baked light at the points g_TestIn[2i].xyz (w their view depth), their normal and face
+//! g_TestIn[2i + 1].xyz: out[i].x as CSFilter takes it (PixelTerrainShare), y TerrainBakedShare from the point as it is.
+[numthreads(64, 1, 1)]
+void CSTerrainShare(uint i : SV_DispatchThreadID)
+{
+  if (i >= g_Test.nTest.x)
+    return;
+  const float4 a = TestIn(2 * i);
+  const float3 vN = TestIn(2 * i + 1).xyz;
+  TestOut(i, float4(PixelTerrainShare(a.xyz, vN, vN, a.w), TerrainBakedShare(a.xyz, vN, vN, PathShadeParams(0), a.w * g_PT.vParams.y), 0, 0));
 }
 
 //! PathTraced over a g_Test.nTest.x x g_Test.nTest.y grid of pixels, with g_PT as the test binds it: out[x + y * w].x 1 where traced.

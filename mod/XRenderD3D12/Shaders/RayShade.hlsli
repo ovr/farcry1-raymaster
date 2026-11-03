@@ -121,6 +121,39 @@ float2 RayTexGen(SRayInstance I, float2 vUV, float3 vWorld)
   return vUV;
 }
 
+//! The corners of triangle nPrimitive of instance I (one with a view of its buffers) in world space, their vertices'
+//! indices and where they start in its vertex buffer (bytes).
+void RayTriangle(SRayInstance I, uint nPrimitive, float3x4 mObjectToWorld, out float3 p[3], out uint3 vIndex, out uint3 vByte)
+{
+  vIndex = uint3(RayIndex(I, 3 * nPrimitive), RayIndex(I, 3 * nPrimitive + 1), RayIndex(I, 3 * nPrimitive + 2));
+  vByte = I.nGeom.y + vIndex * (I.nLayout.x & 0xffff);
+  [unroll] for (uint i = 0; i < 3; i++)
+    p[i] = mul(mObjectToWorld, float4(RayLoad3(I.nGeom.x, vByte[i]), 1));
+}
+
+//! The normal of the triangle of corners p, on the side a ray along vRayDir comes from; fArea twice its area.
+float3 RayTriangleFace(float3 p[3], float3 vRayDir, out float fArea)
+{
+  const float3 vCross = cross(p[1] - p[0], p[2] - p[0]);
+  fArea = length(vCross);
+  const float3 vFace = fArea > 0 ? vCross / fArea : float3(0, 0, 1);
+  return dot(vFace, vRayDir) > 0 ? -vFace : vFace;
+}
+
+//! RaySurface's vFaceNormal alone: the normal of triangle nPrimitive of instance nInstance, on the side a ray along
+//! vRayDir comes from (-vRayDir where the instance has no view of its buffers).
+float3 RayFaceNormal(uint nInstance, uint nPrimitive, float3x4 mObjectToWorld, float3 vRayDir)
+{
+  const SRayInstance I = g_RayInstances[nInstance];
+  if (I.nGeom.x == XR_RAY_NONE)
+    return -vRayDir;
+  float3 p[3];
+  uint3 vIndex, vByte;
+  float fArea;
+  RayTriangle(I, nPrimitive, mObjectToWorld, p, vIndex, vByte);
+  return RayTriangleFace(p, vRayDir, fArea);
+}
+
 //! The point at barycentrics vBary of triangle nPrimitive of instance nInstance, its texture's mip
 //! level under a ray cone fConeWidth wide there along vRayDir. bAlphaTest: only what the alpha test
 //! reads (RayAlphaPasses): the normal only for DF_CUBE0, the vertex colour not with
@@ -140,17 +173,13 @@ SRaySurface RaySurface(uint nInstance, uint nPrimitive, float2 vBary, float3x4 m
     S.fLod = S.fLod1 = 0;
     return S;
   }
-  const uint3 vIndex = uint3(RayIndex(I, 3 * nPrimitive), RayIndex(I, 3 * nPrimitive + 1), RayIndex(I, 3 * nPrimitive + 2));
-  const uint3 vByte = I.nGeom.y + vIndex * (I.nLayout.x & 0xffff);
-  const float3 vW = float3(1 - vBary.x - vBary.y, vBary.x, vBary.y);
   float3 p[3];
-  [unroll] for (uint i = 0; i < 3; i++)
-    p[i] = mul(mObjectToWorld, float4(RayLoad3(I.nGeom.x, vByte[i]), 1));
+  uint3 vIndex, vByte;
+  float fArea;                                         // twice the triangle's
+  RayTriangle(I, nPrimitive, mObjectToWorld, p, vIndex, vByte);
+  const float3 vW = float3(1 - vBary.x - vBary.y, vBary.x, vBary.y);
   S.vPos = p[0] * vW.x + p[1] * vW.y + p[2] * vW.z;
-  const float3 vCross = cross(p[1] - p[0], p[2] - p[0]);
-  const float fArea = length(vCross);                  // twice the triangle's
-  const float3 vFace = fArea > 0 ? vCross / fArea : float3(0, 0, 1);
-  S.vFaceNormal = dot(vFace, vRayDir) > 0 ? -vFace : vFace;
+  S.vFaceNormal = RayTriangleFace(p, vRayDir, fArea);
 
   const uint nNormal = I.nLayout.y & 0xff, nColor = (I.nLayout.y >> 8) & 0xff, nTex0 = (I.nLayout.y >> 16) & 0xff, nTex1 = I.nLayout.y >> 24;
   float3 vN = float3(0, 0, 1);
@@ -185,7 +214,7 @@ SRaySurface RaySurface(uint nInstance, uint nPrimitive, float2 vBary, float3x4 m
 
   // The cone's footprint in uv per texel of a texture 1 x 1: the triangle's area in uv over its area
   // in the world, the cone's width over it slanted by the face's angle.
-  const float fCone = log2(max(fConeWidth, 1e-6) / max(abs(dot(vFace, vRayDir)), 1e-3)) - 0.5 * log2(max(fArea, 1e-20));
+  const float fCone = log2(max(fConeWidth, 1e-6) / max(abs(dot(S.vFaceNormal, vRayDir)), 1e-3)) - 0.5 * log2(max(fArea, 1e-20));
   S.fLod = fCone + 0.5 * log2(max(UVArea(vUV0), 1e-20));
   S.fLod1 = fCone + 0.5 * log2(max(UVArea(vUV1), 1e-20));
   return S;
