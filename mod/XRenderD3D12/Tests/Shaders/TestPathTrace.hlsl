@@ -124,6 +124,15 @@ void CSLampShadow(uint i : SV_DispatchThreadID)
   TestOut(i, float4(fSeen, fGap, fHit, 0));
 }
 
+//! PathLightmapFill of the light map's light / 4 g_TestIn[3i].rgb and the ambient light / 2 g_TestIn[3i + 1].rgb on the point
+//! g_TestIn[3i + 2].xyz with the normal g_Test.vTest.xyz, the lamps g_TestLights (t2 space5), g_PT's parameters: out[i].
+[numthreads(64, 1, 1)]
+void CSLightmapFill(uint i : SV_DispatchThreadID)
+{
+  if (i < g_Test.nTest.x)
+    TestOut(i, float4(PathLightmapFill(TestIn(3 * i).rgb, TestIn(3 * i + 1).rgb, TestIn(3 * i + 2).xyz, g_Test.vTest.xyz, PathShadeParams(0)), 0));
+}
+
 //! PathTraced over a g_Test.nTest.x x g_Test.nTest.y grid of pixels, with g_PT as the test binds it: out[x + y * w].x 1 where traced.
 [numthreads(8, 8, 1)]
 void CSCheckerboard(uint2 p : SV_DispatchThreadID)
@@ -188,4 +197,5 @@ void CSLayout()
   g_TestOut[o++] = g_PT.nCache;
   g_TestOut[o++] = g_PT.nCheckerboard;
   g_TestOut[o++] = asuint(g_PT.vBakeLight);
+  g_TestOut[o++] = g_PT.nTextures4;
 }

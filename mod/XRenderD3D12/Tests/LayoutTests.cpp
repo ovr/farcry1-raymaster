@@ -24,7 +24,7 @@ using namespace XrTest;
 namespace
 {
   //! The vectors (16 bytes; a matrix 4) CSLayout reads of each structure: a member added to RayConstants.h shows here first.
-  constexpr size_t INSTANCE_VECTORS = 14, LIGHT_VECTORS = 8, PATH_TRACE_VECTORS = 27;
+  constexpr size_t INSTANCE_VECTORS = 14, LIGHT_VECTORS = 8, PATH_TRACE_VECTORS = 28;
 
   //! Word w of element k of a structure: a pattern no two places share (a normal float's bits, though they go as words).
   uint32 Pattern(uint32 nStruct, uint32 k, uint32 w) { return 0x40000000u | (nStruct << 20) | (k << 12) | w; }

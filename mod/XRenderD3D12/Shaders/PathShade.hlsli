@@ -43,6 +43,12 @@
 //	The game's ambient light on a surface (SPathSurface::vAmbient): what its
 //	ambient colour adds to the light 1 of its albedo in the raster, as light;
 //	the paths fill in with it (PathTrace.hlsl).
+//	PathLightmapFill: where the frame has no sun, what a light map lights a
+//	surface with beyond the path tracer's own light: the raster's light
+//	(4 * the map + the ambient light, the game's light) as light, less the
+//	ambient light and the light of its lamps baked into the maps
+//	(XR_PT_LIGHT_LM) without their shadows. Near those lamps the path
+//	tracer's light and shadows alone; away from them the maps' flat light.
 //	PathSampleLamp: the lamps' light by one ray, towards a lamp picked among
 //	PT_LAMP_CANDIDATES of them by how much each gives without its shadow
 //	(resampled importance sampling: all of them where there are no more).
@@ -276,6 +282,26 @@ float3 PathLampLight(uint i, float3 vPos, float3 vN, SPathShade P, out float3 vT
 float PathLampGap(SPTLight L, SPathShade P)
 {
   return max(P.fLightGap, L.vColor.w);
+}
+
+//! What a light map lights a point at vPos with the normal vN with beyond the path tracer's own light (see the head of the
+//! file): vMap the map's light / 4 (the G-buffer's, D3D12_PT_LIGHTMAP_FORMAT), vHalfAmbient the game's ambient light / 2;
+//! as light, 0 where its lamps give as much.
+float3 PathLightmapFill(float3 vMap, float3 vHalfAmbient, float3 vPos, float3 vN, SPathShade P)
+{
+  if (all(vMap <= 0))
+    return 0;
+  float3 vFill = PathMultiplier(4 * vMap + 2 * vHalfAmbient) - PathAmbientLight(vHalfAmbient);
+  [loop]
+  for (uint i = 0; i < P.nLights && any(vFill > 0); i++)
+  {
+    if (!(g_PTLights[i].nParams.y & XR_PT_LIGHT_LM))
+      continue;
+    float3 vToLight;
+    float fDistance;
+    vFill -= PathLampLight(i, vPos, vN, P, vToLight, fDistance);
+  }
+  return max(vFill, 0);
 }
 
 //! The light of the sun and the frame's lamps on the surface (see the head of the file); fConeWidth the ray cone's width there.

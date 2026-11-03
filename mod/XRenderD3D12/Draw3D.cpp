@@ -1401,7 +1401,10 @@ void CD3D12Renderer::DrawLeafItem(const SRenderItem &it)
       memcpy(vPathSpecular, dc.vSpecular, sizeof(vPathSpecular));
     else if ((dc.nFlags & DF_LIGHTING) && (dc.nFlags2 & DF2_MATERIAL_LIGHT))
       Set4(vPathSpecular, dc.vSpecular[0] / 2, dc.vSpecular[1] / 2, dc.vSpecular[2] / 2, 0);
+    // d3d12_PTLightMaps: its light map stays, its light into the G-buffer's own target (General.hlsl, XR_PT), not the colour.
+    const uint32 nLightmap = CV_d3d12_PTLightMaps > 0 ? dc.nFlags & (DF_TEX1_LIGHTMAP | DF_LIGHTMAP_DIR) : 0;
     dc.nFlags &= ~(DF_LIGHTING | DF_PIXEL_LIGHTING | DF_SPECULAR | DF_SHADOW_DEBUG | DF_TEX1_LIGHTMAP | DF_LIGHTMAP_DIR);
+    dc.nFlags |= nLightmap;
     dc.nFlags2 &= ~(DF2_MATERIAL_LIGHT | DF2_VERTEX_LIGHTS | DF2_SMOOTH_FALLOFF | DF2_LIGHTMAP_LIGHTS | DF2_SUN_CASCADES | DF2_CASCADES_LIVE |
                     DF2_SHADOW_TINT | DF2_FOLIAGE | DF2_AO_BAKED | DF2_AO_ALL | DF2_NO_SUN);
     dc.nFlags2 |= (nNoSun ? nNoSun : CascadeReceiverFlags(false) | nTint) | (((nMaterial + 1) & 3) << DF2_PT_SHIFT);

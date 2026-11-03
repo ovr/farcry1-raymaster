@@ -825,9 +825,10 @@ public:
     uint32 nLightCount = 0;                 //!< its lights
     int nLightsFrame = -1;                  //!< m_nFrames it was made in
     CD3D12Texture *pAlbedo = nullptr;       //!< the G-buffer (D3D12_PT_ALBEDO_FORMAT, D3D12_PT_NORMAL_FORMAT, D3D12_PT_SUN_FORMAT,
-    CD3D12Texture *pNormal = nullptr;       //!< D3D12_PT_SPECULAR_FORMAT; render targets)
+    CD3D12Texture *pNormal = nullptr;       //!< D3D12_PT_SPECULAR_FORMAT, D3D12_PT_LIGHTMAP_FORMAT; render targets)
     CD3D12Texture *pSun = nullptr;
     CD3D12Texture *pSpecular = nullptr;
+    CD3D12Texture *pLightmap = nullptr;
     bool bBound = false;                    //!< BeginPathTargets .. EndPathTargets
     int nGBufferFrame = -1;                 //!< m_nFrames the main view's opaque list wrote it in
     bool bTraceDue = false;                 //!< EndPathTargets .. DrawPathTrace (once after the list that wrote it)
@@ -1889,6 +1890,7 @@ public:
   float CV_d3d12_PTLamps = 1.0f;            //!< its lamps
   float CV_d3d12_PTBakedFalloff = 0.0f;     //!< the falloff of its lamps baked into the light maps: 0 the raster's dynamic light's,
                                             //!< > 0 the light maps' (1 - d / r) to that power over the whole radius
+  float CV_d3d12_PTLightMaps = 1.0f;        //!< indoors, the light the light maps give beyond its lamps (times; 0: none)
   float CV_d3d12_PTEmission = 1.0f;         //!< what glows
   float CV_d3d12_PTTerrainDelight = 2.0f;   //!< the light baked into the terrain's texture: lit over shadowed (<= 1: none taken off)
   int CV_d3d12_PTDebug = 0;                 //!< the path tracer's G-buffer over the picture: 1 albedo, 2 normal, 3 fog, 4 material,

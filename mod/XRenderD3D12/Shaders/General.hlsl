@@ -219,7 +219,12 @@
 //	gloss: vSpecular.rgb, times texture 0's alpha where vSpecular.w > 0,
 //	which Draw3D.cpp sets so); a pass that multiplies the picture its
 //	factor (unfogged) to the albedo, the highlights' colour and the colour;
-//	the rest no albedo and no highlights.
+//	the rest no albedo and no highlights. Such a surface with its light map
+//	(DF_TEX1_LIGHTMAP, which Draw3D.cpp leaves on with d3d12_PTLightMaps;
+//	a dot3 one with its direction map's share) writes the light map's
+//	light / 4 to SV_Target7 instead of multiplying its colour by it: the
+//	path tracer takes what the map lights beyond its own lamps
+//	(PathLightmapFill, PathShade.hlsli).
 //
 //////////////////////////////////////////////////////////////////////
 
@@ -262,8 +267,8 @@ static float3 s_vAmbientLight, s_vAmbientNoSun, s_vAmbient;
 #ifdef XR_PT
 //! The path tracer's G-buffer of the pixel (PathGBuffer.hlsli): what the colour adds unlit, the albedo, the normal
 //! (N' with DF_BUMP), the side of its triangle the camera sees, the highlights' colour / 2, the fog's share, the sun's
-//! visibility.
-static float3 s_vPTEmission, s_vPTAlbedo, s_vPTNormal, s_vPTFace, s_vPTSpecular;
+//! visibility, the light map's light / 4.
+static float3 s_vPTEmission, s_vPTAlbedo, s_vPTNormal, s_vPTFace, s_vPTSpecular, s_vPTLightmap;
 static float s_fPTFog, s_fPTSun;
 #endif
 
@@ -1029,6 +1034,7 @@ float4 ShadePixel(SVertexOutput In)
   s_vPTEmission = 0;
   s_vPTAlbedo = 0;
   s_vPTSpecular = 0;
+  s_vPTLightmap = 0;
   s_vPTNormal = In.vNormal;
   s_fPTFog = 1;
   s_fPTSun = 1;
@@ -1262,6 +1268,12 @@ float4 ShadePixel(SVertexOutput In)
       // The colour is unlit here: its light is the light map's and the ambient colour under it.
       vAmb = vColor.rgb * g_Draw.vAmbient.rgb;
 #endif
+#ifdef XR_PT
+      // A surface the path tracer lights keeps its colour (the albedo); the light map's light goes to its own target.
+      if (g_Draw.nFlags2 & DF2_PT_MASK)
+        s_vPTLightmap = vLight;
+      else
+#endif
       if (HasFlag2(DF2_LIGHTMAP_LIGHTS))
       {
         float3 vNoSunLight, vSunSpec, vOtherSpec;
@@ -1468,6 +1480,7 @@ struct SPixelOutput
   float4 vNormal : SV_Target4;    //!< the normal, the fog's share, the path material (PathGBufferNormal)
   float4 vSun : SV_Target5;       //!< r the sun's visibility, gba the game's ambient light / 2 (the draw's vAmbient)
   float4 vSpecular : SV_Target6;  //!< the highlights' colour / 2, with the colour's alpha for the blend
+  float4 vLightmap : SV_Target7;  //!< the light map's light / 4 (rgb; 0 without one)
 };
 
 SPixelOutput PSMain(SVertexOutput In)
@@ -1507,6 +1520,7 @@ SPixelOutput PSMain(SVertexOutput In)
 #endif
   Out.vSun = float4(s_fPTSun, saturate(0.5 * vAmbient));
   Out.vSpecular = float4(saturate(s_vPTSpecular), Out.vColor.a);
+  Out.vLightmap = float4(saturate(s_vPTLightmap), 1);
   return Out;
 }
 #elif defined(XR_VELOCITY)

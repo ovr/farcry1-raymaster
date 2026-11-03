@@ -24,6 +24,7 @@
 #include "Test_SurfaceNormal.h"
 #include "Test_LampLight.h"
 #include "Test_LampShadow.h"
+#include "Test_LightmapFill.h"
 
 #include "Shaders/Constants.h"
 
@@ -648,5 +649,81 @@ XR_TEST(PathTrace_ProjectorShadowGap)
           CHECK_MSG(std::fabs(At(Out, i, 2) * Length(vLamp - Points[p]) - (Length(vLamp - Points[p]) - (p == 0 ? 0.3016f : 1.6155f))) < 0.05f,
                     What + ": hit at " + std::to_string(At(Out, i, 2)));
       }
+  }
+}
+
+//! PathLightmapFill (d3d12_PTLightMaps): what a light map lights a point with beyond the path tracer's own light is the
+//! raster's light (4 * the map + the ambient light, the game's light) as light, less the ambient light and the light of the
+//! lamps baked into the maps (XR_PT_LIGHT_LM) there without their shadows, 0 at least; a lamp that is not in the maps takes
+//! nothing off, and without a light map there is none. Why: Research's halls are lit by their light maps' flat light, which
+//! the path tracer's lamps do not reach (its SUB-LEVEL wall had 0.43 of the raster's light, step 277); near the lamps their
+//! light and shadows must stay the path tracer's.
+XR_TEST(PathTrace_LightmapFill)
+{
+  NeedShaderModel65();
+  const float r = 10;
+  SPTLight Lights[2] = {};
+  for (int l = 0; l < 2; l++)
+  {
+    Lights[l].vPos[0] = 100;
+    Lights[l].vPos[1] = 200;
+    Lights[l].vPos[2] = 30;
+    Lights[l].vPos[3] = r;
+    Lights[l].vColor[0] = Lights[l].vColor[1] = Lights[l].vColor[2] = 0.5f;   // twice it 1: the falloff alone
+    Lights[l].nParams[0] = XR_PT_LIGHT_POINT;
+    Lights[l].nParams[1] = XR_PT_LIGHT_STATIC | (l == 0 ? XR_PT_LIGHT_LM : 0);
+    Lights[l].nParams[2] = Lights[l].nParams[3] = XR_RAY_NONE;
+  }
+  struct SCase
+  {
+    float fMap, fAmbient, fDistance;
+  };
+  // Along -x from the lamps, the normal +x: facing them (N.L 1).
+  const SCase Cases[] = { { 0, 0.1f, 20 }, { 0.1f, 0.1f, 20 }, { 0.1f, 0.1f, 1 }, { 0.1f, 0.1f, 7 }, { 0.1f, 0.1f, 8.5f },
+                          { 0.05f, 0.05f, 9.5f }, { 0.25f, 0, 4 }, { 0.02f, 0.2f, 15 } };
+  const uint32 n = (uint32)(sizeof(Cases) / sizeof(Cases[0]));
+  auto Smooth = [](float x) { const float t = std::min(std::max(x / 0.9f, 0.0f), 1.0f); return t * t * (3 - 2 * t); };
+  auto Lamp = [&](float d) { const float x = d / r; return x >= 0.9f ? 0.0f : std::pow(1 - Smooth(x), 2.2f); };
+  auto Light = [](float g) { return std::pow(std::max(g, 0.0f), 2.2f); };
+  for (int nLM = 0; nLM < 2; nLM++)
+  {
+    // nLM 0: the first lamp without XR_PT_LIGHT_LM too (neither is in the maps).
+    SPTLight Run[2] = { Lights[0], Lights[1] };
+    if (nLM == 0)
+      Run[0].nParams[1] = XR_PT_LIGHT_STATIC;
+    SPathTraceConstants PT = {};
+    PT.vSun[3] = 1;   // d3d12_PTLamps
+    PT.nPath[0] = 2;
+    SDispatch d;
+    d.Shader = XR_BYTECODE(Test_LightmapFill);
+    d.pPathTrace = &PT;
+    d.pLights = Run;
+    d.nLightBytes = sizeof(Run);
+    d.Test.nTest[0] = n;
+    d.Test.vTest[0] = 1;
+    for (const SCase &c : Cases)
+    {
+      Push(d.In, c.fMap, c.fMap, c.fMap, 0);
+      Push(d.In, c.fAmbient, c.fAmbient, c.fAmbient, 0);
+      Push(d.In, 100 - c.fDistance, 200, 30, 0);
+    }
+    d.nGroups[0] = Groups64(n);
+    d.nOut = n;
+    const std::vector<uint32> Out = Gpu().Run(d);
+    for (uint32 i = 0; i < n; i++)
+    {
+      const SCase &c = Cases[i];
+      const float fRaster = Light(4 * c.fMap + 2 * c.fAmbient) - Light(2 * c.fAmbient);
+      const float fWant = c.fMap <= 0 ? 0 : std::max(fRaster - (nLM ? Lamp(c.fDistance) : 0), 0.0f), fGot = At(Out, i, 0);
+      CHECK_MSG(std::fabs(fGot - fWant) <= 1e-5f + 1e-3f * fWant, std::string(nLM ? "baked" : "dynamic") + " lamp, case " + std::to_string(i) +
+                                                                  ": " + std::to_string(fGot) + ", not " + std::to_string(fWant));
+      CHECK(At(Out, i, 0) == At(Out, i, 1) && At(Out, i, 1) == At(Out, i, 2));
+    }
+    if (nLM)
+    {
+      CHECK(At(Out, 0, 0) == 0);     // no light map
+      CHECK(At(Out, 1, 0) > 0.25f);  // beyond the lamps: the map's light
+      CHECK(At(Out, 2, 0) == 0);     // by the lamp: its own light
+    }
   }
 }
