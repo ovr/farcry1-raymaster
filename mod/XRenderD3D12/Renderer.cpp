@@ -262,8 +262,8 @@ void CD3D12Renderer::RegisterVariables()
                      "With r_HDRRendering: 1 the upscaler gets the scene's light (HDR), the bloom and the tone map after it at the display's "
                      "size; 0 the scene tone mapped at the render size (LDR)");
   // The anti-aliasing without an upscaler (PostAA.cpp).
-  iConsole->CreateVariable("d3d12_AA", "none", VF_DUMPTODISK,
-                           "The anti-aliasing of the 3D scene without an upscaler (with d3d12_Upscaler fsr FSR anti-aliases): none, "
+  iConsole->CreateVariable("d3d12_AA", "taa", VF_DUMPTODISK,
+                           "The anti-aliasing of the 3D scene without an upscaler (with d3d12_Upscaler fsr FSR anti-aliases; taa by default): none, "
                            "fxaa (FXAA over the finished picture), smaa (SMAA 1x over it), cmaa2 (CMAA2 over it) or taa (TAA: the scene "
                            "jittered, its frames gathered)");
   iConsole->Register("d3d12_AAQuality", &CV_d3d12_AAQuality, 2, VF_DUMPTODISK,
