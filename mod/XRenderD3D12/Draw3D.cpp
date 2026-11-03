@@ -263,8 +263,17 @@ void CD3D12Renderer::BeginScene3D()
     for (size_t i = 0; i < Lights.size(); i++)
     {
       if (const CDLight *p = Lights[i])
-        fprintf(m_pFrameDump.get(), "light %zu: origin (%.1f %.1f %.1f) colour (%.2f %.2f %.2f) radius %.1f flags 0x%x\n", i, p->m_Origin.x,
+      {
+        fprintf(m_pFrameDump.get(), "light %zu: origin (%.1f %.1f %.1f) colour (%.2f %.2f %.2f) radius %.1f flags 0x%x", i, p->m_Origin.x,
                 p->m_Origin.y, p->m_Origin.z, p->m_Color.r, p->m_Color.g, p->m_Color.b, p->m_fRadius, p->m_Flags);
+        // A projector's image: its name, flags2 (FT2_CUBEASSINGLETEXTURE: one picture made a cube, FT2_REPLICATETOALLSIDES,
+        // FT2_CHECKFORALLSEQUENCES), its frames, the frustum and the frame time.
+        if (const CTexture *pImage = static_cast<const CTexture *>(p->m_pLightImage))
+          fprintf(m_pFrameDump.get(), " image '%s' flags2 0x%x frames %zu frustum %.1f angles (%.1f %.1f %.1f) anim speed %g",
+                  pImage->m_Name.c_str(), pImage->m_nFlags2, pImage->m_Sequence.size() + 1, p->m_fLightFrustumAngle, p->m_ProjAngles.x,
+                  p->m_ProjAngles.y, p->m_ProjAngles.z, p->m_fAnimSpeed);
+        fprintf(m_pFrameDump.get(), "\n");
+      }
     }
   }
   m_NearestProj = MakeNearestProjection(m_Camera);
@@ -1477,8 +1486,9 @@ void CD3D12Renderer::DrawLeafItem(const SRenderItem &it)
       continue;
     if ((pLight->m_Flags & (DLF_HEATSOURCE | DLF_LIGHTSOURCE)) == DLF_HEATSOURCE)
       continue;
-    CTexture *pCube = static_cast<CTexture *>(pLight->m_pLightImage);
-    if (!pCube || !pCube->IsCube() || !pCube->IsTextureLoaded())
+    // d3d12_LightImages: the frame of the image's sequence the light casts now.
+    CTexture *pCube = LightImageAt(*pLight, iTimer ? iTimer->GetCurrTime() : 0.0f, CV_d3d12_LightImages > 0);
+    if (!pCube)
       continue;
     dc.nFlags = nFlags;
     dc.nFlags2 = DF2_NO_SUN | DF2_PROJECTOR | DF2_FOG_BLACK | (bTerrain ? DF2_TERRAIN_LIGHT : 0) | nFlags2;

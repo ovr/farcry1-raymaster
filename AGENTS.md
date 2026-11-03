@@ -245,7 +245,8 @@ instructions and is not committed (git-ignored). The references of the modules a
   (`TemplateFx.cpp`, Volcano's lava `LavaVolume`) and the fog of what is added; the far vegetation
   sprites and the terrain's detail layers; the video options' render modes over the scene
   (`r_RenderMode` with `r_Glare`: Improved, Paradise, Cold, Cartoon; `d3d12_RenderMode`,
-  `Shaders/RenderMode.hlsli`). The game's menu gets the renderer's options from the patches in
+  `Shaders/RenderMode.hlsli`); the projected lights' images on all faces and their sequences'
+  frames (`d3d12_LightImages`, `LightImage.h`). The game's menu gets the renderer's options from the patches in
   `assets/scripts` (HDR, ambient occlusion, ray traced reflections, path tracing in Advanced Video
   Options),
   greyed out with another renderer.

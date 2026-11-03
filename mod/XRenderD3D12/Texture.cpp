@@ -22,6 +22,7 @@
 #include "D3D12Descriptors.h"
 #include "Texture.h"
 #include "NormalMapHeight.h"
+#include "LightImage.h"
 #include "Shaders/Constants.h"
 
 namespace
@@ -32,6 +33,8 @@ namespace
   constexpr const char *g_Extensions[3] = { ".dds", ".tga", ".jpg" };
   //! The key suffix of cube maps: the same file can be a 2D texture and a cube.
   constexpr const char *g_CubeKey = "#cube";
+  //! The frames a light image's sequence is searched for at most (FT2_CHECKFORALLSEQUENCES).
+  constexpr int LIGHT_IMAGE_FRAMES = 100;
 
   //! Lower case, '/' for '\'.
   std::string NormalizePath(const char *szPath)
@@ -228,16 +231,21 @@ namespace
     return true;
   }
 
-  //! A cube with the picture on +X and the other five faces transparent black.
-  bool SingleFaceCube(const SImage &Picture, SImage &Out)
+  //! A cube with the picture on +X and the other five faces transparent black; bAllSides: the picture on all six
+  //! (FT2_REPLICATETOALLSIDES, as the original makes Training's bunker's caustics light image).
+  bool SingleFaceCube(const SImage &Picture, SImage &Out, bool bAllSides)
   {
     if (Picture.nFaces != 1 || Picture.nWidth != Picture.nHeight)
       return false;
     Out.Allocate(Picture.Format, Picture.nWidth, Picture.nHeight, Picture.nMips, 6);
     Out.nSrcFlags = Picture.nSrcFlags;
-    memcpy(Out.Bits(0, 0), Picture.Data.data(), Picture.FaceSize());
-    for (int nFace = 1; nFace < 6; nFace++)
-      ClearFace(Out, nFace);
+    for (int nFace = 0; nFace < 6; nFace++)
+    {
+      if (LightImage::FaceHasPicture(nFace, bAllSides))
+        memcpy(Out.Bits(nFace, 0), Picture.Data.data(), Picture.FaceSize());
+      else
+        ClearFace(Out, nFace);
+    }
     return true;
   }
 
@@ -367,6 +375,21 @@ void CTexture::Release(int bForce)
 {
   if (g_pRenderer && g_pRenderer->m_pTextures)
     g_pRenderer->m_pTextures->ReleaseTexture(this, bForce != 0);
+}
+
+CTexture *LightImageAt(const CDLight &Light, float fTime, bool bSequence)
+{
+  CTexture *pCube = static_cast<CTexture *>(Light.m_pLightImage);
+  if (!pCube || !pCube->IsCube() || !pCube->IsTextureLoaded())
+    return nullptr;
+  return bSequence ? pCube->SequenceFrame(fTime, Light.m_fAnimSpeed) : pCube;
+}
+
+CTexture *CTexture::SequenceFrame(float fTime, float fFrameTime)
+{
+  const int nFrame = LightImage::SequenceFrame(fTime, fFrameTime, (int)m_Sequence.size() + 1);
+  CTexture *pFrame = nFrame ? m_Sequence[nFrame - 1] : this;
+  return pFrame && !pFrame->m_bRemoved && pFrame->m_pGPU ? pFrame : this;
 }
 
 const char *CTexture::GetName()
@@ -615,6 +638,11 @@ void CTextureManager::Remove(CTexture *pTex)
 {
   if (!pTex || pTex->m_bRemoved || pTex->m_bPermanent)
     return;
+  // A light image's frames go with it.
+  std::vector<CTexture *> Sequence;
+  Sequence.swap(pTex->m_Sequence);
+  for (CTexture *pFrame : Sequence)
+    ReleaseTexture(pFrame, false);
   for (const std::string &Key : pTex->m_Keys)
   {
     auto It = m_ByName.find(Key);
@@ -754,7 +782,7 @@ bool CTextureManager::SearchCube(const std::string &Base, const std::string &Dir
   if (Res.bOpened)
     return false;
 
-  // One picture: a cube file as it is, any other picture on the +X face.
+  // One picture: a cube file as it is, any other picture on the +X face (Res.bAllSides: on all six).
   nPlain = Candidates(FaceBase, Dir, Bases);
   SImage Picture;
   if (!Search(Bases, nPlain, Picture, Res))
@@ -765,7 +793,7 @@ bool CTextureManager::SearchCube(const std::string &Base, const std::string &Dir
     return true;
   }
   Res.bSingle = true;
-  Res.bDecoded = SingleFaceCube(Picture, Out);
+  Res.bDecoded = SingleFaceCube(Picture, Out, Res.bAllSides);
   return Res.bDecoded;
 }
 
@@ -786,10 +814,13 @@ CTexture *CTextureManager::Load(const char *szName, const char *szTexturePath, u
   if (!Dir.empty() && Dir.back() != '/')
     Dir += '/';
   const bool bCube = (eTT == eTT_Cubemap) || (nFlags2 & FT2_FORCECUBEMAP);
+  // d3d12_LightImages: a light image the engine asks to have on every side, its one picture on all six faces.
+  const bool bLightImages = GetCVarInt("d3d12_LightImages", 1) > 0;
+  const bool bAllSides = bCube && (nFlags2 & FT2_REPLICATETOALLSIDES) && bLightImages;
   // A bump map whose name is no normal map's (*_ddn*, *.ddn*) is a height map, made a normal map;
   // a compressed one is not loaded.
   const bool bHeightBump = eTT == eTT_Bumpmap && !bCube && IsHeightMapName(Base.c_str());
-  const std::string Suffix = bCube ? g_CubeKey : bHeightBump ? "#height" : "";
+  const std::string Suffix = bCube ? std::string(g_CubeKey) + (bAllSides ? "#all" : "") : bHeightBump ? "#height" : "";
   const std::string Key = Base + Suffix;
   // A name searched in a material's folder as well: its answer depends on the folder.
   const std::string DirKey = Dir.empty() ? std::string() : Dir + "|" + Key;
@@ -809,6 +840,7 @@ CTexture *CTextureManager::Load(const char *szName, const char *szTexturePath, u
 
   SImage Image;
   SSearch Res;
+  Res.bAllSides = bAllSides;
   if (bCube)
     SearchCube(Base, Dir, Image, Res);
   else
@@ -871,6 +903,19 @@ CTexture *CTextureManager::Load(const char *szName, const char *szTexturePath, u
     AddKey(pTex, Key);
   if (!DirKey.empty())
     AddKey(pTex, DirKey);
+  // d3d12_LightImages: a light image the engine asks to check for a sequence (Training's bunker's caustics,
+  // causq00 to causq31) has its frames after it, loaded with the same flags, while they are found.
+  if (bLightImages && (nFlags2 & FT2_CHECKFORALLSEQUENCES) && pTex->m_Sequence.empty())
+  {
+    std::string FrameName;
+    for (int nFrame = 1; nFrame < LIGHT_IMAGE_FRAMES && AnimFrameName(Name.c_str(), nFrame, FrameName); nFrame++)
+    {
+      CTexture *pFrame = Load(FrameName.c_str(), szTexturePath, nFlags, nFlags2 & ~FT2_CHECKFORALLSEQUENCES, eTT, false, false);
+      if (!pFrame)
+        break;
+      pTex->m_Sequence.push_back(pFrame);
+    }
+  }
   return pTex;
 }
 
