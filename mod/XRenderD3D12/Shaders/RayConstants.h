@@ -52,6 +52,8 @@
 #define XR_RAY_DEBUG_PT_DIRECT  10  //!< the hits lit by the sun and the lamps as the path tracer lights them, with their emission
 #define XR_RAY_DEBUG_MATERIALS  11  //!< a colour per material the rays take of the hit's instance (SRayInstance but where its
                                     //!< geometry is): the same from frame to frame while that material is
+#define XR_RAY_DEBUG_FACING     12  //!< the side of the hit's triangle as the raster's culling sees it: its front green, its back
+                                    //!< red (a surface the raster shows from there is green: a red one only the rays see)
 // The path tracer's G-buffer (d3d12_PTDebug 1 to 4, PathTrace.cpp; Shaders/PathGBuffer.hlsli), no rays
 #define XR_RAY_DEBUG_GB_ALBEDO  16  //!< the albedo, the game's colour
 #define XR_RAY_DEBUG_GB_NORMAL  17  //!< the normal, rgb = n * 0.5 + 0.5; no surface black
