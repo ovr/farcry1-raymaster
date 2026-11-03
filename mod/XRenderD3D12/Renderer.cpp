@@ -226,6 +226,12 @@ void CD3D12Renderer::RegisterVariables()
                      "1: a projected light's pass over a light-mapped specular bump template has the light's highlight, as the "
                      "original's light-map shaders of those templates add it (Training's bunker's rusty plates under its lamp); 0: "
                      "the pass's diffuse light alone");
+  iConsole->Register("d3d12_LightImages", &CV_d3d12_LightImages, 1, VF_DUMPTODISK,
+                     "1: a projected light's image as the engine asks for it: one picture on all six faces of its cube where it "
+                     "asks for every side (FT2_REPLICATETOALLSIDES), and the frames <name>01, 02, ... after <name>00 cast in turn, "
+                     "one every m_fAnimSpeed seconds, where it asks for the sequence (FT2_CHECKFORALLSEQUENCES): Training's "
+                     "bunker's water caustics lamps, which light all round them; 0: the picture on +X alone and its first frame (the "
+                     "faces and frames for the images loaded after it is set)");
   iConsole->Register("d3d12_RenderMode", &CV_d3d12_RenderMode, 1, VF_DUMPTODISK,
                      "1: the render mode of the video options (r_RenderMode, with r_Glare on) over the scene, as the original's "
                      "screen process draws it: 1 improved and 2 paradise a glare of the scene's bright parts (less where the "

@@ -242,8 +242,7 @@ void CD3D12Renderer::UpdatePathLights(std::span<CDLight *const> Lights)
     }
     if (nFlags & DLF_PROJECT)
     {
-      CTexture *pCube = static_cast<CTexture *>(pLight->m_pLightImage);
-      if (!pCube || !pCube->IsCube() || !pCube->IsTextureLoaded())
+      if (!LightImageAt(*pLight, 0, false))
       {
         nSkippedImage++;
         return;
@@ -297,8 +296,9 @@ void CD3D12Renderer::UpdatePathLights(std::span<CDLight *const> Lights)
     L.nParams[2] = XR_RAY_NONE;
     if (nFlags & DLF_PROJECT)
     {
-      // The projectors with a cube (the picture on +X), as the passes of DrawLeafItem.
-      CTexture *pCube = static_cast<CTexture *>(pLight->m_pLightImage);
+      // The projectors with a cube (the picture on +X, or on every side), the frame of its sequence, as the passes of
+      // DrawLeafItem.
+      CTexture *pCube = LightImageAt(*pLight, iTimer ? iTimer->GetCurrTime() : 0.0f, CV_d3d12_LightImages > 0);
       nKind = XR_PT_LIGHT_PROJECTOR;
       L.nParams[2] = (uint32)pCube->GetSRV();
       memcpy(L.mProject, pLight->m_TextureMatrix.data, sizeof(L.mProject));

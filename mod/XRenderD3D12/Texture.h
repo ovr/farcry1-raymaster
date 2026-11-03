@@ -128,12 +128,18 @@ public:
   //! XR_SAMPLER_* (Shaders/Constants.h) for the texture's clamp and filter settings.
   int GetSampler() const;
   bool IsCube() const;
+  //! The frame of a light image's sequence (m_Sequence) at fTime with fFrameTime seconds a frame, as the original's:
+  //! (int)(fTime / fFrameTime) modulo the frames; this one without a sequence or a frame time.
+  CTexture *SequenceFrame(float fTime, float fFrameTime);
 
   CD3D12Texture *m_pGPU = nullptr;
 
   // The manager's bookkeeping (Texture.cpp).
   std::string m_Name;                 //!< as the engine named it
   std::vector<std::string> m_Keys;    //!< the manager's name keys that lead to this texture
+  //! A light image loaded with FT2_CHECKFORALLSEQUENCES (d3d12_LightImages): its frames after this one (the digits in
+  //! front of the extension counting up, while they are found), each a texture of its own, held by this one.
+  std::vector<CTexture *> m_Sequence;
   int m_nID;
   int m_nRefs = 1;
   int m_nWidth = 0, m_nHeight = 0;
@@ -149,6 +155,11 @@ public:
   bool m_bPermanent = false;          //!< the white texture and the placeholder: never removed
   bool m_bRemoved = false;            //!< removed: no GPU texture, no ID, kept until Shutdown
 };
+
+class CDLight;
+//! A projected light's image (m_pLightImage, a loaded cube) as the light casts it at fTime: with bSequence
+//! (d3d12_LightImages) the frame of its sequence by the light's m_fAnimSpeed (CTexture::SequenceFrame); nullptr for none.
+CTexture *LightImageAt(const CDLight &Light, float fTime, bool bSequence);
 
 class CTextureManager
 {
@@ -238,6 +249,7 @@ private:
     bool bDecoded = false;            //!< and its picture could be read
     bool bViaDir = false;             //!< found only in the material's folder
     bool bSingle = false;             //!< a cube made of one picture on +X
+    bool bAllSides = false;           //!< in: such a cube has the picture on all six faces (FT2_REPLICATETOALLSIDES)
     std::string Base;                 //!< the file that opened, without extension
   };
 

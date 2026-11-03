@@ -1845,6 +1845,7 @@ public:
   int CV_d3d12_MuzzleFlashAuto = 1;         //!< 1: TemplMuzzleFlash_Auto as the original's shader: twice the texture, faded out seen edge on (SDrawConstants::vEdgeFade)
   int CV_d3d12_LightColorScale = 1;         //!< 1: a bump template's light per pixel times the material's colour scaled down by its largest channel above 1 (SFrameConstants::vLightmap.y)
   int CV_d3d12_ProjectorSpecular = 1;       //!< 1: a projector's pass over a light-mapped specular bump template has its highlight (DrawLeafItem)
+  int CV_d3d12_LightImages = 1;             //!< 1: a light image's FT2_REPLICATETOALLSIDES (its picture on all six faces) and FT2_CHECKFORALLSEQUENCES (its frames in turn, CTexture::SequenceFrame)
   int CV_d3d12_RenderMode = 1;              //!< 1: the menu's render mode (r_RenderMode, r_Glare) over the scene (DrawRenderMode); 0: none
   int CV_d3d12_ShadowCascades = 4;          //!< the sun's cascaded shadow maps: how many (0: none)
   float CV_d3d12_ShadowDistance = 120;      //!< how far they reach from the camera (m)

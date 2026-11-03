@@ -1192,6 +1192,21 @@ and lists theirs (`NamesObjects`).
   lit by that light alone (per pixel with the normal map and specular where bump mapping lights the
   object, else as a point light of its radius), times twice the cube at the point's lookup vector
   (`m_TextureMatrix`), added where the first pass is (depth `EQUAL`) and fogged towards black.
+- The image's flags as the engine loads it (`d3d12_LightImages`, 1; `LightImage.h`):
+  - `FT2_REPLICATETOALLSIDES` puts the picture on all six faces, not on +X alone, so the light
+    goes every way the cube is looked up, not only into the +X quarter.
+  - `FT2_CHECKFORALLSEQUENCES` makes the image the first frame of a sequence: `<name>00`, then
+    `<name>01` and on while the files are found. The light casts frame (int)(t / s) modulo the
+    frames at the timer's time t, s being the light's `m_fAnimSpeed` seconds a frame.
+  - Training's bunker's two water caustics lamps (`causq00`, 32 frames, 0.05 s) have both. The
+    original's cube for them, traced, is the same picture on every face and the frame of that
+    count (times 10.28, 10.38 and 10.58 s: frames 13, 15 and 19).
+  - With the +X face alone and frame 0 they lit almost nothing, and the bunker had 0.90 of the
+    original's light (r_RenderMode 0). Now it has 1.00 at frame 210 and 1.07 at frame 490; at the
+    lamps' points it was 0.35-0.62 and is now 0.80-1.03.
+  - Steam's hut lamp has neither flag and keeps its picture on +X.
+  - The faces are made when the image loads, so a new value takes effect with the next level
+    loaded; the frame applies at once. 0: +X alone and frame 0, as before.
 - The light comes in one of two ways, by the object's light mask:
   - the object's own pass, whose mask holds the projector among its lights;
   - a light pass. The engine lights an object with a light map in passes when a lamp in reach
