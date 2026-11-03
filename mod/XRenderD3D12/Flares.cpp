@@ -151,6 +151,8 @@ void CD3D12Renderer::DrawFlares(std::span<const SRenderItem> Items)
   FUNCTION_PROFILER(iSystem, PROFILE_RENDERER);
   if (m_bReflectionPass || m_bShadowMapPass || m_bSpritePass || m_nRecurseLevel > 1 || m_pDevice->IsOffscreen() || !m_pScene || !m_pTextures)
     return;
+  // The lights' beams first, whatever r_Coronas (Beams.cpp).
+  DrawBeams();
   if (CVarFloat(m_pCoronas, "r_Coronas", 0) == 0)
     return;
 
@@ -649,6 +651,7 @@ void CD3D12Renderer::ReleaseFlares()
   for (std::vector<SFlareTest> &Tests : m_FlareTests)
     Tests.clear();
   m_FlareTextures.clear();
+  m_BeamModels.clear();
   if (m_pUpload)
   {
     m_pUpload->ReleaseTexture(m_pSunPatch);

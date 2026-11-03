@@ -1099,3 +1099,19 @@ and lists theirs (`NamesObjects`).
   sectors (shader "terrain") get no detail texture, only their cliff texture where the engine
   marks cliffs; without them (shader "terrainwithdefaultdetailtexture") the detail texture
   everywhere.
+
+## Light beams
+
+- A lamp whose light shader has a `ClientEffect 'Beam'` block in its script (the `LightBeam*`
+  shaders: the hanging lamps of Treehouse's corridors, Steam's huts, ...) gets a cone of light
+  under it, as the original draws it: the shader's cone model (`Model`) along the light's forward
+  axis, from `StartRadius` at the light to `EndRadius` `Length` metres away, coloured from
+  `StartColor` to `EndColor`; its alpha is the colours' alpha times the squared cosine between the
+  model's normal and the way to the camera (the cone's outline fades out) times `min(10 t, 1)` (it
+  fades in over the first tenth of its length), clamped, so a negative end alpha ends it early.
+  Blended by that alpha after the rest of the 3D scene and before the flares, depth tested without
+  depth writes, both sides, fogged; whatever `r_Coronas` and `r_Beams`. Every light of the scene
+  with such a shader has one (`Beams.cpp`, `LightBeam.h`), with the path tracer too.
+- `LightStyle` of the block is read and not used: the original draws the colours as given.
+- Not in the water's reflection: the original draws the lamps' beams there as well, but the
+  reflection's scene has no lamps here.

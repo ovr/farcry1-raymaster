@@ -830,12 +830,8 @@ void CScene::CheckCorona(CDLight *pLight)
   pObj->m_Color.b = pLight->m_Color.b;
 }
 
-bool CScene::UpdateLight(CDLight *pLight)
+void CScene::GetLightAxes(const CDLight *pLight, Vec3 &vForward, Vec3 &vUp, Vec3 &vRight)
 {
-  // Always false: the engine adds (EF_ADDDlight) only the lights for which this returns false.
-  if (!pLight || !(pLight->m_Flags & DLF_PROJECT))
-    return false;
-
   // R = Rz(z) * Ry(y) * Rx(x), right-handed rotations about the world axes (column vectors),
   // angles in degrees.
   constexpr float fDegToRad = std::numbers::pi_v<float> / 180.0f;
@@ -852,15 +848,26 @@ bool CScene::UpdateLight(CDLight *pLight)
     { -sy,     cy * sx,                cy * cx },
   };
   // The basis: forward R (1,0,0), up R (0,1,0), right R (0,0,1) = forward x up.
-  const Vec3 F(R[0][0], R[1][0], R[2][0]);
-  const Vec3 U(R[0][1], R[1][1], R[2][1]);
-  const Vec3 V(R[0][2], R[1][2], R[2][2]);
+  vForward = Vec3(R[0][0], R[1][0], R[2][0]);
+  vUp = Vec3(R[0][1], R[1][1], R[2][1]);
+  vRight = Vec3(R[0][2], R[1][2], R[2][2]);
+}
+
+bool CScene::UpdateLight(CDLight *pLight)
+{
+  // Always false: the engine adds (EF_ADDDlight) only the lights for which this returns false.
+  if (!pLight || !(pLight->m_Flags & DLF_PROJECT))
+    return false;
+
+  Vec3 F, U, V;
+  GetLightAxes(pLight, F, U, V);
   pLight->m_Orientation.m_vForward = F;
   pLight->m_Orientation.m_vUp = U;
   pLight->m_Orientation.m_vRight = V;
 
   // The texture matrix (p * M) takes a world point p to the cube lookup vector
   // (F.d, s U.d, s V.d), d = p - m_Origin, s = 1 / tan(m_fLightFrustumAngle).
+  constexpr float fDegToRad = std::numbers::pi_v<float> / 180.0f;
   const float fAngle = std::clamp(pLight->m_fLightFrustumAngle, 0.01f, 179.99f) * fDegToRad;
   const float s = cosf(fAngle) / sinf(fAngle);
   const Vec3 sU = U * s;
