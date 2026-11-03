@@ -192,8 +192,10 @@ void GetLightSphere(const Matrix44 &World, CLeafBuffer *pLB, Vec3 &vCenter, floa
 //! at the nearest and the farthest point of the object's sphere (GetLightSphere), up to where it
 //! reaches 1/256. Bump mapped draws light per pixel, falling off linearly to the radius; the others
 //! per pixel with d3d12_PixelLighting take these values (DF2_VERTEX_LIGHTS), static objects the
-//! falloff f itself (DF2_SMOOTH_FALLOFF).
-void SetPointLight(SDrawConstants &dc, uint32 n, const CDLight *pLight, const CCObject *pObj, const Vec3 &vCenter, float r)
+//! falloff f itself (DF2_SMOOTH_FALLOFF). fRayGap: the least gap short of the light its rays end
+//! (XR_RAY_LIGHT; a projector's d3d12_RTProjectorShadowGap).
+void SetPointLight(SDrawConstants &dc, uint32 n, const CDLight *pLight, const CCObject *pObj, const Vec3 &vCenter, float r,
+                   float fRayGap = 0)
 {
   const float R = std::max(pLight->m_fRadius, 0.01f);
   float a0, a1, fRange;
@@ -224,7 +226,7 @@ void SetPointLight(SDrawConstants &dc, uint32 n, const CDLight *pLight, const CC
     a1 = std::max(s, 0.0f);
     fRange = a0 > 256 ? 0.0f : (256 - a0) / std::max(a1, 0.01f);
   }
-  Set4(dc.vLightColor[n], pLight->m_Color.r, pLight->m_Color.g, pLight->m_Color.b, 1);
+  Set4(dc.vLightColor[n], pLight->m_Color.r, pLight->m_Color.g, pLight->m_Color.b, std::max(fRayGap, 0.0f));
   Set4(dc.vLightSpec[n], pLight->m_SpecColor.r, pLight->m_SpecColor.g, pLight->m_SpecColor.b, 1);
   Set4(dc.vLightPos[n], pLight->m_Origin.x, pLight->m_Origin.y, pLight->m_Origin.z, 1);
   Set4(dc.vLightAtten[n], a0, a1, fRange, 1 / R);
@@ -1465,7 +1467,8 @@ void CD3D12Renderer::DrawLeafItem(const SRenderItem &it)
     else
       Set4(dc.vColor, MatColor.r * pObj->m_Color.r, MatColor.g * pObj->m_Color.g, MatColor.b * pObj->m_Color.b, 1);
     Set4(dc.vAmbient, 0, 0, 0, bTerrain ? 1.0f : 2.0f);
-    SetPointLight(dc, 0, pLight, pObj, vCenter, r);
+    // Its rays (d3d12_RTLightShadows) end further short of it: its picture draws its fitting's shade.
+    SetPointLight(dc, 0, pLight, pObj, vCenter, r, CV_d3d12_RTProjectorShadowGap);
     dc.nLights = 1;
     dc.nTex5 = pCube->GetSRV();
     memcpy(dc.mParams0, pLight->m_TextureMatrix.data, sizeof(dc.mParams0));

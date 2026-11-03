@@ -504,7 +504,7 @@ void CSSpecular(uint3 vId : SV_DispatchThreadID)
     if (max(vGives.r, max(vGives.g, vGives.b)) < SPECULAR_MIN)
       continue;
     float fHit;
-    vSpecular += vLamp * TraceLight(vPos, vFace, vToLight, fDistance, P.fLightGap, P.nMask, d * g_PT.vParams.y, fHit, P.nMaxTests);
+    vSpecular += vLamp * TraceLight(vPos, vFace, vToLight, fDistance, PathLampGap(L, P), P.nMask, d * g_PT.vParams.y, fHit, P.nMaxTests);
     nRays++;
   }
   g_Out[p] = float4(vColor * vSpecular, 0);

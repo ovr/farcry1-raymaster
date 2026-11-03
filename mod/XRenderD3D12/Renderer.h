@@ -1848,6 +1848,7 @@ public:
   int CV_d3d12_RTLightShadows = 0;          //!< the lamps' shadows by rays (XR_RAY_LIGHT); 2 the light they take away red
   int CV_d3d12_RTLightShadowsMax = 4;       //!< the lamps a pixel traces rays towards
   float CV_d3d12_RTLightShadowGap = 0.1f;   //!< how far short of a lamp its rays end (m): not its own fitting
+  float CV_d3d12_RTProjectorShadowGap = 0.5f; //!< how far short of a projector its rays end, at least the gap above (m): its picture draws its shade
   float CV_d3d12_RTSunAngle = 0.53f;        //!< the sun's disc, degrees across (the soft edges of its shadow)
   int CV_d3d12_RTSunDenoise = 1;            //!< the sun's shadow by rays blended over the frames and its soft edges filtered
   int CV_d3d12_RTGI = 0;                    //!< the ambient light by rays, a bounce (RayAO.cpp): 1 a ray for each 2 x 2 pixels, 2 a pixel

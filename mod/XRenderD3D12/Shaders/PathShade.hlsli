@@ -31,7 +31,9 @@
 //	    static objects to (2 * (1 - smoothstep) in the game's colour,
 //	    SetPointLight), in light; directional ones without the falloff; a
 //	    projector times the picture of its cube (2 * colour * cube before
-//	    the power, as its pass).
+//	    the power, as its pass), its ray ending SPTLight::vColor.w short of
+//	    it where that is more than fLightGap (PathLampGap: the picture draws
+//	    its fitting's shade).
 //	    With d3d12_PTBakedFalloff > 0 a lamp baked into the light maps
 //	    (XR_PT_LIGHT_LM) falls off as they do, slowly over its whole radius:
 //	    ((1 - d / radius)^d3d12_PTBakedFalloff)^2.2 (PathLampFalloff).
@@ -269,6 +271,13 @@ float3 PathLampLight(uint i, float3 vPos, float3 vN, SPathShade P, out float3 vT
   return PathMultiplier(vColor) * (P.fLamps * fFalloff * fNL);
 }
 
+//! How far short of lamp L the rays towards it end: d3d12_RTLightShadowGap, or the lamp's own where that is more (a
+//! projector's d3d12_RTProjectorShadowGap: its picture draws its fitting's shade).
+float PathLampGap(SPTLight L, SPathShade P)
+{
+  return max(P.fLightGap, L.vColor.w);
+}
+
 //! The light of the sun and the frame's lamps on the surface (see the head of the file); fConeWidth the ray cone's width there.
 float3 PathDirect(SPathSurface H, SPathShade P, float fConeWidth)
 {
@@ -282,7 +291,8 @@ float3 PathDirect(SPathSurface H, SPathShade P, float fConeWidth)
     if (all(vLamp <= 0))
       continue;
     float fHit;
-    vLight += vLamp * TraceLight(H.vPos, H.vFaceNormal, vToLight, fDistance, P.fLightGap, P.nMask, fConeWidth, fHit, P.nMaxTests);
+    vLight += vLamp * TraceLight(H.vPos, H.vFaceNormal, vToLight, fDistance, PathLampGap(g_PTLights[i], P), P.nMask, fConeWidth, fHit,
+                                 P.nMaxTests);
   }
   return vLight;
 }
@@ -295,7 +305,7 @@ float3 PathSampleLamp(float3 vPos, float3 vN, float3 vFace, SPathShade P, inout 
     return 0;
   const bool bAll = P.nLights <= PT_LAMP_CANDIDATES;
   const uint nCandidates = bAll ? P.nLights : PT_LAMP_CANDIDATES;
-  float fSum = 0, fPicked = 0, fPickedDistance = 0;
+  float fSum = 0, fPicked = 0, fPickedDistance = 0, fPickedGap = 0;
   float3 vPicked = 0, vPickedDir = 0;
   [loop]
   for (uint k = 0; k < nCandidates; k++)
@@ -314,6 +324,7 @@ float3 PathSampleLamp(float3 vPos, float3 vN, float3 vFace, SPathShade P, inout 
       vPicked = vLamp;
       vPickedDir = vToLight;
       fPickedDistance = fDistance;
+      fPickedGap = PathLampGap(g_PTLights[i], P);
     }
   }
   if (fPicked <= 0)
@@ -321,7 +332,7 @@ float3 PathSampleLamp(float3 vPos, float3 vN, float3 vFace, SPathShade P, inout 
   // The picked one's light over its chance: fSum / fPicked among the candidates, they nCandidates of all the lamps.
   const float fScale = fSum / fPicked * (bAll ? 1 : (float)P.nLights / nCandidates);
   float fHit;
-  return vPicked * fScale * TraceLight(vPos, vFace, vPickedDir, fPickedDistance, P.fLightGap, P.nMask, fConeWidth, fHit, P.nMaxTests);
+  return vPicked * fScale * TraceLight(vPos, vFace, vPickedDir, fPickedDistance, fPickedGap, P.nMask, fConeWidth, fHit, P.nMaxTests);
 }
 
 #endif

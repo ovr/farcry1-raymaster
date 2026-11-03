@@ -23,6 +23,7 @@
 #include "Test_TerrainShare.h"
 #include "Test_SurfaceNormal.h"
 #include "Test_LampLight.h"
+#include "Test_LampShadow.h"
 
 #include "Shaders/Constants.h"
 
@@ -565,4 +566,87 @@ XR_TEST(PathTrace_LampFalloff)
   // By default the baked lamp is the dynamic one, bit for bit.
   for (uint32 j = 0; j < nDistances; j++)
     CHECK_MSG(Default[j * 4] == Default[(nDistances + j) * 4], "distance " + std::to_string(Distances[j]));
+}
+
+//! The rays towards a lamp end short of it by its gap (PathLampGap): d3d12_RTLightShadowGap (0.1 m, g_PT.vShade.y), a
+//! projector's d3d12_RTProjectorShadowGap (SPTLight::vColor.w) where that is more. A lamp 3 m over the floor with a square of
+//! its shade 0.3 m from it on the ray to a point of the floor, and something solid 1.6 m from it on the ray to another: the
+//! shade shadows the point lamp's light and a projector's with gap 0 (step 273: Treehouse's hanging lamps cut a hard-edged
+//! trapezoid into their own picture), not the projector's with 0.5 m; the solid thing shadows them all; a third point sees
+//! them all; with d3d12_RTLightShadowGap 0.6 the shade shadows none of them.
+XR_TEST(PathTrace_ProjectorShadowGap)
+{
+  NeedRaytracing();
+  const SVec3 vLamp{ 0, 0, 3 };
+  SRayScene Scene;
+  // A horizontal square of side s about c (both windings: the rays see it from below).
+  auto Square = [&](SVec3 c, float s)
+  {
+    const SVec3 p[4] = { c + SVec3{ -s, -s, 0 }, c + SVec3{ s, -s, 0 }, c + SVec3{ s, s, 0 }, c + SVec3{ -s, s, 0 } };
+    const int Tri[2][3] = { { 0, 1, 2 }, { 0, 2, 3 } };
+    for (const auto &t : Tri)
+      for (int k = 0; k < 3; k++)
+        Scene.Corners.insert(Scene.Corners.end(), { p[t[k]].x, p[t[k]].y, p[t[k]].z });
+  };
+  const SVec3 vUnderShade{ 1.2f, 0, 0 }, vUnderSolid{ -1.2f, 0, 0 }, vOpen{ 0, 1.2f, 0 };
+  // Where the rays from those points to the lamp cross z = 2.72 (0.30 m from the lamp) and z = 1.5 (1.62 m from it).
+  Square(vLamp + (vUnderShade - vLamp) * (0.28f / 3), 0.1f);
+  Square(vLamp + (vUnderSolid - vLamp) * (1.5f / 3), 0.1f);
+  Scene.nMask = XR_RAY_DYNAMIC;
+  SRayInstance &I = Scene.Instance;
+  I.nGeom[0] = 0;
+  I.nGeom[2] = XR_RAY_NONE;
+  I.nLayout[0] = 12;
+  I.nLayout[1] = 0xffffffffu;
+  I.nLayout[2] = XR_RAY_NONE;
+  // The lamps: a point lamp, a projector with the gap 0.5 m, a projector with 0 (all of them at the same place).
+  SPTLight Lights[3] = {};
+  const float Gaps[3] = { 0, 0.5f, 0 };
+  for (int l = 0; l < 3; l++)
+  {
+    const float vPos[4] = { vLamp.x, vLamp.y, vLamp.z, 10 }, vColor[4] = { 0.5f, 0.5f, 0.5f, Gaps[l] };
+    std::copy(vPos, vPos + 4, Lights[l].vPos);
+    std::copy(vColor, vColor + 4, Lights[l].vColor);
+    Lights[l].nParams[0] = l == 0 ? XR_PT_LIGHT_POINT : XR_PT_LIGHT_PROJECTOR;
+    Lights[l].nParams[2] = Lights[l].nParams[3] = XR_RAY_NONE;
+  }
+  const SVec3 Points[3] = { vUnderShade, vUnderSolid, vOpen };
+  for (float fLightGap : { 0.1f, 0.6f })
+  {
+    SPathTraceConstants PT = {};
+    PT.vShade[1] = fLightGap;
+    PT.nFlags[3] = XR_RAY_STATIC | XR_RAY_DYNAMIC;
+    PT.nPath[0] = 3;
+    SDispatch d;
+    d.Shader = XR_BYTECODE(Test_LampShadow);
+    d.pPathTrace = &PT;
+    d.pScene = &Scene;
+    d.pLights = Lights;
+    d.nLightBytes = sizeof(Lights);
+    for (const SVec3 &p : Points)
+      for (uint32 l = 0; l < 3; l++)
+      {
+        Push(d.In, p, 0);
+        d.In.back() = l;
+        Push(d.In, { 0, 0, 1 }, 0);
+      }
+    const uint32 n = 9;
+    d.Test.nTest[0] = n;
+    d.nOut = n;
+    const std::vector<uint32> Out = Gpu().Run(d);
+    for (uint32 p = 0; p < 3; p++)
+      for (uint32 l = 0; l < 3; l++)
+      {
+        const uint32 i = p * 3 + l;
+        const float fGap = std::max(fLightGap, Gaps[l]);
+        // Under the shade only the gap that reaches past it (more than 0.30 m) lets the light through.
+        const float fWant = p == 2 ? 1.0f : p == 1 ? 0.0f : fGap > 0.3f ? 1.0f : 0.0f;
+        const std::string What = "gap " + std::to_string(fLightGap) + ", lamp " + std::to_string(l) + ", point " + std::to_string(p);
+        CHECK_MSG(At(Out, i, 1) == fGap, What + ": gap " + std::to_string(At(Out, i, 1)) + ", not " + std::to_string(fGap));
+        CHECK_MSG(At(Out, i, 0) == fWant, What + ": seen " + std::to_string(At(Out, i, 0)) + ", not " + std::to_string(fWant));
+        if (fWant == 0)
+          CHECK_MSG(std::fabs(At(Out, i, 2) * Length(vLamp - Points[p]) - (Length(vLamp - Points[p]) - (p == 0 ? 0.3016f : 1.6155f))) < 0.05f,
+                    What + ": hit at " + std::to_string(At(Out, i, 2)));
+      }
+  }
 }

@@ -284,6 +284,10 @@ void CD3D12Renderer::RegisterVariables()
   iConsole->Register("d3d12_RTLightShadowGap", &CV_d3d12_RTLightShadowGap, 0.1f, VF_DUMPTODISK,
                      "With d3d12_RTLightShadows, how far short of a lamp its rays end (m, 0-2.5): what is nearer to it, its own "
                      "fitting, casts no shadow");
+  iConsole->Register("d3d12_RTProjectorShadowGap", &CV_d3d12_RTProjectorShadowGap, 0.5f, VF_DUMPTODISK,
+                     "How far short of a projected light (a lamp with a picture) the rays towards it end, of the lamps' shadows "
+                     "(d3d12_RTLightShadows) and of the path tracer (m, at least d3d12_RTLightShadowGap): its picture draws the "
+                     "shade of its fitting, which casts no shadow of its own within it; 0: as the other lamps");
   iConsole->Register("d3d12_RTSunAngle", &CV_d3d12_RTSunAngle, 0.53f, VF_DUMPTODISK,
                      "With d3d12_RTSunShadows, the sun's disc in degrees across (0.53 as the sun's; 0: hard shadows): the soft edges "
                      "of the shadow widen with the distance to what casts it");
@@ -613,6 +617,7 @@ WIN_HWND CD3D12Renderer::Init(int x,int y,int width,int height,unsigned int cbpp
     CV_d3d12_RTLightShadows = 0;
     iConsole->UnregisterVariable("d3d12_RTLightShadowsMax", true);
     iConsole->UnregisterVariable("d3d12_RTLightShadowGap", true);
+    iConsole->UnregisterVariable("d3d12_RTProjectorShadowGap", true);
     iConsole->UnregisterVariable("d3d12_RTGI", true);
     CV_d3d12_RTGI = 0;
     iConsole->UnregisterVariable("d3d12_PathTracing", true);
