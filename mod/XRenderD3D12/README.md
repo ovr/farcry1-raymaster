@@ -182,18 +182,19 @@ reference of its features and console variables.
     light undoing the compression made of that the light's many times (the sky at Training's start
     in its cave and the windows of its bunker went white, with a bloom over them).
   - Against the reference of the render tests' `aa` (Training's islands from the hill) the error at
-    the edges is 0.69-0.76 of none's and the textures have 1.35-1.39 of its detail: CAS at 0.5 is
-    sharper than the view supersampled 4 x (at 0.25 0.65-0.71 and 1.25-1.28, at 1 1.00-1.03 and
-    1.82-1.87; without the sharpening 0.48-0.51 and 0.81-0.83; the sharpening of our own it
-    replaced, a clamped unsharp mask that left the silhouettes, 0.65-0.68 and 1.03; FSR's Native AA
-    at 0.5 0.69-0.75 and 0.95-1.04). In motion (DemoLevelAAMove, the camera turning over the
-    islands) the edges are 0.72-0.80 of none's, the textures keep 0.92-0.97 of the reference's
-    detail (none 1.03-1.04; with our own sharpening 0.75-0.79) and the flicker's high part
-    (`flicker.py` over 118 frames) is 0.91 of none's (0.87 at 0.25; 0.79 with our own sharpening):
-    the sharper textures flicker more. At 3840 x 2160 its GPU section `upscale` takes 0.59 ms (in
-    the same runs 0.56 with the sharpening of our own and 0.49-0.51 without the sharpening, the
-    frame's GPU time 5.04 and 4.62 ms against 5.00 and 4.64; FSR 4's Native AA 4.10-4.15;
-    PerfSweep Swamp and Pier, with the scene's light for it in `hdr` and the motion vectors).
+    the edges is 0.66-0.73 of none's and the textures have 1.10 of its detail: CAS at 0.5 is a
+    little sharper than the view supersampled 4 x (at 0.75 0.70-0.79 and 1.15, at 1 0.77-0.87 and
+    1.22-1.23; without the sharpening 0.48-0.51 and 0.81-0.83; the sharpening of our own it
+    replaced, a clamped unsharp mask that left the silhouettes, 0.65-0.68 and 1.03; CAS without the
+    3 x 3's limit 0.70-0.76 and 1.35-1.39; FSR's Native AA at 0.5 0.69-0.75 and 0.95-1.04). In
+    motion (DemoLevelAAMove, the camera turning over the islands) the edges are 0.70-0.77 of none's,
+    the textures keep 0.79-0.84 of the reference's detail (at 0.75 0.83-0.88, at 1 0.90-0.94; none
+    1.03-1.04; with our own sharpening 0.75-0.79) and the flicker's high part (`flicker.py` over 118
+    frames) is 0.81 of none's (0.83 at 0.75, 0.86 at 1; 0.79 with our own sharpening): the sharper
+    textures flicker more. At 3840 x 2160 its GPU section `upscale` takes 0.60-0.62 ms (0.59-0.61
+    without the 3 x 3's limit in the same runs; 0.56 with the sharpening of our own and 0.49-0.51
+    without the sharpening in others; FSR 4's Native AA 4.10-4.15; PerfSweep Swamp and Pier, with the
+    scene's light for it in `hdr` and the motion vectors).
   - Unit tests `Taa_*`: the jitter covers the pixel; a still edge gathers the frames (under half
     of the error without it after 48 frames at every quality); a reset takes the frame; the history
     follows the motion (by the nearest of the 3 x 3) and is ignored off the picture; a stale history
