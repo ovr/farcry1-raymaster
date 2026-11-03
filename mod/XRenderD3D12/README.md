@@ -66,18 +66,19 @@ reference of its features and console variables.
 
 - `d3d12_AA` is the anti-aliasing of the main view's 3D scene without an upscaler: `none` (the
   default; the frames are those of the renderer without it, DemoCompare difference 0), `fxaa`,
-  `smaa` or `cmaa2`. An unknown value is logged once and acts as `none`. `d3d12_AAQuality` is 0 to 3 (low,
+  `smaa`, `cmaa2` or `taa`. An unknown value is logged once and acts as `none`. `d3d12_AAQuality` is 0 to 3 (low,
   medium, high, ultra; 2), `d3d12_AADebug 1` shows what it changes (the picture grey, red by how
-  much a pixel is blended; SMAA's and CMAA2's edges too). All of them change at run time. With an upscaler
+  much a pixel is blended; SMAA's and CMAA2's edges too; TAA's red where its history goes, yellow
+  where it is clipped). All of them change at run time. With an upscaler
   that anti-aliases (FSR) `d3d12_AA` is not used (logged once); r_DisplayInfo's `Anti-aliasing`
-  row names the one that is (`FXAA (High)`, `SMAA 1x (High)`, `CMAA2 (High)`, `FSR, temporal`, `none`) and the
-  frame dump has an `anti-aliasing:` line. The original's MSAA (`r_FSAA`, `EnumAAFormats`) is
+  row names the one that is (`FXAA (High)`, `SMAA 1x (High)`, `CMAA2 (High)`, `TAA (High, HDR input)`,
+  `FSR, temporal`, `none`) and the frame dump has an `anti-aliasing:` line. The original's MSAA (`r_FSAA`, `EnumAAFormats`) is
   not offered: the game's Anti-Aliasing list had None alone with this renderer.
 - The game's menu gets it from `assets/scripts/09-video-anti-aliasing.patch`: Video Options'
-  Anti-Aliasing list is None / FXAA / SMAA 1x / CMAA2 (`d3d12_AA`) in place of the game's FSAA modes, on
+  Anti-Aliasing list is None / FXAA / SMAA 1x / CMAA2 / TAA (`d3d12_AA`) in place of the game's FSAA modes, on
   in a game (the game greys it out there: the Direct3D 9 renderer had to relaunch) and greyed out
   while the Upscaler is not None; Apply sets it without a restart.
-- It is drawn over the finished, tone mapped 3D scene in the back buffer (`DrawPostAA`,
+- FXAA, SMAA and CMAA2 are drawn over the finished, tone mapped 3D scene in the back buffer (`DrawPostAA`,
   `PostAA.cpp`, between `EndMainScene` and the screen effects): before the render modes, the
   screen effects, the HUD and the 2D, so the text stays sharp. Its input is a copy of the back
   buffer's colour (the water's scene copy); the alpha the HUD masks by stays. The program
@@ -149,6 +150,38 @@ reference of its features and console variables.
     for bit but for the corners; an edge along the grid stays sharp; a faint edge is one at high
     and none at low; the third frame on the same buffers is the first; B8G8R8A8 as R8G8B8A8; the
     pixels it writes get the alpha 0.
+- TAA (`taa`) is ours (`UpscalerTaa.cpp`, `Shaders/Taa.hlsli`, `Taa.hlsl`; after B. Karis's
+  "High Quality Temporal Supersampling", 2014, and M. Salvi's variance clipping, 2016), an upscaler
+  of the display's size (`IUpscaler`, as FSR's Native AA): with `d3d12_Upscaler none` the main
+  view's scene draws into the upscaler's targets, jittered (Halton 2, 3 over 8 frames), with the
+  motion vectors, the textures' mip bias -1 and the history's reset of the Upscaler section, and
+  with the HDR scene's light (`d3d12_UpscaleHdr`) as FSR gets it. The path tracer gets those
+  targets too. It is not drawn by `DrawPostAA`; its GPU section is the upscalers' `upscale`.
+  - Three compute kernels: the motion of each pixel as the nearest (by the depth) of its 3 x 3's;
+    the resolve, the history where the pixel was (Catmull-Rom, 5 taps) clipped towards the 3 x 3's
+    box (YCoCg, mean +- 1.25 standard deviations within their range) and blended with the frame,
+    each weighted by 1 / (1 + its luma): the frame's share 1 / (n + 1) after n frames of history
+    (the history's alpha counts them, up to 32), at least 1 / 5, 1 / 7, 1 / 10, 1 / 14 by
+    `d3d12_AAQuality` and up to 1.5 times it from a pixel's motion a frame on (the history,
+    resampled every frame, blurs as it moves); then the sharpening, `d3d12_UpscaleSharpness` (0.5;
+    0 turns it off and the resolve writes the picture), a clamped unsharp mask that fades out
+    where the 4 neighbours' luma range is above 0.3 (the silhouettes: there it brought the jaggies
+    back). The history is two R16G16B16A16_FLOAT targets of the display's size in turn; the HDR
+    light is blended exposed and compressed (c / (1 + max(r, g, b)), undone after).
+  - Against the reference of the render tests' `aa` (Training's islands from the hill) the error at
+    the edges is 0.64-0.67 of none's and the textures keep 1.03 of their detail (without the
+    sharpening 0.48-0.52 and 0.81-0.83; FSR's Native AA at 0.5 0.69-0.75 and 0.95-1.04). In motion
+    (DemoLevelAAMove, the camera turning over the islands) the edges are 0.67-0.76 of none's, the
+    textures keep 0.75-0.79 of the reference's detail (none 1.03-1.04) and the flicker's high part
+    (`flicker.py` over 118 frames) is 0.79 of none's. At 3840 x 2160 its GPU section `upscale`
+    takes 0.55-0.56 ms (without the sharpening 0.50-0.52; FSR 4's Native AA 4.10-4.15) and the
+    frame's GPU time goes from 3.96 to 4.73 ms and from 3.66 to 4.47 (PerfSweep Swamp and Pier,
+    with the scene's light for it in `hdr` and the motion vectors).
+  - Unit tests `Taa_*`: the jitter covers the pixel; a still edge gathers the frames (under half
+    of the error without it after 48 frames at every quality); a reset takes the frame; the history
+    follows the motion (by the nearest of the 3 x 3) and is ignored off the picture; a stale history
+    is clipped; the HDR light comes back as it was; a highlight of one frame weighs less; the
+    sharpening sharpens a texture and leaves a silhouette, within the neighbours' range.
 
 ## HDR
 

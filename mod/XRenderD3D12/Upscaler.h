@@ -8,7 +8,9 @@
 //	offset that changes every frame, with its depth and motion vectors; the
 //	upscaler makes the picture of the display's size from it and the
 //	pictures before (Upscale.cpp). AMD FSR Upscaling is UpscalerFsr.cpp;
-//	Intel XeSS and NVIDIA DLSS are to follow.
+//	Intel XeSS and NVIDIA DLSS are to follow. TAA (d3d12_AA taa,
+//	UpscalerTaa.cpp) is one of the display's size: the anti-aliasing
+//	without an upscaler.
 //
 //////////////////////////////////////////////////////////////////////
 
@@ -45,6 +47,7 @@ struct SUpscaleInputs
   float fFovY = 0;                      //!< its vertical field of view (radians)
   float fFrameMs = 0;                   //!< the time since the frame before
   float fSharpness = 0;                 //!< 0 (none) to 1
+  int nQuality = 2;                     //!< the anti-aliasing's quality, 0 (low) to 3 (ultra): d3d12_AAQuality (TAA's)
   bool bReset = false;                  //!< the frame before shows something else: no history
   bool bDebugView = false;              //!< the upscaler's debug view instead of the picture
 };
@@ -72,8 +75,24 @@ public:
   virtual const char *GetName() const = 0;
   //! It gathers the jittered frames into its picture: the scene's textures get a mip bias for them.
   virtual bool GathersFrames() const { return true; }
+  //! It is the anti-aliasing of d3d12_AA (TAA), not an upscaler for the statistics and the log.
+  virtual bool IsAntiAliasing() const { return false; }
 };
+
+//! Element i (from 1) of the Halton sequence of base b: 1/2, 1/4, 3/4, 1/8, ... for b 2.
+inline float Halton(int i, int b)
+{
+  float f = 1, r = 0;
+  for (; i > 0; i /= b)
+  {
+    f /= (float)b;
+    r += f * (float)(i % b);
+  }
+  return r;
+}
 
 //! AMD FSR Upscaling through the AMD FSR SDK's loader (amd_fidelityfx_loader_dx12.dll next to this
 //! renderer).
 std::unique_ptr<IUpscaler> CreateUpscalerFsr();
+//! TAA (UpscalerTaa.cpp): our own temporal anti-aliasing at the display's size (d3d12_AA taa).
+std::unique_ptr<IUpscaler> CreateUpscalerTaa();

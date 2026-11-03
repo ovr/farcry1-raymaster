@@ -22,6 +22,8 @@
 //	    signature, two of them dispatched by the arguments it writes) over
 //	    a copy of the picture in place, then the pass writes the pixels it
 //	    changed.
+//	  - taa: TAA is an upscaler of the display's size (UpscalerTaa.cpp,
+//	    Upscale.cpp): the pass does nothing for it.
 //	The back buffer's alpha stays (the HUD masks through it). With the
 //	HDR output's highlight layer the pass writes it too, from its copy:
 //	the ratio of each pixel blended as its colour is, the fingerprint of the
@@ -64,6 +66,7 @@ const SAntiAliasName s_AntiAliasNames[] = {
   { "fxaa", CD3D12Renderer::EAntiAlias::Fxaa, "FXAA" },
   { "smaa", CD3D12Renderer::EAntiAlias::Smaa, "SMAA 1x" },
   { "cmaa2", CD3D12Renderer::EAntiAlias::Cmaa2, "CMAA2" },
+  { "taa", CD3D12Renderer::EAntiAlias::Taa, "TAA" },
 };
 
 const char *const s_QualityNames[4] = { "Low", "Medium", "High", "Ultra" };
@@ -92,7 +95,7 @@ CD3D12Renderer::EAntiAlias CD3D12Renderer::AntiAliasing()
   }
   if (_stricmp(szValue, m_AAWarned.c_str()) != 0)
   {
-    iLog->LogWarning("XRenderD3D12: d3d12_AA %s: no such anti-aliasing (none, fxaa, smaa, cmaa2); none", szValue);
+    iLog->LogWarning("XRenderD3D12: d3d12_AA %s: no such anti-aliasing (none, fxaa, smaa, cmaa2, taa); none", szValue);
     m_AAWarned = szValue;
   }
   return EAntiAlias::None;
@@ -112,7 +115,8 @@ void CD3D12Renderer::DrawPostAA()
     return;
   }
   // An upscaler that gathers the frames (FSR) anti-aliased this frame's scene.
-  if (m_pUpscaler && m_pUpscaler->GathersFrames() && m_nUpscaledFrame == m_nFrames)
+  const bool bTaa = m_pUpscaler && m_pUpscaler->IsAntiAliasing();
+  if (m_pUpscaler && m_pUpscaler->GathersFrames() && !bTaa && m_nUpscaledFrame == m_nFrames)
   {
     if (!m_bAAUpscalerLogged)
       iLog->Log("XRenderD3D12: d3d12_AA %s is not used: the upscaler %s anti-aliases", AntiAliasName(eAA).szValue, m_pUpscaler->GetName());
@@ -120,6 +124,15 @@ void CD3D12Renderer::DrawPostAA()
     return;
   }
   m_bAAUpscalerLogged = false;
+  const int nQuality = std::clamp(CV_d3d12_AAQuality, 0, 3);
+  // TAA anti-aliased the scene as an upscaler (UpscaleScene).
+  if (eAA == EAntiAlias::Taa)
+  {
+    if (bTaa && m_nUpscaledFrame == m_nFrames && m_pFrameDump)
+      fprintf(m_pFrameDump.get(), "anti-aliasing: TAA, quality %d (%s), sharpness %.2f%s%s\n", nQuality, s_QualityNames[nQuality],
+              std::clamp(CV_d3d12_UpscaleSharpness, 0.0f, 1.0f), m_bUpscalerHdrInput ? ", HDR input" : "", CV_d3d12_AADebug ? ", debug view" : "");
+    return;
+  }
 
   GpuSection("anti-aliasing");
   const int w = m_pDevice->GetWidth(), h = m_pDevice->GetHeight();
@@ -130,7 +143,6 @@ void CD3D12Renderer::DrawPostAA()
     return;
   if (pLayer)
     CopyLayer(m_pAaLayer);
-  const int nQuality = std::clamp(CV_d3d12_AAQuality, 0, 3);
   // SMAA's edges and weights, CMAA2's picture, from the copy (the back buffer's, CopySceneForWater).
   ID3D12Resource *pCopy = m_SceneCopies[m_pDevice->IsInScene() || m_pDevice->IsInHdr() ? 1 : 0].pColor.Get();
   if ((eAA == EAntiAlias::Smaa && !DrawSmaaPasses(pCopy, w, h, nQuality)) || (eAA == EAntiAlias::Cmaa2 && !DrawCmaa2Passes(pCopy, w, h, nQuality)))
@@ -184,6 +196,17 @@ std::string CD3D12Renderer::PostAAInfo()
   if (eAA == EAntiAlias::None)
     return "none";
   char szText[64];
+  if (eAA == EAntiAlias::Taa)
+  {
+    // TAA as the upscaler (UpscaleScene; the statistics run before Update counts the frame). Not made yet (the menu before a 3D
+    // scene with it) is not made for want of a 3D scene; made and failed, UpdateUpscaler keeps its name ("taa", Upscale.cpp).
+    const bool bTaa = m_pUpscaler && m_pUpscaler->IsAntiAliasing();
+    const bool bFailed = !bTaa && !_stricmp(m_UpscalerName.c_str(), "taa");
+    snprintf(szText, sizeof(szText), "TAA (%s%s%s)", s_QualityNames[std::clamp(CV_d3d12_AAQuality, 0, 3)],
+             bTaa && m_bUpscalerHdrInput ? ", HDR input" : "",
+             bFailed ? ", not available" : bTaa && m_nUpscaledFrame == m_nFrames ? "" : ", no 3D scene now");
+    return szText;
+  }
   snprintf(szText, sizeof(szText), "%s (%s%s)", AntiAliasName(eAA).szName, s_QualityNames[std::clamp(CV_d3d12_AAQuality, 0, 3)],
            m_ePostAA == eAA && m_nPostAAFrame == m_nFrames ? "" : ", no 3D scene now");
   return szText;

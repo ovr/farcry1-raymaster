@@ -413,4 +413,24 @@ struct SVolumetricConstants
                                   //!< air, as before), y the power of the part of it in shadow (the sun's light as much as that)
 };
 
+// The threads a side of a group of TAA's kernels (Taa.hlsl, UpscalerTaa.cpp)
+#define XR_TAA_GROUP        8
+
+// TAA's flags (STaaConstants::vFlags.x)
+#define TAA_RESET           0x00000001  //!< no history: the frame as it is (the first frame, a jump of the camera, a new mode)
+#define TAA_HDR             0x00000002  //!< the colours are the HDR scene's light (else LDR colours, the back buffer's)
+#define TAA_EXPOSURE        0x00000004  //!< with TAA_HDR: t3 holds the light's exposure (else vParams.z)
+#define TAA_OUTPUT          0x00000008  //!< the resolve writes the picture too (no sharpening after it)
+#define TAA_DEBUG           0x00000010  //!< its debug view in place of the picture (d3d12_AADebug 1)
+
+//! b0 of TAA's kernels (Taa.hlsl, UpscalerTaa.cpp).
+struct STaaConstants
+{
+  XR_FLOAT4(vSize);               //!< x width, y height (pixels), z 1 / width, w 1 / height
+  XR_FLOAT4(vParams);             //!< x the least share of the frame in the picture at rest (d3d12_AAQuality), y the sharpening
+                                  //!< (0..1, d3d12_UpscaleSharpness), z the exposure without TAA_EXPOSURE, w the least share from a
+                                  //!< pixel's motion a frame on
+  XR_UINT4(vFlags);               //!< x TAA_*
+};
+
 #endif

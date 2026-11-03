@@ -629,12 +629,13 @@ public:
     Fxaa,                                   //!< FXAA (Shaders/Fxaa.hlsli)
     Smaa,                                   //!< SMAA 1x (third_party/smaa; Shaders/Smaa.hlsli, SmaaBlend.hlsli)
     Cmaa2,                                  //!< CMAA2 (third_party/cmaa2; Shaders/AntiAliasCmaa2.hlsl)
+    Taa,                                    //!< TAA, the upscaler of the display's size (UpscalerTaa.cpp, Shaders/Taa.hlsli)
   };
   //! What d3d12_AA asks for; an unknown value is logged once and acts as None.
   EAntiAlias AntiAliasing();
   //! After the main view's EndMainScene, before the render mode and the screen effects: the anti-aliasing of the
   //! finished picture (FXAA, SMAA, CMAA2) from a copy of the back buffer into it, the highlight layer too. Not with an upscaler
-  //! that gathers the frames (FSR anti-aliases).
+  //! that gathers the frames (FSR anti-aliases), nor for TAA (an upscaler of the display's size: UpscaleScene).
   void DrawPostAA();
   //! SMAA 1x's first two passes, compute kernels (Shaders/AntiAliasSmaa.hlsl) at the quality nQuality (0..3) over the
   //! copy pCopy (w x h) of the picture: its edges into m_pSmaaEdges, its blending weights into m_pSmaaWeights, both left
@@ -649,8 +650,8 @@ public:
   bool DrawCmaa2Passes(ID3D12Resource *pCopy, int w, int h, int nQuality);
   //! CMAA2's targets, working buffers and table.
   void ReleaseCmaa2();
-  //! For r_DisplayInfo without an upscaler: "none", or the anti-aliasing and its quality ("FXAA (High)"), and when this
-  //! frame did not get it.
+  //! For r_DisplayInfo without an upscaler: "none", or the anti-aliasing and its quality ("FXAA (High)", "TAA (High, HDR
+  //! input)"), and when this frame did not get it.
   std::string PostAAInfo();
   //! pCopy as a target of the highlight layer's size and format (made again when the layer's size changed). False: none.
   bool EnsureLayerCopy(CD3D12Texture *&pCopy);
