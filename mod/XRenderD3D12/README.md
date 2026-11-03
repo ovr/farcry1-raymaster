@@ -706,7 +706,9 @@ reference of its features and console variables.
   half, 3 distance, 4 mip level, 5 kind, 6 alpha tests, 7 shaded hits over the whole picture; the path
   tracer's: 8 the albedo of the hits, 9 their emission, 10 them lit by the sun and the lamps; 11 a
   colour per material the rays take of the hit's instance (the same while it is: to see the rays'
-  materials steady);
+  materials steady); 12 the side of the hit's triangle as the raster's culling takes it (the front
+  green, the back red: a red surface is one the rays meet and the raster does not draw from there;
+  Training's cave hole is green, a white unlit disc the level puts in it for the sky);
   `d3d12_WaterDebug` 13, 14, 15 the water rays' colour, distance and weight. With the rays off the
   frames are the same as without the code (WaterMove, bit for bit). Check the rays under the debug
   layer with `XRENDERD3D12_DEBUG=2`: GPU based validation turns the water rays' frames black.

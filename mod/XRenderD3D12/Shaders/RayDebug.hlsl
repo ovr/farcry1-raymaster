@@ -50,6 +50,14 @@
 //	                          frame's list does, so a surface keeps its
 //	                          colour while the rays take the same of it;
 //	                          its triangles' edges darker
+//	  XR_RAY_DEBUG_FACING     the side of the hit's triangle the ray
+//	                          meets, as the raster's culling takes it
+//	                          (its front faces counter-clockwise as the
+//	                          viewer sees them, D3D12Pipeline.cpp): the
+//	                          front green, the back red, its triangles'
+//	                          edges darker; every instance is hit on both
+//	                          sides (TRIANGLE_CULL_DISABLE), the raster
+//	                          culls the back of most draws
 //	  XR_RAY_DEBUG_GB_*       the path tracer's G-buffer (PathGBuffer.hlsli:
 //	                          the albedo, the normal, the fog's share, the
 //	                          material, the sun's visibility, the ambient
@@ -258,6 +266,19 @@ float4 PSMain(SRayDebugOutput In) : SV_Target
     vColor = (nKind & XR_RAY_STATIC) ? float3(0.1, 0.8, 0.2) : float3(0.9, 0.15, 0.1);
     if (nKind & XR_RAY_ALPHATEST)
       vColor = lerp(vColor, 1, 0.5);
+  }
+  else if (nView == XR_RAY_DEBUG_FACING)
+  {
+    // DXR's front faces are clockwise from the ray's origin in the object's space, the raster's counter-clockwise on the
+    // screen: the game's view turns the world over on the screen, so the two are the same faces (the walls of a room seen
+    // from inside are DXR's front). An object's mirroring transform (its determinant below 0) turns the raster's over and
+    // leaves DXR's, which it does not take into account.
+    const float3x4 m = Query.CommittedObjectToWorld3x4();
+    const bool bMirror = determinant((float3x3)m) < 0;
+    const bool bFront = Query.CommittedTriangleFrontFace() != bMirror;
+    const float2 b = Query.CommittedTriangleBarycentrics();
+    const float fEdge = min(min(b.x, b.y), 1 - b.x - b.y);
+    vColor = (bFront ? float3(0.15, 0.75, 0.2) : float3(0.9, 0.15, 0.1)) * (fEdge < 0.03 ? 0.4 : 1);
   }
   else
   {
