@@ -118,6 +118,8 @@ set(XRENDERD3D12_SHADER_DIR "${CMAKE_CURRENT_BINARY_DIR}/Shaders")
 set(XRENDERD3D12_SHADER_HEADERS "")
 # The third_party shader sources that ours include: Intel XeGTAO (third_party/xegtao).
 set(XRENDERD3D12_XEGTAO_DIR "${CMAKE_SOURCE_DIR}/third_party/xegtao/Source/Rendering/Shaders")
+# SMAA (third_party/smaa): its shader for the anti-aliasing's kernels, its precomputed textures for PostAA.cpp.
+set(XRENDERD3D12_SMAA_DIR "${CMAKE_SOURCE_DIR}/third_party/smaa")
 # More directories to include from, set around the xrender_d3d12_shader calls of the programs that want them (NRD.hlsli).
 set(XRENDERD3D12_SHADER_INCLUDES "")
 
@@ -168,7 +170,7 @@ function(xrender_d3d12_shader name file profile entry)
     set(more_globs "")
     foreach(dir ${XRENDERD3D12_SHADER_INCLUDES})
         list(APPEND more "-I" "${dir}")
-        list(APPEND more_globs "${dir}/*.hlsli" "${dir}/*.h")
+        list(APPEND more_globs "${dir}/*.hlsli" "${dir}/*.hlsl" "${dir}/*.h")
     endforeach()
     set(out "${XRENDERD3D12_SHADER_DIR}/${name}.h")
     file(GLOB includes "${CMAKE_CURRENT_SOURCE_DIR}/Shaders/*.hlsli" "${CMAKE_CURRENT_SOURCE_DIR}/Shaders/*.h"
@@ -251,7 +253,7 @@ set_target_properties(XRenderD3D12 PROPERTIES
 
 target_link_libraries(XRenderD3D12 PRIVATE CryCommon XRenderCommon d3d12 dxgi dxguid windowscodecs)
 target_include_directories(XRenderD3D12 PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}" "${XRENDERD3D12_SHADER_DIR}" "${XRENDERD3D12_XEGTAO_DIR}"
-    "${XRENDERD3D12_CACAO_DIR}/inc")
+    "${XRENDERD3D12_CACAO_DIR}/inc" "${XRENDERD3D12_SMAA_DIR}")
 
 # AMD FSR Upscaling (third_party/amd-fsr-sdk, tag v2.4.0): the headers and the loader are in the
 # repository; the upscaler (57 MB) is downloaded from the same tag, or is the file that

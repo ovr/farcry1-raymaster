@@ -65,17 +65,18 @@ reference of its features and console variables.
 ## Anti-aliasing
 
 - `d3d12_AA` is the anti-aliasing of the main view's 3D scene without an upscaler: `none` (the
-  default; the frames are those of the renderer without it, DemoCompare difference 0) or `fxaa`.
-  An unknown value is logged once and acts as `none`. `d3d12_AAQuality` is 0 to 3 (low, medium,
-  high, ultra; 2), `d3d12_AADebug 1` shows what it changes. All of them change at run time. With
-  an upscaler that anti-aliases (FSR) `d3d12_AA` is not used (logged once); r_DisplayInfo's
-  `Anti-aliasing` row names the one that is (`FXAA (High)`, `FSR, temporal`, `none`) and the
+  default; the frames are those of the renderer without it, DemoCompare difference 0), `fxaa` or
+  `smaa`. An unknown value is logged once and acts as `none`. `d3d12_AAQuality` is 0 to 3 (low,
+  medium, high, ultra; 2), `d3d12_AADebug 1` shows what it changes (the picture grey, red by how
+  much a pixel is blended; SMAA's edges too). All of them change at run time. With an upscaler
+  that anti-aliases (FSR) `d3d12_AA` is not used (logged once); r_DisplayInfo's `Anti-aliasing`
+  row names the one that is (`FXAA (High)`, `SMAA 1x (High)`, `FSR, temporal`, `none`) and the
   frame dump has an `anti-aliasing:` line. The original's MSAA (`r_FSAA`, `EnumAAFormats`) is
   not offered: the game's Anti-Aliasing list had None alone with this renderer.
 - The game's menu gets it from `assets/scripts/09-video-anti-aliasing.patch`: Video Options'
-  Anti-Aliasing list is None / FXAA (`d3d12_AA`) in place of the game's FSAA modes, on in a game
-  (the game greys it out there: the Direct3D 9 renderer had to relaunch) and greyed out while
-  the Upscaler is not None; Apply sets it without a restart.
+  Anti-Aliasing list is None / FXAA / SMAA 1x (`d3d12_AA`) in place of the game's FSAA modes, on
+  in a game (the game greys it out there: the Direct3D 9 renderer had to relaunch) and greyed out
+  while the Upscaler is not None; Apply sets it without a restart.
 - It is drawn over the finished, tone mapped 3D scene in the back buffer (`DrawPostAA`,
   `PostAA.cpp`, between `EndMainScene` and the screen effects): before the render modes, the
   screen effects, the HUD and the 2D, so the text stays sharp. Its input is a copy of the back
@@ -100,6 +101,28 @@ reference of its features and console variables.
   - Unit tests `Fxaa_*`: an edge drawn without anti-aliasing comes out nearer its exact coverage
     (0.33-0.41 of the error without it at 8 pixel steps), along the edge's direction only; flat
     pictures and the alpha stay bit for bit; an edge along the pixels' grid stays sharp.
+- SMAA 1x (`smaa`) is SMAA's (J. Jimenez et al., `third_party/smaa`, MIT), in three passes:
+  - its luma edge detection and its blending weights (with its precomputed area and search
+    textures, `Textures/AreaTex.h`, `SearchTex.h`) are two compute kernels of its `SMAA.hlsl` as
+    it is (`Shaders/AntiAliasSmaa.hlsl`, `Shaders/Smaa.hlsli`: `SMAA_CUSTOM_SL` with the
+    renderer's samplers; a kernel writes no edges where SMAA's pixel shader discards) into an
+    R8G8 and an R8G8B8A8 target of the display's size;
+  - its neighbourhood blending is the `AntiAlias` program's pass (`Shaders/SmaaBlend.hlsli`):
+    SMAA's choice of the neighbours and their weights, with exact loads in place of its bilinear
+    taps, in linear light (SMAA asks for this pass's sRGB read and write, which the UNORM back
+    buffer and its copy have not); a pixel without weights is not written.
+  - `d3d12_AAQuality` is SMAA's preset: low, medium, high, ultra (edge threshold 0.15, 0.1, 0.1,
+    0.05; 4, 8, 16, 32 search steps; the diagonals and the corners from high on). Against the
+    reference of the render tests' `aa` the error at the edges is 0.62-0.67 of none's at High
+    (0.61-0.69 at the four presets) and the textures keep 0.85-0.91 of their detail (0.81-0.92):
+    sharper edges and textures than FXAA's (0.73-0.75 and 0.75-0.81). At 3840 x 2160 its GPU
+    section `anti-aliasing` (with the copy of the picture) takes 0.15, 0.16, 0.17-0.18 and 0.22 ms
+    (low to ultra; FXAA 0.09-0.12 ms).
+  - Unit tests `Smaa_*` (the passes in turn on the test harness's textures, each one's output the
+    next one's texture as the renderer's targets store it): an edge drawn without anti-aliasing
+    comes out at 0.22-0.27 of the error without it at 8 pixel steps (in linear light), across the
+    edge only; on 32 pixel steps ultra 0.21, low 0.60; the edges at the threshold; the blending in
+    linear light; flat pictures, an edge along the grid and the alpha stay.
 
 ## HDR
 

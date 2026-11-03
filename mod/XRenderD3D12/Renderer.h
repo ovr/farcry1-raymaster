@@ -627,13 +627,20 @@ public:
   {
     None,
     Fxaa,                                   //!< FXAA (Shaders/Fxaa.hlsli)
+    Smaa,                                   //!< SMAA 1x (third_party/smaa; Shaders/Smaa.hlsli, SmaaBlend.hlsli)
   };
   //! What d3d12_AA asks for; an unknown value is logged once and acts as None.
   EAntiAlias AntiAliasing();
   //! After the main view's EndMainScene, before the render mode and the screen effects: the anti-aliasing of the
-  //! finished picture (FXAA) from a copy of the back buffer into it, the highlight layer too. Not with an upscaler that
-  //! gathers the frames (FSR anti-aliases).
+  //! finished picture (FXAA, SMAA) from a copy of the back buffer into it, the highlight layer too. Not with an upscaler
+  //! that gathers the frames (FSR anti-aliases).
   void DrawPostAA();
+  //! SMAA 1x's first two passes, compute kernels (Shaders/AntiAliasSmaa.hlsl) at the quality nQuality (0..3) over the
+  //! copy pCopy (w x h) of the picture: its edges into m_pSmaaEdges, its blending weights into m_pSmaaWeights, both left
+  //! in PIXEL_SHADER_RESOURCE for the blending pass. False: not available (the kernels, the targets).
+  bool DrawSmaaPasses(ID3D12Resource *pCopy, int w, int h, int nQuality);
+  //! SMAA's targets and tables (bAll: its precomputed textures too).
+  void ReleaseSmaa(bool bAll);
   //! For r_DisplayInfo without an upscaler: "none", or the anti-aliasing and its quality ("FXAA (High)"), and when this
   //! frame did not get it.
   std::string PostAAInfo();
@@ -649,6 +656,13 @@ public:
   CD3D12Texture *m_pAaLayer = nullptr;      //!< with the highlight layer: its copy before the pass
   EAntiAlias m_ePostAA = EAntiAlias::None;  //!< the anti-aliasing the picture of m_nPostAAFrame got
   int m_nPostAAFrame = -1;                  //!< m_nFrames of the last frame anti-aliased
+  bool m_bAAFailedLogged = false;           //!< "not available" logged (until it works again)
+  CD3D12Texture *m_pSmaaEdges = nullptr;    //!< SMAA's edges (R8G8_UNORM, the display's size)
+  CD3D12Texture *m_pSmaaWeights = nullptr;  //!< its blending weights (R8G8B8A8_UNORM)
+  CD3D12Texture *m_pSmaaArea = nullptr;     //!< its precomputed area texture (third_party/smaa/Textures/AreaTex.h)
+  CD3D12Texture *m_pSmaaSearch = nullptr;   //!< and search texture (SearchTex.h)
+  int m_nSmaaTables = -1;                   //!< the descriptor tables of its two kernels (AllocRange)
+  ComPtr<ID3D12Resource> m_pSmaaSource;     //!< the copy of the picture the edges kernel's table has
 
   //////////////////////////////////////////////////////////////////////////
   // AmbientOcclusion.cpp: the ambient occlusion of the main view (d3d12_AO, AmbientOcclusion.h)

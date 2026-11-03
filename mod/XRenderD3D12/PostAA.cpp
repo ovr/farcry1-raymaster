@@ -12,6 +12,11 @@
 //	the render mode, the screen effects and the 2D, which stay sharp.
 //	  - fxaa: FXAA (Shaders/Fxaa.hlsli) at d3d12_AAQuality, one pass; the
 //	    pixels it leaves as they are are not written.
+//	  - smaa: SMAA 1x (third_party/smaa) at d3d12_AAQuality's preset: its
+//	    edges and blending weights by two compute kernels
+//	    (Shaders/AntiAliasSmaa.hlsl, Smaa.hlsli) into targets of the
+//	    display's size, then its neighbourhood blending (SmaaBlend.hlsli)
+//	    as the pass; the pixels without weights are not written.
 //	The back buffer's alpha stays (the HUD masks through it). With the
 //	HDR output's highlight layer the pass writes it too, from its copy:
 //	the ratio of each pixel blended as its colour is, the fingerprint of the
@@ -25,7 +30,11 @@
 #include "D3D12Upload.h"
 #include "D3D12Descriptors.h"
 #include "D3D12Pipeline.h"
+#include "D3D12Compute.h"
 #include "Scene.h"
+// SMAA's precomputed textures (third_party/smaa).
+#include "Textures/AreaTex.h"
+#include "Textures/SearchTex.h"
 
 namespace
 {
@@ -48,6 +57,7 @@ struct SAntiAliasName
 const SAntiAliasName s_AntiAliasNames[] = {
   { "none", CD3D12Renderer::EAntiAlias::None, "none" },
   { "fxaa", CD3D12Renderer::EAntiAlias::Fxaa, "FXAA" },
+  { "smaa", CD3D12Renderer::EAntiAlias::Smaa, "SMAA 1x" },
 };
 
 const char *const s_QualityNames[4] = { "Low", "Medium", "High", "Ultra" };
@@ -76,7 +86,7 @@ CD3D12Renderer::EAntiAlias CD3D12Renderer::AntiAliasing()
   }
   if (_stricmp(szValue, m_AAWarned.c_str()) != 0)
   {
-    iLog->LogWarning("XRenderD3D12: d3d12_AA %s: no such anti-aliasing (none, fxaa); none", szValue);
+    iLog->LogWarning("XRenderD3D12: d3d12_AA %s: no such anti-aliasing (none, fxaa, smaa); none", szValue);
     m_AAWarned = szValue;
   }
   return EAntiAlias::None;
@@ -114,16 +124,31 @@ void CD3D12Renderer::DrawPostAA()
     return;
   if (pLayer)
     CopyLayer(m_pAaLayer);
+  const int nQuality = std::clamp(CV_d3d12_AAQuality, 0, 3);
+  // SMAA's edges and weights from the copy (the back buffer's, CopySceneForWater).
+  if (eAA == EAntiAlias::Smaa &&
+      !DrawSmaaPasses(m_SceneCopies[m_pDevice->IsInScene() || m_pDevice->IsInHdr() ? 1 : 0].pColor.Get(), w, h, nQuality))
+  {
+    if (!m_bAAFailedLogged)
+      iLog->LogWarning("XRenderD3D12: d3d12_AA %s is not available at %d x %d; none", AntiAliasName(eAA).szValue, w, h);
+    m_bAAFailedLogged = true;
+    return;
+  }
+  m_bAAFailedLogged = false;
   m_pDevice->SetBackBufferTargets();
 
-  const int nQuality = std::clamp(CV_d3d12_AAQuality, 0, 3);
   SPipelineKey Key = {};
   Key.nProgram = eD3D12P_AntiAlias;
   Key.nState = GS_NODEPTHTEST;
   Key.nCull = R_CULL_NONE;
   SDrawConstants dc = DefaultDrawConstants();
-  dc.nFlags = AA_FXAA | (CV_d3d12_AADebug ? AA_DEBUG : 0);
+  dc.nFlags = (eAA == EAntiAlias::Smaa ? AA_SMAA : AA_FXAA) | (CV_d3d12_AADebug ? AA_DEBUG : 0);
   dc.nTex0 = (uint32)m_nSceneColorSRV;
+  if (eAA == EAntiAlias::Smaa)
+  {
+    dc.nTex1 = (uint32)m_pSmaaWeights->m_nSRV;
+    dc.nTex2 = (uint32)m_pSmaaEdges->m_nSRV;
+  }
   Set4(dc.vParams0, 1.0f / w, 1.0f / h, (float)(w - 1), (float)(h - 1));
   Set4(dc.vParams1, (float)nQuality, 0, 0, 0);
   if (pLayer)
@@ -179,11 +204,117 @@ void CD3D12Renderer::CopyLayer(CD3D12Texture *pCopy)
   m_pDevice->Transition(pLayer, D3D12_RESOURCE_STATE_COPY_SOURCE, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
 }
 
+bool CD3D12Renderer::DrawSmaaPasses(ID3D12Resource *pCopy, int w, int h, int nQuality)
+{
+  constexpr int TABLE = CD3D12Compute::COMPUTE_SRVS + CD3D12Compute::COMPUTE_UAVS;
+  const ED3D12Kernel eEdges = (ED3D12Kernel)(eD3D12K_SmaaEdgesLow + nQuality);
+  const ED3D12Kernel eWeights = (ED3D12Kernel)(eD3D12K_SmaaWeightsLow + nQuality);
+  if (!pCopy || !m_pCompute || !m_pUpload || !m_pDescriptors || !m_pCompute->HasKernel(eEdges) || !m_pCompute->HasKernel(eWeights))
+    return false;
+  // The precomputed textures once, in the formats their headers name; the targets of the display's size.
+  if (!m_pSmaaArea)
+  {
+    const SD3D12SubData Area = { areaTexBytes, AREATEX_PITCH };
+    m_pSmaaArea = m_pUpload->CreateTexture(AREATEX_WIDTH, AREATEX_HEIGHT, 1, DXGI_FORMAT_R8G8_UNORM, false, &Area);
+  }
+  if (!m_pSmaaSearch)
+  {
+    const SD3D12SubData Search = { searchTexBytes, SEARCHTEX_PITCH };
+    m_pSmaaSearch = m_pUpload->CreateTexture(SEARCHTEX_WIDTH, SEARCHTEX_HEIGHT, 1, DXGI_FORMAT_R8_UNORM, false, &Search);
+  }
+  if (m_pSmaaEdges && (m_pSmaaEdges->m_nWidth != w || m_pSmaaEdges->m_nHeight != h))
+    ReleaseSmaa(false);
+  if (!m_pSmaaEdges)
+    m_pSmaaEdges = m_pUpload->CreateRenderTarget(w, h, DXGI_FORMAT_R8G8_UNORM, true);
+  if (!m_pSmaaWeights)
+    m_pSmaaWeights = m_pUpload->CreateRenderTarget(w, h, DXGI_FORMAT_R8G8B8A8_UNORM, true);
+  if (!m_pSmaaArea || !m_pSmaaSearch || !m_pSmaaEdges || m_pSmaaEdges->m_nSRV < 0 || !m_pSmaaWeights || m_pSmaaWeights->m_nSRV < 0)
+    return false;
+  ID3D12Resource *pEdges = m_pSmaaEdges->m_pResource, *pWeights = m_pSmaaWeights->m_pResource;
+  ID3D12Resource *pArea = m_pSmaaArea->m_pResource, *pSearch = m_pSmaaSearch->m_pResource;
+
+  // The tables, made again for another copy (the old slots freed after the frames that use them): the edges kernel's
+  // t0 the copy, u0 the edges; the weights kernel's t0 the edges, t1 the area texture, t2 the search texture, u0 the
+  // weights. The copy is held, so that a new one is never at its address.
+  if (m_nSmaaTables < 0 || pCopy != m_pSmaaSource.Get())
+  {
+    if (m_nSmaaTables >= 0)
+      m_pDescriptors->FreeRange(m_nSmaaTables, 2 * TABLE);
+    m_pSmaaSource.Reset();
+    m_nSmaaTables = m_pDescriptors->AllocRange(2 * TABLE);
+    if (m_nSmaaTables < 0)
+      return false;
+    m_pSmaaSource = pCopy;
+    ID3D12Resource *const SRVs[2][CD3D12Compute::COMPUTE_SRVS] = { { pCopy }, { pEdges, pArea, pSearch } };
+    ID3D12Resource *const UAVs[2] = { pEdges, pWeights };
+    for (int t = 0; t < 2; t++)
+    {
+      const int nTable = m_nSmaaTables + t * TABLE;
+      for (int i = 0; i < CD3D12Compute::COMPUTE_SRVS; i++)
+      {
+        D3D12_SHADER_RESOURCE_VIEW_DESC SRV = {};
+        SRV.Format = SRVs[t][i] ? SRVs[t][i]->GetDesc().Format : DXGI_FORMAT_R8G8B8A8_UNORM;
+        SRV.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
+        SRV.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+        SRV.Texture2D.MipLevels = 1;
+        m_pDescriptors->WriteSRV(nTable + i, SRVs[t][i], &SRV);
+      }
+      for (int i = 0; i < CD3D12Compute::COMPUTE_UAVS; i++)
+      {
+        D3D12_UNORDERED_ACCESS_VIEW_DESC UAV = {};
+        UAV.Format = i == 0 ? UAVs[t]->GetDesc().Format : DXGI_FORMAT_R8G8B8A8_UNORM;
+        UAV.ViewDimension = D3D12_UAV_DIMENSION_TEXTURE2D;
+        m_pDescriptors->WriteUAV(nTable + CD3D12Compute::COMPUTE_SRVS + i, i == 0 ? UAVs[t] : nullptr, &UAV);
+      }
+    }
+  }
+
+  // AntiAliasSmaa.hlsl's b0: SMAA_RT_METRICS.
+  const float vMetrics[4] = { 1.0f / w, 1.0f / h, (float)w, (float)h };
+  const SD3D12FrameAlloc CB = m_pUpload->AllocFrame(sizeof(vMetrics), 256);
+  memcpy(CB.pCPU, vMetrics, sizeof(vMetrics));
+  constexpr D3D12_RESOURCE_STATES PS_READ = D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE;
+  constexpr D3D12_RESOURCE_STATES READ = D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE | D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE;
+  ID3D12GraphicsCommandList *pList = m_pDevice->GetCmdList();
+  const UINT nGroupsX = (UINT)(w + 7) / 8, nGroupsY = (UINT)(h + 7) / 8;
+  m_pDevice->Transition(pCopy, PS_READ, READ);
+  m_pDevice->Transition(pEdges, PS_READ, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+  m_pCompute->Dispatch(pList, eEdges, CB.nGPU, m_nSmaaTables, m_nSmaaTables + CD3D12Compute::COMPUTE_SRVS, nGroupsX, nGroupsY);
+  m_pDevice->Transition(pEdges, D3D12_RESOURCE_STATE_UNORDERED_ACCESS, READ);
+  m_pDevice->Transition(pArea, PS_READ, READ);
+  m_pDevice->Transition(pSearch, PS_READ, READ);
+  m_pDevice->Transition(pWeights, PS_READ, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+  m_pCompute->Dispatch(pList, eWeights, CB.nGPU, m_nSmaaTables + TABLE, m_nSmaaTables + TABLE + CD3D12Compute::COMPUTE_SRVS, nGroupsX,
+                       nGroupsY);
+  m_pDevice->Transition(pWeights, D3D12_RESOURCE_STATE_UNORDERED_ACCESS, PS_READ);
+  m_pDevice->Transition(pSearch, READ, PS_READ);
+  m_pDevice->Transition(pArea, READ, PS_READ);
+  m_pDevice->Transition(pEdges, READ, PS_READ);
+  m_pDevice->Transition(pCopy, READ, PS_READ);
+  return true;
+}
+
+void CD3D12Renderer::ReleaseSmaa(bool bAll)
+{
+  CD3D12Texture **const Textures[4] = { &m_pSmaaEdges, &m_pSmaaWeights, &m_pSmaaArea, &m_pSmaaSearch };
+  for (int i = 0; i < (bAll ? 4 : 2); i++)
+  {
+    if (m_pUpload && *Textures[i])
+      m_pUpload->ReleaseTexture(*Textures[i]);
+    *Textures[i] = nullptr;
+  }
+  if (m_nSmaaTables >= 0 && m_pDescriptors)
+    m_pDescriptors->FreeRange(m_nSmaaTables, 2 * (CD3D12Compute::COMPUTE_SRVS + CD3D12Compute::COMPUTE_UAVS));
+  m_nSmaaTables = -1;
+  m_pSmaaSource.Reset();
+}
+
 void CD3D12Renderer::ReleasePostAA()
 {
   if (m_pUpload && m_pAaLayer)
     m_pUpload->ReleaseTexture(m_pAaLayer);
   m_pAaLayer = nullptr;
+  ReleaseSmaa(true);
   m_ePostAA = EAntiAlias::None;
   m_nPostAAFrame = -1;
 }
