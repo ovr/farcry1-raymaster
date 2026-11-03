@@ -225,7 +225,7 @@ void CD3D12Renderer::BeginAOTarget(const SRenderItem *pItems, int nItems)
   static const float Zero[4] = {};
   m_pDevice->Transition(m_pAOAmbient->m_pResource, AMBIENT_READ, D3D12_RESOURCE_STATE_RENDER_TARGET);
   m_pDevice->GetCmdList()->ClearRenderTargetView(m_pAOAmbient->m_RTV, Zero, 0, nullptr);
-  m_pDevice->BindAmbient(m_pAOAmbient->m_RTV);
+  m_pDevice->BindAmbient(m_pAOAmbient->m_RTV, m_pAOAmbient->m_pResource);
   m_bAOAmbientBound = true;
 }
 
@@ -253,6 +253,8 @@ void CD3D12Renderer::DrawAmbientOcclusion()
   // debug views show the resolve's targets.
   const bool bTaken = m_nAOApply && !CV_d3d12_AODebug;
   const D3D12_RESOURCE_STATES DepthRead = bTaken ? DEPTH_READ | D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE : DEPTH_READ;
+  // With MSAA its depth buffer's nearest samples (Msaa.cpp).
+  ResolveMsaaDepth();
   m_pDevice->Transition(pDepth, D3D12_RESOURCE_STATE_DEPTH_WRITE, DepthRead);
 
   SAOFrame Frame;

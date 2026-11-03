@@ -290,6 +290,8 @@ void CD3D12Renderer::DrawRaySunMask()
   if (!m_pCompute || !m_pUpload || !m_pDescriptors || !m_pDevice || !m_pRayScene || m_pRayScene->GetBuiltFrame() != m_nFrames ||
       !m_pRayScene->GetTLAS() || !m_nCascades || m_nCascadeFrame != m_nFrames || !CascadeReceiverFlags(false) || m_pDevice->IsOffscreen())
     return;
+  // With MSAA its depth buffer's nearest samples (Msaa.cpp).
+  ResolveMsaaDepth();
   ID3D12Resource *pDepth = m_pDevice->GetMainDepth();
   const int w = m_pDevice->GetMainWidth(), h = m_pDevice->GetMainHeight();
   // The view over the whole depth buffer (the pixels' positions from it).

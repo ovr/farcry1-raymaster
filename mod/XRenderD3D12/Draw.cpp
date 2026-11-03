@@ -233,6 +233,10 @@ void CD3D12Renderer::DrawGeometry(const SPipelineKey &Key, const SDrawConstants 
   FullKey.bAmbient = (FullKey.nTarget == 0 || FullKey.nTarget == 3) && m_pDevice->IsAmbientBound() ? 1 : 0;
   // The path tracer's G-buffer bound to the scene's targets (PathTrace.cpp).
   FullKey.bPathTrace = FullKey.nTarget == 3 && m_pDevice->IsPathBound() ? 1 : 0;
+  // MSAA's targets bound to the main view (Msaa.cpp).
+  FullKey.nSamples = FullKey.nTarget == 0 && m_pDevice->GetBoundSamples() > 1 ? (uint8)m_pDevice->GetBoundSamples() : 0;
+  if (FullKey.nSamples && (FullKey.nState & GS_DEPTHWRITE) && !(FullKey.nState & GS_NODEPTHTEST))
+    m_bMsaaDepthDirty = true;
   ID3D12PipelineState *pPSO = m_pPipeline->GetPSO(FullKey);
   if (!pPSO)
     return;

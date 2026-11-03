@@ -198,7 +198,8 @@ void CD3D12Renderer::DrawFlares(std::span<const SRenderItem> Items)
   const float vx = (float)m_Viewport[0], vy = (float)m_Viewport[1], vw = (float)std::max(m_Viewport[2], 1), vh = (float)std::max(m_Viewport[3], 1);
   float fScaleX, fScaleY;
   GetSceneScale(fScaleX, fScaleY);
-  const float fSampleScale = fScaleX * fScaleY;
+  // MSAA's queries count samples (Msaa.cpp).
+  const float fSampleScale = fScaleX * fScaleY * (float)m_pDevice->GetBoundSamples();
   m_fDepthMin = 0;
   m_fDepthMax = 1;
   m_bItemScissor = false;

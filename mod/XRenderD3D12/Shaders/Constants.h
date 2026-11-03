@@ -435,4 +435,15 @@ struct STaaConstants
   XR_UINT4(vCas1);
 };
 
+// MSAA's resolve's flags (SMsaaConstants::vParams.y)
+#define MSAA_HDR            0x00000001  //!< the HDR target's colours (tone mapped for their mean), else the back buffer's
+#define MSAA_AUTO_EXPOSURE  0x00000002  //!< t1 holds the adapted EV (Hdr.cpp's), added to vExposure.x
+
+//! b0 of MSAA's resolve passes (Msaa.hlsl, Msaa.cpp; root constants).
+struct SMsaaConstants
+{
+  XR_UINT4(vParams);              //!< x the samples of a pixel (2, 4 or 8), y MSAA_*
+  XR_FLOAT4(vExposure);           //!< x the exposure's compensation, EV (d3d12_Exposure)
+};
+
 #endif

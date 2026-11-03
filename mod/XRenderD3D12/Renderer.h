@@ -630,6 +630,9 @@ public:
     Smaa,                                   //!< SMAA 1x (third_party/smaa; Shaders/Smaa.hlsli, SmaaBlend.hlsli)
     Cmaa2,                                  //!< CMAA2 (third_party/cmaa2; Shaders/AntiAliasCmaa2.hlsl)
     Taa,                                    //!< TAA, the upscaler of the display's size (UpscalerTaa.cpp, Shaders/Taa.hlsli)
+    Msaa2,                                  //!< MSAA with 2, 4, 8 samples (Msaa.cpp, Shaders/Msaa.hlsli)
+    Msaa4,
+    Msaa8,
   };
   //! What d3d12_AA asks for; an unknown value is logged once and acts as None.
   EAntiAlias AntiAliasing();
@@ -678,6 +681,40 @@ public:
   ComPtr<ID3D12Resource> m_pCmaa2Buffers[5];  //!< its shapes, quads, colours, counters and indirect arguments (u2, u3, u4, u6, u7)
   int m_nCmaa2Table = -1;                   //!< the wide table of its kernels (AllocRange)
   bool m_bCmaa2Cleared = false;             //!< its counters cleared since its buffers were made
+
+  //////////////////////////////////////////////////////////////////////////
+  // Msaa.cpp: MSAA of the main view's scene (d3d12_AA msaa2, msaa4, msaa8)
+
+  //! The samples of d3d12_AA's MSAA (2, 4, 8); 0 for another anti-aliasing.
+  static int MsaaSamples(EAntiAlias eAA);
+  //! In BeginMainScene, the main view's target bound (the HDR target, the back buffer): with MSAA in d3d12_AA, and
+  //! not in an upscaler's scene (FSR anti-aliases, the path tracer's G-buffer has a sample a pixel), the device's
+  //! multisampled targets (CD3D12Device::SetMsaaTargets) bound in the main view's place; else they are released.
+  void BeginMsaa();
+  //! With MSAA, when draws wrote its depth buffer since the last: the nearest samples into the main view's
+  //! (GetMainDepth), for what reads it in the scene (the sun's mask by rays, the ambient occlusion, the water's copy).
+  void ResolveMsaaDepth();
+  //! In EndMainScene: MSAA's colour into the main view's (Msaa.hlsli: the mean of the samples' display light, the HDR
+  //! target's tone mapped for it), its depth (ResolveMsaaDepth), the main view's own targets bound again.
+  void EndMsaa();
+  //! MSAA's passes, views and the device's targets.
+  void ReleaseMsaa();
+  //! The root signature and the pipelines of the resolve's passes (Msaa.hlsl), made at the first. False: not made.
+  bool EnsureMsaaPasses();
+  //! The pass of the depth (bDepth) or the colour: the multisampled target into the main view's.
+  void DrawMsaaResolve(bool bDepth);
+
+  ComPtr<ID3D12RootSignature> m_pMsaaRoot;  //!< the passes': b0 SMsaaConstants (root constants), tables of t0 and t1 (pixel shader)
+  ComPtr<ID3D12PipelineState> m_pMsaaColorPSO[2];   //!< the colour's into the back buffer's format, the HDR target's
+  ComPtr<ID3D12PipelineState> m_pMsaaDepthPSO;
+  bool m_bMsaaPassesFailed = false;         //!< not made (until ReleaseMsaa)
+  int m_nMsaaColorSRV = -1;                 //!< the multisampled colour's view (TEXTURE2DMS)
+  int m_nMsaaDepthSRV = -1;                 //!< the multisampled depth's (R24_UNORM_X8_TYPELESS)
+  uint32 m_nMsaaSRVGeneration = 0;          //!< CD3D12Device::GetMsaaGeneration of the views' targets
+  bool m_bMsaaDepthDirty = false;           //!< the multisampled depth written since ResolveMsaaDepth
+  int m_nMsaaFrame = -1;                    //!< m_nFrames of the last main scene with MSAA
+  const char *m_szMsaaOff = nullptr;        //!< why the last main scene had none of what d3d12_AA asks for
+  bool m_bMsaaLogged = false;               //!< m_szMsaaOff logged (until it works again or d3d12_AA has none)
 
   //////////////////////////////////////////////////////////////////////////
   // AmbientOcclusion.cpp: the ambient occlusion of the main view (d3d12_AO, AmbientOcclusion.h)

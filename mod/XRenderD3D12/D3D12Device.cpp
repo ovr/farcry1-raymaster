@@ -200,10 +200,11 @@ bool CD3D12Device::Init(HWND hWnd, int nWidth, int nHeight, int nDebug, int nDre
   D3D12_DESCRIPTOR_HEAP_DESC HeapDesc = {};
   // The back buffers' views, then the scene targets' (colour, motion vectors, the upscaler's
   // depth; the depth buffer's after the back buffers' in the DSV heap), the HDR target's, the
-  // frame target's, the highlight layer's and two null ones (SceneRTV). The DSV heap: the depth
-  // buffer's, the scene's, then the same read only (ReadOnlyDSV).
+  // frame target's, the highlight layer's, two null ones, MSAA's colour and ambient light and two null
+  // multisampled ones (SceneRTV). The DSV heap: the depth buffer's, the scene's, then the same read only
+  // (ReadOnlyDSV), then MSAA's and the same read only (MsaaDSV).
   HeapDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_RTV;
-  HeapDesc.NumDescriptors = D3D12_BACKBUFFERS + 8;
+  HeapDesc.NumDescriptors = D3D12_BACKBUFFERS + 12;
   if (Failed(m_pDevice->CreateDescriptorHeap(&HeapDesc, IID_PPV_ARGS(&m_pRTVHeap)), "CreateDescriptorHeap (RTV)"))
     return false;
   m_nRTVSize = m_pDevice->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_RTV);
@@ -215,8 +216,13 @@ bool CD3D12Device::Init(HWND hWnd, int nWidth, int nHeight, int nDebug, int nDre
   m_pDevice->CreateRenderTargetView(nullptr, &NullView, SceneRTV(6));
   NullView.Format = D3D12_UPSCALE_DEPTH_FORMAT;
   m_pDevice->CreateRenderTargetView(nullptr, &NullView, SceneRTV(7));
+  NullView.ViewDimension = D3D12_RTV_DIMENSION_TEXTURE2DMS;
+  NullView.Format = D3D12_VELOCITY_FORMAT;
+  m_pDevice->CreateRenderTargetView(nullptr, &NullView, SceneRTV(10));
+  NullView.Format = D3D12_UPSCALE_DEPTH_FORMAT;
+  m_pDevice->CreateRenderTargetView(nullptr, &NullView, SceneRTV(11));
   HeapDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_DSV;
-  HeapDesc.NumDescriptors = 4;
+  HeapDesc.NumDescriptors = 6;
   if (Failed(m_pDevice->CreateDescriptorHeap(&HeapDesc, IID_PPV_ARGS(&m_pDSVHeap)), "CreateDescriptorHeap (DSV)"))
     return false;
 
@@ -379,6 +385,7 @@ void CD3D12Device::Shutdown()
     WaitForGPU();
   ReleaseSceneTargets();
   SetHdrTarget(false);
+  SetMsaaTargets(0, DXGI_FORMAT_UNKNOWN);
   m_Deferred.clear();
   ReleaseSwapChainBuffers();
   m_pCmdList.Reset();
@@ -762,6 +769,13 @@ void CD3D12Device::SetBackBufferTargets()
     const D3D12_CPU_DESCRIPTOR_HANDLE hDSV = m_bDepthReadOnly ? ReadOnlyDSV(true) : SceneDSV();
     m_pCmdList->OMSetRenderTargets(m_hAmbientRTV.ptr ? 4 : 3, hRTV, FALSE, &hDSV);
   }
+  else if (m_bInMsaa)
+  {
+    // MSAA's targets in the places of the main view's (BeginMsaa).
+    const D3D12_CPU_DESCRIPTOR_HANDLE hRTV[4] = { SceneRTV(8), SceneRTV(10), SceneRTV(11), SceneRTV(9) };
+    const D3D12_CPU_DESCRIPTOR_HANDLE hDSV = MsaaDSV(m_bDepthReadOnly);
+    m_pCmdList->OMSetRenderTargets(m_hAmbientRTV.ptr ? 4 : 1, hRTV, FALSE, &hDSV);
+  }
   else
   {
     const D3D12_CPU_DESCRIPTOR_HANDLE hRTV[4] = { m_bInHdr ? SceneRTV(3) : GetBackBufferRTV(), SceneRTV(6), SceneRTV(7), m_hAmbientRTV };
@@ -775,9 +789,21 @@ void CD3D12Device::SetBackBufferTargets()
   m_pCmdList->RSSetScissorRects(1, &rc);
 }
 
-void CD3D12Device::BindAmbient(D3D12_CPU_DESCRIPTOR_HANDLE hRTV)
+void CD3D12Device::BindAmbient(D3D12_CPU_DESCRIPTOR_HANDLE hRTV, ID3D12Resource *pResource)
 {
+  // With MSAA the multisampled ambient light: cleared as the caller cleared its own (to 0), resolved into it
+  // when unbound.
+  if (m_bInFrame && m_bInMsaa)
+  {
+    static const float Zero[4] = {};
+    if (hRTV.ptr && !m_hAmbientRTV.ptr)
+      m_pCmdList->ClearRenderTargetView(SceneRTV(9), Zero, 0, nullptr);
+    else if (!hRTV.ptr && m_hAmbientRTV.ptr && m_pAmbientResource)
+      ResolveInto(m_pAmbientResource, D3D12_RESOURCE_STATE_RENDER_TARGET, m_pMsaaAmbient.Get(), D3D12_RESOURCE_STATE_RENDER_TARGET,
+                  D3D12_AMBIENT_FORMAT);
+  }
   m_hAmbientRTV = hRTV;
+  m_pAmbientResource = hRTV.ptr ? pResource : nullptr;
   if (m_bInFrame && !m_pOffscreen)
     SetBackBufferTargets();
 }
@@ -846,6 +872,13 @@ D3D12_CPU_DESCRIPTOR_HANDLE CD3D12Device::ReadOnlyDSV(bool bScene) const
 {
   D3D12_CPU_DESCRIPTOR_HANDLE h = m_pDSVHeap->GetCPUDescriptorHandleForHeapStart();
   h.ptr += (bScene ? 3 : 2) * m_pDevice->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_DSV);
+  return h;
+}
+
+D3D12_CPU_DESCRIPTOR_HANDLE CD3D12Device::MsaaDSV(bool bReadOnly) const
+{
+  D3D12_CPU_DESCRIPTOR_HANDLE h = m_pDSVHeap->GetCPUDescriptorHandleForHeapStart();
+  h.ptr += (bReadOnly ? 5 : 4) * m_pDevice->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_DSV);
   return h;
 }
 
@@ -1023,6 +1056,152 @@ void CD3D12Device::EndHdr()
   EndOffscreen();
   Barrier(m_pCmdList.Get(), m_pHdrColor.Get(), D3D12_RESOURCE_STATE_RENDER_TARGET, SCENE_READ);
   SetBackBufferTargets();
+}
+
+bool CD3D12Device::SetMsaaTargets(int nSamples, DXGI_FORMAT ColorFormat)
+{
+  if (m_pMsaaColor && nSamples == m_nMsaaSamples && ColorFormat == m_MsaaColorFormat && m_pMsaaColor->GetDesc().Width == (UINT64)m_nWidth &&
+      m_pMsaaColor->GetDesc().Height == (UINT)m_nHeight)
+    return true;
+  if (m_pMsaaColor)
+  {
+    EndMsaa();
+    DeferredRelease(m_pMsaaColor);
+    DeferredRelease(m_pMsaaDepth);
+    DeferredRelease(m_pMsaaAmbient);
+    m_nMsaaSamples = 0;
+    m_MsaaColorFormat = DXGI_FORMAT_UNKNOWN;
+  }
+  if (nSamples <= 1)
+    return true;
+  if (!m_pDevice || m_nWidth <= 0 || m_nHeight <= 0)
+    return false;
+  // The count for every target the draws may have bound (the null ones too), a resolve of the colour and
+  // the ambient light by the GPU's ResolveSubresource.
+  const auto Supports = [&](DXGI_FORMAT Format, bool bResolve)
+  {
+    D3D12_FEATURE_DATA_MULTISAMPLE_QUALITY_LEVELS Levels = {};
+    Levels.Format = Format;
+    Levels.SampleCount = (UINT)nSamples;
+    if (FAILED(m_pDevice->CheckFeatureSupport(D3D12_FEATURE_MULTISAMPLE_QUALITY_LEVELS, &Levels, sizeof(Levels))) || !Levels.NumQualityLevels)
+      return false;
+    D3D12_FEATURE_DATA_FORMAT_SUPPORT Support = { Format };
+    return !bResolve || (SUCCEEDED(m_pDevice->CheckFeatureSupport(D3D12_FEATURE_FORMAT_SUPPORT, &Support, sizeof(Support))) &&
+                         (Support.Support1 & D3D12_FORMAT_SUPPORT1_MULTISAMPLE_RESOLVE));
+  };
+  if (!Supports(ColorFormat, true) || !Supports(D3D12_AMBIENT_FORMAT, true) || !Supports(D3D12_DEPTH_FORMAT, false) ||
+      !Supports(D3D12_VELOCITY_FORMAT, false) || !Supports(D3D12_UPSCALE_DEPTH_FORMAT, false))
+    return false;
+  D3D12_HEAP_PROPERTIES Heap = {};
+  Heap.Type = D3D12_HEAP_TYPE_DEFAULT;
+  D3D12_RESOURCE_DESC Desc = {};
+  Desc.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
+  Desc.Width = m_nWidth;
+  Desc.Height = m_nHeight;
+  Desc.DepthOrArraySize = 1;
+  Desc.MipLevels = 1;
+  Desc.SampleDesc.Count = (UINT)nSamples;
+  Desc.Format = ColorFormat;
+  Desc.Flags = D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET;
+  D3D12_CLEAR_VALUE Clear = {};
+  Clear.Format = ColorFormat;
+  bool bOk = SUCCEEDED(m_pDevice->CreateCommittedResource(&Heap, D3D12_HEAP_FLAG_NONE, &Desc, D3D12_RESOURCE_STATE_RENDER_TARGET, &Clear,
+                                                          IID_PPV_ARGS(&m_pMsaaColor)));
+  Desc.Format = Clear.Format = D3D12_AMBIENT_FORMAT;
+  bOk = bOk && SUCCEEDED(m_pDevice->CreateCommittedResource(&Heap, D3D12_HEAP_FLAG_NONE, &Desc, D3D12_RESOURCE_STATE_RENDER_TARGET, &Clear,
+                                                            IID_PPV_ARGS(&m_pMsaaAmbient)));
+  // Typeless as the depth buffer: read by the resolve (Msaa.cpp).
+  Desc.Format = DXGI_FORMAT_R24G8_TYPELESS;
+  Desc.Flags = D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL;
+  Clear.Format = D3D12_DEPTH_FORMAT;
+  Clear.DepthStencil.Depth = 1.0f;
+  bOk = bOk && SUCCEEDED(m_pDevice->CreateCommittedResource(&Heap, D3D12_HEAP_FLAG_NONE, &Desc, D3D12_RESOURCE_STATE_DEPTH_WRITE, &Clear,
+                                                            IID_PPV_ARGS(&m_pMsaaDepth)));
+  if (!bOk)
+  {
+    iLog->LogError("XRenderD3D12: MSAA %dx: its targets at %d x %d not made", nSamples, m_nWidth, m_nHeight);
+    m_pMsaaColor.Reset();
+    m_pMsaaAmbient.Reset();
+    m_pMsaaDepth.Reset();
+    return false;
+  }
+  m_pMsaaColor->SetName(L"XRenderD3D12 MSAA colour");
+  m_pMsaaAmbient->SetName(L"XRenderD3D12 MSAA ambient light");
+  m_pMsaaDepth->SetName(L"XRenderD3D12 MSAA depth");
+  m_pDevice->CreateRenderTargetView(m_pMsaaColor.Get(), nullptr, SceneRTV(8));
+  m_pDevice->CreateRenderTargetView(m_pMsaaAmbient.Get(), nullptr, SceneRTV(9));
+  D3D12_DEPTH_STENCIL_VIEW_DESC View = {};
+  View.Format = D3D12_DEPTH_FORMAT;
+  View.ViewDimension = D3D12_DSV_DIMENSION_TEXTURE2DMS;
+  m_pDevice->CreateDepthStencilView(m_pMsaaDepth.Get(), &View, MsaaDSV(false));
+  View.Flags = D3D12_DSV_FLAG_READ_ONLY_DEPTH | D3D12_DSV_FLAG_READ_ONLY_STENCIL;
+  m_pDevice->CreateDepthStencilView(m_pMsaaDepth.Get(), &View, MsaaDSV(true));
+  m_nMsaaSamples = nSamples;
+  m_MsaaColorFormat = ColorFormat;
+  m_nMsaaGeneration++;
+  return true;
+}
+
+void CD3D12Device::BeginMsaa()
+{
+  if (!m_bInFrame || m_bInMsaa || m_bInScene || !m_pMsaaColor)
+    return;
+  EndOffscreen();
+  m_bInMsaa = true;
+  if (m_hAmbientRTV.ptr)
+  {
+    static const float Zero[4] = {};
+    m_pCmdList->ClearRenderTargetView(SceneRTV(9), Zero, 0, nullptr);
+  }
+  SetBackBufferTargets();
+}
+
+void CD3D12Device::EndMsaa()
+{
+  if (!m_bInMsaa)
+    return;
+  if (m_bInFrame && m_hAmbientRTV.ptr && m_pAmbientResource)
+    ResolveInto(m_pAmbientResource, D3D12_RESOURCE_STATE_RENDER_TARGET, m_pMsaaAmbient.Get(), D3D12_RESOURCE_STATE_RENDER_TARGET,
+                D3D12_AMBIENT_FORMAT);
+  m_bInMsaa = false;
+  if (!m_bInFrame)
+    return;
+  EndOffscreen();
+  SetBackBufferTargets();
+}
+
+void CD3D12Device::ResolveInto(ID3D12Resource *pDst, D3D12_RESOURCE_STATES DstState, ID3D12Resource *pSrc, D3D12_RESOURCE_STATES SrcState,
+                               DXGI_FORMAT Format)
+{
+  if (!m_bInFrame || !pDst || !pSrc)
+    return;
+  Barrier(m_pCmdList.Get(), pDst, DstState, D3D12_RESOURCE_STATE_RESOLVE_DEST);
+  Barrier(m_pCmdList.Get(), pSrc, SrcState, D3D12_RESOURCE_STATE_RESOLVE_SOURCE);
+  m_pCmdList->ResolveSubresource(pDst, 0, pSrc, 0, Format);
+  Barrier(m_pCmdList.Get(), pSrc, D3D12_RESOURCE_STATE_RESOLVE_SOURCE, SrcState);
+  Barrier(m_pCmdList.Get(), pDst, D3D12_RESOURCE_STATE_RESOLVE_DEST, DstState);
+}
+
+void CD3D12Device::BindMsaaResolveTarget(bool bColor)
+{
+  if (!m_bInFrame)
+    return;
+  m_nStateEpoch++;
+  EndOffscreen();
+  if (bColor)
+  {
+    const D3D12_CPU_DESCRIPTOR_HANDLE hRTV = m_bInHdr ? SceneRTV(3) : GetBackBufferRTV();
+    m_pCmdList->OMSetRenderTargets(1, &hRTV, FALSE, nullptr);
+  }
+  else
+  {
+    const D3D12_CPU_DESCRIPTOR_HANDLE hDSV = GetDSV();
+    m_pCmdList->OMSetRenderTargets(0, nullptr, FALSE, &hDSV);
+  }
+  const D3D12_VIEWPORT vp = { 0, 0, (float)m_nWidth, (float)m_nHeight, 0, 1 };
+  const D3D12_RECT rc = { 0, 0, m_nWidth, m_nHeight };
+  m_pCmdList->RSSetViewports(1, &vp);
+  m_pCmdList->RSSetScissorRects(1, &rc);
 }
 
 bool CD3D12Device::CreateLayer()
@@ -1325,10 +1504,12 @@ void CD3D12Device::EndFrame(bool bPresent, bool bVSync)
   if (!m_bInFrame)
     return;
   EndScene();
+  EndMsaa();
   EndHdr();
   EndOffscreen();
   BindHighlight(false);
   m_hAmbientRTV = {};
+  m_pAmbientResource = nullptr;
   // The timestamp that ends the frame's last section; all of them to the readback buffer.
   if (const int n = m_nGpuMarks[m_nFrameSlot]; n > 0)
   {
@@ -1618,7 +1799,8 @@ void CD3D12Device::ReadOcclusionResults()
 void CD3D12Device::ClearColor(const float rgba[4])
 {
   if (m_bInFrame && !m_bOffscreenShadowMap)
-    m_pCmdList->ClearRenderTargetView(m_pOffscreen ? m_hOffscreenRTV : m_bInScene ? SceneRTV(0) : m_bInHdr ? SceneRTV(3) : GetBackBufferRTV(), rgba, 0, nullptr);
+    m_pCmdList->ClearRenderTargetView(m_pOffscreen ? m_hOffscreenRTV : m_bInScene ? SceneRTV(0) : m_bInMsaa ? SceneRTV(8) : m_bInHdr ? SceneRTV(3) : GetBackBufferRTV(),
+                                      rgba, 0, nullptr);
 }
 
 void CD3D12Device::ClearDepth(float fDepth, uint8 nStencil, bool bDepth, bool bStencil)
@@ -1627,7 +1809,8 @@ void CD3D12Device::ClearDepth(float fDepth, uint8 nStencil, bool bDepth, bool bS
   const bool bScene = IsSceneBound();
   const auto Flags = (D3D12_CLEAR_FLAGS)((bDepth ? D3D12_CLEAR_FLAG_DEPTH : 0) | (bStencil && !bScene ? D3D12_CLEAR_FLAG_STENCIL : 0));
   if (m_bInFrame && Flags)
-    m_pCmdList->ClearDepthStencilView(m_pOffscreen ? m_hOffscreenDSV : bScene ? SceneDSV() : GetDSV(), Flags, fDepth, nStencil, 0, nullptr);
+    m_pCmdList->ClearDepthStencilView(m_pOffscreen ? m_hOffscreenDSV : bScene ? SceneDSV() : m_bInMsaa ? MsaaDSV(false) : GetDSV(), Flags, fDepth,
+                                      nStencil, 0, nullptr);
   if (m_bInFrame && bScene && bDepth)
   {
     const float Depth[4] = { fDepth, 0, 0, 0 };
@@ -1670,7 +1853,10 @@ void CD3D12Device::CopyTargets(ID3D12Resource *pColor, ID3D12Resource *pDepth, c
 {
   if (!m_bInFrame || !pColor)
     return;
-  ID3D12Resource *pMainColor = m_bInScene ? m_pSceneColor.Get() : m_bInHdr ? m_pHdrColor.Get() : GetBackBuffer();
+  // With MSAA its colour resolved (all of it: a resolve has no box), the depth from the depth buffer the caller
+  // resolved.
+  const bool bResolve = m_bInMsaa && !m_bInScene;
+  ID3D12Resource *pMainColor = m_bInScene ? m_pSceneColor.Get() : bResolve ? m_pMsaaColor.Get() : m_bInHdr ? m_pHdrColor.Get() : GetBackBuffer();
   ID3D12Resource *pMainDepth = GetMainDepth();
   const auto Matches = [](ID3D12Resource *pCopy, ID3D12Resource *pSource, DXGI_FORMAT Format)
   {
@@ -1689,13 +1875,15 @@ void CD3D12Device::CopyTargets(ID3D12Resource *pColor, ID3D12Resource *pDepth, c
     r.Transition.StateBefore = Before;
     r.Transition.StateAfter = After;
   };
-  Set(b[0], pMainColor, D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_COPY_SOURCE);
-  Set(b[1], pColor, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, D3D12_RESOURCE_STATE_COPY_DEST);
+  Set(b[0], pMainColor, D3D12_RESOURCE_STATE_RENDER_TARGET, bResolve ? D3D12_RESOURCE_STATE_RESOLVE_SOURCE : D3D12_RESOURCE_STATE_COPY_SOURCE);
+  Set(b[1], pColor, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, bResolve ? D3D12_RESOURCE_STATE_RESOLVE_DEST : D3D12_RESOURCE_STATE_COPY_DEST);
   Set(b[2], pMainDepth, D3D12_RESOURCE_STATE_DEPTH_WRITE, D3D12_RESOURCE_STATE_COPY_SOURCE);
   Set(b[3], pDepth, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, D3D12_RESOURCE_STATE_COPY_DEST);
   const UINT nBarriers = pDepth ? 4 : 2;
   m_pCmdList->ResourceBarrier(nBarriers, b);
-  if (pBox)
+  if (bResolve)
+    m_pCmdList->ResolveSubresource(pColor, 0, pMainColor, 0, m_MsaaColorFormat);
+  else if (pBox)
   {
     D3D12_TEXTURE_COPY_LOCATION Dst = {}, Src = {};
     Dst.pResource = pColor;

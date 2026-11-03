@@ -264,8 +264,8 @@ void CD3D12Renderer::RegisterVariables()
   // The anti-aliasing without an upscaler (PostAA.cpp).
   iConsole->CreateVariable("d3d12_AA", "taa", VF_DUMPTODISK,
                            "The anti-aliasing of the 3D scene without an upscaler (with d3d12_Upscaler fsr FSR anti-aliases; taa by default): none, "
-                           "fxaa (FXAA over the finished picture), smaa (SMAA 1x over it), cmaa2 (CMAA2 over it) or taa (TAA: the scene "
-                           "jittered, its frames gathered)");
+                           "fxaa (FXAA over the finished picture), smaa (SMAA 1x over it), cmaa2 (CMAA2 over it), taa (TAA: the scene "
+                           "jittered, its frames gathered) or msaa2, msaa4, msaa8 (MSAA: the scene drawn with 2, 4 or 8 samples a pixel)");
   iConsole->Register("d3d12_AAQuality", &CV_d3d12_AAQuality, 2, VF_DUMPTODISK,
                      "The anti-aliasing's quality, 0 (low) to 3 (ultra): FXAA's edge thresholds and how far it follows an edge, "
                      "SMAA's and CMAA2's presets, how many frames TAA gathers");
@@ -1555,6 +1555,7 @@ void CD3D12Renderer::ClearDepthBuffer()
 {
   if (EnsureFrame())
     m_pDevice->ClearDepth(1.0f, 0, true, true);
+  m_bMsaaDepthDirty |= m_pDevice && m_pDevice->IsInMsaa();
 }
 
 void CD3D12Renderer::ClearColorBuffer(const Vec3 vColor)
