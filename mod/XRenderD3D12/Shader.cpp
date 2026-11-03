@@ -555,6 +555,9 @@ SResolvedTemplate ResolveTemplate(const std::string &Name, uint64 nMaskGen)
   R.Props.fScrollV = pE->fScrollV;
   R.Props.bLightmap = pE->bLightmap;
   R.Props.bStealth = pE->bStealth;
+  // TemplMuzzleFlash_Auto's program (Training's bunker's shafts of sunlight): the texture times 2 times the vertex
+  // colour min((2 |N.V|)^4, 1), added (ONE, ONE).
+  R.Props.bEdgeFade = pE->Name == "templmuzzleflash_auto";
   if (pE->eClass == eDC_ProcFlare)
   {
     // "flareproc <size>"; 1 for "flareproc", the entry's own for the named ones.

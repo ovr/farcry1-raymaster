@@ -123,13 +123,14 @@ void CD3D12Renderer::MakeFrameConstants(SFrameConstants &fc, bool bScene) const
   const float w = (float)std::max(m_Viewport[2], 1) * sx, h = (float)std::max(m_Viewport[3], 1) * sy;
   Set4(fc.vScreen, w, h, 1 / w, 1 / h);
   Set4(fc.vJitter, bScene ? 2 * m_UpscaleJitter[0] / w : 0.0f, bScene ? -2 * m_UpscaleJitter[1] / h : 0.0f, sx, sy);
-  fc.vMipBias[0] = bScene && m_pUpscaler && m_pUpscaler->GathersFrames() ? log2f(std::max(sx, 1e-3f)) - 1 : 0.0f;
+  fc.vMipBias[0] = (bScene && m_pUpscaler && m_pUpscaler->GathersFrames() ? log2f(std::max(sx, 1e-3f)) - 1 : 0.0f) +
+                   RenderModeMipBias();
   memcpy(&fc.vMipBias[1], m_AOBakedShare, sizeof(m_AOBakedShare));
   Set4(fc.vTime, iTimer ? iTimer->GetCurrTime() : 0.0f, 0, 0, 0);
   Set4(fc.vWorldColor, m_WorldColor[0], m_WorldColor[1], m_WorldColor[2], m_WorldColor[3]);
   Set4(fc.vDepthParams, m_ProjMatrix.data[10], m_ProjMatrix.data[14], 0, 0);
   Set4(fc.vHdr, HdrSkyGlow(), HdrSkyGlowPower(), 0, 0);
-  Set4(fc.vLightmap, CV_d3d12_LightmapDot3 ? 1.0f : 0.0f, 0, 0, 0);
+  Set4(fc.vLightmap, CV_d3d12_LightmapDot3 ? 1.0f : 0.0f, CV_d3d12_LightColorScale ? 1.0f : 0.0f, 0, 0);
   SetCascadeConstants(fc);
   const float fFoliageEnd = std::max(CV_d3d12_FoliageTranslucencyDistance, 1.0f);
   Set4(fc.vFoliage, std::max(CV_d3d12_FoliageTranslucency, 0.0f), std::max(CV_d3d12_FoliageTranslucencyPower, 0.1f), fFoliageEnd, 2 / fFoliageEnd);

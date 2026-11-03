@@ -186,6 +186,15 @@ void D3DState_WriteDevice(IDirect3DDevice9 *pDev, bool bShaderConstants)
     pDev->GetSamplerState(nStage, D3DSAMP_ADDRESSV, &nV);
     pDev->GetSamplerState(nStage, D3DSAMP_ADDRESSW, &nW);
     Append(szLine, sizeof(szLine), " filter %u/%u/%u address %u/%u/%u", nMin, nMag, nMip, nU, nV, nW);
+    DWORD nLodBias = 0, nMaxMip = 0;
+    pDev->GetSamplerState(nStage, D3DSAMP_MIPMAPLODBIAS, &nLodBias);
+    pDev->GetSamplerState(nStage, D3DSAMP_MAXMIPLEVEL, &nMaxMip);
+    if (nLodBias || nMaxMip)
+    {
+      float fLodBias;
+      memcpy(&fLodBias, &nLodBias, sizeof(fLodBias));
+      Append(szLine, sizeof(szLine), " mip bias %g top mip %u", fLodBias, nMaxMip);
+    }
     DWORD nTexTransform = 0;
     pDev->GetTextureStageState(nStage, D3DTSS_TEXTURETRANSFORMFLAGS, &nTexTransform);
     D3DMATRIX T;

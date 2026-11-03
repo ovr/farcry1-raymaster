@@ -242,6 +242,7 @@ struct SShaderProps
   float fFlareSize = 0.0f;                        //!< eDC_ProcFlare: how far the glow reaches beyond the surface, in metres
   bool bLightmap = false;                         //!< combines the lightmap of lightmapped objects
   bool bStealth = false;                          //!< colour scaled by the object's "refraction" (GetColorScale)
+  bool bEdgeFade = false;                         //!< TemplMuzzleFlash_Auto: twice the texture, its planes fading out seen edge on (d3d12_MuzzleFlashAuto)
   bool bPixelLighting = false;                    //!< a material of a bump, model, light diffuse or glass template: with bump
                                                   //!< mapping on it is lit per pixel, with its normal map when it has one
   bool bSpecular = false;                         //!< with bPixelLighting: a specular template (TemplBumpSpec*, TemplModelBumpSpec*)

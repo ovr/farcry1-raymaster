@@ -24,6 +24,28 @@
 //	reduced to about POST_BLUR_ROWS rows and blurred by 2 of its texels, so
 //	it looks the same at every resolution; the screen blur's radius grows
 //	slower than the screen (ScreenBlurSigma).
+//	Before them the render mode of the video options (r_RenderMode with
+//	r_Glare on), as the original's screen process draws it, its passes
+//	traced at 1280 x 720 (DrawRenderMode):
+//	  - Improved, Paradise: the scene's copy reduced to 256 x 256 (D); the
+//	    glare's source at 128 x 128, 2 (saturate(D - t) * 0.8)^2 times
+//	    1 - the adapted luminance A, blurred by four passes of 4 taps
+//	    farther and farther apart (G); the scene F + (1 - L) G, then
+//	    towards its luminance L by k (t 0.25, k 0.2 improved; t 0.1, k
+//	    0.1 paradise).
+//	  - Cold: F first 2 saturate(0.75 F - 0.3 D) (contrast), the source's
+//	    gain 0.65 and no blur, k 0.425.
+//	  - Cartoon: flatter, warmer colours, times a factor dark where the
+//	    colour falls from the pixel above to the one below or from the left
+//	    one to the right one; the frame's textures a mip and a half softer
+//	    (RenderModeMipBias, the frame constants' vMipBias.x), so the edges
+//	    follow the shapes rather than the textures' grain.
+//	  A, kept from frame to frame in an 8 bit target as the original's,
+//	  steps 5 % of the way to the luminance of 4 m^2 every RM_ADAPT_STEP
+//	  seconds (the original's 4 frames at 50 per second), m the scene at the
+//	  four spots its 2 x 2 target takes (RenderModeAdapt, Post.hlsl): in a
+//	  dark bunker it stays low, the glare strong, in daylight it rises to
+//	  about 245 / 255, where rounding stops it, the glare faint.
 //
 //////////////////////////////////////////////////////////////////////
 
@@ -50,6 +72,30 @@ void Set4(float v[4], float x, float y, float z, float w)
 
 //! A triangle over the whole target (clip space).
 const float s_FullScreen[3][3] = { { -1, -1, 0 }, { -1, 3, 0 }, { 3, -1, 0 } };
+
+//! The render modes' targets: the scene reduced, the glare (fixed sizes, as the original's: the glare is a part of
+//! the screen at every resolution).
+constexpr int RM_DOWN_SIZE = 256;
+constexpr int RM_GLARE_SIZE = 128;
+//! The adapted luminance: a step of RM_ADAPT_SHARE of the way every RM_ADAPT_STEP seconds.
+constexpr float RM_ADAPT_STEP = 0.08f;
+constexpr float RM_ADAPT_SHARE = 0.05f;
+//! The cartoon's mip bias of every texture: softer surfaces, so its dark edges follow the shapes.
+constexpr float RM_CARTOON_MIP_BIAS = 1.5f;
+
+//! A render mode's constants: the glare's threshold (added before it is squared) and gain, the share of the
+//! luminance at the end, its blur and the cold contrast.
+struct SRenderModeLook
+{
+  float fThreshold, fGain, fGrey;
+  bool bBlur, bCold;
+};
+
+const SRenderModeLook s_RenderModes[3] = {
+  { -0.25f, 0.8f, 0.2f, true, false },    // 1 improved
+  { -0.1f, 0.8f, 0.1f, true, false },     // 2 paradise
+  { -0.1f, 0.65f, 0.425f, false, true },  // 3 cold
+};
 
 //! Motion blur: the share of the frame before is 1 - MOTION_BLUR_RATE * r_MotionBlurAmount * the
 //! frame time, so at the default amount 0.9 there is none from 1 / 67.5 s a frame on (the demos'
@@ -96,17 +142,21 @@ void CD3D12Renderer::DrawScreenEffects()
   const bool bBlur = fx.bScreenBlur && fx.fBlurAmount > 0;
   const bool bFade = fx.bScreenFade && fx.fFadeAlpha > 0;
   const float fMotion = MotionBlurShare();
+  const int nRenderMode = RenderMode();
   if (!fx.bFlashBang)
     m_bFlashGhost = false;
-  if (!fx.bNightVision && !bBlur && !fx.bFlashBang && !bFade && fMotion <= 0)
+  if (!fx.bNightVision && !bBlur && !fx.bFlashBang && !bFade && fMotion <= 0 && !nRenderMode)
     return;
   if (m_pFrameDump)
   {
-    fprintf(m_pFrameDump.get(), "screen effects: night vision %d, blur %g (%.2f %.2f %.2f), flash bang %d (%g), fade %g, motion blur %g\n",
+    fprintf(m_pFrameDump.get(), "screen effects: night vision %d, blur %g (%.2f %.2f %.2f), flash bang %d (%g), fade %g, motion blur %g, render mode %d\n",
             fx.bNightVision, bBlur ? fx.fBlurAmount : 0.0f, fx.fBlurColor[0], fx.fBlurColor[1], fx.fBlurColor[2], fx.bFlashBang,
-            fx.fFlashBang, bFade ? fx.fFadeAlpha : 0.0f, fMotion);
+            fx.fFlashBang, bFade ? fx.fFadeAlpha : 0.0f, fMotion, nRenderMode);
   }
   GpuSection("screen effects");
+  // The render mode first, as the original's screen process: the other effects and the motion blur's history over it.
+  if (nRenderMode)
+    DrawRenderMode(nRenderMode);
   // With motion blur the fade is a pass of its own after the frame is kept.
   if (fx.bNightVision || bBlur || fx.bFlashBang || (bFade && fMotion <= 0))
     DrawScreenComposite(fx, bBlur, bFade && fMotion <= 0);
@@ -276,15 +326,194 @@ void CD3D12Renderer::DrawPostBlur(SPostBlur &Blur, float fSigma)
   DrawPostPass(Blur.pTex[0], dc);
 }
 
-void CD3D12Renderer::DrawPostPass(CD3D12Texture *pTarget, const SDrawConstants &dc)
+void CD3D12Renderer::DrawPostPass(CD3D12Texture *pTarget, const SDrawConstants &dc, uint32 nState)
 {
   m_pDevice->SetOffscreenTargets(pTarget->m_pResource, pTarget->m_RTV, {}, pTarget->m_nWidth, pTarget->m_nHeight);
   SPipelineKey Key = {};
   Key.nProgram = eD3D12P_Post;
-  Key.nState = GS_NODEPTHTEST;
+  Key.nState = nState;
   Key.nCull = R_CULL_NONE;
   Key.nTarget = 1;
   DrawImmediate(Key, dc, D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST, VERTEX_FORMAT_P3F, s_FullScreen, 3);
+}
+
+int CD3D12Renderer::RenderMode() const
+{
+  if (!CV_d3d12_RenderMode || !iConsole)
+    return 0;
+  if (!m_pGlare)
+    m_pGlare = iConsole->GetCVar("r_Glare");
+  if (!m_pRenderModeVar)
+    m_pRenderModeVar = iConsole->GetCVar("r_RenderMode");
+  // The menu offers the render modes with r_Glare on only; the original draws none without it.
+  if (!m_pGlare || !m_pGlare->GetIVal() || !m_pRenderModeVar)
+    return 0;
+  const int nMode = m_pRenderModeVar->GetIVal();
+  return nMode >= 1 && nMode <= 4 ? nMode : 0;
+}
+
+float CD3D12Renderer::RenderModeMipBias() const
+{
+  if (!CV_d3d12_RenderMode || !iConsole)
+    return 0;
+  if (!m_pRenderModeVar)
+    m_pRenderModeVar = iConsole->GetCVar("r_RenderMode");
+  // The original's cartoon biases every texture stage of the frame, with r_Glare off too (traced).
+  return m_pRenderModeVar && m_pRenderModeVar->GetIVal() == 4 ? RM_CARTOON_MIP_BIAS : 0.0f;
+}
+
+bool CD3D12Renderer::EnsureRenderModeTargets()
+{
+  if (!m_pDevice || !m_pUpload)
+    return false;
+  if (!m_pRmDown)
+    m_pRmDown = m_pUpload->CreateRenderTarget(RM_DOWN_SIZE, RM_DOWN_SIZE, DXGI_FORMAT_R8G8B8A8_UNORM);
+  for (CD3D12Texture *&pGlare : m_pRmGlare)
+  {
+    if (!pGlare)
+      pGlare = m_pUpload->CreateRenderTarget(RM_GLARE_SIZE, RM_GLARE_SIZE, DXGI_FORMAT_R8G8B8A8_UNORM);
+  }
+  if (!m_pRmAdapt)
+  {
+    m_pRmAdapt = m_pUpload->CreateRenderTarget(1, 1, DXGI_FORMAT_R8G8B8A8_UNORM);
+    m_bRmAdaptCleared = false;
+    m_fRmAdaptTime = 0;
+  }
+  // With the highlight layer its copy (the swap chain's size).
+  ID3D12Resource *pLayer = m_pDevice->HasLayer() ? m_pDevice->GetHighlight() : nullptr;
+  if (pLayer)
+  {
+    const D3D12_RESOURCE_DESC Desc = pLayer->GetDesc();
+    if (m_pRmLayer && (m_pRmLayer->m_nWidth != (int)Desc.Width || m_pRmLayer->m_nHeight != (int)Desc.Height))
+    {
+      m_pUpload->ReleaseTexture(m_pRmLayer);
+      m_pRmLayer = nullptr;
+    }
+    if (!m_pRmLayer)
+      m_pRmLayer = m_pUpload->CreateRenderTarget((int)Desc.Width, (int)Desc.Height, D3D12_HIGHLIGHT_FORMAT);
+  }
+  const auto Ok = [](const CD3D12Texture *p) { return p && p->m_nSRV >= 0; };
+  return Ok(m_pRmDown) && Ok(m_pRmGlare[0]) && Ok(m_pRmGlare[1]) && Ok(m_pRmAdapt) && (!pLayer || Ok(m_pRmLayer));
+}
+
+void CD3D12Renderer::ReleaseRenderModeTargets()
+{
+  if (m_pUpload)
+  {
+    for (CD3D12Texture *pTex : { m_pRmDown, m_pRmGlare[0], m_pRmGlare[1], m_pRmAdapt, m_pRmLayer })
+    {
+      if (pTex)
+        m_pUpload->ReleaseTexture(pTex);
+    }
+  }
+  m_pRmDown = m_pRmGlare[0] = m_pRmGlare[1] = m_pRmAdapt = m_pRmLayer = nullptr;
+  m_bRmAdaptCleared = false;
+  m_fRmAdaptTime = 0;
+}
+
+void CD3D12Renderer::DrawRenderMode(int nMode)
+{
+  if (!EnsureRenderModeTargets() || !CopySceneForWater())
+    return;
+  const int w = m_pDevice->GetWidth(), h = m_pDevice->GetHeight();
+  const bool bCartoon = nMode == 4;
+  const SRenderModeLook &Look = s_RenderModes[bCartoon ? 0 : nMode - 1];
+  SDrawConstants dc = DefaultDrawConstants();
+  if (!bCartoon)
+  {
+    // The scene at 256 x 256: the mean over each texel (bilinear taps of 2 x 2 pixels across it).
+    dc.nFlags = POST_DOWNSAMPLE;
+    dc.nTex0 = (uint32)m_nSceneColorSRV;
+    const int nTaps = std::max((std::max(w, h) / RM_DOWN_SIZE + 1) / 2, 1);
+    Set4(dc.vParams0, 1.0f / RM_DOWN_SIZE, 1.0f / RM_DOWN_SIZE, (float)nTaps, 0);
+    DrawPostPass(m_pRmDown, dc);
+
+    // The adapted luminance: black at first, then a step every RM_ADAPT_STEP seconds (blended, in 8 bits).
+    if (!m_bRmAdaptCleared)
+    {
+      dc = DefaultDrawConstants();
+      dc.nFlags = POST_BLEND;
+      dc.nTex0 = D3D12_SRV_WHITE;
+      Set4(dc.vParams0, 1, 1, 0, 0);
+      Set4(dc.vParams1, 0, 0, 0, 0);
+      DrawPostPass(m_pRmAdapt, dc);
+      m_bRmAdaptCleared = true;
+    }
+    m_fRmAdaptTime += iTimer ? std::max(iTimer->GetFrameTime(), 0.0f) : 0.0f;
+    if (m_fRmAdaptTime >= RM_ADAPT_STEP * 0.999f)
+    {
+      m_fRmAdaptTime = std::min(m_fRmAdaptTime - RM_ADAPT_STEP, RM_ADAPT_STEP);
+      dc = DefaultDrawConstants();
+      dc.nFlags = POST_RM_ADAPT;
+      dc.nTex0 = (uint32)m_nSceneColorSRV;
+      Set4(dc.vParams0, 1, 1, 0, 0);
+      Set4(dc.vParams1, RM_ADAPT_SHARE, 0, 0, 0);
+      DrawPostPass(m_pRmAdapt, dc, GS_NODEPTHTEST | GS_BLSRC_SRCALPHA | GS_BLDST_ONEMINUSSRCALPHA);
+    }
+
+    // The glare's source, then its blur (improved, paradise).
+    dc = DefaultDrawConstants();
+    dc.nFlags = POST_RM_BRIGHT;
+    dc.nTex0 = (uint32)m_pRmDown->m_nSRV;
+    dc.nTex1 = (uint32)m_pRmAdapt->m_nSRV;
+    Set4(dc.vParams0, 1.0f / RM_GLARE_SIZE, 1.0f / RM_GLARE_SIZE, 0, 0);
+    Set4(dc.vParams1, Look.fThreshold, Look.fGain, 0, 0);
+    DrawPostPass(m_pRmGlare[0], dc);
+    for (int k = 1; k <= 4 && Look.bBlur; k++)
+    {
+      dc.nFlags = POST_RM_BLUR;
+      dc.nTex0 = (uint32)m_pRmGlare[(k - 1) & 1]->m_nSRV;
+      Set4(dc.vParams1, 0.25f * k, 0, 0, 0);
+      DrawPostPass(m_pRmGlare[k & 1], dc);
+    }
+  }
+
+  // Over the back buffer; with the highlight layer it gets the ratio its copy had for the scene's colour.
+  ID3D12Resource *pLayer = m_pDevice->HasLayer() ? m_pDevice->GetHighlight() : nullptr;
+  if (pLayer)
+  {
+    m_pDevice->Transition(pLayer, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, D3D12_RESOURCE_STATE_COPY_SOURCE);
+    m_pDevice->Transition(m_pRmLayer->m_pResource, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, D3D12_RESOURCE_STATE_COPY_DEST);
+    m_pDevice->GetCmdList()->CopyResource(m_pRmLayer->m_pResource, pLayer);
+    m_pDevice->Transition(m_pRmLayer->m_pResource, D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+    m_pDevice->Transition(pLayer, D3D12_RESOURCE_STATE_COPY_SOURCE, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+  }
+  m_pDevice->SetBackBufferTargets();
+  SPipelineKey Key = {};
+  Key.nProgram = eD3D12P_Post;
+  Key.nState = GS_NODEPTHTEST;
+  Key.nCull = R_CULL_NONE;
+  dc = DefaultDrawConstants();
+  dc.nTex0 = (uint32)m_nSceneColorSRV;
+  Set4(dc.vParams0, 1.0f / w, 1.0f / h, 0, 0);
+  if (bCartoon)
+    dc.nFlags = POST_RM_CARTOON;
+  else
+  {
+    dc.nFlags = POST_RM_COMPOSITE;
+    dc.nTex1 = (uint32)m_pRmGlare[0]->m_nSRV;
+    dc.nTex2 = (uint32)m_pRmDown->m_nSRV;
+    Set4(dc.vParams1, Look.fGrey, Look.bCold ? 1.0f : 0.0f, 0, 0);
+  }
+  if (pLayer)
+  {
+    dc.nTex4 = (uint32)m_pRmLayer->m_nSRV;
+    Key.nTarget = 4;
+    m_pDevice->BindHighlight(true);
+  }
+  DrawImmediate(Key, dc, D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST, VERTEX_FORMAT_P3F, s_FullScreen, 3);
+  if (pLayer)
+    m_pDevice->BindHighlight(false);
+
+  if (m_pFrameDump)
+  {
+    uint8 vAdapt[4] = {};
+    const bool bRead = !bCartoon && m_pDevice->ReadBackTexture(m_pRmAdapt->m_pResource, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, vAdapt, 1, 1);
+    fprintf(m_pFrameDump.get(), "render mode %d (%s): adapted luminance %d / 255, %.3f s to its next step%s\n", nMode,
+            nMode == 1 ? "improved" : nMode == 2 ? "paradise" : nMode == 3 ? "cold" : "cartoon", bRead ? vAdapt[0] : -1,
+            std::max(RM_ADAPT_STEP - m_fRmAdaptTime, 0.0f), pLayer ? ", the highlight layer kept" : "");
+    m_pDevice->SetBackBufferTargets();
+  }
 }
 
 float CD3D12Renderer::MotionBlurShare()
@@ -337,4 +566,5 @@ void CD3D12Renderer::ReleaseScreenEffects()
   m_pPostGhost = nullptr;
   m_bFlashGhost = false;
   ReleaseMotionHistory();
+  ReleaseRenderModeTargets();
 }

@@ -378,6 +378,44 @@ static void SaveTexture(IDirect3DTexture9 *pTex, const D3DSURFACE_DESC &Desc)
   free(pPixels);
 }
 
+//! A render target texture of at most 4 x 4 texels (the screen effects' average colours, which the
+//! renderer can fill without a draw of the frame) is read back and its texels written as B G R A.
+static void PrintSmallTarget(IDirect3DTexture9 *pTex, const D3DSURFACE_DESC &Desc)
+{
+  if (!(Desc.Usage & D3DUSAGE_RENDERTARGET) || Desc.Width > 4 || Desc.Height > 4 ||
+      (Desc.Format != D3DFMT_A8R8G8B8 && Desc.Format != D3DFMT_X8R8G8B8))
+    return;
+  IDirect3DDevice9 *pDev = NULL;
+  IDirect3DSurface9 *pSurf = NULL, *pMem = NULL;
+  if (SUCCEEDED(pTex->GetDevice(&pDev)) && SUCCEEDED(pTex->GetSurfaceLevel(0, &pSurf)) &&
+      SUCCEEDED(pDev->CreateOffscreenPlainSurface(Desc.Width, Desc.Height, Desc.Format, D3DPOOL_SYSTEMMEM, &pMem, NULL)) &&
+      SUCCEEDED(pDev->GetRenderTargetData(pSurf, pMem)))
+  {
+    D3DLOCKED_RECT Rect = {};
+    if (SUCCEEDED(pMem->LockRect(&Rect, NULL, D3DLOCK_READONLY)))
+    {
+      char szLine[512] = "";
+      int n = 0;
+      for (UINT y = 0; y < Desc.Height; y++)
+        for (UINT x = 0; x < Desc.Width; x++)
+        {
+          const BYTE *p = (const BYTE *)Rect.pBits + y * Rect.Pitch + x * 4;
+          n += sprintf_s(szLine + n, sizeof(szLine) - n, " (%u %u %u %u)", p[2], p[1], p[0], p[3]);
+        }
+      pMem->UnlockRect();
+      Trace_Write("    [d3d] tex %p texels r g b a:%s", pTex, szLine);
+    }
+  }
+  else
+    Trace_Write("    [d3d] tex %p: render target not read back", pTex);
+  if (pMem)
+    pMem->Release();
+  if (pSurf)
+    pSurf->Release();
+  if (pDev)
+    pDev->Release();
+}
+
 static void DescribeTexture(IDirect3DBaseTexture9 *pTex)
 {
   D3DRESOURCETYPE eType = pTex->GetType();
@@ -387,6 +425,7 @@ static void DescribeTexture(IDirect3DBaseTexture9 *pTex)
     Trace_Write("    [d3d] tex %p: %ux%u format %u levels %u pool %u usage 0x%x", pTex, Desc.Width, Desc.Height, Desc.Format,
       pTex->GetLevelCount(), Desc.Pool, Desc.Usage);
     SaveTexture((IDirect3DTexture9 *)pTex, Desc);
+    PrintSmallTarget((IDirect3DTexture9 *)pTex, Desc);
   }
   else if (eType == D3DRTYPE_CUBETEXTURE && SUCCEEDED(((IDirect3DCubeTexture9 *)pTex)->GetLevelDesc(0, &Desc)))
   {
@@ -742,6 +781,13 @@ static void WriteDraw(IDirect3DDevice9 *pDev, const char *szCall, bool bStreams,
       continue;
     if (FirstSeen(pTextures[nStage]))
       DescribeTexture(pTextures[nStage]);
+    else if (pTextures[nStage]->GetType() == D3DRTYPE_TEXTURE)
+    {
+      // a small render target's texels at every draw (the engine fills some without a draw of the frame)
+      D3DSURFACE_DESC Desc = {};
+      if (SUCCEEDED(((IDirect3DTexture9 *)pTextures[nStage])->GetLevelDesc(0, &Desc)))
+        PrintSmallTarget((IDirect3DTexture9 *)pTextures[nStage], Desc);
+    }
     pTextures[nStage]->Release();
   }
 

@@ -5,7 +5,7 @@
 //	File: TestHeaders.hlsl
 //	Description: The unit tests' kernels over the renderer's shader
 //	headers that stand alone (Shader Model 6.0): PathGBuffer.hlsli,
-//	HdrLight.hlsli, HdrToneMap.hlsli, HdrExposure.hlsli, HdrFrameAverage.hlsli, PathCache.hlsli and LightmapLight.hlsli, included as the renderer's
+//	HdrLight.hlsli, HdrToneMap.hlsli, HdrExposure.hlsli, HdrFrameAverage.hlsli, PathCache.hlsli, LightmapLight.hlsli and RenderMode.hlsli, included as the renderer's
 //	programs include them. Each kernel runs the tested functions on the
 //	items of g_TestIn and writes what they give to g_TestOut; ShaderTests.cpp
 //	checks it. One compile per kernel (Tests/CMakeLists.txt).
@@ -22,6 +22,7 @@
 #include "HdrFrameAverage.hlsli"
 #include "PathCache.hlsli"
 #include "LightmapLight.hlsli"
+#include "RenderMode.hlsli"
 
 //! PathOctEncode / PathOctDecode of the unit vector g_TestIn[i].xyz: out[3i] the map's point, out[3i + 1] its vector, out[3i + 2]
 //! the vector of the point as the 10 bits of R10G10B10A2 keep it.
@@ -97,6 +98,24 @@ void CSLightmapLight(uint i : SV_DispatchThreadID)
   const float4 v = TestIn(i);
   TestOut(i, float4(LightmapLampFalloff(v.x), LightmapDot3(v.y, v.z, true), LightmapDot3(v.y, v.z, false),
                     LightmapLampHighlight(TestIn(i + n).xyz, TestIn(i + 2 * n).xyz, TestIn(i + 3 * n).xyz)));
+}
+
+//! The render modes' colour math (RenderMode.hlsli), n = g_Test.nTest.x items: f = g_TestIn[i].rgb, its w the glare's
+//! threshold; d = g_TestIn[i + n].rgb, w the gain; a = g_TestIn[i + 2n].rgb, w the share of the luminance; r =
+//! g_TestIn[i + 3n].rgb. out[4i] = (RenderModeGlareSource(d, a), RenderModeAdaptTarget(f)), out[4i + 1] =
+//! (RenderModeCold(f, d), RenderModeEdge(u f, d d, l a, r r)), out[4i + 2] = (RenderModeGlared(f, the glare d), 0),
+//! out[4i + 3] = (RenderModeCartoonColor(f), 0).
+[numthreads(64, 1, 1)]
+void CSRenderMode(uint i : SV_DispatchThreadID)
+{
+  const uint n = g_Test.nTest.x;
+  if (i >= n)
+    return;
+  const float4 f = TestIn(i), d = TestIn(i + n), a = TestIn(i + 2 * n), r = TestIn(i + 3 * n);
+  TestOut(4 * i, float4(RenderModeGlareSource(d.rgb, a.rgb, f.w, d.w), RenderModeAdaptTarget(f.rgb)));
+  TestOut(4 * i + 1, float4(RenderModeCold(f.rgb, d.rgb), RenderModeEdge(f.rgb, d.rgb, a.rgb, r.rgb)));
+  TestOut(4 * i + 2, float4(RenderModeGlared(f.rgb, d.rgb, a.w), 0));
+  TestOut(4 * i + 3, float4(RenderModeCartoonColor(f.rgb), 0));
 }
 
 //! The sky's glow towards the sun (HdrLight.hlsli): out[i] = (HdrSkyGlow(g_TestIn[i].x the cosine, y the glow, z the power), 0, 0, 0).

@@ -50,10 +50,18 @@
 //	                   of the ambient light (rgb): 1 the light taken where
 //	                   it is under 1 (for the draw that subtracts it), 2 the
 //	                   light given where it is over 1 (for one that adds it)
+//	  POST_RM_*        the render modes (r_RenderMode, PostFx.cpp): the
+//	                   adapted luminance's target, the glare's source, its
+//	                   blur, the scene with its glare, the cartoon
+//	                   (RenderMode* below, their colour math in
+//	                   RenderMode.hlsli); with the highlight layer the
+//	                   composite and the cartoon keep the ratio the layer's
+//	                   copy tex4 had for the scene copy's colour
 //
 //////////////////////////////////////////////////////////////////////
 
 #include "Common.hlsli"
+#include "RenderMode.hlsli"
 
 struct SPostOutput
 {
@@ -222,8 +230,83 @@ float4 AoTaken(float2 vPixel)
   return float4(f16tof32(f32tof16((1 - v) * g_Textures[g_Draw.nTex2].SampleLevel(g_SamplerPointClamp, vUV, 0).rgb)), 0);
 }
 
+// The render modes (r_RenderMode, PostFx.cpp), as the original's screen process draws them on the frame; their colour
+// math in RenderMode.hlsli.
+
+//! The adapted luminance's target (RenderModeAdaptTarget), m the scene's colour at the four spots the original's 2 x 2
+//! target takes (the D3D9 pixel centres of its pass over its 256 x 256 copy: the top left corner, the top and the left
+//! edges' middles, the middle of the screen), each about 2 of those texels across, clamped to the screen.
+float4 RenderModeAdapt()
+{
+  float3 m = 0;
+  [unroll]
+  for (int s = 0; s < 4; s++)
+  {
+    const float2 c = float2(s & 1, s >> 1) * 0.5;
+    [unroll]
+    for (int y = 0; y < 4; y++)
+    {
+      [unroll]
+      for (int x = 0; x < 4; x++)
+        m += SampleClamp(g_Draw.nTex0, c + ((float2(x, y) + 0.5) / 4 - 0.5) * (2.0 / 256)).rgb;
+    }
+  }
+  return float4((float3)RenderModeAdaptTarget(m / 64), g_Draw.vParams1.x);
+}
+
+//! The glare's source at 128 x 128 (RenderModeGlareSource) from the 256 x 256 copy tex0 (bilinear: the mean of its
+//! 2 x 2 texels) and the adapted luminance tex1 (1 x 1); vParams1.xy the threshold and the gain.
+float4 RenderModeBright(float2 vPixel)
+{
+  const float3 d = SampleClamp(g_Draw.nTex0, vPixel * g_Draw.vParams0.xy).rgb;
+  const float3 a = saturate(g_Textures[g_Draw.nTex1].Load(int3(0, 0, 0)).rgb);
+  return float4(RenderModeGlareSource(d, a, g_Draw.vParams1.x, g_Draw.vParams1.y), a.b);
+}
+
+//! One of the glare's blur passes: 4 bilinear taps at (1, 2), (-2, 1), (-1, -2), (2, -1) times vParams1.x texels.
+float4 RenderModeBlur(float2 vPixel)
+{
+  const float2 vUV = vPixel * g_Draw.vParams0.xy, s = g_Draw.vParams0.xy * g_Draw.vParams1.x;
+  return 0.25 * (SampleClamp(g_Draw.nTex0, vUV + s * float2(1, 2)) + SampleClamp(g_Draw.nTex0, vUV + s * float2(-2, 1)) +
+                 SampleClamp(g_Draw.nTex0, vUV + s * float2(-1, -2)) + SampleClamp(g_Draw.nTex0, vUV + s * float2(2, -1)));
+}
+
+//! The scene tex0 with its glare tex1 (RenderModeGlared), towards its luminance by vParams1.x. Cold (vParams1.y):
+//! the scene first through RenderModeCold with the 256 x 256 copy tex2 (the original's back buffer).
+float4 RenderModeComposite(float2 vPixel)
+{
+  const float2 vUV = vPixel * g_Draw.vParams0.xy;
+  float3 f = g_Textures[g_Draw.nTex0].Load(int3(vPixel, 0)).rgb;
+  if (g_Draw.vParams1.y > 0)
+    f = RenderModeCold(f, SampleClamp(g_Draw.nTex2, vUV).rgb);
+  return float4(RenderModeGlared(f, SampleClamp(g_Draw.nTex1, vUV).rgb, g_Draw.vParams1.x), 1);
+}
+
+//! The cartoon: its colours (RenderModeCartoonColor) of the pixel times RenderModeEdge of those above, below, left and
+//! right of it (clamped to the screen), as the original's: dark where the colour falls downwards or to the right.
+float4 RenderModeCartoon(float2 vPixel)
+{
+  const int2 p = (int2)vPixel, vLast = (int2)round(1 / g_Draw.vParams0.xy) - 1;
+  const float3 c = RenderModeCartoonColor(g_Textures[g_Draw.nTex0].Load(int3(p, 0)).rgb);
+  const float3 u = RenderModeCartoonColor(g_Textures[g_Draw.nTex0].Load(int3(clamp(p + int2(0, -1), 0, vLast), 0)).rgb);
+  const float3 d = RenderModeCartoonColor(g_Textures[g_Draw.nTex0].Load(int3(clamp(p + int2(0, 1), 0, vLast), 0)).rgb);
+  const float3 l = RenderModeCartoonColor(g_Textures[g_Draw.nTex0].Load(int3(clamp(p + int2(-1, 0), 0, vLast), 0)).rgb);
+  const float3 r = RenderModeCartoonColor(g_Textures[g_Draw.nTex0].Load(int3(clamp(p + int2(1, 0), 0, vLast), 0)).rgb);
+  return float4(c * RenderModeEdge(u, d, l, r), 1);
+}
+
 float4 PSMain(SPostOutput In) : SV_Target
 {
+  if (HasFlag(POST_RM_ADAPT))
+    return RenderModeAdapt();
+  if (HasFlag(POST_RM_BRIGHT))
+    return RenderModeBright(In.vPos.xy);
+  if (HasFlag(POST_RM_BLUR))
+    return RenderModeBlur(In.vPos.xy);
+  if (HasFlag(POST_RM_COMPOSITE))
+    return RenderModeComposite(In.vPos.xy);
+  if (HasFlag(POST_RM_CARTOON))
+    return RenderModeCartoon(In.vPos.xy);
   if (HasFlag(POST_AO_TAKEN))
     return AoTaken(In.vPos.xy);
   if (HasFlag(POST_DEPTH_VIEW))
@@ -249,8 +332,18 @@ SHighlightOutput PSHighlight(SPostOutput In)
 {
   SHighlightOutput Out;
   Out.vColor = PSMain(In);
-  float3 vRatio = g_Textures[g_Draw.nTex1].SampleLevel(g_SamplerLinearClamp, In.vPos.xy * g_Draw.vParams0.xy, 0).rgb;
-  vRatio = lerp(float3(1, 1, 1), max(vRatio, 1), step(g_Draw.vParams2.x, Out.vColor.rgb));
+  float3 vRatio;
+  if (HasFlag(POST_RM_COMPOSITE | POST_RM_CARTOON))
+  {
+    // A render mode over the scene: the ratio the layer's copy tex4 had where it had the scene copy's colour.
+    bool bScene;
+    vRatio = LayerRatio(g_Textures[g_Draw.nTex0].Load(int3(In.vPos.xy, 0)).rgb, g_Textures[g_Draw.nTex4].Load(int3(In.vPos.xy, 0)), bScene);
+  }
+  else
+  {
+    vRatio = g_Textures[g_Draw.nTex1].SampleLevel(g_SamplerLinearClamp, In.vPos.xy * g_Draw.vParams0.xy, 0).rgb;
+    vRatio = lerp(float3(1, 1, 1), max(vRatio, 1), step(g_Draw.vParams2.x, Out.vColor.rgb));
+  }
   Out.vHighlight = float4(vRatio, HighlightFingerprint(Out.vColor.rgb));
   return Out;
 }
