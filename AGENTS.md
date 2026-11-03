@@ -221,7 +221,8 @@ instructions and is not committed (git-ignored). The references of the modules a
   DemoReplay with `-DemoArgs '--exec-at 1 "<variable> <value>"'` against the same run without it.
 - The features and their variables, described in `mod/XRenderD3D12/README.md`: the window and full
   screen (`r_Width`, `r_Height`, `r_Fullscreen` applied while the game runs); the upscaler
-  (`d3d12_Upscaler`, AMD FSR, on the HDR scene's light `d3d12_UpscaleHdr`); HDR (`r_HDRRendering`, `d3d12_ToneMap` with the neutral tone map
+  (`d3d12_Upscaler`, AMD FSR, on the HDR scene's light `d3d12_UpscaleHdr`); the anti-aliasing
+  without an upscaler (`d3d12_AA`: FXAA `Shaders/Fxaa.hlsli`, `d3d12_AAQuality`, `PostAA.cpp`); HDR (`r_HDRRendering`, `d3d12_ToneMap` with the neutral tone map
   that keeps the hue, `Shaders/HdrToneMap.hlsli`, the automatic exposure's meter by a histogram
   with the sky kept below the knee `d3d12_ExposureMeter`, `Shaders/HdrExposure.hlsli`, the bloom,
   colour grading, the HDR output `d3d12_HDROutput` with its highlights above the game's white
@@ -248,5 +249,5 @@ instructions and is not committed (git-ignored). The references of the modules a
   `Shaders/RenderMode.hlsli`); the projected lights' images on all faces and their sequences'
   frames (`d3d12_LightImages`, `LightImage.h`). The game's menu gets the renderer's options from the patches in
   `assets/scripts` (HDR, ambient occlusion, ray traced reflections, path tracing in Advanced Video
-  Options),
+  Options, the upscaler and the anti-aliasing in Video Options),
   greyed out with another renderer.

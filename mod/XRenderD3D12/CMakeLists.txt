@@ -39,6 +39,7 @@ set(XRENDERD3D12_SOURCES
     FarSprites.cpp
     Shadows.cpp
     Cascades.cpp
+    PostAA.cpp
     PostFx.cpp
     Hdr.cpp
     Volumetric.cpp

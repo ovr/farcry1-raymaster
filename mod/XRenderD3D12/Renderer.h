@@ -620,6 +620,37 @@ public:
   ICVar *m_pUpscalerVar = nullptr;          //!< d3d12_Upscaler
 
   //////////////////////////////////////////////////////////////////////////
+  // PostAA.cpp: the anti-aliasing of the main view without an upscaler (d3d12_AA)
+
+  //! d3d12_AA: none, or the anti-aliasing of the finished picture.
+  enum class EAntiAlias : uint8
+  {
+    None,
+    Fxaa,                                   //!< FXAA (Shaders/Fxaa.hlsli)
+  };
+  //! What d3d12_AA asks for; an unknown value is logged once and acts as None.
+  EAntiAlias AntiAliasing();
+  //! After the main view's EndMainScene, before the render mode and the screen effects: the anti-aliasing of the
+  //! finished picture (FXAA) from a copy of the back buffer into it, the highlight layer too. Not with an upscaler that
+  //! gathers the frames (FSR anti-aliases).
+  void DrawPostAA();
+  //! For r_DisplayInfo without an upscaler: "none", or the anti-aliasing and its quality ("FXAA (High)"), and when this
+  //! frame did not get it.
+  std::string PostAAInfo();
+  //! pCopy as a target of the highlight layer's size and format (made again when the layer's size changed). False: none.
+  bool EnsureLayerCopy(CD3D12Texture *&pCopy);
+  //! The highlight layer into pCopy (EnsureLayerCopy), for a pass over the scene that writes the layer anew from it.
+  void CopyLayer(CD3D12Texture *pCopy);
+  void ReleasePostAA();
+
+  ICVar *m_pAAVar = nullptr;                //!< d3d12_AA
+  std::string m_AAWarned;                   //!< the unknown d3d12_AA logged last
+  bool m_bAAUpscalerLogged = false;         //!< "the upscaler anti-aliases" logged (until d3d12_AA or the upscaler changes)
+  CD3D12Texture *m_pAaLayer = nullptr;      //!< with the highlight layer: its copy before the pass
+  EAntiAlias m_ePostAA = EAntiAlias::None;  //!< the anti-aliasing the picture of m_nPostAAFrame got
+  int m_nPostAAFrame = -1;                  //!< m_nFrames of the last frame anti-aliased
+
+  //////////////////////////////////////////////////////////////////////////
   // AmbientOcclusion.cpp: the ambient occlusion of the main view (d3d12_AO, AmbientOcclusion.h)
 
   //! Before the main view's opaque list (pItems): with d3d12_AOApply 1 the ambient light's target,
@@ -1859,6 +1890,8 @@ public:
   int CV_d3d12_UpscaleVersion = 0;          //!< the upscaler's major version (FSR 3 or 4), 0 its own choice
   int CV_d3d12_UpscaleHdr = 1;              //!< with r_HDRRendering: 1 the upscaler gets the scene's light, tone mapped after it; 0 the
                                             //!< scene tone mapped at the render size (as up to step 259)
+  int CV_d3d12_AAQuality = 2;               //!< the anti-aliasing's (d3d12_AA, a string) quality, 0 (low) to 3 (ultra)
+  int CV_d3d12_AADebug = 0;                 //!< 1: the anti-aliasing's view of the edges
   int CV_d3d12_AOQuality = 2;               //!< the ambient occlusion's (d3d12_AO, a string) quality, 0 to 3
   float CV_d3d12_AORadius = 1;              //!< its radius (m)
   float CV_d3d12_AOStrength = 1;            //!< the exponent of its visibility

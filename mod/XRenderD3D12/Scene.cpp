@@ -649,6 +649,7 @@ void CScene::EndEf3D(int nFlags)
     for (const CDLight *pLight : s.Lights)
       ++(pLight->m_Flags & DLF_SUN ? g_pRenderer->m_nFrameSunLights : g_pRenderer->m_nFrameDynLights);
     g_pRenderer->EndMainScene();
+    g_pRenderer->DrawPostAA();
     g_pRenderer->DrawScreenEffects();
     g_pRenderer->DrawAODebug();
     g_pRenderer->DrawRayDebug();

@@ -514,13 +514,14 @@ void CD3D12Renderer::DrawStats()
         Value("Path tracing", Format("%s, %d bounce%s%s%s", s.szDenoiser, s.nBounces, s.nBounces == 1 ? "" : "s",
                                      s.bCache ? ", cache" : "", s.bCheckerboard ? ", checkerboard" : ""));
     }
-    // The anti-aliasing (the upscaler's alone: no multisampling, EnumAAFormats), the upscaler and
-    // the 3D scene's size before and after it.
+    // The anti-aliasing (the upscaler's, else d3d12_AA's: PostAA.cpp), the upscaler and the 3D scene's size before and
+    // after it.
     const SUpscaleInfo Up = UpscaleInfo();
     const int nWidth = m_pDevice->GetWidth(), nHeight = m_pDevice->GetHeight();
     if (Up.szName)
     {
-      Value("Anti-aliasing", Up.bThisFrame ? "FSR, temporal" : "FSR, temporal (no 3D scene now)");
+      const std::string PostAA = AntiAliasing() != EAntiAlias::None && m_pAAVar ? Format(", d3d12_AA %s not used", m_pAAVar->GetString()) : "";
+      Value("Anti-aliasing", Format("FSR, temporal%s%s", Up.bThisFrame ? "" : " (no 3D scene now)", PostAA.c_str()));
       Value("Upscaler", Format("%s, %s%s", Up.szName, Up.szMode, Up.bHdr ? ", HDR input" : ""));
       Value("Resolution", Up.nRenderWidth == nWidth && Up.nRenderHeight == nHeight
                             ? Format("%dx%d, native", nWidth, nHeight)
@@ -528,7 +529,7 @@ void CD3D12Renderer::DrawStats()
     }
     else
     {
-      Value("Anti-aliasing", "none");
+      Value("Anti-aliasing", PostAAInfo());
       Value("Upscaler", _stricmp(Up.szWanted, "none") != 0 && Up.szWanted[0] ? Format("none (%s is not available)", Up.szWanted) : "none");
       Value("Resolution", Format("%dx%d", nWidth, nHeight));
     }
