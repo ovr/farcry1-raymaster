@@ -77,6 +77,9 @@ const float s_FullScreen[3][3] = { { -1, -1, 0 }, { -1, 3, 0 }, { 3, -1, 0 } };
 //! the screen at every resolution).
 constexpr int RM_DOWN_SIZE = 256;
 constexpr int RM_GLARE_SIZE = 128;
+//! Above this many bilinear taps a side (a screen wider than about 1800) the scene is first reduced to a quarter, the
+//! mean of 4 x 4 pixels, then to RM_DOWN_SIZE: one pass of 8 x 8 taps a texel at 4K took 0.21 ms of the GPU, the two 0.05.
+constexpr int RM_DOWN_MAX_TAPS = 3;
 //! The adapted luminance: a step of RM_ADAPT_SHARE of the way every RM_ADAPT_STEP seconds.
 constexpr float RM_ADAPT_STEP = 0.08f;
 constexpr float RM_ADAPT_SHARE = 0.05f;
@@ -153,10 +156,13 @@ void CD3D12Renderer::DrawScreenEffects()
             fx.bNightVision, bBlur ? fx.fBlurAmount : 0.0f, fx.fBlurColor[0], fx.fBlurColor[1], fx.fBlurColor[2], fx.bFlashBang,
             fx.fFlashBang, bFade ? fx.fFadeAlpha : 0.0f, fMotion, nRenderMode);
   }
-  GpuSection("screen effects");
   // The render mode first, as the original's screen process: the other effects and the motion blur's history over it.
   if (nRenderMode)
+  {
+    GpuSection("render mode");
     DrawRenderMode(nRenderMode);
+  }
+  GpuSection("screen effects");
   // With motion blur the fade is a pass of its own after the frame is kept.
   if (fx.bNightVision || bBlur || fx.bFlashBang || (bFade && fMotion <= 0))
     DrawScreenComposite(fx, bBlur, bFade && fMotion <= 0);
@@ -379,6 +385,17 @@ bool CD3D12Renderer::EnsureRenderModeTargets()
     m_bRmAdaptCleared = false;
     m_fRmAdaptTime = 0;
   }
+  // A large screen's quarter (the first of the two reductions).
+  const int w = m_pDevice->GetWidth(), h = m_pDevice->GetHeight();
+  const bool bQuarter = (std::max(w, h) / RM_DOWN_SIZE + 1) / 2 > RM_DOWN_MAX_TAPS;
+  const int qw = (w + 3) / 4, qh = (h + 3) / 4;
+  if (m_pRmQuarter && (!bQuarter || m_pRmQuarter->m_nWidth != qw || m_pRmQuarter->m_nHeight != qh))
+  {
+    m_pUpload->ReleaseTexture(m_pRmQuarter);
+    m_pRmQuarter = nullptr;
+  }
+  if (bQuarter && !m_pRmQuarter)
+    m_pRmQuarter = m_pUpload->CreateRenderTarget(qw, qh, DXGI_FORMAT_R8G8B8A8_UNORM);
   // With the highlight layer its copy (the swap chain's size).
   ID3D12Resource *pLayer = m_pDevice->HasLayer() ? m_pDevice->GetHighlight() : nullptr;
   if (pLayer)
@@ -393,20 +410,21 @@ bool CD3D12Renderer::EnsureRenderModeTargets()
       m_pRmLayer = m_pUpload->CreateRenderTarget((int)Desc.Width, (int)Desc.Height, D3D12_HIGHLIGHT_FORMAT);
   }
   const auto Ok = [](const CD3D12Texture *p) { return p && p->m_nSRV >= 0; };
-  return Ok(m_pRmDown) && Ok(m_pRmGlare[0]) && Ok(m_pRmGlare[1]) && Ok(m_pRmAdapt) && (!pLayer || Ok(m_pRmLayer));
+  return Ok(m_pRmDown) && Ok(m_pRmGlare[0]) && Ok(m_pRmGlare[1]) && Ok(m_pRmAdapt) && (!pLayer || Ok(m_pRmLayer)) &&
+         (!bQuarter || Ok(m_pRmQuarter));
 }
 
 void CD3D12Renderer::ReleaseRenderModeTargets()
 {
   if (m_pUpload)
   {
-    for (CD3D12Texture *pTex : { m_pRmDown, m_pRmGlare[0], m_pRmGlare[1], m_pRmAdapt, m_pRmLayer })
+    for (CD3D12Texture *pTex : { m_pRmDown, m_pRmGlare[0], m_pRmGlare[1], m_pRmAdapt, m_pRmLayer, m_pRmQuarter })
     {
       if (pTex)
         m_pUpload->ReleaseTexture(pTex);
     }
   }
-  m_pRmDown = m_pRmGlare[0] = m_pRmGlare[1] = m_pRmAdapt = m_pRmLayer = nullptr;
+  m_pRmDown = m_pRmGlare[0] = m_pRmGlare[1] = m_pRmAdapt = m_pRmLayer = m_pRmQuarter = nullptr;
   m_bRmAdaptCleared = false;
   m_fRmAdaptTime = 0;
 }
@@ -421,10 +439,19 @@ void CD3D12Renderer::DrawRenderMode(int nMode)
   SDrawConstants dc = DefaultDrawConstants();
   if (!bCartoon)
   {
-    // The scene at 256 x 256: the mean over each texel (bilinear taps of 2 x 2 pixels across it).
+    // The scene at 256 x 256: the mean over each texel (bilinear taps of 2 x 2 pixels across it); on a large screen
+    // through its quarter (2 x 2 taps: the mean of 4 x 4 pixels).
     dc.nFlags = POST_DOWNSAMPLE;
     dc.nTex0 = (uint32)m_nSceneColorSRV;
-    const int nTaps = std::max((std::max(w, h) / RM_DOWN_SIZE + 1) / 2, 1);
+    int nFrom = std::max(w, h);
+    if (m_pRmQuarter)
+    {
+      Set4(dc.vParams0, 1.0f / m_pRmQuarter->m_nWidth, 1.0f / m_pRmQuarter->m_nHeight, 2, 0);
+      DrawPostPass(m_pRmQuarter, dc);
+      dc.nTex0 = (uint32)m_pRmQuarter->m_nSRV;
+      nFrom = std::max(m_pRmQuarter->m_nWidth, m_pRmQuarter->m_nHeight);
+    }
+    const int nTaps = std::max((nFrom / RM_DOWN_SIZE + 1) / 2, 1);
     Set4(dc.vParams0, 1.0f / RM_DOWN_SIZE, 1.0f / RM_DOWN_SIZE, (float)nTaps, 0);
     DrawPostPass(m_pRmDown, dc);
 

@@ -1223,7 +1223,10 @@ and lists theirs (`NamesObjects`).
   2 (saturate(D - t) 0.8)^2 (1 - A), blurred by four passes of 4 taps farther and farther apart
   (G); the scene F + (1 - L) G, then towards its luminance L (0.3 0.59 0.11) by k (t 0.25, k 0.2
   Improved; t 0.1, k 0.1 Paradise). The targets have the original's fixed sizes, so the glare is
-  the same part of the screen at every resolution.
+  the same part of the screen at every resolution. D is the mean of the scene over each texel;
+  a screen wider than about 1800 is first reduced to a quarter (the mean of 4 x 4 pixels), so at
+  4K Paradise takes about 0.17 ms of the GPU (the GPU time's section `render mode`: the scene's
+  copy 0.07, the reductions 0.05, the composite 0.04) rather than 0.34 with 8 x 8 taps a texel.
 - Cold: F first 2 saturate(0.75 F - 0.3 D), the source's gain 0.65, no blur, k 0.425.
 - Cartoon: (0.75 F + 0.225 L) (1.25 1.24 1.2), times saturate(1 - saturate(2 |a|^2) - 2 |b|^2),
   a = 2 saturate(the pixel above - the one below), b = 2 saturate(the left one - the right one):
