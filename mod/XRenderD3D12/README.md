@@ -176,7 +176,11 @@ reference of its features and console variables.
     `CasSetup` on the CPU), scaled by the 3 x 3's distance to black and to white over its maximum,
     so that the textures' small contrasts get the most of it. It takes linear light from 0 to 1:
     the HDR light exposed and compressed as the history blends it, the LDR colours decoded (c^2.2)
-    and encoded again. The history stays unsharpened; only the picture is.
+    and encoded again. The history stays unsharpened; only the picture is. Its result, back in the
+    picture's colours, is kept within the 3 x 3's range per channel (as FSR's RCAS limits its lobe):
+    CAS's lobe takes a pixel a little past its neighbours, and near the top of the compressed HDR
+    light undoing the compression made of that the light's many times (the sky at Training's start
+    in its cave and the windows of its bunker went white, with a bloom over them).
   - Against the reference of the render tests' `aa` (Training's islands from the hill) the error at
     the edges is 0.69-0.76 of none's and the textures have 1.35-1.39 of its detail: CAS at 0.5 is
     sharper than the view supersampled 4 x (at 0.25 0.65-0.71 and 1.25-1.28, at 1 1.00-1.03 and
@@ -197,7 +201,8 @@ reference of its features and console variables.
     sharpening is CAS's filter as `ffx_cas.h` writes it (worked out on the CPU, for the LDR colours
     and the HDR light, at the sharpness 0, 0.5 and 1) with `UpscalerTaa.cpp`'s constants
     (`CasSetup`), leaves flat pictures as they are to their border and raises a texture's
-    contrast, more the higher the sharpness.
+    contrast, more the higher the sharpness; the HDR light sharpened stays within its 3 x 3's range
+    (a bright sky's texture and a cave's opening at the exposures 1 and 4).
 
 ## HDR
 

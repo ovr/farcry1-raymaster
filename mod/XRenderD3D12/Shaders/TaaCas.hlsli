@@ -13,9 +13,13 @@
 //	scaled by the 3 x 3's distance to black and to white over its maximum:
 //	the textures' small contrasts get it all, a silhouette against the sky
 //	and the brightest and darkest parts less. CAS takes linear light from
-//	0 to 1 (TaaToCas). The includer defines first:
-//	  float3 TaaCasLoad(int2 p)  pixel p of the picture (clamped into it)
-//	                             in CAS's space
+//	0 to 1 (TaaToCas, Taa.hlsli, included first); its result, back in the
+//	picture's colours, is kept within the 3 x 3's range (TaaCas says why).
+//	The includer defines first:
+//	  float3 TaaCasPicture(int2 p)  pixel p of the picture (clamped into
+//	                                it): the HDR light or the LDR colours
+//	  float TaaCasExposure()        the picture's exposure (TaaToCas's:
+//	                                0 for the LDR colours)
 //
 //////////////////////////////////////////////////////////////////////
 
@@ -33,11 +37,12 @@
 #define CAS_BETTER_DIAGONALS 1
 #define CAS_GO_SLOWER 1
 
-float3 TaaCasLoad(int2 p);
+float3 TaaCasPicture(int2 p);
+float TaaCasExposure();
 
 AF3 CasLoad(ASU2 p)
 {
-  return TaaCasLoad(p);
+  return TaaToCas(TaaCasPicture(p), TaaCasExposure());
 }
 
 void CasInput(inout AF1 r, inout AF1 g, inout AF1 b)
@@ -46,12 +51,29 @@ void CasInput(inout AF1 r, inout AF1 g, inout AF1 b)
 
 #include "ffx_cas.h"
 
-//! Pixel p sharpened by CAS, with CasSetup's constants (vConst0, vConst1) of the sharpness: in CAS's space, 0 to 1.
+//! Pixel p sharpened by CAS, with CasSetup's constants (vConst0, vConst1) of the sharpness, in the picture's colours,
+//! each channel within its 3 x 3's range of them. CAS's lobe takes a pixel a little past its neighbours, which in colours
+//! from 0 to 1 is a little; but TaaToCas compresses the HDR light, the brighter the more (c / (1 + max(r, g, b))), and
+//! TaaFromCas makes of that little near the top the light's many times: the sky at a cave's opening, a window seen from
+//! a dark room, became white with a bloom around it. Within the range the light sharpened is never brighter than its
+//! brightest neighbour (as FSR's RCAS limits its lobe to the neighbours' range on the same compressed HDR light). The
+//! range is the picture's own: in CAS's space each pixel is compressed by its own brightest channel, so that a channel's
+//! range there is not its range in light.
 float3 TaaCas(int2 p, uint4 vConst0, uint4 vConst1)
 {
   AF3 c;
   CasFilter(c.r, c.g, c.b, AU2(p), vConst0, vConst1, true);
-  return c;
+  float3 vMin = 1e30, vMax = 0;
+  [unroll] for (int y = -1; y <= 1; y++)
+  {
+    [unroll] for (int x = -1; x <= 1; x++)
+    {
+      const float3 v = max(TaaCasPicture(p + int2(x, y)), 0);
+      vMin = min(vMin, v);
+      vMax = max(vMax, v);
+    }
+  }
+  return clamp(TaaFromCas(c, TaaCasExposure()), vMin, vMax);
 }
 
 #endif

@@ -61,9 +61,14 @@ float TestTaaExposure()
   return (g_Test.nTest.w & 2) ? g_Test.vTest.y : 0;
 }
 
-float3 TaaCasLoad(int2 p)
+float3 TaaCasPicture(int2 p)
 {
-  return TaaToCas(TaaLoadColor(p), TestTaaExposure());
+  return TaaLoadColor(p);
+}
+
+float TaaCasExposure()
+{
+  return TestTaaExposure();
 }
 
 #include "TaaCas.hlsli"
@@ -92,7 +97,7 @@ void CSTaaSharpen(uint i : SV_DispatchThreadID)
   if (i >= g_Test.nTest.x)
     return;
   const uint4 vConst0 = g_TestIn[0], vConst1 = g_TestIn[1];
-  TestOut(i, float4(TaaFromCas(TaaCas(TestTaaPixel(i), vConst0, vConst1), TestTaaExposure()), 1));
+  TestOut(i, float4(TaaCas(TestTaaPixel(i), vConst0, vConst1), 1));
 }
 
 [numthreads(64, 1, 1)]
