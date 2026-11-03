@@ -782,6 +782,7 @@ public:
     float vSky[3];      //!< the sky's light where a path leaves the scene
     float vBakeLight[3]; //!< the light baked into the terrain on a lit open face towards the sun, each channel
     float fLamps, fEmission, fDelight, fLightGap;
+    float fBakedFalloff; //!< d3d12_PTBakedFalloff (0: the lamps baked into the light maps fall off as the dynamic ones)
     uint32 nLights;
   };
   void GetPathShade(SPathShadeParams &P) const;
@@ -1857,6 +1858,8 @@ public:
   float CV_d3d12_PTLightDistance = 60.0f;   //!< the path tracer's lights within this distance of the camera (to their sphere, m)
   float CV_d3d12_PTSun = 1.0f;              //!< the path tracer's sun: times HdrDecode(2 * its colour) (Shaders/PathShade.hlsli)
   float CV_d3d12_PTLamps = 1.0f;            //!< its lamps
+  float CV_d3d12_PTBakedFalloff = 0.0f;     //!< the falloff of its lamps baked into the light maps: 0 the raster's dynamic light's,
+                                            //!< > 0 the light maps' (1 - d / r) to that power over the whole radius
   float CV_d3d12_PTEmission = 1.0f;         //!< what glows
   float CV_d3d12_PTTerrainDelight = 2.0f;   //!< the light baked into the terrain's texture: lit over shadowed (<= 1: none taken off)
   int CV_d3d12_PTDebug = 0;                 //!< the path tracer's G-buffer over the picture: 1 albedo, 2 normal, 3 fog, 4 material,

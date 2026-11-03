@@ -742,6 +742,16 @@ reference of its features and console variables.
   the paths fill in with (below), unshadowed as the raster's (left out, Jack in the Training intro's
   dream, lit mostly by it in the raster, had 0.12 of the raster's light on his shirt, 0.65 with it; as a
   lamp a cave's roof hid it). The frame dump lists them (`pt lights:`).
+- The lamps fall off as the raster's dynamic light, (1 - smoothstep(0, 0.9, d / r))^2.2, nothing from
+  0.9 r on (`PathLampFalloff`). The light maps were baked with a flatter falloff that reaches the whole
+  radius, so a room lit by its maps is darker in the path tracer. `d3d12_PTBakedFalloff` k > 0 (0 by
+  default: the picture as it was) makes the lamps baked into the light maps (`XR_PT_LIGHT_LM`) fall off
+  as ((1 - d / r)^k)^2.2 to the radius. On Research's SUB-LEVEL wall (step 271: `Film_research-lamp.ini`
+  frames 400 and 460, HDR with the exposure fixed and a clamp) the raster has 2.3 times the path
+  tracer's light on the frame's mean, up to 5 in places; k = 1 brings it to 1.45 and k = 2 makes it
+  darker, and the game's ambient unoccluded (`d3d12_PTAmbientRange 0`) does not change it. Near the
+  lamps k = 1 is brighter than the maps (a still view: 19.5 % of its pixels, 7.4 % with 0). Test: unit
+  test `PathTrace_LampFalloff`.
 - The scene for rays has its materials (`SRayInstance` `vAlbedo`, `vSpecular`, `nPath`, set while the
   opaque list is captured): its hits are shaded by `Shaders/PathShade.hlsli` in linear light (the HDR
   target's, `HdrDecode`): the albedo is the draw's colour without its light (no light map, ambient or
