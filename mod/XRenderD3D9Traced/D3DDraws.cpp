@@ -14,6 +14,7 @@
 #include <map>
 #include <set>
 #include <vector>
+#include <wrl/client.h>
 #include "RenderTrace.h"
 #include "VCallHooks.h"
 #include "D3DState.h"
@@ -23,6 +24,7 @@
 //! Slots of IDirect3DDevice9 (declaration order in d3d9.h).
 enum
 {
+  DEV_Reset = 16,
   DEV_Present = 17,
   DEV_UpdateSurface = 30,
   DEV_GetRenderTargetData = 32,
@@ -85,6 +87,7 @@ typedef HRESULT (STDMETHODCALLTYPE *PFN_GetDepthStencilSurface)(IDirect3DDevice9
 typedef HRESULT (STDMETHODCALLTYPE *PFN_CreateQuery)(IDirect3DDevice9 *, D3DQUERYTYPE, IDirect3DQuery9 **);
 typedef HRESULT (STDMETHODCALLTYPE *PFN_LockRect)(IDirect3DSurface9 *, D3DLOCKED_RECT *, const RECT *, DWORD);
 typedef HRESULT (STDMETHODCALLTYPE *PFN_Present)(IDirect3DDevice9 *, const RECT *, const RECT *, HWND, const RGNDATA *);
+typedef HRESULT (STDMETHODCALLTYPE *PFN_Reset)(IDirect3DDevice9 *, D3DPRESENT_PARAMETERS *);
 typedef HRESULT (STDMETHODCALLTYPE *PFN_Lock)(IUnknown *, UINT, UINT, void **, DWORD);
 typedef HRESULT (STDMETHODCALLTYPE *PFN_Unlock)(IUnknown *);
 
@@ -722,8 +725,10 @@ static void WriteDraw(IDirect3DDevice9 *pDev, const char *szCall, bool bStreams,
   pDev->GetVertexShader(&pVS);
   pDev->GetPixelShader(&pPS);
   Append(szLine, sizeof(szLine), " vs %p ps %p", pVS, pPS);
-  IDirect3DBaseTexture9 *pTextures[4] = {};
-  for (DWORD nStage = 0; nStage < 4; nStage++)
+  // The stages a pixel shader of model 3 samples too (the light-map bump shaders' light falloff and light cube on 4 and 5).
+  constexpr DWORD DRAW_STAGES = 8;
+  IDirect3DBaseTexture9 *pTextures[DRAW_STAGES] = {};
+  for (DWORD nStage = 0; nStage < DRAW_STAGES; nStage++)
   {
     pDev->GetTexture(nStage, &pTextures[nStage]);
     if (pTextures[nStage])
@@ -775,7 +780,7 @@ static void WriteDraw(IDirect3DDevice9 *pDev, const char *szCall, bool bStreams,
     }
     pPS->Release();
   }
-  for (DWORD nStage = 0; nStage < 4; nStage++)
+  for (DWORD nStage = 0; nStage < DRAW_STAGES; nStage++)
   {
     if (!pTextures[nStage])
       continue;
@@ -818,12 +823,248 @@ static void WriteDraw(IDirect3DDevice9 *pDev, const char *szCall, bool bStreams,
     D3DState_WriteDevice(pDev, s_nLevel >= 3);
 }
 
+//! XRENDERTRACED_D3D_PIXEL="x,y[;x,y...]" (back buffer pixels, up to PIXEL_MAX): after each call of the captured frame that can
+//! write a surface of the back buffer's size (a draw or a target Clear into its render targets, StretchRect, ColorFill,
+//! UpdateSurface) the pixel's value on that surface when it differs from the last one there, as
+//! "[d3d pixel] after <call>: (x y) rgb r g b a a on <surface>" (A8R8G8B8; X8R8G8B8 without a, other formats their bytes):
+//! which draws make a pixel of the picture and what each adds. The pixels are copied into a PIXEL_MAX x 1 target that is read
+//! back, one wait for the GPU a call, so the frame is slow; draws that write no colour are skipped. Not watched: UpdateTexture
+//! and writes through LockRect.
+constexpr int PIXEL_MAX = 8;
+//! Surfaces a pixel keeps its last value on (scene targets and the back buffer take turns within a frame).
+constexpr int PIXEL_SURFACES = 8;
+//! The widest pixel (A32B32G32R32F).
+constexpr UINT PIXEL_BYTES = 16;
+//! Formats the copies are kept in at a time.
+constexpr int PIXEL_FORMATS = 4;
+//! Failed reads written a capture.
+constexpr int PIXEL_FAILURES = 4;
+
+//! A pixel's last value on a surface. The surface is not held: one freed and made again at the same address in the same
+//! format goes on from its values.
+struct SPixelLast
+{
+  IDirect3DSurface9 *m_pSurf;
+  D3DFORMAT m_eFormat;
+  BYTE m_Bytes[PIXEL_BYTES];
+};
+
+struct SPixelWatch
+{
+  int m_nX, m_nY;
+  SPixelLast m_Last[PIXEL_SURFACES];
+  int m_nNextLast; //!< the slot a new surface takes (in turn when all are used)
+};
+static SPixelWatch s_Pixels[PIXEL_MAX];
+static int s_nPixels = -1;
+
+//! The PIXEL_MAX x 1 render target the pixels are copied into and its system memory copy, of a format; both null when the
+//! format has none (written once).
+struct SPixelCopy
+{
+  D3DFORMAT m_eFormat;
+  IDirect3DSurface9 *m_pRT, *m_pMem;
+};
+static SPixelCopy s_PixelCopies[PIXEL_FORMATS];
+static int s_nPixelCopies = 0, s_nNextPixelCopy = 0;
+static int s_nPixelFailures = 0;
+
+static void ParsePixels()
+{
+  s_nPixels = 0;
+  char szEnv[256] = "";
+  if (!GetEnvironmentVariableA("XRENDERTRACED_D3D_PIXEL", szEnv, sizeof(szEnv)))
+    return;
+  for (const char *p = szEnv; *p && s_nPixels < PIXEL_MAX;)
+  {
+    int nX = 0, nY = 0;
+    if (sscanf_s(p, "%d,%d", &nX, &nY) == 2 && nX >= 0 && nY >= 0)
+    {
+      SPixelWatch &W = s_Pixels[s_nPixels++];
+      memset(&W, 0, sizeof(W));
+      W.m_nX = nX;
+      W.m_nY = nY;
+    }
+    const char *pNext = strchr(p, ';');
+    if (!pNext)
+      break;
+    p = pNext + 1;
+  }
+  if (s_nPixels)
+    Trace_Write("d3d pixels: %d watched (%s)", s_nPixels, szEnv);
+}
+
+static bool PixelsWatched()
+{
+  if (s_nPixels < 0)
+    ParsePixels();
+  return s_nPixels > 0;
+}
+
+//! Bytes of a pixel of eFormat (4 for the ones not listed: 32-bit colour, R32F, G16R16, depth).
+static UINT FormatBytes(D3DFORMAT eFormat)
+{
+  switch (eFormat)
+  {
+  case D3DFMT_A32B32G32R32F: return 16;
+  case D3DFMT_A16B16G16R16F: case D3DFMT_A16B16G16R16: case D3DFMT_G32R32F: return 8;
+  case D3DFMT_R8G8B8: return 3;
+  case D3DFMT_R5G6B5: case D3DFMT_X1R5G5B5: case D3DFMT_A1R5G5B5: case D3DFMT_A4R4G4B4: case D3DFMT_X4R4G4B4: case D3DFMT_A8R3G3B2:
+  case D3DFMT_R16F: case D3DFMT_A8L8: case D3DFMT_L16: case D3DFMT_V8U8: return 2;
+  case D3DFMT_A8: case D3DFMT_L8: case D3DFMT_R3G3B2: case D3DFMT_A4L4: case D3DFMT_P8: return 1;
+  default: return 4;
+  }
+}
+
+static void ReleasePixelCopy(SPixelCopy &C)
+{
+  if (C.m_pRT)
+    C.m_pRT->Release();
+  if (C.m_pMem)
+    C.m_pMem->Release();
+  C = { D3DFMT_UNKNOWN, nullptr, nullptr };
+}
+
+//! The pixels' copies go (made again by the next read) and with them the values on the surfaces: at the end of the capture
+//! and before a Reset, which needs every default pool resource released.
+static void ForgetPixels()
+{
+  for (int i = 0; i < s_nPixelCopies; i++)
+    ReleasePixelCopy(s_PixelCopies[i]);
+  s_nPixelCopies = s_nNextPixelCopy = 0;
+  for (int i = 0; i < s_nPixels; i++)
+  {
+    memset(s_Pixels[i].m_Last, 0, sizeof(s_Pixels[i].m_Last));
+    s_Pixels[i].m_nNextLast = 0;
+  }
+}
+
+//! The copy of eFormat, made when the format has none yet; nullptr when the format cannot have one.
+static SPixelCopy *PixelCopy(IDirect3DDevice9 *pDev, D3DFORMAT eFormat)
+{
+  for (int i = 0; i < s_nPixelCopies; i++)
+    if (s_PixelCopies[i].m_eFormat == eFormat)
+      return s_PixelCopies[i].m_pRT ? &s_PixelCopies[i] : nullptr;
+  SPixelCopy &C = s_PixelCopies[s_nPixelCopies < PIXEL_FORMATS ? s_nPixelCopies++ : s_nNextPixelCopy++ % PIXEL_FORMATS];
+  ReleasePixelCopy(C);
+  C.m_eFormat = eFormat;
+  if (FAILED(pDev->CreateRenderTarget(PIXEL_MAX, 1, eFormat, D3DMULTISAMPLE_NONE, 0, FALSE, &C.m_pRT, nullptr))
+    || FAILED(pDev->CreateOffscreenPlainSurface(PIXEL_MAX, 1, eFormat, D3DPOOL_SYSTEMMEM, &C.m_pMem, nullptr)))
+  {
+    ReleasePixelCopy(C);
+    C.m_eFormat = eFormat;
+    Trace_Write("d3d pixels: no %d x 1 copy in format %u, its surfaces are not watched", PIXEL_MAX, eFormat);
+    return nullptr;
+  }
+  return &C;
+}
+
+static const char *SurfaceName(IDirect3DDevice9 *pDev, IDirect3DSurface9 *pSurf, char *szBuf, size_t nBuf);
+
+//! The watched pixels of pSurf after szWhat, the ones whose value differs from their last one on that surface; the pixels are
+//! read by the original device calls (not traced).
+static void CheckPixels(IDirect3DDevice9 *pDev, const char *szWhat, IDirect3DSurface9 *pSurf)
+{
+  if (!pSurf || !PixelsWatched())
+    return;
+  Microsoft::WRL::ComPtr<IDirect3DSurface9> pBack;
+  D3DSURFACE_DESC BackDesc = {}, Desc = {};
+  if (FAILED(pDev->GetBackBuffer(0, 0, D3DBACKBUFFER_TYPE_MONO, &pBack)) || FAILED(pBack->GetDesc(&BackDesc))
+    || FAILED(pSurf->GetDesc(&Desc)) || Desc.Width != BackDesc.Width || Desc.Height != BackDesc.Height)
+    return;
+  SPixelCopy *pCopy = PixelCopy(pDev, Desc.Format);
+  if (!pCopy)
+    return;
+  auto bOnSurface = [&Desc](const SPixelWatch &W) { return W.m_nX < (int)Desc.Width && W.m_nY < (int)Desc.Height; };
+  HRESULT hr = S_OK;
+  for (int i = 0; i < s_nPixels && SUCCEEDED(hr); i++)
+  {
+    const SPixelWatch &W = s_Pixels[i];
+    if (!bOnSurface(W))
+      continue;
+    const RECT Src = { W.m_nX, W.m_nY, W.m_nX + 1, W.m_nY + 1 }, Dst = { i, 0, i + 1, 1 };
+    hr = ((PFN_StretchRect)s_pOrigVTable[DEV_StretchRect])(pDev, pSurf, &Src, pCopy->m_pRT, &Dst, D3DTEXF_POINT);
+  }
+  if (SUCCEEDED(hr))
+    hr = ((PFN_GetRenderTargetData)s_pOrigVTable[DEV_GetRenderTargetData])(pDev, pCopy->m_pRT, pCopy->m_pMem);
+  D3DLOCKED_RECT Locked = {};
+  if (SUCCEEDED(hr))
+    hr = pCopy->m_pMem->LockRect(&Locked, nullptr, D3DLOCK_READONLY);
+  if (FAILED(hr))
+  {
+    if (s_nPixelFailures++ < PIXEL_FAILURES)
+      Trace_Write("d3d pixels: reading %p format %u after %s failed: 0x%08x", pSurf, Desc.Format, szWhat, hr);
+    return;
+  }
+  const UINT nBytes = FormatBytes(Desc.Format);
+  BYTE Bytes[PIXEL_MAX][PIXEL_BYTES] = {};
+  for (int i = 0; i < s_nPixels; i++)
+    memcpy(Bytes[i], (const BYTE *)Locked.pBits + i * nBytes, nBytes);
+  pCopy->m_pMem->UnlockRect();
+  //! X8R8G8B8's fourth byte is not part of the picture.
+  const UINT nCompare = Desc.Format == D3DFMT_X8R8G8B8 ? 3 : nBytes;
+  for (int i = 0; i < s_nPixels; i++)
+  {
+    SPixelWatch &W = s_Pixels[i];
+    if (!bOnSurface(W))
+      continue;
+    SPixelLast *pLast = nullptr;
+    for (SPixelLast &L : W.m_Last)
+      if (L.m_pSurf == pSurf)
+        pLast = &L;
+    if (pLast && pLast->m_eFormat == Desc.Format && !memcmp(pLast->m_Bytes, Bytes[i], nCompare))
+      continue;
+    if (!pLast)
+      pLast = &W.m_Last[W.m_nNextLast++ % PIXEL_SURFACES];
+    pLast->m_pSurf = pSurf;
+    pLast->m_eFormat = Desc.Format;
+    memcpy(pLast->m_Bytes, Bytes[i], nBytes);
+    char szValue[80] = "", szSurf[160];
+    if (Desc.Format == D3DFMT_A8R8G8B8)
+      _snprintf_s(szValue, _TRUNCATE, "rgb %u %u %u a %u", Bytes[i][2], Bytes[i][1], Bytes[i][0], Bytes[i][3]);
+    else if (Desc.Format == D3DFMT_X8R8G8B8)
+      _snprintf_s(szValue, _TRUNCATE, "rgb %u %u %u", Bytes[i][2], Bytes[i][1], Bytes[i][0]);
+    else
+      for (UINT b = 0; b < nBytes; b++)
+        Append(szValue, sizeof(szValue), "%s%02x", b ? " " : "bytes ", Bytes[i][b]);
+    Trace_Write("[d3d pixel] after %s: (%d %d) %s on %s", szWhat, W.m_nX, W.m_nY, szValue, SurfaceName(pDev, pSurf, szSurf, sizeof(szSurf)));
+  }
+}
+
+//! The watched pixels of the render targets after a draw or a target Clear; a draw's targets whose colour writes are off
+//! (shadow volumes, depth passes, query boxes) are not read.
+static void CheckTargetPixels(IDirect3DDevice9 *pDev, const char *szWhat, bool bDraw)
+{
+  static const D3DRENDERSTATETYPE s_eColorWrite[] = { D3DRS_COLORWRITEENABLE, D3DRS_COLORWRITEENABLE1, D3DRS_COLORWRITEENABLE2,
+    D3DRS_COLORWRITEENABLE3 };
+  for (DWORD n = 0; n < sizeof(s_eColorWrite) / sizeof(s_eColorWrite[0]); n++)
+  {
+    DWORD nWrite = 0xF;
+    if (bDraw && SUCCEEDED(pDev->GetRenderState(s_eColorWrite[n], &nWrite)) && !(nWrite & 0xF))
+      continue;
+    Microsoft::WRL::ComPtr<IDirect3DSurface9> pRT;
+    if (SUCCEEDED(pDev->GetRenderTarget(n, &pRT)) && pRT)
+      CheckPixels(pDev, szWhat, pRT.Get());
+  }
+}
+
+static void CheckDrawPixels(IDirect3DDevice9 *pDev)
+{
+  if (!PixelsWatched())
+    return;
+  char szWhat[32];
+  _snprintf_s(szWhat, _TRUNCATE, "draw %d", s_nDraws);
+  CheckTargetPixels(pDev, szWhat, true);
+}
+
 static HRESULT STDMETHODCALLTYPE Hook_DrawPrimitive(IDirect3DDevice9 *pDev, D3DPRIMITIVETYPE eType, UINT nStartVertex, UINT nPrims)
 {
   char szCall[160];
   _snprintf_s(szCall, _TRUNCATE, "DrawPrimitive(%s start %u prims %u)", PrimName(eType), nStartVertex, nPrims);
   WriteDraw(pDev, szCall, true, false, nStartVertex, DrawVertexCount(eType, nPrims), NULL, 0, _ReturnAddress());
-  return ((PFN_DrawPrimitive)s_pOrigVTable[DEV_DrawPrimitive])(pDev, eType, nStartVertex, nPrims);
+  const HRESULT hr = ((PFN_DrawPrimitive)s_pOrigVTable[DEV_DrawPrimitive])(pDev, eType, nStartVertex, nPrims);
+  CheckDrawPixels(pDev);
+  return hr;
 }
 
 static HRESULT STDMETHODCALLTYPE Hook_DrawIndexedPrimitive(IDirect3DDevice9 *pDev, D3DPRIMITIVETYPE eType, INT nBaseVertex, UINT nMinIndex,
@@ -833,7 +1074,10 @@ static HRESULT STDMETHODCALLTYPE Hook_DrawIndexedPrimitive(IDirect3DDevice9 *pDe
   _snprintf_s(szCall, _TRUNCATE, "DrawIndexedPrimitive(%s base %d min %u verts %u start %u prims %u)", PrimName(eType), nBaseVertex, nMinIndex,
     nVerts, nStartIndex, nPrims);
   WriteDraw(pDev, szCall, true, true, nStartIndex, 0, NULL, 0, _ReturnAddress(), (UINT)(nBaseVertex + (INT)nMinIndex), nVerts);
-  return ((PFN_DrawIndexedPrimitive)s_pOrigVTable[DEV_DrawIndexedPrimitive])(pDev, eType, nBaseVertex, nMinIndex, nVerts, nStartIndex, nPrims);
+  const HRESULT hr = ((PFN_DrawIndexedPrimitive)s_pOrigVTable[DEV_DrawIndexedPrimitive])(pDev, eType, nBaseVertex, nMinIndex, nVerts,
+    nStartIndex, nPrims);
+  CheckDrawPixels(pDev);
+  return hr;
 }
 
 static HRESULT STDMETHODCALLTYPE Hook_DrawPrimitiveUP(IDirect3DDevice9 *pDev, D3DPRIMITIVETYPE eType, UINT nPrims, const void *pVerts,
@@ -842,7 +1086,9 @@ static HRESULT STDMETHODCALLTYPE Hook_DrawPrimitiveUP(IDirect3DDevice9 *pDev, D3
   char szCall[160];
   _snprintf_s(szCall, _TRUNCATE, "DrawPrimitiveUP(%s prims %u stride %u)", PrimName(eType), nPrims, nStride);
   WriteDraw(pDev, szCall, false, false, 0, DrawVertexCount(eType, nPrims), pVerts, nStride, _ReturnAddress());
-  return ((PFN_DrawPrimitiveUP)s_pOrigVTable[DEV_DrawPrimitiveUP])(pDev, eType, nPrims, pVerts, nStride);
+  const HRESULT hr = ((PFN_DrawPrimitiveUP)s_pOrigVTable[DEV_DrawPrimitiveUP])(pDev, eType, nPrims, pVerts, nStride);
+  CheckDrawPixels(pDev);
+  return hr;
 }
 
 static HRESULT STDMETHODCALLTYPE Hook_DrawIndexedPrimitiveUP(IDirect3DDevice9 *pDev, D3DPRIMITIVETYPE eType, UINT nMinIndex, UINT nVerts,
@@ -852,8 +1098,10 @@ static HRESULT STDMETHODCALLTYPE Hook_DrawIndexedPrimitiveUP(IDirect3DDevice9 *p
   _snprintf_s(szCall, _TRUNCATE, "DrawIndexedPrimitiveUP(%s min %u verts %u prims %u indices %s stride %u)", PrimName(eType), nMinIndex,
     nVerts, nPrims, eIndexFormat == D3DFMT_INDEX32 ? "32" : "16", nStride);
   WriteDraw(pDev, szCall, false, false, 0, 0, NULL, 0, _ReturnAddress());
-  return ((PFN_DrawIndexedPrimitiveUP)s_pOrigVTable[DEV_DrawIndexedPrimitiveUP])(pDev, eType, nMinIndex, nVerts, nPrims, pIndices,
-    eIndexFormat, pVerts, nStride);
+  const HRESULT hr = ((PFN_DrawIndexedPrimitiveUP)s_pOrigVTable[DEV_DrawIndexedPrimitiveUP])(pDev, eType, nMinIndex, nVerts, nPrims,
+    pIndices, eIndexFormat, pVerts, nStride);
+  CheckDrawPixels(pDev);
+  return hr;
 }
 
 static HRESULT STDMETHODCALLTYPE Hook_Clear(IDirect3DDevice9 *pDev, DWORD nRects, const D3DRECT *pRects, DWORD nFlags, D3DCOLOR nColor,
@@ -863,7 +1111,10 @@ static HRESULT STDMETHODCALLTYPE Hook_Clear(IDirect3DDevice9 *pDev, DWORD nRects
   _snprintf_s(szLine, _TRUNCATE, "[d3d] Clear(rects %u flags 0x%x colour 0x%08x z %g stencil %u)", nRects, nFlags, nColor, fZ, nStencil);
   AppendRE(szLine, sizeof(szLine));
   Trace_Write("%s", szLine);
-  return ((PFN_Clear)s_pOrigVTable[DEV_Clear])(pDev, nRects, pRects, nFlags, nColor, fZ, nStencil);
+  const HRESULT hr = ((PFN_Clear)s_pOrigVTable[DEV_Clear])(pDev, nRects, pRects, nFlags, nColor, fZ, nStencil);
+  if ((nFlags & D3DCLEAR_TARGET) && PixelsWatched())
+    CheckTargetPixels(pDev, "Clear", false);
+  return hr;
 }
 
 //! "back buffer", or the surface's size and format with the texture it belongs to (as the draws write it).
@@ -915,7 +1166,9 @@ static HRESULT STDMETHODCALLTYPE Hook_UpdateSurface(IDirect3DDevice9 *pDev, IDir
   Trace_Write("[d3d] UpdateSurface(%s rect %s -> %s at (%ld %ld))", SurfaceName(pDev, pSrc, szSrc, sizeof(szSrc)),
     RectName(pSrcRect, szRect, sizeof(szRect)), SurfaceName(pDev, pDst, szDst, sizeof(szDst)), pDstPoint ? pDstPoint->x : 0,
     pDstPoint ? pDstPoint->y : 0);
-  return ((PFN_UpdateSurface)s_pOrigVTable[DEV_UpdateSurface])(pDev, pSrc, pSrcRect, pDst, pDstPoint);
+  const HRESULT hr = ((PFN_UpdateSurface)s_pOrigVTable[DEV_UpdateSurface])(pDev, pSrc, pSrcRect, pDst, pDstPoint);
+  CheckPixels(pDev, "UpdateSurface", pDst);
+  return hr;
 }
 
 static HRESULT STDMETHODCALLTYPE Hook_StretchRect(IDirect3DDevice9 *pDev, IDirect3DSurface9 *pSrc, const RECT *pSrcRect,
@@ -925,7 +1178,9 @@ static HRESULT STDMETHODCALLTYPE Hook_StretchRect(IDirect3DDevice9 *pDev, IDirec
   Trace_Write("[d3d] StretchRect(%s rect %s -> %s rect %s, filter %d)", SurfaceName(pDev, pSrc, szSrc, sizeof(szSrc)),
     RectName(pSrcRect, szRect1, sizeof(szRect1)), SurfaceName(pDev, pDst, szDst, sizeof(szDst)), RectName(pDstRect, szRect2, sizeof(szRect2)),
     eFilter);
-  return ((PFN_StretchRect)s_pOrigVTable[DEV_StretchRect])(pDev, pSrc, pSrcRect, pDst, pDstRect, eFilter);
+  const HRESULT hr = ((PFN_StretchRect)s_pOrigVTable[DEV_StretchRect])(pDev, pSrc, pSrcRect, pDst, pDstRect, eFilter);
+  CheckPixels(pDev, "StretchRect", pDst);
+  return hr;
 }
 
 static HRESULT STDMETHODCALLTYPE Hook_ColorFill(IDirect3DDevice9 *pDev, IDirect3DSurface9 *pSurf, const RECT *pRect, D3DCOLOR nColor)
@@ -933,7 +1188,9 @@ static HRESULT STDMETHODCALLTYPE Hook_ColorFill(IDirect3DDevice9 *pDev, IDirect3
   char szSurf[160], szRect[64];
   Trace_Write("[d3d] ColorFill(%s rect %s colour 0x%08x)", SurfaceName(pDev, pSurf, szSurf, sizeof(szSurf)),
     RectName(pRect, szRect, sizeof(szRect)), nColor);
-  return ((PFN_ColorFill)s_pOrigVTable[DEV_ColorFill])(pDev, pSurf, pRect, nColor);
+  const HRESULT hr = ((PFN_ColorFill)s_pOrigVTable[DEV_ColorFill])(pDev, pSurf, pRect, nColor);
+  CheckPixels(pDev, "ColorFill", pSurf);
+  return hr;
 }
 
 //! Read backs and queries (how the renderer learns what was drawn, e.g. whether a flare is hidden).
@@ -1042,6 +1299,15 @@ static HRESULT STDMETHODCALLTYPE Hook_Present(IDirect3DDevice9 *pDev, const RECT
   return hr;
 }
 
+//! A Reset in the captured frame: the pixels' copies are released first (default pool), see ForgetPixels.
+static HRESULT STDMETHODCALLTYPE Hook_Reset(IDirect3DDevice9 *pDev, D3DPRESENT_PARAMETERS *pParams)
+{
+  ForgetPixels();
+  const HRESULT hr = ((PFN_Reset)s_pOrigVTable[DEV_Reset])(pDev, pParams);
+  Trace_Write("[d3d] Reset -> 0x%08x", hr);
+  return hr;
+}
+
 void D3DDraws_Begin(IRenderer *pRenderer)
 {
   if (s_pDevice)
@@ -1082,6 +1348,7 @@ void D3DDraws_Begin(IRenderer *pRenderer)
   s_HookedVTable[DEV_GetDepthStencilSurface] = (void *)&Hook_GetDepthStencilSurface;
   s_HookedVTable[DEV_CreateQuery] = (void *)&Hook_CreateQuery;
   s_HookedVTable[DEV_Present] = (void *)&Hook_Present;
+  s_HookedVTable[DEV_Reset] = (void *)&Hook_Reset;
   s_HookedVTable[DEV_DrawPrimitive] = (void *)&Hook_DrawPrimitive;
   s_HookedVTable[DEV_DrawIndexedPrimitive] = (void *)&Hook_DrawIndexedPrimitive;
   s_HookedVTable[DEV_DrawPrimitiveUP] = (void *)&Hook_DrawPrimitiveUP;
@@ -1366,5 +1633,7 @@ void D3DDraws_End()
     it->first->Release();
   }
   s_Shadows.clear();
+  ForgetPixels();
+  s_nPixelFailures = 0;
   Trace_Write("==== %d Direct3D draws ====", s_nDraws);
 }

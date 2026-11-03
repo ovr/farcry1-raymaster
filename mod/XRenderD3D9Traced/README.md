@@ -186,7 +186,8 @@ reference of the rest.
 
 - `XRENDERTRACED_D3D_DRAWS=1` writes the Direct3D 9 draw calls of the original renderer in the
   captured frame (`D3DDraws.h`; the header line gives `ITimer::GetCurrTime()`, for animated
-  values): buffers, vertex declaration, shaders, textures and the render
+  values): buffers, vertex declaration, shaders, textures (of stages 0-7: the model 3 light-map
+  bump shaders sample 6) and the render
   element being drawn (x64; for a leaf buffer the shader and template of its chunk, while an
   object rendered with `SRendParams::pMaterial` is drawn with that material, whose shader,
   template and resources the `IMatInfo` dump under its `CLeafBuffer::Render` line gives), the
@@ -211,6 +212,18 @@ reference of the rest.
   X8R8G8B8 a draw uses is read back (`GetRenderTargetData`) and its texels written
   (`[d3d] tex ... texels r g b a`) at every draw, not only where it is first seen: the render
   modes' adapted luminance is such a 1 x 1 target, kept from frame to frame.
+  `XRENDERTRACED_D3D_PIXEL=x,y[;x,y...]` (up to 8 back buffer pixels) writes a pixel's history:
+  after each call of the captured frame that can write a surface of the back buffer's size (a
+  draw or a target `Clear` into its render targets, `StretchRect`, `ColorFill`, `UpdateSurface`)
+  the pixels are copied into an 8 x 1 target and read back, and a pixel is written when its value
+  on that surface differs from its last one there
+  (`[d3d pixel] after draw 812: (402 96) rgb 96 71 52 on back buffer 000001D2C0A4F1E0 1280x720
+  format 22 usage 0x1 tex 0000000000000000`; A8R8G8B8 adds `a`, other formats give their bytes):
+  which draws make a pixel of the picture and what each one adds. Draws with colour writes off are
+  not read; `UpdateTexture` and writes through `LockRect` are not watched. Every read waits for
+  the GPU, so the captured frame takes seconds, and the queries the renderer asks within it (flare
+  and corona visibility) can answer sooner than in play: a flare there can differ from the picture
+  without the watch.
   `XRENDERTRACED_D3D_CUBESAVE=<path prefix>` saves level 0 of the six faces of every cube texture
   a draw uses as TGA files (DXT decoded, A8L8 and L8 as grey with their alpha; keep them in the
   scratchpad, never commit them).
