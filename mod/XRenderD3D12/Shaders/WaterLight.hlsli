@@ -11,7 +11,10 @@
 //	the ripple finer than the texture: the Beckmann distribution in the
 //	slopes' space. Near the camera the normal's waves break the sun up into
 //	sparks; far away the lost slopes widen them into one streak towards the
-//	camera, the sun's path. Without bindings: Water.hlsl and the unit tests
+//	camera, the sun's path. And the sun's light through the thin crests of
+//	the waves: lit from behind, the water of a crest scatters it forwards,
+//	towards a camera that looks at the sun past it (turquoise: the red is
+//	absorbed on the way). Without bindings: Water.hlsl and the unit tests
 //	(Tests/Shaders/TestHeaders.hlsl) include it.
 //
 //////////////////////////////////////////////////////////////////////
@@ -79,6 +82,49 @@ float3 WaterCapLight(float3 vLight, float fCap)
 {
   const float m = max(vLight.r, max(vLight.g, vLight.b));
   return m > fCap ? vLight * (fCap / m) : vLight;
+}
+
+//! The brightness of the sun's light through a crest lit all the way through (WaterCrestLight 1)
+//! against a white face turned to the sun: the water scatters it forwards, towards a camera that
+//! looks at the sun past it. Fitted by eye: so that the crests show against the reflection of the
+//! sky the water mirrors at a slant (Carrier by day, Bunker at sunset; 1 hardly shows).
+static const float WATER_CREST_PEAK = 4;
+
+//! The colour of the sun's light through a crest lit all the way through, as a share of the light
+//! of a white face turned to the sun: WATER_CREST_PEAK times a turquoise (the red absorbed, the blue
+//! scattered less forwards than the green), half of it in the hue of the level's deep water vDeep
+//! (its brightest channel at the turquoise's), so that a lagoon and the open sea keep their own
+//! colours.
+float3 WaterCrestColor(float3 vDeep)
+{
+  static const float3 TURQUOISE = float3(0.10, 0.62, 0.50);
+  const float m = max(vDeep.r, max(vDeep.g, vDeep.b));
+  const float3 vHue = m > 1e-4 ? vDeep * (TURQUOISE.g / m) : TURQUOISE;
+  return lerp(TURQUOISE, vHue, 0.5) * WATER_CREST_PEAK;
+}
+
+//! How much of the sun's light the thin crests of the waves let through towards the camera, 0 to 1
+//! (times WaterCrestColor): N the normal, V towards the camera, L towards the sun (unit vectors, z
+//! up), fHeight the height of the waves there (RMS 1), fSlopeRMS the RMS of their slopes along one
+//! axis. The upper part of a wave (above the mean, all of it from twice the RMS), seen against the
+//! sun (the forward scattering: the square of the cosine between the view's ray and the sun's),
+//! more on its face turned away from the sun, which the light leaves after crossing the crest (half
+//! on a level face, all of it from the waves' RMS slope away from the sun, none from it towards the
+//! sun: the ripple's slopes hardly follow the long waves' heights, at a crest's top the slope is
+//! level), seen at a slant (the thin edge: 1 - N.V); WATER_CREST_GAIN times that, at most 1 (a
+//! crest at half the RMS whose back slopes by the RMS of 0.3, looking 10 degrees down towards a sun
+//! 20 degrees up: 0.52). 0 with the sun below the horizon or overhead, or without waves.
+static const float WATER_CREST_GAIN = 8;
+float WaterCrestLight(float3 N, float3 V, float3 L, float fHeight, float fSlopeRMS)
+{
+  const float fSide = length(L.xy);
+  if (L.z <= 0 || fSide < 1e-3 || fSlopeRMS <= 0)
+    return 0;
+  const float fCrest = smoothstep(0, 2, fHeight);
+  const float c = saturate(dot(-V, L));
+  const float fBack = saturate(0.5 + dot(N.xy, -L.xy / fSide) / (max(N.z, 1e-3) * 2 * fSlopeRMS));
+  const float t = 1 - saturate(dot(N, V));
+  return saturate(WATER_CREST_GAIN * fCrest * c * c * fBack * t);
 }
 
 #endif

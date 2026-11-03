@@ -1925,6 +1925,7 @@ public:
   int CV_d3d12_Caustics = 1;          //!< 0: no caustics under the ocean
   float CV_d3d12_WaterGlint = 1;      //!< strength of the sun's glint on water (0: none, as the game)
   float CV_d3d12_WaterGlintRoughness = 0.004f;  //!< the variance of the slopes of the water's ripple finer than its wave texture (the glint's)
+  float CV_d3d12_WaterCrestLight = 1;  //!< strength of the sun's light through the waves' crests (0: none, as the game)
   int CV_d3d12_GpuTimes = 0;          //!< N: the GPU time of the frame's sections to the log every N frames
   int CV_d3d12_FrameLog = 0;          //!< 1: a line per frame to XRenderD3D12_frames.txt (LogFrame), 2 with the engine's profilers
   int CV_d3d12_CpuSamples = 0;        //!< N: the render thread's stack every N microseconds, to XRenderD3D12_samples.txt at 0 (CpuSampler)
