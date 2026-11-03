@@ -1179,7 +1179,7 @@ void CD3D12Renderer::DrawRayDebug()
     SPathShadeParams P;
     GetPathShade(P);
     Set4(dc.vParams2, P.vSun[0], P.vSun[1], P.vSun[2], P.fLamps);
-    Set4(dc.vParams3, P.fEmission, P.fDelight, P.fLightGap, 0);
+    Set4(dc.vParams3, P.fEmission, P.fDelight, P.fLightGap, P.fBakedFalloff);
     Set4(dc.vAmbient, P.vBakeLight[0], P.vBakeLight[1], P.vBakeLight[2], 0);
     dc.nTex2 = P.nLights;
   }

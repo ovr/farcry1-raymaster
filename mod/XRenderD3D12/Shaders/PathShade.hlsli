@@ -32,6 +32,9 @@
 //	    SetPointLight), in light; directional ones without the falloff; a
 //	    projector times the picture of its cube (2 * colour * cube before
 //	    the power, as its pass).
+//	    With d3d12_PTBakedFalloff > 0 a lamp baked into the light maps
+//	    (XR_PT_LIGHT_LM) falls off as they do, slowly over its whole radius:
+//	    ((1 - d / radius)^d3d12_PTBakedFalloff)^2.2 (PathLampFalloff).
 //	The game's lights multiply its colours (the raster's colour * light):
 //	in light, colour^2.2 * light^2.2 is that product's light below 1
 //	(PathMultiplier), what most of the picture is.
@@ -75,6 +78,8 @@ struct SPathShade
   float fDelight;       //!< d3d12_PTTerrainDelight (at most 1: the sector's colour is the albedo)
   float3 vBakeLight;    //!< the light baked into the terrain on a lit face towards the sun (the path tracer's sun and sky)
   float fLightGap;      //!< how far short of a lamp its ray ends (d3d12_RTLightShadowGap)
+  float fBakedFalloff;  //!< d3d12_PTBakedFalloff: 0 the lamps baked into the light maps fall off as the dynamic ones, > 0 the
+                        //!< power of (1 - d / r), the light maps' falloff
   uint nLights;         //!< the lamps in g_PTLights
   uint nMask;           //!< the instances the rays towards the sun and the lamps see
   uint nMaxTests;       //!< their alpha tests at most
@@ -224,6 +229,17 @@ float3 PathSun(float3 vPos, float3 vN, float3 vFace, SPathShade P, float fConeWi
   return P.vSun * fNL * TraceSun(vPos, vFace, P.nMask, fConeWidth, P.nMaxTests);
 }
 
+//! A lamp's falloff, as light, at x = its distance over its radius: as the raster's dynamic light (1 - smoothstep(0, 0.9,
+//! x))^2.2, nothing from 0.9 on; a lamp baked into the light maps (bLightMap) with fBakedFalloff > 0 (d3d12_PTBakedFalloff)
+//! as they light the level, falling off slowly over its whole radius: ((1 - x)^fBakedFalloff)^2.2 (the game's colour).
+float PathLampFalloff(float x, bool bLightMap, float fBakedFalloff)
+{
+  const bool bBaked = fBakedFalloff > 0 && bLightMap;
+  if (x >= (bBaked ? 1 : 0.9))
+    return 0;
+  return pow(bBaked ? pow(1 - x, fBakedFalloff) : 1 - smoothstep(0, 0.9, x), HDR_GAMMA);
+}
+
 //! Lamp i's light on a point at vPos with the normal vN without its shadow (see the head of the file), 0 where it does
 //! not reach; vToLight the direction towards it, fDistance how far it is.
 float3 PathLampLight(uint i, float3 vPos, float3 vN, SPathShade P, out float3 vToLight, out float fDistance)
@@ -239,11 +255,10 @@ float3 PathLampLight(uint i, float3 vPos, float3 vN, SPathShade P, out float3 vT
   {
     vToLight = L.vPos.xyz - vPos;
     fDistance = length(vToLight);
-    const float x = fDistance / L.vPos.w;
-    if (x >= 0.9)
+    fFalloff = PathLampFalloff(fDistance / L.vPos.w, (L.nParams.y & XR_PT_LIGHT_LM) != 0, P.fBakedFalloff);
+    if (fFalloff <= 0)
       return 0;
     vToLight /= max(fDistance, 1e-4);
-    fFalloff = pow(1 - smoothstep(0, 0.9, x), HDR_GAMMA);
   }
   const float fNL = dot(vN, vToLight);
   if (fNL <= 0)

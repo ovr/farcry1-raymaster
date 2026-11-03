@@ -91,6 +91,19 @@ void CSSurfaceNormal(uint i : SV_DispatchThreadID)
     TestOut(i, float4(PathSurfaceNormal(g_TestIn[2 * i].w, TestIn(2 * i).xyz, TestIn(2 * i + 1).xyz), 0));
 }
 
+//! PathLampLight of lamp g_TestIn[2i].w (its index, bits) on the point g_TestIn[2i].xyz with the normal g_TestIn[2i + 1].xyz,
+//! the lamps g_TestLights (t2 space5), the shading's parameters g_PT's: out[i] its light, w the distance.
+[numthreads(64, 1, 1)]
+void CSLampLight(uint i : SV_DispatchThreadID)
+{
+  if (i >= g_Test.nTest.x)
+    return;
+  float3 vToLight;
+  float fDistance;
+  const float3 vLight = PathLampLight(g_TestIn[2 * i].w, TestIn(2 * i).xyz, TestIn(2 * i + 1).xyz, PathShadeParams(0), vToLight, fDistance);
+  TestOut(i, float4(vLight, fDistance));
+}
+
 //! PathTraced over a g_Test.nTest.x x g_Test.nTest.y grid of pixels, with g_PT as the test binds it: out[x + y * w].x 1 where traced.
 [numthreads(8, 8, 1)]
 void CSCheckerboard(uint2 p : SV_DispatchThreadID)

@@ -22,6 +22,7 @@
 #include "Test_PixelSurface.h"
 #include "Test_TerrainShare.h"
 #include "Test_SurfaceNormal.h"
+#include "Test_LampLight.h"
 
 #include "Shaders/Constants.h"
 
@@ -487,4 +488,81 @@ XR_TEST(PathTrace_TerrainShare)
   // The fault this guards against, in this scene: from the depth buffer's points some of the lit slope is in shadow.
   CHECK_MSG(nRawShaded > nLit / 20, std::to_string(nRawShaded) + " of " + std::to_string(nLit) +
                                         " lit points shaded from the depth buffer's points: the scene no longer shows the fault");
+}
+
+//! PathLampLight's falloff (PathLampFalloff): by default (d3d12_PTBakedFalloff 0) a lamp baked into the light maps
+//! (XR_PT_LIGHT_LM) falls off as any other, as the raster's dynamic light, (1 - smoothstep(0, 0.9, d / r))^2.2, and gives
+//! nothing from 0.9 r on, bit for bit as the lamps without the flag; with d3d12_PTBakedFalloff k > 0 (g_PT.vShade.z) the
+//! baked one falls off as ((1 - d / r)^k)^2.2 over its whole radius, the others as before. Why: Research's light maps light
+//! its walls from lamps 0.9-1 r away, where the path tracer had nothing (step 271); the default must stay the picture it was.
+XR_TEST(PathTrace_LampFalloff)
+{
+  NeedShaderModel65();
+  const float r = 10;
+  SPTLight Lights[2] = {};
+  for (int l = 0; l < 2; l++)
+  {
+    Lights[l].vPos[3] = r;
+    Lights[l].vColor[0] = Lights[l].vColor[1] = Lights[l].vColor[2] = 0.5f;   // twice it 1: the falloff alone
+    Lights[l].nParams[0] = XR_PT_LIGHT_POINT;
+    Lights[l].nParams[1] = l == 0 ? XR_PT_LIGHT_LM | XR_PT_LIGHT_STATIC : XR_PT_LIGHT_STATIC;
+    Lights[l].nParams[2] = Lights[l].nParams[3] = XR_RAY_NONE;
+  }
+  const float Distances[] = { 0.5f, 1, 2.5f, 4.5f, 6, 7.5f, 8.5f, 8.95f, 9.05f, 9.5f, 9.95f, 10.05f, 12 };
+  const uint32 nDistances = (uint32)(sizeof(Distances) / sizeof(Distances[0])), n = 2 * nDistances;
+  auto Smooth = [](float x) { const float t = std::min(std::max(x / 0.9f, 0.0f), 1.0f); return t * t * (3 - 2 * t); };
+  auto Dynamic = [&](float x) { return x >= 0.9f ? 0.0f : std::pow(1 - Smooth(x), 2.2f); };
+  auto Baked = [](float x, float k) { return x >= 1 ? 0.0f : std::pow(std::pow(1 - x, k), 2.2f); };
+  std::vector<uint32> Default;
+  for (float k : { 0.0f, 0.5f, 1.0f, 2.0f })
+  {
+    SPathTraceConstants PT = {};
+    PT.vSun[3] = 1;                // d3d12_PTLamps
+    PT.vShade[2] = k;              // d3d12_PTBakedFalloff
+    PT.nPath[0] = 2;
+    SDispatch d;
+    d.Shader = XR_BYTECODE(Test_LampLight);
+    d.pPathTrace = &PT;
+    d.pLights = Lights;
+    d.nLightBytes = sizeof(Lights);
+    for (uint32 l = 0; l < 2; l++)
+    {
+      for (float dist : Distances)
+      {
+        Push(d.In, dist, 0, 0, 0);
+        d.In.back() = l;           // the lamp's index, bits
+        Push(d.In, -1, 0, 0, 0);   // facing it: N.L 1
+      }
+    }
+    d.Test.nTest[0] = n;
+    d.nGroups[0] = Groups64(n);
+    d.nOut = n;
+    const std::vector<uint32> Out = Gpu().Run(d);
+    for (uint32 l = 0; l < 2; l++)
+    {
+      for (uint32 j = 0; j < nDistances; j++)
+      {
+        const uint32 i = l * nDistances + j;
+        const float x = Distances[j] / r, fWant = l == 0 && k > 0 ? Baked(x, k) : Dynamic(x), fGot = At(Out, i, 0);
+        CHECK_MSG(std::fabs(fGot - fWant) <= 1e-6f + 2e-4f * fWant, "falloff " + std::to_string(k) + (l == 0 ? ", baked" : ", dynamic") +
+                                                                  " lamp at " + std::to_string(x) + " r: " + std::to_string(fGot) + ", not " +
+                                                                  std::to_string(fWant));
+        CHECK(At(Out, i, 0) == At(Out, i, 1) && At(Out, i, 1) == At(Out, i, 2));
+        if (fWant > 0)
+          CHECK_NEAR(At(Out, i, 3), Distances[j], 1e-5);
+      }
+    }
+    if (k == 0)
+      Default = Out;
+    else
+    {
+      // The dynamic lamp is as by default, bit for bit; the baked one still lights at 0.95 r.
+      for (uint32 j = 0; j < nDistances; j++)
+        CHECK(Out[(nDistances + j) * 4] == Default[(nDistances + j) * 4]);
+      CHECK(Distances[9] == 9.5f && At(Out, 9, 0) > 0);
+    }
+  }
+  // By default the baked lamp is the dynamic one, bit for bit.
+  for (uint32 j = 0; j < nDistances; j++)
+    CHECK_MSG(Default[j * 4] == Default[(nDistances + j) * 4], "distance " + std::to_string(Distances[j]));
 }
