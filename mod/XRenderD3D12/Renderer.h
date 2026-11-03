@@ -1635,6 +1635,26 @@ public:
   CD3D12Texture *m_pSunMask = nullptr;      //!< DrawSunMask: the mask
 
   //////////////////////////////////////////////////////////////////////////
+  // Beams.cpp: the beams of the lights
+
+  //! DrawFlares, before the flares (whatever r_Coronas): the beam of every light of the scene
+  //! whose shader has one (CShader::GetBeam).
+  void DrawBeams();
+  //! A beam's cone model: its vertices (position, normal) and triangles, the length (its box's
+  //! largest x) and the radius (its box's largest y).
+  struct SBeamModel
+  {
+    std::vector<Vec3> Pos, Normals;
+    std::vector<ushort> Inds;
+    Vec3 vBoxMin = Vec3(0, 0, 0), vBoxMax = Vec3(0, 0, 0);
+    float fLength = 0, fRadius = 0;
+  };
+  //! The model of that file (I3DEngine::MakeObject on first use, copied, the object released);
+  //! nullptr when it could not be read.
+  const SBeamModel *GetBeamModel(const std::string &Name);
+  std::vector<std::pair<std::string, SBeamModel>> m_BeamModels;   //!< GetBeamModel's models so far
+
+  //////////////////////////////////////////////////////////////////////////
   // State (public: the subsystems' files use it)
 
   std::unique_ptr<CD3D12Device> m_pDevice;

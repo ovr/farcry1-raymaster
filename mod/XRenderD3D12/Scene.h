@@ -185,6 +185,9 @@ public:
   CFColor GetSunColor() const;
   //! EF_UpdateDLight: m_Orientation and m_TextureMatrix of a DLF_PROJECT light; always false.
   static bool UpdateLight(CDLight *pLight);
+  //! The axes of a light from its m_ProjAngles (the projector's, m_Orientation): forward R (1,0,0),
+  //! up R (0,1,0), right R (0,0,1), R = Rz(z) Ry(y) Rx(x) of the angles in degrees.
+  static void GetLightAxes(const CDLight *pLight, Vec3 &vForward, Vec3 &vUp, Vec3 &vRight);
 
   //////////////////////////////////////////////////////////////////////////
   // Fog volumes (Scene.cpp)

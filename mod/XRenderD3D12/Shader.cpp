@@ -866,18 +866,17 @@ void ParseSkies(std::string_view Text, std::unordered_map<std::string, SSkyShade
   EndShader();
 }
 
-//! The "ClientEffect 'Corona'" blocks of a shader script, under the name of the "Shader '<name>'"
-//! block they are in (lower case): RGBStyle ('Fixed' (r g b a) or = FromLight), Scale (a number,
-//! or 'Comp' with a sine wave of Level, Amp, Phase and Freq: its Level), DistFactor and Map; the
-//! other keys are not read. "/* */" and "//" start comments.
-void ParseCoronas(std::string_view Text, std::unordered_map<std::string, SCorona> &Coronas)
+//! Walks the "ClientEffect '<Effect>'" blocks of a shader script (Effect in lower case, quoted):
+//! OnStart() at a block's start, OnLine(Line) for each of its lines (the rest of the ClientEffect
+//! line first, without "//" comments, trimmed), OnEnd(Shader) at its closing brace, Shader the name
+//! of the "Shader '<name>'" block it is in (lower case). "/* */" and "//" start comments.
+template <class FStart, class FLine, class FEnd>
+void ParseClientEffects(std::string_view Text, std::string_view Effect, FStart OnStart, FLine OnLine, FEnd OnEnd)
 {
   const std::string Clean = StripBlockComments(Text);
   std::string Shader;
-  SCorona Corona;
-  int nDepth = -1;          // braces open in the corona block; -1: not in one
+  int nDepth = -1;          // braces open in the effect's block; -1: not in one
   bool bOpened = false;
-  bool bScaleComp = false;  // Scale 'Comp': the next Level is the scale
   size_t nPos = 0;
   while (nPos < Clean.size())
   {
@@ -895,18 +894,49 @@ void ParseCoronas(std::string_view Text, std::unordered_map<std::string, SCorona
         const size_t q2 = q1 == std::string_view::npos ? q1 : Line.find('\'', q1 + 1);
         if (q2 != std::string_view::npos)
           Shader = Lower(std::string(Line.substr(q1 + 1, q2 - q1 - 1)).c_str());
-      }
-      else if (StartsWithWord(Line, "ClientEffect") && !Shader.empty() && Lower(std::string(Line).c_str()).find("'corona'") != std::string::npos)
-      {
-        Corona = SCorona();
-        nDepth = 0;
-        bOpened = false;
-        bScaleComp = false;
-        Line = Line.substr(Line.find('\'', Line.find('\'') + 1) + 1);
-      }
-      else
         continue;
+      }
+      if (!StartsWithWord(Line, "ClientEffect") || Shader.empty() || Lower(std::string(Line).c_str()).find(Effect) == std::string::npos)
+        continue;
+      OnStart();
+      nDepth = 0;
+      bOpened = false;
+      Line = Line.substr(Line.find('\'', Line.find('\'') + 1) + 1);
     }
+    OnLine(Line);
+    for (char c : Line)
+    {
+      if (c == '{')
+      {
+        nDepth++;
+        bOpened = true;
+      }
+      else if (c == '}' && nDepth > 0)
+        nDepth--;
+    }
+    if (bOpened && nDepth == 0)
+    {
+      OnEnd(Shader);
+      nDepth = -1;
+    }
+  }
+}
+
+//! The "ClientEffect 'Corona'" blocks of a shader script, under the name of the "Shader '<name>'"
+//! block they are in (lower case): RGBStyle ('Fixed' (r g b a) or = FromLight), Scale (a number,
+//! or 'Comp' with a sine wave of Level, Amp, Phase and Freq: its Level), DistFactor and Map; the
+//! other keys are not read.
+void ParseCoronas(std::string_view Text, std::unordered_map<std::string, SCorona> &Coronas)
+{
+  SCorona Corona;
+  bool bScaleComp = false;  // Scale 'Comp': the next Level is the scale
+  auto OnStart = [&]
+  {
+    Corona = SCorona();
+    bScaleComp = false;
+  };
+  auto OnLine = [&](std::string_view Line)
+  {
     if (StartsWithWord(Line, "RGBStyle"))
     {
       const std::string Low = Lower(std::string(Line).c_str());
@@ -949,22 +979,35 @@ void ParseCoronas(std::string_view Text, std::unordered_map<std::string, SCorona
         }
       }
     }
-    for (char c : Line)
-    {
-      if (c == '{')
-      {
-        nDepth++;
-        bOpened = true;
-      }
-      else if (c == '}' && nDepth > 0)
-        nDepth--;
-    }
-    if (bOpened && nDepth == 0)
-    {
-      Coronas[Shader] = Corona;
-      nDepth = -1;
-    }
-  }
+  };
+  ParseClientEffects(Text, "'corona'", OnStart, OnLine, [&](const std::string &Shader) { Coronas[Shader] = Corona; });
+}
+
+//! The "ClientEffect 'Beam'" blocks of a shader script, under the name of the "Shader '<name>'"
+//! block they are in (lower case): Model, LightStyle, StartRadius, EndRadius, Length, StartColor
+//! (r g b a) and EndColor (r g b a).
+void ParseBeams(std::string_view Text, std::unordered_map<std::string, SBeam> &Beams)
+{
+  SBeam Beam;
+  auto OnLine = [&](std::string_view Line)
+  {
+    float f;
+    if (StartsWithWord(Line, "Model"))
+      Beam.Model = FirstWordOf(Line);
+    else if (StartsWithWord(Line, "LightStyle") && ParseFloats(ValueOf(Line), &f, 1) == 1)
+      Beam.nLightStyle = (int)f;
+    else if (StartsWithWord(Line, "StartRadius") && ParseFloats(ValueOf(Line), &f, 1) == 1)
+      Beam.fStartRadius = f;
+    else if (StartsWithWord(Line, "EndRadius") && ParseFloats(ValueOf(Line), &f, 1) == 1)
+      Beam.fEndRadius = f;
+    else if (StartsWithWord(Line, "Length") && ParseFloats(ValueOf(Line), &f, 1) == 1)
+      Beam.fLength = f;
+    else if (StartsWithWord(Line, "StartColor"))
+      ParseFloats(Line.substr(std::min(Line.find('('), Line.size())), Beam.StartColor, 4);
+    else if (StartsWithWord(Line, "EndColor"))
+      ParseFloats(Line.substr(std::min(Line.find('('), Line.size())), Beam.EndColor, 4);
+  };
+  ParseClientEffects(Text, "'beam'", [&] { Beam = SBeam(); }, OnLine, [&](const std::string &Shader) { Beams[Shader] = Beam; });
 }
 
 } // namespace
@@ -1057,6 +1100,7 @@ void CShaderManager::Shutdown()
   m_LightMaterials.clear();
   m_Skies.clear();
   m_Coronas.clear();
+  m_Beams.clear();
   m_bScriptsRead = false;
   m_pDefault = nullptr;
   m_nNextUserTemplate = EFT_USER_FIRST;
@@ -1091,6 +1135,7 @@ void CShaderManager::ReadScripts()
     {
       ParseSkies(Text, m_Skies);
       ParseCoronas(Text, m_Coronas);
+      ParseBeams(Text, m_Beams);
     }
   }
 }
@@ -1107,6 +1152,13 @@ const SCorona *CShaderManager::FindCorona(const char *szShader)
   ReadScripts();
   const auto it = m_Coronas.find(Lower(szShader));
   return it == m_Coronas.end() ? nullptr : &it->second;
+}
+
+const SBeam *CShaderManager::FindBeam(const char *szShader)
+{
+  ReadScripts();
+  const auto it = m_Beams.find(Lower(szShader));
+  return it == m_Beams.end() ? nullptr : &it->second;
 }
 
 CShader *CShaderManager::GetDefault()
@@ -1185,6 +1237,10 @@ CShader *CShaderManager::LoadShader(const char *szName, EShClass eClass, int nFl
         pSH = Create(Resolved, EShaderKind::Engine, Props, nullptr, nMaskGen);
         if (pCorona)
           pSH->SetCorona(*pCorona);
+        // A light's beam (drawn at the lights with the shader by the beam pass, whatever the
+        // shader's draw class).
+        if (const SBeam *pBeam = FindBeam(Name.c_str()))
+          pSH->SetBeam(*pBeam);
         m_ByName.emplace(std::move(Resolved), pSH);
       }
     }

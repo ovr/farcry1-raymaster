@@ -47,6 +47,8 @@ set(XRENDERD3D12_SOURCES
     HdrStats.cpp
     HdrStatsMath.h
     Flares.cpp
+    Beams.cpp
+    LightBeam.h
     Stats.cpp
     CpuSampler.h
     CpuSampler.cpp

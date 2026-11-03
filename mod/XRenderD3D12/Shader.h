@@ -103,6 +103,20 @@ struct SCorona
   std::string Map;                    //!< Map: the texture
 };
 
+//! The beam of a light shader: the "ClientEffect 'Beam'" block of its script (Lights.csl, the
+//! LightBeam* shaders): a cone of light from the light along its forward axis, drawn by the beam
+//! pass at every light with the shader (Beams.cpp).
+struct SBeam
+{
+  std::string Model;                  //!< Model: the cone (objects/indoor/lights/beam.cgf), '\' as '/'
+  float fStartRadius = 0.1f;          //!< StartRadius: the radius at the light
+  float fEndRadius = 1;               //!< EndRadius: the radius at the far end
+  float fLength = 1;                  //!< Length: from the light to the far end
+  float StartColor[4] = { 1, 1, 1, 1 };   //!< StartColor (r g b a): at the light
+  float EndColor[4] = { 1, 1, 1, 0 };     //!< EndColor (r g b a): at the far end (alpha below 0 fades it out before)
+  int nLightStyle = 0;                //!< LightStyle: read, not used (the original's beams draw the colours as given)
+};
+
 //! A layer of a sky shader drawn over its box: a "Layer" block after the first one (the box) of its
 //! script that names a Map (CloudsSky1).
 struct SSkyLayer
@@ -328,6 +342,10 @@ public:
   const SCorona *GetCorona() const { return m_pCorona.get(); }
   //! The Flare element of a flare shader; NULL for the others.
   CRendElement *GetFlare() const { return m_pFlare.get(); }
+  //! Gives a light shader its beam.
+  void SetBeam(const SBeam &Beam) { m_pBeam = std::make_unique<SBeam>(Beam); }
+  //! The beam of a light shader; NULL for the others.
+  const SBeam *GetBeam() const { return m_pBeam.get(); }
 
 private:
   CShader *GetUserTemplate(int nTempl);
@@ -347,6 +365,7 @@ private:
   SEfTemplates m_Templates;
   std::unique_ptr<SCorona> m_pCorona;
   std::unique_ptr<CRendElement> m_pFlare;     //!< the Flare element of a flare shader (in m_REs)
+  std::unique_ptr<SBeam> m_pBeam;
 };
 
 //! All shaders, the user templates and the light materials (one per renderer, CD3D12Renderer::m_pShaders).
@@ -407,6 +426,9 @@ public:
   //! The corona a flare shader's script gives it ("ClientEffect 'Corona'" in its "Shader" block of
   //! the same scripts); NULL when the shader has none.
   const SCorona *FindCorona(const char *szShader);
+  //! The beam a light shader's script gives it ("ClientEffect 'Beam'" in its "Shader" block of the
+  //! same scripts); NULL when the shader has none.
+  const SBeam *FindBeam(const char *szShader);
 
   //! IShader::AddTemplate: registers the template szName under nTemplId (-1: a new id from
   //! EFT_USER_FIRST up); returns the id, -1 when there is nothing to register.
@@ -452,7 +474,7 @@ private:
   //! Loads the textures besides the diffuse one that the drawing of pSH reads (the normal map, the
   //! gloss map, the cube map), so that the first frame drawing the material does not read files.
   void LoadDrawnTextures(const CShader *pSH, SRenderShaderResources *pRes);
-  //! Reads the skies and the coronas of the shader scripts, once.
+  //! Reads the skies, the coronas and the beams of the shader scripts, once.
   void ReadScripts();
 
   std::vector<std::unique_ptr<CShader>> m_Shaders;              //!< indexed by ID
@@ -464,6 +486,7 @@ private:
   std::vector<std::unique_ptr<SLightMaterial>> m_LightMaterials; //!< [0] the default one
   std::unordered_map<std::string, SSkyShader> m_Skies;          //!< FindSky: sky by shader name
   std::unordered_map<std::string, SCorona> m_Coronas;           //!< FindCorona: corona by shader name
+  std::unordered_map<std::string, SBeam> m_Beams;               //!< FindBeam: beam by shader name
   bool m_bScriptsRead = false;
   CShader *m_pDefault = nullptr;
   int m_nNextUserTemplate = EFT_USER_FIRST;
