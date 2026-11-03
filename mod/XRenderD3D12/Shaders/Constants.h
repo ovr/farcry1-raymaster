@@ -155,6 +155,7 @@ typedef float float4x4_t[16];
 
 // SDrawConstants::nFlags of the anti-aliasing program (AntiAlias.hlsl, PostAA.cpp): one mode
 #define AA_FXAA             0x00000001  //!< FXAA (Fxaa.hlsli) of the copy tex0 at the quality vParams1.x; the pixels it keeps are not written
+#define AA_SMAA             0x00000002  //!< SMAA 1x's neighbourhood blending (SmaaBlend.hlsli) of the copy tex0 by the weights tex1; the same
 #define AA_DEBUG            0x80000000  //!< with the mode: its view of the edges (d3d12_AADebug 1)
 
 // SDrawConstants::nFlags of the HDR program (Hdr.hlsl, Hdr.cpp): one mode

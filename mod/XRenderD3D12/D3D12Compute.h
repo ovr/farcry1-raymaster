@@ -84,6 +84,14 @@ enum ED3D12Kernel
   eD3D12K_RaySunFfxPack,            //!< the denoised visibility into the mask
   eD3D12K_PathCacheUpdate,          //!< the path tracer's radiance cache: its samples (Shaders/PathTrace.hlsl; with rays)
   eD3D12K_PathCacheResolve,         //!< its samples blended into its light
+  eD3D12K_SmaaEdgesLow,             //!< SMAA 1x's edges by quality (d3d12_AAQuality 0..3; Shaders/AntiAliasSmaa.hlsl)
+  eD3D12K_SmaaEdgesMedium,
+  eD3D12K_SmaaEdgesHigh,
+  eD3D12K_SmaaEdgesUltra,
+  eD3D12K_SmaaWeightsLow,           //!< SMAA 1x's blending weights by quality
+  eD3D12K_SmaaWeightsMedium,
+  eD3D12K_SmaaWeightsHigh,
+  eD3D12K_SmaaWeightsUltra,
   eD3D12K_Num
 };
 

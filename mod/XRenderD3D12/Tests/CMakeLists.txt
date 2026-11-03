@@ -15,18 +15,22 @@ set(XRENDERD3D12_TESTS_SHADER_DIR "${CMAKE_CURRENT_BINARY_DIR}/Shaders")
 set(XRENDERD3D12_TESTS_SHADER_HEADERS "")
 set(XRENDERD3D12_SHADER_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../Shaders")
 
-#! xrender_d3d12_test_shader(<name> <file> <profile> <entry>): compiles one kernel into Shaders/Test_<name>.h.
+#! xrender_d3d12_test_shader(<name> <file> <profile> <entry> [defines...]): compiles one kernel into Shaders/Test_<name>.h.
 function(xrender_d3d12_test_shader name file profile entry)
+    set(defines "")
+    foreach(d ${ARGN})
+        list(APPEND defines "-D" "${d}")
+    endforeach()
     set(out "${XRENDERD3D12_TESTS_SHADER_DIR}/Test_${name}.h")
     file(GLOB includes "${XRENDERD3D12_SHADER_SOURCE_DIR}/*.hlsl" "${XRENDERD3D12_SHADER_SOURCE_DIR}/*.hlsli"
         "${XRENDERD3D12_SHADER_SOURCE_DIR}/*.h" "${CMAKE_CURRENT_SOURCE_DIR}/Shaders/*.hlsli" "${XRENDERD3D12_XEGTAO_DIR}/*.hlsli"
-        "${XRENDERD3D12_XEGTAO_DIR}/*.h")
+        "${XRENDERD3D12_XEGTAO_DIR}/*.h" "${XRENDERD3D12_SMAA_DIR}/*.hlsl")
     add_custom_command(
         OUTPUT "${out}"
         COMMAND "${CMAKE_COMMAND}" -E make_directory "${XRENDERD3D12_TESTS_SHADER_DIR}"
         COMMAND "${XRENDERD3D12_DXC}" -nologo -T ${profile} -E ${entry} -Zpr -O3 -Qstrip_reflect
                 -I "${XRENDERD3D12_SHADER_SOURCE_DIR}" -I "${CMAKE_CURRENT_SOURCE_DIR}/Shaders" -I "${XRENDERD3D12_XEGTAO_DIR}"
-                -Vn "g_Test_${name}" -Fh "${out}" "${file}"
+                -I "${XRENDERD3D12_SMAA_DIR}" ${defines} -Vn "g_Test_${name}" -Fh "${out}" "${file}"
         MAIN_DEPENDENCY "${file}"
         DEPENDS ${includes}
         COMMENT "dxc (tests) ${entry} -> Test_${name}.h"
@@ -40,6 +44,15 @@ set(headers "${CMAKE_CURRENT_SOURCE_DIR}/Shaders/TestHeaders.hlsl")
 foreach(k Oct GBufferNormal Hdr HdrStats ToneMap HdrOutput SkyGlow FrameAverage Exposure CacheCell CacheLookup CacheAdd CacheRead CachePoke
           LightmapLight RenderMode Fxaa)
     xrender_d3d12_test_shader(${k} "${headers}" cs_6_0 CS${k})
+endforeach()
+# SMAA 1x (Smaa.hlsli with third_party/smaa's SMAA.hlsl, SmaaBlend.hlsli): its edges and its blending at the high
+# preset, its weights at the low, high and ultra presets.
+set(smaa "${CMAKE_CURRENT_SOURCE_DIR}/Shaders/TestSmaa.hlsl")
+xrender_d3d12_test_shader(SmaaEdges "${smaa}" cs_6_0 CSSmaaEdges SMAA_PRESET_HIGH)
+xrender_d3d12_test_shader(SmaaBlend "${smaa}" cs_6_0 CSSmaaBlend SMAA_PRESET_HIGH)
+foreach(q Low High Ultra)
+    string(TOUPPER "${q}" preset)
+    xrender_d3d12_test_shader(SmaaWeights${q} "${smaa}" cs_6_0 CSSmaaWeights SMAA_PRESET_${preset})
 endforeach()
 # The path tracer's functions, PathTrace.hlsl included as it is (Shader Model 6.5, as Shaders.cmake compiles it).
 set(pathtrace "${CMAKE_CURRENT_SOURCE_DIR}/Shaders/TestPathTrace.hlsl")
@@ -79,7 +92,7 @@ source_group("Shaders\\Generated" FILES ${XRENDERD3D12_TESTS_SHADER_HEADERS})
 add_executable(XRenderD3D12Tests ${XRENDERD3D12_TESTS_SOURCES} ${XRENDERD3D12_TESTS_HLSL} ${XRENDERD3D12_TESTS_SHADER_HEADERS})
 set_target_properties(XRenderD3D12Tests PROPERTIES FOLDER "Renderer")
 target_include_directories(XRenderD3D12Tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}" "${CMAKE_CURRENT_SOURCE_DIR}/.."
-    "${XRENDERD3D12_TESTS_SHADER_DIR}")
+    "${XRENDERD3D12_TESTS_SHADER_DIR}" "${XRENDERD3D12_SMAA_DIR}")
 target_compile_definitions(XRenderD3D12Tests PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX)
 target_compile_options(XRenderD3D12Tests PRIVATE /W4)
 target_link_libraries(XRenderD3D12Tests PRIVATE d3d12 dxgi)

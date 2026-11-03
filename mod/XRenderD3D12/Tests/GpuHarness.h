@@ -25,8 +25,9 @@
 //	  10 SRV t2 space5  SPTLight[] (g_PTLights of PathShade.hlsli), the
 //	                    same as 4
 //	  11 tables of the descriptor heap, unbounded: t0 space4 the raw
-//	  .. buffers (g_Buffers: 0 the scene's corners), t0 space1, 2, 3 and 6
-//	  15 the textures (null ones)
+//	  .. buffers (g_Buffers: 0 the scene's corners), t0 space1 the 2D
+//	  15 textures (g_Textures: SDispatch::Textures, null ones after them),
+//	     t0 space2, 3 and 6 the other textures (null ones)
 //	  static samplers s0-s4 as Common.hlsli has them
 //	Every run waits for the GPU: the tests are small.
 //
@@ -73,6 +74,16 @@ namespace XrTest
     float vTest2[4] = {};
   };
 
+  //! The most textures of a run (SDispatch::Textures).
+  constexpr size_t MAX_TEST_TEXTURES = 8;
+  //! A 2D texture of a run: one level of nWidth x nHeight texels in Format (R8G8B8A8_UNORM, R8G8_UNORM, R8_UNORM,
+  //! R16G16B16A16_FLOAT, R32G32B32A32_FLOAT or R32_FLOAT), Data its texels row by row from the top, packed.
+  struct STestTexture
+  {
+    uint32 nWidth = 0, nHeight = 0;
+    DXGI_FORMAT Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+    std::vector<uint8_t> Data;
+  };
   //! A scene for rays: one instance of triangles (three corners each, not indexed, opaque) with the identity transform,
   //! its BLAS and TLAS built for the run. Its corners are g_Buffers[0] (12 bytes each), which Instance.nGeom and
   //! Instance.nLayout name as the renderer's would.
@@ -97,6 +108,7 @@ namespace XrTest
     size_t nLightBytes = 0;
     const void *pFrame = nullptr;         //!< b0: an SFrameConstants (else zeros)
     const SRayScene *pScene = nullptr;    //!< t0, t1 space5 and g_Buffers (needs HasRaytracing)
+    std::vector<STestTexture> Textures;   //!< g_Textures[0..] (t0 space1), at most MAX_TEST_TEXTURES
     size_t nOut = 1;
   };
 
@@ -126,6 +138,11 @@ namespace XrTest
     ID3D12PipelineState *Pipeline(const SBytecode &Shader);
     //! The scene's BLAS and TLAS built into the open list (the buffers kept in Keep until the run ends); the TLAS.
     D3D12_GPU_VIRTUAL_ADDRESS BuildScene(const SRayScene &Scene, std::vector<ComPtr<ID3D12Resource>> &Keep);
+    //! The texture uploaded by the open list into a resource of its own (kept in Keep until the run ends), its SRV in
+    //! the heap's slot nSlot.
+    void UploadTexture(const STestTexture &Texture, UINT nSlot, std::vector<ComPtr<ID3D12Resource>> &Keep);
+    //! A null 2D texture's SRV in the heap's slot nSlot.
+    void NullTexture(UINT nSlot);
     D3D12_CPU_DESCRIPTOR_HANDLE CpuHandle(UINT n) const;
     D3D12_GPU_DESCRIPTOR_HANDLE GpuHandle(UINT n) const;
     void Execute();
@@ -147,7 +164,8 @@ namespace XrTest
     ComPtr<ID3D12InfoQueue> m_pInfoQueue;
     ComPtr<ID3D12Device5> m_pDevice5;               //!< with raytracing tier 1.1, else null
     ComPtr<ID3D12GraphicsCommandList4> m_pList4;
-    ComPtr<ID3D12DescriptorHeap> m_pHeap;           //!< shader visible: 0 g_Buffers[0], 1-4 null textures
+    ComPtr<ID3D12DescriptorHeap> m_pHeap;           //!< shader visible: 0 g_Buffers[0], 1-4 null textures, TEXTURE_SLOT.. the
+                                                    //!< run's g_Textures (null ones after them)
     UINT m_nDescriptorSize = 0;
   };
 

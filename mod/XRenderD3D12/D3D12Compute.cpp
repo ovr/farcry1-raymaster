@@ -57,6 +57,14 @@
 #include "PathTraceSpecular_CS.h"
 #include "PathCacheUpdate_CS.h"
 #include "PathCacheResolve_CS.h"
+#include "SmaaEdgesLow_CS.h"
+#include "SmaaEdgesMedium_CS.h"
+#include "SmaaEdgesHigh_CS.h"
+#include "SmaaEdgesUltra_CS.h"
+#include "SmaaWeightsLow_CS.h"
+#include "SmaaWeightsMedium_CS.h"
+#include "SmaaWeightsHigh_CS.h"
+#include "SmaaWeightsUltra_CS.h"
 #if XRENDERD3D12_NRD
 #include "PathNrdPack_CS.h"
 #include "PathNrdResolve_CS.h"
@@ -134,6 +142,14 @@ const SKernel s_Kernels[eD3D12K_Num] =
 #endif
   { "path tracer (radiance cache)", g_PathCacheUpdate_CS, sizeof(g_PathCacheUpdate_CS), true },
   { "path tracer (radiance cache's light)", g_PathCacheResolve_CS, sizeof(g_PathCacheResolve_CS), true },
+  { "SMAA edges (low)", g_SmaaEdgesLow_CS, sizeof(g_SmaaEdgesLow_CS) },
+  { "SMAA edges (medium)", g_SmaaEdgesMedium_CS, sizeof(g_SmaaEdgesMedium_CS) },
+  { "SMAA edges (high)", g_SmaaEdgesHigh_CS, sizeof(g_SmaaEdgesHigh_CS) },
+  { "SMAA edges (ultra)", g_SmaaEdgesUltra_CS, sizeof(g_SmaaEdgesUltra_CS) },
+  { "SMAA weights (low)", g_SmaaWeightsLow_CS, sizeof(g_SmaaWeightsLow_CS) },
+  { "SMAA weights (medium)", g_SmaaWeightsMedium_CS, sizeof(g_SmaaWeightsMedium_CS) },
+  { "SMAA weights (high)", g_SmaaWeightsHigh_CS, sizeof(g_SmaaWeightsHigh_CS) },
+  { "SMAA weights (ultra)", g_SmaaWeightsUltra_CS, sizeof(g_SmaaWeightsUltra_CS) },
 };
 static_assert(sizeof(s_Kernels) / sizeof(s_Kernels[0]) == eD3D12K_Num, "a kernel for each ED3D12Kernel");
 

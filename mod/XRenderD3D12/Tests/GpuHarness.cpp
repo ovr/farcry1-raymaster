@@ -18,6 +18,9 @@
 
 namespace
 {
+  //! The descriptor heap's first slot of g_Textures (t0 space1): a run's textures, then null ones.
+  constexpr UINT TEXTURE_SLOT = 8;
+
   void Ok(HRESULT hr, const char *szWhat)
   {
     if (FAILED(hr))
@@ -133,10 +136,11 @@ XrTest::CGpu::CGpu()
   Ok(m_pDevice->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&m_pFence)), "CreateFence");
   m_hEvent = CreateEventW(nullptr, FALSE, FALSE, nullptr);
 
-  // The descriptor heap: 0 g_Buffers[0] (a scene's corners, null without one), 1-4 null textures (2D, cube, 2D array, 3D).
+  // The descriptor heap: 0 g_Buffers[0] (a scene's corners, null without one), 1-4 null textures (2D, cube, 2D array, 3D),
+  // TEXTURE_SLOT.. g_Textures (a run's textures, null ones).
   D3D12_DESCRIPTOR_HEAP_DESC HeapDesc = {};
   HeapDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
-  HeapDesc.NumDescriptors = 8;
+  HeapDesc.NumDescriptors = TEXTURE_SLOT + (UINT)MAX_TEST_TEXTURES;
   HeapDesc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
   Ok(m_pDevice->CreateDescriptorHeap(&HeapDesc, IID_PPV_ARGS(&m_pHeap)), "CreateDescriptorHeap");
   m_nDescriptorSize = m_pDevice->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
@@ -166,6 +170,8 @@ XrTest::CGpu::CGpu()
         Null.Texture3D.MipLevels = 1;
       m_pDevice->CreateShaderResourceView(nullptr, &Null, CpuHandle(1 + i));
     }
+    for (UINT i = 0; i < MAX_TEST_TEXTURES; i++)
+      NullTexture(TEXTURE_SLOT + i);
   }
 
   // The root signature of GpuHarness.h.
@@ -254,6 +260,70 @@ XrTest::ComPtr<ID3D12Resource> XrTest::CGpu::Buffer(D3D12_HEAP_TYPE eHeap, size_
   // Committed resources of the default heap start zeroed (no D3D12_HEAP_FLAG_CREATE_NOT_ZEROED).
   Ok(m_pDevice->CreateCommittedResource(&Heap, D3D12_HEAP_FLAG_NONE, &Desc, eState, nullptr, IID_PPV_ARGS(&pRes)), "CreateCommittedResource");
   return pRes;
+}
+
+void XrTest::CGpu::NullTexture(UINT nSlot)
+{
+  D3D12_SHADER_RESOURCE_VIEW_DESC Null = {};
+  Null.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+  Null.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+  Null.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
+  Null.Texture2D.MipLevels = 1;
+  m_pDevice->CreateShaderResourceView(nullptr, &Null, CpuHandle(nSlot));
+}
+
+void XrTest::CGpu::UploadTexture(const STestTexture &Texture, UINT nSlot, std::vector<ComPtr<ID3D12Resource>> &Keep)
+{
+  UINT nTexel = 0;
+  switch (Texture.Format)
+  {
+  case DXGI_FORMAT_R8_UNORM: nTexel = 1; break;
+  case DXGI_FORMAT_R8G8_UNORM: nTexel = 2; break;
+  case DXGI_FORMAT_R8G8B8A8_UNORM: case DXGI_FORMAT_R32_FLOAT: nTexel = 4; break;
+  case DXGI_FORMAT_R16G16B16A16_FLOAT: nTexel = 8; break;
+  case DXGI_FORMAT_R32G32B32A32_FLOAT: nTexel = 16; break;
+  default: throw std::runtime_error("a test texture's format the harness does not upload");
+  }
+  const size_t nRow = (size_t)Texture.nWidth * nTexel;
+  if (!Texture.nWidth || !Texture.nHeight || Texture.Data.size() != nRow * Texture.nHeight)
+    throw std::runtime_error("a test texture's size does not match its data");
+  D3D12_HEAP_PROPERTIES Heap = {};
+  Heap.Type = D3D12_HEAP_TYPE_DEFAULT;
+  D3D12_RESOURCE_DESC Desc = {};
+  Desc.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
+  Desc.Width = Texture.nWidth;
+  Desc.Height = Texture.nHeight;
+  Desc.DepthOrArraySize = 1;
+  Desc.MipLevels = 1;
+  Desc.Format = Texture.Format;
+  Desc.SampleDesc.Count = 1;
+  ComPtr<ID3D12Resource> pTexture;
+  Ok(m_pDevice->CreateCommittedResource(&Heap, D3D12_HEAP_FLAG_NONE, &Desc, D3D12_RESOURCE_STATE_COPY_DEST, nullptr, IID_PPV_ARGS(&pTexture)),
+     "CreateCommittedResource (texture)");
+  // The rows at the pitch a copy wants.
+  D3D12_PLACED_SUBRESOURCE_FOOTPRINT Layout = {};
+  UINT64 nBytes = 0;
+  m_pDevice->GetCopyableFootprints(&Desc, 0, 1, 0, &Layout, nullptr, nullptr, &nBytes);
+  std::vector<uint8_t> Rows((size_t)nBytes);
+  for (UINT y = 0; y < Texture.nHeight; y++)
+    memcpy(Rows.data() + (size_t)Layout.Offset + (size_t)y * Layout.Footprint.RowPitch, Texture.Data.data() + y * nRow, nRow);
+  ComPtr<ID3D12Resource> pStaging = Upload(Rows.data(), Rows.size());
+  D3D12_TEXTURE_COPY_LOCATION Dst = {}, Src = {};
+  Dst.pResource = pTexture.Get();
+  Dst.Type = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
+  Src.pResource = pStaging.Get();
+  Src.Type = D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT;
+  Src.PlacedFootprint = Layout;
+  m_pList->CopyTextureRegion(&Dst, 0, 0, 0, &Src, nullptr);
+  const D3D12_RESOURCE_BARRIER Read = Transition(pTexture.Get(), D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+  m_pList->ResourceBarrier(1, &Read);
+  D3D12_SHADER_RESOURCE_VIEW_DESC View = {};
+  View.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+  View.Format = Texture.Format;
+  View.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
+  View.Texture2D.MipLevels = 1;
+  m_pDevice->CreateShaderResourceView(pTexture.Get(), &View, CpuHandle(nSlot));
+  Keep.insert(Keep.end(), { pTexture, pStaging });
 }
 
 XrTest::ComPtr<ID3D12Resource> XrTest::CGpu::Upload(const void *pData, size_t nBytes)
@@ -412,6 +482,8 @@ std::vector<uint32> XrTest::CGpu::Run(const SDispatch &d)
   ComPtr<ID3D12Resource> pRayInstances = Upload(d.pScene ? &d.pScene->Instance : nullptr, sizeof(SRayInstance));
   if (d.pScene && !HasRaytracing())
     throw std::runtime_error("a scene for rays on a device without raytracing tier 1.1");
+  if (d.Textures.size() > MAX_TEST_TEXTURES)
+    throw std::runtime_error("more test textures than the harness binds");
   ComPtr<ID3D12Resource> pOut = Buffer(D3D12_HEAP_TYPE_DEFAULT, nOutBytes, D3D12_RESOURCE_STATE_COMMON, true);
   ComPtr<ID3D12Resource> pReadback = Buffer(D3D12_HEAP_TYPE_READBACK, nOutBytes, D3D12_RESOURCE_STATE_COPY_DEST, false);
 
@@ -420,6 +492,8 @@ std::vector<uint32> XrTest::CGpu::Run(const SDispatch &d)
   std::vector<ComPtr<ID3D12Resource>> Keep;
   // Without a scene the root SRV of t0 space5 names the input: no kernel without one reads it.
   const D3D12_GPU_VIRTUAL_ADDRESS nScene = d.pScene ? BuildScene(*d.pScene, Keep) : pIn->GetGPUVirtualAddress();
+  for (size_t i = 0; i < d.Textures.size(); i++)
+    UploadTexture(d.Textures[i], TEXTURE_SLOT + (UINT)i, Keep);
   D3D12_RESOURCE_BARRIER Before[] = {
     Transition(pOut.Get(), D3D12_RESOURCE_STATE_COMMON, D3D12_RESOURCE_STATE_UNORDERED_ACCESS),
     Transition(m_pCache.Get(), D3D12_RESOURCE_STATE_COMMON, D3D12_RESOURCE_STATE_UNORDERED_ACCESS),
@@ -440,7 +514,7 @@ std::vector<uint32> XrTest::CGpu::Run(const SDispatch &d)
   ID3D12DescriptorHeap *pHeaps[] = { m_pHeap.Get() };
   m_pList->SetDescriptorHeaps(1, pHeaps);
   for (UINT i = 0; i < 5; i++)
-    m_pList->SetComputeRootDescriptorTable(11 + i, GpuHandle(i));
+    m_pList->SetComputeRootDescriptorTable(11 + i, GpuHandle(i == 1 ? TEXTURE_SLOT : i));
   m_pList->Dispatch(d.nGroups[0], d.nGroups[1], d.nGroups[2]);
   D3D12_RESOURCE_BARRIER After[] = {
     Transition(pOut.Get(), D3D12_RESOURCE_STATE_UNORDERED_ACCESS, D3D12_RESOURCE_STATE_COPY_SOURCE),
@@ -449,6 +523,9 @@ std::vector<uint32> XrTest::CGpu::Run(const SDispatch &d)
   m_pList->ResourceBarrier(2, After);
   m_pList->CopyBufferRegion(pReadback.Get(), 0, pOut.Get(), 0, nOutBytes);
   Execute();
+  // The next run sees null textures where it has none (the GPU is done with this one's).
+  for (size_t i = 0; i < d.Textures.size(); i++)
+    NullTexture(TEXTURE_SLOT + (UINT)i);
 
   std::vector<uint32> Out(d.nOut * 4);
   void *p = nullptr;

@@ -61,9 +61,11 @@ instructions and is not committed (git-ignored). The references of the modules a
   `third_party/amd-fsr-sdk` is the part of the AMD FSR SDK that XRenderD3D12 uses; its 57 MB
   upscaler DLL is not committed but downloaded by CMake. `third_party/xegtao` (Intel XeGTAO) and
   `third_party/fidelityfx-cacao` (AMD FidelityFX CACAO) are XRenderD3D12's ambient occlusion,
-  `third_party/directx-headers` the d3dx12 headers that CACAO's host includes. Every library added
-  there needs a matching permission in `LICENSE-EXCEPTION.md` unless its license is GPL-compatible
-  and it comes with its source.
+  `third_party/directx-headers` the d3dx12 headers that CACAO's host includes. `third_party/smaa`
+  (SMAA) is XRenderD3D12's SMAA 1x, from the repository's last commit, not a tag: its last tag has
+  an older license (its `README.md` says why). Every library added there needs a matching
+  permission in `LICENSE-EXCEPTION.md` unless its license is GPL-compatible and it comes with its
+  source.
   `third_party/nrd` (NVIDIA NRD, the path tracer's denoiser of XRenderD3D12), `third_party/shadermake`
   and `third_party/mathlib` (its shaders' build tool and its math library) are git submodules of
   NVIDIA's repositories, at the tag v4.18.0 and the commits that tag names; the repository has their
@@ -222,7 +224,8 @@ instructions and is not committed (git-ignored). The references of the modules a
 - The features and their variables, described in `mod/XRenderD3D12/README.md`: the window and full
   screen (`r_Width`, `r_Height`, `r_Fullscreen` applied while the game runs); the upscaler
   (`d3d12_Upscaler`, AMD FSR, on the HDR scene's light `d3d12_UpscaleHdr`); the anti-aliasing
-  without an upscaler (`d3d12_AA`: FXAA `Shaders/Fxaa.hlsli`, `d3d12_AAQuality`, `PostAA.cpp`); HDR (`r_HDRRendering`, `d3d12_ToneMap` with the neutral tone map
+  without an upscaler (`d3d12_AA`: FXAA `Shaders/Fxaa.hlsli`, SMAA 1x `third_party/smaa` with
+  `Shaders/Smaa.hlsli`, `SmaaBlend.hlsli`, `AntiAliasSmaa.hlsl`; `d3d12_AAQuality`, `PostAA.cpp`); HDR (`r_HDRRendering`, `d3d12_ToneMap` with the neutral tone map
   that keeps the hue, `Shaders/HdrToneMap.hlsli`, the automatic exposure's meter by a histogram
   with the sky kept below the knee `d3d12_ExposureMeter`, `Shaders/HdrExposure.hlsli`, the bloom,
   colour grading, the HDR output `d3d12_HDROutput` with its highlights above the game's white
