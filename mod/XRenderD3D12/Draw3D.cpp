@@ -844,14 +844,14 @@ void CD3D12Renderer::DrawLeafItem(const SRenderItem &it)
         dc.nTex3 = pBump->GetSRV();
         dc.vParams1[1] = 1;
       }
-      // d3d12_LightmapSpecular: over a dot3 light map the original's bump shaders add the highlight of a lamp baked
-      // into it (Research's cyan wall lamp on the cave's rock and the machines below it), with the material's specular
-      // colour (white for the templates without one) and the texture's alpha as the gloss, whatever the template; the
-      // main view's draws only (not the paths' G-buffer nor the scene for rays).
-      if (!(dc.nFlags & DF_LIGHTING) && CV_d3d12_LightmapSpecular && !bPathDraw && !m_bDepthPrepass && !m_bRayCaptureWalk &&
-          !(pObj->m_ObjFlags & FOB_ZPASS) && HasNormal(nFormat))
+      // d3d12_LightmapSpecular: over a dot3 light map the original's specular bump templates add the highlight of a
+      // lamp baked into it (Research's cyan wall lamp on the cave's rock and the machines below it), with the material's
+      // specular colour and the texture's alpha as the gloss; the diffuse ones (Research's concrete walls) have none.
+      // The main view's draws only (not the paths' G-buffer nor the scene for rays).
+      if (!(dc.nFlags & DF_LIGHTING) && CV_d3d12_LightmapSpecular && Props.bSpecular && !bPathDraw && !m_bDepthPrepass &&
+          !m_bRayCaptureWalk && !(pObj->m_ObjFlags & FOB_ZPASS) && HasNormal(nFormat))
       {
-        const CFColor Spec = Props.bSpecular && it.pRes && it.pRes->m_LMaterial ? it.pRes->m_LMaterial->Front.m_Specular : CFColor(1, 1, 1, 1);
+        const CFColor Spec = it.pRes && it.pRes->m_LMaterial ? it.pRes->m_LMaterial->Front.m_Specular : CFColor(1, 1, 1, 1);
         if (AddLightmapLamps(dc, pObj, World, pLB))
         {
           dc.nFlags |= DF_SPECULAR;
