@@ -1638,6 +1638,10 @@ and lists theirs (`NamesObjects`).
   - `d3d12_WaterDebug` 31 the light the water scatters, 32 the sun's light in it over its mean (grey
     1, white 2: the shafts), 33 the share of the scene left (with `r_HDRRendering 0`); the blended
     objects after the pass show the same term.
+  - The cost at 3840 x 2160 (`d3d12_GpuTimes`, `Under_carrier.ini`'s five views, no upscaler): the
+    pass (`underwater`) 1.12-1.33 ms, the frame 2.20-3.29 -> 3.38-4.48 ms; with the rays' sun
+    shadows and reflections the pass 1.09-1.32 ms, the frame 3.02-4.15 -> 4.24-5.34 ms. Above the
+    water none of it runs.
 - The sun's glint (`d3d12_WaterGlint`, 1; 0 draws the frames of the water before it; not saved;
   `d3d12_WaterSunGlint`, a highlight fitted by eye and off as in the game, is gone with it) is the
   sun mirrored by the waves' facets (`Shaders/WaterLight.hlsli`): Beckmann's distribution of the
