@@ -81,6 +81,7 @@
 #include "OceanMips_CS.h"
 #include "OceanFoam_CS.h"
 #include "OceanFoamView_CS.h"
+#include "OceanCaustics_CS.h"
 #if XRENDERD3D12_NRD
 #include "PathNrdPack_CS.h"
 #include "PathNrdResolve_CS.h"
@@ -183,6 +184,7 @@ const SKernel s_Kernels[eD3D12K_Num] =
   { "ocean (mip levels)", g_OceanMips_CS, sizeof(g_OceanMips_CS) },
   { "ocean (foam)", g_OceanFoam_CS, sizeof(g_OceanFoam_CS) },
   { "ocean (foam view)", g_OceanFoamView_CS, sizeof(g_OceanFoamView_CS) },
+  { "ocean (caustics)", g_OceanCaustics_CS, sizeof(g_OceanCaustics_CS) },
 };
 static_assert(sizeof(s_Kernels) / sizeof(s_Kernels[0]) == eD3D12K_Num, "a kernel for each ED3D12Kernel");
 

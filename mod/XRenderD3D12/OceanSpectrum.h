@@ -96,6 +96,11 @@ namespace OceanSpectrum
   //! s: the foam's kernels run at most this often (no more work at a higher frame rate; between, the water reads the
   //! last view).
   constexpr double FOAM_STEP = 1.0 / 120;
+  //! The caustics' cascades (XR_CAUSTICS_CASCADES: the middle and the short one, from XR_CAUSTICS_FIRST) and the first of
+  //! each one's four depths (m), each of the others twice the one before (WaterCaustics.hlsli's CausticsAtDepth): the short
+  //! waves (0.1-0.7 m) focus the sun at 1-8 m of depth at the drawn steepness, the middle ones (0.7-4 m) at 7-50 m.
+  constexpr int CAUSTICS_CASCADES = 2, CAUSTICS_FIRST = 1;
+  constexpr double CAUSTICS_DEPTH[CAUSTICS_CASCADES] = { 2.0, 0.5 };
 
   //! The share of the sea white with whitecaps at the wind U (m/s), Monahan's.
   inline double WhitecapCoverage(double U)

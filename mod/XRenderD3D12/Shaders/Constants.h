@@ -398,6 +398,16 @@ struct SDepthTileConstants
 // The bores in the surf zone at a time (from where the swell breaks to the shore: on a plane beach of slope b the travel
 // time is 2 sqrt(h_b / g) / b, a period at 1:14 and 1 m; SurfFoam, its test).
 #define XR_FOAM_SURF_BORES  1
+// The caustics of the FFT ocean (OceanFFT.hlsl's XR_OCEAN_CAUSTICS, General.hlsl's DF_CAUSTICS): the cascades whose waves
+// make them (the middle and the short one: the long waves focus the sun beyond 50 m), the first of them, the depths of
+// each (m, in RGBA; OceanSpectrum.h's CAUSTICS_DEPTH), the texels a ray may move at most from where it crossed the
+// surface (the margin around a group's texels), a group's texels a side and the mip levels (the last 16 x 16 texels: a
+// pixel larger than its texel sees the cascade's mean).
+#define XR_CAUSTICS_CASCADES 2
+#define XR_CAUSTICS_FIRST   1
+#define XR_CAUSTICS_MARGIN  8
+#define XR_CAUSTICS_TILE    32
+#define XR_CAUSTICS_MIPS    5
 
 //! b0 of the FFT ocean's kernels (OceanFFT.hlsl, OceanFFT.cpp).
 struct SOceanConstants
@@ -414,6 +424,8 @@ struct SOceanConstants
                                   //!< the ramp below it over which they turn white, z the share of the foam of each texel
                                   //!< spread to each of its four neighbours since the frame before (OceanFFT.hlsli's
                                   //!< FoamSpread; OceanSpectrum::FOAM_SPREAD)
+  XR_FLOAT4(vSun);                //!< the caustics (XR_OCEAN_CAUSTICS): xyz towards the sun (z > 0), w the slopes' factor (as drawn)
+  XR_FLOAT4_ARRAY(vCausticsDepths, XR_CAUSTICS_CASCADES);  //!< each caustics cascade's depths (m) of its texels' x, y, z, w
 };
 
 //! b0 of a level of the bloom from one twice its size (Bloom.hlsl, Hdr.cpp).

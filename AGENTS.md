@@ -251,7 +251,8 @@ instructions and is not committed (git-ignored). The references of the modules a
   the light through the crests `d3d12_WaterCrestLight`, `Shaders/WaterLight.hlsli`; the FFT ocean's waves
   `d3d12_WaterFFT`, `d3d12_WaterWind`, `d3d12_WaterSlope`, `d3d12_WaterChop`, `OceanFFT.cpp`, `OceanSpectrum.h`; its foam, the
   whitecaps, the shore's breaking waves and the swell's surf, `d3d12_WaterFoam`, `d3d12_WaterSurf`, `FoamPattern.h`,
-  `Shaders/WaterFoam.hlsli`); the templates with shaders of their own
+  `Shaders/WaterFoam.hlsli`; its caustics on the sea floor `d3d12_WaterCaustics`, `Shaders/WaterCaustics.hlsli`); the
+  templates with shaders of their own
   (`TemplateFx.cpp`, Volcano's lava `LavaVolume`) and the fog of what is added; the far vegetation
   sprites (their pictures blended, `d3d12_SpriteBlend`, `FarSpriteAngles.h`) and the terrain's detail layers; the video options' render modes over the scene
   (`r_RenderMode` with `r_Glare`: Improved, Paradise, Cold, Cartoon; `d3d12_RenderMode`,
