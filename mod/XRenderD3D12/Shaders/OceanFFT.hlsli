@@ -142,9 +142,9 @@ float4 OceanFieldsAt(uint c, uint s, float2 x)
   return lerp(lerp(a, b, t.x), lerp(d, e, t.x), t.y);
 }
 
-//! The waves' texel X of cascade c (the header's): fChop the displacement's factor (0: none, the fields at X), fLeastJ the
-//! least determinant of its Jacobian, fTexel the cascade's texel (m), fHeightWeight its height's weight.
-float4 OceanWaves(uint c, uint2 X, float fChop, float fLeastJ, float fTexel, float fHeightWeight)
+//! The point x0 of cascade c (texels) that the displacement moves to texel X: fChop the displacement's factor (0: none, X),
+//! fLeastJ the least determinant of its Jacobian, fTexel the cascade's texel (m).
+float2 OceanSource(uint c, uint2 X, float fChop, float fLeastJ, float fTexel)
 {
   float2 x0 = float2(X);
   if (fChop > 0)
@@ -161,6 +161,14 @@ float4 OceanWaves(uint c, uint2 X, float fChop, float fLeastJ, float fTexel, flo
       x0 -= float2(jyy * r.x - jxy * r.y, jxx * r.y - jxy * r.x) / fDet;
     }
   }
+  return x0;
+}
+
+//! The waves' texel X of cascade c (the header's): fChop the displacement's factor (0: none, the fields at X), fLeastJ the
+//! least determinant of its Jacobian, fTexel the cascade's texel (m), fHeightWeight its height's weight.
+float4 OceanWaves(uint c, uint2 X, float fChop, float fLeastJ, float fTexel, float fHeightWeight)
+{
+  const float2 x0 = OceanSource(c, X, fChop, fLeastJ, fTexel);
   const float4 a = OceanFieldsAt(c, 0, x0), b = OceanFieldsAt(c, 1, x0);
   float2 vSlope = b.xy;
   if (fChop > 0)
@@ -170,6 +178,30 @@ float4 OceanWaves(uint c, uint2 X, float fChop, float fLeastJ, float fTexel, flo
     vSlope = float2(jyy * vSlope.x - jxy * vSlope.y, jxx * vSlope.y - jxy * vSlope.x) / fDet;
   }
   return float4(vSlope, a.z * fHeightWeight, dot(vSlope, vSlope));
+}
+
+//! The whitecaps' foam of a texel fCentre spread over the sea by the share d of it (at most 0.25) to each of its four
+//! neighbours and theirs (fAround their sum) to it: the patches a breaking crest leaves grow as they fade (the foam's
+//! diffusion, FTCS: none made or lost, the sea's share white kept).
+float FoamSpread(float fCentre, float fAround, float d)
+{
+  return fCentre + d * (fAround - 4 * fCentre);
+}
+
+//! The foam's texel X of cascade c (the header's arguments as OceanWaves'): x the share of it white with the whitecaps'
+//! foam: where the surface at the point moved there is squeezed below fBreak (the first order of the Jacobian's
+//! determinant, 1 + fChop div D: a gaussian, so that its threshold sets the share breaking exactly; the determinant's
+//! own second order lifts its lowest values, at 12 m/s only 0.009 % of the long cascade below the threshold of 0.23 %;
+//! fInvRamp 1 / the width of the ramp to all white below it) the crest breaks, else the foam of the frame before
+//! (fBefore) fades (fKeep of it left; the texel stays at its place on the sea, so the foam stays behind the crest that
+//! made it); yz the horizontal displacement there (m: X less it is the point moved there, so that what is drawn there
+//! moves with the water), w the height (m).
+float4 OceanFoam(uint c, uint2 X, float fChop, float fLeastJ, float fTexel, float fBefore, float fKeep, float fBreak, float fInvRamp)
+{
+  const float2 x0 = OceanSource(c, X, fChop, fLeastJ, fTexel);
+  const float4 a = OceanFieldsAt(c, 0, x0), b = OceanFieldsAt(c, 1, x0);
+  const float fBreaking = saturate((fBreak - (1 + fChop * (b.z + b.w))) * fInvRamp);
+  return float4(max(fBefore * fKeep, fBreaking), fChop * a.xy, a.z);
 }
 
 #endif

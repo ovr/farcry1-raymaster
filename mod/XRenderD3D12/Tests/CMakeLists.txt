@@ -43,7 +43,7 @@ endfunction()
 # The headers that stand alone (Shader Model 6.0).
 set(headers "${CMAKE_CURRENT_SOURCE_DIR}/Shaders/TestHeaders.hlsl")
 foreach(k Oct GBufferNormal Hdr HdrStats ToneMap HdrOutput SkyGlow FrameAverage Exposure CacheCell CacheLookup CacheAdd CacheRead CachePoke
-          LightmapLight RenderMode Fxaa ArrayCoords BlendPictures PictureNoise WaterGlint WaterCap WaterCrest)
+          LightmapLight RenderMode Fxaa ArrayCoords BlendPictures PictureNoise WaterGlint WaterCap WaterCrest Foam FoamMix FoamLight FoamContact FoamSurf)
     xrender_d3d12_test_shader(${k} "${headers}" cs_6_0 CS${k})
 endforeach()
 # SMAA 1x (Smaa.hlsli with third_party/smaa's SMAA.hlsl, SmaaBlend.hlsli): its edges and its blending at the high
@@ -80,10 +80,11 @@ foreach(k LeafSide Cosine Checkerboard Layout PixelSurface TerrainShare SurfaceN
 endforeach()
 # The FFT ocean's kernels, from the renderer's own source as Shaders.cmake compiles them (GpuHarness.h's RunOcean runs
 # them as OceanFFT.cpp does).
-foreach(k Rows Columns Waves Mips)
+foreach(k Rows Columns Waves Mips Foam)
     string(TOUPPER "${k}" kd)
     xrender_d3d12_test_shader(Ocean${k} "${XRENDERD3D12_SHADER_SOURCE_DIR}/OceanFFT.hlsl" cs_6_0 CSMain XR_OCEAN_${kd})
 endforeach()
+xrender_d3d12_test_shader(OceanFoamView "${XRENDERD3D12_SHADER_SOURCE_DIR}/OceanFFT.hlsl" cs_6_0 CSMain XR_OCEAN_FOAM_VIEW)
 # The renderer's own kernel, from its own source.
 xrender_d3d12_test_shader(PathCacheResolve "${XRENDERD3D12_SHADER_SOURCE_DIR}/PathTrace.hlsl" cs_6_5 CSCacheResolve)
 
@@ -113,6 +114,7 @@ set(XRENDERD3D12_TESTS_SOURCES
     FarSpriteTests.cpp
     WaterLightTests.cpp
     OceanTests.cpp
+    FoamTests.cpp
 )
 file(GLOB XRENDERD3D12_TESTS_HLSL "${CMAKE_CURRENT_SOURCE_DIR}/Shaders/*.hlsl" "${CMAKE_CURRENT_SOURCE_DIR}/Shaders/*.hlsli")
 set_source_files_properties(${XRENDERD3D12_TESTS_HLSL} PROPERTIES HEADER_FILE_ONLY ON)

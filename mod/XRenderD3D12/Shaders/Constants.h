@@ -385,6 +385,19 @@ struct SDepthTileConstants
 #define XR_OCEAN_TILE2      6.9
 #define XR_OCEAN_MIPS       9
 #define XR_OCEAN_LEVEL4     16
+// The sea's foam's pattern (FoamPattern.h, Water.cpp, WaterFoam.hlsli): its texels a side and the tiles (m) of its two
+// samples, the second turned by 37 degrees (cos, sin).
+#define XR_FOAM_SIZE        512
+#define XR_FOAM_TILE0       3.7
+#define XR_FOAM_TILE1       2.3
+#define XR_FOAM_TURN_COS    0.79864
+#define XR_FOAM_TURN_SIN    0.60182
+// The swell's period (s; OceanFFT.cpp, WaterFoam.hlsli's SurfFoam): the long waves from far away that break on the shore
+// even in a calm (a trade wind swell's 8-12 s).
+#define XR_FOAM_SURF_PERIOD 9
+// The bores in the surf zone at a time (from where the swell breaks to the shore: on a plane beach of slope b the travel
+// time is 2 sqrt(h_b / g) / b, a period at 1:14 and 1 m; SurfFoam, its test).
+#define XR_FOAM_SURF_BORES  1
 
 //! b0 of the FFT ocean's kernels (OceanFFT.hlsl, OceanFFT.cpp).
 struct SOceanConstants
@@ -394,6 +407,13 @@ struct SOceanConstants
                                   //!< Jacobian (where a crest would fold over)
   XR_FLOAT4_ARRAY(vCascades, XR_OCEAN_CASCADES);  //!< each cascade's: x its tile (m), y the weight of its height
                                   //!< (OceanSpectrum::SSea::HeightWeight), z its texel (m)
+  XR_FLOAT4(vFoam);               //!< the whitecaps' kernel (XR_OCEAN_FOAM): x the share of the frame before's foam left
+                                  //!< (exp(-dt / OceanSpectrum::FOAM_LIFE); 0: none, the first frame)
+  XR_FLOAT4_ARRAY(vFoamCascades, XR_OCEAN_CASCADES);  //!< each cascade's: x the determinant of its Jacobian below which
+                                  //!< its crests break (OceanSpectrum::SSea::WhitecapJacobian; -1: none), y 1 / the width of
+                                  //!< the ramp below it over which they turn white, z the share of the foam of each texel
+                                  //!< spread to each of its four neighbours since the frame before (OceanFFT.hlsli's
+                                  //!< FoamSpread; OceanSpectrum::FOAM_SPREAD)
 };
 
 //! b0 of a level of the bloom from one twice its size (Bloom.hlsl, Hdr.cpp).

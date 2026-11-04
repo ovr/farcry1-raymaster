@@ -111,7 +111,9 @@ enum ED3D12Kernel
   eD3D12K_OceanRows,                //!< the FFT ocean: the sea's spectra at the frame's time, their inverse FFTs along x (Shaders/OceanFFT.hlsl)
   eD3D12K_OceanColumns,             //!< their inverse FFTs along y, the fields
   eD3D12K_OceanWaves,               //!< the waves' texels from the fields, their mip levels 1 to 4
-  eD3D12K_OceanMips,                //!< their mip levels 4 to 8
+  eD3D12K_OceanMips,                //!< their mip levels 4 to 8 (the foam's view's too)
+  eD3D12K_OceanFoam,                //!< the foam's state (the whitecaps; d3d12_WaterFoam), from the frame before's
+  eD3D12K_OceanFoamView,            //!< the state into the foam's view (RGBA16F, the water's), its mip levels 1 to 4
   eD3D12K_Num
 };
 

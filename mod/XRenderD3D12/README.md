@@ -1203,7 +1203,8 @@ and lists theirs (`NamesObjects`).
   already lost close to the camera, so it is grey over most of the sea), 16 the sun's glint, 17 the
   sun's light through the crests, 18 the variance of the glint's slopes (white: 0.05), 19 the sun's
   shadow on the water (black), 20 the height of the waves the crests' light reads (black -2, white 2
-  of its RMS).
+  of its RMS); with the foam 21 how much of the water's light it hides, 22 the whitecaps' amount, 23
+  the shore's (the three without the game's foam strips on the beaches).
 - The FFT ocean (`d3d12_WaterFFT`, 1; 0 draws the static wave texture and the frames of the water
   before it; not saved; `OceanSpectrum.h`, `OceanFFT.cpp`, `Shaders/OceanFFT.hlsl`): the ocean's
   waves are a wind sea made by inverse FFTs on the GPU each frame (Tessendorf's "Simulating Ocean
@@ -1254,6 +1255,75 @@ and lists theirs (`NamesObjects`).
   reflections 1.07 -> 0.80; Bunker's sunset 0.63 -> 0.58, with the rays 0.77 -> 0.78; Carrier's
   frame 3.22 -> 3.14 ms with the pass, 4.45 -> 4.22 with the rays); the spectrum, made on the CPU at
   the first water and when the wind changes, takes under 65 ms.
+- The FFT ocean's foam (`d3d12_WaterFoam`, 1; 0 draws the frames of the water before it; not saved;
+  `Shaders/WaterFoam.hlsli`, `FoamPattern.h`, the foam kernel in `Shaders/OceanFFT.hlsl`):
+  - Whitecaps. Their share of the sea is Monahan and O'Muircheartaigh's law of the wind,
+    3.84e-6 U^3.41: 0.03 % at the default 3.5 m/s (hardly any), 0.3 % at 7, 1 % at 10, 3.9 % at 15.
+    - Once a frame after the waves, a kernel finds where the long and the middle cascades' crests
+      break (half of the share each; the short cascade's ripple traps no air). That is where the
+      surface is squeezed most: the first order of the Jacobian's determinant of the displacement,
+      1 + lambda div D, falls below a threshold.
+    - The squeeze is a gaussian with the RMS of the cascade's slopes, so the threshold is the normal
+      quantile of the share breaking at a time, `WHITECAP_ACTIVE` (a quarter) of Monahan's. The
+      determinant's own second order lifts its lowest values: at 12 m/s only 0.009 % of the long
+      cascade lay below the threshold meant for 0.23 %.
+    - The foam stays where its crest broke (the water does not travel with the wave) and fades as
+      exp(-t / 4 s). It spreads as it fades, a diffusion of 0.5 m^2/s (the middle cascade's as much
+      in its texels): its patches grow about 2 m and the share white is kept.
+    - Its state is kept in two RGBA32F arrays in turn. A GPU may round a half float towards 0 as
+      it stores it, and in 16 bits the foam faded 4 % faster over 2 s at 60 frames a second. A
+      second kernel copies the state into the view the water reads, RGBA16F with its mip levels as
+      the waves' (two 32-bit texels a pixel cost the water 0.11 ms more at 4K on Carrier).
+    - The kernels run at most 120 times a second; between, the water reads the last view.
+    - Run over 12 s of the sea, the share white is Monahan's within 8 % at 7, 10 and 15 m/s
+      (1.07, 1.01 and 1.06 of it; `Ocean_WhitecapCoverage`).
+    - The middle cascade's whitecaps break more on the long waves' crests (Longuet-Higgins and
+      Stewart's modulation), their share over the sea the same.
+  - Shore. A wave breaks where the water under the surface is shallower than its height over the
+    breaker index.
+    - The index is McCowan's 0.78 on the mean, 0.55-1.0 from a slowly drifting noise (it changes
+      from wave to wave and along a crest).
+    - The wave's height is twice the long waves' crest there, the highest of now and of what was
+      0.7 and 1.4 s up the wind at the spectrum's peak speed. It is at least a quarter of the
+      significant height, scaled as the slopes.
+    - The foam is the square of the share of that depth left: it gathers at the edge, with lace
+      further out.
+    - Against rocks, walls and what stands in the water, where the bottom drops steeply and no
+      wave breaks on its way there, the foam of the waves running up them reaches out twice their
+      height along the view's path through the water.
+    - At the default wind both are thin rims (a calm lagoon). On the beaches the game draws its own
+      foam strips running up the sand, as before.
+  - Surf. The shores' waves are mostly swell, long waves from far away that break even in a calm:
+    `d3d12_WaterSurf` (0.8 m; 0 none, only the wind sea's) is its height there, its period 9 s
+    (a trade wind swell's 8-12 s). It is not in the waves drawn, only in their foam.
+    - It breaks where the water gets shallower than its height over the breaker index above (1 m
+      on the mean) and runs on to the shore as bores. A bore's front is where its travel time from
+      the break point has come: sqrt(depth / that depth) of the whole on a plane beach (a bore runs
+      at sqrt(g h)), so the fronts follow the depth's lines and run shorewards, one in the zone at a
+      time (`XR_FOAM_SURF_BORES`; on a beach of 1:14 the travel time is a period). A noise 40 m
+      across shifts their phase along the shore.
+    - Each front carries a white roller, most of it over the fifth of the period after it, and
+      leaves a lace that fades until the next one. The foam rises over the 3 % of the period before
+      a front, so there is no hard edge in time or across the screen. The breaking grows over the
+      first fifth of the way, and each bore has its own strength (0.55-1: the swell's sets).
+    - The game's beaches drop steeply under the water, so the surf zone is a few metres wide: a
+      white band that runs to the edge and its lace, under and beyond the game's strips.
+  - Pattern. Foam is a lace of bubbles: a 512 x 512 tiling texture made at the start.
+    - It holds four octaves of Worley's cells (rims and fill) and patches of value noise, ranked so
+      that each value is as common as any other. The water is white where the pattern is above one
+      less the amount, so the amount is the share white.
+    - Two samples (tiles of 3.7 and 2.3 m, the second turned 37 degrees) are mapped back to one
+      uniform value.
+    - The pattern sways with the waves, taken where the water moved from, and drifts at 3 % of the
+      wind. Where it is finer than the pixel it is the amount itself.
+  - Light. Thin foam (a low amount) lets some of the water's light through. The foam is a white
+    diffuse layer (albedo 0.6) under the sun (wrapped a little, in its shadow none) and the sky,
+    over the water's colour; the glint and the crests' light are gone under it.
+  - None from below, in the environment cubes or in heat vision. `d3d12_WaterDebug` 21, 22 and 23
+    show it.
+  - Cost at 4K: the water 0.05-0.08 ms more (Carrier 0.58 -> 0.64 ms, Bunker's sunset 0.57 ->
+    0.65, the surf's beach 0.51 -> 0.58), the foam's kernels 0.03 ms. The shore's terms and the
+    pattern run only where a pixel's quad needs them (most of the sea has no foam).
 - The sun's glint (`d3d12_WaterGlint`, 1; 0 draws the frames of the water before it; not saved;
   `d3d12_WaterSunGlint`, a highlight fitted by eye and off as in the game, is gone with it) is the
   sun mirrored by the waves' facets (`Shaders/WaterLight.hlsli`): Beckmann's distribution of the

@@ -52,6 +52,7 @@
 #include "Texture.h"
 #include "Scene.h"
 #include "RayTracing.h"
+#include "FoamPattern.h"
 #include <atomic>
 
 namespace
@@ -333,9 +334,20 @@ std::vector<byte> MakeCausticsTexture(int N, float &fMinMean)
 //! takes them as they are).
 struct SWaterPixels
 {
-  std::vector<byte> Waves, Caustics;
+  std::vector<byte> Waves, Caustics, Foam;
   float fCausticsMinMean = 1;
 };
+
+//! The foam's pattern texture (FoamPattern.h), B, G, R, A bytes (the same in each).
+std::vector<byte> MakeFoamTexture()
+{
+  static_assert(FoamPattern::SIZE == XR_FOAM_SIZE, "FoamPattern.h and Constants.h");
+  const std::vector<uint8_t> Pattern = FoamPattern::Make(XR_FOAM_SIZE);
+  std::vector<byte> Out(Pattern.size() * 4);
+  for (size_t i = 0; i < Pattern.size(); i++)
+    Out[i * 4] = Out[i * 4 + 1] = Out[i * 4 + 2] = Out[i * 4 + 3] = Pattern[i];
+  return Out;
+}
 std::atomic<SWaterPixels *> g_pWaterPixels{ nullptr };
 HANDLE g_hWaterThread = nullptr;
 
@@ -344,6 +356,7 @@ DWORD WINAPI MakeWaterPixels(void *)
   SWaterPixels *p = new SWaterPixels;
   p->Waves = MakeWaveTexture(WAVE_TEXTURE_SIZE);
   p->Caustics = MakeCausticsTexture(CAUSTICS_TEXTURE_SIZE, p->fCausticsMinMean);
+  p->Foam = MakeFoamTexture();
   g_pWaterPixels = p;
   return 0;
 }
@@ -388,6 +401,19 @@ int CD3D12Renderer::GetCausticsTexture()
       m_nCausticsTexture = -1;
   }
   return m_nCausticsTexture > 0 ? m_pTextures->GetSRV(m_nCausticsTexture) : -1;
+}
+
+int CD3D12Renderer::GetFoamTexture()
+{
+  if (!m_nFoamTexture && m_pTextures)
+  {
+    const SWaterPixels &Pixels = WaterPixels();
+    m_nFoamTexture = m_pTextures->CreateFromMemory(Pixels.Foam.data(), XR_FOAM_SIZE, XR_FOAM_SIZE, eTF_8888, 2, true, FILTER_TRILINEAR, 0,
+                                                   "$OceanFoam", 0);
+    if (!m_nFoamTexture)
+      m_nFoamTexture = -1;
+  }
+  return m_nFoamTexture > 0 ? m_pTextures->GetSRV(m_nFoamTexture) : -1;
 }
 
 bool CD3D12Renderer::SetupCausticsDraw(SPipelineKey &Key, SDrawConstants &dc, const SRenderItem &it)
@@ -946,9 +972,12 @@ bool CD3D12Renderer::SetupWaterDraw(SPipelineKey &Key, SDrawConstants &dc, const
        IsHdrTarget() ? std::max(CV_d3d12_HDRSun, 1.0f) : 1.0f, 1);
   // The FFT ocean's waves (OceanFFT.cpp) in place of the wave texture: their slopes in metres per
   // metre, the bump amounts a factor of them.
-  dc.nShadowTex[2] = 0;
+  // Their foam on the ocean seen by the camera (none in an environment cube, in heat vision, on a water volume).
+  dc.nShadowTex[2] = dc.nShadowTex[3] = 0;
   Set4(dc.vAddColor, 0, 0, 0, 0);
-  const bool bOceanFFT = SetOceanConstants(dc, dc.vParams0[0]);
+  Set4(dc.vTexGen1U, 0, 0, 0, 0);
+  const bool bFoam = bSunLight && !bVolume && CV_d3d12_WaterFoam > 0;
+  const bool bOceanFFT = SetOceanConstants(dc, dc.vParams0[0], bFoam ? GetFoamTexture() : -1);
 
   // The sky box the scene's sky drew (as it drew it).
   dc.nTex2 = dc.nTex3 = dc.nTex4 = D3D12_SRV_WHITE;
@@ -1023,6 +1052,9 @@ bool CD3D12Renderer::SetupBeachDraw(SPipelineKey &Key, SDrawConstants &dc, int n
     m_pBeachBumpTexture = m_pTextures->LoadTexture("textures/fire_noise", 0, 0, eTT_Bumpmap, -1, -1, -1, 0);
   CTexture *pTex = nPass < BEACH_WAVES ? m_pBeachTexture : m_pBeachWetTexture;
   if (!pTex || !pTex->IsTextureLoaded() || pTex->IsCube())
+    return false;
+  // The views of the water's own foam (d3d12_WaterDebug 21-23) show it alone, not under these strips.
+  if (CV_d3d12_WaterDebug >= 21 && CV_d3d12_WaterDebug <= 23)
     return false;
 
   // The mesh runs from the sea (v 0) to the land (v 1) and fades out at both edges (vertex alpha).

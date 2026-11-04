@@ -100,18 +100,22 @@ namespace XrTest
     SBytecode Edges, DispatchArgs, Candidates, Apply;
   };
 
-  //! The FFT ocean's kernels (the renderer's Shaders/OceanFFT.hlsl, as Shaders.cmake compiles them) for CGpu::RunOcean.
+  //! The FFT ocean's kernels (the renderer's Shaders/OceanFFT.hlsl, as Shaders.cmake compiles them) for CGpu::RunOcean;
+  //! Foam and FoamView (with Mips the view's levels) for the foam of RunOceanFrames, none without them.
   struct SOceanKernels
   {
-    SBytecode Rows, Columns, Waves, Mips;
+    SBytecode Rows, Columns, Waves, Mips, Foam, FoamView;
   };
   //! What RunOcean leaves: the fields (2 * XR_OCEAN_CASCADES slices of XR_OCEAN_SIZE x XR_OCEAN_SIZE RGBA32F texels, slice
   //! after slice, row after row) and each of the waves' XR_OCEAN_MIPS levels (XR_OCEAN_CASCADES slices of RGBA16F texels,
-  //! as floats).
+  //! as floats); the foam's state (XR_OCEAN_CASCADES slices of RGBA32F texels) and its view's levels as the waves'
+  //! (RGBA16F; both empty without the foam's kernels).
   struct SOceanOutput
   {
     std::vector<float> Fields;
     std::vector<float> Waves[XR_OCEAN_MIPS];
+    std::vector<float> FoamState;
+    std::vector<float> Foam[XR_OCEAN_MIPS];
   };
 
   //! What a run binds; the output is nOut uint4 items, zeroed before the kernel runs.
@@ -159,6 +163,10 @@ namespace XrTest
     //! u0..u4), its targets in their formats, its four kernels in its order with its barriers. H0: the cascades' h0 texels
     //! (OceanSpectrum.h's SCascade::H0, one cascade after another), Constants the frame's.
     SOceanOutput RunOcean(const std::vector<float> &H0, const SOceanConstants &Constants, const SOceanKernels &Kernels);
+    //! RunOcean's pass once a frame, each frame with its constants, in one command list; with Kernels.Foam the foam after
+    //! each frame's waves as UpdateOcean runs it (its state into one of its two targets from the other, in turn, then the
+    //! view of it and the view's mip levels). What the last frame leaves.
+    SOceanOutput RunOceanFrames(const std::vector<float> &H0, const std::vector<SOceanConstants> &Frames, const SOceanKernels &Kernels);
     //! Whether the device stores the format through a typed UAV (CMAA2's output).
     bool HasTypedStore(DXGI_FORMAT Format);
     //! The radiance cache emptied (every word 0).
