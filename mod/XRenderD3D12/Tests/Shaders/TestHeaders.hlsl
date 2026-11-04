@@ -397,6 +397,27 @@ void CSFoamSurf(uint i : SV_DispatchThreadID)
   TestOut(i, float4(SurfFoam(a.x, a.y, a.z), 0, 0, 0));
 }
 
+//! SurfClumps (WaterFoam.hlsli) at the position g_TestIn[2i].xy, the depth .z, the break's depth .w, the phase
+//! g_TestIn[2i + 1].x.
+[numthreads(64, 1, 1)]
+void CSFoamClumps(uint i : SV_DispatchThreadID)
+{
+  if (i >= g_Test.nTest.x)
+    return;
+  const float4 a = TestIn(2 * i);
+  TestOut(i, float4(SurfClumps(a.xy, a.z, a.w, TestIn(2 * i + 1).x), 0, 0, 0));
+}
+
+//! FoamShade (WaterFoam.hlsli) of the pattern's value g_TestIn[i].x, the amount .y, the blur .z.
+[numthreads(64, 1, 1)]
+void CSFoamShade(uint i : SV_DispatchThreadID)
+{
+  if (i >= g_Test.nTest.x)
+    return;
+  const float4 a = TestIn(i);
+  TestOut(i, float4(FoamShade(a.x, a.y, a.z), 0, 0, 0));
+}
+
 //! FoamLight (WaterFoam.hlsli) of the normal g_TestIn[4i].xyz in the sun's shadow g_TestIn[4i].w, the sun's direction
 //! g_TestIn[4i + 1].xyz, its light g_TestIn[4i + 2].rgb and the sky's g_TestIn[4i + 3].rgb: out[i].rgb.
 [numthreads(64, 1, 1)]

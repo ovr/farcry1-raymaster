@@ -587,9 +587,11 @@ bool FoamQuadAny(bool b)
 //! highest of the long waves' now and as they were 0.7 and 1.4 s ago, what was here then that far ahead now at the speed
 //! of the spectrum's peak, vTexGen1V.xy, weaker as it passes; scaled as the slopes, vParams0.x). The shore's foam only
 //! in the shallows and by what stands in the water, the pattern only where there is foam (most of the sea has none).
-float WaterFoam(float2 P, float fDepth, float fPath, out float fWhitecaps, out float fShore)
+//! fShade the foam's brightness there (FoamShade, 1 on the mean).
+float WaterFoam(float2 P, float fDepth, float fPath, out float fWhitecaps, out float fShore, out float fShade)
 {
   const uint t = g_Draw.nShadowTex.w;
+  fShade = 1;
   const float4 f0 = g_TextureArrays[t].Sample(g_SamplerLinearWrap, float3(P / XR_OCEAN_TILE0, 0));
   const float4 f1 = g_TextureArrays[t].Sample(g_SamplerLinearWrap, float3(P / XR_OCEAN_TILE1, 1));
   fWhitecaps = WhitecapAmount(f0.x, f1.x, f0.w, g_Draw.vTexGen1U.y);
@@ -609,9 +611,14 @@ float WaterFoam(float2 P, float fDepth, float fPath, out float fWhitecaps, out f
     const float fIndex = FoamBreakerIndex(0.5 + 1.6 * (fNoise - 0.5));
     fShore = max(ShoreFoam(fDepth, fCrest, g_Draw.vTexGen1U.z, fIndex), ContactFoam(fPath, fCrest, g_Draw.vTexGen1U.z));
     // The swell's surf (vTexGen1V.z its height, 0 none; w the periods gone): its fronts not quite along the depth's lines,
-    // their phase from a noise 40 m across.
+    // their phase from a noise 40 m across; torn into clumps.
     if (g_Draw.vTexGen1V.z > 0)
-      fShore = max(fShore, SurfFoam(fDepth, g_Draw.vTexGen1V.z / fIndex, g_Draw.vTexGen1V.w + 0.6 * FoamValueNoise(P / 40)));
+    {
+      const float fBreak = g_Draw.vTexGen1V.z / fIndex, fCycle = g_Draw.vTexGen1V.w + 0.6 * FoamValueNoise(P / 40);
+      const float fSurf = SurfFoam(fDepth, fBreak, fCycle);
+      if (fSurf > 0)
+        fShore = max(fShore, saturate(fSurf * SurfClumps(P, fDepth, fBreak, fCycle)));
+    }
   }
   const float fAmount = saturate((fWhitecaps + fShore) * g_Draw.vTexGen1U.x);
   if (!FoamQuadAny(fAmount > 0))
@@ -624,8 +631,10 @@ float WaterFoam(float2 P, float fDepth, float fPath, out float fWhitecaps, out f
   const uint p = asuint(g_Draw.vTexGen1U.w);
   const float u = FoamUniform(g_Textures[p].Sample(g_SamplerLinearWrap, uv0).r, g_Textures[p].Sample(g_SamplerLinearWrap, uv1).r);
   const float fTexels = max(length(fwidth(uv0)), length(fwidth(uv1))) * XR_FOAM_SIZE;
+  const float fBlur = saturate(log2(max(fTexels, 1)) / 3);
+  fShade = FoamShade(u, fAmount, fBlur);
   // Where the water meets what stands in it the foam fades in over its first 2 cm (no hard edge).
-  return FoamOpacity(FoamCover(fAmount, u, fwidth(u), saturate(log2(max(fTexels, 1)) / 3)), fAmount) * saturate(fDepth * 50);
+  return FoamOpacity(FoamCover(fAmount, u, fwidth(u), fBlur), fAmount) * saturate(fDepth * 50);
 }
 
 //! The sky's light on a white face facing up (linear): the sky box in five directions (as the water's own colour lit by the
@@ -717,10 +726,10 @@ float4 ShadeWater(SWaterOutput In)
   }
   // The foam on the FFT ocean seen from above (d3d12_WaterFoam, vTexGen1U.x; WaterFoam): the share of the pixel white
   // (its textures' derivatives outside the branches).
-  float fFoam = 0, fWhitecaps = 0, fShoreFoam = 0;
+  float fFoam = 0, fWhitecaps = 0, fShoreFoam = 0, fFoamShade = 1;
   if (g_Draw.vTexGen1U.x > 0)
   {
-    fFoam = WaterFoam(In.vWorldPos.xy, fDepthBelow, fThick0 * fDistance / max(fSurface, 1e-3), fWhitecaps, fShoreFoam);
+    fFoam = WaterFoam(In.vWorldPos.xy, fDepthBelow, fThick0 * fDistance / max(fSurface, 1e-3), fWhitecaps, fShoreFoam, fFoamShade);
     if (bBelow)
       fFoam = 0;
   }
@@ -862,7 +871,7 @@ float4 ShadeWater(SWaterOutput In)
     // The foam over it, lit by the sun (as the glint fades as it sets) and the sky.
     if (fFoam > 0)
     {
-      const float3 vFoam = FoamLight(N, L, WaterSunLight() * fSunUp, fSunShadow, WaterSkyLight());
+      const float3 vFoam = FoamLight(N, L, WaterSunLight() * fSunUp, fSunShadow, WaterSkyLight()) * fFoamShade;
       vColor = lerp(vColor, float3(HdrEncode(vFoam.r), HdrEncode(vFoam.g), HdrEncode(vFoam.b)), fFoam);
     }
     if (g_Draw.vParams0.z == 1)
