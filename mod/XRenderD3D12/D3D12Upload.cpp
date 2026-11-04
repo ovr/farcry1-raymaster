@@ -945,19 +945,19 @@ CD3D12Texture *CD3D12Upload::CreateRenderTarget(int nWidth, int nHeight, DXGI_FO
   return pTex;
 }
 
-CD3D12Texture *CD3D12Upload::CreateComputeTarget(int nWidth, int nHeight, int nMips, DXGI_FORMAT Format, const wchar_t *szName)
+CD3D12Texture *CD3D12Upload::CreateComputeTarget(int nWidth, int nHeight, int nMips, DXGI_FORMAT Format, const wchar_t *szName, int nArraySize)
 {
-  if (!m_pDevice || nWidth <= 0 || nHeight <= 0 || nMips <= 0)
+  if (!m_pDevice || nWidth <= 0 || nHeight <= 0 || nMips <= 0 || nArraySize <= 0)
     return nullptr;
   const D3D12_HEAP_PROPERTIES Heap = HeapProps(D3D12_HEAP_TYPE_DEFAULT);
-  const D3D12_RESOURCE_DESC Desc = TextureDesc(nWidth, nHeight, 1, nMips, Format, D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS);
+  const D3D12_RESOURCE_DESC Desc = TextureDesc(nWidth, nHeight, nArraySize, nMips, Format, D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS);
   ComPtr<ID3D12Resource> pResource;
   HRESULT hr = m_pDevice->CreateCommittedResource(&Heap, D3D12_HEAP_FLAG_NONE, &Desc, D3D12_RESOURCE_STATE_UNORDERED_ACCESS, nullptr,
                                                   IID_PPV_ARGS(&pResource));
   if (FAILED(hr))
   {
-    iLog->LogError("XRenderD3D12: CreateCommittedResource (compute target %dx%d, %d mips, format %d) failed (0x%08X)",
-      nWidth, nHeight, nMips, (int)Format, (unsigned)hr);
+    iLog->LogError("XRenderD3D12: CreateCommittedResource (compute target %dx%dx%d, %d mips, format %d) failed (0x%08X)",
+      nWidth, nHeight, nArraySize, nMips, (int)Format, (unsigned)hr);
     return nullptr;
   }
   if (szName)
@@ -969,6 +969,7 @@ CD3D12Texture *CD3D12Upload::CreateComputeTarget(int nWidth, int nHeight, int nM
   pTex->m_nWidth = nWidth;
   pTex->m_nHeight = nHeight;
   pTex->m_nMips = nMips;
+  pTex->m_nArraySize = nArraySize;
   AddVideoMemory(pTex->m_pResource);
   return pTex;
 }

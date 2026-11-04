@@ -1202,7 +1202,40 @@ and lists theirs (`NamesObjects`).
   RMS of the wave slopes finer than a pixel (white: 0.1; the finest of the three wave layers is
   already lost close to the camera, so it is grey over most of the sea), 16 the sun's glint, 17 the
   sun's light through the crests, 18 the variance of the glint's slopes (white: 0.05), 19 the sun's
-  shadow on the water (black).
+  shadow on the water (black), 20 the height of the waves the crests' light reads (black -2, white 2
+  of its RMS).
+- The FFT ocean (`d3d12_WaterFFT`, 1; 0 draws the static wave texture and the frames of the water
+  before it; not saved; `OceanSpectrum.h`, `OceanFFT.cpp`, `Shaders/OceanFFT.hlsl`): the ocean's
+  waves are a wind sea made by inverse FFTs on the GPU each frame (Tessendorf's "Simulating Ocean
+  Water"), in place of the texture's sum of sines that only slid along, one shape repeating every
+  61, 17.3 and 5.9 m. JONSWAP's spectrum of the wind `d3d12_WaterWind` (5 m/s, at least 0.5; a 50 km
+  fetch), spread about its direction (the old texture's main layer's) by Mitsuyasu's cos^2s, deep
+  water's dispersion with the capillary term: each wave runs at its own speed, the long ones faster,
+  so the sea changes its shape as it goes and repeats only after 1024 s (its frequencies whole
+  multiples of 2 pi / 1024 s, the phase exact in a float). Three cascades of 256 x 256 texels, 250,
+  40.5 and 6.9 m a side, each wave in exactly one of them (longer than 4 m, 4 to 0.7 m, 0.7 m down
+  to 4 texels, 11 cm; each about a third of the slopes): no two of the tiles nearly share a
+  multiple under 900 m (40 and 7 would every 280 m), so their sum does not repeat where the camera
+  can see it. The starting amplitudes come from a hash of the cascade and the texel, the same sea
+  every run. Once a frame, before the environment cubes, when the frame's list has water, four
+  compute kernels make the four packed complex fields of each cascade at the frame's time (Dx + i
+  Dy, h + i dDx/dy, dh/dx + i dh/dy, dDx/dx + i dDy/dy), their FFTs along the rows and along the
+  columns (Stockham's radix 2 in group shared memory), then the waves' texture: a slice a cascade
+  (RGBA16F, 9 mip levels) of the slopes, the height in the weight of the cascade's slopes (as the
+  crests' light had it from the old texture) and the squared slope, whose mean over a mip level
+  less the square of the mean slope is LEAN's lost variance as before. The water's program samples
+  the three slices at the world position over their tiles (no scrolling: the FFT moves them) and
+  sums their slopes; the planar, screen space and ray traced reflections, their blur, the glint and
+  the crests' light read the normal and the lost variance as they did. Their steepness is the old
+  texture's (`d3d12_WaterSlope`, 0.0446 the RMS slope along an axis at the default bump amounts,
+  0.03 and 0.02, other amounts in proportion): the physical sea's at any wind (0.08 at 2 m/s, 0.106
+  at 5) is 1.8 to 2.4 times steeper than the game's water was drawn for, so the wind sets only the waves'
+  lengths, directions and speeds; `d3d12_WaterSlope 0` gives the wind sea's own. The scopes' glass
+  and the caustics keep their own static textures. The pass costs 0.02-0.04 ms at any resolution,
+  and the water's three samples of a 16-bit array cost less than the old texture's three layers
+  (3840 x 2160: Carrier 0.72 -> 0.57 ms, Bunker's sunset 0.63 -> 0.57; the frame 3.26 -> 3.08 ms with
+  the pass); the spectrum, made on the CPU at the first water and when the wind changes, takes
+  under 65 ms.
 - The sun's glint (`d3d12_WaterGlint`, 1; 0 draws the frames of the water before it; not saved;
   `d3d12_WaterSunGlint`, a highlight fitted by eye and off as in the game, is gone with it) is the
   sun mirrored by the waves' facets (`Shaders/WaterLight.hlsli`): Beckmann's distribution of the

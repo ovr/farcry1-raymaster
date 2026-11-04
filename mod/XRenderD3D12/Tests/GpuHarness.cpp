@@ -13,6 +13,7 @@
 #include "TestFramework.h"
 #include "Shaders/Constants.h"
 
+#include <cmath>
 #include <cstring>
 #include <stdexcept>
 
@@ -778,5 +779,249 @@ std::vector<uint8_t> XrTest::CGpu::RunCmaa2(const STestTexture &Picture, const S
     memcpy(Out.data() + y * nRow, (const uint8_t *)p + (size_t)Layout.Offset + (size_t)y * Layout.Footprint.RowPitch, nRow);
   D3D12_RANGE None = { 0, 0 };
   pReadback->Unmap(0, &None);
+  return Out;
+}
+
+std::vector<float> XrTest::HalfsToFloats(const uint16_t *p, size_t n)
+{
+  std::vector<float> Out(n);
+  for (size_t i = 0; i < n; i++)
+  {
+    const uint32_t h = p[i], nSign = (h & 0x8000u) << 16, nExp = (h >> 10) & 0x1f, nMant = h & 0x3ffu;
+    uint32_t f;
+    if (nExp == 0)
+    {
+      // Zero or a subnormal: mant * 2^-24.
+      const float v = std::ldexp((float)nMant, -24);
+      memcpy(&f, &v, 4);
+      f |= nSign;
+    }
+    else if (nExp == 31)
+      f = nSign | 0x7f800000u | (nMant << 13);
+    else
+      f = nSign | ((nExp + 112) << 23) | (nMant << 13);
+    memcpy(&Out[i], &f, 4);
+  }
+  return Out;
+}
+
+XrTest::SOceanOutput XrTest::CGpu::RunOcean(const std::vector<float> &H0, const SOceanConstants &Constants, const SOceanKernels &Kernels)
+{
+  constexpr UINT N = XR_OCEAN_SIZE, C = XR_OCEAN_CASCADES, MIPS = XR_OCEAN_MIPS, L4 = XR_OCEAN_LEVEL4;
+  constexpr UINT SRVS = 4, UAVS = 5, TABLE = SRVS + UAVS, KERNELS = 4;
+  if (H0.size() != (size_t)C * N * N * 4)
+    throw std::runtime_error("the ocean's h0 is not its cascades' texels");
+  if (!m_pComputeRootSignature)
+  {
+    // D3D12Compute.cpp's: 0 CBV b0; 1 table t0..t3; 2 table u0..u4 (its static samplers unused by the ocean's kernels).
+    D3D12_DESCRIPTOR_RANGE Ranges[2] = {};
+    Ranges[0].RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_SRV;
+    Ranges[0].NumDescriptors = SRVS;
+    Ranges[1].RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_UAV;
+    Ranges[1].NumDescriptors = UAVS;
+    D3D12_ROOT_PARAMETER Params[3] = {};
+    Params[0].ParameterType = D3D12_ROOT_PARAMETER_TYPE_CBV;
+    Params[0].ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
+    for (int i = 1; i < 3; i++)
+    {
+      Params[i].ParameterType = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
+      Params[i].DescriptorTable.NumDescriptorRanges = 1;
+      Params[i].DescriptorTable.pDescriptorRanges = &Ranges[i - 1];
+      Params[i].ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
+    }
+    D3D12_ROOT_SIGNATURE_DESC Rs = {};
+    Rs.NumParameters = 3;
+    Rs.pParameters = Params;
+    ComPtr<ID3DBlob> pBlob, pError;
+    Ok(D3D12SerializeRootSignature(&Rs, D3D_ROOT_SIGNATURE_VERSION_1, &pBlob, &pError), "D3D12SerializeRootSignature (compute)");
+    Ok(m_pDevice->CreateRootSignature(0, pBlob->GetBufferPointer(), pBlob->GetBufferSize(), IID_PPV_ARGS(&m_pComputeRootSignature)),
+       "CreateRootSignature (compute)");
+  }
+  auto Pso = [&](const SBytecode &Shader) {
+    ComPtr<ID3D12PipelineState> &pPso = m_ComputePipelines[Shader.pData];
+    if (!pPso)
+    {
+      D3D12_COMPUTE_PIPELINE_STATE_DESC Desc = {};
+      Desc.pRootSignature = m_pComputeRootSignature.Get();
+      Desc.CS = { Shader.pData, Shader.nSize };
+      Ok(m_pDevice->CreateComputePipelineState(&Desc, IID_PPV_ARGS(&pPso)), "CreateComputePipelineState (compute)");
+    }
+    return pPso.Get();
+  };
+  auto Array = [&](UINT w, UINT nSlices, UINT nMips, DXGI_FORMAT Format, D3D12_RESOURCE_STATES eState, bool bUav) {
+    D3D12_HEAP_PROPERTIES Heap = {};
+    Heap.Type = D3D12_HEAP_TYPE_DEFAULT;
+    D3D12_RESOURCE_DESC Desc = {};
+    Desc.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
+    Desc.Width = Desc.Height = w;
+    Desc.DepthOrArraySize = (UINT16)nSlices;
+    Desc.MipLevels = (UINT16)nMips;
+    Desc.Format = Format;
+    Desc.SampleDesc.Count = 1;
+    Desc.Flags = bUav ? D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS : D3D12_RESOURCE_FLAG_NONE;
+    ComPtr<ID3D12Resource> p;
+    Ok(m_pDevice->CreateCommittedResource(&Heap, D3D12_HEAP_FLAG_NONE, &Desc, eState, nullptr, IID_PPV_ARGS(&p)), "CreateCommittedResource (ocean)");
+    return p;
+  };
+  constexpr DXGI_FORMAT F32 = DXGI_FORMAT_R32G32B32A32_FLOAT, F16 = DXGI_FORMAT_R16G16B16A16_FLOAT;
+  constexpr D3D12_RESOURCE_STATES UAV_STATE = D3D12_RESOURCE_STATE_UNORDERED_ACCESS, READ = D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE;
+  ComPtr<ID3D12Resource> pH0 = Array(N, C, 1, F32, D3D12_RESOURCE_STATE_COPY_DEST, false);
+  ComPtr<ID3D12Resource> pRows = Array(N, 2 * C, 1, F32, UAV_STATE, true), pFields = Array(N, 2 * C, 1, F32, UAV_STATE, true);
+  ComPtr<ID3D12Resource> pWaves = Array(N, C, MIPS, F16, UAV_STATE, true), pLevel4 = Array(L4, C, 1, F16, UAV_STATE, true);
+  ComPtr<ID3D12Resource> pCB = Upload(&Constants, sizeof(Constants));
+
+  // The tables as OceanFFT.cpp's EnsureOceanTargets writes them.
+  ComPtr<ID3D12DescriptorHeap> pHeap;
+  D3D12_DESCRIPTOR_HEAP_DESC HeapDesc = {};
+  HeapDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
+  HeapDesc.NumDescriptors = KERNELS * TABLE;
+  HeapDesc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
+  Ok(m_pDevice->CreateDescriptorHeap(&HeapDesc, IID_PPV_ARGS(&pHeap)), "CreateDescriptorHeap (ocean)");
+  auto Cpu = [&](UINT n) {
+    D3D12_CPU_DESCRIPTOR_HANDLE h = pHeap->GetCPUDescriptorHandleForHeapStart();
+    h.ptr += (SIZE_T)n * m_nDescriptorSize;
+    return h;
+  };
+  auto Gpu = [&](UINT n) {
+    D3D12_GPU_DESCRIPTOR_HANDLE h = pHeap->GetGPUDescriptorHandleForHeapStart();
+    h.ptr += (UINT64)n * m_nDescriptorSize;
+    return h;
+  };
+  auto SRV = [&](UINT nSlot, ID3D12Resource *p, DXGI_FORMAT Format, UINT nSlices) {
+    D3D12_SHADER_RESOURCE_VIEW_DESC v = {};
+    v.Format = Format;
+    v.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2DARRAY;
+    v.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+    v.Texture2DArray.MipLevels = 1;
+    v.Texture2DArray.ArraySize = nSlices;
+    m_pDevice->CreateShaderResourceView(p, &v, Cpu(nSlot));
+  };
+  auto UAV = [&](UINT nSlot, ID3D12Resource *p, DXGI_FORMAT Format, UINT nSlices, UINT nMip) {
+    D3D12_UNORDERED_ACCESS_VIEW_DESC v = {};
+    v.Format = Format;
+    v.ViewDimension = D3D12_UAV_DIMENSION_TEXTURE2DARRAY;
+    v.Texture2DArray.MipSlice = nMip;
+    v.Texture2DArray.ArraySize = nSlices;
+    m_pDevice->CreateUnorderedAccessView(p, nullptr, &v, Cpu(nSlot));
+  };
+  for (UINT k = 0; k < KERNELS; k++)
+    for (UINT i = 0; i < SRVS; i++)
+      SRV(k * TABLE + i, nullptr, F32, 2 * C);
+  SRV(0 * TABLE, pH0.Get(), F32, C);
+  SRV(1 * TABLE, pRows.Get(), F32, 2 * C);
+  SRV(2 * TABLE, pFields.Get(), F32, 2 * C);
+  SRV(3 * TABLE, pLevel4.Get(), F16, C);
+  for (UINT i = 0; i < UAVS; i++)
+  {
+    UAV(0 * TABLE + SRVS + i, i == 0 ? pRows.Get() : nullptr, F32, 2 * C, 0);
+    UAV(1 * TABLE + SRVS + i, i == 0 ? pFields.Get() : nullptr, F32, 2 * C, 0);
+    UAV(2 * TABLE + SRVS + i, i < 4 ? pWaves.Get() : pLevel4.Get(), F16, C, i < 4 ? i : 0);
+    UAV(3 * TABLE + SRVS + i, pWaves.Get(), F16, C, 4 + i);
+  }
+
+  // The readback of every sub resource of the fields and of the waves.
+  const D3D12_RESOURCE_DESC FieldsDesc = pFields->GetDesc(), WavesDesc = pWaves->GetDesc();
+  std::vector<D3D12_PLACED_SUBRESOURCE_FOOTPRINT> FieldsLayout(2 * C), WavesLayout(C * MIPS);
+  UINT64 nFieldsBytes = 0, nWavesBytes = 0;
+  m_pDevice->GetCopyableFootprints(&FieldsDesc, 0, 2 * C, 0, FieldsLayout.data(), nullptr, nullptr, &nFieldsBytes);
+  m_pDevice->GetCopyableFootprints(&WavesDesc, 0, C * MIPS, 0, WavesLayout.data(), nullptr, nullptr, &nWavesBytes);
+  ComPtr<ID3D12Resource> pFieldsBack = Buffer(D3D12_HEAP_TYPE_READBACK, (size_t)nFieldsBytes, D3D12_RESOURCE_STATE_COPY_DEST, false);
+  ComPtr<ID3D12Resource> pWavesBack = Buffer(D3D12_HEAP_TYPE_READBACK, (size_t)nWavesBytes, D3D12_RESOURCE_STATE_COPY_DEST, false);
+
+  Ok(m_pAllocator->Reset(), "Reset");
+  Ok(m_pList->Reset(m_pAllocator.Get(), nullptr), "Reset");
+  std::vector<ComPtr<ID3D12Resource>> Keep;
+  {
+    // h0, a slice a cascade.
+    std::vector<D3D12_PLACED_SUBRESOURCE_FOOTPRINT> Layout(C);
+    UINT64 nBytes = 0;
+    const D3D12_RESOURCE_DESC Desc = pH0->GetDesc();
+    m_pDevice->GetCopyableFootprints(&Desc, 0, C, 0, Layout.data(), nullptr, nullptr, &nBytes);
+    std::vector<uint8_t> Rows((size_t)nBytes);
+    for (UINT c = 0; c < C; c++)
+      for (UINT y = 0; y < N; y++)
+        memcpy(Rows.data() + (size_t)Layout[c].Offset + (size_t)y * Layout[c].Footprint.RowPitch, &H0[((size_t)c * N + y) * N * 4], N * 16);
+    ComPtr<ID3D12Resource> pStaging = Upload(Rows.data(), Rows.size());
+    for (UINT c = 0; c < C; c++)
+    {
+      D3D12_TEXTURE_COPY_LOCATION Dst = {}, Src = {};
+      Dst.pResource = pH0.Get();
+      Dst.Type = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
+      Dst.SubresourceIndex = c;
+      Src.pResource = pStaging.Get();
+      Src.Type = D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT;
+      Src.PlacedFootprint = Layout[c];
+      m_pList->CopyTextureRegion(&Dst, 0, 0, 0, &Src, nullptr);
+    }
+    Keep.push_back(pStaging);
+  }
+  auto Move = [&](ID3D12Resource *p, D3D12_RESOURCE_STATES eFrom, D3D12_RESOURCE_STATES eTo) {
+    const D3D12_RESOURCE_BARRIER t = Transition(p, eFrom, eTo);
+    m_pList->ResourceBarrier(1, &t);
+  };
+  Move(pH0.Get(), D3D12_RESOURCE_STATE_COPY_DEST, READ);
+  ID3D12DescriptorHeap *pHeaps[] = { pHeap.Get() };
+  m_pList->SetDescriptorHeaps(1, pHeaps);
+  m_pList->SetComputeRootSignature(m_pComputeRootSignature.Get());
+  m_pList->SetComputeRootConstantBufferView(0, pCB->GetGPUVirtualAddress());
+  auto Dispatch = [&](const SBytecode &k, UINT nTable, UINT x, UINT y, UINT z) {
+    m_pList->SetPipelineState(Pso(k));
+    m_pList->SetComputeRootDescriptorTable(1, Gpu(nTable * TABLE));
+    m_pList->SetComputeRootDescriptorTable(2, Gpu(nTable * TABLE + SRVS));
+    m_pList->Dispatch(x, y, z);
+  };
+  // UpdateOcean's order and barriers.
+  Dispatch(Kernels.Rows, 0, 1, N, C);
+  Move(pRows.Get(), UAV_STATE, READ);
+  Dispatch(Kernels.Columns, 1, 1, N, C);
+  Move(pFields.Get(), UAV_STATE, READ);
+  Dispatch(Kernels.Waves, 2, N / 16, N / 16, C);
+  Move(pLevel4.Get(), UAV_STATE, READ);
+  Dispatch(Kernels.Mips, 3, 1, 1, C);
+  Move(pFields.Get(), READ, D3D12_RESOURCE_STATE_COPY_SOURCE);
+  Move(pWaves.Get(), UAV_STATE, D3D12_RESOURCE_STATE_COPY_SOURCE);
+  auto Copy = [&](ID3D12Resource *pSrc, ID3D12Resource *pDst, const std::vector<D3D12_PLACED_SUBRESOURCE_FOOTPRINT> &Layout) {
+    for (UINT i = 0; i < (UINT)Layout.size(); i++)
+    {
+      D3D12_TEXTURE_COPY_LOCATION Dst = {}, Src = {};
+      Dst.pResource = pDst;
+      Dst.Type = D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT;
+      Dst.PlacedFootprint = Layout[i];
+      Src.pResource = pSrc;
+      Src.Type = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
+      Src.SubresourceIndex = i;
+      m_pList->CopyTextureRegion(&Dst, 0, 0, 0, &Src, nullptr);
+    }
+  };
+  Copy(pFields.Get(), pFieldsBack.Get(), FieldsLayout);
+  Copy(pWaves.Get(), pWavesBack.Get(), WavesLayout);
+  Execute();
+
+  SOceanOutput Out;
+  void *p = nullptr;
+  D3D12_RANGE None = { 0, 0 };
+  D3D12_RANGE Range = { 0, (SIZE_T)nFieldsBytes };
+  Ok(pFieldsBack->Map(0, &Range, &p), "Map");
+  Out.Fields.resize((size_t)2 * C * N * N * 4);
+  for (UINT s = 0; s < 2 * C; s++)
+    for (UINT y = 0; y < N; y++)
+      memcpy(&Out.Fields[((size_t)s * N + y) * N * 4], (const uint8_t *)p + (size_t)FieldsLayout[s].Offset + (size_t)y * FieldsLayout[s].Footprint.RowPitch, N * 16);
+  pFieldsBack->Unmap(0, &None);
+  Range = { 0, (SIZE_T)nWavesBytes };
+  Ok(pWavesBack->Map(0, &Range, &p), "Map");
+  for (UINT m = 0; m < MIPS; m++)
+  {
+    const UINT w = N >> m;
+    std::vector<uint16_t> Halfs((size_t)C * w * w * 4);
+    for (UINT c = 0; c < C; c++)
+    {
+      // Sub resource m + c * MIPS.
+      const D3D12_PLACED_SUBRESOURCE_FOOTPRINT &l = WavesLayout[m + c * MIPS];
+      for (UINT y = 0; y < w; y++)
+        memcpy(&Halfs[((size_t)c * w + y) * w * 4], (const uint8_t *)p + (size_t)l.Offset + (size_t)y * l.Footprint.RowPitch, (size_t)w * 8);
+    }
+    Out.Waves[m] = HalfsToFloats(Halfs.data(), Halfs.size());
+  }
+  pWavesBack->Unmap(0, &None);
   return Out;
 }

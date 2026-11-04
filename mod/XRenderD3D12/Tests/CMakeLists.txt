@@ -78,6 +78,12 @@ set(pathtrace "${CMAKE_CURRENT_SOURCE_DIR}/Shaders/TestPathTrace.hlsl")
 foreach(k LeafSide Cosine Checkerboard Layout PixelSurface TerrainShare SurfaceNormal LampLight LampShadow LightmapFill)
     xrender_d3d12_test_shader(${k} "${pathtrace}" cs_6_5 CS${k})
 endforeach()
+# The FFT ocean's kernels, from the renderer's own source as Shaders.cmake compiles them (GpuHarness.h's RunOcean runs
+# them as OceanFFT.cpp does).
+foreach(k Rows Columns Waves Mips)
+    string(TOUPPER "${k}" kd)
+    xrender_d3d12_test_shader(Ocean${k} "${XRENDERD3D12_SHADER_SOURCE_DIR}/OceanFFT.hlsl" cs_6_0 CSMain XR_OCEAN_${kd})
+endforeach()
 # The renderer's own kernel, from its own source.
 xrender_d3d12_test_shader(PathCacheResolve "${XRENDERD3D12_SHADER_SOURCE_DIR}/PathTrace.hlsl" cs_6_5 CSCacheResolve)
 
@@ -106,6 +112,7 @@ set(XRENDERD3D12_TESTS_SOURCES
     LightImageTests.cpp
     FarSpriteTests.cpp
     WaterLightTests.cpp
+    OceanTests.cpp
 )
 file(GLOB XRENDERD3D12_TESTS_HLSL "${CMAKE_CURRENT_SOURCE_DIR}/Shaders/*.hlsl" "${CMAKE_CURRENT_SOURCE_DIR}/Shaders/*.hlsli")
 set_source_files_properties(${XRENDERD3D12_TESTS_HLSL} PROPERTIES HEADER_FILE_ONLY ON)

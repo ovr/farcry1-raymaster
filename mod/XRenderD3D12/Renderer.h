@@ -1123,6 +1123,37 @@ public:
   Matrix44 m_ReflectionViewProj;            //!< world to clip of the mirrored camera (without the water clip)
 
   //////////////////////////////////////////////////////////////////////////
+  // OceanFFT.cpp: the FFT ocean's waves (d3d12_WaterFFT)
+
+  //! Once a frame before the main view's scenes when its list (Items) has water: the sea's waves at
+  //! the frame's time into m_Ocean.pWaves (the targets made on the first call, the sea when
+  //! d3d12_WaterWind changes). d3d12_WaterFFT 0: released.
+  void UpdateOcean(std::span<const SRenderItem> Items);
+  bool EnsureOceanTargets();
+  //! The sea of the wind fWind (m / s) on the CPU, its h0 uploaded.
+  bool MakeOcean(float fWind);
+  //! The water's constants of the FFT waves (SetupWaterDraw; fBump the bump amounts' slope factor):
+  //! false without them (the static wave texture then).
+  bool SetOceanConstants(SDrawConstants &dc, float fBump) const;
+  void ReleaseOcean();
+  struct SOceanState
+  {
+    CD3D12Texture *pH0 = nullptr;           //!< h0 of the sea (RGBA32F, a slice a cascade: re, im, the steps of its Omega)
+    CD3D12Texture *pRows = nullptr;         //!< the spectra transformed along x (RGBA32F, two slices a cascade)
+    CD3D12Texture *pFields = nullptr;       //!< and along y: the fields
+    CD3D12Texture *pWaves = nullptr;        //!< the waves (RGBA16F, a slice a cascade, XR_OCEAN_MIPS levels; its SRV the water's)
+    CD3D12Texture *pLevel4 = nullptr;       //!< their level 4 for the last kernel
+    int nTables = -1;                       //!< the four kernels' descriptor tables
+    int nFrame = -1;                        //!< the frame the waves were made in, -1 none yet
+    bool bFailed = false;                   //!< no targets (until d3d12_WaterFFT 0)
+    float fWind = 0;                        //!< the wind of the sea in pH0
+    float fSlopeRMS = 0;                    //!< its slopes' RMS along an axis
+    float fFineVar = 0;                     //!< the variance of its ripple finer than the short cascade (both axes)
+    float fHeightWeight[XR_OCEAN_CASCADES] = {};  //!< each cascade's height's weight (SSea::HeightWeight)
+  };
+  SOceanState m_Ocean;
+
+  //////////////////////////////////////////////////////////////////////////
   // EnvCubes.cpp: the cubes of the scene around the objects of TemplReflEnvCM (EEnvMap::Auto)
 
   //! A cube of the scene seen from a point.
@@ -1926,6 +1957,9 @@ public:
   float CV_d3d12_WaterGlint = 1;      //!< strength of the sun's glint on water (0: none, as the game)
   float CV_d3d12_WaterGlintRoughness = 0.004f;  //!< the variance of the slopes of the water's ripple finer than its wave texture (the glint's)
   float CV_d3d12_WaterCrestLight = 1;  //!< strength of the sun's light through the waves' crests (0: none, as the game)
+  int CV_d3d12_WaterFFT = 1;          //!< 1: the FFT ocean's waves (OceanFFT.cpp); 0: the static wave texture, as before
+  float CV_d3d12_WaterWind = 5;       //!< m/s: the wind of the FFT ocean's sea (its waves' heights and slopes)
+  float CV_d3d12_WaterSlope = 0.0446f;  //!< the FFT waves' slopes' RMS along an axis at the default bump amounts (the old texture's; 0: the wind sea's own)
   int CV_d3d12_GpuTimes = 0;          //!< N: the GPU time of the frame's sections to the log every N frames
   int CV_d3d12_FrameLog = 0;          //!< 1: a line per frame to XRenderD3D12_frames.txt (LogFrame), 2 with the engine's profilers
   int CV_d3d12_CpuSamples = 0;        //!< N: the render thread's stack every N microseconds, to XRenderD3D12_samples.txt at 0 (CpuSampler)

@@ -100,6 +100,20 @@ namespace XrTest
     SBytecode Edges, DispatchArgs, Candidates, Apply;
   };
 
+  //! The FFT ocean's kernels (the renderer's Shaders/OceanFFT.hlsl, as Shaders.cmake compiles them) for CGpu::RunOcean.
+  struct SOceanKernels
+  {
+    SBytecode Rows, Columns, Waves, Mips;
+  };
+  //! What RunOcean leaves: the fields (2 * XR_OCEAN_CASCADES slices of XR_OCEAN_SIZE x XR_OCEAN_SIZE RGBA32F texels, slice
+  //! after slice, row after row) and each of the waves' XR_OCEAN_MIPS levels (XR_OCEAN_CASCADES slices of RGBA16F texels,
+  //! as floats).
+  struct SOceanOutput
+  {
+    std::vector<float> Fields;
+    std::vector<float> Waves[XR_OCEAN_MIPS];
+  };
+
   //! What a run binds; the output is nOut uint4 items, zeroed before the kernel runs.
   struct SDispatch
   {
@@ -141,6 +155,10 @@ namespace XrTest
     //! once, before the first). The picture the last frame leaves, its texels as Picture's. Throws when the device has no
     //! typed UAV store of the format (the renderer leaves the picture then).
     std::vector<uint8_t> RunCmaa2(const STestTexture &Picture, const SCmaa2Kernels &Kernels, int nFrames = 1);
+    //! The FFT ocean's pass as OceanFFT.cpp's UpdateOcean runs it: the standard root signature of D3D12Compute.h (b0; t0..t3;
+    //! u0..u4), its targets in their formats, its four kernels in its order with its barriers. H0: the cascades' h0 texels
+    //! (OceanSpectrum.h's SCascade::H0, one cascade after another), Constants the frame's.
+    SOceanOutput RunOcean(const std::vector<float> &H0, const SOceanConstants &Constants, const SOceanKernels &Kernels);
     //! Whether the device stores the format through a typed UAV (CMAA2's output).
     bool HasTypedStore(DXGI_FORMAT Format);
     //! The radiance cache emptied (every word 0).
@@ -193,7 +211,12 @@ namespace XrTest
     ComPtr<ID3D12DescriptorHeap> m_pWideHeap;           //!< shader visible, that table
     ComPtr<ID3D12CommandSignature> m_pDispatchSignature;
     std::map<const void *, ComPtr<ID3D12PipelineState>> m_WidePipelines;
+    ComPtr<ID3D12RootSignature> m_pComputeRootSignature;  //!< D3D12Compute.h's standard one (RunOcean), made at the first
+    std::map<const void *, ComPtr<ID3D12PipelineState>> m_ComputePipelines;
   };
+
+  //! n half floats (IEEE 754 binary16) as floats.
+  std::vector<float> HalfsToFloats(const uint16_t *p, size_t n);
 
   //! The tests' device, made at the first use (throws std::runtime_error when there is none).
   CGpu &Gpu();

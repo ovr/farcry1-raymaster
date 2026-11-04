@@ -128,8 +128,9 @@ public:
   CD3D12Texture *CreateRenderTarget(int nWidth, int nHeight, DXGI_FORMAT Format, bool bUnorderedAccess = false);
   //! A texture that compute passes write (ALLOW_UNORDERED_ACCESS), nMips levels, without views (the
   //! pass writes them into its descriptor tables, so Format may be typeless); starts in
-  //! UNORDERED_ACCESS. szName names it for the debug layer.
-  CD3D12Texture *CreateComputeTarget(int nWidth, int nHeight, int nMips, DXGI_FORMAT Format, const wchar_t *szName);
+  //! UNORDERED_ACCESS. szName names it for the debug layer; nArraySize > 1: a texture array of that
+  //! many slices.
+  CD3D12Texture *CreateComputeTarget(int nWidth, int nHeight, int nMips, DXGI_FORMAT Format, const wchar_t *szName, int nArraySize = 1);
   //! The same as a 3D texture of nWidth x nHeight x nDepth texels, one mip.
   CD3D12Texture *CreateComputeVolume(int nWidth, int nHeight, int nDepth, DXGI_FORMAT Format, const wchar_t *szName);
   //! Replaces a rectangle of one sub resource (x, y, nWidth, nHeight in texels; multiples of 4

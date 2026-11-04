@@ -105,14 +105,21 @@
 //	            (d3d12_WaterReflectionBlur; 0: the reflection is not blurred),
 //	            yz the first row (c, s) of the sky box's turn about z (the
 //	            level's sky box angle, DrawSkyItem: a direction of the world is
-//	            turned back by it before the box is looked up)
+//	            turned back by it before the box is looked up), w 1: the FFT
+//	            ocean's waves (d3d12_WaterFFT) in place of nTex5's, vParams0.x
+//	            the factor of their slopes
 //	  vTexGenV  XR_RAYTRACE: x the mode (1, 2), y the rays' length (m), z the
 //	            instance mask (bits 0-7) and bit 8 the sun's shadow at the
 //	            hits
 //	  nShadowTex  x the depth tiles of the depth copy (Water.cpp, the ocean's;
 //	            R32_FLOAT: at level 0 the least depth of each XR_DEPTH_TILE x
 //	            XR_DEPTH_TILE pixels, at each next one of 2 x 2 texels of the
-//	            one before), y their levels (0: none)
+//	            one before), y their levels (0: none), z with vTexGenU.w the
+//	            FFT ocean's waves (OceanFFT.cpp: a texture array, a slice a
+//	            cascade, OceanFFT.hlsli's texels)
+//	  vAddColor with vTexGenU.w: x the RMS along an axis of the FFT ocean's
+//	            slopes, y the variance of its ripple finer than the short
+//	            cascade (both axes)
 //	  vSpecular the sun's glint: x its strength (d3d12_WaterGlint; 0: none),
 //	            y the variance of the slopes of the ripple finer than the
 //	            texture (d3d12_WaterGlintRoughness), z its most light (the
@@ -172,8 +179,33 @@ float LinearDepth(float fDepth)
 //! weight of its slopes (the long waves' metres would make patches tens of metres wide of what the
 //! light through the crests, WaterCrestLight, finds on the short waves' sharper crests), RMS 1 (as
 //! far as the mip levels leave it).
+//! WaveNormal of the FFT ocean's waves (vTexGenU.w; OceanFFT.cpp): the three cascades (the slices of
+//! g_TextureArrays[nShadowTex.z]) over their tiles, their slopes in metres per metre summed, times
+//! fScale (the bump amounts' factor); they run and change their shape by themselves (no time).
+//! fLostVar the variance their mip levels smoothed out of each, fHeight their heights each in the
+//! weight of its slopes (RMS 1, OceanSpectrum.h's HeightWeight).
+float3 OceanWaveNormal(float2 vPos, float fScale, out float fLostVar, out float fHeight)
+{
+  static const float Tiles[XR_OCEAN_CASCADES] = { XR_OCEAN_TILE0, XR_OCEAN_TILE1, XR_OCEAN_TILE2 };
+  float2 vSlope = 0;
+  fLostVar = 0;
+  fHeight = 0;
+  [unroll]
+  for (uint c = 0; c < XR_OCEAN_CASCADES; c++)
+  {
+    float4 t = g_TextureArrays[g_Draw.nShadowTex.z].Sample(g_SamplerLinearWrap, float3(vPos / Tiles[c], c));
+    vSlope += t.xy;
+    fLostVar += max(t.w - dot(t.xy, t.xy), 0);
+    fHeight += t.z;
+  }
+  fLostVar *= fScale * fScale;
+  return normalize(float3(-vSlope * fScale, 1));
+}
+
 float3 WaveNormal(float2 vPos, float fTime, float fScale, out float fLostVar, out float fHeight)
 {
+  if (g_Draw.vTexGenU.w != 0)
+    return OceanWaveNormal(vPos, fScale, fLostVar, fHeight);
   static const float4 Layers[3] =
   {
     float4( 0.94,  0.34, 61.0, 1.10),
@@ -205,6 +237,12 @@ float3 WaveNormal(float2 vPos, float fTime, float fScale, out float fLostVar, ou
 //! The RMS along one axis of WaveNormal's slopes before fScale: the layers' together, sqrt of the
 //! sum of Weights^2.
 static const float WAVE_SLOPE_RMS = 0.743;
+
+//! The RMS along one axis of WaveNormal's slopes at fScale: the wave texture's or the FFT ocean's.
+float WaveSlopeRMS(float fScale)
+{
+  return fScale * (g_Draw.vTexGenU.w != 0 ? g_Draw.vAddColor.x : WAVE_SLOPE_RMS);
+}
 
 float3 WaveNormal(float2 vPos, float fTime, float fScale, out float fLostVar)
 {
@@ -684,7 +722,7 @@ float4 ShadeWater(SWaterOutput In)
     }
     if (g_Draw.vParams0.w > 0)
       vCrest = WaterSunLight() * WaterCrestColor(g_Draw.vParams3.rgb) *
-               (WaterCrestLight(N, V, L, fHeight, g_Draw.vParams0.x * WAVE_SLOPE_RMS) * g_Draw.vParams0.w * (1 - F) * fSunUp);
+               (WaterCrestLight(N, V, L, fHeight, WaveSlopeRMS(g_Draw.vParams0.x)) * g_Draw.vParams0.w * (1 - F) * fSunUp);
     {
 #ifdef XR_RAYTRACE
       const float fCone = fDistance * fPixelAngle;
@@ -744,6 +782,8 @@ float4 ShadeWater(SWaterOutput In)
       return float4(HdrEncode(vCrest.r), HdrEncode(vCrest.g), HdrEncode(vCrest.b), 1);
     if (g_Draw.vParams0.z == 18)
       return float4(saturate(fGlintVar / 0.05).xxx, 1);
+    if (g_Draw.vParams0.z == 20)
+      return float4(saturate(fHeight * 0.25 + 0.5).xxx, 1);
     if (g_Draw.vParams0.z == 19)
     {
 #ifdef XR_RAYTRACE
