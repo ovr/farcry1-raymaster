@@ -117,7 +117,10 @@ struct SPipelineKey
                           //!< 0 one; DrawGeometry sets it
   uint8 bWaterDeferred;   //!< the water program over the whole view where the ocean's grid's depth pass left the waves
                           //!< (XR_WATER_DEFERRED, OceanGrid.cpp's DrawOceanGrid): its own vertex and pixel shaders
-  uint8 nUnused[2];       //!< 0: the key has no padding (it is hashed and compared as bytes)
+  uint8 bAlphaToCoverage; //!< nSamples > 1: the samples a pixel covers by its alpha (AlphaToCoverageEnable): the general program's
+                          //!< alpha-tested draws there (d3d12_AlphaToCoverage; DrawGeometry sets it, with fAlphaRef negated: the
+                          //!< pixel shader gives the alpha sharpened to the test's edge, CoverageAlpha, in place of the test)
+  uint8 nUnused;          //!< 0: the key has no padding (it is hashed and compared as bytes)
 };
 
 //! SPipelineKey::nColorFormat.

@@ -1966,6 +1966,7 @@ public:
   int m_nPolygons = 0;                //!< GetPolyCount: the triangles of the frame the last Update ended
   int m_nFrameDraws = 0;              //!< the draws since the last Update (DrawGeometry)
   int m_nFramePSOChanges = 0;         //!< of them, those with another pipeline state than the draw before
+  int m_nFrameAlphaCoverage = 0;      //!< of them, those with alpha to coverage (SPipelineKey::bAlphaToCoverage; the frame dump)
   int m_nFrameSunLights = 0;          //!< r_DisplayInfo: the main view's sun (DLF_SUN) and other lights in this
   int m_nFrameDynLights = 0;          //!< frame (CScene::EndEf3D), 0 again at the end of Update
   ID3D12PipelineState *m_pLastPSO = nullptr;  //!< the pipeline state of the last draw (counted only)
@@ -2130,6 +2131,8 @@ public:
                                             //!< scene tone mapped at the render size (as up to step 259)
   int CV_d3d12_AAQuality = 2;               //!< the anti-aliasing's (d3d12_AA, a string) quality, 0 (low) to 3 (ultra)
   int CV_d3d12_AADebug = 0;                 //!< 1: the anti-aliasing's view of the edges
+  int CV_d3d12_AlphaToCoverage = 1;         //!< with MSAA, 1: the alpha-tested draws' edges by the samples their alpha covers
+                                            //!< (sharpened to the test's edge, Draw.cpp's DrawGeometry); 0 the test, a step
   int CV_d3d12_AOQuality = 2;               //!< the ambient occlusion's (d3d12_AO, a string) quality, 0 to 3
   float CV_d3d12_AORadius = 1;              //!< its radius (m)
   float CV_d3d12_AOStrength = 1;            //!< the exponent of its visibility

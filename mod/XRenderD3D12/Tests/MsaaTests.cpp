@@ -5,7 +5,9 @@
 //	File: MsaaTests.cpp
 //	Description: Unit tests of MSAA's resolve (d3d12_AA msaa2, msaa4,
 //	msaa8, Msaa.cpp) on the GPU: Shaders/Msaa.hlsli as Msaa.hlsl's passes
-//	use it (TestMsaa.hlsl), on the samples of single pixels.
+//	use it (TestMsaa.hlsl), on the samples of single pixels; and of alpha
+//	to coverage's alpha (d3d12_AlphaToCoverage, AlphaCoverage.hlsli's
+//	CoverageAlpha, TestHeaders.hlsl).
 //
 //////////////////////////////////////////////////////////////////////
 
@@ -14,6 +16,7 @@
 #include "TestMath.h"
 
 #include "Test_Msaa.h"
+#include "Test_CoverageAlpha.h"
 
 #include <algorithm>
 #include <cmath>
@@ -65,6 +68,40 @@ namespace
   double Encode(double x) { return x <= 0 ? 0 : x <= 1 ? std::pow(x, 1 / 2.2) : 1 + (x - 1) / 2.2; }
   //! The ACES curve's fit (MsaaToneMap).
   double ToneMap(double x) { return x * (2.51 * x + 0.03) / (x * (2.43 * x + 0.59) + 0.14); }
+
+  //! An alpha-tested pixel: its alpha at the centre, the test's reference and the alpha's change across it (fwidth).
+  struct SAlphaPixel
+  {
+    float a, fRef, fWidth;
+  };
+
+  //! CoverageAlpha of each pixel.
+  std::vector<float> Coverage(const std::vector<SAlphaPixel> &Pixels)
+  {
+    SDispatch d;
+    d.Shader = XR_BYTECODE(Test_CoverageAlpha);
+    d.Test.nTest[0] = (uint32)Pixels.size();
+    d.nGroups[0] = Groups64(Pixels.size());
+    for (const SAlphaPixel &p : Pixels)
+      Push(d.In, p.a, p.fRef, p.fWidth, 0);
+    d.nOut = Pixels.size();
+    const std::vector<uint32> Out = Gpu().Run(d);
+    std::vector<float> R;
+    for (size_t i = 0; i < Pixels.size(); i++)
+      R.push_back(At(Out, i, 0));
+    return R;
+  }
+
+  //! The share of a pixel the alpha test keeps (alpha >= fRef) where the alpha changes evenly across it, from a at its
+  //! centre by fWidth from one side to the other: counted over 65536 points across it.
+  double KeptShare(double a, double fRef, double fWidth)
+  {
+    constexpr int nPoints = 1 << 16;
+    int nKept = 0;
+    for (int k = 0; k < nPoints; k++)
+      nKept += a + fWidth * ((k + 0.5) / nPoints - 0.5) >= fRef;
+    return (double)nKept / nPoints;
+  }
 }
 
 // Why: where all of a pixel's samples are of one surface (all but the edges), the resolve must leave its colour as it
@@ -193,5 +230,63 @@ XR_TEST(Msaa_DepthNearest)
         fNearest = std::min(fNearest, Pixel[i][8 - nSamples + s]);
       CHECK_NEAR(R[i].fDepth, fNearest, 0);
     }
+  }
+}
+
+// Why: along an alpha-tested edge (a leaf's, a blade of grass', a grating's bar) alpha to coverage must cover the share
+// of the pixel the test keeps, so that the edge steps through the samples as the surface's edge crosses the pixel, and
+// summed along the edge the leaves keep their area: neither thinner nor thicker than the test draws them. Where the
+// filtered texture's alpha changes evenly across a pixel, by a little (a magnified texture) or by more than the whole
+// range (a far, minified one), at each reference the game uses.
+XR_TEST(Msaa_CoverageEdge)
+{
+  std::vector<SAlphaPixel> In;
+  for (const float fRef : { 0.25f, 0.5f, 128.0f / 255, 0.75f })
+    for (const float fWidth : { 0.002f, 0.02f, 0.1f, 0.4f, 1.0f, 2.0f })
+      for (int k = -12; k <= 12; k++)
+        In.push_back({ fRef + fWidth * k / 16.0f, fRef, fWidth });
+  const std::vector<float> R = Coverage(In);
+  double fSumGot = 0, fSumWant = 0;
+  for (size_t i = 0; i < In.size(); i++)
+  {
+    const double fWant = KeptShare(In[i].a, In[i].fRef, In[i].fWidth);
+    CHECK_NEAR(R[i], fWant, 1.0 / 65536 + 1e-5);
+    fSumGot += R[i];
+    fSumWant += fWant;
+  }
+  CHECK_NEAR(fSumGot, fSumWant, 1e-2);
+}
+
+// Why: where the alpha does not change across the pixel (a leaf's inside, a grating's hole, a magnified texel) the
+// coverage must be the test's own: all of the samples where it keeps the pixel, none where it discards it. A leaf's
+// inside half covered would be see-through dither, a hole's alpha just under the reference a film over the grating's
+// holes (they stay see-through, as the original draws them).
+XR_TEST(Msaa_CoverageFlat)
+{
+  std::vector<SAlphaPixel> In;
+  for (const float fRef : { 1.0f / 255, 0.25f, 0.5f, 128.0f / 255, 0.75f })
+    for (const float fDelta : { -1.0f, -0.1f, -0.01f, -1e-3f, 1e-3f, 0.01f, 0.1f, 1.0f })
+      In.push_back({ std::clamp(fRef + fDelta, 0.0f, 1.0f), fRef, 0 });
+  const std::vector<float> R = Coverage(In);
+  for (size_t i = 0; i < In.size(); i++)
+    CHECK_NEAR(R[i], In[i].a >= In[i].fRef ? 1.0f : 0.0f, 0);
+}
+
+// Why: the coverage must grow with the alpha (no edge whose samples come and go as the alpha rises across it) and stay
+// within the samples a pixel has, whatever the alpha's change across it, with the edge's middle at the reference.
+XR_TEST(Msaa_CoverageRange)
+{
+  std::vector<SAlphaPixel> In;
+  for (const float fWidth : { 0.0f, 1e-5f, 0.01f, 0.3f, 3.0f, 50.0f })
+    for (int k = 0; k <= 64; k++)
+      In.push_back({ k / 64.0f, 0.5f, fWidth });
+  const std::vector<float> R = Coverage(In);
+  for (size_t i = 0; i < In.size(); i++)
+  {
+    CHECK(R[i] >= 0 && R[i] <= 1);
+    if (i % 65)
+      CHECK(R[i] >= R[i - 1]);
+    if (i % 65 == 32 && In[i].fWidth > 0)
+      CHECK_NEAR(R[i], 0.5f, 1e-6);
   }
 }

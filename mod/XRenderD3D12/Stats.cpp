@@ -252,7 +252,7 @@ void CD3D12Renderer::CollectStats()
     m_pDevice->ResetGpuTimes();
   }
   const int nDraws = m_nFrameDraws, nPSOChanges = m_nFramePSOChanges;
-  m_nFrameDraws = m_nFramePSOChanges = 0;
+  m_nFrameDraws = m_nFramePSOChanges = m_nFrameAlphaCoverage = 0;
   if (CV_r_Stats <= 0 && m_DisplayInfo.nValue <= 0)
   {
     m_StatsSum = {};

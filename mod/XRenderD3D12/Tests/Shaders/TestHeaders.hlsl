@@ -5,7 +5,7 @@
 //	File: TestHeaders.hlsl
 //	Description: The unit tests' kernels over the renderer's shader
 //	headers that stand alone (Shader Model 6.0): PathGBuffer.hlsli,
-//	HdrLight.hlsli, HdrToneMap.hlsli, HdrExposure.hlsli, HdrFrameAverage.hlsli, PathCache.hlsli, LightmapLight.hlsli, RenderMode.hlsli, ArrayCoords.hlsli, WaterLight.hlsli, WaterFoam.hlsli, WaterCaustics.hlsli, WaterVolume.hlsli, Underwater.hlsli and Fxaa.hlsli, included as the renderer's
+//	HdrLight.hlsli, HdrToneMap.hlsli, HdrExposure.hlsli, HdrFrameAverage.hlsli, PathCache.hlsli, LightmapLight.hlsli, RenderMode.hlsli, ArrayCoords.hlsli, WaterLight.hlsli, WaterFoam.hlsli, WaterCaustics.hlsli, WaterVolume.hlsli, Underwater.hlsli, AlphaCoverage.hlsli and Fxaa.hlsli, included as the renderer's
 //	programs include them. Each kernel runs the tested functions on the
 //	items of g_TestIn and writes what they give to g_TestOut; ShaderTests.cpp
 //	checks it. One compile per kernel (Tests/CMakeLists.txt).
@@ -34,6 +34,18 @@
 // The ocean's grid's table of the game's disc (GridDiscAlpha): the input's first words (CSGridDisc).
 #define GRID_DISC_WORD(i) asfloat(g_TestIn[(i) >> 2][(i) & 3])
 #include "OceanGrid.hlsli"
+#include "AlphaCoverage.hlsli"
+
+//! CoverageAlpha (AlphaCoverage.hlsli) of the alpha g_TestIn[i].x, the reference .y and the alpha's change across the
+//! pixel .z: out[i].x.
+[numthreads(64, 1, 1)]
+void CSCoverageAlpha(uint i : SV_DispatchThreadID)
+{
+  if (i >= g_Test.nTest.x)
+    return;
+  const float4 a = TestIn(i);
+  TestOut(i, float4(CoverageAlpha(a.x, a.y, a.z), 0, 0, 0));
+}
 
 //! The FXAA tests' picture (Fxaa.hlsli): g_Test.nTest.y x g_Test.nTest.z pixels, g_TestIn[y * width + x] the rgba of
 //! pixel (x, y) as floats, clamped to the picture as AntiAlias.hlsl clamps its loads.

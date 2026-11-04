@@ -238,6 +238,18 @@ void CD3D12Renderer::DrawGeometry(const SPipelineKey &Key, const SDrawConstants 
   FullKey.nSamples = FullKey.nTarget == 0 && m_pDevice->GetBoundSamples() > 1 ? (uint8)m_pDevice->GetBoundSamples() : 0;
   if (FullKey.nSamples && (FullKey.nState & GS_DEPTHWRITE) && !(FullKey.nState & GS_NODEPTHTEST))
     m_bMsaaDepthDirty = true;
+  // MSAA's alpha-tested draws: the samples their alpha covers (d3d12_AlphaToCoverage), the pixel shader's alpha sharpened to the
+  // test's edge in place of the test (fAlphaRef negated below, General.hlsl's CoverageAlpha). Not the test that keeps what is under
+  // the reference (DF_ALPHATEST_LESS), a blend that takes the source's alpha (the alpha is the coverage now), nor the draws whose
+  // alpha after the test is another (the far sprites' pictures, the detail layer, the caustics, the shadow's passes, the fog
+  // volumes) or whose program is their own (DF2_SHADER_FX).
+  const uint32 nSrcBlend = FullKey.nState & GS_BLSRC_MASK, nDstBlend = FullKey.nState & GS_BLDST_MASK;
+  FullKey.bAlphaToCoverage = FullKey.nSamples > 1 && CV_d3d12_AlphaToCoverage > 0 && Key.nProgram == eD3D12P_General && !FullKey.bDepthOnly &&
+                             (dc.nFlags & (DF_ALPHATEST | DF_ALPHATEST_LESS)) == DF_ALPHATEST && dc.fAlphaRef > 0 &&
+                             !(dc.nFlags & (DF_ALPHA_ONE | DF_DETAIL_LAYER | DF_CAUSTICS | DF_SHADOW_PASS | DF_SHADOW_DEBUG)) &&
+                             !(dc.nFlags2 & (DF2_FOG_VOLUME | DF2_SHADER_FX)) &&
+                             nSrcBlend != GS_BLSRC_SRCALPHA && nSrcBlend != GS_BLSRC_ONEMINUSSRCALPHA && nSrcBlend != GS_BLSRC_ALPHASATURATE &&
+                             nDstBlend != GS_BLDST_SRCALPHA && nDstBlend != GS_BLDST_ONEMINUSSRCALPHA ? 1 : 0;
   ID3D12PipelineState *pPSO = m_pPipeline->GetPSO(FullKey);
   if (!pPSO)
     return;
@@ -274,6 +286,16 @@ void CD3D12Renderer::DrawGeometry(const SPipelineKey &Key, const SDrawConstants 
     }
     memcpy(LocalDC.mPrevWorldViewProj, LocalDC.mWorldViewProj, sizeof(LocalDC.mPrevWorldViewProj));
   }
+  // Alpha to coverage: the reference negated (the scene for rays took the draw's own above).
+  if (FullKey.bAlphaToCoverage)
+  {
+    if (pDC != &LocalDC)
+    {
+      LocalDC = dc;
+      pDC = &LocalDC;
+    }
+    LocalDC.fAlphaRef = -dc.fAlphaRef;
+  }
   // The state the draw before set stays while nothing else touched the command list.
   ID3D12GraphicsCommandList *pList = m_pDevice->GetDrawCmdList();
   SDrawState &Set = m_DrawState;
@@ -288,6 +310,7 @@ void CD3D12Renderer::DrawGeometry(const SPipelineKey &Key, const SDrawConstants 
     Set.pPSO = pPSO;
   }
   m_nFramePSOChanges += pPSO != m_pLastPSO;
+  m_nFrameAlphaCoverage += FullKey.bAlphaToCoverage;
   m_pLastPSO = pPSO;
   if (m_nFrameCB != Set.nFrameCB)
   {

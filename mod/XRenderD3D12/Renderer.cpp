@@ -341,6 +341,9 @@ void CD3D12Renderer::RegisterVariables()
   iConsole->Register("d3d12_AADebug", &CV_d3d12_AADebug, 0, 0,
                      "1: the anti-aliasing's view of the edges (grey where it leaves the picture, red by how much it blends; SMAA and "
                      "CMAA2: also the edges they found; TAA: red where its history goes, yellow where it is clipped)");
+  iConsole->Register("d3d12_AlphaToCoverage", &CV_d3d12_AlphaToCoverage, 1, VF_DUMPTODISK,
+                     "With MSAA (d3d12_AA msaa2, msaa4, msaa8), 1: the alpha-tested surfaces (grass, leaves, gratings) cover the samples "
+                     "their alpha sharpened to the test's edge covers (alpha to coverage): their edges smooth; 0: the alpha test, a step");
   // The ambient occlusion (AmbientOcclusion.cpp).
   iConsole->CreateVariable("d3d12_AO", "cacao", VF_DUMPTODISK,
                            "Ambient occlusion of the 3D scene: none, gtao (Intel XeGTAO), cacao (AMD FidelityFX CACAO), both in screen "
