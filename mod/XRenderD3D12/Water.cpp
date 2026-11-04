@@ -108,6 +108,9 @@ constexpr float WATER_ABSORPTION[3] = { 0.030f, 0.024f, 0.005f };
 constexpr float WATER_TURBIDITY = 0.005f;
 constexpr float WATER_SCATTER[3] = { 0.18f, 0.28f, 0.54f };
 constexpr float WATER_DISPLACEMENT = 0.03f;
+//! The sun's share of the light the ocean's water scatters at a high sun (d3d12_WaterVolume): the rest the sky's, lit in
+//! the sun's shadow too (as the caustics' share of the sea floor's light, OceanFFT.cpp's CAUSTICS_SUN_SHARE).
+constexpr float WATER_VOLUME_SUN_SHARE = 0.6f;
 
 // A beach wave runs up the shore and back in this many seconds (BEACH_WAVES of them at a time), the
 // second this many seconds behind the first; the foam is white, this many times the world colour's
@@ -1035,6 +1038,14 @@ bool CD3D12Renderer::SetupWaterDraw(SPipelineKey &Key, SDrawConstants &dc, const
     Set4(dc.vParams3, pFV->Color.r, pFV->Color.g, pFV->Color.b, 0);
     dc.vParams2[0] = pFV->fFogLayerZ;
     dc.vParams2[1] = logf(100.0f) / (2 * std::max(pFV->fMaxFogDist, 1.0f));
+    // The light in its water (d3d12_WaterVolume; Water.hlsl's OceanVolume) in place of the fog: the sun's share of the
+    // light it scatters, as of the light on the sea floor (the caustics'), none in the sun's shadow (none in an
+    // environment cube or heat vision: the cascades are the camera's).
+    if (CV_d3d12_WaterVolume > 0)
+    {
+      dc.vAddColor[2] = bSunLight ? WATER_VOLUME_SUN_SHARE * std::clamp(m_SunDir[2] * 4, 0.0f, 1.0f) : 0.0f;
+      dc.vAddColor[3] = 1;
+    }
   }
   else
   {

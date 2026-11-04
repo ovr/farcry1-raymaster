@@ -1204,7 +1204,9 @@ and lists theirs (`NamesObjects`).
   sun's light through the crests, 18 the variance of the glint's slopes (white: 0.05), 19 the sun's
   shadow on the water (black), 20 the height of the waves the crests' light reads (black -2, white 2
   of its RMS); with the foam 21 how much of the water's light it hides, 22 the whitecaps' amount, 23
-  the shore's (the three without the game's foam strips on the beaches).
+  the shore's (the three without the game's foam strips on the beaches); with the light in the ocean's
+  water 24 the light it scatters towards the camera, 25 the share of the scene behind it left (from
+  below the share of Snell's window), 26 the share of the sun's light left in the light it scatters.
 - The FFT ocean (`d3d12_WaterFFT`, 1; 0 draws the static wave texture and the frames of the water
   before it; not saved; `OceanSpectrum.h`, `OceanFFT.cpp`, `Shaders/OceanFFT.hlsl`): the ocean's
   waves are a wind sea made by inverse FFTs on the GPU each frame (Tessendorf's "Simulating Ocean
@@ -1370,6 +1372,46 @@ and lists theirs (`NamesObjects`).
     correlate 0.67, 1 s apart 0.01.
   - Cost at 3840 x 2160: the kernel 0.07-0.08 ms (the ocean's section 0.07 -> 0.14-0.15 ms), the
     floor 0.03 ms more (Carrier 0.53 -> 0.56 ms, the surf's beach 0.71 -> 0.74).
+- The light in the ocean's water (`d3d12_WaterVolume`, 1; 0 draws the fog volume's fog, the frames
+  before; not saved; `Shaders/WaterVolume.hlsli`): the scene behind the surface seen through the
+  water and the light the water scatters towards the camera, in each channel, in place of the fog
+  volume's colour laid over the scene by distance.
+  - The water's attenuation per metre in each channel comes from the level's fog volume, its colour
+    C (in linear light) and density (ln 100 over twice its distance): a channel as bright as C's
+    luminance by the density, one half as bright twice as fast (deep water's colour is the light it
+    scatters back over the light it absorbs), at most 64 times, at least pure water's absorption
+    (Pope and Fry 1997: 0.26, 0.057 and 0.011 per metre at 610, 550 and 470 nm). Carrier's water (C
+    0.18, 0.35, 0.57 in gamma, 60 m) is pure water's in red and green, 0.013 in blue; Bunker's and
+    the river's murkier water attenuates all three faster.
+  - The scene behind (the copy of the colour buffer) keeps exp(-c (s + d / cos t)): s the view's path
+    down to it along its ray refracted at the waves' normal (Snell's law, 1.333), d its depth under the
+    surface, t the angle of the sun's ray refracted into the water. The water scatters the light
+    coming down (attenuated as fast) towards the camera along the refracted ray, single scattering:
+    C 2 / (1 + m) (1 - exp(-c (1 + m) s)), m the ray's cosine to the vertical, so deep water seen
+    straight down is C. Shallows over sand turn turquoise (red fades in the first metres, green and
+    blue stay: at 2 m in Carrier's water the sand's green over red twice its own), the deep water the
+    level's colour, darker with the depth.
+  - The sun's share of that light (0.6, less at a low sun; none in the environment cubes and in heat
+    vision) is the sun's light where each of four segments of the ray takes it (their ends at the
+    reach times (j / 4)^2, the reach 3 over the least attenuation: 95 % of the least attenuated
+    channel's light comes from nearer): one bilinear comparison of the cascades where the sun's
+    refracted ray to the segment's middle left the surface. A pixel's quad shares its four, lane q the
+    q-th segment's of its own ray (a quarter of the cost of four a pixel; the quad's rays a pixel
+    apart); none where all of the ray's points are beyond the cascades. The water darkens in the
+    shadows of the cliffs, the wreck and the pier, and the sun through gaps lights shafts in it.
+  - From below, Snell's window: the light from the air through the waves' surface by Fresnel's
+    transmission from water to air (unpolarized; none beyond the critical angle, 48.6 degrees, where
+    the surface mirrors the water below: its colour), the scene above along the view's ray refracted
+    out of the water (the copy of the colour buffer where it shows that direction above the surface,
+    else the sky box), then the fog under the water as before. The sun's flare and coronas seen from
+    under the ocean are moved to the sun's direction refracted into the water.
+  - `d3d12_WaterDebug` 24, 25 and 26 show its terms (with `r_HDRRendering 0`: else tone mapped).
+  - Cost at 3840 x 2160: the water 0.04-0.08 ms more (Carrier 0.65 -> 0.72 ms, Bunker's sunset 0.66
+    -> 0.74, the surf's beach 0.58 -> 0.64, Fort's reefs 0.34 -> 0.38; with the rays' sun shadows and
+    reflections Carrier 0.90 -> 1.07), most of it the sun's comparisons (four a pixel cost 0.12 ms on
+    Carrier, the quad's shared 0.05); with `d3d12_WaterVolume 0` 0.01-0.02 ms. The debug views'
+    terms are returned where they are made: kept to the end of the program they held registers
+    through all of it, the water 0.05 ms slower with `d3d12_WaterVolume 0` too.
 - The sun's glint (`d3d12_WaterGlint`, 1; 0 draws the frames of the water before it; not saved;
   `d3d12_WaterSunGlint`, a highlight fitted by eye and off as in the game, is gone with it) is the
   sun mirrored by the waves' facets (`Shaders/WaterLight.hlsli`): Beckmann's distribution of the

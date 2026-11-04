@@ -5,7 +5,7 @@
 //	File: TestHeaders.hlsl
 //	Description: The unit tests' kernels over the renderer's shader
 //	headers that stand alone (Shader Model 6.0): PathGBuffer.hlsli,
-//	HdrLight.hlsli, HdrToneMap.hlsli, HdrExposure.hlsli, HdrFrameAverage.hlsli, PathCache.hlsli, LightmapLight.hlsli, RenderMode.hlsli, ArrayCoords.hlsli, WaterLight.hlsli, WaterFoam.hlsli and Fxaa.hlsli, included as the renderer's
+//	HdrLight.hlsli, HdrToneMap.hlsli, HdrExposure.hlsli, HdrFrameAverage.hlsli, PathCache.hlsli, LightmapLight.hlsli, RenderMode.hlsli, ArrayCoords.hlsli, WaterLight.hlsli, WaterFoam.hlsli, WaterCaustics.hlsli, WaterVolume.hlsli and Fxaa.hlsli, included as the renderer's
 //	programs include them. Each kernel runs the tested functions on the
 //	items of g_TestIn and writes what they give to g_TestOut; ShaderTests.cpp
 //	checks it. One compile per kernel (Tests/CMakeLists.txt).
@@ -27,6 +27,7 @@
 #include "WaterLight.hlsli"
 #include "WaterFoam.hlsli"
 #include "WaterCaustics.hlsli"
+#include "WaterVolume.hlsli"
 #include "OceanFFT.hlsli"
 
 //! The FXAA tests' picture (Fxaa.hlsli): g_Test.nTest.y x g_Test.nTest.z pixels, g_TestIn[y * width + x] the rgba of
@@ -451,6 +452,59 @@ void CSCausticsFar(uint i : SV_DispatchThreadID)
   if (i >= g_Test.nTest.x)
     return;
   TestOut(i, float4(CausticsFar(TestIn(i).x), 0, 0, 0));
+}
+
+//! VolumeAttenuation (WaterVolume.hlsli) of the colour g_TestIn[i].rgb and the density .w: out[i].rgb.
+[numthreads(64, 1, 1)]
+void CSVolumeAttenuation(uint i : SV_DispatchThreadID)
+{
+  if (i >= g_Test.nTest.x)
+    return;
+  TestOut(i, float4(VolumeAttenuation(TestIn(i).rgb, TestIn(i).w), 0));
+}
+
+//! VolumeInscatter (WaterVolume.hlsli) of the deep colour g_TestIn[3i].rgb, the attenuation g_TestIn[3i + 1].rgb, the
+//! light's g_TestIn[3i + 2].rgb, the cosine g_TestIn[3i + 1].w, from g_TestIn[3i].w to g_TestIn[3i + 2].w: out[i].rgb.
+[numthreads(64, 1, 1)]
+void CSVolumeInscatter(uint i : SV_DispatchThreadID)
+{
+  if (i >= g_Test.nTest.x)
+    return;
+  const float4 a = TestIn(3 * i), b = TestIn(3 * i + 1), c = TestIn(3 * i + 2);
+  TestOut(i, float4(VolumeInscatter(a.rgb, b.rgb, c.rgb, b.w, a.w, c.w), 0));
+}
+
+//! VolumeReach (WaterVolume.hlsli) of the attenuations g_TestIn[i].xyz and the path .w (out[3i].x); VolumeSegmentEnd of
+//! each segment out to it (out[3i + 1]), VolumeSegmentPoint (out[3i + 2]).
+[numthreads(64, 1, 1)]
+void CSVolumeSegments(uint i : SV_DispatchThreadID)
+{
+  if (i >= g_Test.nTest.x)
+    return;
+  const float r = VolumeReach(TestIn(i).xyz, TestIn(i).w);
+  TestOut(3 * i, float4(r, XR_VOLUME_TAPS, 0, 0));
+  float4 e = 0, p = 0;
+  [unroll]
+  for (uint j = 0; j < XR_VOLUME_TAPS; j++)
+  {
+    e[j] = VolumeSegmentEnd(j, r);
+    p[j] = VolumeSegmentPoint(j, r);
+  }
+  TestOut(3 * i + 1, e);
+  TestOut(3 * i + 2, p);
+}
+
+//! VolumeRefract (WaterVolume.hlsli) of the view g_TestIn[2i].xyz and the normal g_TestIn[2i + 1].xyz (out[2i].xyz),
+//! VolumeRefractedCos of the view's z (out[2i].w); VolumeSunEntry of the point g_TestIn[2i].xyz fDepth g_TestIn[2i + 1].w
+//! down, the sun's direction the normal (out[2i + 1].xyz); SnellWindow of g_TestIn[2i].w (out[2i + 1].w).
+[numthreads(64, 1, 1)]
+void CSVolumeRay(uint i : SV_DispatchThreadID)
+{
+  if (i >= g_Test.nTest.x)
+    return;
+  const float4 a = TestIn(2 * i), b = TestIn(2 * i + 1);
+  TestOut(2 * i, float4(VolumeRefract(a.xyz, b.xyz), VolumeRefractedCos(a.z)));
+  TestOut(2 * i + 1, float4(VolumeSunEntry(a.xyz, b.w, b.xyz), SnellWindow(a.w)));
 }
 
 //! FoamLight (WaterFoam.hlsli) of the normal g_TestIn[4i].xyz in the sun's shadow g_TestIn[4i].w, the sun's direction
