@@ -149,9 +149,17 @@ float4 OceanWaves(uint c, uint2 X, float fChop, float fLeastJ, float fTexel, flo
   float2 x0 = float2(X);
   if (fChop > 0)
   {
+    // Newton's steps towards the x0 that the displacement moves to X: r = x0 + fChop D(x0) - X (in texels), its
+    // Jacobian J = I + fChop dD/dx0 (symmetric: D is a gradient), its determinant at least fLeastJ.
     [unroll]
     for (int i = 0; i < 3; i++)
-      x0 = float2(X) - (fChop / fTexel) * OceanFieldsAt(c, 0, x0).xy;
+    {
+      const float4 a = OceanFieldsAt(c, 0, x0), b = OceanFieldsAt(c, 1, x0);
+      const float jxx = 1 + fChop * b.z, jyy = 1 + fChop * b.w, jxy = fChop * a.w;
+      const float fDet = max(jxx * jyy - jxy * jxy, fLeastJ);
+      const float2 r = x0 + (fChop / fTexel) * a.xy - float2(X);
+      x0 -= float2(jyy * r.x - jxy * r.y, jxx * r.y - jxy * r.x) / fDet;
+    }
   }
   const float4 a = OceanFieldsAt(c, 0, x0), b = OceanFieldsAt(c, 1, x0);
   float2 vSlope = b.xy;

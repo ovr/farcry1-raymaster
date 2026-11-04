@@ -1148,7 +1148,7 @@ public:
     bool bFailed = false;                   //!< no targets (until d3d12_WaterFFT 0)
     float fWind = 0;                        //!< the wind of the sea in pH0
     float fSlopeRMS = 0;                    //!< its slopes' RMS along an axis
-    float fFineVar = 0;                     //!< the variance of its ripple finer than the short cascade (both axes)
+    float fFineVar = 0;                     //!< the variance of its ripple finer than the short cascade (both axes, unscaled)
     float fHeightWeight[XR_OCEAN_CASCADES] = {};  //!< each cascade's height's weight (SSea::HeightWeight)
   };
   SOceanState m_Ocean;
@@ -1958,8 +1958,9 @@ public:
   float CV_d3d12_WaterGlintRoughness = 0.004f;  //!< the variance of the slopes of the water's ripple finer than its wave texture (the glint's)
   float CV_d3d12_WaterCrestLight = 1;  //!< strength of the sun's light through the waves' crests (0: none, as the game)
   int CV_d3d12_WaterFFT = 1;          //!< 1: the FFT ocean's waves (OceanFFT.cpp); 0: the static wave texture, as before
-  float CV_d3d12_WaterWind = 5;       //!< m/s: the wind of the FFT ocean's sea (its waves' heights and slopes)
+  float CV_d3d12_WaterWind = 3.5f;    //!< m/s: the wind of the FFT ocean's sea (its waves' lengths, directions, speeds)
   float CV_d3d12_WaterSlope = 0.0446f;  //!< the FFT waves' slopes' RMS along an axis at the default bump amounts (the old texture's; 0: the wind sea's own)
+  float CV_d3d12_WaterChop = 2.5f;    //!< the FFT waves' horizontal displacement, Tessendorf's lambda (sharp crests; 0: none)
   int CV_d3d12_GpuTimes = 0;          //!< N: the GPU time of the frame's sections to the log every N frames
   int CV_d3d12_FrameLog = 0;          //!< 1: a line per frame to XRenderD3D12_frames.txt (LogFrame), 2 with the engine's profilers
   int CV_d3d12_CpuSamples = 0;        //!< N: the render thread's stack every N microseconds, to XRenderD3D12_samples.txt at 0 (CpuSampler)

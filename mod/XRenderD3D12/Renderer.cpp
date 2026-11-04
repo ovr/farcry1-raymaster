@@ -178,12 +178,16 @@ void CD3D12Renderer::RegisterVariables()
                      "1: the waves of a wind sea on the water (Tessendorf's FFT ocean: JONSWAP's spectrum of d3d12_WaterWind, "
                      "three cascades of 250, 40.5 and 6.9 m), running at their own speeds and changing their shape; 0: the static "
                      "wave texture, as before");
-  iConsole->Register("d3d12_WaterWind", &CV_d3d12_WaterWind, 5.0f, 0,
+  iConsole->Register("d3d12_WaterWind", &CV_d3d12_WaterWind, 3.5f, 0,
                      "The wind (m/s, at least 0.5) of the FFT ocean's sea (d3d12_WaterFFT): the length of its waves, how far "
                      "they follow the wind, their speeds");
   iConsole->Register("d3d12_WaterSlope", &CV_d3d12_WaterSlope, 0.0446f, 0,
                      "The RMS along an axis of the FFT ocean's slopes at the level's default bump amounts (0.03 and 0.02; "
-                     "other amounts in proportion): 0.0446 the old wave texture's; 0: the wind sea's own (0.106 at 5 m/s)");
+                     "other amounts in proportion): 0.0446 the old wave texture's; 0: the wind sea's own (0.096 at 3.5 m/s)");
+  iConsole->Register("d3d12_WaterChop", &CV_d3d12_WaterChop, 2.5f, 0,
+                     "The FFT ocean's waves moved along the wind sea's horizontal displacement times this (Tessendorf's lambda; "
+                     "1: each wave a trochoid of Gerstner's), narrow sharp crests and wide troughs: 2.5 the crests up to 3 times "
+                     "narrower at 3.5 m/s, none folding over; 0: none");
   iConsole->Register("d3d12_GpuTimes", &CV_d3d12_GpuTimes, 0, 0,
                      "N: every N frames, the average GPU time of the frame's sections (shadow maps, water reflection, opaque, "
                      "water, blended, ...) and the time between frames to the console and XRenderD3D12_gpu.txt; 0 off");

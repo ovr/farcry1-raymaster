@@ -390,7 +390,7 @@ struct SDepthTileConstants
 struct SOceanConstants
 {
   XR_FLOAT4(vParams);             //!< x the time's fraction of the sea's period (OceanSpectrum::PERIOD), y the horizontal
-                                  //!< displacement's factor (d3d12_WaterChop; 0: none), z the least determinant of its
+                                  //!< displacement's factor (d3d12_WaterChop, Tessendorf's lambda; 0: none), z the least determinant of its
                                   //!< Jacobian (where a crest would fold over)
   XR_FLOAT4_ARRAY(vCascades, XR_OCEAN_CASCADES);  //!< each cascade's: x its tile (m), y the weight of its height
                                   //!< (OceanSpectrum::SSea::HeightWeight), z its texel (m)

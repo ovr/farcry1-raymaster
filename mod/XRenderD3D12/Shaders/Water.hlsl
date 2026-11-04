@@ -119,7 +119,8 @@
 //	            cascade, OceanFFT.hlsli's texels)
 //	  vAddColor with vTexGenU.w: x the RMS along an axis of the FFT ocean's
 //	            slopes, y the variance of its ripple finer than the short
-//	            cascade (both axes)
+//	            cascade (both axes, times the bump amounts' factor; the
+//	            glint's in place of vSpecular.y)
 //	  vSpecular the sun's glint: x its strength (d3d12_WaterGlint; 0: none),
 //	            y the variance of the slopes of the ripple finer than the
 //	            texture (d3d12_WaterGlintRoughness), z its most light (the
@@ -707,12 +708,13 @@ float4 ShadeWater(SWaterOutput In)
     // The sun's glint (d3d12_WaterGlint, vSpecular.x; WaterLight.hlsli): the facets that mirror it,
     // the pixel's waves and the slopes about them of the ripple finer than a pixel (the variance
     // fLostVar at full strength, d3d12_WaterReflectionBlur is the reflection's) and of the ripple
-    // finer than the texture (d3d12_WaterGlintRoughness, vSpecular.y); times the reflection amount,
+    // finer than the texture (d3d12_WaterGlintRoughness, vSpecular.y; the FFT ocean's: Cox and Munk's
+    // of the wind less its cascades', vAddColor.y); times the reflection amount,
     // fading out as the sun sets (below 6 degrees), at most the sun's flare (vSpecular.z). The sun's
     // light through the thin crests (d3d12_WaterCrestLight, vParams0.w; WaterCrestLight), what the
     // surface does not reflect of it (1 - F), fading out as the glint. In the sun's shadow
     // (WaterSunShadow, looked up only where there is light to shade) neither.
-    const float fGlintVar = fLostVar + g_Draw.vSpecular.y;
+    const float fGlintVar = fLostVar + (g_Draw.vTexGenU.w != 0 ? g_Draw.vAddColor.y : g_Draw.vSpecular.y);
     const float fSunUp = saturate(L.z * 10);
     float3 vGlint = 0, vCrest = 0;
     if (g_Draw.vSpecular.x > 0)
