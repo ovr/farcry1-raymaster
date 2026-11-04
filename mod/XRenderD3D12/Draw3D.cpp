@@ -309,6 +309,15 @@ void CD3D12Renderer::DrawItems(SRenderItem *pItems, int nItems, int eList)
   bool bSprites = eList != eRL_Blended;
   // The flares after the rest of the scene, before the elements over it.
   bool bFlares = eList != eRL_Blended;
+  // Under the ocean's surface (d3d12_WaterUnder) the light in its water over the scene after the last water surface, the
+  // sprites after it.
+  bool bUnder = eList != eRL_Blended || !UnderwaterOn();
+  const bool bUnderDrawn = m_bUnderDrawn;  // (a list drawn inside a draw: a mirror's)
+  m_bUnderDrawn = false;
+  int nLastWater = -1;
+  for (int i = 0; i < nItems && !bUnder; i++)
+    if (pItems[i].pRE && (pItems[i].eDrawClass == eDC_Water || pItems[i].eDrawClass == eDC_WaterBeach))
+      nLastWater = i;
   // A list copies the scene as drawn before it (the water, the flares, the glass of a scope).
   m_bSceneCopied = false;
   // d3d12_DepthPrepass: the main view's opaque surfaces that write the depth and discard nothing
@@ -351,7 +360,12 @@ void CD3D12Renderer::DrawItems(SRenderItem *pItems, int nItems, int eList)
     const SRenderItem &it = pItems[i];
     if (!it.pRE)
       continue;
-    if (!bSprites && it.eDrawClass != eDC_Water && it.eDrawClass != eDC_WaterBeach)
+    if (!bUnder && i > nLastWater)
+    {
+      DrawUnderwater();
+      bUnder = true;
+    }
+    if (!bSprites && bUnder && it.eDrawClass != eDC_Water && it.eDrawClass != eDC_WaterBeach)
     {
       GpuSection("blended");
       m_fDrawHeat = 0;
@@ -388,6 +402,8 @@ void CD3D12Renderer::DrawItems(SRenderItem *pItems, int nItems, int eList)
       break;
     }
   }
+  if (!bUnder)
+    DrawUnderwater();
   if (!bSprites)
   {
     GpuSection("blended");
@@ -396,6 +412,7 @@ void CD3D12Renderer::DrawItems(SRenderItem *pItems, int nItems, int eList)
   }
   if (!bFlares)
     DrawFlares({ pItems, (size_t)nItems });
+  m_bUnderDrawn = bUnderDrawn;
   m_bHeatPass = false;
   m_fDrawHeat = 0;
   m_bItemScissor = false;
@@ -455,8 +472,11 @@ void CD3D12Renderer::DrawLeafItem(const SRenderItem &it)
   // The depth prepass and the scene for rays: the first pass alone, which writes the depth.
   if ((m_bDepthPrepass || m_bRayCaptureWalk) && (bFogPass || (pObj->m_ObjFlags & FOB_LIGHTPASS)))
     return;
+  // Under the ocean with d3d12_WaterUnder the light in its water is DrawUnderwater's over all that the blended list's water
+  // surfaces leave, the blended objects after them taking it over their own colour (SetUnderwaterFog).
   const SFogVolume *pFogVolume = bFogPass ? m_pScene->GetFogVolume(it.nFog) : nullptr;
   if (bFogPass && (!pFogVolume || (pFogVolume->bCaustics && (m_bReflectionPass || m_Camera.GetPos().z >= pFogVolume->fFogLayerZ)) ||
+                   (pFogVolume->bCaustics && UnderwaterOn()) ||
                    !IsVolumetricFogOn() || m_bShadowMapPass || m_bSpritePass))
     return;
 
@@ -1339,6 +1359,9 @@ void CD3D12Renderer::DrawLeafItem(const SRenderItem &it)
     if ((Key.nState & GS_BLDST_MASK) == GS_BLDST_ONE)
       dc.nFlags2 |= DF2_FOG_BLACK;
   }
+  // Under the ocean, after the light in its water (DrawUnderwater): that light over the colour (the plants in the water).
+  if (m_bUnderDrawn && it.eList == eRL_Blended)
+    SetUnderwaterFog(dc, Key.nState);
   // The picture of a far vegetation sprite: where the object is, whatever the texture's alpha.
   if (m_bSpritePass)
     dc.nFlags |= DF_ALPHA_ONE;
@@ -1533,6 +1556,8 @@ void CD3D12Renderer::DrawLeafItem(const SRenderItem &it)
     Key.nState = bTerrain ? GS_BLSRC_ONE | GS_BLDST_ONE
                  : bBlended ? GS_BLSRC_SRCALPHA | GS_BLDST_ONE
                             : GS_BLSRC_ONE | GS_BLDST_ONE | GS_DEPTHFUNC_EQUAL;
+    if (m_bUnderDrawn && it.eList == eRL_Blended)
+      SetUnderwaterFog(dc, Key.nState);
     TexCoord1.reset();
     if (!(dc.nFlags & DF_BUMP))
       Tangents.reset();

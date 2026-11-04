@@ -200,8 +200,11 @@
 //	            cascade (both axes, times the bump amounts' factor; the
 //	            glint's in place of vSpecular.y); the ocean with a fog
 //	            volume: w 1 the light in its water (d3d12_WaterVolume,
-//	            OceanVolume; 0 OceanFog), z the sun's share of the light the
-//	            water scatters (0: none in the sun's shadow)
+//	            OceanVolume; 0 OceanFog), 2 and from below the surface's
+//	            light alone (d3d12_WaterUnder: Underwater.hlsl lays the
+//	            water's between it and the camera over it), z the sun's
+//	            share of the light the water scatters (0: none in the sun's
+//	            shadow)
 //	  vSpecular the sun's glint: x its strength (d3d12_WaterGlint; 0: none),
 //	            y the variance of the slopes of the ripple finer than the
 //	            texture (d3d12_WaterGlintRoughness), z its most light (the
@@ -214,6 +217,7 @@
 #include "WaterLight.hlsli"
 #include "WaterFoam.hlsli"
 #include "WaterVolume.hlsli"
+#include "Underwater.hlsli"
 #ifdef XR_RAYTRACE
 #include "RayShade.hlsli"
 #else
@@ -1264,8 +1268,12 @@ float4 ShadeWater(SWaterOutput In)
       float3 vAbove = vScatter;
       if (fWindow > 0)
         vAbove = SceneAbove(In.vWorldPos, refract(-V, N, VOLUME_ETA), g_Frame.vScreen.xy * vInvSize);
-      vColor = lerp(WaterEncode(lerp(WaterDecode(vScatter), WaterDecode(vAbove), fWindow)), vScatter,
-                    FogInsideVolume(fSurface, g_Draw.vParams2.y));
+      // With d3d12_WaterUnder (w 2) the surface's own light, the water's between it and the camera Underwater.hlsl's.
+      if (g_Draw.vAddColor.w > 1.5)
+        vColor = WaterEncode(UnderSurface(WaterDecode(vScatter), WaterDecode(vAbove), fWindow, saturate(-V.z)));
+      else
+        vColor = lerp(WaterEncode(lerp(WaterDecode(vScatter), WaterDecode(vAbove), fWindow)), vScatter,
+                      FogInsideVolume(fSurface, g_Draw.vParams2.y));
       if (g_Draw.vParams0.z == 8)
         return float4(vAbove, 1);
       if (g_Draw.vParams0.z == 25)

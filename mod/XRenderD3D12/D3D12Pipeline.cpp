@@ -116,6 +116,8 @@
 #include "AntiAlias_VS.h"
 #include "AntiAlias_PS.h"
 #include "AntiAlias_Highlight_PS.h"
+#include "Underwater_VS.h"
+#include "Underwater_PS.h"
 
 using Microsoft::WRL::ComPtr;
 
@@ -179,6 +181,7 @@ namespace
     { "RayDebug", g_RayDebug_VS, sizeof(g_RayDebug_VS), g_RayDebug_PS, sizeof(g_RayDebug_PS) },
     { "PathComposite", g_PathComposite_VS, sizeof(g_PathComposite_VS), g_PathComposite_PS, sizeof(g_PathComposite_PS) },
     { "AntiAlias", g_AntiAlias_VS, sizeof(g_AntiAlias_VS), g_AntiAlias_PS, sizeof(g_AntiAlias_PS) },
+    { "Underwater", g_Underwater_VS, sizeof(g_Underwater_VS), g_Underwater_PS, sizeof(g_Underwater_PS) },
   };
 
   //! The general program's pixel shaders with the ambient light's part (XR_AMBIENT) by [cascades][HDR][velocity].

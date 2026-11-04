@@ -1209,7 +1209,9 @@ and lists theirs (`NamesObjects`).
   below the share of Snell's window), 26 the share of the sun's light left in the light it scatters;
   with the wakes 27 their slopes (red and green along x and y, 0.5 none, saturated at 0.25 either
   way; blue the RMS of the slopes their mip levels smoothed out, white 0.1), 28 their foam's share
-  white.
+  white; with the ocean's grid 29 its height, 30 the shares of the waves left; from under the
+  surface 31 the light the water scatters, 32 the sun's light in it over its mean, 33 the share of
+  the scene left.
 - The FFT ocean (`d3d12_WaterFFT`, 1; 0 draws the static wave texture and the frames of the water
   before it; not saved; `OceanSpectrum.h`, `OceanFFT.cpp`, `Shaders/OceanFFT.hlsl`): the ocean's
   waves are a wind sea made by inverse FFTs on the GPU each frame (Tessendorf's "Simulating Ocean
@@ -1558,6 +1560,52 @@ and lists theirs (`NamesObjects`).
   - `d3d12_WaterDebug` 29 the height (grey 0; red up and blue down, 0.3 m from grey; green 3 cm),
     30 the shares of the waves left (red the depth's, green the bodies', blue the camera's and the
     distance's).
+- The view from under the ocean's surface (`d3d12_WaterUnder`, 1, with `d3d12_WaterVolume`; 0 draws
+  the frames before; not saved; `Underwater.cpp`, `Shaders/Underwater.hlsl`,
+  `Shaders/Underwater.hlsli`): with the camera under the level, the light in the water seen from
+  inside it, in each channel, in place of the fog volume's colour laid over each surface by its
+  distance.
+  - The pass. The main view leaves out the ocean's fog volume's fog passes, the ocean seen from below
+    gives its surface's light alone (Snell's window and, beyond it, the water below it mirrors: the
+    deep water's light along the mirrored ray, 2 / (1 + m) of its colour), and after the water
+    surfaces the blended list copies the scene and draws a triangle over the view: each pixel's
+    scene, at its distance from the depth copy (through the water up to the surface at most: the
+    level, or 4 m over it with the ocean's grid where the copy has none of its surface), keeps
+    exp(-c (s + d / cos t)) of its light, s its path through the water, d its depth, t the sun's
+    refracted angle (as the light in the water's from above), and the light the water scatters
+    towards the camera along the path is added.
+  - The light it scatters: the light coming down attenuated by exp(-c d) to the depth d of each
+    point of the ray, single scattering, taken by the water on the way back (exp(-c t) at the
+    distance t), in closed form over each of 16 segments of the ray, each the same share of that
+    light in green (the nearer ones shorter; out to the reach, 3 over green's attenuation along the
+    ray, the last one's sun beyond). Looking level from 5 m under Carrier's water: blue over green
+    over red, brighter than the deep water seen from above, darker the deeper the camera; the
+    floor's red gone within some 10 m of its light's path, its sand blue further off.
+  - The sun's share of it (0.6, less at a low sun) is the sun's light at a point of each segment (one
+    bilinear comparison of the cascades where the sun's refracted ray to it left the surface, then
+    the FFT ocean's caustics there at its depth, as on the floor: their mip level from the pixel's
+    footprint and the sun's disc's blur): the shafts of light under the waves, radiating from the
+    sun's refracted direction, and the dark between them in the shadows of the cliffs. A pixel's
+    quad shares them, lane q the segments 4 i + q of its own ray, the point in each moved by the
+    pixel's noise over the frames (the temporal anti-aliasing's) and by the golden ratio from one
+    to the next. Scattered forwards most: sea water's phase function, half the molecules'
+    (Morel's, 1 + 0.835 cos^2), half the particles' (Henyey and Greenstein at Petzold's mean cosine
+    0.924), its mean 1: looking up the sun's refracted rays the water glows round them (half the
+    peak within 3.5 degrees, a tenth at 8.6), some 230 times as bright as away from them.
+  - The blended objects after the pass (the plants in the water) take the same light over their
+    own colour in their own program (`General.hlsl` with `UnderFog`: the same path, attenuation and
+    scattered light, the sun's light its mean along the way): blended over the water behind by
+    their alpha, a (colour T + L) + (1 - a) (behind, already so), exactly; an added light
+    attenuated alone; none over a blend that multiplies the frame. With the fog volume's fog over
+    them they were yellow-green on the blue sand a few metres off (the share of Carrier's view
+    greener than blue 0.134, now 0.0004). Those before the water surfaces (wholly over the water)
+    are the pass's.
+  - The fog of the scene, the flares and the sprites as before; the sun's flare from under the
+    ocean at the sun's refracted direction (`d3d12_WaterVolume`) and through Snell's window no
+    longer fogged.
+  - `d3d12_WaterDebug` 31 the light the water scatters, 32 the sun's light in it over its mean (grey
+    1, white 2: the shafts), 33 the share of the scene left (with `r_HDRRendering 0`); the blended
+    objects after the pass show the same term.
 - The sun's glint (`d3d12_WaterGlint`, 1; 0 draws the frames of the water before it; not saved;
   `d3d12_WaterSunGlint`, a highlight fitted by eye and off as in the game, is gone with it) is the
   sun mirrored by the waves' facets (`Shaders/WaterLight.hlsli`): Beckmann's distribution of the

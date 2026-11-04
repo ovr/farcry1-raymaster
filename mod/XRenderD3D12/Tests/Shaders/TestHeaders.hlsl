@@ -5,7 +5,7 @@
 //	File: TestHeaders.hlsl
 //	Description: The unit tests' kernels over the renderer's shader
 //	headers that stand alone (Shader Model 6.0): PathGBuffer.hlsli,
-//	HdrLight.hlsli, HdrToneMap.hlsli, HdrExposure.hlsli, HdrFrameAverage.hlsli, PathCache.hlsli, LightmapLight.hlsli, RenderMode.hlsli, ArrayCoords.hlsli, WaterLight.hlsli, WaterFoam.hlsli, WaterCaustics.hlsli, WaterVolume.hlsli and Fxaa.hlsli, included as the renderer's
+//	HdrLight.hlsli, HdrToneMap.hlsli, HdrExposure.hlsli, HdrFrameAverage.hlsli, PathCache.hlsli, LightmapLight.hlsli, RenderMode.hlsli, ArrayCoords.hlsli, WaterLight.hlsli, WaterFoam.hlsli, WaterCaustics.hlsli, WaterVolume.hlsli, Underwater.hlsli and Fxaa.hlsli, included as the renderer's
 //	programs include them. Each kernel runs the tested functions on the
 //	items of g_TestIn and writes what they give to g_TestOut; ShaderTests.cpp
 //	checks it. One compile per kernel (Tests/CMakeLists.txt).
@@ -28,6 +28,7 @@
 #include "WaterFoam.hlsli"
 #include "WaterCaustics.hlsli"
 #include "WaterVolume.hlsli"
+#include "Underwater.hlsli"
 #include "OceanFFT.hlsli"
 #include "Wake.hlsli"
 // The ocean's grid's table of the game's disc (GridDiscAlpha): the input's first words (CSGridDisc).
@@ -509,6 +510,90 @@ void CSVolumeRay(uint i : SV_DispatchThreadID)
   const float4 a = TestIn(2 * i), b = TestIn(2 * i + 1);
   TestOut(2 * i, float4(VolumeRefract(a.xyz, b.xyz), VolumeRefractedCos(a.z)));
   TestOut(2 * i + 1, float4(VolumeSunEntry(a.xyz, b.w, b.xyz), SnellWindow(a.w)));
+}
+
+//! UnderPath (Underwater.hlsli) of the distance g_TestIn[i].x, the direction's z .y, the camera's depth .z and the cap .w:
+//! out[i].x.
+[numthreads(64, 1, 1)]
+void CSUnderPath(uint i : SV_DispatchThreadID)
+{
+  if (i >= g_Test.nTest.x)
+    return;
+  const float4 a = TestIn(i);
+  TestOut(i, float4(UnderPath(a.x, a.y, a.z, a.w), 0, 0, 0));
+}
+
+//! UnderPhase (Underwater.hlsli) of the cosine g_TestIn[i].x: out[i].x.
+[numthreads(64, 1, 1)]
+void CSUnderPhase(uint i : SV_DispatchThreadID)
+{
+  if (i >= g_Test.nTest.x)
+    return;
+  TestOut(i, float4(UnderPhase(TestIn(i).x), 0, 0, 0));
+}
+
+//! UnderSegmentEnd (Underwater.hlsli) of each of the XR_UNDER_TAPS segments at the attenuation g_TestIn[i].x out to the
+//! reach .y (out[5i] to out[5i + 3], segment j + 1's end in [j / 4][j % 4]); UnderSegmentAt of the share .z (out[5i + 4].x),
+//! XR_UNDER_TAPS (out[5i + 4].y).
+[numthreads(64, 1, 1)]
+void CSUnderSegments(uint i : SV_DispatchThreadID)
+{
+  if (i >= g_Test.nTest.x)
+    return;
+  const float4 a = TestIn(i);
+  float4 e[XR_UNDER_TAPS / 4];
+  [unroll]
+  for (uint j = 0; j < XR_UNDER_TAPS; j++)
+    e[j / 4][j % 4] = UnderSegmentEnd(j + 1, a.x, a.y);
+  [unroll]
+  for (uint q = 0; q < XR_UNDER_TAPS / 4; q++)
+    TestOut(5 * i + q, e[q]);
+  TestOut(5 * i + 4, float4(UnderSegmentAt(a.z, a.x, a.y), XR_UNDER_TAPS, 0, 0));
+}
+
+//! UnderInscatter (Underwater.hlsli) of the deep colour g_TestIn[4i].rgb, the camera's depth .w, the attenuation
+//! g_TestIn[4i + 1].rgb, the cosine .w, the path g_TestIn[4i + 2].x, the reach .y, the sun's share .z, the phase .w, the
+//! sun's light at segment j g_TestIn[4i + 3].x + j g_TestIn[4i + 3].y (at least 0): out[i] (the light, fLit).
+[numthreads(64, 1, 1)]
+void CSUnderInscatter(uint i : SV_DispatchThreadID)
+{
+  if (i >= g_Test.nTest.x)
+    return;
+  const float4 a = TestIn(4 * i), b = TestIn(4 * i + 1), c = TestIn(4 * i + 2), s = TestIn(4 * i + 3);
+  float v[XR_UNDER_TAPS];
+  [unroll]
+  for (uint j = 0; j < XR_UNDER_TAPS; j++)
+    v[j] = max(s.x + j * s.y, 0);
+  float fLit;
+  const float3 L = UnderInscatter(a.rgb, b.rgb, a.w, b.w, c.x, c.y, c.z, c.w, v, fLit);
+  TestOut(i, float4(L, fLit));
+}
+
+//! UnderFog (Underwater.hlsli) of the deep colour g_TestIn[4i].rgb, the camera's depth .w, the attenuation g_TestIn[4i + 1].rgb,
+//! the distance .w, the view's direction g_TestIn[4i + 2].xyz, the surface's depth .w, the sun g_TestIn[4i + 3].xyz, the sun's
+//! share .w, the cap 4 (with a positive distance; 0 with a negative one, its absolute value): out[2i] (the light, the phase
+//! UnderSunPhase), out[2i + 1].rgb T.
+[numthreads(64, 1, 1)]
+void CSUnderFog(uint i : SV_DispatchThreadID)
+{
+  if (i >= g_Test.nTest.x)
+    return;
+  const float4 a = TestIn(4 * i), b = TestIn(4 * i + 1), d = TestIn(4 * i + 2), e = TestIn(4 * i + 3);
+  float3 T;
+  const float3 L = UnderFog(a.rgb, b.rgb, a.w, d.xyz, abs(b.w), d.w, b.w > 0 ? 4 : 0, e.xyz, e.w, T);
+  TestOut(2 * i, float4(L, UnderSunPhase(e.xyz, d.xyz)));
+  TestOut(2 * i + 1, float4(T, 0));
+}
+
+//! UnderSurface (Underwater.hlsli) of the deep colour g_TestIn[2i].rgb, the window .w, the light above g_TestIn[2i + 1].rgb
+//! and the cosine .w: out[i].rgb.
+[numthreads(64, 1, 1)]
+void CSUnderSurface(uint i : SV_DispatchThreadID)
+{
+  if (i >= g_Test.nTest.x)
+    return;
+  const float4 a = TestIn(2 * i), b = TestIn(2 * i + 1);
+  TestOut(i, float4(UnderSurface(a.rgb, b.rgb, a.w, b.w), 0));
 }
 
 //! FoamLight (WaterFoam.hlsli) of the normal g_TestIn[4i].xyz in the sun's shadow g_TestIn[4i].w, the sun's direction

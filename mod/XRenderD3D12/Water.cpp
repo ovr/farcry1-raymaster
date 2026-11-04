@@ -542,6 +542,31 @@ bool CD3D12Renderer::CopySceneForWater(const int *pRect)
     return false;
   // The copies of the main view's target: the back buffer, or the HDR target or an upscaler's scene.
   SSceneCopy &Copy = m_SceneCopies[m_pDevice->IsInScene() || m_pDevice->IsInHdr() ? 1 : 0];
+  if (!EnsureSceneCopy(Copy))
+    return false;
+  if (pRect)
+  {
+    const D3D12_BOX Box = { (UINT)pRect[0], (UINT)pRect[1], 0, (UINT)pRect[2], (UINT)pRect[3], 1 };
+    m_pDevice->CopyTargets(Copy.pColor.Get(), nullptr, &Box);
+  }
+  else
+  {
+    // With MSAA the depth buffer's nearest samples first (Msaa.cpp; CopyTargets resolves the colour).
+    ResolveMsaaDepth();
+    m_pDevice->CopyTargets(Copy.pColor.Get(), Copy.pDepth.Get());
+  }
+  m_nSceneColorSRV = Copy.nColorSRV;
+  m_nSceneDepthSRV = Copy.nDepthSRV;
+  m_bSceneCopied = !pRect;
+  m_pSceneCopy = pRect ? nullptr : &Copy;
+  m_nSceneTileSRV = -1;
+  return true;
+}
+
+bool CD3D12Renderer::EnsureSceneCopy(SSceneCopy &Copy)
+{
+  if (!m_pDevice || !m_pDescriptors)
+    return false;
   const int w = m_pDevice->GetMainWidth(), h = m_pDevice->GetMainHeight();
   const DXGI_FORMAT ColorFormat = m_pDevice->GetMainColorFormat(), DepthFormat = m_pDevice->GetMainDepthSRVFormat();
   if (!Copy.pColor || w != Copy.nWidth || h != Copy.nHeight || ColorFormat != Copy.ColorFormat || DepthFormat != Copy.DepthFormat)
@@ -566,22 +591,6 @@ bool CD3D12Renderer::CopySceneForWater(const int *pRect)
       return false;
     }
   }
-  if (pRect)
-  {
-    const D3D12_BOX Box = { (UINT)pRect[0], (UINT)pRect[1], 0, (UINT)pRect[2], (UINT)pRect[3], 1 };
-    m_pDevice->CopyTargets(Copy.pColor.Get(), nullptr, &Box);
-  }
-  else
-  {
-    // With MSAA the depth buffer's nearest samples first (Msaa.cpp; CopyTargets resolves the colour).
-    ResolveMsaaDepth();
-    m_pDevice->CopyTargets(Copy.pColor.Get(), Copy.pDepth.Get());
-  }
-  m_nSceneColorSRV = Copy.nColorSRV;
-  m_nSceneDepthSRV = Copy.nDepthSRV;
-  m_bSceneCopied = !pRect;
-  m_pSceneCopy = pRect ? nullptr : &Copy;
-  m_nSceneTileSRV = -1;
   return true;
 }
 
@@ -1050,7 +1059,8 @@ bool CD3D12Renderer::SetupWaterDraw(SPipelineKey &Key, SDrawConstants &dc, const
     if (CV_d3d12_WaterVolume > 0)
     {
       dc.vAddColor[2] = bSunLight ? WATER_VOLUME_SUN_SHARE * std::clamp(m_SunDir[2] * 4, 0.0f, 1.0f) : 0.0f;
-      dc.vAddColor[3] = 1;
+      // From below with d3d12_WaterUnder (2) the surface's light alone, the water's between it and the camera DrawUnderwater's.
+      dc.vAddColor[3] = UnderwaterOn() ? 2.0f : 1.0f;
     }
   }
   else

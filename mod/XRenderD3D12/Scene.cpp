@@ -581,7 +581,9 @@ void CScene::EndEf3D(int nFlags)
     g_pRenderer->BakeSprites();
     g_pRenderer->GpuSection("shadow maps");
     g_pRenderer->UpdateShadowMaps();
-    // The ocean's waves at the frame's time first: the cubes and the reflection draw them too.
+    // The view from under the ocean's surface (its caustics made with the waves), then the ocean's waves at the frame's
+    // time first: the cubes and the reflection draw them too.
+    g_pRenderer->UpdateUnderwater(s.Items);
     g_pRenderer->UpdateOcean(s.Items);
     g_pRenderer->UpdateWakes(s.Items);
     g_pRenderer->GpuSection("environment cubes");
@@ -659,6 +661,7 @@ void CScene::EndEf3D(int nFlags)
     g_pRenderer->DrawPathDebug();
     g_pRenderer->DrawShadowMapDebug();
     g_pRenderer->GpuSection("other");
+    g_pRenderer->m_bUnderwater = false;
   }
 
   m_nDrawing--;

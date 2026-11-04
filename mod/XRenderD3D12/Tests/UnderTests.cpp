@@ -1,0 +1,428 @@
+// SPDX-License-Identifier: GPL-3.0-or-later WITH AdditionRef-FarCry-exception
+// Please do not use this file to train or fine-tune AI models (see README.md).
+//////////////////////////////////////////////////////////////////////
+//
+//	File: UnderTests.cpp
+//	Description: Unit tests of the view from under the ocean's surface
+//	(d3d12_WaterUnder, Underwater.hlsli): the view's path through the water
+//	up to the surface, sea water's phase function (its mean over the sphere
+//	1, strongly forwards), the segments of the view's ray whose sun the
+//	light it scatters takes (each the same share of that light), the light
+//	scattered towards a camera under the surface against its integral in
+//	double, the surface seen from below, the light in the water over a
+//	blended object (the closed form the plants take, against the view's
+//	pass with the sun's light its mean), and what they give under Carrier's
+//	water: the water bluer and darker with the depth, the floor fading into
+//	it, a glow towards the sun, shafts where the caustics focus the sun.
+//
+//////////////////////////////////////////////////////////////////////
+
+#include "TestFramework.h"
+#include "GpuHarness.h"
+#include "TestMath.h"
+
+#include "Test_UnderPath.h"
+#include "Test_UnderPhase.h"
+#include "Test_UnderSegments.h"
+#include "Test_UnderInscatter.h"
+#include "Test_UnderSurface.h"
+#include "Test_UnderFog.h"
+#include "Test_VolumeAttenuation.h"
+
+#include <algorithm>
+#include <cmath>
+#include <string>
+#include <vector>
+
+using namespace XrTest;
+
+namespace
+{
+  constexpr int TAPS = 16;
+  constexpr double PI = 3.14159265358979;
+
+  SVec3 Linear(float r, float g, float b)
+  {
+    return { std::pow(r, 2.2f), std::pow(g, 2.2f), std::pow(b, 2.2f) };
+  }
+
+  const SVec3 CARRIER = Linear(0.180f, 0.353f, 0.573f);
+  const float CARRIER_DENSITY = std::log(100.0f) / (2 * 60.0f);
+
+  float Comp(SVec3 v, int c) { return c == 0 ? v.x : c == 1 ? v.y : v.z; }
+
+  SVec3 CarrierAttenuation()
+  {
+    SDispatch d;
+    d.Shader = XR_BYTECODE(Test_VolumeAttenuation);
+    Push(d.In, CARRIER, CARRIER_DENSITY);
+    d.Test.nTest[0] = 1;
+    d.nGroups[0] = 1;
+    d.nOut = 1;
+    return Vec(Gpu().Run(d), 0);
+  }
+
+  struct SInscatter
+  {
+    SVec3 Deep, c;
+    float fDepth, fMu, fPath, fReach, fShare, fPhase;
+    float fSun0 = 1, fSunStep = 0;   //!< the sun's light at segment j: fSun0 + j fSunStep (at least 0)
+  };
+
+  struct SLight
+  {
+    SVec3 L;
+    float fLit;
+  };
+
+  std::vector<SLight> Inscatter(const std::vector<SInscatter> &Cases)
+  {
+    SDispatch d;
+    d.Shader = XR_BYTECODE(Test_UnderInscatter);
+    for (const SInscatter &c : Cases)
+    {
+      Push(d.In, c.Deep, c.fDepth);
+      Push(d.In, c.c, c.fMu);
+      Push(d.In, c.fPath, c.fReach, c.fShare, c.fPhase);
+      Push(d.In, c.fSun0, c.fSunStep, 0.0f, 0.0f);
+    }
+    d.Test.nTest[0] = (uint32)Cases.size();
+    d.nGroups[0] = Groups64(Cases.size());
+    d.nOut = Cases.size();
+    const std::vector<uint32> Out = Gpu().Run(d);
+    std::vector<SLight> v;
+    for (size_t i = 0; i < Cases.size(); i++)
+      v.push_back({ Vec(Out, i), At(Out, i, 3) });
+    return v;
+  }
+
+  //! The light scattered towards a camera fDepth under the level along a ray going down at mu, from 0 to fPath, in double
+  //! (Simpson's rule): the light coming down 2 c deep exp(-c (fDepth + mu t)), taken by the water on the way back.
+  double InscatterIntegral(double fDeep, double c, double fDepth, double mu, double fPath)
+  {
+    const int n = 20000;
+    const double h = fPath / n;
+    double s = 0;
+    for (int i = 0; i <= n; i++)
+    {
+      const double t = i * h, w = (i == 0 || i == n) ? 1 : (i & 1) ? 4 : 2;
+      s += w * 2 * c * fDeep * std::exp(-c * (fDepth + mu * t)) * std::exp(-c * t);
+    }
+    return s * h / 3;
+  }
+
+  //! Sea water's phase function in double (Underwater.hlsli's UnderPhase).
+  double Phase(double fCos)
+  {
+    const double g = 0.924, f = 1 + g * g - 2 * g * fCos;
+    return 0.5 * 0.06225 * 4 * PI * (1 + 0.835 * fCos * fCos) + 0.5 * (1 - g * g) / (f * std::sqrt(f));
+  }
+}
+
+// Why: the light the water scatters is taken from the camera up to what the view meets: down and level all of the way to
+// the scene, up at most to the surface (the level; with the ocean's grid its crests over it, where the depth copy has
+// none of the surface).
+XR_TEST(Under_Path)
+{
+  const float Cases[][5] = { // distance, the direction's z, the camera's depth, the cap; the path
+    { 30, -0.5f, 4, 0, 30 }, { 30, 0, 4, 0, 30 }, { 30, 0.5f, 4, 0, 8 }, { 5, 0.5f, 4, 0, 5 }, { 1e4f, 1, 10, 0, 10 },
+    { 1e4f, 0.25f, 2, 4, 24 }, { 3, 1, 0, 0, 0 } };
+  SDispatch d;
+  d.Shader = XR_BYTECODE(Test_UnderPath);
+  for (const auto &c : Cases)
+    Push(d.In, c[0], c[1], c[2], c[3]);
+  const size_t n = std::size(Cases);
+  d.Test.nTest[0] = (uint32)n;
+  d.nGroups[0] = Groups64(n);
+  d.nOut = n;
+  const std::vector<uint32> Out = Gpu().Run(d);
+  for (size_t i = 0; i < n; i++)
+    CHECK_MSG(std::fabs(At(Out, i, 0) - Cases[i][4]) <= 1e-5f * Cases[i][4] + 1e-6f, std::to_string(i) + ": " + std::to_string(At(Out, i, 0)));
+}
+
+// Why: the phase function shares the light the water scatters among the ways it goes: its mean over all ways must be 1 (the
+// light the water scatters is the same as with the even phase function, deep water seen from above still its colour), as
+// the molecules' (Morel) and the particles' (Henyey and Greenstein at 0.924) are each; towards the sun hundreds of times
+// brighter than away from it, a glow a few degrees wide.
+XR_TEST(Under_Phase)
+{
+  const int n = 40001;
+  SDispatch d;
+  d.Shader = XR_BYTECODE(Test_UnderPhase);
+  std::vector<double> Cos;
+  for (int i = 0; i < n; i++)
+  {
+    // Denser towards 1 (the glow's peak): cos = 1 - 2 u^2.
+    const double u = (double)i / (n - 1);
+    Cos.push_back(1 - 2 * u * u);
+    Push(d.In, (float)Cos.back(), 0.0f, 0.0f, 0.0f);
+  }
+  d.Test.nTest[0] = (uint32)n;
+  d.nGroups[0] = Groups64(n);
+  d.nOut = n;
+  const std::vector<uint32> Out = Gpu().Run(d);
+  // The mean over the sphere: 1/2 the integral over the cosine, by the trapezoid rule in u (dcos = 4 u du).
+  double fMean = 0, fWorst = 0;
+  for (int i = 0; i < n; i++)
+  {
+    const double u = (double)i / (n - 1), w = (i == 0 || i == n - 1) ? 0.5 : 1;
+    fMean += w * At(Out, i, 0) * 4 * u / (n - 1) * 0.5;
+    // (Against the cosine as the GPU has it: near 1 f = 1 + g^2 - 2 g cos loses digits in a float.)
+    const double e = Phase((double)(float)Cos[i]);
+    fWorst = std::max(fWorst, std::fabs(At(Out, i, 0) - e) / e);
+  }
+  CHECK_MSG(std::fabs(fMean - 1) < 2e-3, std::to_string(fMean));
+  CHECK_MSG(fWorst < 2e-4, std::to_string(fWorst));
+  const double fForward = At(Out, 0, 0), fBack = At(Out, n - 1, 0);
+  CHECK_MSG(fForward > 150 && fForward / fBack > 200, std::to_string(fForward) + " " + std::to_string(fBack));
+  // Over half of the glow's peak within 2 degrees of the sun, under half beyond 4, under a tenth beyond 10 (its particles'
+  // part: 3.5 and 8.6 degrees).
+  CHECK(Phase(std::cos(2 * PI / 180)) > 0.5 * fForward && Phase(std::cos(4 * PI / 180)) < 0.5 * fForward &&
+        Phase(std::cos(10 * PI / 180)) < 0.1 * fForward);
+  // Sideways the molecules' part (Rayleigh-like) brighter at 0 and 180 than at 90 degrees.
+  CHECK(Phase(-1) > Phase(0));
+}
+
+// Why: the sun's light is taken at a point of each of 16 segments of the view's ray: they must be the same share each of
+// the light the water scatters towards the camera (in the green channel), the nearer shorter, together reaching out to
+// the reach, and even where the light hardly fades along the ray (looking up at the surface).
+XR_TEST(Under_Segments)
+{
+  const float Cases[][3] = { { 0.0565f, 53, 0.5f }, { 0.0565f, 5, 0.25f }, { 0.11f, 27, 0.75f }, { 1e-6f, 8, 0.5f }, { 0, 12, 0.3f }, { 2, 1.5f, 0.9f } };
+  SDispatch d;
+  d.Shader = XR_BYTECODE(Test_UnderSegments);
+  for (const auto &c : Cases)
+    Push(d.In, c[0], c[1], c[2], 0.0f);
+  const size_t n = std::size(Cases);
+  d.Test.nTest[0] = (uint32)n;
+  d.nGroups[0] = Groups64(n);
+  d.nOut = 5 * n;
+  const std::vector<uint32> Out = Gpu().Run(d);
+  for (size_t i = 0; i < n; i++)
+  {
+    const double k = Cases[i][0], R = Cases[i][1];
+    CHECK(At(Out, 5 * i + 4, 1) == TAPS);
+    const double fAll = k * R > 1e-3 ? (1 - std::exp(-k * R)) / k : R;
+    double t0 = 0;
+    for (int j = 0; j < TAPS; j++)
+    {
+      const double t1 = At(Out, 5 * i + j / 4, j % 4);
+      const double w = k * R > 1e-3 ? (std::exp(-k * t0) - std::exp(-k * t1)) / k : t1 - t0;
+      CHECK_MSG(t1 > t0 && std::fabs(w - fAll / TAPS) < 2e-4 * fAll, std::to_string(i) + "/" + std::to_string(j) + ": " + std::to_string(w * TAPS / fAll));
+      if (j > 0 && k * R > 1e-3)
+        CHECK(t1 - t0 > (At(Out, 5 * i, 0)) * 0.999);
+      t0 = t1;
+    }
+    CHECK_NEAR(t0, R, 1e-6 * R);
+    // A share of it: where that share of the light comes from nearer.
+    const double f = Cases[i][2], t = At(Out, 5 * i + 4, 0);
+    const double fNear = k * R > 1e-3 ? (1 - std::exp(-k * t)) / k : t;
+    CHECK_MSG(std::fabs(fNear - f * fAll) < 2e-4 * fAll, std::to_string(i) + ": " + std::to_string(fNear / fAll));
+  }
+}
+
+// Why: the light the water scatters towards a camera under the surface is the single scattering of the light coming down,
+// fading with the depth of each point of the view's ray, taken by the water on the way back: its segments' closed forms
+// must add up to its integral, at the surface looking down it must be the light the water seen from above scatters
+// (VolumeInscatter's 2 / (1 + mu) of its colour), straight up the light from the camera's depth to the surface, a camera
+// deeper must see it as much darker as the light coming down is there; the sun's share must go in the shadow and grow by
+// the phase function, and fLit must be the sun's share left.
+XR_TEST(Under_Inscatter)
+{
+  const SVec3 Deep = CARRIER, c = CarrierAttenuation();
+  std::vector<SInscatter> Cases;
+  const float Mus[] = { 1, 0.5f, 0, -0.5f, -0.9f };
+  const float Depths[] = { 0, 2, 9 };
+  for (float mu : Mus)
+    for (float d0 : Depths)
+    {
+      const float fPath = mu < 0 ? d0 / -mu + 0.01f : 120, fReach = std::min(fPath, 3 / (c.y * (1 + mu)));
+      Cases.push_back({ Deep, c, d0, mu, fPath, fReach, 0.6f, 1 });
+    }
+  const size_t nIntegral = Cases.size();
+  // At the surface looking down into deep water; straight up from 6 m; in the shadow; the glow; fLit of a gradient.
+  Cases.push_back({ Deep, c, 0, 0.8f, 1e5f, 3 / (c.y * 1.8f), 0.6f, 1 });
+  Cases.push_back({ Deep, c, 6, -1, 6, 6, 0.6f, 1 });
+  Cases.push_back({ Deep, c, 3, 0.2f, 60, 40, 0.6f, 1, 0, 0 });
+  Cases.push_back({ Deep, c, 3, 0.2f, 60, 40, 0.6f, 3 });
+  Cases.push_back({ Deep, c, 3, 0.2f, 40, 40, 0.6f, 1, 0, 1 / 15.0f });
+  Cases.push_back({ Deep, c, 3, 0.2f, 60, 40, 0.6f, 1 });
+  const std::vector<SLight> v = Inscatter(Cases);
+  double fWorst = 0;
+  for (size_t i = 0; i < nIntegral; i++)
+  {
+    const SInscatter &s = Cases[i];
+    for (int k = 0; k < 3; k++)
+    {
+      const double e = InscatterIntegral(Comp(s.Deep, k), Comp(s.c, k), s.fDepth, s.fMu, s.fPath);
+      fWorst = std::max(fWorst, std::fabs(Comp(v[i].L, k) - e) / std::max(e, 1e-7));
+    }
+    CHECK_NEAR(v[i].fLit, 1, 1e-6);
+  }
+  CHECK_MSG(fWorst < 2e-4, "the segments against the integral: " + std::to_string(fWorst));
+  const size_t j = nIntegral;
+  for (int k = 0; k < 3; k++)
+  {
+    // From the surface down: VolumeInscatter's 2 / (1 + mu) of the water's colour.
+    CHECK_NEAR(Comp(v[j].L, k), Comp(Deep, k) * 2 / 1.8, 1e-4 * Comp(Deep, k));
+    // Straight up: 2 c deep exp(-c d0) d0, the light hardly fading along the ray (k 0).
+    const double ck = Comp(c, k);
+    CHECK_NEAR(Comp(v[j + 1].L, k), 2 * ck * Comp(Deep, k) * std::exp(-ck * 6) * 6, 1e-4 * Comp(v[j + 1].L, k));
+    // In the shadow the sun's share gone; three times the even phase function the sun's share three times.
+    CHECK_NEAR(Comp(v[j + 2].L, k), 0.4 * Comp(v[j + 5].L, k), 1e-5 * Comp(v[j + 5].L, k));
+    CHECK_NEAR(Comp(v[j + 3].L, k), (0.4 + 0.6 * 3) * Comp(v[j + 5].L, k), 1e-5 * Comp(v[j + 5].L, k));
+  }
+  // A camera deeper: the light coming down there exp(-c d) as bright (the level views at 0 and 9 m, mu 0).
+  for (int k = 0; k < 3; k++)
+    CHECK_NEAR(Comp(v[2 * 3 + 2].L, k) / Comp(v[2 * 3].L, k), std::exp(-Comp(c, k) * 9), 1e-4);
+  CHECK_NEAR(v[j + 2].fLit, 0, 1e-7);
+  CHECK_NEAR(v[j + 4].fLit, 0.5, 1e-5);
+}
+
+// Why: from below the surface lets the light from the air through Snell's window, and mirrors the water under it outside
+// (and the share of the window Fresnel reflects): the deep water's light seen along the mirrored ray, the light the water
+// seen from above at that angle scatters (2 / (1 + mu) of its colour).
+XR_TEST(Under_Surface)
+{
+  const SVec3 Above = { 3, 2.5f, 2 };
+  const float Cases[][2] = { { 0, 0.5f }, { 0, 1 }, { 0, 0 }, { 1, 1 }, { 0.6f, 0.9f } };
+  SDispatch d;
+  d.Shader = XR_BYTECODE(Test_UnderSurface);
+  for (const auto &c : Cases)
+  {
+    Push(d.In, CARRIER, c[0]);
+    Push(d.In, Above, c[1]);
+  }
+  const size_t n = std::size(Cases);
+  d.Test.nTest[0] = (uint32)n;
+  d.nGroups[0] = Groups64(n);
+  d.nOut = n;
+  const std::vector<uint32> Out = Gpu().Run(d);
+  for (size_t i = 0; i < n; i++)
+    for (int k = 0; k < 3; k++)
+    {
+      const double fMirror = Comp(CARRIER, k) * 2 / (1 + Cases[i][1]);
+      const double e = fMirror * (1 - Cases[i][0]) + Comp(Above, k) * Cases[i][0];
+      CHECK_NEAR(Comp(Vec(Out, i), k), e, 1e-5 * e);
+    }
+}
+
+// Why: a blended object under the water (the plants) is drawn after the view's pass and takes the light in the water over its
+// own colour: blended over the water behind by its alpha, a·(colour T + L) + (1 - a)·(what is behind, already so), it must
+// be what the view's pass gives a surface there with the sun's light its mean along the way (the same path up to the surface,
+// the same attenuation along it and down to the surface's depth, the same scattered light and glow towards the sun), so that
+// a plant matches the water round it near and far; none of the sun's glow with the sun under the horizon.
+XR_TEST(Under_Fog)
+{
+  const SVec3 Deep = CARRIER, c = CarrierAttenuation();
+  struct SCase
+  {
+    float fCamera, fDist;   //!< the camera's depth; the distance (negative: the flat surface, no cap)
+    SVec3 D;                //!< the view's direction (normalised below)
+    float fDepth;           //!< the surface's depth
+    SVec3 L;                //!< the sun
+  };
+  const SVec3 Sun = { -0.85f, -0.08f, 0.52f }, Night = { 0.3f, 0.2f, -0.6f };
+  const SCase Cases[] = {
+    { 5, 3, { 0, 1, 0 }, 5, Sun },        { 5, 25, { 0.3f, 1, -0.2f }, 8, Sun }, { 5, 60, { 0, 1, -0.8f }, 13, Sun },
+    { 5, 12, { -0.638f, -0.06f, 0.768f }, 0, Sun }, { 5, -40, { 0.1f, 1, 0.5f }, 0, Sun }, { 5, 40, { 0.1f, 1, 0.5f }, 0, Sun },
+    { 1, 8, { 1, 0, 0.1f }, 0.2f, Sun },  { 12, 20, { 0, -1, 0 }, 12, Night }, { 0.5f, 0.2f, { 0, 0, -1 }, 0.7f, Sun } };
+  SDispatch d;
+  d.Shader = XR_BYTECODE(Test_UnderFog);
+  std::vector<SVec3> Dirs;
+  for (const SCase &k : Cases)
+  {
+    const float n = std::sqrt(k.D.x * k.D.x + k.D.y * k.D.y + k.D.z * k.D.z);
+    Dirs.push_back({ k.D.x / n, k.D.y / n, k.D.z / n });
+    Push(d.In, Deep, k.fCamera);
+    Push(d.In, c, k.fDist);
+    Push(d.In, Dirs.back(), k.fDepth);
+    Push(d.In, k.L, 0.6f);
+  }
+  const size_t n = std::size(Cases);
+  d.Test.nTest[0] = (uint32)n;
+  d.nGroups[0] = Groups64(n);
+  d.nOut = 2 * n;
+  const std::vector<uint32> Out = Gpu().Run(d);
+  // The view's pass of the same rays, its sun's light 1 at every segment (UnderInscatter: the same path and reach).
+  std::vector<SInscatter> Pass;
+  for (size_t i = 0; i < n; i++)
+  {
+    const SCase &k = Cases[i];
+    const float fDist = std::fabs(k.fDist), fCap = k.fDist > 0 ? 4.0f : 0.0f, mu = -Dirs[i].z;
+    const float fPath = Dirs[i].z > 0 ? std::min(fDist, (k.fCamera + fCap) / Dirs[i].z) : fDist;
+    Pass.push_back({ Deep, c, k.fCamera, mu, fPath, std::min(fPath, 3 / std::max(c.y * (1 + mu), 1e-4f)), 0.6f, At(Out, 2 * i, 3) });
+  }
+  const std::vector<SLight> v = Inscatter(Pass);
+  const double eta = 1.333;
+  for (size_t i = 0; i < n; i++)
+  {
+    const SCase &k = Cases[i];
+    const SVec3 S = Vec(Out, 2 * i), T = Vec(Out, 2 * i + 1);
+    // The phase towards the camera: the sun refracted into the water, against the double's.
+    double fPhase = 1;
+    if (k.L.z > 0)
+    {
+      const double hx = k.L.x / eta, hy = k.L.y / eta, hz = std::sqrt(1 - hx * hx - hy * hy);
+      fPhase = Phase(hx * Dirs[i].x + hy * Dirs[i].y + hz * Dirs[i].z);
+    }
+    CHECK_MSG(std::fabs(At(Out, 2 * i, 3) - fPhase) < 2e-4 * fPhase, std::to_string(i) + ": " + std::to_string(At(Out, 2 * i, 3)));
+    const double fLz = std::max((double)k.L.z, 0.0), fCos = std::sqrt(1 - (1 - fLz * fLz) / (eta * eta));
+    for (int q = 0; q < 3; q++)
+    {
+      const double e = Comp(v[i].L, q);
+      CHECK_MSG(std::fabs(Comp(S, q) - e) <= 3e-4 * e + 1e-8, std::to_string(i) + "/" + std::to_string(q) + ": " + std::to_string(Comp(S, q) / e));
+      const double fT = std::exp(-Comp(c, q) * (Pass[i].fPath + k.fDepth / fCos));
+      CHECK_MSG(std::fabs(Comp(T, q) - fT) <= 1e-5 * fT + 1e-9, std::to_string(i) + "/" + std::to_string(q) + ": " + std::to_string(Comp(T, q)));
+    }
+  }
+  // Up through the surface: the path ends at the surface (5 m up at 0.45: 11.2 m, with the grid's cap 20 m): the flat
+  // surface's light less.
+  CHECK(At(Out, 2 * 4, 1) < At(Out, 2 * 5, 1));
+  // The glow: looking up the sun's refracted rays (case 3) many times as bright as across them (case 1).
+  CHECK(At(Out, 2 * 3, 3) > 20 * At(Out, 2 * 1, 3));
+  CHECK_NEAR(At(Out, 2 * 7, 3), 1, 1e-6);
+}
+
+// Why: what the step is for, under Carrier's water: looking level the water is blue-green, brighter than the deep water
+// seen from above and darker the deeper the camera; a sandy floor fades into the water's colour with the distance; the
+// glow round the sun makes the water towards it many times as bright as away from it; and a ray through a shaft where the
+// caustics focus the sun (twice its light) is several times as bright as one through the shadow between: shafts.
+XR_TEST(Under_Carrier)
+{
+  const SVec3 c = CarrierAttenuation();
+  const float kg = c.y;
+  auto Reach = [&](float mu, float fPath) { return std::min(fPath, 3 / (kg * (1 + mu))); };
+  std::vector<SInscatter> Cases;
+  for (float d0 : { 2.0f, 5.0f, 15.0f })
+    Cases.push_back({ CARRIER, c, d0, 0, 400, Reach(0, 400), 0.6f, 1 });
+  // A floor 10, 30 and 400 m off (the view level from 5 m), the scene's attenuation exp(-c t).
+  for (float t : { 10.0f, 30.0f, 400.0f })
+    Cases.push_back({ CARRIER, c, 5, 0, t, Reach(0, t), 0.6f, 1 });
+  // Towards the sun (the phase at 0 degrees) and away from it (180), from 5 m, 30 degrees up.
+  Cases.push_back({ CARRIER, c, 5, -0.5f, 10, 10, 0.6f, (float)Phase(1) });
+  Cases.push_back({ CARRIER, c, 5, -0.5f, 10, 10, 0.6f, (float)Phase(-1) });
+  // The caustics' shafts: a ray through one (the sun's light 2 along it), one through the shadow between.
+  Cases.push_back({ CARRIER, c, 5, 0, 20, 20, 0.6f, 1, 2, 0 });
+  Cases.push_back({ CARRIER, c, 5, 0, 20, 20, 0.6f, 1, 0, 0 });
+  const std::vector<SLight> v = Inscatter(Cases);
+  // Level from 2 m: blue over green over red, brighter than deep water from above (the colour); deeper darker.
+  CHECK_MSG(v[0].L.z > v[0].L.y && v[0].L.y > v[0].L.x && v[0].L.z > CARRIER.z, std::to_string(v[0].L.z) + " " + std::to_string(CARRIER.z));
+  CHECK(v[1].L.y < v[0].L.y && v[2].L.y < 0.6f * v[1].L.y && v[2].L.z < v[1].L.z);
+  // The sand (0.45, 0.40, 0.30) seen through the water: at 10 m still more of it than the water's light in green, at
+  // 400 m the water's alone.
+  const SVec3 Sand = { 0.45f, 0.40f, 0.30f };
+  auto Seen = [&](size_t i, float t) { return SVec3{ Sand.x * std::exp(-c.x * t), Sand.y * std::exp(-c.y * t), Sand.z * std::exp(-c.z * t) } + v[i].L; };
+  const SVec3 s10 = Seen(3, 10), s400 = Seen(5, 400);
+  CHECK_MSG(Sand.y * std::exp(-c.y * 10) > v[3].L.y, std::to_string(s10.y));
+  for (int k = 0; k < 3; k++)
+    CHECK_NEAR(Comp(s400, k), Comp(v[1].L, k), 0.01 * Comp(v[1].L, k) + 1e-5);
+  // Red fades first: at 30 m the floor's red under a tenth of its own.
+  CHECK(Sand.x * std::exp(-c.x * 30) < 0.1f * Sand.x);
+  // The glow: towards the sun many times as bright as away.
+  CHECK_MSG(v[6].L.y > 20 * v[7].L.y, std::to_string(v[6].L.y / v[7].L.y));
+  // The shafts: the sun's light twice its mean along one (fLit 2), the ray through the shadow between a quarter as bright
+  // (only the light not the sun's: 0.4 against 1.6).
+  CHECK_NEAR(v[8].fLit, 2, 1e-5);
+  CHECK_NEAR(v[9].L.y, 0.25f * v[8].L.y, 1e-5 * v[8].L.y);
+}

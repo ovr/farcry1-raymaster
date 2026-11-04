@@ -347,10 +347,11 @@ void CD3D12Renderer::UpdateOcean(std::span<const SRenderItem> Items)
   m_pDevice->Transition(pLevel4, D3D12_RESOURCE_STATE_UNORDERED_ACCESS, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
   m_pCompute->Dispatch(pList, eD3D12K_OceanMips, CB.nGPU, Table(3, false), Table(3, true), 1, 1, C);
   m_pDevice->Transition(pLevel4, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
-  // The caustics (d3d12_WaterCaustics) when the frame draws them, in daylight: from the waves' level 0 at the frame's
-  // time, their mip levels as the waves'.
+  // The caustics (d3d12_WaterCaustics) when the frame draws them or a view from under the water (the light in it,
+  // Underwater.cpp), in daylight: from the waves' level 0 at the frame's time, their mip levels as the waves'.
   const bool bCaustics = CV_d3d12_WaterCaustics > 0 && CV_d3d12_Caustics && m_SunDir[2] > 0 &&
-                         std::any_of(Items.begin(), Items.end(), [](const SRenderItem &it) { return it.eDrawClass == eDC_Caustics; });
+                         (m_bUnderwater ||
+                          std::any_of(Items.begin(), Items.end(), [](const SRenderItem &it) { return it.eDrawClass == eDC_Caustics; }));
   if (bCaustics)
   {
     ID3D12Resource *pCaustics = o.pCaustics->m_pResource;
