@@ -439,6 +439,11 @@ bool CD3D12Renderer::SetupCausticsDraw(SPipelineKey &Key, SDrawConstants &dc, co
   const float fTime = iTimer ? iTimer->GetCurrTime() : 0.0f;
   Set4(dc.vParams0, pFV->fFogLayerZ, 1 / CAUSTICS_SIZE, fTime, CAUSTICS_STRENGTH * fSun);
   Set4(dc.vParams1, m_SunDir[0] * fShift, m_SunDir[1] * fShift, CAUSTICS_DEPTH, CAUSTICS_RANGE / m_fCausticsMinMean);
+  // The FFT ocean's (d3d12_WaterCaustics; OceanFFT.cpp) where its kernel made them: in the sun's light alone, its
+  // visibility from the cascades.
+  Set4(dc.vParams2, 0, 0, 0, 0);
+  if (SetOceanCaustics(dc, fSun))
+    dc.nFlags2 |= CascadeReceiverFlags(false);
   return true;
 }
 

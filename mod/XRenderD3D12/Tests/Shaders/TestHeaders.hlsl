@@ -26,6 +26,8 @@
 #include "ArrayCoords.hlsli"
 #include "WaterLight.hlsli"
 #include "WaterFoam.hlsli"
+#include "WaterCaustics.hlsli"
+#include "OceanFFT.hlsli"
 
 //! The FXAA tests' picture (Fxaa.hlsli): g_Test.nTest.y x g_Test.nTest.z pixels, g_TestIn[y * width + x] the rgba of
 //! pixel (x, y) as floats, clamped to the picture as AntiAlias.hlsl clamps its loads.
@@ -416,6 +418,39 @@ void CSFoamShade(uint i : SV_DispatchThreadID)
     return;
   const float4 a = TestIn(i);
   TestOut(i, float4(FoamShade(a.x, a.y, a.z), 0, 0, 0));
+}
+
+//! CausticsRay (OceanFFT.hlsli) of the slopes g_TestIn[2i].xy and the sun's direction g_TestIn[2i + 1].xyz: out[i].xy the
+//! ray's move per metre, .z the light let in.
+[numthreads(64, 1, 1)]
+void CSCausticsRay(uint i : SV_DispatchThreadID)
+{
+  if (i >= g_Test.nTest.x)
+    return;
+  float fLight;
+  const float2 v = CausticsRay(TestIn(2 * i).xy, TestIn(2 * i + 1).xyz, fLight);
+  TestOut(i, float4(v, fLight, 0));
+}
+
+//! CausticsAtDepth (WaterCaustics.hlsli) of the texel g_TestIn[2i] at the first depth g_TestIn[2i + 1].x and the depth .y
+//! (out[i].x), CausticsFactor of it at the share .z and the most .w (out[i].y).
+[numthreads(64, 1, 1)]
+void CSCausticsDepth(uint i : SV_DispatchThreadID)
+{
+  if (i >= g_Test.nTest.x)
+    return;
+  const float4 a = TestIn(2 * i + 1);
+  const float I = CausticsAtDepth(TestIn(2 * i), a.x, a.y);
+  TestOut(i, float4(I, CausticsFactor(I, a.z, a.w), 0, 0));
+}
+
+//! CausticsFar (WaterCaustics.hlsli) of the texels a pixel takes g_TestIn[i].x: out[i].x.
+[numthreads(64, 1, 1)]
+void CSCausticsFar(uint i : SV_DispatchThreadID)
+{
+  if (i >= g_Test.nTest.x)
+    return;
+  TestOut(i, float4(CausticsFar(TestIn(i).x), 0, 0, 0));
 }
 
 //! FoamLight (WaterFoam.hlsli) of the normal g_TestIn[4i].xyz in the sun's shadow g_TestIn[4i].w, the sun's direction

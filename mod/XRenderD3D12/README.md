@@ -1249,7 +1249,7 @@ and lists theirs (`NamesObjects`).
   patch). The default wind is fitted by the frames: at 5 m/s Bunker's sunset path got as wide as
   tall and milky near the camera (the glint suite's column, 1.02 against at least 1.2), at 3.5 it
   keeps the sparkle and the column (1.25), at 3 Carrier's glint shrinks. The scopes' glass
-  and the caustics keep their own static textures. The pass costs 0.02-0.04 ms at any resolution,
+  keeps its own static texture (the caustics are the waves' since step 290, below). The pass costs 0.02-0.04 ms at any resolution,
   and the water's three samples of a 16-bit array cost less than the old texture's three layers
   (3840 x 2160, the glint suite's views: Carrier 0.75 -> 0.58 ms, with the rays' sun shadows and
   reflections 1.07 -> 0.80; Bunker's sunset 0.63 -> 0.58, with the rays 0.77 -> 0.78; Carrier's
@@ -1332,6 +1332,44 @@ and lists theirs (`NamesObjects`).
   - Cost at 4K: the water 0.05-0.08 ms more (Carrier 0.58 -> 0.64 ms, Bunker's sunset 0.57 ->
     0.65, the surf's beach 0.51 -> 0.58), the foam's kernels 0.03 ms. The shore's terms and the
     pattern run only where a pixel's quad needs them (most of the sea has no foam).
+- The FFT ocean's caustics (`d3d12_WaterCaustics`, 1; 0 draws the static caustics texture, the
+  frames before; not saved; `d3d12_Caustics 0` none at all; the caustics kernel in
+  `Shaders/OceanFFT.hlsl`, `Shaders/WaterCaustics.hlsli`): the sun's light on the shallow floor
+  gathered and spread by the same waves the water draws, in place of a texture of its own waves.
+  - Once a frame after the waves, when the frame draws the floor under the ocean in daylight, a
+    kernel follows the sun's rays through the middle and the short cascades (40.5 and 6.9 m; the
+    long one's waves focus only far below the game's floors). Each texel's ray is refracted at its
+    normal (Snell's law, 1.333) and carries the light the surface lets in for its area seen from
+    above (a face turned to the sun more, one turned away none); its move against a level
+    surface's at each of four depths, each twice the one before (the short cascade's 0.5-4 m, the
+    middle one's 2-16 m: where their waves focus the sun at the drawn steepness), is where it
+    lands.
+  - The rays are 4 x 4 a cell between four texels, their moves and light bilinear between the
+    texels' (where a wave spreads them 1.5 times 2 x 2 left a ripple of 8.7 %, 4 x 4 1.1 %), splatted
+    bilinearly into the four depths' texels in group shared memory, a tile of 32 x 32 texels a
+    group with a margin of 8 (at the deepest depth 0.05 % of the game's sea's rays move more than 5
+    texels, the physical sea's 4 % more than 7; a cell whose rays cannot reach the tile is
+    skipped). The light is kept in fixed point and its mean is the sun's light, 1 at every depth:
+    the rays leaving a tile land in the next one, so the caustics move the floor's light around
+    and do not add to it (the static texture brightened the floor by 4-6 %).
+  - The kernel writes the texture (RGBA16F, the four depths, a slice a cascade) and its mip levels
+    down to 16 x 16 texels (no kernel for the rest). A GPU may round a half float towards 0 as it
+    stores it: the kernel rounds to the nearest itself (the mean was 0.9993, now 0.99999).
+  - The floor's program takes each cascade where the sun's refracted ray from the floor crossed the
+    surface, at the floor's depth (linearly to the first depth from 1 at the surface, between two
+    by the log of the depth), blurred by the sun's disc (0.53 degrees over 1.333: its width at
+    that depth is the least of the gradients), the cascade's mean where a pixel takes more than its
+    last mip level's texel (no shimmer far off), and multiplies the two. The floor's light is
+    1 + k (I - 1), at most 4 times: k is the sun's share of it (0.6; less at a low sun), fading to
+    none at 16 m (the light scattered in the water evens them out), none in the sun's shadow (one
+    bilinear comparison of the cascades where the caustics change the light, the rays' mask with
+    `d3d12_RTSunShadows`).
+  - The game's sea at its 3.5 m/s wind and the drawn slopes still shows them by 1-2 m of depth (the
+    short cascade's light's RMS 0.31 at 1 m, 0.67 at 2) and focuses them by 4 m; the middle
+    cascade's longer waves are faint there. They change with the waves: the frames 0.02 s apart
+    correlate 0.67, 1 s apart 0.01.
+  - Cost at 3840 x 2160: the kernel 0.07-0.08 ms (the ocean's section 0.07 -> 0.14-0.15 ms), the
+    floor 0.03 ms more (Carrier 0.53 -> 0.56 ms, the surf's beach 0.71 -> 0.74).
 - The sun's glint (`d3d12_WaterGlint`, 1; 0 draws the frames of the water before it; not saved;
   `d3d12_WaterSunGlint`, a highlight fitted by eye and off as in the game, is gone with it) is the
   sun mirrored by the waves' facets (`Shaders/WaterLight.hlsli`): Beckmann's distribution of the

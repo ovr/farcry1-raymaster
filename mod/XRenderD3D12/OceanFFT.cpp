@@ -66,12 +66,21 @@ namespace
 
   static_assert(OceanSpectrum::SIZE == XR_OCEAN_SIZE && OceanSpectrum::CASCADES == XR_OCEAN_CASCADES, "OceanSpectrum.h and Constants.h");
   static_assert(XR_OCEAN_SIZE >> (XR_OCEAN_MIPS - 1) == 1 && XR_OCEAN_SIZE / 16 == XR_OCEAN_LEVEL4, "the kernels' levels");
+  static_assert(XR_CAUSTICS_TILE == 32 && XR_CAUSTICS_MIPS == 5 && XR_OCEAN_SIZE % XR_CAUSTICS_TILE == 0, "the caustics kernel's levels");
 
   constexpr int TABLE = CD3D12Compute::COMPUTE_SRVS + CD3D12Compute::COMPUTE_UAVS;
   //! Rows, columns, waves, their mip levels; the foam's state into each of its two targets, the view of each, the view's
-  //! mip levels: a table each.
-  constexpr int KERNELS = 9;
-  constexpr int FOAM_TABLE = 4, FOAM_VIEW_TABLE = 6, FOAM_MIPS_TABLE = 8;
+  //! mip levels; the caustics (their mip levels in the kernel): a table each.
+  constexpr int KERNELS = 10;
+  constexpr int FOAM_TABLE = 4, FOAM_VIEW_TABLE = 6, FOAM_MIPS_TABLE = 8, CAUSTICS_TABLE = 9;
+  static_assert(OceanSpectrum::CAUSTICS_CASCADES == XR_CAUSTICS_CASCADES && OceanSpectrum::CAUSTICS_FIRST == XR_CAUSTICS_FIRST,
+                "OceanSpectrum.h and Constants.h");
+  //! The caustics on the sea floor (d3d12_WaterCaustics; General.hlsl's DF_CAUSTICS): the share of the floor's light the
+  //! sun's (what they move around; the sky's and the water's light stay), less at a low sun, none in its shadow; the
+  //! depth (m) by which they are gone (the light scattered in the water evens them out), the most they brighten a pixel.
+  constexpr float CAUSTICS_SUN_SHARE = 0.6f;
+  constexpr float CAUSTICS_FADE_DEPTH = 16.0f;
+  constexpr float CAUSTICS_MOST = 4.0f;
   constexpr DXGI_FORMAT FIELDS_FORMAT = DXGI_FORMAT_R32G32B32A32_FLOAT;
   constexpr DXGI_FORMAT WAVES_FORMAT = DXGI_FORMAT_R16G16B16A16_FLOAT;
   //! The foam's state: in 32 bits, since a GPU may round a half float towards 0 as it stores it, and the share kept each
@@ -130,14 +139,19 @@ bool CD3D12Renderer::EnsureOceanTargets()
   o.pFoam[1] = m_pUpload->CreateComputeTarget(N, N, 1, FOAM_FORMAT, L"XRenderD3D12 ocean foam 1", C);
   o.pFoamView = m_pUpload->CreateComputeTarget(N, N, XR_OCEAN_MIPS, FOAM_VIEW_FORMAT, L"XRenderD3D12 ocean foam's view", C);
   o.pFoamLevel4 = m_pUpload->CreateComputeTarget(XR_OCEAN_LEVEL4, XR_OCEAN_LEVEL4, 1, FOAM_VIEW_FORMAT, L"XRenderD3D12 ocean foam's level 4", C);
+  constexpr int CC = XR_CAUSTICS_CASCADES;
+  o.pCaustics = m_pUpload->CreateComputeTarget(N, N, XR_CAUSTICS_MIPS, WAVES_FORMAT, L"XRenderD3D12 ocean caustics", CC);
   o.nTables = m_pDescriptors->AllocRange(KERNELS * TABLE);
   static_assert(FOAM_VIEW_FORMAT == WAVES_FORMAT, "the views' SRVs and tables");
   const D3D12_SHADER_RESOURCE_VIEW_DESC MipsSRV = ArraySRV(WAVES_FORMAT, C, XR_OCEAN_MIPS);
   for (CD3D12Texture *pTex : { o.pWaves, o.pFoamView })
     if (pTex)
       pTex->m_nSRV = m_pDescriptors->AllocSRV(pTex->m_pResource, &MipsSRV);
-  if (!o.pRows || !o.pFields || !o.pWaves || !o.pLevel4 || !o.pFoam[0] || !o.pFoam[1] || !o.pFoamView || !o.pFoamLevel4 ||
-      o.nTables < 0 || o.pWaves->m_nSRV < 0 || o.pFoamView->m_nSRV < 0)
+  const D3D12_SHADER_RESOURCE_VIEW_DESC CausticsSRV = ArraySRV(WAVES_FORMAT, CC, XR_CAUSTICS_MIPS);
+  if (o.pCaustics)
+    o.pCaustics->m_nSRV = m_pDescriptors->AllocSRV(o.pCaustics->m_pResource, &CausticsSRV);
+  if (!o.pRows || !o.pFields || !o.pWaves || !o.pLevel4 || !o.pFoam[0] || !o.pFoam[1] || !o.pFoamView || !o.pFoamLevel4 || !o.pCaustics ||
+      o.nTables < 0 || o.pWaves->m_nSRV < 0 || o.pFoamView->m_nSRV < 0 || o.pCaustics->m_nSRV < 0)
   {
     iLog->LogError("XRenderD3D12: no FFT ocean (its targets)");
     ReleaseOcean();
@@ -173,6 +187,8 @@ bool CD3D12Renderer::EnsureOceanTargets()
         pIn = o.pLevel4->m_pResource, pSRV = &Level4SRV;
       else if (bViewMips && i == 0)
         pIn = o.pFoamLevel4->m_pResource, pSRV = &Level4SRV;
+      else if (k == CAUSTICS_TABLE && i == 0)
+        pIn = o.pWaves->m_pResource, pSRV = &Level4SRV;   // their level 0
       m_pDescriptors->WriteSRV(nTable + i, pIn, pSRV);
     }
     for (int i = 0; i < CD3D12Compute::COMPUTE_UAVS; i++)
@@ -181,6 +197,11 @@ bool CD3D12Renderer::EnsureOceanTargets()
       ID3D12Resource *pOut = nullptr;
       if (k < 2)
         pOut = i == 0 ? (k == 0 ? o.pRows : o.pFields)->m_pResource : nullptr;
+      else if (k == CAUSTICS_TABLE)
+      {
+        UAV = ArrayUAV(WAVES_FORMAT, CC, i);
+        pOut = o.pCaustics->m_pResource;
+      }
       else if (bFoam)
       {
         UAV = ArrayUAV(FOAM_FORMAT, C, 0);
@@ -201,12 +222,13 @@ bool CD3D12Renderer::EnsureOceanTargets()
   }
   // Made in UNORDERED_ACCESS; the waves and the foam's view at rest where the water's program reads them, the foam's
   // states where the kernels read them, the kernels' inputs where the next kernel reads them.
-  for (CD3D12Texture *pTex : { o.pWaves, o.pFoamView })
+  for (CD3D12Texture *pTex : { o.pWaves, o.pFoamView, o.pCaustics })
     m_pDevice->Transition(pTex->m_pResource, D3D12_RESOURCE_STATE_UNORDERED_ACCESS, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
   for (CD3D12Texture *pTex : { o.pFoam[0], o.pFoam[1] })
     m_pDevice->Transition(pTex->m_pResource, D3D12_RESOURCE_STATE_UNORDERED_ACCESS, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
   o.nFrame = -1;
   o.nFoamFrame = -1;
+  o.nCausticsFrame = -1;
   if (iLog)
     iLog->Log("XRenderD3D12: the FFT ocean: %d cascades of %d x %d texels (%g, %g, %g m)", C, N, N, XR_OCEAN_TILE0, XR_OCEAN_TILE1, XR_OCEAN_TILE2);
   return true;
@@ -293,6 +315,14 @@ void CD3D12Renderer::UpdateOcean(std::span<const SRenderItem> Items)
     Set4(oc.vFoamCascades[c], bBreaks ? 1 + fSigma * o.fWhitecapZ[c] : -1.0f, bBreaks ? 1 / ((float)OceanSpectrum::FOAM_RAMP * fSigma) : 0.0f,
          fSince > 0 ? (float)OceanSpectrum::FoamSpreadShare(c, std::min(fSince, 60.0)) : 0.0f, 0);
   }
+  // The caustics: towards the sun, the slopes as drawn (d3d12_WaterSlope's scale; the bump amounts at their default),
+  // each caustics cascade's four depths.
+  Set4(oc.vSun, m_SunDir[0], m_SunDir[1], m_SunDir[2], SeaScale(CV_d3d12_WaterSlope, o.fSlopeRMS));
+  for (int c = 0; c < XR_CAUSTICS_CASCADES; c++)
+  {
+    const float d = (float)OceanSpectrum::CAUSTICS_DEPTH[c];
+    Set4(oc.vCausticsDepths[c], d, 2 * d, 4 * d, 8 * d);
+  }
   const SD3D12FrameAlloc CB = m_pUpload->AllocFrame(sizeof(oc), 256);
   memcpy(CB.pCPU, &oc, sizeof(oc));
 
@@ -316,7 +346,24 @@ void CD3D12Renderer::UpdateOcean(std::span<const SRenderItem> Items)
   m_pDevice->Transition(pLevel4, D3D12_RESOURCE_STATE_UNORDERED_ACCESS, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
   m_pCompute->Dispatch(pList, eD3D12K_OceanMips, CB.nGPU, Table(3, false), Table(3, true), 1, 1, C);
   m_pDevice->Transition(pLevel4, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
-  m_pDevice->Transition(pWaves, D3D12_RESOURCE_STATE_UNORDERED_ACCESS, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+  // The caustics (d3d12_WaterCaustics) when the frame draws them, in daylight: from the waves' level 0 at the frame's
+  // time, their mip levels as the waves'.
+  const bool bCaustics = CV_d3d12_WaterCaustics > 0 && CV_d3d12_Caustics && m_SunDir[2] > 0 &&
+                         std::any_of(Items.begin(), Items.end(), [](const SRenderItem &it) { return it.eDrawClass == eDC_Caustics; });
+  if (bCaustics)
+  {
+    ID3D12Resource *pCaustics = o.pCaustics->m_pResource;
+    constexpr UINT CC = XR_CAUSTICS_CASCADES;
+    m_pDevice->Transition(pWaves, D3D12_RESOURCE_STATE_UNORDERED_ACCESS, READ);
+    m_pDevice->Transition(pCaustics, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+    m_pCompute->Dispatch(pList, eD3D12K_OceanCaustics, CB.nGPU, Table(CAUSTICS_TABLE, false), Table(CAUSTICS_TABLE, true), N / XR_CAUSTICS_TILE,
+                         N / XR_CAUSTICS_TILE, CC);
+    m_pDevice->Transition(pWaves, READ, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+    m_pDevice->Transition(pCaustics, D3D12_RESOURCE_STATE_UNORDERED_ACCESS, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+    o.nCausticsFrame = m_nFrames;
+  }
+  else
+    m_pDevice->Transition(pWaves, D3D12_RESOURCE_STATE_UNORDERED_ACCESS, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
   if (bFoam && (fSince < 0 || fSince >= OceanSpectrum::FOAM_STEP))
   {
     // The foam's state into the other target than the frame before's, from it; then its view and the view's mip levels
@@ -387,12 +434,30 @@ bool CD3D12Renderer::SetOceanConstants(SDrawConstants &dc, float fBump, int nFoa
   return true;
 }
 
+bool CD3D12Renderer::SetOceanCaustics(SDrawConstants &dc, float fSun) const
+{
+  const SOceanState &o = m_Ocean;
+  if (!CV_d3d12_WaterFFT || CV_d3d12_WaterCaustics <= 0 || !o.pCaustics || o.nCausticsFrame < 0)
+    return false;
+  // General.hlsl's DF_CAUSTICS of the FFT ocean (vParams2.x > 0): the caustics' texture (nTex1, an array), each caustics
+  // cascade's 1 / tile, its first depth; the share of the light they move (fSun: less at a low sun), the depth they are
+  // gone by, the most they brighten.
+  constexpr int F = XR_CAUSTICS_FIRST;
+  dc.nTex1 = (uint32)o.pCaustics->m_nSRV;
+  Set4(dc.vParams2, (float)(1 / OceanSpectrum::TILE[F]), (float)(1 / OceanSpectrum::TILE[F + 1]), 0, 0);
+  Set4(dc.vParams3, (float)OceanSpectrum::CAUSTICS_DEPTH[0], (float)OceanSpectrum::CAUSTICS_DEPTH[1], 0, 0);
+  dc.vParams0[3] = CAUSTICS_SUN_SHARE * fSun;
+  dc.vParams1[2] = CAUSTICS_FADE_DEPTH;
+  dc.vParams1[3] = CAUSTICS_MOST;
+  return true;
+}
+
 void CD3D12Renderer::ReleaseOcean()
 {
   SOceanState &o = m_Ocean;
   if (m_pUpload)
   {
-    for (CD3D12Texture *pTex : { o.pH0, o.pRows, o.pFields, o.pWaves, o.pLevel4, o.pFoam[0], o.pFoam[1], o.pFoamView, o.pFoamLevel4 })
+    for (CD3D12Texture *pTex : { o.pH0, o.pRows, o.pFields, o.pWaves, o.pLevel4, o.pFoam[0], o.pFoam[1], o.pFoamView, o.pFoamLevel4, o.pCaustics })
       m_pUpload->ReleaseTexture(pTex);
   }
   if (m_pDescriptors && o.nTables >= 0)

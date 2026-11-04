@@ -1139,6 +1139,9 @@ public:
   //! nFoamPattern the foam's pattern's texture index, -1: no foam): false without them (the static
   //! wave texture then).
   bool SetOceanConstants(SDrawConstants &dc, float fBump, int nFoamPattern) const;
+  //! The caustics' constants of the FFT ocean for the sea floor's draw (SetupCausticsDraw: d3d12_WaterCaustics; fSun
+  //! their strength by the sun's height): false without them (the static caustics texture then).
+  bool SetOceanCaustics(SDrawConstants &dc, float fSun) const;
   void ReleaseOcean();
   struct SOceanState
   {
@@ -1152,6 +1155,9 @@ public:
                                             //!< before's taking turns (nFoam the frame's)
     CD3D12Texture *pFoamView = nullptr;     //!< the last state's view (RGBA16F, XR_OCEAN_MIPS levels; its SRV the water's)
     CD3D12Texture *pFoamLevel4 = nullptr;   //!< its level 4 for the last kernel
+    CD3D12Texture *pCaustics = nullptr;     //!< the caustics (d3d12_WaterCaustics; RGBA16F, a slice a caustics cascade: the
+                                            //!< light at its four depths; XR_CAUSTICS_MIPS levels; its SRV the sea floor's)
+    int nCausticsFrame = -1;                //!< the frame that made them, -1 none yet
     int nFoam = 0;                          //!< the target of pFoam the last frame made
     int nFoamFrame = -1;                    //!< that frame, -1 none yet
     double fFoamTime = 0;                   //!< its time (s)
@@ -1980,6 +1986,7 @@ public:
   float CV_d3d12_WaterChop = 2.5f;    //!< the FFT waves' horizontal displacement, Tessendorf's lambda (sharp crests; 0: none)
   float CV_d3d12_WaterFoam = 1;       //!< the FFT ocean's foam: whitecaps, waves breaking on the shore (0: none, the frames before)
   float CV_d3d12_WaterSurf = 0.8f;    //!< m: the height of the swell breaking on the ocean's shores, its surf's foam (0: none)
+  int CV_d3d12_WaterCaustics = 1;     //!< the caustics on the sea floor of the FFT ocean's waves (0: the static texture, the frames before)
   int CV_d3d12_GpuTimes = 0;          //!< N: the GPU time of the frame's sections to the log every N frames
   int CV_d3d12_FrameLog = 0;          //!< 1: a line per frame to XRenderD3D12_frames.txt (LogFrame), 2 with the engine's profilers
   int CV_d3d12_CpuSamples = 0;        //!< N: the render thread's stack every N microseconds, to XRenderD3D12_samples.txt at 0 (CpuSampler)

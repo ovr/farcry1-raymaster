@@ -197,6 +197,10 @@ void CD3D12Renderer::RegisterVariables()
                      "With d3d12_WaterFoam: the height (m) of the swell (9 s) breaking on the ocean's shores, where the water "
                      "gets shallower than it over 0.78; its bores run to the shore, a white roller on each front and the lace "
                      "it leaves; 0: none (only the wind sea's)");
+  iConsole->Register("d3d12_WaterCaustics", &CV_d3d12_WaterCaustics, 1, 0,
+                     "With d3d12_WaterFFT and d3d12_Caustics: the caustics on the sea floor made by the FFT ocean's waves (the "
+                     "sun's rays refracted by its middle and short cascades, their light at the floor's depth), in the sun's "
+                     "light only; 0: the static caustics texture, the frames before");
   iConsole->Register("d3d12_GpuTimes", &CV_d3d12_GpuTimes, 0, 0,
                      "N: every N frames, the average GPU time of the frame's sections (shadow maps, water reflection, opaque, "
                      "water, blended, ...) and the time between frames to the console and XRenderD3D12_gpu.txt; 0 off");

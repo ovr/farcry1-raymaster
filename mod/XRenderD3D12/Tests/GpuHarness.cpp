@@ -817,13 +817,13 @@ XrTest::SOceanOutput XrTest::CGpu::RunOceanFrames(const std::vector<float> &H0, 
 {
   constexpr UINT N = XR_OCEAN_SIZE, C = XR_OCEAN_CASCADES, MIPS = XR_OCEAN_MIPS, L4 = XR_OCEAN_LEVEL4;
   // The tables: 0 rows, 1 columns, 2 waves, 3 their mips, 4 + t the foam's state into target t, 6 + t the view of it, 8
-  // the view's mips.
-  constexpr UINT SRVS = 4, UAVS = 5, TABLE = SRVS + UAVS, KERNELS = 9;
+  // the view's mips, 9 the caustics (their levels in the kernel).
+  constexpr UINT SRVS = 4, UAVS = 5, TABLE = SRVS + UAVS, KERNELS = 10, CC = XR_CAUSTICS_CASCADES, CM = XR_CAUSTICS_MIPS;
   if (H0.size() != (size_t)C * N * N * 4)
     throw std::runtime_error("the ocean's h0 is not its cascades' texels");
   if (Frames.empty())
     throw std::runtime_error("the ocean runs no frame");
-  const bool bFoam = Kernels.Foam.pData != nullptr;
+  const bool bFoam = Kernels.Foam.pData != nullptr, bCaustics = Kernels.Caustics.pData != nullptr;
   if (bFoam && !Kernels.FoamView.pData)
     throw std::runtime_error("the ocean's foam without its view's kernel");
   if (!m_pComputeRootSignature)
@@ -891,6 +891,9 @@ XrTest::SOceanOutput XrTest::CGpu::RunOceanFrames(const std::vector<float> &H0, 
     pFoamView = Array(N, C, MIPS, F16, UAV_STATE, true);
     pFoamLevel4 = Array(L4, C, 1, F16, UAV_STATE, true);
   }
+  ComPtr<ID3D12Resource> pCaustics;
+  if (bCaustics)
+    pCaustics = Array(N, CC, CM, F16, UAV_STATE, true);
   // Each frame's constants at a multiple of 256 bytes.
   constexpr size_t CB_STRIDE = (sizeof(SOceanConstants) + 255) & ~(size_t)255;
   std::vector<uint8_t> CBData(CB_STRIDE * Frames.size());
@@ -966,6 +969,13 @@ XrTest::SOceanOutput XrTest::CGpu::RunOceanFrames(const std::vector<float> &H0, 
     for (UINT i = 0; i < UAVS; i++)
       UAV(8 * TABLE + SRVS + i, pFoamView.Get(), F16, C, 4 + i);
   }
+  if (bCaustics)
+  {
+    // The caustics: t0 the waves' level 0; u0..u4 their levels 0..4.
+    SRV(9 * TABLE, pWaves.Get(), F16, C);
+    for (UINT i = 0; i < UAVS; i++)
+      UAV(9 * TABLE + SRVS + i, pCaustics.Get(), F16, CC, i);
+  }
 
   // The readback of every sub resource of the fields, of the waves and of the foam.
   const D3D12_RESOURCE_DESC FieldsDesc = pFields->GetDesc(), WavesDesc = pWaves->GetDesc();
@@ -986,6 +996,15 @@ XrTest::SOceanOutput XrTest::CGpu::RunOceanFrames(const std::vector<float> &H0, 
     m_pDevice->GetCopyableFootprints(&FoamDesc, 0, C * MIPS, 0, FoamLayout.data(), nullptr, nullptr, &nFoamBytes);
     pStateBack = Buffer(D3D12_HEAP_TYPE_READBACK, (size_t)nStateBytes, D3D12_RESOURCE_STATE_COPY_DEST, false);
     pFoamBack = Buffer(D3D12_HEAP_TYPE_READBACK, (size_t)nFoamBytes, D3D12_RESOURCE_STATE_COPY_DEST, false);
+  }
+  std::vector<D3D12_PLACED_SUBRESOURCE_FOOTPRINT> CausticsLayout(CC * CM);
+  UINT64 nCausticsBytes = 0;
+  ComPtr<ID3D12Resource> pCausticsBack;
+  if (bCaustics)
+  {
+    const D3D12_RESOURCE_DESC CausticsDesc = pCaustics->GetDesc();
+    m_pDevice->GetCopyableFootprints(&CausticsDesc, 0, CC * CM, 0, CausticsLayout.data(), nullptr, nullptr, &nCausticsBytes);
+    pCausticsBack = Buffer(D3D12_HEAP_TYPE_READBACK, (size_t)nCausticsBytes, D3D12_RESOURCE_STATE_COPY_DEST, false);
   }
 
   Ok(m_pAllocator->Reset(), "Reset");
@@ -1054,6 +1073,12 @@ XrTest::SOceanOutput XrTest::CGpu::RunOceanFrames(const std::vector<float> &H0, 
     Move(pLevel4.Get(), UAV_STATE, READ);
     Dispatch(Kernels.Mips, 3, 1, 1, C);
     Move(pLevel4.Get(), READ, UAV_STATE);
+    if (bCaustics)
+    {
+      Move(pWaves.Get(), UAV_STATE, READ);
+      Dispatch(Kernels.Caustics, 9, N / XR_CAUSTICS_TILE, N / XR_CAUSTICS_TILE, CC);
+      Move(pWaves.Get(), READ, UAV_STATE);
+    }
     if (bFoam)
     {
       t = f > 0 ? 1 - t : 0;
@@ -1073,6 +1098,8 @@ XrTest::SOceanOutput XrTest::CGpu::RunOceanFrames(const std::vector<float> &H0, 
     Move(pFoam[t].Get(), READ, D3D12_RESOURCE_STATE_COPY_SOURCE);
     Move(pFoamView.Get(), UAV_STATE, D3D12_RESOURCE_STATE_COPY_SOURCE);
   }
+  if (bCaustics)
+    Move(pCaustics.Get(), UAV_STATE, D3D12_RESOURCE_STATE_COPY_SOURCE);
   auto Copy = [&](ID3D12Resource *pSrc, ID3D12Resource *pDst, const std::vector<D3D12_PLACED_SUBRESOURCE_FOOTPRINT> &Layout) {
     for (UINT i = 0; i < (UINT)Layout.size(); i++)
     {
@@ -1093,6 +1120,8 @@ XrTest::SOceanOutput XrTest::CGpu::RunOceanFrames(const std::vector<float> &H0, 
     Copy(pFoam[t].Get(), pStateBack.Get(), StateLayout);
     Copy(pFoamView.Get(), pFoamBack.Get(), FoamLayout);
   }
+  if (bCaustics)
+    Copy(pCaustics.Get(), pCausticsBack.Get(), CausticsLayout);
   Execute();
 
   SOceanOutput Out;
@@ -1145,6 +1174,24 @@ XrTest::SOceanOutput XrTest::CGpu::RunOceanFrames(const std::vector<float> &H0, 
       Out.Foam[m] = HalfsToFloats(Halfs.data(), Halfs.size());
     }
     pFoamBack->Unmap(0, &None);
+  }
+  if (bCaustics)
+  {
+    Range = { 0, (SIZE_T)nCausticsBytes };
+    Ok(pCausticsBack->Map(0, &Range, &p), "Map");
+    for (UINT m = 0; m < CM; m++)
+    {
+      const UINT w = N >> m;
+      std::vector<uint16_t> Halfs((size_t)CC * w * w * 4);
+      for (UINT c = 0; c < CC; c++)
+      {
+        const D3D12_PLACED_SUBRESOURCE_FOOTPRINT &l = CausticsLayout[m + c * CM];
+        for (UINT y = 0; y < w; y++)
+          memcpy(&Halfs[((size_t)c * w + y) * w * 4], (const uint8_t *)p + (size_t)l.Offset + (size_t)y * l.Footprint.RowPitch, (size_t)w * 8);
+      }
+      Out.Caustics[m] = HalfsToFloats(Halfs.data(), Halfs.size());
+    }
+    pCausticsBack->Unmap(0, &None);
   }
   return Out;
 }

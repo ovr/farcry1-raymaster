@@ -129,6 +129,20 @@ uint OceanInverseFFT(uint j)
   return nSrc;
 }
 
+//! The caustics: 1 over the water's refractive index (air to water).
+static const float CAUSTICS_ETA = 1 / 1.333;
+
+//! The caustics: the sun's ray that crosses the surface where its slopes are s (dh/dx, dh/dy; vSun towards the sun, z > 0),
+//! its move along the surface per metre it goes down in the water (Snell's law at the normal (-s, 1)); fLight the sun's
+//! light the surface lets in there for its area seen from above, as a share of a level surface's: N.L |(-s, 1)| / L.z = 1
+//! - s.L.xy / L.z, a face turned towards the sun more (0 for one turned away; its mean over a tile 1, the slopes' 0).
+float2 CausticsRay(float2 s, float3 vSun, out float fLight)
+{
+  fLight = max(1 - dot(s, vSun.xy) / max(vSun.z, 1e-3), 0);
+  const float3 T = refract(-vSun, normalize(float3(-s, 1)), CAUSTICS_ETA);
+  return T.z < -1e-3 ? T.xy / -T.z : 0;
+}
+
 #ifdef OCEAN_FIELDS
 
 //! Field pair s of cascade c at texel position x (bilinear, the tile wrapping).

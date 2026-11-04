@@ -114,6 +114,7 @@ enum ED3D12Kernel
   eD3D12K_OceanMips,                //!< their mip levels 4 to 8 (the foam's view's too)
   eD3D12K_OceanFoam,                //!< the foam's state (the whitecaps; d3d12_WaterFoam), from the frame before's
   eD3D12K_OceanFoamView,            //!< the state into the foam's view (RGBA16F, the water's), its mip levels 1 to 4
+  eD3D12K_OceanCaustics,            //!< the caustics of the waves at four depths (d3d12_WaterCaustics; the sea floor's), mip levels 1 to 4
   eD3D12K_Num
 };
 

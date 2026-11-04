@@ -128,7 +128,15 @@
 //	      the surface (vParams0: x water level, y 1 / pattern size, z time,
 //	      w k; vParams1: xy the ray's shift per metre of depth, z the depth
 //	      where the caustics are gone, w the texture's scale to a mean of 1),
-//	      fading in over the first metre of depth
+//	      fading in over the first metre of depth; with vParams2.x > 0 the FFT
+//	      ocean's (d3d12_WaterCaustics, WaterCaustics.hlsli): the product of
+//	      the caustics cascades' light at the depth (the array nTex1, slice i
+//	      at that point times vParams2[i] (1 / its tile), its first depth
+//	      vParams3[i]; the sun's disc's blur; its mean where a pixel takes
+//	      more than its last mip level's texel), rgb = 0.5 * clamp(1 + k
+//	      (I - 1), 0, vParams1.w), k = vParams0.w times the sun's visibility
+//	      (DF2_SUN_CASCADES: one tap, CascadeTapNormal), fading out to
+//	      vParams1.z m of depth
 //	    DF2_FOG_VOLUME (a fog volume over an object in it): the volume's colour
 //	      (vColor.rgb), alpha FogVolumeAlpha (times the alpha with vParams0.w);
 //	      nothing below applies
@@ -231,6 +239,7 @@
 
 #include "Common.hlsli"
 #include "LightmapLight.hlsli"
+#include "WaterCaustics.hlsli"
 #if defined(XR_RAY_REFL) || defined(XR_RAY_LIGHT)
 #include "RayShade.hlsli"
 #endif
@@ -1143,7 +1152,8 @@ float4 ShadePixel(SVertexOutput In)
 #ifdef XR_RAY_SUN
   float fRayWeight = 0;
   float2 vRaySun = 1;
-  if (HasFlag2(DF2_SUN_CASCADES))
+  // The FFT caustics' own (below).
+  if (HasFlag2(DF2_SUN_CASCADES) && !HasFlag(DF_CAUSTICS))
   {
     vRaySun = RaySunMask(In.vPos, fRayWeight);
     if (fRayWeight < 1)
@@ -1151,7 +1161,7 @@ float4 ShadePixel(SVertexOutput In)
     fSun = lerp(fSun, HasFlag(DF_SHADOW_PASS) ? 1 : HasFlag2(DF2_CASCADES_LIVE) ? vRaySun.y : vRaySun.x, fRayWeight);
   }
 #elif defined(XR_CASCADES)
-  if (HasFlag2(DF2_SUN_CASCADES))
+  if (HasFlag2(DF2_SUN_CASCADES) && !HasFlag(DF_CAUSTICS))
     fSun = SunCascades(In.vWorldPos, In.vNormal, In.vPos.xy, fSun);
 #endif
 #ifdef XR_PT
@@ -1411,7 +1421,44 @@ float4 ShadePixel(SVertexOutput In)
     vFogColor = 0.5;
   }
 
-  if (HasFlag(DF_CAUSTICS))
+  if (HasFlag(DF_CAUSTICS) && g_Draw.vParams2.x > 0)
+  {
+    // The FFT ocean's (d3d12_WaterCaustics): each caustics cascade's light at the floor's depth where the sun's refracted
+    // ray crossed the surface, blurred by the sun's disc (the gradients at least its width there), its mean where a pixel
+    // takes more than its last mip level's texel, their product; the sun's share of the floor's light times it, in the
+    // sun's light, fading out with the depth. The sun's visibility only where the light changes (above the water, below
+    // the fade and far off none): one bilinear comparison in the cascades (the rays' mask with the rays' shadows).
+    const float fDepth = max(g_Draw.vParams0.x - In.vWorldPos.z, 0);
+    const float2 vP = In.vWorldPos.xy + g_Draw.vParams1.xy * fDepth;
+    const Texture2DArray Caustics = g_TextureArrays[g_Draw.nTex1];
+    float fLight = 1;
+    [unroll]
+    for (uint i = 0; i < XR_CAUSTICS_CASCADES; i++)
+    {
+      const float2 uv = vP * g_Draw.vParams2[i], dx = ddx(uv), dy = ddy(uv);
+      const float fBlur = fDepth * CAUSTICS_SUN_ANGLE * g_Draw.vParams2[i];
+      const float fSize = max(max(length(dx), length(dy)), 1e-9), fGrow = max(1, fBlur / fSize);
+      const float fCascade = CausticsAtDepth(Caustics.SampleGrad(g_SamplerLinearWrap, float3(uv, i), dx * fGrow, dy * fGrow), g_Draw.vParams3[i], fDepth);
+      fLight *= lerp(1, fCascade, CausticsFar(fSize * fGrow * XR_OCEAN_SIZE));
+    }
+    const float fFade = saturate(1 - fDepth / g_Draw.vParams1.z);
+    float fLit = 1;
+    [branch]
+    if (fLight != 1 && fFade > 0 && HasFlag2(DF2_SUN_CASCADES))
+    {
+#ifdef XR_RAY_SUN
+      float fWeight = 0;
+      const float2 vMask = RaySunMask(In.vPos, fWeight);
+      fLit = lerp(fWeight < 1 ? CascadeTapNormal(In.vWorldPos, In.vNormal) : 1, vMask.x, fWeight);
+#elif defined(XR_CASCADES)
+      fLit = CascadeTapNormal(In.vWorldPos, In.vNormal);
+#endif
+    }
+    const float k = g_Draw.vParams0.w * saturate(fLit) * fFade;
+    vColor = float4((0.5 * CausticsFactor(fLight, k, g_Draw.vParams1.w)).xxx, 1);
+    vFogColor = 0.5;
+  }
+  else if (HasFlag(DF_CAUSTICS))
   {
     float fDepth = g_Draw.vParams0.x - In.vWorldPos.z;
     float2 vP = (In.vWorldPos.xy + g_Draw.vParams1.xy * fDepth) * g_Draw.vParams0.y;
@@ -1456,11 +1503,11 @@ float4 ShadePixel(SVertexOutput In)
   if (HasFlag(DF_SHADOW_DEBUG))
     vColor = float4(fSun, fSun, fSun, 1);
 #ifdef XR_CASCADES
-  if (HasFlag2(DF2_SUN_CASCADES) && g_Frame.vShadowTint.w >= 3 && !HasFlag(DF_SHADOW_PASS))
+  if (HasFlag2(DF2_SUN_CASCADES) && g_Frame.vShadowTint.w >= 3 && !HasFlag(DF_SHADOW_PASS | DF_CAUSTICS))
     vColor.rgb = CascadeDebug(In.vWorldPos, In.vNormal, In.vPos.xy, vColor.rgb);
 #endif
 #ifdef XR_RAY_SUN
-  if (HasFlag2(DF2_SUN_CASCADES) && g_Frame.vShadowTint.w >= 4 && !HasFlag(DF_SHADOW_PASS) && fRayWeight > 0)
+  if (HasFlag2(DF2_SUN_CASCADES) && g_Frame.vShadowTint.w >= 4 && !HasFlag(DF_SHADOW_PASS | DF_CAUSTICS) && fRayWeight > 0)
     vColor.rgb = lerp(vColor.rgb, float3(1 - vRaySun.x, 1 - vRaySun.y, 0.6) * 0.8 + 0.2 * dot(saturate(vColor.rgb), float3(0.299, 0.587, 0.114)), fRayWeight);
 #endif
   return vColor;
