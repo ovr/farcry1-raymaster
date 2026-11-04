@@ -5,7 +5,7 @@
 //	File: TestHeaders.hlsl
 //	Description: The unit tests' kernels over the renderer's shader
 //	headers that stand alone (Shader Model 6.0): PathGBuffer.hlsli,
-//	HdrLight.hlsli, HdrToneMap.hlsli, HdrExposure.hlsli, HdrFrameAverage.hlsli, PathCache.hlsli, LightmapLight.hlsli, RenderMode.hlsli, ArrayCoords.hlsli, WaterLight.hlsli and Fxaa.hlsli, included as the renderer's
+//	HdrLight.hlsli, HdrToneMap.hlsli, HdrExposure.hlsli, HdrFrameAverage.hlsli, PathCache.hlsli, LightmapLight.hlsli, RenderMode.hlsli, ArrayCoords.hlsli, WaterLight.hlsli, WaterFoam.hlsli and Fxaa.hlsli, included as the renderer's
 //	programs include them. Each kernel runs the tested functions on the
 //	items of g_TestIn and writes what they give to g_TestOut; ShaderTests.cpp
 //	checks it. One compile per kernel (Tests/CMakeLists.txt).
@@ -25,6 +25,7 @@
 #include "RenderMode.hlsli"
 #include "ArrayCoords.hlsli"
 #include "WaterLight.hlsli"
+#include "WaterFoam.hlsli"
 
 //! The FXAA tests' picture (Fxaa.hlsli): g_Test.nTest.y x g_Test.nTest.z pixels, g_TestIn[y * width + x] the rgba of
 //! pixel (x, y) as floats, clamped to the picture as AntiAlias.hlsl clamps its loads.
@@ -349,4 +350,60 @@ void CSWaterCap(uint i : SV_DispatchThreadID)
     return;
   const float4 a = TestIn(i);
   TestOut(i, float4(WaterCapLight(a.rgb, a.w), 0));
+}
+
+//! The foam's share of a pixel (WaterFoam.hlsli): ShoreFoam of the depth, crest, significant height and breaker index
+//! g_TestIn[3i]; FoamCover of the amount, the pattern's value, its width and the blur g_TestIn[3i + 1] and FoamOpacity of
+//! that cover and the amount; FoamUniform of g_TestIn[3i + 2].xy: out[i] = (shore, cover, opacity, uniform).
+[numthreads(64, 1, 1)]
+void CSFoam(uint i : SV_DispatchThreadID)
+{
+  if (i >= g_Test.nTest.x)
+    return;
+  const float4 s = TestIn(i * 3), c = TestIn(i * 3 + 1), u = TestIn(i * 3 + 2);
+  const float fCover = FoamCover(c.x, c.y, c.z, c.w);
+  TestOut(i, float4(ShoreFoam(s.x, s.y, s.z, s.w), fCover, FoamOpacity(fCover, c.x), FoamUniform(u.x, u.y)));
+}
+
+//! WhitecapAmount (WaterFoam.hlsli) of the cascades' foam and the long waves' height and its inverse RMS g_TestIn[2i];
+//! FoamBreakerIndex of g_TestIn[2i + 1].x and FoamValueNoise at g_TestIn[2i + 1].yz: out[i] = (amount, index, noise, 0).
+[numthreads(64, 1, 1)]
+void CSFoamMix(uint i : SV_DispatchThreadID)
+{
+  if (i >= g_Test.nTest.x)
+    return;
+  const float4 w = TestIn(i * 2), n = TestIn(i * 2 + 1);
+  TestOut(i, float4(WhitecapAmount(w.x, w.y, w.z, w.w), FoamBreakerIndex(n.x), FoamValueNoise(n.yz), 0));
+}
+
+//! ContactFoam (WaterFoam.hlsli) of the view's path through the water, the crest and the significant height
+//! g_TestIn[i].xyz: out[i].x.
+[numthreads(64, 1, 1)]
+void CSFoamContact(uint i : SV_DispatchThreadID)
+{
+  if (i >= g_Test.nTest.x)
+    return;
+  const float4 a = TestIn(i);
+  TestOut(i, float4(ContactFoam(a.x, a.y, a.z), 0, 0, 0));
+}
+
+//! SurfFoam (WaterFoam.hlsli) of the depth, the depth where the swell breaks and its phase g_TestIn[i].xyz: out[i].x.
+[numthreads(64, 1, 1)]
+void CSFoamSurf(uint i : SV_DispatchThreadID)
+{
+  if (i >= g_Test.nTest.x)
+    return;
+  const float4 a = TestIn(i);
+  TestOut(i, float4(SurfFoam(a.x, a.y, a.z), 0, 0, 0));
+}
+
+//! FoamLight (WaterFoam.hlsli) of the normal g_TestIn[4i].xyz in the sun's shadow g_TestIn[4i].w, the sun's direction
+//! g_TestIn[4i + 1].xyz, its light g_TestIn[4i + 2].rgb and the sky's g_TestIn[4i + 3].rgb: out[i].rgb.
+[numthreads(64, 1, 1)]
+void CSFoamLight(uint i : SV_DispatchThreadID)
+{
+  if (i >= g_Test.nTest.x)
+    return;
+  const float4 n = TestIn(i * 4);
+  TestOut(i, float4(FoamLight(n.xyz, TestIn(i * 4 + 1).xyz, TestIn(i * 4 + 2).rgb, n.w, TestIn(i * 4 + 3).rgb), 0));
 }

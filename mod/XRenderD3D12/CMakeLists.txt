@@ -35,6 +35,7 @@ set(XRENDERD3D12_SOURCES
     Water.cpp
     OceanFFT.cpp
     OceanSpectrum.h
+    FoamPattern.h
     EnvCubes.cpp
     Mirrors.cpp
     TemplateFx.cpp

@@ -22,8 +22,11 @@
 #include "Test_OceanColumns.h"
 #include "Test_OceanWaves.h"
 #include "Test_OceanMips.h"
+#include "Test_OceanFoam.h"
+#include "Test_OceanFoamView.h"
 
 #include <algorithm>
+#include <cstdio>
 #include <cmath>
 #include <complex>
 #include <cstring>
@@ -187,6 +190,64 @@ namespace
     for (double x : v)
       s += x * x;
     return std::sqrt(s / std::max<size_t>(v.size(), 1));
+  }
+
+  SOceanKernels FoamKernels()
+  {
+    SOceanKernels k = Kernels();
+    k.Foam = XR_BYTECODE(Test_OceanFoam);
+    k.FoamView = XR_BYTECODE(Test_OceanFoamView);
+    return k;
+  }
+
+  //! The foam's constants as UpdateOcean sets them: the foam before kept by fKeep (0: none before), each cascade's crests
+  //! breaking below its threshold (SSea::WhitecapJacobian) over the ramp FOAM_RAMP of its determinant's spread.
+  void SetFoam(SOceanConstants &oc, double fKeep, const SSea &Sea, double fChop)
+  {
+    oc.vFoam[0] = (float)fKeep;
+    for (int c = 0; c < C; c++)
+    {
+      const double fSigma = Sea.JacobianSigma(c, fChop);
+      const bool bBreaks = WHITECAP_SHARE[c] > 0 && fSigma > 0;
+      oc.vFoamCascades[c][0] = bBreaks ? (float)Sea.WhitecapJacobian(c, fChop) : -1.0f;
+      oc.vFoamCascades[c][1] = bBreaks ? (float)(1 / (FOAM_RAMP * fSigma)) : 0.0f;
+    }
+  }
+
+  //! UpdateOcean's constants of the frames fRate a second over fSeconds from fStart s (the first with no foam before it).
+  std::vector<SOceanConstants> FoamFrames(const SSea &Sea, double fChop, double fStart, double fSeconds, double fRate)
+  {
+    std::vector<SOceanConstants> Frames;
+    const int n = (int)std::lround(fSeconds * fRate);
+    for (int i = 0; i <= n; i++)
+    {
+      SOceanConstants oc = Constants((fStart + i / fRate) / PERIOD, fChop, Sea);
+      SetFoam(oc, i > 0 ? std::exp(-1 / fRate / FOAM_LIFE) : 0.0, Sea, fChop);
+      for (int c = 0; c < C; c++)
+        oc.vFoamCascades[c][2] = i > 0 ? (float)FoamSpreadShare(c, 1 / fRate) : 0.0f;
+      Frames.push_back(oc);
+    }
+    return Frames;
+  }
+
+  //! The foam's view's texel (x, y) of level m, cascade c: (the share white, the displacement x and y, the height).
+  const float *FoamTexel(const SOceanOutput &o, int m, int c, int x, int y)
+  {
+    const size_t w = (size_t)N >> m;
+    return &o.Foam[m][(((size_t)c * w + y) * w + x) * 4];
+  }
+
+  //! The foam's state's texel (x, y) of cascade c, as FoamTexel's.
+  const float *StateTexel(const SOceanOutput &o, int c, int x, int y)
+  {
+    return &o.FoamState[(((size_t)c * N + y) * N + x) * 4];
+  }
+
+  //! The sea's whitecaps' share as the water's program takes it (WaterFoam.hlsli's WhitecapAmount): the long cascade's
+  //! foam's mean and the middle one's (its modulation by the long waves' heights 1 on the mean).
+  double WhitecapShare(const SOceanOutput &o)
+  {
+    return FoamTexel(o, XR_OCEAN_MIPS - 1, 0, 0, 0)[0] + FoamTexel(o, XR_OCEAN_MIPS - 1, 1, 0, 0)[0];
   }
 }
 
@@ -627,4 +688,217 @@ XR_TEST(Ocean_Deterministic)
   CHECK(memcmp(o0.Fields.data(), o1.Fields.data(), o0.Fields.size() * 4) == 0);
   for (int m = 0; m < XR_OCEAN_MIPS; m++)
     CHECK(memcmp(o0.Waves[m].data(), o1.Waves[m].data(), o0.Waves[m].size() * 4) == 0);
+}
+
+// Why: the whitecaps' foam must fade as exp(-t / FOAM_LIFE) once its crest has passed whatever the frame rate: the
+// kernel keeps the frame before's share times the share the time since leaves (its two targets in turn), so at 15 and at
+// 60 frames a second the same share is left after the same time (the state in 32 bits: in 16 a GPU may round each
+// frame's towards 0).
+XR_TEST(Ocean_FoamDecay)
+{
+  SSea Sea;
+  MakeSea(5, Sea);
+  const double T = 2, fLeft = std::exp(-T / FOAM_LIFE);
+  for (double fRate : { 15.0, 60.0 })
+  {
+    std::vector<SOceanConstants> Frames = FoamFrames(Sea, 2.5, 3.0, T, fRate);
+    // All white at the first frame (every determinant below its threshold), none breaking after.
+    for (size_t i = 0; i < Frames.size(); i++)
+      for (int c = 0; c < C; c++)
+      {
+        Frames[i].vFoamCascades[c][0] = i == 0 ? 1e4f : -1e4f;
+        Frames[i].vFoamCascades[c][1] = 1;
+      }
+    const SOceanOutput o = Gpu().RunOceanFrames(H0Of(Sea), Frames, FoamKernels());
+    double fWorst = 0;
+    for (int c = 0; c < C; c++)
+      for (int i = 0; i < N * N; i += 97)
+        fWorst = std::max(fWorst, std::fabs(StateTexel(o, c, i % N, i / N)[0] - fLeft));
+    CHECK_MSG(fWorst < 4e-3, std::to_string(fRate) + " a second: " + std::to_string(fWorst));
+  }
+}
+
+// Why: the foam a breaking crest leaves spreads over the sea as it fades (a diffusion: its patches grow, the middle
+// cascade's as much in its texels); none is made or lost by it (the sea's share white kept, FTCS), the patches get wider
+// and fainter; a uniform foam stays as it is.
+XR_TEST(Ocean_FoamSpread)
+{
+  SSea Sea;
+  MakeSea(15, Sea);
+  const double fRate = 30, T = 2;
+  std::vector<SOceanConstants> Frames = FoamFrames(Sea, 2.5, 4.0, T, fRate);
+  // Breaking at the first frame alone, nothing fading after.
+  for (size_t i = 1; i < Frames.size(); i++)
+  {
+    Frames[i].vFoam[0] = 1;
+    for (int c = 0; c < C; c++)
+      Frames[i].vFoamCascades[c][0] = -1e4f;
+  }
+  const SOceanOutput o0 = Gpu().RunOceanFrames(H0Of(Sea), { Frames[0] }, FoamKernels());
+  const SOceanOutput o = Gpu().RunOceanFrames(H0Of(Sea), Frames, FoamKernels());
+  for (int c = 0; c < 2; c++)
+  {
+    double fMean0 = 0, fMean = 0, fMost0 = 0, fMost = 0, fArea0 = 0, fArea = 0;
+    for (int i = 0; i < N * N; i++)
+    {
+      const double a = StateTexel(o0, c, i % N, i / N)[0], b = StateTexel(o, c, i % N, i / N)[0];
+      fMean0 += a;
+      fMean += b;
+      fMost0 = std::max(fMost0, a);
+      fMost = std::max(fMost, b);
+      fArea0 += a > 0.01;
+      fArea += b > 0.01;
+    }
+    std::printf("  cascade %d spreads: mean %.6f -> %.6f, most %.3f -> %.3f, texels above 0.01 %.0f -> %.0f\n", c, fMean0 / (N * N),
+                fMean / (N * N), fMost0, fMost, fArea0, fArea);
+    CHECK(fMean0 > 0);
+    CHECK_NEAR(fMean / fMean0, 1, 1e-3);
+    CHECK(fMost < 0.8 * fMost0);
+    CHECK(fArea > 2 * fArea0);
+  }
+  // A uniform foam: the decay test's.
+  CHECK_NEAR(FoamSpreadShare(0, 1 / fRate), FOAM_SPREAD[0] / fRate / ((TILE[0] / N) * (TILE[0] / N)), 1e-12);
+  CHECK_NEAR(FoamSpreadShare(0, 10), FOAM_MOST_SPREAD, 0);
+  CHECK_NEAR(FoamSpreadShare(1, 1 / fRate), FoamSpreadShare(0, 1 / fRate), 1e-12);
+  CHECK_NEAR(FoamSpreadShare(2, 1 / fRate), 0, 0);
+}
+
+// Why: a crest breaks where its cascade's surface is squeezed most, the first order of the Jacobian's determinant of
+// its displacement (1 + chop div D, a gaussian) below the cascade's threshold (SSea::WhitecapJacobian: the share of the
+// sea's whitecaps breaking at a time below it); at a first frame (no foam before it) the foam must be there alone, on
+// the surface drawn (the points moved, each covering its determinant's area), on the crests (above the cascade's
+// level), none in the short cascade; the foam's texels carry the displacement and the height there.
+XR_TEST(Ocean_FoamBreaking)
+{
+  const double fWind = 12, fChop = 2.5;
+  SSea Sea;
+  MakeSea(fWind, Sea);
+  const SOceanOutput o = Gpu().RunOceanFrames(H0Of(Sea), FoamFrames(Sea, fChop, 5.0, 0, 30), FoamKernels());
+  for (int c = 0; c < C; c++)
+  {
+    const double fShare = WhitecapCoverage(fWind) * WHITECAP_SHARE[c] * WHITECAP_ACTIVE;
+    double fWhite = 0, fHeight = 0, fMean = 0;
+    for (int y = 0; y < N; y++)
+      for (int x = 0; x < N; x++)
+      {
+        const float *t = StateTexel(o, c, x, y);
+        fMean += t[0];
+        if (t[0] > 0.5f)
+        {
+          fWhite++;
+          fHeight += t[3];
+        }
+      }
+    fMean /= N * N;
+    if (fShare <= 0)
+    {
+      CHECK_NEAR(fMean, 0, 0);
+      continue;
+    }
+    const double fHeightRMS = std::sqrt(Sea.Cascades[c].fHeightVar);
+    // On the fields' own texels (the points before the displacement moved them): the squeeze's spread as the CPU's,
+    // its share below the threshold the share breaking; on the surface drawn each of them covers its determinant's
+    // area, so the foam's mean is the breaking's weighted by the determinant over the determinant's mean.
+    const double fBreak = Sea.WhitecapJacobian(c, fChop), fInvRamp = 1 / (FOAM_RAMP * Sea.JacobianSigma(c, fChop));
+    double fDiv = 0, fBelow = 0, fExpect = 0, fArea = 0;
+    for (size_t i = 0; i < (size_t)N * N; i++)
+    {
+      const double fxx = GpuField(o, c, 6, i), fyy = GpuField(o, c, 7, i), fxy = GpuField(o, c, 3, i);
+      const double fLinear = 1 + fChop * (fxx + fyy);
+      const double J = std::max((1 + fChop * fxx) * (1 + fChop * fyy) - fChop * fChop * fxy * fxy, 0.0);
+      fDiv += (fxx + fyy) * (fxx + fyy);
+      fBelow += fLinear < fBreak;
+      fExpect += J * std::clamp((fBreak - fLinear) * fInvRamp, 0.0, 1.0);
+      fArea += J;
+    }
+    fExpect /= fArea;
+    CHECK_NEAR(fChop * std::sqrt(fDiv / (N * N)) / Sea.JacobianSigma(c, fChop), 1, 0.05);
+    CHECK_MSG(fBelow / (N * N) > 0.7 * fShare && fBelow / (N * N) < 1.4 * fShare,
+              "cascade " + std::to_string(c) + ": " + std::to_string(fBelow / (N * N)) + " below against " + std::to_string(fShare));
+    std::printf("  cascade %d breaks: %.5f (%.5f white), expected %.5f, below %.5f against the share %.5f, their height %.3f RMS\n", c,
+                fMean, fWhite / (N * N), fExpect, fBelow / (N * N), fShare, fHeight / std::max(fWhite, 1.0) / fHeightRMS);
+    // The kernel's bilinear fields between their texels and its three Newton's steps smooth the sharpest squeezes,
+    // narrower than a texel on the surface drawn: 0.58 and 0.47 of it at 12 m/s.
+    CHECK_MSG(fMean > 0.35 * fExpect && fMean < 1.33 * fExpect,
+              "cascade " + std::to_string(c) + ": " + std::to_string(fMean) + " breaking against " + std::to_string(fExpect));
+    CHECK_MSG(fHeight / std::max(fWhite, 1.0) > 0.5 * fHeightRMS, "cascade " + std::to_string(c) + " breaks below its crests");
+  }
+  // The displacement and the height (the fields at the point the texel moved from).
+  double fD = 0, fH = 0;
+  for (int i = 0; i < N * N; i += 31)
+  {
+    fD += std::fabs(StateTexel(o, 0, i % N, i / N)[1]);
+    fH += std::fabs(StateTexel(o, 0, i % N, i / N)[3]);
+  }
+  CHECK(fD > 0 && fH > 0);
+}
+
+// Why: the water reads the foam's view, in half floats as the waves (two 32-bit texels a pixel cost it 0.11 ms at 4K),
+// while the state the foam fades in stays in 32 bits; the view must be the frame's state as half floats round it, its mip
+// levels the state's means (the far sea's whitecaps the mean the kernel made), not the frame before's.
+XR_TEST(Ocean_FoamView)
+{
+  SSea Sea;
+  MakeSea(12, Sea);
+  const SOceanOutput o = Gpu().RunOceanFrames(H0Of(Sea), FoamFrames(Sea, 2.5, 5.0, 0.2, 30), FoamKernels());
+  double fWorst0 = 0, fWorst = 0, fWhite = 0;
+  for (int c = 0; c < C; c++)
+    for (int y = 0; y < N; y++)
+      for (int x = 0; x < N; x++)
+      {
+        const float *s = StateTexel(o, c, x, y), *v = FoamTexel(o, 0, c, x, y);
+        fWhite += s[0];
+        for (int i = 0; i < 4; i++)
+          fWorst0 = std::max(fWorst0, std::fabs(v[i] - s[i]) / (std::fabs(s[i]) + 1e-3));
+      }
+  CHECK(fWhite > 0);
+  // A half float has 10 bits of fraction: up to 2^-10 off where its store rounds towards 0.
+  CHECK_MSG(fWorst0 < 1.5e-3, "level 0 against the state: " + std::to_string(fWorst0));
+  for (int m = 1; m < XR_OCEAN_MIPS; m++)
+  {
+    const int w = N >> m, b = 1 << m;
+    for (int c = 0; c < C; c++)
+      for (int y = 0; y < w; y += std::max(w / 8, 1))
+        for (int x = 0; x < w; x += std::max(w / 8, 1))
+        {
+          double fMean[4] = {}, fAbs[4] = {};
+          for (int j = 0; j < b; j++)
+            for (int i = 0; i < b; i++)
+            {
+              const float *s = StateTexel(o, c, x * b + i, y * b + j);
+              for (int k = 0; k < 4; k++)
+              {
+                fMean[k] += s[k];
+                fAbs[k] += std::fabs(s[k]);
+              }
+            }
+          const float *v = FoamTexel(o, m, c, x, y);
+          for (int k = 0; k < 4; k++)
+            fWorst = std::max(fWorst, std::fabs(v[k] - fMean[k] / (b * b)) / (fAbs[k] / (b * b) + 1e-3));
+        }
+  }
+  std::printf("  the view against the state: level 0 %.2e, the levels above against its means %.2e\n", fWorst0, fWorst);
+  CHECK_MSG(fWorst < 3e-3, "the levels against the state's means: " + std::to_string(fWorst));
+}
+
+// Why: the share of the sea white with whitecaps is Monahan's of the wind (OceanSpectrum.h's WhitecapCoverage): the
+// crests breaking at a time (WHITECAP_ACTIVE of it) and the foam they leave, fading; after some foam lives the share the
+// water takes (WaterFoam.hlsli's WhitecapAmount: the long and the middle cascades') must be within a factor of 1.5 of
+// Monahan's at 10 and 15 m/s; more with more wind.
+XR_TEST(Ocean_WhitecapCoverage)
+{
+  double fBefore = 0;
+  for (double fWind : { 7.0, 10.0, 15.0 })
+  {
+    SSea Sea;
+    MakeSea(fWind, Sea);
+    const SOceanOutput o = Gpu().RunOceanFrames(H0Of(Sea), FoamFrames(Sea, 2.5, 7.0, 3 * FOAM_LIFE, 12), FoamKernels());
+    const double fShare = WhitecapShare(o), fMonahan = WhitecapCoverage(fWind);
+    std::printf("  whitecaps at %g m/s: %.5f (%.5f + %.5f), Monahan's %.5f, ratio %.3f\n", fWind, fShare, FoamTexel(o, 8, 0, 0, 0)[0],
+                FoamTexel(o, 8, 1, 0, 0)[0], fMonahan, fShare / fMonahan);
+    if (fWind >= 10)
+      CHECK_MSG(fShare > fMonahan / 1.5 && fShare < fMonahan * 1.5, std::to_string(fWind) + " m/s: " + std::to_string(fShare));
+    CHECK(fShare > fBefore);
+    fBefore = fShare;
+  }
 }

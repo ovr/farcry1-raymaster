@@ -15,7 +15,12 @@
 //	                    into levels 1 to 3 and level 4 (a texture of its
 //	                    own: the next kernel reads it)
 //	  XR_OCEAN_MIPS     a group a cascade: level 4 and the means of 2 x 2
-//	                    into levels 5 to 8 (1 x 1)
+//	                    into levels 5 to 8 (1 x 1); the foam's view's too
+//	  XR_OCEAN_FOAM     16 x 16 texels a group: the foam's state (OceanFoam:
+//	                    the whitecaps, the displacement, the height;
+//	                    d3d12_WaterFoam), a level
+//	  XR_OCEAN_FOAM_VIEW as the waves, the state into the foam's view, the
+//	                    texture the water reads
 //
 //	Bindings (D3D12Compute.h): b0 SOceanConstants;
 //	  ROWS     t0 h0 (RGBA32F, a slice a cascade: re, im, the steps of
@@ -24,7 +29,13 @@
 //	  COLUMNS  t0 the rows; u0 the fields (as the rows)
 //	  WAVES    t0 the fields; u0..u3 levels 0..3 of the waves (RGBA16F, a
 //	           slice a cascade), u4 level 4 (XR_OCEAN_LEVEL4 a side)
-//	  MIPS     t0 level 4; u0..u4 levels 4..8 of the waves
+//	  MIPS     t0 level 4; u0..u4 levels 4..8 of the waves (of the view)
+//	  FOAM     t0 the fields, t1 the frame before's state (the other of
+//	           the two targets); u0 the state (RGBA32F, a slice a cascade:
+//	           a half float's store may round towards 0, the foam's fading
+//	           lost by it)
+//	  FOAM_VIEW t0 the state; u0..u3 levels 0..3 of the view (RGBA16F),
+//	           u4 its level 4
 //
 //////////////////////////////////////////////////////////////////////
 
@@ -83,11 +94,42 @@ void CSMain(uint j : SV_GroupThreadID, uint3 vGroup : SV_GroupID)
   }
 }
 
-#elif defined(XR_OCEAN_WAVES)
+#elif defined(XR_OCEAN_FOAM)
 
 Texture2DArray<float4> g_Fields : register(t0);
 #define OCEAN_FIELDS(c, s, p) g_Fields[uint3(p, 2 * (c) + (s))]
 #include "OceanFFT.hlsli"
+Texture2DArray<float4> g_FoamBefore : register(t1);
+RWTexture2DArray<float4> g_State : register(u0);
+
+[numthreads(16, 16, 1)]
+void CSMain(uint3 vGroup : SV_GroupID, uint2 vThread : SV_GroupThreadID)
+{
+  const uint c = vGroup.z;
+  const uint2 vTexel = vGroup.xy * 16 + vThread;
+  // The frame before's foam (the other of the two targets) unread in the first frame: its texels are not made yet;
+  // spread from the texel to its four neighbours (the tile wrapping).
+  float fBefore = 0;
+  if (g_Ocean.vFoam.x > 0)
+  {
+    const uint m = XR_OCEAN_SIZE - 1;
+    const float fAround = g_FoamBefore[uint3((vTexel.x + 1) & m, vTexel.y, c)].x + g_FoamBefore[uint3((vTexel.x + m) & m, vTexel.y, c)].x +
+                          g_FoamBefore[uint3(vTexel.x, (vTexel.y + 1) & m, c)].x + g_FoamBefore[uint3(vTexel.x, (vTexel.y + m) & m, c)].x;
+    fBefore = FoamSpread(g_FoamBefore[uint3(vTexel, c)].x, fAround, g_Ocean.vFoamCascades[c].z);
+  }
+  g_State[uint3(vTexel, c)] = OceanFoam(c, vTexel, g_Ocean.vParams.y, g_Ocean.vParams.z, g_Ocean.vCascades[c].z, fBefore, g_Ocean.vFoam.x,
+                                        g_Ocean.vFoamCascades[c].x, g_Ocean.vFoamCascades[c].y);
+}
+
+#elif defined(XR_OCEAN_WAVES) || defined(XR_OCEAN_FOAM_VIEW)
+
+#ifdef XR_OCEAN_FOAM_VIEW
+Texture2DArray<float4> g_State : register(t0);
+#else
+Texture2DArray<float4> g_Fields : register(t0);
+#define OCEAN_FIELDS(c, s, p) g_Fields[uint3(p, 2 * (c) + (s))]
+#include "OceanFFT.hlsli"
+#endif
 
 RWTexture2DArray<float4> g_Level0 : register(u0);
 RWTexture2DArray<float4> g_Level1 : register(u1);
@@ -111,7 +153,11 @@ void CSMain(uint3 vGroup : SV_GroupID, uint2 vThread : SV_GroupThreadID)
 {
   const uint c = vGroup.z;
   const uint2 vTexel = vGroup.xy * 16 + vThread;
+#ifdef XR_OCEAN_FOAM_VIEW
+  float4 v = g_State[uint3(vTexel, c)];
+#else
   float4 v = OceanWaves(c, vTexel, g_Ocean.vParams.y, g_Ocean.vParams.z, g_Ocean.vCascades[c].z, g_Ocean.vCascades[c].y);
+#endif
   g_Level0[uint3(vTexel, c)] = v;
   gs_A[vThread.y * 16 + vThread.x] = v;
   GroupMemoryBarrierWithGroupSync();

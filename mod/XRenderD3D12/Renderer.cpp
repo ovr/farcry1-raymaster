@@ -162,7 +162,8 @@ void CD3D12Renderer::RegisterVariables()
                      "8 the scene behind, 9 view path (red, 0-32 m), depth (green, 0-16 m) and fresnel (blue), 10 the vertex colour, 11 its alpha, "
                      "12 the RMS of the wave slopes finer than a pixel (white: 0.1); with d3d12_RTReflections: 13 the rays' hits, 14 their distance "
                      "(blue near, red at d3d12_RTDistance), 15 how much they count; 16 the sun's glint, 17 its light through the crests, 18 the variance of its slopes (white: 0.05), 19 the sun's shadow on the water (black), "
-                     "20 the height of the waves the crests' light reads (black -2, white 2 of its RMS)");
+                     "20 the height of the waves the crests' light reads (black -2, white 2 of its RMS); with d3d12_WaterFoam: 21 the foam's "
+                     "share of the pixel, 22 the whitecaps' amount, 23 the shore's (all three without the beaches' foam strips)");
   iConsole->Register("d3d12_Caustics", &CV_d3d12_Caustics, 1, VF_DUMPTODISK, "Caustics on the terrain under the ocean; 0 off");
   // Not saved (d3d12_WaterSunGlint before it was, at 0).
   iConsole->Register("d3d12_WaterGlint", &CV_d3d12_WaterGlint, 1.0f, 0,
@@ -188,6 +189,14 @@ void CD3D12Renderer::RegisterVariables()
                      "The FFT ocean's waves moved along the wind sea's horizontal displacement times this (Tessendorf's lambda; "
                      "1: each wave a trochoid of Gerstner's), narrow sharp crests and wide troughs: 2.5 the crests up to 3 times "
                      "narrower at 3.5 m/s, none folding over; 0: none");
+  iConsole->Register("d3d12_WaterFoam", &CV_d3d12_WaterFoam, 1.0f, 0,
+                     "The FFT ocean's foam (d3d12_WaterFFT): whitecaps where its crests break (Monahan's share of the sea at the "
+                     "wind: hardly any below 5 m/s) and the foam of the waves breaking on the shore, the rocks and what stands in "
+                     "the water (shallower than the waves' height over 0.78): its strength; 0: none, the frames before");
+  iConsole->Register("d3d12_WaterSurf", &CV_d3d12_WaterSurf, 0.8f, 0,
+                     "With d3d12_WaterFoam: the height (m) of the swell (9 s) breaking on the ocean's shores, where the water "
+                     "gets shallower than it over 0.78; its bores run to the shore, a white roller on each front and the lace "
+                     "it leaves; 0: none (only the wind sea's)");
   iConsole->Register("d3d12_GpuTimes", &CV_d3d12_GpuTimes, 0, 0,
                      "N: every N frames, the average GPU time of the frame's sections (shadow maps, water reflection, opaque, "
                      "water, blended, ...) and the time between frames to the console and XRenderD3D12_gpu.txt; 0 off");
@@ -1004,6 +1013,7 @@ void CD3D12Renderer::Release()
     pTex = nullptr;
   m_nWaveTexture = 0;
   m_nCausticsTexture = 0;
+  m_nFoamTexture = 0;
   m_SkyBoxes.clear();
   m_nSceneSkyBox = -1;
   if (m_pTextures)

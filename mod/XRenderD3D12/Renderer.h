@@ -998,6 +998,8 @@ public:
   bool SetupCausticsDraw(SPipelineKey &Key, SDrawConstants &dc, const SRenderItem &it);
   //! The texture index of the caustics pattern (made on first use), -1 without one.
   int GetCausticsTexture();
+  //! The texture index of the foam's pattern (MakeFoamTexture; made on first use), -1 without one.
+  int GetFoamTexture();
   //! The glass of a scope (eDC_ScopeLens, WorldViewProj its transform). False: not drawn.
   bool SetupScopeLensDraw(SPipelineKey &Key, SDrawConstants &dc, const SRenderItem &it, const Matrix44 &WorldViewProj);
   //! The part of the main view's target (left, top, right, bottom in its pixels) that the glass of a
@@ -1106,6 +1108,7 @@ public:
   CTexture *m_pBeachBumpTexture = nullptr;  //!< textures/fire_noise as a normal map (one reference)
   int m_nWaveTexture = 0;                   //!< GetWaveTexture: its ID, 0 not made yet, -1 failed
   int m_nCausticsTexture = 0;               //!< GetCausticsTexture: its ID, 0 not made yet, -1 failed
+  int m_nFoamTexture = 0;                   //!< GetFoamTexture: its ID, 0 not made yet, -1 failed
   float m_fCausticsMinMean = 1;             //!< the mean of the smaller of two texels of it (its mean 1)
   static constexpr int REFLECTION_MIPS = 8;  //!< the most mip levels of m_pReflectionColor
   ComPtr<ID3D12Resource> m_pReflectionColor, m_pReflectionDepth;
@@ -1132,9 +1135,10 @@ public:
   bool EnsureOceanTargets();
   //! The sea of the wind fWind (m / s) on the CPU, its h0 uploaded.
   bool MakeOcean(float fWind);
-  //! The water's constants of the FFT waves (SetupWaterDraw; fBump the bump amounts' slope factor):
-  //! false without them (the static wave texture then).
-  bool SetOceanConstants(SDrawConstants &dc, float fBump) const;
+  //! The water's constants of the FFT waves (SetupWaterDraw; fBump the bump amounts' slope factor;
+  //! nFoamPattern the foam's pattern's texture index, -1: no foam): false without them (the static
+  //! wave texture then).
+  bool SetOceanConstants(SDrawConstants &dc, float fBump, int nFoamPattern) const;
   void ReleaseOcean();
   struct SOceanState
   {
@@ -1143,13 +1147,26 @@ public:
     CD3D12Texture *pFields = nullptr;       //!< and along y: the fields
     CD3D12Texture *pWaves = nullptr;        //!< the waves (RGBA16F, a slice a cascade, XR_OCEAN_MIPS levels; its SRV the water's)
     CD3D12Texture *pLevel4 = nullptr;       //!< their level 4 for the last kernel
-    int nTables = -1;                       //!< the four kernels' descriptor tables
+    CD3D12Texture *pFoam[2] = {};           //!< the foam's state (d3d12_WaterFoam; RGBA32F, a slice a cascade: the
+                                            //!< whitecaps, the displacement, the height), the frame's and the one
+                                            //!< before's taking turns (nFoam the frame's)
+    CD3D12Texture *pFoamView = nullptr;     //!< the last state's view (RGBA16F, XR_OCEAN_MIPS levels; its SRV the water's)
+    CD3D12Texture *pFoamLevel4 = nullptr;   //!< its level 4 for the last kernel
+    int nFoam = 0;                          //!< the target of pFoam the last frame made
+    int nFoamFrame = -1;                    //!< that frame, -1 none yet
+    double fFoamTime = 0;                   //!< its time (s)
+    int nTables = -1;                       //!< the kernels' descriptor tables
     int nFrame = -1;                        //!< the frame the waves were made in, -1 none yet
     bool bFailed = false;                   //!< no targets (until d3d12_WaterFFT 0)
     float fWind = 0;                        //!< the wind of the sea in pH0
     float fSlopeRMS = 0;                    //!< its slopes' RMS along an axis
     float fFineVar = 0;                     //!< the variance of its ripple finer than the short cascade (both axes, unscaled)
     float fHeightWeight[XR_OCEAN_CASCADES] = {};  //!< each cascade's height's weight (SSea::HeightWeight)
+    float fDivRMS[XR_OCEAN_CASCADES] = {};  //!< the RMS of each cascade's displacement's divergence (SSea::JacobianSigma at 1)
+    float fWhitecapZ[XR_OCEAN_CASCADES] = {};  //!< the normal quantile of each cascade's share of the whitecaps breaking (0: none)
+    float fHeightRMS0 = 0;                  //!< the RMS of the long cascade's height (m, unscaled)
+    float fHs = 0;                          //!< the sea's significant height (m, unscaled)
+    float fPeakSpeed = 0;                   //!< the speed of the waves at the spectrum's peak (m / s)
   };
   SOceanState m_Ocean;
 
@@ -1961,6 +1978,8 @@ public:
   float CV_d3d12_WaterWind = 3.5f;    //!< m/s: the wind of the FFT ocean's sea (its waves' lengths, directions, speeds)
   float CV_d3d12_WaterSlope = 0.0446f;  //!< the FFT waves' slopes' RMS along an axis at the default bump amounts (the old texture's; 0: the wind sea's own)
   float CV_d3d12_WaterChop = 2.5f;    //!< the FFT waves' horizontal displacement, Tessendorf's lambda (sharp crests; 0: none)
+  float CV_d3d12_WaterFoam = 1;       //!< the FFT ocean's foam: whitecaps, waves breaking on the shore (0: none, the frames before)
+  float CV_d3d12_WaterSurf = 0.8f;    //!< m: the height of the swell breaking on the ocean's shores, its surf's foam (0: none)
   int CV_d3d12_GpuTimes = 0;          //!< N: the GPU time of the frame's sections to the log every N frames
   int CV_d3d12_FrameLog = 0;          //!< 1: a line per frame to XRenderD3D12_frames.txt (LogFrame), 2 with the engine's profilers
   int CV_d3d12_CpuSamples = 0;        //!< N: the render thread's stack every N microseconds, to XRenderD3D12_samples.txt at 0 (CpuSampler)

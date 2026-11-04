@@ -54,6 +54,13 @@
 //	    water's hue, on the upper part of the ripple (the wave texture's
 //	    height), more on its faces turned away from the sun, seen against it
 //	    at a slant; light added as the glint's, in the sun's shadow none;
+//	  - the FFT ocean's foam (WaterFoam.hlsli; d3d12_WaterFoam 0 leaves it
+//	    out): the whitecaps where its crests break (the foam kernel's share
+//	    white, fading) and the waves breaking on the shore, the rocks and what
+//	    stands in the water (where the water under the surface is shallower
+//	    than their height over the breaker index), in a lace of bubbles that
+//	    sways with the waves; white under the sun and the sky over the
+//	    colour, the glint and the crests' light gone under it;
 //	  - near the shore (close to the camera) the surface fades into the
 //	    scene behind it, so the water has no hard edge; seen from below,
 //	    the ocean shows the scene above bent by large swells, in its fog
@@ -116,7 +123,19 @@
 //	            XR_DEPTH_TILE pixels, at each next one of 2 x 2 texels of the
 //	            one before), y their levels (0: none), z with vTexGenU.w the
 //	            FFT ocean's waves (OceanFFT.cpp: a texture array, a slice a
-//	            cascade, OceanFFT.hlsli's texels)
+//	            cascade, OceanFFT.hlsli's texels), w with vTexGen1U.x its
+//	            foam (the same: OceanFFT.hlsli's OceanFoam)
+//	  vTexGen1U the foam: x d3d12_WaterFoam (0: none), y one over the RMS of
+//	            the long waves' height, z the sea's significant height (m,
+//	            scaled as the slopes), w (as uint) the pattern (g_Textures,
+//	            FoamPattern.h)
+//	  vTexGen1V the foam: xy the speed of the waves at the spectrum's peak
+//	            along the wind (m/s), z the swell's height at the shore (m,
+//	            d3d12_WaterSurf; 0 no surf), w its periods gone (the time over
+//	            XR_FOAM_SURF_PERIOD)
+//	  vTexMat0  the foam: xy, zw the pattern's two samples' drift with the
+//	            wind (m)
+//	  vTexMat1  the foam: xy the breaker index's noise's drift (m)
 //	  vAddColor with vTexGenU.w: x the RMS along an axis of the FFT ocean's
 //	            slopes, y the variance of its ripple finer than the short
 //	            cascade (both axes, times the bump amounts' factor; the
@@ -131,6 +150,7 @@
 
 #include "Common.hlsli"
 #include "WaterLight.hlsli"
+#include "WaterFoam.hlsli"
 #ifdef XR_RAYTRACE
 #include "RayShade.hlsli"
 #endif
@@ -550,6 +570,75 @@ float WaterSunShadow(float3 P, float fConeWidth)
   return CascadeTap(P);
 }
 
+//! Whether b holds for any lane of the pixel's quad (its 2 x 2, the helpers too): a branch on it keeps the derivatives
+//! of what is inside it.
+bool FoamQuadAny(bool b)
+{
+  const uint u = b ? 1u : 0u;
+  return (u | QuadReadAcrossX(u) | QuadReadAcrossY(u) | QuadReadAcrossDiagonal(u)) != 0;
+}
+
+//! The foam on the FFT ocean (vTexGen1U.x, d3d12_WaterFoam; WaterFoam.hlsli) at the world position P, the water fDepth
+//! deep there (m), fPath the view's path through the water to the scene behind (m, the undisplaced pixel's): how much of the water's light the foam over the pixel hides (its share white, thin foam less: the
+//! breaker index from a slowly drifting noise, vTexMat1); fWhitecaps, fShore the amounts of the whitecaps and of the waves breaking
+//! on the shore (the debug views). The foam's texels (nShadowTex.w, OceanFFT.hlsli's OceanFoam) of the long and the middle
+//! cascades: the whitecaps (their mip levels the share of the sea white), the displacement (the pattern taken where the
+//! water moved here from, so that it sways with the waves; drifting with the wind, vTexMat0), the height (the crest: the
+//! highest of the long waves' now and as they were 0.7 and 1.4 s ago, what was here then that far ahead now at the speed
+//! of the spectrum's peak, vTexGen1V.xy, weaker as it passes; scaled as the slopes, vParams0.x). The shore's foam only
+//! in the shallows and by what stands in the water, the pattern only where there is foam (most of the sea has none).
+float WaterFoam(float2 P, float fDepth, float fPath, out float fWhitecaps, out float fShore)
+{
+  const uint t = g_Draw.nShadowTex.w;
+  const float4 f0 = g_TextureArrays[t].Sample(g_SamplerLinearWrap, float3(P / XR_OCEAN_TILE0, 0));
+  const float4 f1 = g_TextureArrays[t].Sample(g_SamplerLinearWrap, float3(P / XR_OCEAN_TILE1, 1));
+  fWhitecaps = WhitecapAmount(f0.x, f1.x, f0.w, g_Draw.vTexGen1U.y);
+  fShore = 0;
+  // Out to the deepest water a wave breaks in and to the reach of the foam by what stands in it: the surf's height over
+  // the least breaker index, the wind sea's highest crests (about its significant height) twice over it, 5 of it.
+  const float fNear = max(g_Draw.vTexGen1V.z / FoamBreakerIndex(0), 5 * g_Draw.vTexGen1U.z) + 0.05;
+  if (FoamQuadAny(fDepth < fNear || fPath < fNear))
+  {
+    const float2 vAhead = g_Draw.vTexGen1V.xy;
+    const float h1 = g_TextureArrays[t].Sample(g_SamplerLinearWrap, float3((P + vAhead * 0.7) / XR_OCEAN_TILE0, 0)).w;
+    const float h2 = g_TextureArrays[t].Sample(g_SamplerLinearWrap, float3((P + vAhead * 1.4) / XR_OCEAN_TILE0, 0)).w;
+    const float fCrest = max(max(f0.w + f1.w, 0.75 * h1), 0.5 * h2) * g_Draw.vParams0.x;
+    // The breaker index from two octaves of noise 6 and 2.6 m apart, changing slowly as they drift apart (vTexMat1.xy).
+    const float2 R = float2(XR_FOAM_TURN_COS * P.x - XR_FOAM_TURN_SIN * P.y, XR_FOAM_TURN_SIN * P.x + XR_FOAM_TURN_COS * P.y);
+    const float fNoise = 0.65 * FoamValueNoise((P + g_Draw.vTexMat1.xy) / 6) + 0.35 * FoamValueNoise((R - g_Draw.vTexMat1.xy) / 2.6);
+    const float fIndex = FoamBreakerIndex(0.5 + 1.6 * (fNoise - 0.5));
+    fShore = max(ShoreFoam(fDepth, fCrest, g_Draw.vTexGen1U.z, fIndex), ContactFoam(fPath, fCrest, g_Draw.vTexGen1U.z));
+    // The swell's surf (vTexGen1V.z its height, 0 none; w the periods gone): its fronts not quite along the depth's lines,
+    // their phase from a noise 40 m across.
+    if (g_Draw.vTexGen1V.z > 0)
+      fShore = max(fShore, SurfFoam(fDepth, g_Draw.vTexGen1V.z / fIndex, g_Draw.vTexGen1V.w + 0.6 * FoamValueNoise(P / 40)));
+  }
+  const float fAmount = saturate((fWhitecaps + fShore) * g_Draw.vTexGen1U.x);
+  if (!FoamQuadAny(fAmount > 0))
+    return 0;
+
+  const float2 Q = P - (f0.yz + f1.yz);
+  const float2 uv0 = (Q + g_Draw.vTexMat0.xy) / XR_FOAM_TILE0;
+  const float2 uv1 = (float2(XR_FOAM_TURN_COS * Q.x - XR_FOAM_TURN_SIN * Q.y, XR_FOAM_TURN_SIN * Q.x + XR_FOAM_TURN_COS * Q.y) +
+                      g_Draw.vTexMat0.zw) / XR_FOAM_TILE1;
+  const uint p = asuint(g_Draw.vTexGen1U.w);
+  const float u = FoamUniform(g_Textures[p].Sample(g_SamplerLinearWrap, uv0).r, g_Textures[p].Sample(g_SamplerLinearWrap, uv1).r);
+  const float fTexels = max(length(fwidth(uv0)), length(fwidth(uv1))) * XR_FOAM_SIZE;
+  // Where the water meets what stands in it the foam fades in over its first 2 cm (no hard edge).
+  return FoamOpacity(FoamCover(fAmount, u, fwidth(u), saturate(log2(max(fTexels, 1)) / 3)), fAmount) * saturate(fDepth * 50);
+}
+
+//! The sky's light on a white face facing up (linear): the sky box in five directions (as the water's own colour lit by the
+//! sky takes it), the fog's colour without one.
+float3 WaterSkyLight()
+{
+  float3 vSky = g_Frame.vFogColor.rgb;
+  if (g_Draw.vParams1.y != 0)
+    vSky = 0.2 * (SkyBoxColor(float3(0, 0, 1)) + SkyBoxColor(float3(1, 0, 0.3)) + SkyBoxColor(float3(-1, 0, 0.3)) +
+                  SkyBoxColor(float3(0, 1, 0.3)) + SkyBoxColor(float3(0, -1, 0.3)));
+  return float3(HdrDecode(vSky.r), HdrDecode(vSky.g), HdrDecode(vSky.b));
+}
+
 //! The light of a white face turned to the sun: the game lights a texture modulated by 2 with twice
 //! the sun's colour (General.hlsl's DrawLighting), in gamma space (HdrDecode), as the path tracer's
 //! sun (PathShade.hlsli).
@@ -625,6 +714,15 @@ float4 ShadeWater(SWaterOutput In)
     float3 vSky = SkyBoxColor(float3(0, 0, 1)) + SkyBoxColor(float3(1, 0, 0.3)) + SkyBoxColor(float3(-1, 0, 0.3)) +
                   SkyBoxColor(float3(0, 1, 0.3)) + SkyBoxColor(float3(0, -1, 0.3));
     vScatter *= 0.6 + 0.4 * saturate(dot(vSky, float3(0.30, 0.59, 0.11)) / (5 * 0.6));
+  }
+  // The foam on the FFT ocean seen from above (d3d12_WaterFoam, vTexGen1U.x; WaterFoam): the share of the pixel white
+  // (its textures' derivatives outside the branches).
+  float fFoam = 0, fWhitecaps = 0, fShoreFoam = 0;
+  if (g_Draw.vTexGen1U.x > 0)
+  {
+    fFoam = WaterFoam(In.vWorldPos.xy, fDepthBelow, fThick0 * fDistance / max(fSurface, 1e-3), fWhitecaps, fShoreFoam);
+    if (bBelow)
+      fFoam = 0;
   }
   float3 vColor;
   if (!bBelow)
@@ -725,6 +823,13 @@ float4 ShadeWater(SWaterOutput In)
     if (g_Draw.vParams0.w > 0)
       vCrest = WaterSunLight() * WaterCrestColor(g_Draw.vParams3.rgb) *
                (WaterCrestLight(N, V, L, fHeight, WaveSlopeRMS(g_Draw.vParams0.x)) * g_Draw.vParams0.w * (1 - F) * fSunUp);
+    // The foam neither mirrors the sun nor lets its light through.
+    if (fFoam > 0)
+    {
+      vGlint *= 1 - fFoam;
+      vCrest *= 1 - fFoam;
+    }
+    float fSunShadow = 1;
     {
 #ifdef XR_RAYTRACE
       const float fCone = fDistance * fPixelAngle;
@@ -732,11 +837,11 @@ float4 ShadeWater(SWaterOutput In)
       const float fCone = 0;
 #endif
       const float3 vSun = vGlint + vCrest;
-      if (max(vSun.r, max(vSun.g, vSun.b)) > 1e-3)
+      if (max(vSun.r, max(vSun.g, vSun.b)) > 1e-3 || fFoam > 0)
       {
-        const float fShadow = WaterSunShadow(In.vWorldPos, fCone);
-        vGlint *= fShadow;
-        vCrest *= fShadow;
+        fSunShadow = WaterSunShadow(In.vWorldPos, fCone);
+        vGlint *= fSunShadow;
+        vCrest *= fSunShadow;
       }
       else
         vGlint = vCrest = 0;
@@ -754,6 +859,12 @@ float4 ShadeWater(SWaterOutput In)
       vColor = float3(HdrEncode(vLight.r), HdrEncode(vLight.g), HdrEncode(vLight.b));
     }
     vColor = lerp(vScene0, vColor, fShore);
+    // The foam over it, lit by the sun (as the glint fades as it sets) and the sky.
+    if (fFoam > 0)
+    {
+      const float3 vFoam = FoamLight(N, L, WaterSunLight() * fSunUp, fSunShadow, WaterSkyLight());
+      vColor = lerp(vColor, float3(HdrEncode(vFoam.r), HdrEncode(vFoam.g), HdrEncode(vFoam.b)), fFoam);
+    }
     if (g_Draw.vParams0.z == 1)
       return float4(vRefracted, 1);
     if (g_Draw.vParams0.z == 2)
@@ -786,6 +897,12 @@ float4 ShadeWater(SWaterOutput In)
       return float4(saturate(fGlintVar / 0.05).xxx, 1);
     if (g_Draw.vParams0.z == 20)
       return float4(saturate(fHeight * 0.25 + 0.5).xxx, 1);
+    if (g_Draw.vParams0.z == 21)
+      return float4(fFoam.xxx, 1);
+    if (g_Draw.vParams0.z == 22)
+      return float4(fWhitecaps.xxx, 1);
+    if (g_Draw.vParams0.z == 23)
+      return float4(fShoreFoam.xxx, 1);
     if (g_Draw.vParams0.z == 19)
     {
 #ifdef XR_RAYTRACE

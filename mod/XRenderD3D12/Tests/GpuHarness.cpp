@@ -807,10 +807,25 @@ std::vector<float> XrTest::HalfsToFloats(const uint16_t *p, size_t n)
 
 XrTest::SOceanOutput XrTest::CGpu::RunOcean(const std::vector<float> &H0, const SOceanConstants &Constants, const SOceanKernels &Kernels)
 {
+  SOceanKernels k = Kernels;
+  k.Foam = k.FoamView = {};
+  return RunOceanFrames(H0, { Constants }, k);
+}
+
+XrTest::SOceanOutput XrTest::CGpu::RunOceanFrames(const std::vector<float> &H0, const std::vector<SOceanConstants> &Frames,
+                                                  const SOceanKernels &Kernels)
+{
   constexpr UINT N = XR_OCEAN_SIZE, C = XR_OCEAN_CASCADES, MIPS = XR_OCEAN_MIPS, L4 = XR_OCEAN_LEVEL4;
-  constexpr UINT SRVS = 4, UAVS = 5, TABLE = SRVS + UAVS, KERNELS = 4;
+  // The tables: 0 rows, 1 columns, 2 waves, 3 their mips, 4 + t the foam's state into target t, 6 + t the view of it, 8
+  // the view's mips.
+  constexpr UINT SRVS = 4, UAVS = 5, TABLE = SRVS + UAVS, KERNELS = 9;
   if (H0.size() != (size_t)C * N * N * 4)
     throw std::runtime_error("the ocean's h0 is not its cascades' texels");
+  if (Frames.empty())
+    throw std::runtime_error("the ocean runs no frame");
+  const bool bFoam = Kernels.Foam.pData != nullptr;
+  if (bFoam && !Kernels.FoamView.pData)
+    throw std::runtime_error("the ocean's foam without its view's kernel");
   if (!m_pComputeRootSignature)
   {
     // D3D12Compute.cpp's: 0 CBV b0; 1 table t0..t3; 2 table u0..u4 (its static samplers unused by the ocean's kernels).
@@ -868,7 +883,20 @@ XrTest::SOceanOutput XrTest::CGpu::RunOcean(const std::vector<float> &H0, const 
   ComPtr<ID3D12Resource> pH0 = Array(N, C, 1, F32, D3D12_RESOURCE_STATE_COPY_DEST, false);
   ComPtr<ID3D12Resource> pRows = Array(N, 2 * C, 1, F32, UAV_STATE, true), pFields = Array(N, 2 * C, 1, F32, UAV_STATE, true);
   ComPtr<ID3D12Resource> pWaves = Array(N, C, MIPS, F16, UAV_STATE, true), pLevel4 = Array(L4, C, 1, F16, UAV_STATE, true);
-  ComPtr<ID3D12Resource> pCB = Upload(&Constants, sizeof(Constants));
+  ComPtr<ID3D12Resource> pFoam[2], pFoamView, pFoamLevel4;
+  if (bFoam)
+  {
+    for (ComPtr<ID3D12Resource> &p : pFoam)
+      p = Array(N, C, 1, F32, UAV_STATE, true);
+    pFoamView = Array(N, C, MIPS, F16, UAV_STATE, true);
+    pFoamLevel4 = Array(L4, C, 1, F16, UAV_STATE, true);
+  }
+  // Each frame's constants at a multiple of 256 bytes.
+  constexpr size_t CB_STRIDE = (sizeof(SOceanConstants) + 255) & ~(size_t)255;
+  std::vector<uint8_t> CBData(CB_STRIDE * Frames.size());
+  for (size_t f = 0; f < Frames.size(); f++)
+    memcpy(&CBData[f * CB_STRIDE], &Frames[f], sizeof(SOceanConstants));
+  ComPtr<ID3D12Resource> pCB = Upload(CBData.data(), CBData.size());
 
   // The tables as OceanFFT.cpp's EnsureOceanTargets writes them.
   ComPtr<ID3D12DescriptorHeap> pHeap;
@@ -918,8 +946,28 @@ XrTest::SOceanOutput XrTest::CGpu::RunOcean(const std::vector<float> &H0, const 
     UAV(2 * TABLE + SRVS + i, i < 4 ? pWaves.Get() : pLevel4.Get(), F16, C, i < 4 ? i : 0);
     UAV(3 * TABLE + SRVS + i, pWaves.Get(), F16, C, 4 + i);
   }
+  if (bFoam)
+  {
+    for (UINT t = 0; t < 2; t++)
+    {
+      // The state: t0 the fields, t1 the other target; u0 the target. Its view: t0 the target; u0..u3 the view's levels
+      // 0..3, u4 level 4.
+      SRV((4 + t) * TABLE, pFields.Get(), F32, 2 * C);
+      SRV((4 + t) * TABLE + 1, pFoam[1 - t].Get(), F32, C);
+      SRV((6 + t) * TABLE, pFoam[t].Get(), F32, C);
+      for (UINT i = 0; i < UAVS; i++)
+      {
+        UAV((4 + t) * TABLE + SRVS + i, i == 0 ? pFoam[t].Get() : nullptr, F32, C, 0);
+        UAV((6 + t) * TABLE + SRVS + i, i < 4 ? pFoamView.Get() : pFoamLevel4.Get(), F16, C, i < 4 ? i : 0);
+      }
+    }
+    // The view's mips: t0 level 4, u0..u4 levels 4..8.
+    SRV(8 * TABLE, pFoamLevel4.Get(), F16, C);
+    for (UINT i = 0; i < UAVS; i++)
+      UAV(8 * TABLE + SRVS + i, pFoamView.Get(), F16, C, 4 + i);
+  }
 
-  // The readback of every sub resource of the fields and of the waves.
+  // The readback of every sub resource of the fields, of the waves and of the foam.
   const D3D12_RESOURCE_DESC FieldsDesc = pFields->GetDesc(), WavesDesc = pWaves->GetDesc();
   std::vector<D3D12_PLACED_SUBRESOURCE_FOOTPRINT> FieldsLayout(2 * C), WavesLayout(C * MIPS);
   UINT64 nFieldsBytes = 0, nWavesBytes = 0;
@@ -927,6 +975,18 @@ XrTest::SOceanOutput XrTest::CGpu::RunOcean(const std::vector<float> &H0, const 
   m_pDevice->GetCopyableFootprints(&WavesDesc, 0, C * MIPS, 0, WavesLayout.data(), nullptr, nullptr, &nWavesBytes);
   ComPtr<ID3D12Resource> pFieldsBack = Buffer(D3D12_HEAP_TYPE_READBACK, (size_t)nFieldsBytes, D3D12_RESOURCE_STATE_COPY_DEST, false);
   ComPtr<ID3D12Resource> pWavesBack = Buffer(D3D12_HEAP_TYPE_READBACK, (size_t)nWavesBytes, D3D12_RESOURCE_STATE_COPY_DEST, false);
+  // The foam's state in 32 bits (OceanFFT.cpp's FOAM_FORMAT), its view in 16 as the waves.
+  std::vector<D3D12_PLACED_SUBRESOURCE_FOOTPRINT> StateLayout(C), FoamLayout(C * MIPS);
+  UINT64 nStateBytes = 0, nFoamBytes = 0;
+  ComPtr<ID3D12Resource> pStateBack, pFoamBack;
+  if (bFoam)
+  {
+    const D3D12_RESOURCE_DESC StateDesc = pFoam[0]->GetDesc(), FoamDesc = pFoamView->GetDesc();
+    m_pDevice->GetCopyableFootprints(&StateDesc, 0, C, 0, StateLayout.data(), nullptr, nullptr, &nStateBytes);
+    m_pDevice->GetCopyableFootprints(&FoamDesc, 0, C * MIPS, 0, FoamLayout.data(), nullptr, nullptr, &nFoamBytes);
+    pStateBack = Buffer(D3D12_HEAP_TYPE_READBACK, (size_t)nStateBytes, D3D12_RESOURCE_STATE_COPY_DEST, false);
+    pFoamBack = Buffer(D3D12_HEAP_TYPE_READBACK, (size_t)nFoamBytes, D3D12_RESOURCE_STATE_COPY_DEST, false);
+  }
 
   Ok(m_pAllocator->Reset(), "Reset");
   Ok(m_pList->Reset(m_pAllocator.Get(), nullptr), "Reset");
@@ -963,23 +1023,56 @@ XrTest::SOceanOutput XrTest::CGpu::RunOcean(const std::vector<float> &H0, const 
   ID3D12DescriptorHeap *pHeaps[] = { pHeap.Get() };
   m_pList->SetDescriptorHeaps(1, pHeaps);
   m_pList->SetComputeRootSignature(m_pComputeRootSignature.Get());
-  m_pList->SetComputeRootConstantBufferView(0, pCB->GetGPUVirtualAddress());
   auto Dispatch = [&](const SBytecode &k, UINT nTable, UINT x, UINT y, UINT z) {
     m_pList->SetPipelineState(Pso(k));
     m_pList->SetComputeRootDescriptorTable(1, Gpu(nTable * TABLE));
     m_pList->SetComputeRootDescriptorTable(2, Gpu(nTable * TABLE + SRVS));
     m_pList->Dispatch(x, y, z);
   };
-  // UpdateOcean's order and barriers.
-  Dispatch(Kernels.Rows, 0, 1, N, C);
-  Move(pRows.Get(), UAV_STATE, READ);
-  Dispatch(Kernels.Columns, 1, 1, N, C);
-  Move(pFields.Get(), UAV_STATE, READ);
-  Dispatch(Kernels.Waves, 2, N / 16, N / 16, C);
-  Move(pLevel4.Get(), UAV_STATE, READ);
-  Dispatch(Kernels.Mips, 3, 1, 1, C);
+  // At rest where the foam kernel reads the target of the frame before.
+  if (bFoam)
+    for (ComPtr<ID3D12Resource> &p : pFoam)
+      Move(p.Get(), UAV_STATE, READ);
+  // UpdateOcean's order and barriers, a frame after another.
+  UINT t = 0;
+  for (size_t f = 0; f < Frames.size(); f++)
+  {
+    m_pList->SetComputeRootConstantBufferView(0, pCB->GetGPUVirtualAddress() + f * CB_STRIDE);
+    if (f > 0)
+    {
+      // The frame before's writes to the waves and their level 4 done before this frame's.
+      const D3D12_RESOURCE_BARRIER Uav = { D3D12_RESOURCE_BARRIER_TYPE_UAV };
+      m_pList->ResourceBarrier(1, &Uav);
+      Move(pFields.Get(), READ, UAV_STATE);
+    }
+    Dispatch(Kernels.Rows, 0, 1, N, C);
+    Move(pRows.Get(), UAV_STATE, READ);
+    Dispatch(Kernels.Columns, 1, 1, N, C);
+    Move(pRows.Get(), READ, UAV_STATE);
+    Move(pFields.Get(), UAV_STATE, READ);
+    Dispatch(Kernels.Waves, 2, N / 16, N / 16, C);
+    Move(pLevel4.Get(), UAV_STATE, READ);
+    Dispatch(Kernels.Mips, 3, 1, 1, C);
+    Move(pLevel4.Get(), READ, UAV_STATE);
+    if (bFoam)
+    {
+      t = f > 0 ? 1 - t : 0;
+      Move(pFoam[t].Get(), READ, UAV_STATE);
+      Dispatch(Kernels.Foam, 4 + t, N / 16, N / 16, C);
+      Move(pFoam[t].Get(), UAV_STATE, READ);
+      Dispatch(Kernels.FoamView, 6 + t, N / 16, N / 16, C);
+      Move(pFoamLevel4.Get(), UAV_STATE, READ);
+      Dispatch(Kernels.Mips, 8, 1, 1, C);
+      Move(pFoamLevel4.Get(), READ, UAV_STATE);
+    }
+  }
   Move(pFields.Get(), READ, D3D12_RESOURCE_STATE_COPY_SOURCE);
   Move(pWaves.Get(), UAV_STATE, D3D12_RESOURCE_STATE_COPY_SOURCE);
+  if (bFoam)
+  {
+    Move(pFoam[t].Get(), READ, D3D12_RESOURCE_STATE_COPY_SOURCE);
+    Move(pFoamView.Get(), UAV_STATE, D3D12_RESOURCE_STATE_COPY_SOURCE);
+  }
   auto Copy = [&](ID3D12Resource *pSrc, ID3D12Resource *pDst, const std::vector<D3D12_PLACED_SUBRESOURCE_FOOTPRINT> &Layout) {
     for (UINT i = 0; i < (UINT)Layout.size(); i++)
     {
@@ -995,6 +1088,11 @@ XrTest::SOceanOutput XrTest::CGpu::RunOcean(const std::vector<float> &H0, const 
   };
   Copy(pFields.Get(), pFieldsBack.Get(), FieldsLayout);
   Copy(pWaves.Get(), pWavesBack.Get(), WavesLayout);
+  if (bFoam)
+  {
+    Copy(pFoam[t].Get(), pStateBack.Get(), StateLayout);
+    Copy(pFoamView.Get(), pFoamBack.Get(), FoamLayout);
+  }
   Execute();
 
   SOceanOutput Out;
@@ -1023,5 +1121,30 @@ XrTest::SOceanOutput XrTest::CGpu::RunOcean(const std::vector<float> &H0, const 
     Out.Waves[m] = HalfsToFloats(Halfs.data(), Halfs.size());
   }
   pWavesBack->Unmap(0, &None);
+  if (bFoam)
+  {
+    Range = { 0, (SIZE_T)nStateBytes };
+    Ok(pStateBack->Map(0, &Range, &p), "Map");
+    Out.FoamState.resize((size_t)C * N * N * 4);
+    for (UINT c = 0; c < C; c++)
+      for (UINT y = 0; y < N; y++)
+        memcpy(&Out.FoamState[((size_t)c * N + y) * N * 4], (const uint8_t *)p + (size_t)StateLayout[c].Offset + (size_t)y * StateLayout[c].Footprint.RowPitch, N * 16);
+    pStateBack->Unmap(0, &None);
+    Range = { 0, (SIZE_T)nFoamBytes };
+    Ok(pFoamBack->Map(0, &Range, &p), "Map");
+    for (UINT m = 0; m < MIPS; m++)
+    {
+      const UINT w = N >> m;
+      std::vector<uint16_t> Halfs((size_t)C * w * w * 4);
+      for (UINT c = 0; c < C; c++)
+      {
+        const D3D12_PLACED_SUBRESOURCE_FOOTPRINT &l = FoamLayout[m + c * MIPS];
+        for (UINT y = 0; y < w; y++)
+          memcpy(&Halfs[((size_t)c * w + y) * w * 4], (const uint8_t *)p + (size_t)l.Offset + (size_t)y * l.Footprint.RowPitch, (size_t)w * 8);
+      }
+      Out.Foam[m] = HalfsToFloats(Halfs.data(), Halfs.size());
+    }
+    pFoamBack->Unmap(0, &None);
+  }
   return Out;
 }

@@ -68,6 +68,53 @@ namespace OceanSpectrum
   //! The least variance of the drawn slopes finer than the short cascade (the sun's glint; OceanFFT.cpp applies it
   //! after the bump amounts' factor): a sharper glint would glitter in single pixels from frame to frame.
   constexpr double LEAST_FINE_VARIANCE = 0.001;
+  //! Monahan and O'Muircheartaigh's (1980) share of the open sea white with whitecaps at the wind U (m/s, 10 m up):
+  //! 3.84e-6 U^3.41 (0.03 % at 3.5 m/s, 0.3 % at 7, 1 % at 10, 3.9 % at 15).
+  constexpr double MONAHAN[2] = { 3.84e-6, 3.41 };
+  //! The whitecaps' share of each cascade's crests: the long waves' and the middle ones' (the short cascade's ripple
+  //! breaks without trapping air: no foam).
+  constexpr double WHITECAP_SHARE[CASCADES] = { 0.5, 0.5, 0 };
+  //! The share of the whitecaps' coverage breaking at a time (the rest the foam they leave, fading over FOAM_LIFE),
+  //! fitted by Ocean_WhitecapCoverage (the coverage Monahan's within 8 % at 7, 10 and 15 m/s).
+  constexpr double WHITECAP_ACTIVE = 0.25;
+  //! s: the whitecaps' foam fades as exp(-t / FOAM_LIFE) once its crest has passed.
+  constexpr double FOAM_LIFE = 4;
+  //! The width of the determinant's ramp over which a breaking crest turns white, in the RMS of its spread about 1.
+  constexpr double FOAM_RAMP = 0.25;
+  //! m^2/s: how fast the foam of each cascade's whitecaps spreads over the sea as it fades (a diffusion: its patches
+  //! grow, sqrt(2 FOAM_SPREAD t) about the crest that left them, 2 m after FOAM_LIFE of the long cascade's, the middle
+  //! cascade's smaller breakers' as much in their texels, 0.3 m), the coverage kept.
+  constexpr double FOAM_SPREAD[CASCADES] = { 0.5, 0.5 * (TILE[1] / TILE[0]) * (TILE[1] / TILE[0]), 0 };
+  //! The most of a texel's foam spread to each of its neighbours in a step (the diffusion's FTCS is stable below 0.25).
+  constexpr double FOAM_MOST_SPREAD = 0.2;
+  //! The share of a texel's foam of cascade c spread to each of its neighbours over fSeconds.
+  inline double FoamSpreadShare(int c, double fSeconds)
+  {
+    const double fTexel = TILE[c] / SIZE;
+    return std::min(FOAM_SPREAD[c] * std::max(fSeconds, 0.0) / (fTexel * fTexel), FOAM_MOST_SPREAD);
+  }
+  //! s: the foam's kernels run at most this often (no more work at a higher frame rate; between, the water reads the
+  //! last view).
+  constexpr double FOAM_STEP = 1.0 / 120;
+
+  //! The share of the sea white with whitecaps at the wind U (m/s), Monahan's.
+  inline double WhitecapCoverage(double U)
+  {
+    return MONAHAN[0] * std::pow(std::max(U, 0.0), MONAHAN[1]);
+  }
+
+  //! The standard normal distribution's quantile: the x below which the share p of it lies (bisection of erfc; for the
+  //! few calls at a change of the wind).
+  inline double NormalQuantile(double p)
+  {
+    double fLow = -40, fHigh = 40;
+    for (int i = 0; i < 200; i++)
+    {
+      const double m = 0.5 * (fLow + fHigh);
+      (0.5 * std::erfc(-m / std::sqrt(2.0)) < p ? fLow : fHigh) = m;
+    }
+    return 0.5 * (fLow + fHigh);
+  }
 
   //! Deep water's angular frequency (rad / s) of a wave of wave number k (rad / m).
   inline double Omega(double k)
@@ -217,6 +264,32 @@ namespace OceanSpectrum
     double FineVar() const
     {
       return std::max(COX_MUNK[0] + COX_MUNK[1] * fWind - SlopeVar(), 0.0);
+    }
+    //! How far the determinant of cascade c's Jacobian with the displacement's factor fChop spreads about 1 (its RMS, to the
+    //! first order): J = 1 + fChop div D, div D = -|k| H a gaussian of the variance of the cascade's slopes along both axes.
+    double JacobianSigma(int c, double fChop) const
+    {
+      const SCascade &k = Cascades[c];
+      return fChop * std::sqrt(k.fSlopeVarX + k.fSlopeVarY);
+    }
+    //! The first order of the determinant of cascade c's Jacobian (1 + fChop div D, OceanFFT.hlsli's OceanFoam) below which
+    //! its crests break into whitecaps: the share of its surface below it is its share of the whitecaps breaking at a time
+    //! (WhitecapCoverage times WHITECAP_SHARE times WHITECAP_ACTIVE); -1 (none) for a cascade without whitecaps.
+    double WhitecapJacobian(int c, double fChop) const
+    {
+      const double fShare = WhitecapCoverage(fWind) * WHITECAP_SHARE[c] * WHITECAP_ACTIVE;
+      const double s = JacobianSigma(c, fChop);
+      return fShare > 0 && s > 0 ? 1 + s * NormalQuantile(fShare) : -1;
+    }
+    //! The sea's significant height (m): 4 times the RMS of the height of its cascades together.
+    double SignificantHeight() const
+    {
+      return 4 * std::sqrt(Cascades[0].fHeightVar + Cascades[1].fHeightVar + Cascades[2].fHeightVar);
+    }
+    //! The speed (m / s) of the waves at the spectrum's peak: g over its frequency, deep water's phase speed.
+    double PeakSpeed() const
+    {
+      return G / PeakOmega(fWind);
     }
   };
 
