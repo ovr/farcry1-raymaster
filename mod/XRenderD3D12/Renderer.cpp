@@ -163,7 +163,9 @@ void CD3D12Renderer::RegisterVariables()
                      "12 the RMS of the wave slopes finer than a pixel (white: 0.1); with d3d12_RTReflections: 13 the rays' hits, 14 their distance "
                      "(blue near, red at d3d12_RTDistance), 15 how much they count; 16 the sun's glint, 17 its light through the crests, 18 the variance of its slopes (white: 0.05), 19 the sun's shadow on the water (black), "
                      "20 the height of the waves the crests' light reads (black -2, white 2 of its RMS); with d3d12_WaterFoam: 21 the foam's "
-                     "share of the pixel, 22 the whitecaps' amount, 23 the shore's (all three without the beaches' foam strips)");
+                     "share of the pixel, 22 the whitecaps' amount, 23 the shore's (all three without the beaches' foam strips); "
+                     "with d3d12_WaterVolume: 24 the light the ocean's water scatters, 25 the share of the scene behind it left "
+                     "(from below the share of Snell's window), 26 the share of the sun's light left in the light it scatters");
   iConsole->Register("d3d12_Caustics", &CV_d3d12_Caustics, 1, VF_DUMPTODISK, "Caustics on the terrain under the ocean; 0 off");
   // Not saved (d3d12_WaterSunGlint before it was, at 0).
   iConsole->Register("d3d12_WaterGlint", &CV_d3d12_WaterGlint, 1.0f, 0,
@@ -201,6 +203,10 @@ void CD3D12Renderer::RegisterVariables()
                      "With d3d12_WaterFFT and d3d12_Caustics: the caustics on the sea floor made by the FFT ocean's waves (the "
                      "sun's rays refracted by its middle and short cascades, their light at the floor's depth), in the sun's "
                      "light only; 0: the static caustics texture, the frames before");
+  iConsole->Register("d3d12_WaterVolume", &CV_d3d12_WaterVolume, 1, 0,
+                     "The light in the ocean's water: each colour channel attenuated as fast as the level's water colour is "
+                     "dark in it (turquoise shallows, the floor fading into deep water), the light it scatters fading with the "
+                     "depth, in the sun's shadow less; from below Snell's window; 0: the fog volume's fog, the frames before");
   iConsole->Register("d3d12_GpuTimes", &CV_d3d12_GpuTimes, 0, 0,
                      "N: every N frames, the average GPU time of the frame's sections (shadow maps, water reflection, opaque, "
                      "water, blended, ...) and the time between frames to the console and XRenderD3D12_gpu.txt; 0 off");

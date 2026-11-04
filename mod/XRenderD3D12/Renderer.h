@@ -1987,6 +1987,7 @@ public:
   float CV_d3d12_WaterFoam = 1;       //!< the FFT ocean's foam: whitecaps, waves breaking on the shore (0: none, the frames before)
   float CV_d3d12_WaterSurf = 0.8f;    //!< m: the height of the swell breaking on the ocean's shores, its surf's foam (0: none)
   int CV_d3d12_WaterCaustics = 1;     //!< the caustics on the sea floor of the FFT ocean's waves (0: the static texture, the frames before)
+  int CV_d3d12_WaterVolume = 1;       //!< the light in the ocean's water: attenuation by channel, scattering, Snell's window (0: the fog volume's fog, the frames before)
   int CV_d3d12_GpuTimes = 0;          //!< N: the GPU time of the frame's sections to the log every N frames
   int CV_d3d12_FrameLog = 0;          //!< 1: a line per frame to XRenderD3D12_frames.txt (LogFrame), 2 with the engine's profilers
   int CV_d3d12_CpuSamples = 0;        //!< N: the render thread's stack every N microseconds, to XRenderD3D12_samples.txt at 0 (CpuSampler)

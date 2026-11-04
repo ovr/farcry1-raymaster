@@ -11,11 +11,22 @@
 //	    slopes (made by the renderer, Water.cpp);
 //	  - refraction: the copy of the colour buffer, displaced by the normal,
 //	    seen through the water between the surface and the scene behind it
-//	    (the copy of the depth buffer). The ocean with a fog volume lays the
-//	    fog volume's colour over the scene behind as the fog volumes of the
-//	    game do (OceanFog): by the depth of the point under the fog layer
-//	    and the camera's height above it, times the point's distance along
-//	    the view axis. Other water: the light of the scene behind went
+//	    (the copy of the depth buffer). The ocean with a fog volume
+//	    (d3d12_WaterVolume, OceanVolume; WaterVolume.hlsli): the water
+//	    attenuates each channel of the light (from its fog volume's colour
+//	    and density: a channel as bright as the colour's luminance by the
+//	    density, one half as bright twice as fast, at least pure water's
+//	    absorption) along the view's ray refracted
+//	    down to the scene behind and along the light's way down to its
+//	    depth, and scatters the light coming down (fading with the depth)
+//	    towards the camera, deep water seen straight down its fog volume's
+//	    colour; the sun's share of that light in the sun's shadow where the
+//	    sun's ray to each segment of the view's ray left the surface (the
+//	    cascades); with d3d12_WaterVolume 0 the fog volume's colour laid
+//	    over the scene behind as the fog volumes of the game do (OceanFog):
+//	    by the depth of the point under the fog layer and the camera's
+//	    height above it, times the point's distance along the view axis.
+//	    Other water: the light of the scene behind went
 //	    down to it through the water and comes up along the view ray, so it
 //	    keeps exp(-extinction * (light path + view path)), the light path
 //	    being its depth under the surface along the refracted sun; the water
@@ -64,8 +75,10 @@
 //	  - near the shore (close to the camera) the surface fades into the
 //	    scene behind it, so the water has no hard edge; seen from below,
 //	    the ocean shows the scene above bent by large swells, in its fog
-//	    volume's fog, other water the scene above through the window of
-//	    total internal reflection;
+//	    volume's fog, through Snell's window (d3d12_WaterVolume: Fresnel's
+//	    transmission from water to air, none beyond the critical angle,
+//	    where the surface mirrors the water's colour), other water the
+//	    scene above through the window of total internal reflection;
 //	  - the frame's linear fog (not on the ocean from below).
 //	Compiled with XR_RAYTRACE (d3d12_RTReflections, Shader Model 6.5) the
 //	reflection also comes from the scene for rays (RayShade.hlsli): a ray
@@ -139,7 +152,10 @@
 //	  vAddColor with vTexGenU.w: x the RMS along an axis of the FFT ocean's
 //	            slopes, y the variance of its ripple finer than the short
 //	            cascade (both axes, times the bump amounts' factor; the
-//	            glint's in place of vSpecular.y)
+//	            glint's in place of vSpecular.y); the ocean with a fog
+//	            volume: w 1 the light in its water (d3d12_WaterVolume,
+//	            OceanVolume; 0 OceanFog), z the sun's share of the light the
+//	            water scatters (0: none in the sun's shadow)
 //	  vSpecular the sun's glint: x its strength (d3d12_WaterGlint; 0: none),
 //	            y the variance of the slopes of the ripple finer than the
 //	            texture (d3d12_WaterGlintRoughness), z its most light (the
@@ -151,6 +167,7 @@
 #include "Common.hlsli"
 #include "WaterLight.hlsli"
 #include "WaterFoam.hlsli"
+#include "WaterVolume.hlsli"
 #ifdef XR_RAYTRACE
 #include "RayShade.hlsli"
 #endif
@@ -657,6 +674,102 @@ float3 WaterSunLight()
   return float3(HdrDecode(c.r), HdrDecode(c.g), HdrDecode(c.b));
 }
 
+float3 WaterDecode(float3 c)
+{
+  return float3(HdrDecode(c.r), HdrDecode(c.g), HdrDecode(c.b));
+}
+
+float3 WaterEncode(float3 v)
+{
+  return float3(HdrEncode(v.r), HdrEncode(v.g), HdrEncode(v.b));
+}
+
+//! The ocean's water seen from above (d3d12_WaterVolume, vAddColor.w; WaterVolume.hlsli), in linear light: the scene
+//! behind vScene (the point there vBehind) through the water, attenuated in each channel (from its fog volume's colour,
+//! vParams3, and density, vParams2.y) along the view's ray refracted at the waves' normal N down to it and along the light's
+//! way down to its depth (the sun's ray refracted), and the light the water scatters towards the camera on the way; the
+//! sun's share of that light (vAddColor.z) in the sun's shadow at each segment of the ray, where the sun's refracted ray to
+//! it left the surface (one bilinear comparison of the cascades a segment, CascadeTap). vFloor the share of the scene
+//! behind left, vInscatter the water's light, fShade the share of the sun's left in it (the debug views).
+float3 OceanVolume(float3 vScene, float3 P, float3 N, float3 V, float3 vBehind, float2 vPixel, out float3 vFloor, out float3 vInscatter,
+                   out float fShade)
+{
+  const float3 vDeep = WaterDecode(g_Draw.vParams3.rgb);
+  const float3 c = VolumeAttenuation(vDeep, g_Draw.vParams2.y);
+  const float3 T = VolumeRefract(V, N);
+  const float fMu = max(-T.z, 0.1);
+  const float fDepth = max(P.z - vBehind.z, 0);
+  const float fPath = fDepth / fMu;
+  const float3 L = g_Frame.vSunDir.xyz;
+  vFloor = exp(-c * (fPath + fDepth / VolumeRefractedCos(saturate(L.z))));
+  const float3 k = c * (1 + fMu);
+  const float fShare = g_Draw.vAddColor.z;
+  fShade = 1;
+  const uint n = min((uint)g_Frame.vCascadeParams.x, XR_MAX_CASCADES);
+  const float fReach = VolumeReach(k, fPath);
+  // The points where the sun's rays to the ray's points left the surface: P + t W (level, the sun's ray climbs back the
+  // depth the view's went down), nearer than P by at most t |W|; all beyond the cascades, none of them in their shadow.
+  const float3 W = VolumeSunEntry(T, fMu, L);
+  const bool bTaps = fShare > 0 && n > 0 && fPath > 0.01 && ViewDepth(P) - fReach * length(W) < g_Frame.vCascadeEnd[n - 1];
+  // One comparison a pixel, the quad's four shared: lane q (its place in the 2 x 2 pixels) the sun of the q-th segment
+  // of its own ray, the quad's rays a pixel apart (at a quarter of the cost of four, the sun in the water the same for
+  // the quad's pixels); where any of the quad's pixels needs them.
+#if XR_VOLUME_TAPS != 4
+#error The quad's lanes take a segment each.
+#endif
+  float fTap = 1;
+  if (FoamQuadAny(bTaps))
+    fTap = CascadeTap(P + W * VolumeSegmentPoint((uint)vPixel.x % 2 + 2 * ((uint)vPixel.y % 2), fReach));
+  const float4 vSun = saturate(float4(QuadReadLaneAt(fTap, 0), QuadReadLaneAt(fTap, 1), QuadReadLaneAt(fTap, 2), QuadReadLaneAt(fTap, 3)));
+  [branch]
+  if (bTaps)
+  {
+    float3 vSum = 0, e0 = 1;
+    float v = 1, fWeight = 0, fLit = 0;
+    [unroll]
+    for (uint j = 0; j < XR_VOLUME_TAPS; j++)
+    {
+      v = vSun[j];
+      const float3 e1 = exp(-k * VolumeSegmentEnd(j, fReach));
+      const float f = 1 - fShare + fShare * v;
+      vSum += (e0 - e1) * f;
+      fWeight += e0.g - e1.g;
+      fLit += (e0.g - e1.g) * v;
+      e0 = e1;
+    }
+    const float3 e = exp(-k * fPath);
+    vSum += (e0 - e) * (1 - fShare + fShare * v);
+    fLit += (e0.g - e.g) * v;
+    fWeight += e0.g - e.g;
+    vInscatter = vDeep * 2 / (1 + fMu) * vSum;
+    fShade = fWeight > 0 ? fLit / fWeight : 1;
+  }
+  else
+    vInscatter = VolumeInscatter(vDeep, c, c, fMu, 0, fPath);
+  return vScene * vFloor + vInscatter;
+}
+
+//! The scene above the ocean seen from below through Snell's window at the surface point P: the light coming down along D
+//! (the view's ray refracted out of the water, up), where the screen's copy shows it in that direction (what the camera
+//! sees along D is above the water there: the copy's depth beyond where D leaves it), else the sky box (as the sky draws
+//! it; without one the fog's colour). vViewToBuffer the viewport's size over the buffer's.
+float3 SceneAbove(float3 P, float3 D, float2 vViewToBuffer)
+{
+  const float4 vClip = mul(float4(D, 0), g_Frame.mViewProj);
+  if (vClip.w > 0)
+  {
+    const float2 vUV = ClipToUV(vClip, vViewToBuffer);
+    if (all(vUV >= 0) && all(vUV <= vViewToBuffer))
+    {
+      const float3 vCamera = g_Frame.vCameraPos.xyz;
+      const float fLeaves = ViewDepth(vCamera + D * ((P.z - vCamera.z) / max(D.z, 1e-3)));
+      if (LinearDepth(g_Textures[g_Draw.nTex1].SampleLevel(g_SamplerPointClamp, vUV, 0).r) > fLeaves)
+        return g_Textures[g_Draw.nTex0].SampleLevel(g_SamplerLinearClamp, vUV, 0).rgb;
+    }
+  }
+  return g_Draw.vParams1.y != 0 ? SkyBoxColor(D) * SkyGlow(D) : g_Frame.vFogColor.rgb;
+}
+
 float4 ShadeWater(SWaterOutput In)
 {
   float3 vCamera = g_Frame.vCameraPos.xyz;
@@ -739,10 +852,28 @@ float4 ShadeWater(SWaterOutput In)
     float3 vRefracted;
     if (g_Draw.vParams3.w == 0)
     {
-      // The fog volume over the scene behind (the point there along the displaced ray).
+      // The point of the scene behind along the displaced ray; the ocean's water over it (d3d12_WaterVolume, vAddColor.w),
+      // else its fog volume's fog.
       float3 vBehind = vCamera - V * (fDistance * fBehind / max(fSurface, 1e-3));
-      float fLayer = g_Draw.vParams2.x;
-      vRefracted = lerp(vScene, vScatter, OceanFog(fLayer - vBehind.z, vCamera.z - fLayer, fBehind, g_Draw.vParams2.y));
+      if (g_Draw.vAddColor.w > 0)
+      {
+        // Its terms' debug views here: kept to the end of the shader they would hold registers through all of it.
+        float3 vFloorShare, vInscatter;
+        float fVolumeShade;
+        vRefracted = WaterEncode(OceanVolume(WaterDecode(vScene), In.vWorldPos, N, V, vBehind, In.vPos.xy, vFloorShare, vInscatter,
+                                             fVolumeShade));
+        if (g_Draw.vParams0.z == 24)
+          return float4(WaterEncode(vInscatter), 1);
+        if (g_Draw.vParams0.z == 25)
+          return float4(vFloorShare, 1);
+        if (g_Draw.vParams0.z == 26)
+          return float4(fVolumeShade.xxx, 1);
+      }
+      else
+      {
+        float fLayer = g_Draw.vParams2.x;
+        vRefracted = lerp(vScene, vScatter, OceanFog(fLayer - vBehind.z, vCamera.z - fLayer, fBehind, g_Draw.vParams2.y));
+      }
     }
     else
     {
@@ -932,10 +1063,26 @@ float4 ShadeWater(SWaterOutput In)
   }
   else if (g_Draw.vParams3.w == 0)
   {
-    // The ocean from below: the scene above through the waves (as the game's ocean shows it,
-    // without a window of total internal reflection), a third of it the water's colour the surface
-    // reflects back down, in the fog of its volume.
-    vColor = lerp(vScene, vScatter, 1 - 0.65 * (1 - FogInsideVolume(fSurface, g_Draw.vParams2.y)));
+    // The ocean from below: the scene above through the waves, in the fog of its volume. With d3d12_WaterVolume
+    // (vAddColor.w) through Snell's window: the light from the air that passes the surface (SnellWindow at the waves'
+    // normal; none beyond the critical angle, where the surface mirrors the water below), the rest the water's colour;
+    // else as the game's ocean shows it, without the window, a third of it the water's colour the surface reflects
+    // back down.
+    if (g_Draw.vAddColor.w > 0)
+    {
+      const float fWindow = SnellWindow(dot(N, V));
+      float3 vAbove = vScatter;
+      if (fWindow > 0)
+        vAbove = SceneAbove(In.vWorldPos, refract(-V, N, VOLUME_ETA), g_Frame.vScreen.xy * vInvSize);
+      vColor = lerp(WaterEncode(lerp(WaterDecode(vScatter), WaterDecode(vAbove), fWindow)), vScatter,
+                    FogInsideVolume(fSurface, g_Draw.vParams2.y));
+      if (g_Draw.vParams0.z == 8)
+        return float4(vAbove, 1);
+      if (g_Draw.vParams0.z == 25)
+        return float4(fWindow.xxx, 1);
+    }
+    else
+      vColor = lerp(vScene, vScatter, 1 - 0.65 * (1 - FogInsideVolume(fSurface, g_Draw.vParams2.y)));
     if (g_Draw.vParams0.z == 8)
       return float4(vScene, 1);
   }

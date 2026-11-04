@@ -26,7 +26,8 @@
 //	screen's pixels, SUN_PATCH_SIZE of 768 rows, where the depth is the far
 //	plane, blurred towards the sun; Post.hlsl), so that the sun glows
 //	through gaps. Otherwise a flare is the first square without the depth
-//	test.
+//	test. With the camera under the ocean (d3d12_WaterVolume) the sun's flare
+//	is where Snell's window shows it, along its ray refracted into the water.
 //
 //	A procedural flare (a material of FlareProc) is a glow around its
 //	surface: the outline of the surface's vertices as the camera sees them,
@@ -111,6 +112,19 @@ void Transform(const Matrix44 &m, const Vec3 &p, float Out[4])
     Out[c] = p.x * d[c] + p.y * d[4 + c] + p.z * d[8 + c] + d[12 + c];
 }
 
+//! Where the sun at vSun is seen from vCamera under water: as far, along its ray refracted into the water (Snell's law at
+//! 1.333: the horizontal part of the direction over it, inside the window of 48.6 degrees about the zenith); below the
+//! horizon where it is.
+Vec3 RefractedSun(const Vec3 &vCamera, const Vec3 &vSun)
+{
+  const Vec3 d = vSun - vCamera;
+  const float fLength = d.GetLength();
+  if (fLength <= 0 || d.z <= 0)
+    return vSun;
+  const float x = d.x / fLength / 1.333f, y = d.y / fLength / 1.333f;
+  return vCamera + Vec3(x, y, sqrtf(std::max(1 - x * x - y * y, 0.0f))) * fLength;
+}
+
 struct SPoint2
 {
   float x, y;
@@ -156,15 +170,20 @@ void CD3D12Renderer::DrawFlares(std::span<const SRenderItem> Items)
   if (CVarFloat(m_pCoronas, "r_Coronas", 0) == 0)
     return;
 
-  // The flares: the Flare items with a corona, the coronas of the scene's lights.
+  // The flares: the Flare items with a corona, the coronas of the scene's lights. Under the ocean (d3d12_WaterVolume) the
+  // sun is seen through Snell's window: along its ray refracted into the water (Water.hlsl's SceneAbove).
+  const SFogVolume *pOcean = CV_d3d12_WaterVolume > 0 ? m_pScene->GetOceanFogVolume() : nullptr;
+  const bool bUnderOcean = pOcean && m_Camera.GetPos().z < pOcean->fFogLayerZ;
   std::vector<SFlare> Flares;
   for (const SRenderItem &it : Items)
   {
     if (it.pRE && it.pRE->m_Type == eDATA_Flare && it.pShader && it.pShader->GetCorona() && it.pObj && it.pObj != m_pScene->GetDefaultObject())
     {
       const SCorona *pCorona = it.pShader->GetCorona();
-      Flares.push_back({ it.pObj, it.pRE, pCorona, it.pObj->GetTranslation(), CFColor(pCorona->Color[0], pCorona->Color[1], pCorona->Color[2], 1),
-                         pCorona->fScale, true });
+      Vec3 vPos = it.pObj->GetTranslation();
+      if (bUnderOcean)
+        vPos = RefractedSun(m_Camera.GetPos(), vPos);
+      Flares.push_back({ it.pObj, it.pRE, pCorona, vPos, CFColor(pCorona->Color[0], pCorona->Color[1], pCorona->Color[2], 1), pCorona->fScale, true });
     }
   }
   auto AddCoronas = [&](std::span<CDLight *const> Lights)
