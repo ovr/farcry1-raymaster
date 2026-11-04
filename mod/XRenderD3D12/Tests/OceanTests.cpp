@@ -8,7 +8,8 @@
 //	cascades) and its pass on the GPU (the renderer's OceanFFT.hlsl kernels
 //	as OceanFFT.cpp runs them, GpuHarness.h's RunOcean): the fields against
 //	the inverse FFTs of their spectra in double, the waves' slopes and
-//	their units, the speed the waves run at, the mip levels' means (LEAN),
+//	their units, the speed the waves run at, the sharp crests (Gerstner's
+//	trochoid of one wave moved by its displacement), the mip levels' means (LEAN),
 //	no repetition of the cascades' sum and the same waves every run.
 //
 //////////////////////////////////////////////////////////////////////
@@ -434,6 +435,85 @@ XR_TEST(Ocean_PhaseSpeed)
     const double fWant = OmegaSteps(fK) * 2 * PI / PERIOD * fDt;
     CHECK_NEAR(-d, fWant, 1e-3);
     CHECK_NEAR(-d / fK / fDt / (Omega(fK) / fK), 1.0, 0.01);
+  }
+}
+
+// Why: the sharp crests are the waves moved along their horizontal displacement (d3d12_WaterChop) and resampled at
+// the texels: one wave of it must come out as Gerstner's trochoid, X = x0 - q / k sin(k x0), h = a cos(k x0), q = chop a
+// k, its crests narrow and its troughs wide: the height above 0 over 1/2 - q / pi of the wave (the sine's 1/2), its
+// mean -q a / 2 (0), its steepest slope q / sqrt(1 - q^2) (q). The kernel's 3 Newton's steps towards x0 converge, its
+// bilinear fields leave the curve within 1 % of a, its slopes within 3 % of the steepest. Where the crest would fold
+// over (q > 1) its slopes stay finite (the Jacobian's least determinant, 0.1).
+XR_TEST(Ocean_Gerstner)
+{
+  const int nBin = 8;                   // along x in the long cascade: a wave of 32 texels
+  double k, ky;
+  WaveVector(0, nBin, 0, k, ky);
+  const double fTexel = TILE[0] / N;
+  auto Run = [&](double a, double fChop) {
+    std::vector<float> H0((size_t)C * N * N * 4, 0.0f);
+    const float fSteps = (float)OmegaSteps(k);
+    H0[(size_t)nBin * 4 + 0] = (float)(a / 2);
+    H0[(size_t)nBin * 4 + 2] = fSteps;
+    H0[(size_t)(N - nBin) * 4 + 2] = fSteps;
+    const double One[C] = { 1, 1, 1 };
+    return Gpu().RunOcean(H0, Constants(0, fChop, One), Kernels());
+  };
+  // The row's crest share (h > 0, its crossings between the texels by linear interpolation), mean height, steepest slope.
+  struct SRow { double fCrest, fMean, fSteepest; };
+  auto Row = [&](const SOceanOutput &o, int y) {
+    SRow r = { 0, 0, 0 };
+    for (int x = 0; x < N; x++)
+    {
+      const double h0 = Wave(o, 0, 0, x, y)[2], h1 = Wave(o, 0, 0, (x + 1) & (N - 1), y)[2];
+      if (h0 > 0 && h1 > 0)
+        r.fCrest += 1;
+      else if (h0 > 0 || h1 > 0)
+        r.fCrest += std::max(h0, h1) / std::fabs(h1 - h0);
+      r.fMean += h0;
+      r.fSteepest = std::max(r.fSteepest, std::fabs((double)Wave(o, 0, 0, x, y)[0]));
+    }
+    r.fCrest /= N;
+    r.fMean /= N;
+    return r;
+  };
+
+  const double q = 0.5, a = q / k;
+  const SOceanOutput o = Run(a, 1.0);
+  double fWorstH = 0, fWorstS = 0;
+  for (int y : { 0, 77 })
+    for (int x = 0; x < N; x++)
+    {
+      // The trochoid's x0 at X.
+      const double X = x * fTexel;
+      double x0 = X;
+      for (int i = 0; i < 20; i++)
+        x0 -= (x0 - q / k * std::sin(k * x0) - X) / (1 - q * std::cos(k * x0));
+      const double h = a * std::cos(k * x0), s = -a * k * std::sin(k * x0) / (1 - q * std::cos(k * x0));
+      const float *t = Wave(o, 0, 0, x, y);
+      fWorstH = std::max(fWorstH, std::fabs(t[2] - h) / a);
+      fWorstS = std::max(fWorstS, std::fabs(t[0] - s) / (q / std::sqrt(1 - q * q)));
+      CHECK(std::fabs(t[1]) < 1e-3 * a * k);
+    }
+  CHECK_MSG(fWorstH < 0.01, std::to_string(fWorstH));
+  CHECK_MSG(fWorstS < 0.03, std::to_string(fWorstS));
+  const SRow g = Row(o, 0);
+  CHECK_NEAR(g.fCrest, 0.5 - q / PI, 0.005);
+  CHECK_NEAR(g.fMean / a, -q / 2, 0.01);
+  CHECK_NEAR(g.fSteepest / (q / std::sqrt(1 - q * q)), 1.0, 0.03);
+  // Without the displacement the sine.
+  const SRow s = Row(Run(a, 0.0), 0);
+  CHECK_NEAR(s.fCrest, 0.5, 0.005);
+  CHECK_NEAR(s.fMean / a, 0.0, 0.005);
+  CHECK_NEAR(s.fSteepest / q, 1.0, 0.03);
+  // Folding over: finite, at most the slope over the least determinant.
+  const double qf = 1.5, af = qf / k;
+  const SOceanOutput f = Run(af, 1.0);
+  for (int x = 0; x < N; x++)
+  {
+    const float *t = Wave(f, 0, 0, x, 0);
+    CHECK(std::isfinite(t[0]) && std::isfinite(t[2]) && std::isfinite(t[3]));
+    CHECK(std::fabs(t[0]) <= af * k / 0.1 * 1.01);
   }
 }
 

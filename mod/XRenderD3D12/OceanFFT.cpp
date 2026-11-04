@@ -17,8 +17,9 @@
 //	    inverse FFTs along x (into m_Ocean.pRows, two slices a cascade);
 //	  - the columns: their inverse FFTs along y, the fields (pFields);
 //	  - the waves: their texels (the slopes, the height in the weight of
-//	    the cascade's slopes, the squared slope; with the displacement of
-//	    d3d12_WaterChop the sharp crests) into level 0 of pWaves (RGBA16F, a
+//	    the cascade's slopes, the squared slope; moved by the horizontal
+//	    displacement of d3d12_WaterChop, the sharp crests, as a trochoid's
+//	    of Gerstner's) into level 0 of pWaves (RGBA16F, a
 //	    slice a cascade), the means of 2 x 2 into levels 1 to 4 (level 4 also
 //	    into pLevel4);
 //	  - the mip levels: 4 to 8 from pLevel4.
@@ -27,8 +28,13 @@
 //	slopes summed, times the bump amounts' factor and d3d12_WaterSlope over
 //	the sea's own RMS (SetOceanConstants: by default the old texture's
 //	steepness, the wind setting only the waves' lengths, directions and
-//	speeds). The waves stay as they were in a frame without water (the
-//	environment cubes may still draw the ocean).
+//	speeds). The displacement is the wind sea's own times d3d12_WaterChop,
+//	so that how much narrower the crests get does not change with that
+//	scale; the glint's ripple finer than the short cascade is Cox and
+//	Munk's of the wind less the cascades' (times the bump amounts' factor,
+//	not that scale: the glint and the sun's path widen with the wind).
+//	The waves stay as they were in a frame without water (the environment
+//	cubes may still draw the ocean).
 //
 //////////////////////////////////////////////////////////////////////
 
@@ -64,6 +70,13 @@ namespace
   //! The bump amounts the slopes' factor is 1 at (Water.cpp's defaults, 0.03 and 0.02, times 1.2).
   constexpr float DEFAULT_BUMP = 0.06f;
   constexpr D3D12_RESOURCE_STATES READ = D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE | D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE;
+
+  //! The factor of the sea's slopes and heights that gives them the RMS fSlope along an axis (d3d12_WaterSlope; 0: the
+  //! sea's own, fSeaRMS).
+  float SeaScale(float fSlope, float fSeaRMS)
+  {
+    return fSlope > 0 && fSeaRMS > 0 ? fSlope / fSeaRMS : 1.0f;
+  }
 
   D3D12_SHADER_RESOURCE_VIEW_DESC ArraySRV(DXGI_FORMAT Format, int nSlices, int nMips)
   {
@@ -203,7 +216,10 @@ void CD3D12Renderer::UpdateOcean(std::span<const SRenderItem> Items)
   // The time's fraction of the sea's period, in double (the timer's seconds grow without end).
   const double fTime = iTimer ? (double)iTimer->GetCurrTime() : 0.0;
   const double fTau = fmod(fTime, OceanSpectrum::PERIOD) / OceanSpectrum::PERIOD;
-  Set4(oc.vParams, (float)(fTau < 0 ? fTau + 1 : fTau), 0.0f, LEAST_JACOBIAN, 0);
+  // Tessendorf's lambda of the wind sea's own displacement: how much narrower its crests get does not change with
+  // the slopes' scale (d3d12_WaterSlope).
+  const float fChop = std::max(CV_d3d12_WaterChop, 0.0f);
+  Set4(oc.vParams, (float)(fTau < 0 ? fTau + 1 : fTau), fChop, LEAST_JACOBIAN, 0);
   for (int c = 0; c < XR_OCEAN_CASCADES; c++)
     Set4(oc.vCascades[c], (float)OceanSpectrum::TILE[c], o.fHeightWeight[c], (float)(OceanSpectrum::TILE[c] / XR_OCEAN_SIZE), 0);
   const SD3D12FrameAlloc CB = m_pUpload->AllocFrame(sizeof(oc), 256);
@@ -232,7 +248,8 @@ void CD3D12Renderer::UpdateOcean(std::span<const SRenderItem> Items)
   m_pDevice->Transition(pWaves, D3D12_RESOURCE_STATE_UNORDERED_ACCESS, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
   o.nFrame = m_nFrames;
   if (m_pFrameDump)
-    fprintf(m_pFrameDump.get(), "ocean: wind %g m/s, tau %.6f, slopes' RMS %.3f, finer ripple %.4f\n", o.fWind, oc.vParams[0], o.fSlopeRMS, o.fFineVar);
+    fprintf(m_pFrameDump.get(), "ocean: wind %g m/s, tau %.6f, chop %.3f, slopes' RMS %.3f, finer ripple %.4f\n", o.fWind, oc.vParams[0], fChop,
+            o.fSlopeRMS, o.fFineVar);
 }
 
 bool CD3D12Renderer::SetOceanConstants(SDrawConstants &dc, float fBump) const
@@ -240,10 +257,13 @@ bool CD3D12Renderer::SetOceanConstants(SDrawConstants &dc, float fBump) const
   const SOceanState &o = m_Ocean;
   if (!CV_d3d12_WaterFFT || !o.pWaves || o.nFrame < 0)
     return false;
-  // The bump amounts a factor of the wind's sea (1 at their default), d3d12_WaterSlope its slopes' RMS there.
-  dc.vParams0[0] = fBump / DEFAULT_BUMP * (CV_d3d12_WaterSlope > 0 && o.fSlopeRMS > 0 ? CV_d3d12_WaterSlope / o.fSlopeRMS : 1.0f);
+  // The bump amounts a factor of the wind's sea (1 at their default), d3d12_WaterSlope its slopes' RMS there; the
+  // finer ripple the wind's, times the bump amounts' factor alone (scaled as the cascades, the least at 3.5 m/s, 0.0011
+  // at 5, Carrier's glint would shrink to a small core of the game's patch).
+  const float fLevel = fBump / DEFAULT_BUMP;
+  dc.vParams0[0] = fLevel * SeaScale(CV_d3d12_WaterSlope, o.fSlopeRMS);
   dc.nShadowTex[2] = (uint32)o.pWaves->m_nSRV;
-  Set4(dc.vAddColor, o.fSlopeRMS, o.fFineVar, 0, 0);
+  Set4(dc.vAddColor, o.fSlopeRMS, std::max(o.fFineVar * fLevel * fLevel, (float)OceanSpectrum::LEAST_FINE_VARIANCE), 0, 0);
   return true;
 }
 

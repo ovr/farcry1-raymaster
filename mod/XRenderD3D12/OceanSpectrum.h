@@ -65,7 +65,8 @@ namespace OceanSpectrum
   constexpr double WIND[2] = { 0.94, 0.34 };      //!< the wind's direction (the old wave texture's main layer's)
   //! Cox and Munk's variance of the slopes of a clean sea (both axes together): 0.003 + 0.00512 U.
   constexpr double COX_MUNK[2] = { 0.003, 0.00512 };
-  //! The least variance of the slopes finer than the short cascade (the sun's glint).
+  //! The least variance of the drawn slopes finer than the short cascade (the sun's glint; OceanFFT.cpp applies it
+  //! after the bump amounts' factor): a sharper glint would glitter in single pixels from frame to frame.
   constexpr double LEAST_FINE_VARIANCE = 0.001;
 
   //! Deep water's angular frequency (rad / s) of a wave of wave number k (rad / m).
@@ -212,10 +213,10 @@ namespace OceanSpectrum
       return k.fHeightVar > 0 ? std::sqrt(fShare / k.fHeightVar) : 0;
     }
     //! The variance of the slopes finer than the short cascade (both axes): Cox and Munk's of the wind less what the
-    //! cascades hold, at least LEAST_FINE_VARIANCE.
+    //! cascades hold (none at a light wind, where the cascades hold more than Cox and Munk measured).
     double FineVar() const
     {
-      return std::max(COX_MUNK[0] + COX_MUNK[1] * fWind - SlopeVar(), LEAST_FINE_VARIANCE);
+      return std::max(COX_MUNK[0] + COX_MUNK[1] * fWind - SlopeVar(), 0.0);
     }
   };
 

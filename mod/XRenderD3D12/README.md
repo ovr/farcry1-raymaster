@@ -1208,8 +1208,8 @@ and lists theirs (`NamesObjects`).
   before it; not saved; `OceanSpectrum.h`, `OceanFFT.cpp`, `Shaders/OceanFFT.hlsl`): the ocean's
   waves are a wind sea made by inverse FFTs on the GPU each frame (Tessendorf's "Simulating Ocean
   Water"), in place of the texture's sum of sines that only slid along, one shape repeating every
-  61, 17.3 and 5.9 m. JONSWAP's spectrum of the wind `d3d12_WaterWind` (5 m/s, at least 0.5; a 50 km
-  fetch), spread about its direction (the old texture's main layer's) by Mitsuyasu's cos^2s, deep
+  61, 17.3 and 5.9 m. JONSWAP's spectrum of the wind `d3d12_WaterWind` (3.5 m/s, at least 0.5; a 50
+  km fetch: a significant height of 0.57 m, the peak's waves 19 m long), spread about its direction (the old texture's main layer's) by Mitsuyasu's cos^2s, deep
   water's dispersion with the capillary term: each wave runs at its own speed, the long ones faster,
   so the sea changes its shape as it goes and repeats only after 1024 s (its frequencies whole
   multiples of 2 pi / 1024 s, the phase exact in a float). Three cascades of 256 x 256 texels, 250,
@@ -1223,19 +1223,37 @@ and lists theirs (`NamesObjects`).
   columns (Stockham's radix 2 in group shared memory), then the waves' texture: a slice a cascade
   (RGBA16F, 9 mip levels) of the slopes, the height in the weight of the cascade's slopes (as the
   crests' light had it from the old texture) and the squared slope, whose mean over a mip level
-  less the square of the mean slope is LEAN's lost variance as before. The water's program samples
+  less the square of the mean slope is LEAN's lost variance as before. The sharp crests
+  (`d3d12_WaterChop`, 2.5, Tessendorf's lambda; 0 none; not saved): each cascade's waves are moved
+  along their horizontal displacement D = i k / |k| H times it and taken again at the texels (three
+  Newton's steps towards the point the displacement moves to the texel, the slopes there through
+  the inverse of its Jacobian, whose determinant is kept at 0.1 or more where a crest would fold
+  over): narrow sharp crests and wide flat troughs, one wave of it Gerstner's trochoid (at 1). The
+  wind sea at 3.5 m/s with lambda 1 has its Jacobian's determinant down to 0.7 only, hardly sharper
+  than the sines; at 2.5 down to 0.31 (the crests up to 3 times narrower), none folding over; it is
+  the wind sea's own displacement, so how much narrower the crests get does not change with
+  `d3d12_WaterSlope`. The water's program samples
   the three slices at the world position over their tiles (no scrolling: the FFT moves them) and
   sums their slopes; the planar, screen space and ray traced reflections, their blur, the glint and
   the crests' light read the normal and the lost variance as they did. Their steepness is the old
   texture's (`d3d12_WaterSlope`, 0.0446 the RMS slope along an axis at the default bump amounts,
-  0.03 and 0.02, other amounts in proportion): the physical sea's at any wind (0.08 at 2 m/s, 0.106
-  at 5) is 1.8 to 2.4 times steeper than the game's water was drawn for, so the wind sets only the waves'
-  lengths, directions and speeds; `d3d12_WaterSlope 0` gives the wind sea's own. The scopes' glass
+  0.03 and 0.02, other amounts in proportion): the physical sea's at any wind (0.082 at 2 m/s, 0.096
+  at 3.5, 0.106 at 5) is 1.8 to 2.4 times steeper than the game's water was drawn for, so the wind sets only the waves'
+  lengths, directions and speeds; `d3d12_WaterSlope 0` gives the wind sea's own. The glint's ripple
+  finer than the short cascade is Cox and Munk's variance of the slopes of the wind (0.003 + 0.00512
+  U, both axes) less the cascades' (0.0025 at 3.5 m/s, 0.006 at 5, none at 2: then 0.001, the
+  least, against a glint glittering in single pixels), times the bump amounts' factor alone, in
+  place of `d3d12_WaterGlintRoughness` (0.004, the old texture's): the glint and the sun's path
+  widen with the wind (scaled as the slopes, Carrier's glint shrank to a small core of the game's
+  patch). The default wind is fitted by the frames: at 5 m/s Bunker's sunset path got as wide as
+  tall and milky near the camera (the glint suite's column, 1.02 against at least 1.2), at 3.5 it
+  keeps the sparkle and the column (1.25), at 3 Carrier's glint shrinks. The scopes' glass
   and the caustics keep their own static textures. The pass costs 0.02-0.04 ms at any resolution,
   and the water's three samples of a 16-bit array cost less than the old texture's three layers
-  (3840 x 2160: Carrier 0.72 -> 0.57 ms, Bunker's sunset 0.63 -> 0.57; the frame 3.26 -> 3.08 ms with
-  the pass); the spectrum, made on the CPU at the first water and when the wind changes, takes
-  under 65 ms.
+  (3840 x 2160, the glint suite's views: Carrier 0.75 -> 0.58 ms, with the rays' sun shadows and
+  reflections 1.07 -> 0.80; Bunker's sunset 0.63 -> 0.58, with the rays 0.77 -> 0.78; Carrier's
+  frame 3.22 -> 3.14 ms with the pass, 4.45 -> 4.22 with the rays); the spectrum, made on the CPU at
+  the first water and when the wind changes, takes under 65 ms.
 - The sun's glint (`d3d12_WaterGlint`, 1; 0 draws the frames of the water before it; not saved;
   `d3d12_WaterSunGlint`, a highlight fitted by eye and off as in the game, is gone with it) is the
   sun mirrored by the waves' facets (`Shaders/WaterLight.hlsli`): Beckmann's distribution of the
