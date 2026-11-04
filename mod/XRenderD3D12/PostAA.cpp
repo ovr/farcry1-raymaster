@@ -131,7 +131,12 @@ void CD3D12Renderer::DrawPostAA()
   if (MsaaSamples(eAA))
   {
     if (m_nMsaaFrame == m_nFrames && m_pFrameDump)
-      fprintf(m_pFrameDump.get(), "anti-aliasing: %s\n", AntiAliasName(eAA).szName);
+    {
+      fprintf(m_pFrameDump.get(), "anti-aliasing: %s", AntiAliasName(eAA).szName);
+      if (CV_d3d12_AlphaToCoverage > 0)
+        fprintf(m_pFrameDump.get(), ", alpha to coverage: %d draws", m_nFrameAlphaCoverage);
+      fprintf(m_pFrameDump.get(), "\n");
+    }
     return;
   }
   const int nQuality = std::clamp(CV_d3d12_AAQuality, 0, 3);
@@ -210,7 +215,7 @@ std::string CD3D12Renderer::PostAAInfo()
   if (MsaaSamples(eAA))
   {
     const bool bThisFrame = m_nMsaaFrame == m_nFrames;
-    snprintf(szText, sizeof(szText), "%s%s%s%s", AntiAliasName(eAA).szName, bThisFrame ? "" : " (",
+    snprintf(szText, sizeof(szText), "%s%s%s%s", AntiAliasName(eAA).szName, bThisFrame ? CV_d3d12_AlphaToCoverage > 0 ? ", alpha to coverage" : "" : " (",
              bThisFrame ? "" : m_szMsaaOff ? m_szMsaaOff : "no 3D scene now", bThisFrame ? "" : ")");
     return szText;
   }

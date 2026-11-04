@@ -73,7 +73,7 @@ reference of its features and console variables.
   where it is clipped). All of them change at run time. With an upscaler
   that anti-aliases (FSR) `d3d12_AA` is not used (logged once); r_DisplayInfo's `Anti-aliasing`
   row names the one that is (`FXAA (High)`, `SMAA 1x (High)`, `CMAA2 (High)`, `TAA (High, HDR input)`,
-  `MSAA 4x`, `FSR, temporal`, `none`) and the frame dump has an `anti-aliasing:` line. The original's FSAA modes
+  `MSAA 4x, alpha to coverage`, `FSR, temporal`, `none`) and the frame dump has an `anti-aliasing:` line. The original's FSAA modes
   (`r_FSAA`, `EnumAAFormats`) are not offered: MSAA is `d3d12_AA`'s.
 - The game's menu gets it from `assets/scripts/09-video-anti-aliasing.patch`: Video Options'
   Anti-Aliasing list is None / FXAA / SMAA 1x / CMAA2 / TAA / MSAA 2x / 4x / 8x (`d3d12_AA`) in place of the game's FSAA modes, on
@@ -204,6 +204,38 @@ reference of its features and console variables.
     (`CasSetup`), leaves flat pictures as they are to their border and raises a texture's
     contrast, more the higher the sharpness; the HDR light sharpened stays within its 3 x 3's range
     (a bright sky's texture and a cave's opening at the exposures 1 and 4).
+- MSAA (`msaa2`, `msaa4`, `msaa8`, `Msaa.cpp`): from `BeginMainScene` to `EndMainScene` the main view draws into the
+  device's multisampled colour, depth buffer and ambient light (`CD3D12Device::SetMsaaTargets`, `BeginMsaa`; the
+  pipelines with `SPipelineKey::nSamples`). What comes after the scene, and what reads the depth buffer in it (the sun's
+  mask by rays, the ambient occlusion, the water's copy of the scene), takes the main view's own targets, which get the
+  samples resolved: the colour by `Msaa.hlsl`'s pass (`Msaa.hlsli`: the mean of the display's light of the samples, the
+  HDR target's tone mapped at the scene's exposure for it, so that a highlight in one sample counts as much as the
+  display shows it), the depth buffer the nearest sample, the ambient light by the GPU's resolve. Not with an upscaler's
+  scene (FSR anti-aliases) nor the path tracer's (its G-buffer has one sample a pixel): logged once, then none.
+  - Alpha to coverage (`d3d12_AlphaToCoverage`, 1 by default): the alpha-tested surfaces (the grass, the leaves, the
+    gratings) cover the samples of their alpha sharpened to the test's edge in place of the test:
+    `AlphaCoverage.hlsli`'s `CoverageAlpha`, saturate((a - ref) / fwidth(a) + 0.5) (B. Golus, "Anti-aliased Alpha Test:
+    The Esoteric Alpha To Coverage", 2017), with `AlphaToCoverageEnable` in their pipelines
+    (`SPipelineKey::bAlphaToCoverage`). `DrawGeometry` sets it for the general program's draws with `DF_ALPHATEST` (not
+    `DF_ALPHATEST_LESS`) whose blend does not take the source's alpha, nor those whose alpha after the test is another
+    (the far sprites' pictures, the detail layer, the caustics, the shadow's passes, the fog volumes, `DF2_SHADER_FX`),
+    and negates the reference in their constants (the scene for rays keeps the draw's own). An edge steps through the
+    samples as the surface's edge crosses the pixel, a leaf keeps its area (the share of each pixel the test keeps), a
+    leaf's inside and a grating's holes stay as the test draws them. In `DemoLevelAA.ini`'s two views at 1280 x 720
+    (render_tests' `aa` suite, 110 draws with it) MSAA 4x's error against the 4 x supersampled reference where alpha to
+    coverage changes the frame (3.2 % and 7.7 % of it: the palms' leaves, the grass) is 0.74 / 0.79 of the alpha
+    test's, the detail there 0.90 of the reference's (the test's steps 1.09: detail of their own), off those pixels as
+    without it; at 3840 x 2160 with MSAA 4x the frame takes 0.05 / 0.12 ms more (5.48 -> 5.53, 5.43 -> 5.55 ms: the
+    opaque objects 0.01 / 0.04, the ambient occlusion 0.01 / 0.05, the water 0.00 / 0.03). `0`: the test, the frames
+    before (MSAA 4x's 0 px against step 294's build).
+    The frame dump's line is `anti-aliasing: MSAA 4x, alpha to coverage: N draws`, r_DisplayInfo's row
+    `MSAA 4x, alpha to coverage`.
+  - Unit tests `Msaa_*`: a pixel of one surface's samples stays as it is; an edge's pixel is the mean of the display's
+    light of its samples; a highlight in one sample counts as the display shows it; the alpha's plain mean; the
+    nearest depth. `Msaa_CoverageEdge`, `Msaa_CoverageFlat`, `Msaa_CoverageRange`: alpha to coverage's alpha is the
+    share of the pixel the test keeps where the alpha changes evenly across it (65536 points across the pixel, at the
+    references 0.25, 0.5, 128 / 255, 0.75 and the alpha's change 0.002 to 2 a pixel), the test's own 0 or 1 where it
+    does not change, and grows with the alpha.
 
 ## HDR
 

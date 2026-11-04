@@ -1009,6 +1009,8 @@ ComPtr<ID3D12PipelineState> CD3D12Pipeline::CreatePSO(const SPipelineKey &Key, b
       Target.RenderTargetWriteMask = 0;
   }
   Desc.SampleMask = UINT_MAX;
+  // The samples covered by the pixel's alpha (an alpha-tested draw with MSAA): its edge over the samples, not a step.
+  Desc.BlendState.AlphaToCoverageEnable = Key.bAlphaToCoverage && Key.nSamples > 1 && !Key.bDepthOnly ? TRUE : FALSE;
 
   D3D12_RASTERIZER_DESC &Raster = Desc.RasterizerState;
   Raster.FillMode = Key.bWireframe ? D3D12_FILL_MODE_WIREFRAME : D3D12_FILL_MODE_SOLID;
@@ -1102,10 +1104,10 @@ ComPtr<ID3D12PipelineState> CD3D12Pipeline::CreatePSO(const SPipelineKey &Key, b
       return nullptr;
     iLog->LogError("XRenderD3D12: CreateGraphicsPipelineState failed (0x%08X): program %s, vertex format %d, state 0x%08X, "
       "cull %d, topology %d, target %d, depth bias %d, streams %d, wireframe %d, colour format %d, ambient %d, blend op %d, rays %d, path %d, "
-      "samples %d", (unsigned)hr,
+      "samples %d, alpha to coverage %d", (unsigned)hr,
       Program.szName, (int)Key.nVertexFormat, nState, (int)Key.nCull, nTopology, (int)Key.nTarget, (int)Key.bDepthBias,
       (int)Key.nStreams, (int)Key.bWireframe, (int)Key.nColorFormat, (int)Key.bAmbient, (int)Key.nBlendOp, (int)Key.bRayTrace, (int)Key.bPathTrace,
-      (int)Key.nSamples);
+      (int)Key.nSamples, (int)Key.bAlphaToCoverage);
     return nullptr;
   }
   return pPSO;

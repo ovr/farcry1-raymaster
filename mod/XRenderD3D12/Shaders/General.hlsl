@@ -67,6 +67,8 @@
 //	      fall-off of DF2_GLOW_FALLOFF. Its core goes above white, its soft edge
 //	      stays as the game's, whatever its colour and fade
 //	    DF_ALPHATEST: discard when a < fAlphaRef (DF_ALPHATEST_LESS: when a >= fAlphaRef);
+//	      a negative fAlphaRef (alpha to coverage with MSAA): a = CoverageAlpha
+//	      (AlphaCoverage.hlsli) at -fAlphaRef, the samples it covers in place of the test;
 //	      then DF_ALPHA_ONE: a = 1
 //	    DF_DETAIL_LAYER (a terrain detail layer, multiplied in twice; its vertices 5 cm
 //	      out along the normal, its clip w + 0.005, as the original's): rgb =
@@ -241,6 +243,7 @@
 #include "LightmapLight.hlsli"
 #include "WaterCaustics.hlsli"
 #include "Underwater.hlsli"
+#include "AlphaCoverage.hlsli"
 #if defined(XR_RAY_REFL) || defined(XR_RAY_LIGHT)
 #include "RayShade.hlsli"
 #endif
@@ -1377,6 +1380,9 @@ float4 ShadePixel(SVertexOutput In)
   {
     if (HasFlag(DF_ALPHATEST_LESS))
       clip(g_Draw.fAlphaRef - vColor.a - 1.0 / 512);
+    // Alpha to coverage (the reference negated, Draw.cpp's DrawGeometry): the samples the edge covers in place of the test.
+    else if (g_Draw.fAlphaRef < 0)
+      vColor.a = CoverageAlpha(vColor.a, -g_Draw.fAlphaRef, fwidth(vColor.a));
     else
       clip(vColor.a - g_Draw.fAlphaRef);
   }
