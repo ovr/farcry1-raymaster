@@ -94,6 +94,15 @@
 #include "Water_RT_Velocity_PS.h"
 #include "Water_RT_Hdr_PS.h"
 #include "Water_RT_Hdr_Velocity_PS.h"
+#include "Water_Deferred_VS.h"
+#include "Water_Deferred_PS.h"
+#include "Water_Deferred_Velocity_PS.h"
+#include "Water_Deferred_Hdr_PS.h"
+#include "Water_Deferred_Hdr_Velocity_PS.h"
+#include "Water_Deferred_RT_PS.h"
+#include "Water_Deferred_RT_Velocity_PS.h"
+#include "Water_Deferred_RT_Hdr_PS.h"
+#include "Water_Deferred_RT_Hdr_Velocity_PS.h"
 #include "Post_VS.h"
 #include "Post_PS.h"
 #include "Post_Highlight_PS.h"
@@ -797,7 +806,9 @@ ComPtr<ID3D12PipelineState> CD3D12Pipeline::CreatePSO(const SPipelineKey &Key, b
   const bool bGeneral = Key.nProgram == eD3D12P_General, bWater = Key.nProgram == eD3D12P_Water;
   const bool bVelocity = bScene && ((bGeneral && !(nState & (GS_BLSRC_MASK | GS_BLDST_MASK)) &&
                                      !(nState & (GS_NOCOLMASK | GS_COLMASKONLYALPHA))) || bWater);
-  const bool bUpscaleDepth = bScene && !(nState & GS_NODEPTHTEST) && ((bGeneral && (nState & GS_DEPTHWRITE)) || bWater);
+  // (The deferred ocean, bWaterDeferred, tests no depth: its pixels those of the waves' depth.)
+  const bool bUpscaleDepth = bScene && (!(nState & GS_NODEPTHTEST) || (bWater && Key.bWaterDeferred)) &&
+                             ((bGeneral && (nState & GS_DEPTHWRITE)) || bWater);
 
   D3D12_GRAPHICS_PIPELINE_STATE_DESC Desc = {};
   Desc.pRootSignature = m_pRootSignature.Get();
@@ -849,6 +860,20 @@ ComPtr<ID3D12PipelineState> CD3D12Pipeline::CreatePSO(const SPipelineKey &Key, b
       { { g_Water_RT_Hdr_PS, sizeof(g_Water_RT_Hdr_PS) }, { g_Water_RT_Hdr_Velocity_PS, sizeof(g_Water_RT_Hdr_Velocity_PS) } },
     };
     Desc.PS = s_WaterRayPS[bHdr ? 1 : 0][bVelocity || bUpscaleDepth ? 1 : 0];
+  }
+  // The deferred ocean (XR_WATER_DEFERRED), by [rays][HDR][velocity].
+  if (bWater && Key.bWaterDeferred)
+  {
+    static const D3D12_SHADER_BYTECODE s_WaterDeferredPS[2][2][2] =
+    {
+      { { { g_Water_Deferred_PS, sizeof(g_Water_Deferred_PS) }, { g_Water_Deferred_Velocity_PS, sizeof(g_Water_Deferred_Velocity_PS) } },
+        { { g_Water_Deferred_Hdr_PS, sizeof(g_Water_Deferred_Hdr_PS) }, { g_Water_Deferred_Hdr_Velocity_PS, sizeof(g_Water_Deferred_Hdr_Velocity_PS) } } },
+      { { { g_Water_Deferred_RT_PS, sizeof(g_Water_Deferred_RT_PS) }, { g_Water_Deferred_RT_Velocity_PS, sizeof(g_Water_Deferred_RT_Velocity_PS) } },
+        { { g_Water_Deferred_RT_Hdr_PS, sizeof(g_Water_Deferred_RT_Hdr_PS) },
+          { g_Water_Deferred_RT_Hdr_Velocity_PS, sizeof(g_Water_Deferred_RT_Hdr_Velocity_PS) } } },
+    };
+    Desc.VS = { g_Water_Deferred_VS, sizeof(g_Water_Deferred_VS) };
+    Desc.PS = s_WaterDeferredPS[Key.bRayTrace ? 1 : 0][bHdr ? 1 : 0][bVelocity || bUpscaleDepth ? 1 : 0];
   }
   // The general program writing the ambient light's part of its colour too.
   if (bAmbient && bGeneral)

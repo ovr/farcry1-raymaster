@@ -21,6 +21,9 @@
 //	                    bodies' and the breaking waves' new), the view the
 //	                    water reads into level 0 and the means of 2 x 2 into
 //	                    levels 1 to 3
+//	  XR_WAKE_HEIGHT    with the ocean's grid (d3d12_WaterGeometry): 16 x 16
+//	                    texels a group, the height into level 0 of the
+//	                    heights the grid reads, the means into levels 1 to 3
 //
 //	Bindings (D3D12Compute.h): b0 SWakeConstants;
 //	  ROWS          t0 the window (RG32F: the header's q); u0 the rows
@@ -31,6 +34,7 @@
 //	                other of two taking turns); u0 the foam, u1..u4 levels
 //	                0..3 of the view (RGBA16F: the slopes dh/dx, dh/dy, their
 //	                square, the foam's share white)
+//	  HEIGHT        t0 the window; u0..u3 levels 0..3 of the heights (R16F, m)
 //
 //////////////////////////////////////////////////////////////////////
 
@@ -199,6 +203,52 @@ void CSMain(uint3 vGroup : SV_GroupID, uint2 vThread : SV_GroupThreadID)
   GroupMemoryBarrierWithGroupSync();
   if (all(vThread < 2))
     g_Level3[vGroup.xy * 2 + vThread] = Mean(vThread, 4, true);
+}
+
+#elif defined(XR_WAKE_HEIGHT)
+
+// The waves' heights for the ocean's grid (d3d12_WaterGeometry; Water.hlsl's WakeGridHeight): the window's, each mip level
+// the mean of the one before's 2 x 2 texels.
+Texture2D<float2> g_State : register(t0);
+RWTexture2D<float> g_Level0 : register(u0);
+RWTexture2D<float> g_Level1 : register(u1);
+RWTexture2D<float> g_Level2 : register(u2);
+RWTexture2D<float> g_Level3 : register(u3);
+
+groupshared float gs_H[16 * 16];
+groupshared float gs_G[8 * 8];
+
+//! The mean of the 2 x 2 texels of a level of n x n at the thread's place in the next.
+float MeanHeight(uint2 v, uint n, bool bH)
+{
+  const uint i = 2 * v.y * n + 2 * v.x;
+  return bH ? 0.25 * (gs_H[i] + gs_H[i + 1] + gs_H[i + n] + gs_H[i + n + 1]) : 0.25 * (gs_G[i] + gs_G[i + 1] + gs_G[i + n] + gs_G[i + n + 1]);
+}
+
+[numthreads(16, 16, 1)]
+void CSMain(uint3 vGroup : SV_GroupID, uint2 vThread : SV_GroupThreadID)
+{
+  const uint2 p = vGroup.xy * 16 + vThread;
+  float h = g_State[p].x;
+  g_Level0[p] = h;
+  gs_H[vThread.y * 16 + vThread.x] = h;
+  GroupMemoryBarrierWithGroupSync();
+  if (all(vThread < 8))
+  {
+    h = MeanHeight(vThread, 16, true);
+    g_Level1[vGroup.xy * 8 + vThread] = h;
+    gs_G[vThread.y * 8 + vThread.x] = h;
+  }
+  GroupMemoryBarrierWithGroupSync();
+  if (all(vThread < 4))
+  {
+    h = MeanHeight(vThread, 8, false);
+    g_Level2[vGroup.xy * 4 + vThread] = h;
+    gs_H[vThread.y * 4 + vThread.x] = h;
+  }
+  GroupMemoryBarrierWithGroupSync();
+  if (all(vThread < 2))
+    g_Level3[vGroup.xy * 2 + vThread] = MeanHeight(vThread, 4, true);
 }
 
 #endif

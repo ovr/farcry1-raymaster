@@ -33,7 +33,11 @@
 //	    at least the bodies' where they are, faster than WAKE_FOAM_SPEED,
 //	    and the waves' breaking where steeper than WAKE_BREAK_SLOPE, but
 //	    under a body; fading over WAKE_FOAM_LIFE and spreading, R32F in two
-//	    textures taking turns), RGBA16F with XR_WAKE_MIPS levels.
+//	    textures taking turns), RGBA16F with XR_WAKE_MIPS levels;
+//	  - with the ocean's grid (d3d12_WaterGeometry; OceanGrid.cpp) the
+//	    heights its vertices take the wakes' at (Water.hlsl's
+//	    WakeGridHeight): the window's height, R16F with XR_WAKE_MIPS levels
+//	    (each the means of 2 x 2 texels of the one before).
 //	The water's program (Water.hlsl's WaterWake) adds the view's slopes to
 //	the ocean's waves (their lost variance to the reflection's blur) and
 //	its foam to the ocean's, torn into clumps (WaterFoam.hlsli's
@@ -63,12 +67,14 @@ namespace
   static_assert(XR_WAKE_SIZE == 1024 && XR_WAKE_SIZE % 16 == 0 && (16 >> (XR_WAKE_MIPS - 1)) >= 2, "Shaders/Wake.hlsl's groups and levels");
 
   constexpr int TABLE = CD3D12Compute::COMPUTE_SRVS + CD3D12Compute::COMPUTE_UAVS;
-  //! The rows, the columns, the rows' inverse; the view into each of the foam's two textures: a table each.
-  constexpr int KERNELS = 5;
+  //! The rows, the columns, the rows' inverse; the view into each of the foam's two textures; the heights: a table each.
+  constexpr int KERNELS = 6;
   constexpr int VIEW_TABLE = 3;
+  constexpr int HEIGHT_TABLE = 5;
   constexpr DXGI_FORMAT STATE_FORMAT = DXGI_FORMAT_R32G32_FLOAT;
   constexpr DXGI_FORMAT FOAM_FORMAT = DXGI_FORMAT_R32_FLOAT;
   constexpr DXGI_FORMAT VIEW_FORMAT = DXGI_FORMAT_R16G16B16A16_FLOAT;
+  constexpr DXGI_FORMAT HEIGHT_FORMAT = DXGI_FORMAT_R16_FLOAT;
   //! The longest pause between steps (s) the waves stay over (a longer one: a level loaded, a cut scene, a game saved).
   constexpr double WAKE_GAP = 0.5;
   constexpr D3D12_RESOURCE_STATES SRV_STATE = D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE;
@@ -131,11 +137,15 @@ bool CD3D12Renderer::EnsureWakeTargets()
   w.pFoam[0] = m_pUpload->CreateComputeTarget(N, N, 1, FOAM_FORMAT, L"XRenderD3D12 wakes' foam 0");
   w.pFoam[1] = m_pUpload->CreateComputeTarget(N, N, 1, FOAM_FORMAT, L"XRenderD3D12 wakes' foam 1");
   w.pView = m_pUpload->CreateComputeTarget(N, N, XR_WAKE_MIPS, VIEW_FORMAT, L"XRenderD3D12 wakes' view");
+  w.pHeights = m_pUpload->CreateComputeTarget(N, N, XR_WAKE_MIPS, HEIGHT_FORMAT, L"XRenderD3D12 wakes' heights");
   w.nTables = m_pDescriptors->AllocRange(KERNELS * TABLE);
-  const D3D12_SHADER_RESOURCE_VIEW_DESC ViewSRV = TextureSRV(VIEW_FORMAT, XR_WAKE_MIPS);
+  const D3D12_SHADER_RESOURCE_VIEW_DESC ViewSRV = TextureSRV(VIEW_FORMAT, XR_WAKE_MIPS), HeightSRV = TextureSRV(HEIGHT_FORMAT, XR_WAKE_MIPS);
   if (w.pView)
     w.pView->m_nSRV = m_pDescriptors->AllocSRV(w.pView->m_pResource, &ViewSRV);
-  if (!w.pState || !w.pRows || !w.pColumns || !w.pFoam[0] || !w.pFoam[1] || !w.pView || w.nTables < 0 || w.pView->m_nSRV < 0)
+  if (w.pHeights)
+    w.pHeights->m_nSRV = m_pDescriptors->AllocSRV(w.pHeights->m_pResource, &HeightSRV);
+  if (!w.pState || !w.pRows || !w.pColumns || !w.pFoam[0] || !w.pFoam[1] || !w.pView || !w.pHeights || w.nTables < 0 || w.pView->m_nSRV < 0 ||
+      w.pHeights->m_nSRV < 0)
   {
     iLog->LogError("XRenderD3D12: no wakes (their targets)");
     ReleaseWakes();
@@ -145,9 +155,9 @@ bool CD3D12Renderer::EnsureWakeTargets()
 
   // The tables (Shaders/Wake.hlsl's bindings): 0 the rows (the window into the rows), 1 the columns (the rows into the
   // columns), 2 the rows' inverse (the columns into the window); VIEW_TABLE + f the view with the foam into pFoam[f] from
-  // the other. The views the kernels do not use null.
+  // the other; HEIGHT_TABLE the heights from the window. The views the kernels do not use null.
   const D3D12_SHADER_RESOURCE_VIEW_DESC StateSRV = TextureSRV(STATE_FORMAT, 1), FoamSRV = TextureSRV(FOAM_FORMAT, 1);
-  for (int k = 0; k < KERNELS; k++)
+  for (int k = 0; k < HEIGHT_TABLE; k++)
   {
     const int nTable = w.nTables + k * TABLE;
     const bool bView = k >= VIEW_TABLE;
@@ -183,11 +193,23 @@ bool CD3D12Renderer::EnsureWakeTargets()
       m_pDescriptors->WriteUAV(nTable + CD3D12Compute::COMPUTE_SRVS + i, pOut, &UAV);
     }
   }
+  {
+    const int nTable = w.nTables + HEIGHT_TABLE * TABLE;
+    for (int i = 0; i < CD3D12Compute::COMPUTE_SRVS; i++)
+      m_pDescriptors->WriteSRV(nTable + i, i == 0 ? w.pState->m_pResource : nullptr, &StateSRV);
+    for (int i = 0; i < CD3D12Compute::COMPUTE_UAVS; i++)
+    {
+      const D3D12_UNORDERED_ACCESS_VIEW_DESC UAV = TextureUAV(HEIGHT_FORMAT, std::min(i, XR_WAKE_MIPS - 1));
+      m_pDescriptors->WriteUAV(nTable + CD3D12Compute::COMPUTE_SRVS + i, i < XR_WAKE_MIPS ? w.pHeights->m_pResource : nullptr, &UAV);
+    }
+  }
   // Made in UNORDERED_ACCESS: the window, the rows and the columns rest there; the foam's textures where the view's
-  // kernel reads them, the view where the water's program does.
+  // kernel reads them, the view where the water's program does, the heights where its vertex program does.
   for (CD3D12Texture *pTex : { w.pFoam[0], w.pFoam[1] })
     m_pDevice->Transition(pTex->m_pResource, UAV_STATE, SRV_STATE);
   m_pDevice->Transition(w.pView->m_pResource, UAV_STATE, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+  m_pDevice->Transition(w.pHeights->m_pResource, UAV_STATE, SRV_STATE);
+  w.nHeightsFrame = -1;
   w.nFrame = -1;
   w.Seen.clear();
   if (iLog)
@@ -195,10 +217,9 @@ bool CD3D12Renderer::EnsureWakeTargets()
   return true;
 }
 
-void CD3D12Renderer::GatherWakeBodies(std::vector<WakeBodies::SStepBody> &Bodies, float dt)
+bool CD3D12Renderer::GatherWaterBodies(std::vector<std::pair<int, WakeBodies::SBody>> &Now) const
 {
-  SWakeState &w = m_Wakes;
-  Bodies.clear();
+  Now.clear();
   I3DEngine *p3D = iSystem ? iSystem->GetI3DEngine() : nullptr;
   IEntitySystem *pEntities = iSystem ? iSystem->GetIEntitySystem() : nullptr;
   IEntityIt *pIt = pEntities ? pEntities->GetEntityIterator() : nullptr;
@@ -206,15 +227,11 @@ void CD3D12Renderer::GatherWakeBodies(std::vector<WakeBodies::SStepBody> &Bodies
   {
     if (pIt)
       pIt->Release();
-    w.Seen.clear();
-    return;
+    return false;
   }
   const float fWater = p3D->GetWaterLevel();
   const Vec3 vCamera = m_Camera.GetPos();
   const float fReach = WAKE_HALF_WINDOW;
-  // The bodies crossing the surface now, each where the last step saw it (none: first seen, it is only stored).
-  std::vector<std::pair<int, SBody>> Now;
-  std::vector<SMove> Moves;
   while (!pIt->IsEnd())
   {
     IEntity *pEntity = pIt->Next();
@@ -235,16 +252,34 @@ void CD3D12Renderer::GatherWakeBodies(std::vector<WakeBodies::SStepBody> &Bodies
     const float pMin[3] = { vLocalMin.x, vLocalMin.y, vLocalMin.z }, pMax[3] = { vLocalMax.x, vLocalMax.y, vLocalMax.z };
     const float pPos[3] = { vPos.x, vPos.y, vPos.z };
     SBody Body;
-    if (!MakeBody(pMin, pMax, pPos, pEntity->GetAngles().z, vMin.z, vMax.z, fWater, bCharacter, Body))
-      continue;
-    const int nId = (int)pEntity->GetId();
-    Now.emplace_back(nId, Body);
-    const auto Before = std::find_if(w.Seen.begin(), w.Seen.end(), [nId](const std::pair<int, SBody> &s) { return s.first == nId; });
+    if (MakeBody(pMin, pMax, pPos, pEntity->GetAngles().z, vMin.z, vMax.z, fWater, bCharacter, Body))
+      Now.emplace_back((int)pEntity->GetId(), Body);
+  }
+  pIt->Release();
+  return true;
+}
+
+void CD3D12Renderer::GatherWakeBodies(std::vector<WakeBodies::SStepBody> &Bodies, float dt)
+{
+  SWakeState &w = m_Wakes;
+  Bodies.clear();
+  // The bodies crossing the surface now, each where the last step saw it (none: first seen, it is only stored).
+  std::vector<std::pair<int, SBody>> Now;
+  if (!GatherWaterBodies(Now))
+  {
+    w.Seen.clear();
+    return;
+  }
+  std::vector<SMove> Moves;
+  for (const auto &[nId, Body] : Now)
+  {
+    const int nBody = nId;
+    const auto Before = std::find_if(w.Seen.begin(), w.Seen.end(), [nBody](const std::pair<int, SBody> &s) { return s.first == nBody; });
     if (Before != w.Seen.end())
       Moves.push_back({ nId, Before->second, Body });
   }
-  pIt->Release();
   w.Seen = std::move(Now);
+  const Vec3 vCamera = m_Camera.GetPos();
   for (const SMove &m : Choose(std::move(Moves), vCamera.x, vCamera.y, XR_WAKE_BODIES))
   {
     SStepBody b;
@@ -357,6 +392,15 @@ void CD3D12Renderer::UpdateWakes(std::span<const SRenderItem> Items)
     m_pDevice->Transition(pFoam, SRV_STATE, UAV_STATE);
     m_pDevice->Transition(pView, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, UAV_STATE);
     m_pCompute->Dispatch(pList, eD3D12K_WakeView, CB.nGPU, Table(VIEW_TABLE + f, false), Table(VIEW_TABLE + f, true), N / 16, N / 16, 1);
+    // The heights for the ocean's grid (d3d12_WaterGeometry; OceanGrid.cpp), of the window as the view sees it.
+    if (CV_d3d12_WaterGeometry > 0)
+    {
+      ID3D12Resource *pHeights = w.pHeights->m_pResource;
+      m_pDevice->Transition(pHeights, SRV_STATE, UAV_STATE);
+      m_pCompute->Dispatch(pList, eD3D12K_WakeHeight, CB.nGPU, Table(HEIGHT_TABLE, false), Table(HEIGHT_TABLE, true), N / 16, N / 16, 1);
+      m_pDevice->Transition(pHeights, UAV_STATE, SRV_STATE);
+      w.nHeightsFrame = m_nFrames;
+    }
     m_pDevice->Transition(pState, SRV_STATE, UAV_STATE);
     m_pDevice->Transition(pFoam, UAV_STATE, SRV_STATE);
     m_pDevice->Transition(pView, UAV_STATE, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
@@ -400,7 +444,7 @@ void CD3D12Renderer::ReleaseWakes()
   SWakeState &w = m_Wakes;
   if (m_pUpload)
   {
-    for (CD3D12Texture *pTex : { w.pState, w.pRows, w.pColumns, w.pFoam[0], w.pFoam[1], w.pView })
+    for (CD3D12Texture *pTex : { w.pState, w.pRows, w.pColumns, w.pFoam[0], w.pFoam[1], w.pView, w.pHeights })
       m_pUpload->ReleaseTexture(pTex);
   }
   if (m_pDescriptors && w.nTables >= 0)

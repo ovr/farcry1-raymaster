@@ -114,7 +114,9 @@ struct SPipelineKey
                           //!< blended; DrawGeometry sets it
   uint8 nSamples;         //!< nTarget 0 with MSAA's targets bound (CD3D12Device::BeginMsaa): their samples, 2, 4 or 8;
                           //!< 0 one; DrawGeometry sets it
-  uint8 nUnused[3];       //!< 0: the key has no padding (it is hashed and compared as bytes)
+  uint8 bWaterDeferred;   //!< the water program over the whole view where the ocean's grid's depth pass left the waves
+                          //!< (XR_WATER_DEFERRED, OceanGrid.cpp's DrawOceanGrid): its own vertex and pixel shaders
+  uint8 nUnused[2];       //!< 0: the key has no padding (it is hashed and compared as bytes)
 };
 
 //! SPipelineKey::nColorFormat.

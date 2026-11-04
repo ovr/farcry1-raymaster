@@ -30,6 +30,9 @@
 #include "WaterVolume.hlsli"
 #include "OceanFFT.hlsli"
 #include "Wake.hlsli"
+// The ocean's grid's table of the game's disc (GridDiscAlpha): the input's first words (CSGridDisc).
+#define GRID_DISC_WORD(i) asfloat(g_TestIn[(i) >> 2][(i) & 3])
+#include "OceanGrid.hlsli"
 
 //! The FXAA tests' picture (Fxaa.hlsli): g_Test.nTest.y x g_Test.nTest.z pixels, g_TestIn[y * width + x] the rgba of
 //! pixel (x, y) as floats, clamped to the picture as AntiAlias.hlsl clamps its loads.
@@ -531,4 +534,36 @@ void CSWakeShape(uint i : SV_DispatchThreadID)
   const uint t = (uint)a.z;
   const int c = (int)a.w;
   TestOut(i, float4(WakeShape(a.xy, vPose, vShape), WakeDepth(a.xy, vPose, vShape), (float)WakeCell(t, c), WakeOffset(t, c)));
+}
+
+//! The ocean's grid (OceanGrid.hlsli) of g_TestIn[4i] (the radius r, a texel's size, the height h, the depth under the
+//! level, all m), g_TestIn[4i + 1] a body's pose, g_TestIn[4i + 2] (its half sides xy, the point P zw) and
+//! g_TestIn[4i + 3] (the camera's height over the level; the height of a scene behind, the surface's in front of it, the
+//! level, all m): out[2i] GridSpacing(r), GridLod of it and the texel, GridShore, GridBodyShare at P; out[2i + 1]
+//! GridCameraShare, GridCameraCap of h, GridFarShare, GridHiddenShare.
+[numthreads(64, 1, 1)]
+void CSGrid(uint i : SV_DispatchThreadID)
+{
+  if (i >= g_Test.nTest.x)
+    return;
+  const float4 a = TestIn(4 * i), vPose = TestIn(4 * i + 1), b = TestIn(4 * i + 2), e = TestIn(4 * i + 3);
+  const float fSpacing = GridSpacing(a.x);
+  TestOut(2 * i, float4(fSpacing, GridLod(fSpacing, a.y), GridShore(a.z, a.w), GridBodyShare(b.zw, vPose, float4(b.xy, 0, 0))));
+  TestOut(2 * i + 1, float4(GridCameraShare(a.x, e.x), GridCameraCap(a.z, a.x, e.x), GridFarShare(a.x), GridHiddenShare(e.y, e.z, e.w)));
+}
+
+//! GridDiscAlpha (OceanGrid.hlsli) at the points g_TestIn[g_Test.nTest.z + i].xy (m from the disc's centre) of the
+//! disc of g_Test.nTest.y rings whose table (OceanGrid::DiscTable) is the input's first words, then g_Test.nTest.w
+//! rings of the grid (OceanGrid::FrameRings): out[i].x; yz GridRing of the ring g_TestIn[g_Test.nTest.z + i].z; w with
+//! g_Test.vTest.x (its rows a doubling, OceanGrid::AlphaScale) GridDiscAlphaTable of the table (OceanGrid::AlphaTable)
+//! from the word g_Test.vTest.y.
+[numthreads(64, 1, 1)]
+void CSGridDisc(uint i : SV_DispatchThreadID)
+{
+  if (i >= g_Test.nTest.x)
+    return;
+  const float4 a = TestIn(g_Test.nTest.z + i);
+  const float2 vRing = g_Test.nTest.w > 0 ? GridRing((uint)a.z, g_Test.nTest.y * (1 + XR_GRID_DISC_SEGMENTS), g_Test.nTest.w) : 0;
+  const float fTable = g_Test.vTest.x > 0 ? GridDiscAlphaTable(a.xy, (uint)g_Test.vTest.y, g_Test.vTest.x) : 0;
+  TestOut(i, float4(GridDiscAlpha(a.xy, g_Test.nTest.y), vRing, fTable));
 }

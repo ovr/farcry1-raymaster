@@ -437,6 +437,26 @@ struct SOceanConstants
 #define XR_WAKE_BODIES      32
 #define XR_WAKE_MIPS        4
 
+// The ocean's grid (d3d12_WaterGeometry; OceanGrid.h, OceanGrid.cpp, OceanGrid.hlsli, Water.hlsl): a polar grid around the
+// camera in place of the game's disc of the ocean, its vertices raised to the waves' height: the segments around, the
+// rings' spacing out to where the segments are as wide (then each ring a segment's width further than the one before: the
+// cells square), the radius beyond which nothing is raised (m: the waves less than a pixel high there seen from a few metres
+// over the water), the most bodies the ocean's waves fade under.
+#define XR_GRID_SEGMENTS    512
+#define XR_GRID_SPACING     0.125
+#define XR_GRID_DISPLACED   500.0
+#define XR_GRID_BODIES      16
+// The least rise on the screen (pixels) of a ring's spacing far off where the waves face the camera (OceanGrid::FrameRings).
+#define XR_GRID_PIXELS      4.0
+// The game's disc the grid takes the vertex alpha of (OceanGrid::ReadDisc, Water.hlsl's GridDiscAlpha): the segments of
+// its rings (10 degrees each), the most rings.
+#define XR_GRID_DISC_SEGMENTS 36
+#define XR_GRID_DISC_RINGS  32
+// The frame's table of the disc's alpha by radius for the deferred ocean (OceanGrid::AlphaTable, OceanGrid.hlsli's
+// GridDiscAlphaTable): its rows, the radius (m) where they go from as many a metre to as many a doubling.
+#define XR_GRID_ALPHA_ROWS  256
+#define XR_GRID_ALPHA_R0    0.5
+
 //! b0 of the wakes' kernels (Wake.hlsl, Wake.cpp). A cell of the world (x / XR_WAKE_CELL, floored) is the window's texel
 //! of its index modulo XR_WAKE_SIZE (the window wraps: as the camera moves, the cells it leaves are those it comes to).
 struct SWakeConstants

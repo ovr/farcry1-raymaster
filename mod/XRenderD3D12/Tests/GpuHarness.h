@@ -121,10 +121,11 @@ namespace XrTest
     std::vector<float> Caustics[XR_CAUSTICS_MIPS];
   };
 
-  //! The wakes' kernels (Shaders/Wake.hlsl).
+  //! The wakes' kernels (Shaders/Wake.hlsl); Height (the ocean's grid's heights after each view) may be left out.
   struct SWakeKernels
   {
     SBytecode Rows, Columns, RowsInverse, View;
+    SBytecode Height{};
   };
   //! A frame of RunWake: its steps' constants (each the three kernels of a step), then its view's.
   struct SWakeFrame
@@ -133,12 +134,14 @@ namespace XrTest
     SWakeConstants View = {};
   };
   //! What RunWake leaves: the window (XR_WAKE_SIZE x XR_WAKE_SIZE RG32F texels, row after row: the height, the filtered
-  //! potential), the last view's foam (R32F) and the view's XR_WAKE_MIPS levels (RGBA16F texels, as floats).
+  //! potential), the last view's foam (R32F) and the view's XR_WAKE_MIPS levels (RGBA16F texels, as floats); with the
+  //! Height kernel the heights' levels (R16F, as floats).
   struct SWakeOutput
   {
     std::vector<float> State;
     std::vector<float> Foam;
     std::vector<float> View[XR_WAKE_MIPS];
+    std::vector<float> Heights[XR_WAKE_MIPS];
   };
 
   //! What a run binds; the output is nOut uint4 items, zeroed before the kernel runs.

@@ -251,6 +251,7 @@ bool CD3D12Renderer::MakeOcean(float fWind)
   m_pDescriptors->WriteSRV(o.nTables, o.pH0->m_pResource, nullptr);
   o.fWind = fWind;
   o.fSlopeRMS = (float)Sea.SlopeRMS();
+  o.fSlopeRMS0 = (float)std::sqrt((Sea.Cascades[0].fSlopeVarX + Sea.Cascades[0].fSlopeVarY) / 2);
   o.fFineVar = (float)Sea.FineVar();
   for (int c = 0; c < XR_OCEAN_CASCADES; c++)
   {
