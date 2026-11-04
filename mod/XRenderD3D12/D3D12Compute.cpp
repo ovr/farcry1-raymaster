@@ -75,6 +75,10 @@
 #include "TaaDilate_CS.h"
 #include "TaaResolve_CS.h"
 #include "TaaSharpen_CS.h"
+#include "OceanRows_CS.h"
+#include "OceanColumns_CS.h"
+#include "OceanWaves_CS.h"
+#include "OceanMips_CS.h"
 #if XRENDERD3D12_NRD
 #include "PathNrdPack_CS.h"
 #include "PathNrdResolve_CS.h"
@@ -171,6 +175,10 @@ const SKernel s_Kernels[eD3D12K_Num] =
   { "TAA motion", g_TaaDilate_CS, sizeof(g_TaaDilate_CS) },
   { "TAA resolve", g_TaaResolve_CS, sizeof(g_TaaResolve_CS) },
   { "TAA sharpening", g_TaaSharpen_CS, sizeof(g_TaaSharpen_CS) },
+  { "ocean (rows)", g_OceanRows_CS, sizeof(g_OceanRows_CS) },
+  { "ocean (columns)", g_OceanColumns_CS, sizeof(g_OceanColumns_CS) },
+  { "ocean (waves)", g_OceanWaves_CS, sizeof(g_OceanWaves_CS) },
+  { "ocean (mip levels)", g_OceanMips_CS, sizeof(g_OceanMips_CS) },
 };
 static_assert(sizeof(s_Kernels) / sizeof(s_Kernels[0]) == eD3D12K_Num, "a kernel for each ED3D12Kernel");
 

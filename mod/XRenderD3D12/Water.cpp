@@ -944,6 +944,11 @@ bool CD3D12Renderer::SetupWaterDraw(SPipelineKey &Key, SDrawConstants &dc, const
   dc.nTex5 = GetWaveTexture();
   Set4(dc.vSpecular, bGlint ? CV_d3d12_WaterGlint : 0.0f, std::max(CV_d3d12_WaterGlintRoughness, 1e-5f),
        IsHdrTarget() ? std::max(CV_d3d12_HDRSun, 1.0f) : 1.0f, 1);
+  // The FFT ocean's waves (OceanFFT.cpp) in place of the wave texture: their slopes in metres per
+  // metre, the bump amounts a factor of them.
+  dc.nShadowTex[2] = 0;
+  Set4(dc.vAddColor, 0, 0, 0, 0);
+  const bool bOceanFFT = SetOceanConstants(dc, dc.vParams0[0]);
 
   // The sky box the scene's sky drew (as it drew it).
   dc.nTex2 = dc.nTex3 = dc.nTex4 = D3D12_SRV_WHITE;
@@ -971,7 +976,7 @@ bool CD3D12Renderer::SetupWaterDraw(SPipelineKey &Key, SDrawConstants &dc, const
   }
   // How much the ripple finer than a pixel blurs the reflection (and turns the fresnel term); the sky
   // box's turn (the level's sky box angle, DrawSkyItem).
-  Set4(dc.vTexGenU, std::max(CV_d3d12_WaterReflectionBlur, 0.0f), m_fSceneSkyTurn[0], m_fSceneSkyTurn[1], 0);
+  Set4(dc.vTexGenU, std::max(CV_d3d12_WaterReflectionBlur, 0.0f), m_fSceneSkyTurn[0], m_fSceneSkyTurn[1], bOceanFFT ? 1.0f : 0.0f);
   // The reflection by rays, with this frame's scene for them.
   if (CV_d3d12_RTReflections > 0 && !m_bEnvCubePass && m_pRayScene && m_pRayScene->GetTLAS())
   {

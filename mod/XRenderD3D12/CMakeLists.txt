@@ -33,6 +33,8 @@ set(XRENDERD3D12_SOURCES
     Draw.cpp
     Draw3D.cpp
     Water.cpp
+    OceanFFT.cpp
+    OceanSpectrum.h
     EnvCubes.cpp
     Mirrors.cpp
     TemplateFx.cpp

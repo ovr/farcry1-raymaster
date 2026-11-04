@@ -581,6 +581,8 @@ void CScene::EndEf3D(int nFlags)
     g_pRenderer->BakeSprites();
     g_pRenderer->GpuSection("shadow maps");
     g_pRenderer->UpdateShadowMaps();
+    // The ocean's waves at the frame's time first: the cubes and the reflection draw them too.
+    g_pRenderer->UpdateOcean(s.Items);
     g_pRenderer->GpuSection("environment cubes");
     g_pRenderer->UpdateEnvCubes(s.Items);
     g_pRenderer->GpuSection("water reflection");

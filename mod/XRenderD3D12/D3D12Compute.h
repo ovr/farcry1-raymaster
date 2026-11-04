@@ -108,6 +108,10 @@ enum ED3D12Kernel
   eD3D12K_TaaDilate,                //!< TAA: each pixel's motion, the nearest of its 3 x 3's (Shaders/Taa.hlsl; d3d12_AA taa)
   eD3D12K_TaaResolve,               //!< the frame blended into its history
   eD3D12K_TaaSharpen,               //!< the history sharpened into the picture
+  eD3D12K_OceanRows,                //!< the FFT ocean: the sea's spectra at the frame's time, their inverse FFTs along x (Shaders/OceanFFT.hlsl)
+  eD3D12K_OceanColumns,             //!< their inverse FFTs along y, the fields
+  eD3D12K_OceanWaves,               //!< the waves' texels from the fields, their mip levels 1 to 4
+  eD3D12K_OceanMips,                //!< their mip levels 4 to 8
   eD3D12K_Num
 };
 

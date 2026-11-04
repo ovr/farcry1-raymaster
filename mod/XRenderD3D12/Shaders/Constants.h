@@ -375,6 +375,27 @@ struct SDepthTileConstants
   XR_FLOAT4(vSize);               //!< x 1 / the copy's width, y 1 / its height (texels), zw the size of level 5
 };
 
+// The FFT ocean (OceanFFT.cpp, OceanFFT.hlsl, Water.hlsl; OceanSpectrum.h on the CPU): the texels a side of a cascade,
+// the cascades, their tiles (metres a side, OceanSpectrum::TILE), the levels of the waves' mip chain (down to 1 x 1) and
+// the texels a side of its level 4 (the last the waves' kernel makes).
+#define XR_OCEAN_SIZE       256
+#define XR_OCEAN_CASCADES   3
+#define XR_OCEAN_TILE0      250.0
+#define XR_OCEAN_TILE1      40.5
+#define XR_OCEAN_TILE2      6.9
+#define XR_OCEAN_MIPS       9
+#define XR_OCEAN_LEVEL4     16
+
+//! b0 of the FFT ocean's kernels (OceanFFT.hlsl, OceanFFT.cpp).
+struct SOceanConstants
+{
+  XR_FLOAT4(vParams);             //!< x the time's fraction of the sea's period (OceanSpectrum::PERIOD), y the horizontal
+                                  //!< displacement's factor (d3d12_WaterChop; 0: none), z the least determinant of its
+                                  //!< Jacobian (where a crest would fold over)
+  XR_FLOAT4_ARRAY(vCascades, XR_OCEAN_CASCADES);  //!< each cascade's: x its tile (m), y the weight of its height
+                                  //!< (OceanSpectrum::SSea::HeightWeight), z its texel (m)
+};
+
 //! b0 of a level of the bloom from one twice its size (Bloom.hlsl, Hdr.cpp).
 struct SBloomConstants
 {
