@@ -1092,6 +1092,9 @@ public:
     int nTileWidth = 0, nTileHeight = 0;    //!< level 0's size
   };
   void FreeSceneCopy(SSceneCopy &Copy);
+  //! The textures of a copy of the main view's target and its depth (Copy's, made again for a new size or format) and their
+  //! SRVs; false: none.
+  bool EnsureSceneCopy(SSceneCopy &Copy);
   //! The depth tiles of the copy made last (whole, not m_bSceneCopied's rectangle): level 0 the least
   //! depth of each XR_DEPTH_TILE x XR_DEPTH_TILE pixels of the depth copy, each next level the least
   //! of 2 x 2 texels of the one before, made in the copy's pTiles by two compute kernels
@@ -1252,6 +1255,29 @@ public:
     std::vector<std::pair<int, WakeBodies::SBody>> Bodies;  //!< the bodies in the water without the wakes (theirs with them)
   };
   SOceanGridState m_OceanGrid;
+
+  //////////////////////////////////////////////////////////////////////////
+  // Underwater.cpp: the view from under the ocean's surface (d3d12_WaterUnder)
+
+  //! Once a frame before the main view's scenes: m_bUnderwater, the camera under the ocean's surface with the ocean in its
+  //! list (Items) and the light in its water on (d3d12_WaterVolume): the main view's lists then leave out the ocean's fog
+  //! volume's fog passes, the ocean from below gives its surface's light alone, and the blended list draws the light in the
+  //! water over the scene after the water surfaces (DrawUnderwater); the caustics made for it.
+  void UpdateUnderwater(std::span<const SRenderItem> Items);
+  //! m_bUnderwater in the main view's lists (not in the scenes it shows: the reflection, the cubes, the shadow maps).
+  bool UnderwaterOn() const;
+  //! The blended list's pass after the water surfaces (UnderwaterOn): the scene as drawn so far copied (m_UnderCopy; the
+  //! copy of the list's start stays the flares'), then a triangle over the view of Underwater.hlsl; m_bUnderDrawn.
+  void DrawUnderwater();
+  //! A draw of the blended list after DrawUnderwater (m_bUnderDrawn) with the blend nState: the light in the water over its
+  //! colour (SDrawConstants::vUnder); none for a blend that multiplies the frame.
+  void SetUnderwaterFog(SDrawConstants &dc, uint32 nState) const;
+  //! How far over the level the ocean's surface may be (the grid's crests), for the view's path through the water.
+  float UnderCap() const;
+  void ReleaseUnderwater();
+  bool m_bUnderwater = false;
+  bool m_bUnderDrawn = false;     //!< the blended list being drawn has drawn the light in the water (DrawItems resets it)
+  SSceneCopy m_UnderCopy;
 
   //////////////////////////////////////////////////////////////////////////
   // EnvCubes.cpp: the cubes of the scene around the objects of TemplReflEnvCM (EEnvMap::Auto)
@@ -2068,6 +2094,7 @@ public:
   int CV_d3d12_WaterWakes = 1;        //!< the wakes of the bodies moving through the ocean, their foam (Wake.cpp; 0: none, the frames before)
   int CV_d3d12_WaterGeometry = 1;     //!< the ocean's grid raised to the waves in place of the game's flat disc (OceanGrid.cpp; 0: the disc, the frames before)
   int CV_d3d12_WaterDeferred = 1;     //!< the grid's depth first, then its water shaded once a pixel over the view (DrawOceanGrid; 0: the grid shaded as drawn)
+  int CV_d3d12_WaterUnder = 1;        //!< the view from under the ocean's surface: the light in its water, the sun's shafts (Underwater.cpp; 0: the fog volume's fog, the frames before)
   int CV_d3d12_GpuTimes = 0;          //!< N: the GPU time of the frame's sections to the log every N frames
   int CV_d3d12_FrameLog = 0;          //!< 1: a line per frame to XRenderD3D12_frames.txt (LogFrame), 2 with the engine's profilers
   int CV_d3d12_CpuSamples = 0;        //!< N: the render thread's stack every N microseconds, to XRenderD3D12_samples.txt at 0 (CpuSampler)

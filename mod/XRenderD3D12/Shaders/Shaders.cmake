@@ -175,6 +175,9 @@ xrender_d3d12_shader(RayDebug_PS RayDebug.hlsl ps_6_5 PSMain)
 # The path tracer's light into the picture (eD3D12P_PathComposite, d3d12_PathTracing): no rays.
 xrender_d3d12_shader(PathComposite_VS PathComposite.hlsl vs_6_0 VSMain)
 xrender_d3d12_shader(PathComposite_PS PathComposite.hlsl ps_6_0 PSMain)
+# The view from under the ocean's surface (eD3D12P_Underwater, d3d12_WaterUnder, Underwater.cpp).
+xrender_d3d12_shader(Underwater_VS Underwater.hlsl vs_6_0 VSMain)
+xrender_d3d12_shader(Underwater_PS Underwater.hlsl ps_6_0 PSMain)
 
 # The compute kernels (D3D12Compute.h, ED3D12Kernel): Intel XeGTAO's passes (XeGtao.hlsl, one per
 # compile), the ambient occlusion's resolve, the HDR meter's first level, the bloom's levels, the

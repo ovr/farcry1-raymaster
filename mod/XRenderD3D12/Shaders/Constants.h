@@ -266,6 +266,12 @@ struct SDrawConstants
   XR_FLOAT4(vHdrCore);            //!< DF2_HDR_CORE: x the factor of the light in its core, y 1: the shape times tex0 a (a SRCALPHA blend)
   XR_FLOAT4(vEdgeFade);           //!< x 1: the colour per vertex times min((2 |N.V|)^4, 1), N the vertex normal, V the view direction: planes
                                   //!< fading out seen edge on (TemplMuzzleFlash_Auto, d3d12_MuzzleFlashAuto)
+  XR_FLOAT4(vUnderColor);         //!< vUnder.w > 0: rgb the ocean's fog volume's colour (the game's), w its density
+  XR_FLOAT4(vUnder);              //!< under the ocean's surface, drawn after the light in its water (Underwater.cpp): the light in the water over the
+                                  //!< colour after the fog (Underwater.hlsli's UnderFog): x the level, y how far over it the surface may be, z the
+                                  //!< sun's share of the light the water scatters; w 0 none, 1 the colour attenuated and that light added (a blend
+                                  //!< by the source's alpha or none), 2 attenuated alone (an added light); plus 10, 20, 30 for d3d12_WaterDebug
+                                  //!< 31-33: the view's term (the light, the sun's share 0.5, T)
 };
 
 //! b0 of the ambient occlusion's resolve (AoResolve.hlsl, AmbientOcclusion.cpp).

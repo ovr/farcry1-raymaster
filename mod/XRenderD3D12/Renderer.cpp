@@ -168,7 +168,10 @@ void CD3D12Renderer::RegisterVariables()
                      "(from below the share of Snell's window), 26 the share of the sun's light left in the light it scatters; "
                      "with d3d12_WaterWakes: 27 the wakes' slopes, 28 their foam; with d3d12_WaterGeometry: 29 the grid's height "
                      "(red up and blue down, 0.3 m from grey; green 3 cm), 30 its shares of the waves (red the depth's, green the "
-                     "bodies', blue the camera's and the distance's)");
+                     "bodies', blue the camera's and the distance's); under the ocean with d3d12_WaterUnder: 31 the light its "
+                     "water scatters towards the camera, 32 the sun's light in it (grey its mean: black its shadow, brighter "
+                     "the caustics' shafts), 33 the share of the scene behind left (the other modes there without the water's "
+                     "light)");
   iConsole->Register("d3d12_Caustics", &CV_d3d12_Caustics, 1, VF_DUMPTODISK, "Caustics on the terrain under the ocean; 0 off");
   // Not saved (d3d12_WaterSunGlint before it was, at 0).
   iConsole->Register("d3d12_WaterGlint", &CV_d3d12_WaterGlint, 1.0f, 0,
@@ -222,6 +225,11 @@ void CD3D12Renderer::RegisterVariables()
                      "With d3d12_WaterGeometry: the ocean's grid drawn into the depth alone, then its water shaded once a pixel "
                      "over the view where it is (its small triangles shaded the pixels along their edges twice); 0: the grid "
                      "shaded as it is drawn");
+  iConsole->Register("d3d12_WaterUnder", &CV_d3d12_WaterUnder, 1, 0,
+                     "With d3d12_WaterVolume, the camera under the ocean's surface: the light in its water over the scene (each "
+                     "colour channel attenuated along the view and the light's way down, the light the water scatters fading "
+                     "with the depth), the sun's shafts through the waves (its shadow and the FFT ocean's caustics along the "
+                     "view), the glow round the sun (sea water scatters forwards); 0: the fog volume's fog, the frames before");
   iConsole->Register("d3d12_GpuTimes", &CV_d3d12_GpuTimes, 0, 0,
                      "N: every N frames, the average GPU time of the frame's sections (shadow maps, water reflection, opaque, "
                      "water, blended, ...) and the time between frames to the console and XRenderD3D12_gpu.txt; 0 off");
@@ -1017,6 +1025,7 @@ void CD3D12Renderer::Release()
   ReleaseOcean();
   ReleaseWakes();
   ReleaseOceanGrid();
+  ReleaseUnderwater();
   ReleaseMirror();
   ReleaseEnvCubes();
   ReleaseSprites();

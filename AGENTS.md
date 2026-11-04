@@ -255,7 +255,8 @@ instructions and is not committed (git-ignored). The references of the modules a
   in its water, Snell's window from below, `d3d12_WaterVolume`, `Shaders/WaterVolume.hlsli`; the wakes of what moves
   through it, `d3d12_WaterWakes`, `Wake.cpp`, `WakeBodies.h`, `Shaders/Wake.hlsl`; the waves' geometry, a grid in
   place of the game's disc raised to their height, `d3d12_WaterGeometry`, `OceanGrid.cpp`, `OceanGrid.h`,
-  `Shaders/OceanGrid.hlsli`); the
+  `Shaders/OceanGrid.hlsli`; the view from under its surface, the light in the water from inside, the sun's shafts
+  and glow, `d3d12_WaterUnder`, `Underwater.cpp`, `Shaders/Underwater.hlsl`); the
   templates with shaders of their own
   (`TemplateFx.cpp`, Volcano's lava `LavaVolume`) and the fog of what is added; the far vegetation
   sprites (their pictures blended, `d3d12_SpriteBlend`, `FarSpriteAngles.h`) and the terrain's detail layers; the video options' render modes over the scene

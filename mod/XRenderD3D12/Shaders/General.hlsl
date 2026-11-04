@@ -240,6 +240,7 @@
 #include "Common.hlsli"
 #include "LightmapLight.hlsli"
 #include "WaterCaustics.hlsli"
+#include "Underwater.hlsli"
 #if defined(XR_RAY_REFL) || defined(XR_RAY_LIGHT)
 #include "RayShade.hlsli"
 #endif
@@ -1492,6 +1493,28 @@ float4 ShadePixel(SVertexOutput In)
 #ifdef XR_PT
     s_fPTFog = SceneFog(In.vWorldPos);
 #endif
+  }
+  // Under the ocean's surface, a blended object drawn after the light in its water (Underwater.cpp): that light over it, its
+  // colour attenuated along its path through the water and the light's way down to it, the light the water scatters in front
+  // of it added (by its alpha in the blend: over the water behind, already so, exactly).
+  [branch]
+  if (g_Draw.vUnder.w > 0)
+  {
+    const float3 vToPixel = In.vWorldPos - g_Frame.vCameraPos.xyz;
+    const float fDist = length(vToPixel);
+    const float3 vDeep = float3(HdrDecode(g_Draw.vUnderColor.r), HdrDecode(g_Draw.vUnderColor.g), HdrDecode(g_Draw.vUnderColor.b));
+    const float3 c = VolumeAttenuation(vDeep, g_Draw.vUnderColor.w);
+    float3 T;
+    const float3 vScatter = UnderFog(vDeep, c, max(g_Draw.vUnder.x - g_Frame.vCameraPos.z, 0), vToPixel / max(fDist, 1e-4), fDist,
+                                     max(g_Draw.vUnder.x - In.vWorldPos.z, 0), g_Draw.vUnder.y, g_Frame.vSunDir.xyz, g_Draw.vUnder.z, T);
+    // The mode, and d3d12_WaterDebug 31-33 by tens (the view's terms: an added light none).
+    const bool bOver = fmod(g_Draw.vUnder.w, 10) < 1.5;
+    const float fDebug = floor(g_Draw.vUnder.w / 10);
+    const float3 v = fDebug == 1 ? (bOver ? vScatter : 0)
+                     : fDebug == 2 ? (bOver ? float3(1, 1, 1) * HdrDecode(0.5) : 0)
+                     : fDebug == 3 ? (bOver ? float3(HdrDecode(T.r), HdrDecode(T.g), HdrDecode(T.b)) : 0)
+                     : float3(HdrDecode(vColor.r), HdrDecode(vColor.g), HdrDecode(vColor.b)) * T + (bOver ? vScatter : 0);
+    vColor.rgb = float3(HdrEncode(v.r), HdrEncode(v.g), HdrEncode(v.b));
   }
 #ifdef XR_AMBIENT
   // A pass that multiplies the picture multiplies A as much.

@@ -40,6 +40,7 @@ set(XRENDERD3D12_SOURCES
     WakeBodies.h
     OceanGrid.cpp
     OceanGrid.h
+    Underwater.cpp
     EnvCubes.cpp
     Mirrors.cpp
     TemplateFx.cpp
