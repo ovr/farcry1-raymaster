@@ -30,14 +30,17 @@
 #include "AmbientOcclusion.h"
 #include "Shaders/Constants.h"
 #include "WakeBodies.h"
+#include <optional>
 
 struct SRaySunConstants;
+struct SGeomDraw;
 
 struct SDisplayInfo;
 enum class EDisplayOutput;
 
 class CD3D12Device;
 class CD3D12Upload;
+class CD3D12Buffer;
 class CD3D12Texture;
 class CD3D12Descriptors;
 class CD3D12Pipeline;
@@ -1167,6 +1170,7 @@ public:
     bool bFailed = false;                   //!< no targets (until d3d12_WaterFFT 0)
     float fWind = 0;                        //!< the wind of the sea in pH0
     float fSlopeRMS = 0;                    //!< its slopes' RMS along an axis
+    float fSlopeRMS0 = 0;                   //!< the long cascade's (unscaled)
     float fFineVar = 0;                     //!< the variance of its ripple finer than the short cascade (both axes, unscaled)
     float fHeightWeight[XR_OCEAN_CASCADES] = {};  //!< each cascade's height's weight (SSea::HeightWeight)
     float fDivRMS[XR_OCEAN_CASCADES] = {};  //!< the RMS of each cascade's displacement's divergence (SSea::JacobianSigma at 1)
@@ -1187,6 +1191,9 @@ public:
   bool EnsureWakeTargets();
   //! The bodies of the frame that moved since the last step (m_Wakes.Seen the frame's; dt the time since it).
   void GatherWakeBodies(std::vector<WakeBodies::SStepBody> &Bodies, float dt);
+  //! The bodies crossing the ocean's surface over water within WAKE_HALF_WINDOW of the camera, by entity (false: no
+  //! engine to ask).
+  bool GatherWaterBodies(std::vector<std::pair<int, WakeBodies::SBody>> &Now) const;
   //! The water's constants of the wakes (SetupWaterDraw: vLightPos[0..1]; bFoam their foam): false (and none) without them.
   bool SetWakeConstants(SDrawConstants &dc, bool bFoam) const;
   void ReleaseWakes();
@@ -1197,6 +1204,8 @@ public:
     CD3D12Texture *pColumns = nullptr;      //!< and along y, turned over the step and transformed back (RG32F)
     CD3D12Texture *pFoam[2] = {};           //!< the foam (R32F), the frame's and the one before's taking turns (nFoam the frame's)
     CD3D12Texture *pView = nullptr;         //!< the view (RGBA16F, XR_WAKE_MIPS levels: the slopes, their square, the foam; its SRV the water's)
+    CD3D12Texture *pHeights = nullptr;      //!< the heights for the ocean's grid (R16F, XR_WAKE_MIPS levels; its SRV the water's vertex program's)
+    int nHeightsFrame = -1;                 //!< the frame they were last made (with d3d12_WaterGeometry), -1 none since the last clear
     int nFoam = 0;
     int nTables = -1;                       //!< the kernels' descriptor tables
     int nFrame = -1;                        //!< the frame of the last step, -1 none yet
@@ -1210,6 +1219,39 @@ public:
     std::vector<WakeBodies::SStepBody> Bodies;            //!< the frame's that make waves
   };
   SWakeState m_Wakes;
+
+  //////////////////////////////////////////////////////////////////////////
+  // OceanGrid.cpp: the ocean's grid in place of the game's disc (d3d12_WaterGeometry)
+
+  //! The ocean's grid in place of the game's disc of the ocean (DrawLeafItem, after SetupWaterDraw): its constants in dc
+  //! (vLightSpec, the bodies in vLightColor and vLightAtten) and its transform; empty (the disc drawn as it is) where it
+  //! does not apply (d3d12_WaterGeometry 0, no FFT ocean, an environment cube, a water volume, a disc not as the game's).
+  std::optional<SGeomDraw> SetupOceanGrid(SDrawConstants &dc, const SRenderItem &it, CLeafBuffer *pLB);
+  bool EnsureOceanGrid();
+  //! The terrain's heights for the grid's depth under the level (made for each level).
+  bool EnsureGridTerrain();
+  //! The grid (Geom, SetupOceanGrid's) of the water's draw: with d3d12_WaterDeferred its depth alone, then the water
+  //! program over the view where it is in front of the scene's copy (Water.hlsl's PSDeferred), each pixel shaded once;
+  //! else (MSAA, its debug views 29 and 30, no view of the depth buffer) the grid shaded as it is drawn.
+  void DrawOceanGrid(const SPipelineKey &Key, const SDrawConstants &dc, const SGeomDraw &Geom);
+  void ReleaseOceanGrid();
+  struct SOceanGridState
+  {
+    CD3D12Buffer *pVB = nullptr;            //!< OceanGrid::Build's vertices (VERTEX_FORMAT_P3F_COL4UB), then the 3 of a triangle over the view
+    CD3D12Buffer *pIB = nullptr;            //!< and its triangles (R32_UINT), then that triangle's
+    uint32 nVertices = 0, nIndices = 0;     //!< the grid's
+    ComPtr<ID3D12Resource> pDepth;          //!< the depth buffer nDepthSRV is of (kept: a new one is never at its address)
+    DXGI_FORMAT DepthFormat = DXGI_FORMAT_UNKNOWN;
+    int nDepthSRV = -1;                     //!< the main view's depth buffer in the texture table (PSDeferred)
+    std::vector<float> Rings;               //!< the frame's rings' radii (OceanGrid::FrameRings)
+    CD3D12Texture *pTerrain = nullptr;      //!< the terrain's heights (R32F, a texel a unit of its height map, the texel i at i units)
+    float fTerrainScale = 0, fTerrainOffset = 0;  //!< the world (m) to its uv: x * scale + offset
+    bool bTerrainStale = true;              //!< a level loaded since it was made (PreLoad)
+    bool bFailed = false;                   //!< no grid (until d3d12_WaterGeometry 0)
+    int nBodiesFrame = -1;                  //!< the frame of Bodies
+    std::vector<std::pair<int, WakeBodies::SBody>> Bodies;  //!< the bodies in the water without the wakes (theirs with them)
+  };
+  SOceanGridState m_OceanGrid;
 
   //////////////////////////////////////////////////////////////////////////
   // EnvCubes.cpp: the cubes of the scene around the objects of TemplReflEnvCM (EEnvMap::Auto)
@@ -2024,6 +2066,8 @@ public:
   int CV_d3d12_WaterCaustics = 1;     //!< the caustics on the sea floor of the FFT ocean's waves (0: the static texture, the frames before)
   int CV_d3d12_WaterVolume = 1;       //!< the light in the ocean's water: attenuation by channel, scattering, Snell's window (0: the fog volume's fog, the frames before)
   int CV_d3d12_WaterWakes = 1;        //!< the wakes of the bodies moving through the ocean, their foam (Wake.cpp; 0: none, the frames before)
+  int CV_d3d12_WaterGeometry = 1;     //!< the ocean's grid raised to the waves in place of the game's flat disc (OceanGrid.cpp; 0: the disc, the frames before)
+  int CV_d3d12_WaterDeferred = 1;     //!< the grid's depth first, then its water shaded once a pixel over the view (DrawOceanGrid; 0: the grid shaded as drawn)
   int CV_d3d12_GpuTimes = 0;          //!< N: the GPU time of the frame's sections to the log every N frames
   int CV_d3d12_FrameLog = 0;          //!< 1: a line per frame to XRenderD3D12_frames.txt (LogFrame), 2 with the engine's profilers
   int CV_d3d12_CpuSamples = 0;        //!< N: the render thread's stack every N microseconds, to XRenderD3D12_samples.txt at 0 (CpuSampler)

@@ -38,6 +38,8 @@ set(XRENDERD3D12_SOURCES
     FoamPattern.h
     Wake.cpp
     WakeBodies.h
+    OceanGrid.cpp
+    OceanGrid.h
     EnvCubes.cpp
     Mirrors.cpp
     TemplateFx.cpp

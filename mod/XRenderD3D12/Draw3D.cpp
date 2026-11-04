@@ -433,7 +433,7 @@ void CD3D12Renderer::DrawLeafItem(const SRenderItem &it)
   CLeafBuffer *pLB = pLeaf->m_pBuffer;
   if (!pLB)
     return;
-  const std::optional<SGeomDraw> Geom = Geometry::GetDraw(pLB, pLeaf->m_pChunk);
+  std::optional<SGeomDraw> Geom = Geometry::GetDraw(pLB, pLeaf->m_pChunk);
   if (!Geom)
     return;
   const CCObject *pObj = it.pObj;
@@ -683,12 +683,16 @@ void CD3D12Renderer::DrawLeafItem(const SRenderItem &it)
   if ((dc.nFlags2 & DF2_CUBE_SHADER) && Props.BumpCube())
     Tangents = Geometry::GetTangentStream(pLB);
 
+  // The ocean's grid (SetupOceanGrid): its depth, then the water over the view where it is (DrawOceanGrid).
+  bool bOceanGrid = false;
   auto Draw = [&]()
   {
     if (m_pFrameDump && !m_bDepthPrepass && !m_bRayCaptureWalk)
       DumpDraw(dc, Key, pTex);
     const D3D12_VERTEX_BUFFER_VIEW *pTC1 = TexCoord1 ? &*TexCoord1 : nullptr, *pTangents = Tangents ? &*Tangents : nullptr;
-    if (Geom->IsIndexed())
+    if (bOceanGrid)
+      DrawOceanGrid(Key, dc, *Geom);
+    else if (Geom->IsIndexed())
       DrawGeometry(Key, dc, Geom->Topology, Geom->VB, &Geom->IB, Geom->nNumIndices, Geom->nFirstIndex, Geom->nBaseVertex, pTC1, pTangents, nInstances);
     else
       DrawGeometry(Key, dc, Geom->Topology, Geom->VB, nullptr, Geom->nNumVertices, Geom->nFirstVertex, 0, pTC1, pTangents, nInstances);
@@ -1242,6 +1246,14 @@ void CD3D12Renderer::DrawLeafItem(const SRenderItem &it)
     // Not in its own reflection; in the environment cubes only the ocean (SetupWaterDraw).
     if (m_bReflectionPass || !SetupWaterDraw(Key, dc, it))
       return;
+    // The ocean's grid raised to the waves in place of the game's flat disc (d3d12_WaterGeometry; OceanGrid.cpp).
+    // It writes the depth: the waves' faces hidden behind a nearer crest are not drawn over it.
+    if (std::optional<SGeomDraw> Grid = SetupOceanGrid(dc, it, pLB))
+    {
+      Geom = Grid;
+      Key.nState = GS_DEPTHWRITE;
+      bOceanGrid = true;
+    }
     // The surface stays where it is, though the ocean's ring follows the camera.
     SetStaticMotion(dc);
     pTex = nullptr;

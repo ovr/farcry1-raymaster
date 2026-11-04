@@ -165,7 +165,10 @@ void CD3D12Renderer::RegisterVariables()
                      "20 the height of the waves the crests' light reads (black -2, white 2 of its RMS); with d3d12_WaterFoam: 21 the foam's "
                      "share of the pixel, 22 the whitecaps' amount, 23 the shore's (all three without the beaches' foam strips); "
                      "with d3d12_WaterVolume: 24 the light the ocean's water scatters, 25 the share of the scene behind it left "
-                     "(from below the share of Snell's window), 26 the share of the sun's light left in the light it scatters");
+                     "(from below the share of Snell's window), 26 the share of the sun's light left in the light it scatters; "
+                     "with d3d12_WaterWakes: 27 the wakes' slopes, 28 their foam; with d3d12_WaterGeometry: 29 the grid's height "
+                     "(red up and blue down, 0.3 m from grey; green 3 cm), 30 its shares of the waves (red the depth's, green the "
+                     "bodies', blue the camera's and the distance's)");
   iConsole->Register("d3d12_Caustics", &CV_d3d12_Caustics, 1, VF_DUMPTODISK, "Caustics on the terrain under the ocean; 0 off");
   // Not saved (d3d12_WaterSunGlint before it was, at 0).
   iConsole->Register("d3d12_WaterGlint", &CV_d3d12_WaterGlint, 1.0f, 0,
@@ -211,6 +214,14 @@ void CD3D12Renderer::RegisterVariables()
                      "The waves of what moves through the ocean's surface (boats, swimmers, bodies: their part in the water), "
                      "in a window of 128 m around the camera (deep water's waves, Kelvin's wedge behind a boat, rings round "
                      "a swimmer), the foam of a fast hull and of the waves breaking; 0: none, the frames before");
+  iConsole->Register("d3d12_WaterGeometry", &CV_d3d12_WaterGeometry, 1, 0,
+                     "With d3d12_WaterFFT: the ocean drawn as a fine grid around the camera raised to the waves' height (the "
+                     "FFT ocean's and the wakes'; their crests against the sky and the shore), lower in shallow water, flat "
+                     "under the boats and at a camera at the water; 0: the game's flat disc, the frames before");
+  iConsole->Register("d3d12_WaterDeferred", &CV_d3d12_WaterDeferred, 1, 0,
+                     "With d3d12_WaterGeometry: the ocean's grid drawn into the depth alone, then its water shaded once a pixel "
+                     "over the view where it is (its small triangles shaded the pixels along their edges twice); 0: the grid "
+                     "shaded as it is drawn");
   iConsole->Register("d3d12_GpuTimes", &CV_d3d12_GpuTimes, 0, 0,
                      "N: every N frames, the average GPU time of the frame's sections (shadow maps, water reflection, opaque, "
                      "water, blended, ...) and the time between frames to the console and XRenderD3D12_gpu.txt; 0 off");
@@ -1005,6 +1016,7 @@ void CD3D12Renderer::Release()
   ReleaseWaterReflection();
   ReleaseOcean();
   ReleaseWakes();
+  ReleaseOceanGrid();
   ReleaseMirror();
   ReleaseEnvCubes();
   ReleaseSprites();
@@ -1085,10 +1097,13 @@ void CD3D12Renderer::PreLoad (void)
     m_pRayScene->ClearReflection();
   m_SpritesToBake.clear();
   PurgeSprites();
+  // Its terrain under the ocean's grid (OceanGrid.cpp).
+  m_OceanGrid.bTerrainStale = true;
 }
 
 void CD3D12Renderer::PostLoad (void)
 {
+  m_OceanGrid.bTerrainStale = true;
 }
 
 //////////////////////////////////////////////////////////////////////////

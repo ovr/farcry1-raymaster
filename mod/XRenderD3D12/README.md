@@ -1460,6 +1460,104 @@ and lists theirs (`NamesObjects`).
     window of 512 cells of 25 cm cost 0.03 ms), the water 0.09 ms more with a boat's wake in view
     (Fort's chase 0.84 -> 0.93 ms, with the rays' reflections and sun shadows 1.23 -> 1.39; the frame
     4.27 -> 4.42 ms, 5.53 -> 5.76), nothing where nothing moves (Carrier's water 0.75 ms either way).
+- The waves' geometry (`d3d12_WaterGeometry`, 1; 0 draws the frames before; not saved; `OceanGrid.cpp`,
+  `OceanGrid.h`, `Shaders/OceanGrid.hlsli`): the ocean's surface raised to the waves' height, so that
+  their crests stand against the sky and the shore and their troughs hide what is behind them.
+  - The grid. The game draws the ocean as one disc around the camera at the level (rings of
+    segments 10 degrees wide, 1244 m across on Fort), the terrain hiding it on land. In its place a
+    polar grid of 512 segments around the camera: rings 12.5 cm apart (the wakes' cells) out to
+    10.2 m, where the segments are as wide, then each a segment's width further out (square cells,
+    as wide on the screen at every distance) out to 500 m, then 1.25 times as far each out to 20 km;
+    the vertex program pulls the vertices beyond the game's disc onto its edge, so that the grid
+    covers what the disc did (214,017 vertices, 427,520 triangles, made once).
+  - Rings by the frame (`OceanGrid::FrameRings`). Far off from a low camera those rings are finer on
+    the screen than a pixel, triangles thinner than a pixel that shade their quads for nothing. Each
+    frame the radii are spaced so that a ring's step rises at least 4 pixels on the screen where the
+    waves face the camera: dr >= 4 r^2 / (P (h + 0.4 s r)), P the pixels a radian (the projection's
+    y scale times half the target's height), h the camera's height over the level, s the long
+    cascade's RMS slope as drawn; never closer than the rings above. From 2 m over the water fewer
+    than two thirds of the rings fall within Fort's disc; from 100 m up the rings within 200 m are
+    those above. The vertices' z is their ring; the vertex program reads its radius from a table
+    after the disc's.
+  - Depth. The grid writes the depth buffer, its rings drawn from the camera out: the faces of the
+    waves behind a nearer crest fail the test (drawn later over it, the storm's water cost 0.9 ms
+    more at 4K). What reads the depth after the water (the volumetric light's shafts, the blended
+    list's test) stops at the waves.
+  - Shaded once a pixel (`d3d12_WaterDeferred`, 1; 0 shades the grid as it is drawn; not saved).
+    The grid's cells are some 30 pixels across at 4K, and its triangles shaded the 2 x 2 quads
+    along their edges twice (Carrier's water 0.41 ms more than the flat disc's at 512 segments,
+    0.13 ms at 128). So the grid is drawn into the depth alone, without a pixel shader, and the
+    water's program (`Shaders/Water.hlsl`'s `PSDeferred`) shades a triangle over the view where
+    the depth buffer holds a nearer surface than the scene's copy: the world position from the
+    depth along the pixel's ray (the upscaler's jitter taken off), the disc's alpha from a table
+    made each frame (below), the still surface's motion by the grid's matrices; a quad without the
+    waves does none of it, the pixels of a quad with them that have none are discarded after.
+    The triangle lies at the depth of the farthest water (the disc's edge beyond the camera, 20 m
+    further), the depth test GREATER: the sky and what is further off start none of the program
+    (over them it only found no water: Bunker's sunset, two fifths sky, 0.96 -> 0.84 ms, with the
+    rays 1.50 -> 1.29). The textures' mip levels come from the position's derivatives across the
+    quad: where a quad holds a crest and the water behind it, or the water and what stands in
+    front of it, a level too coarse for single pixels along the edge (the neighbour nearer in
+    depth's derivatives with `SampleGrad` cost 0.06-0.15 ms more). With MSAA's targets and in the
+    debug views 29 and 30 the grid is shaded as drawn. The frames are those of the grid shaded as
+    drawn but for such pixels (at 3840 x 2160 more than 24 levels apart: none of Carrier's frame
+    250, 0.001 % of Fort's chase, along the gun; the storm at 1280 x 720 0.09 %, along the
+    horizon).
+  - The disc's vertex alpha (the game's fade of the water towards the shore and with the distance,
+    which weighs the reflection) is read from its vertices each frame (`OceanGrid::ReadDisc`: its
+    centre, level, rings and each ring's alpha by segment, whatever order its strip gives them in)
+    into a table the vertex program interpolates between, bilinear in the ring and the segment as
+    the disc's triangles are along their edges. The deferred water takes it per pixel from a second
+    table made each frame (`OceanGrid::AlphaTable`): 256 rows of the 36 segments' alphas, the rows
+    a geometric series of 1 + r / 0.5 m (22.6 a doubling out to 1244.5 m: 3 % apart far off, 1.5 cm
+    at the centre), the last at the disc's edge; bilinear between them, two loads (the search among
+    the disc's rings for each pixel cost the water 0.04-0.12 ms at 4K). Where the alpha bends at a
+    ring between two rows it is within a quarter of the slope's change times their spacing.
+  - The height: the FFT ocean's cascades, each at the mip level whose texel is as wide as the grid's
+    spacing there (no wave shorter than two cells: those would crawl over the vertices), and the
+    wakes' (the window's height, a texture of its own with 4 mip levels written after their view).
+    Vertical only: the cascades are already moved onto the world's grid (`OceanFinish`), their
+    height the displaced surface's.
+  - Limits. In shallow water a crest at most 0.39 of the depth under the level above it, a trough
+    as far under it (half McCowan's breaker index; a smooth limit; the depth from the terrain's
+    heights, a texture made for each level), none on the shore, where the terrain hides the grid as
+    it hid the disc. None of the ocean's waves under the bodies in the water (the game floats a boat
+    on the level: the waves would run through its hull), all of them again 1 m beyond its box; a
+    wake's waves stay. Around a camera within 0.75 m of the level the surface is flat out to 2 m, all
+    of the waves from 8 m on (the game takes the camera as under the water by the level alone: a
+    crest over it would cut the view in two); no crest rises closer than 0.3 m under a camera over
+    the water there, the limit rising 0.5 m a metre further out (from a boat in a high sea the
+    crests a few metres off do stand over the eye), a trough as far over one under it. The waves
+    fade out from 250 to 500 m, where the rings are too sparse for them.
+  - The water's program takes the camera as under the water by the level, as the game does, and the
+    foam of the shore and of what stands in the water by the depth under the still level along the
+    view (with the displaced surface's, a crest standing in front of a boat made the boat behind it
+    the shore's white).
+  - What stands over the water behind a crest is hidden by it (`GridHiddenShare`): the view's ray
+    refracted into a wave goes down into the water (at least 41 degrees under the surface, Snell's
+    window), under the trough beyond the crest, not on to a boat's side, the shore or the sky behind
+    it. The water's light through the crest is taken down to the floor under it (the terrain's
+    heights; deep water off them), the scene's colour as that floor's (in shallow water the beach
+    behind as its sand): all of the scene from 0.5 m over the depth of the crest's height under the
+    level, none of it lower (none under the flat disc or a trough, none of a shallow floor: a crest
+    there at most 0.39 of the depth). Seen as through the water down to their height, the boats and
+    the sky behind the storm's crests showed through them as through glass (debug view 25 over the
+    storm's crests 1.0, now 0.095: Fort's floor under them). The foam of the shore and of what
+    stands in the water takes the same floor's depth (`GridBehindZ`: a boat's waterline behind a
+    crest drew the foam of the waves against its side over the crest).
+  - The default sea (3.5 m/s, its significant height 0.15 m) changes little but at the silhouettes
+    and the wakes; at 12 m/s (`d3d12_WaterWind 12`, `d3d12_WaterSlope 0`) the crests 1-2 m high a
+    few tens of metres off stand over a camera 1.3 m over the water and hide the boats behind them
+    (the game's boats do not ride the waves: they float on the level).
+  - Cost at 3840 x 2160 (`d3d12_GpuTimes`, no upscaler), the water against the flat disc's, the
+    raster / with the rays' sun shadows and reflections: Carrier 1.15 -> 1.24 / 1.66 -> 1.81 ms,
+    Bunker's sunset 0.77 -> 0.84 / 1.18 -> 1.29, Fort's chase 0.96 -> 1.07 / 1.50 -> 1.65, the storm
+    from 1.3 m 0.81 -> 0.87 / 1.24 -> 1.35 (the grid shaded as drawn 1.56 / 2.15, 1.06 / 1.63,
+    1.33 / 2.03, 1.72 / 2.57); the frame as much more. The motion vectors are the surface's as it
+    is (as the grid's shaded as drawn: the waves' own rise and fall left out).
+  - `d3d12_WaterDebug` 29 the height (grey 0; red up and blue down, 0.3 m from grey; green 3 cm),
+    30 the shares of the waves left (red the depth's, green the bodies', blue the camera's and the
+    distance's).
 - The sun's glint (`d3d12_WaterGlint`, 1; 0 draws the frames of the water before it; not saved;
   `d3d12_WaterSunGlint`, a highlight fitted by eye and off as in the game, is gone with it) is the
   sun mirrored by the waves' facets (`Shaders/WaterLight.hlsli`): Beckmann's distribution of the

@@ -76,6 +76,24 @@
 //	    waves of the bodies moving through the ocean in a window around the
 //	    camera (Wake.cpp), their slopes added to the waves' and their foam
 //	    to the foam's, fading out at the window's edge;
+//	  - the waves' geometry (d3d12_WaterGeometry; OceanGrid.cpp,
+//	    OceanGrid.hlsli): in place of the game's flat disc of the ocean a
+//	    polar grid of the same extent around the camera, whose vertices
+//	    this program raises to the waves' height (OceanGridVertex: the FFT
+//	    ocean's cascades, each at the mip level of the grid's spacing there,
+//	    none under the bodies in the water, and the wakes'), limited by the
+//	    depth under the level, flat around a camera at the water, no crest
+//	    up to a camera over it, none far off: the crests stand against the
+//	    sky and the shore, the troughs hide what is behind them. Its vertex
+//	    alpha the disc's, read from its vertices (GridDiscAlpha); from below
+//	    by the level as the game takes it, the foam's depth under the level
+//	    too (none on what a crest hides). It writes the depth buffer (its
+//	    rings from the camera out: what a nearer crest hides fails the
+//	    test). With d3d12_WaterDeferred (XR_WATER_DEFERRED, PSDeferred)
+//	    the grid is drawn into the depth alone and this program shades the
+//	    view where the waves are, each pixel once (the world position from
+//	    the depth, the disc's alpha from a table by radius,
+//	    GridDiscAlphaTable);
 //	  - near the shore (close to the camera) the surface fades into the
 //	    scene behind it, so the water has no hard edge; seen from below,
 //	    the ocean shows the scene above bent by large swells, in its fog
@@ -102,7 +120,7 @@
 //	upscaler's scene) the pixel shader also writes the motion vector of the
 //	surface (MotionVector, from mWorldViewProj and mPrevWorldViewProj) to
 //	SV_Target1 and its depth to SV_Target2: the water does not write the depth
-//	buffer, but it is what the upscaler sees there.
+//	buffer (but for the ocean's grid), but it is what the upscaler sees there.
 //
 //	SDrawConstants:
 //	  vParams0  x wave slope scale, y reflection amount, z d3d12_WaterDebug,
@@ -156,7 +174,27 @@
 //	  vLightPos the wakes (WaterWake): [1].w the share shown (0: none), [0] xy the
 //	            window's centre point (m), zw its texel there over the
 //	            window's size, [1] x 1 / the sponge's width (m), y 1 their
-//	            foam, z (as uint) the view's SRV (Shaders/Wake.hlsl's view)
+//	            foam, z (as uint) the view's SRV (Shaders/Wake.hlsl's view);
+//	            XR_WATER_DEFERRED: [2..4] xyz the view's rays (DeferredPos),
+//	            [2].w (as uint) the depth buffer, [3].w the depth of the
+//	            farthest water (VSDeferred)
+//	  vLightSpec the ocean's grid (OceanGrid.cpp; [0].x 0: the game's disc):
+//	            [0] x 1, y the level, z the disc's radius, w the bodies; [1]
+//	            xy the grid's centre (the camera's), z (as uint) the
+//	            terrain's heights (R32F), w the camera's height over the
+//	            level; [2] xyz each cascade's height (m) for its texels'
+//	            height channel, w the rows a doubling of the disc's alpha
+//	            table (OceanGrid::AlphaScale); [3] x 1 with the wakes'
+//	            heights, y (as uint)
+//	            their SRV (R16F, Wake.hlsl's heights), zw the terrain's uv of
+//	            the world (z 0: no terrain); [4] x, y (as uint) the raw buffer
+//	            and the byte offset of the disc's table (OceanGrid::
+//	            DiscTable), z its rings, w the grid's rings, their radii after
+//	            it (OceanGrid::FrameRings), then the disc's alpha by radius
+//	            for the deferred ocean (OceanGrid::AlphaTable)
+//	  vLightColor, vLightAtten  the grid's bodies: [n] the middle of the
+//	            box (xy) and the cos and sin of its turn (zw); its half sides
+//	            (xy)
 //	  vAddColor with vTexGenU.w: x the RMS along an axis of the FFT ocean's
 //	            slopes, y the variance of its ripple finer than the short
 //	            cascade (both axes, times the bump amounts' factor; the
@@ -178,7 +216,15 @@
 #include "WaterVolume.hlsli"
 #ifdef XR_RAYTRACE
 #include "RayShade.hlsli"
+#else
+// The raw buffers (the texture table, D3D12Pipeline.h's space4): the ocean's grid's table of the game's disc.
+ByteAddressBuffer g_Buffers[] : register(t0, space4);
 #endif
+// The ocean's grid's table of the game's disc and of its frame's rings (OceanGrid.hlsli's GridDiscAlpha and GridRing):
+// vLightSpec[4] x (uint) its raw buffer, y (uint) its byte offset there.
+#define GRID_DISC_WORD(i) asfloat(g_Buffers[asuint(g_Draw.vLightSpec[4].x)].Load(asuint(g_Draw.vLightSpec[4].y) + 4 * (i)))
+#define GRID_DISC_WORDS2(i) asfloat(g_Buffers[asuint(g_Draw.vLightSpec[4].x)].Load2(asuint(g_Draw.vLightSpec[4].y) + 4 * (i)))
+#include "OceanGrid.hlsli"
 
 struct SWaterOutput
 {
@@ -186,23 +232,112 @@ struct SWaterOutput
   float3 vWorldPos : TEXCOORD0;
   float4 vColor : COLOR0;
   float2 vTex0 : TEXCOORD1;
+  float4 vGrid : TEXCOORD4;     //!< the ocean's grid (OceanGridVertex's vShares; else 0, 1, 1, 1)
 #ifdef XR_VELOCITY
   float4 vCurClip : TEXCOORD2;  //!< the clip position without the jitter
   float4 vPrevClip : TEXCOORD3; //!< the same in the frame before
 #endif
 };
 
+//! The wakes' height (m) at P for the ocean's grid (vLightSpec[3].x; Wake.cpp's heights, each texel the cell of its index
+//! modulo the window's size as WaterWake's view) at the mip level of the grid's fSpacing there, fading out over the sponge
+//! as WaterWake's slopes.
+float WakeGridHeight(float2 P, float fSpacing)
+{
+  const float4 c0 = g_Draw.vLightPos[0], c1 = g_Draw.vLightPos[1];
+  const float2 d = P - c0.xy;
+  const float fFade = saturate((0.5 * XR_WAKE_SIZE * XR_WAKE_CELL - max(abs(d.x), abs(d.y))) * c1.x) * c1.w;
+  if (fFade <= 0)
+    return 0;
+  const float2 vUV = d / (XR_WAKE_SIZE * XR_WAKE_CELL) + c0.zw;
+  return g_Textures[asuint(g_Draw.vLightSpec[3].y)].SampleLevel(g_SamplerLinearWrap, vUV, GridLod(fSpacing, XR_WAKE_CELL)).x * fFade;
+}
+
+//! The depth (m) under the ocean's level (vLightSpec[0].y) at P from the terrain's heights (vLightSpec[1].z, its texture
+//! coordinates vLightSpec[3].zw): deep water off the terrain.
+float GridTerrainDepth(float2 P)
+{
+  const float2 vTerrainUV = P * g_Draw.vLightSpec[3].z + g_Draw.vLightSpec[3].w;
+  float fDepth = 1e4;
+  if (all(vTerrainUV >= 0) && all(vTerrainUV <= 1))
+    fDepth = g_Draw.vLightSpec[0].y - g_Textures[asuint(g_Draw.vLightSpec[1].z)].SampleLevel(g_SamplerLinearClamp, vTerrainUV, 0).x;
+  return fDepth;
+}
+
+//! The height z (m) of the scene behind the ocean's grid's surface point P as the water there takes it: what stands over
+//! the water behind a crest hidden by it (GridHiddenShare), the floor under P in its place (GridTerrainDepth), so that
+//! the water's light through the crest goes down to that floor (the scene's colour as its: in shallow water the beach
+//! behind as its sand) and the foam of the shore and of what stands in the water takes that floor's depth (by the boat's
+//! side behind a crest, its waterline drew the foam of the waves against it over the crest).
+float GridBehindZ(float z, float3 P)
+{
+  const float fHidden = GridHiddenShare(z, P.z, g_Draw.vLightSpec[0].y);
+  [branch]
+  if (fHidden <= 0)
+    return z;
+  return lerp(z, min(g_Draw.vLightSpec[0].y - GridTerrainDepth(P.xy), P.z), fHidden);
+}
+
+//! The ocean's grid (vLightSpec[0].x; OceanGrid.cpp): the vertex vIn (xy its direction across the water from the grid's
+//! centre, the camera, z its ring) on the frame's ring (GridRing: vLightSpec[4].w of them after the disc's table), pulled
+//! onto the edge of the game's disc beyond it, raised to the waves' height there: the FFT ocean's cascades' (each at the
+//! mip level of the grid's spacing there), none under the bodies, and the wakes'; none at a camera at the water and far
+//! off, limited by the depth under the level (OceanGrid.hlsli). vShares: x the height (m), y the share of it the depth
+//! left, z the bodies' share of the ocean's waves, w the camera's and the distance's.
+float3 OceanGridVertex(float3 vIn, out float4 vShares)
+{
+  const float4 g0 = g_Draw.vLightSpec[0], g1 = g_Draw.vLightSpec[1], g2 = g_Draw.vLightSpec[2], g3 = g_Draw.vLightSpec[3];
+  const uint k = (uint)vIn.z;
+  const float2 vRing = GridRing(k, (uint)g_Draw.vLightSpec[4].z * (1 + XR_GRID_DISC_SEGMENTS), (uint)g_Draw.vLightSpec[4].w);
+  float r = vRing.x;
+  float2 vLocal = k > 0 ? normalize(vIn.xy) * r : 0;
+  if (r > g0.z)
+  {
+    vLocal *= g0.z / r;
+    r = g0.z;
+  }
+  vShares = float4(0, 1, 1, 1);
+  if (r >= XR_GRID_DISPLACED)
+    return float3(vLocal, 0);
+  const float2 P = g1.xy + vLocal;
+  const float fSpacing = max(GridSpacing(r), vRing.y);
+  static const float Tiles[XR_OCEAN_CASCADES] = { XR_OCEAN_TILE0, XR_OCEAN_TILE1, XR_OCEAN_TILE2 };
+  float h = 0;
+  [unroll]
+  for (uint c = 0; c < XR_OCEAN_CASCADES; c++)
+    h += g_TextureArrays[g_Draw.nShadowTex.z].SampleLevel(g_SamplerLinearWrap, float3(P / Tiles[c], c),
+                                                          GridLod(fSpacing, Tiles[c] / XR_OCEAN_SIZE)).z * g2[c];
+  float fBodies = 1;
+  for (uint n = 0; n < (uint)g0.w; n++)
+    fBodies = min(fBodies, GridBodyShare(P, g_Draw.vLightColor[n], g_Draw.vLightAtten[n]));
+  h *= fBodies;
+  if (g3.x != 0)
+    h += WakeGridHeight(P, fSpacing);
+  const float fNear = GridCameraShare(r, g1.w) * GridFarShare(r);
+  h = GridCameraCap(h * fNear, r, g1.w);
+  const float fDepth = GridTerrainDepth(P);
+  const float fRaised = GridShore(h, fDepth);
+  vShares = float4(fRaised, abs(h) > 1e-5 ? fRaised / h : 1, fBodies, fNear);
+  return float3(vLocal, fRaised);
+}
+
 SWaterOutput VSMain(SVertexInput In)
 {
   SWaterOutput Out;
   float4 vPos = float4(In.vPos.xyz, 1);
+  Out.vGrid = float4(0, 1, 1, 1);
+  Out.vColor = DecodeVertexColor(In.vColor0);
+  if (g_Draw.vLightSpec[0].x != 0)
+  {
+    vPos.xyz = OceanGridVertex(In.vPos.xyz, Out.vGrid);
+    Out.vColor.a = GridDiscAlpha(vPos.xy, (uint)g_Draw.vLightSpec[4].z);
+  }
   Out.vPos = Jitter(mul(vPos, g_Draw.mWorldViewProj));
 #ifdef XR_VELOCITY
   Out.vCurClip = mul(vPos, g_Draw.mWorldViewProj);
   Out.vPrevClip = mul(vPos, g_Draw.mPrevWorldViewProj);
 #endif
   Out.vWorldPos = mul(vPos, g_Draw.mWorld).xyz;
-  Out.vColor = DecodeVertexColor(In.vColor0);
   Out.vTex0 = In.vTex0;
   return Out;
 }
@@ -799,7 +934,13 @@ float4 ShadeWater(SWaterOutput In)
   float3 vToCamera = vCamera - In.vWorldPos;
   float fDistance = length(vToCamera);
   float3 V = vToCamera / max(fDistance, 1e-4);
-  bool bBelow = vCamera.z < In.vWorldPos.z;
+  // From below by the level (the ocean's grid raised: as the game takes the camera to be under the water).
+  bool bBelow = vCamera.z < (g_Draw.vLightSpec[0].x != 0 ? g_Draw.vLightSpec[0].y : In.vWorldPos.z);
+  // The ocean's grid's debug views (OceanGridVertex's shares), before anything else holds registers.
+  if (g_Draw.vParams0.z == 29)
+    return float4(saturate(0.5 + In.vGrid.x / 0.6), saturate(0.5 + In.vGrid.x / 0.06), saturate(0.5 - In.vGrid.x / 0.6), 1);
+  if (g_Draw.vParams0.z == 30)
+    return float4(In.vGrid.yzw, 1);
 #ifdef XR_RAYTRACE
   // The angle between neighbouring pixels' view rays (before any branch).
   float fPixelAngle = max(length(ddx(V)), length(ddy(V)));
@@ -879,8 +1020,16 @@ float4 ShadeWater(SWaterOutput In)
   float fFoam = 0, fWhitecaps = 0, fShoreFoam = 0, fFoamShade = 1;
   if (g_Draw.vTexGen1U.x > 0)
   {
-    fFoam = WaterFoam(In.vWorldPos.xy, fDepthBelow, fThick0 * fDistance / max(fSurface, 1e-3), fWakeFoam, fWhitecaps, fShoreFoam,
-                      fFoamShade);
+    // On the ocean's grid the still water's depth over the scene behind and the view's path under the level to it (as
+    // the flat disc's: the scene behind a raised crest may be above the water, a boat's side, which no wave breaks on;
+    // what a crest hides the floor under it, GridBehindZ).
+    float fFoamDepth = fDepthBelow, fFoamPath = fThick0 * fDistance / max(fSurface, 1e-3);
+    if (g_Draw.vLightSpec[0].x != 0)
+    {
+      fFoamDepth = max(g_Draw.vLightSpec[0].y - GridBehindZ(vFloor.z, In.vWorldPos), 0);
+      fFoamPath = fFoamDepth / max(V.z, 0.01);
+    }
+    fFoam = WaterFoam(In.vWorldPos.xy, fFoamDepth, fFoamPath, fWakeFoam, fWhitecaps, fShoreFoam, fFoamShade);
     if (bBelow)
       fFoam = 0;
   }
@@ -893,6 +1042,9 @@ float4 ShadeWater(SWaterOutput In)
       // The point of the scene behind along the displaced ray; the ocean's water over it (d3d12_WaterVolume, vAddColor.w),
       // else its fog volume's fog.
       float3 vBehind = vCamera - V * (fDistance * fBehind / max(fSurface, 1e-3));
+      // On the ocean's grid what stands over the water behind a crest hidden by it (GridBehindZ).
+      if (g_Draw.vLightSpec[0].x != 0)
+        vBehind.z = GridBehindZ(vBehind.z, In.vWorldPos);
       if (g_Draw.vAddColor.w > 0)
       {
         // Its terms' debug views here: kept to the end of the shader they would hold registers through all of it.
@@ -1160,5 +1312,109 @@ SPixelOutput PSMain(SWaterOutput In)
 float4 PSMain(SWaterOutput In) : SV_Target
 {
   return SceneOutput(ShadeWater(In));
+}
+#endif
+
+#ifdef XR_WATER_DEFERRED
+// The deferred ocean (XR_WATER_DEFERRED; OceanGrid.cpp's DrawOceanGrid): after the grid's depth pass (the waves' depth in
+// the depth buffer, no pixel shader) the water program over the whole view, its pixels where the depth buffer holds a
+// nearer surface than the scene's copy (nTex1): the waves'. Each of the water's pixels is shaded once, where the grid's
+// triangles, a few pixels across, shaded the quads along their edges twice (at 4K the water 0.4 ms more on Carrier).
+// vLightPos[2..4] xyz the view's rays (the world position from the view's x, y and depth, CD3D12Renderer::GetRayView's),
+// vLightPos[2].w (as uint) the depth buffer.
+
+struct SDeferredOutput
+{
+  float4 vPos : SV_Position;
+  float2 vNDC : TEXCOORD0;      //!< the view's x and y (-1..1, y up)
+};
+
+//! The triangle over the view (OceanGrid.cpp: its vertices' xy the view's x and y) at the farthest water's depth
+//! (vLightPos[3].w; the test GREATER: nothing of it over what is further off).
+SDeferredOutput VSDeferred(SVertexInput In)
+{
+  SDeferredOutput Out;
+  Out.vPos = float4(In.vPos.xy, g_Draw.vLightPos[3].w, 1);
+  Out.vNDC = In.vPos.xy;
+  return Out;
+}
+
+//! The depth buffer's value at pixel p (0 off it).
+float DeferredDepth(int2 p)
+{
+  return g_Textures[asuint(g_Draw.vLightPos[2].w)].Load(int3(p, 0)).r;
+}
+
+//! The world position at the view's vNDC and view depth d (the upscaler's jitter, which moved the grid's vertices, taken off).
+float3 DeferredPos(float2 vNDC, float d)
+{
+  const float2 v = vNDC - g_Frame.vJitter.xy;
+  return g_Frame.vCameraPos.xyz + d * (g_Draw.vLightPos[4].xyz + v.x * g_Draw.vLightPos[2].xyz + v.y * g_Draw.vLightPos[3].xyz);
+}
+
+//! What the grid's vertex program would have given the pixel (fDepth its depth): the world position along its view ray
+//! (the textures' mip levels from its derivatives across the quad: where a quad holds a crest and the water behind it, or
+//! the water and what stands in front of it, a level too coarse; the frames those of the grid shaded as it is drawn but
+//! for single pixels along such edges, the neighbour nearer in depth's derivatives with SampleGrad cost 0.06-0.15 ms
+//! at 4K); the vertex alpha the game's disc's there (GridDiscAlphaTable, bilinear as the forward grid's linear between
+//! its vertices); the clip positions of the still surface by the grid's matrices (its vertices across the water from
+//! mWorld's translation).
+SWaterOutput DeferredWater(SDeferredOutput In, float fDepth)
+{
+  const float3 P = DeferredPos(In.vNDC, LinearDepth(fDepth));
+  SWaterOutput Out;
+  Out.vPos = float4(In.vPos.xy, fDepth, 1);
+  Out.vWorldPos = P;
+  const uint nRings = (uint)g_Draw.vLightSpec[4].z, nGridRings = (uint)g_Draw.vLightSpec[4].w;
+  Out.vColor = float4(1, 1, 1, GridDiscAlphaTable(P.xy - g_Draw.vLightSpec[1].xy, nRings * (1 + XR_GRID_DISC_SEGMENTS) + nGridRings,
+                                                  g_Draw.vLightSpec[2].w));
+  Out.vTex0 = 0;
+  Out.vGrid = float4(0, 1, 1, 1);
+#ifdef XR_VELOCITY
+  const float4 vLocal = float4(P - g_Draw.mWorld[3].xyz, 1);
+  Out.vCurClip = mul(vLocal, g_Draw.mWorldViewProj);
+  Out.vPrevClip = mul(vLocal, g_Draw.mPrevWorldViewProj);
+#endif
+  return Out;
+}
+
+//! The deferred ocean's pixel: none of a quad without the waves (its pixels' quads shaded together, the derivatives
+//! within them kept), the pixels of a quad with them shaded, those without them discarded after.
+#ifdef XR_VELOCITY
+[earlydepthstencil]
+SPixelOutput PSDeferred(SDeferredOutput In)
+#else
+[earlydepthstencil]
+float4 PSDeferred(SDeferredOutput In) : SV_Target
+#endif
+{
+  const int2 p = (int2)In.vPos.xy;
+  const float fDepth = DeferredDepth(p);
+  const bool bWater = fDepth < g_Textures[g_Draw.nTex1].Load(int3(p, 0)).r;
+  [branch]
+  if (!FoamQuadAny(bWater))
+  {
+    discard;
+#ifdef XR_VELOCITY
+    return (SPixelOutput)0;
+#else
+    return 0;
+#endif
+  }
+  const SWaterOutput W = DeferredWater(In, fDepth);
+#ifdef XR_VELOCITY
+  SPixelOutput Out;
+  Out.vColor = SceneOutput(ShadeWater(W));
+  Out.vMotion = MotionVector(W.vCurClip, W.vPrevClip);
+  Out.fDepth = fDepth;
+  if (!bWater)
+    discard;
+  return Out;
+#else
+  const float4 vColor = SceneOutput(ShadeWater(W));
+  if (!bWater)
+    discard;
+  return vColor;
+#endif
 }
 #endif

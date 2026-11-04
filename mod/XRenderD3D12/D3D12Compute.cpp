@@ -86,6 +86,7 @@
 #include "WakeColumns_CS.h"
 #include "WakeRowsInverse_CS.h"
 #include "WakeView_CS.h"
+#include "WakeHeight_CS.h"
 #if XRENDERD3D12_NRD
 #include "PathNrdPack_CS.h"
 #include "PathNrdResolve_CS.h"
@@ -193,6 +194,7 @@ const SKernel s_Kernels[eD3D12K_Num] =
   { "wakes (columns)", g_WakeColumns_CS, sizeof(g_WakeColumns_CS) },
   { "wakes (rows, inverse)", g_WakeRowsInverse_CS, sizeof(g_WakeRowsInverse_CS) },
   { "wakes (view)", g_WakeView_CS, sizeof(g_WakeView_CS) },
+  { "wakes (heights)", g_WakeHeight_CS, sizeof(g_WakeHeight_CS) },
 };
 static_assert(sizeof(s_Kernels) / sizeof(s_Kernels[0]) == eD3D12K_Num, "a kernel for each ED3D12Kernel");
 

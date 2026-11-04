@@ -119,6 +119,7 @@ enum ED3D12Kernel
   eD3D12K_WakeColumns,              //!< the FFT along y, the waves' step, the inverse FFT along y
   eD3D12K_WakeRowsInverse,          //!< the inverse FFT along x: the window
   eD3D12K_WakeView,                 //!< the slopes and the foam into the view (the water's), its mip levels 1 to 3
+  eD3D12K_WakeHeight,               //!< the heights for the ocean's grid (d3d12_WaterGeometry), their mip levels 1 to 3
   eD3D12K_Num
 };
 

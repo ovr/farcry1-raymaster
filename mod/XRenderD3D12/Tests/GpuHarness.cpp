@@ -850,7 +850,8 @@ ID3D12PipelineState *XrTest::CGpu::ComputePipeline(const SBytecode &Shader)
 
 XrTest::SWakeOutput XrTest::CGpu::RunWake(const std::vector<float> &Start, const std::vector<SWakeFrame> &Frames, const SWakeKernels &Kernels)
 {
-  constexpr UINT N = XR_WAKE_SIZE, MIPS = XR_WAKE_MIPS, SRVS = 4, UAVS = 5, TABLE = SRVS + UAVS, KERNELS = 5;
+  constexpr UINT N = XR_WAKE_SIZE, MIPS = XR_WAKE_MIPS, SRVS = 4, UAVS = 5, TABLE = SRVS + UAVS, KERNELS = 6, HEIGHT_TABLE = 5;
+  const bool bHeight = Kernels.Height.pData != nullptr;
   if (!Start.empty() && Start.size() != (size_t)N * N * 2)
     throw std::runtime_error("the wakes' start is not the window's texels");
   if (Frames.empty())
@@ -876,6 +877,8 @@ XrTest::SWakeOutput XrTest::CGpu::RunWake(const std::vector<float> &Start, const
   ComPtr<ID3D12Resource> pState = Target(1, STATE, D3D12_RESOURCE_STATE_COPY_DEST), pRows = Target(1, STATE, UAV_STATE),
                          pColumns = Target(1, STATE, UAV_STATE), pFoam[2] = { Target(1, FOAM, UAV_STATE), Target(1, FOAM, UAV_STATE) },
                          pView = Target(MIPS, VIEW, UAV_STATE);
+  constexpr DXGI_FORMAT HEIGHTS = DXGI_FORMAT_R16_FLOAT;
+  ComPtr<ID3D12Resource> pHeights = bHeight ? Target(MIPS, HEIGHTS, UAV_STATE) : nullptr;
   // The constants of each step and each view at a multiple of 256 bytes, in the order they run.
   constexpr size_t CB_STRIDE = (sizeof(SWakeConstants) + 255) & ~(size_t)255;
   std::vector<const SWakeConstants *> Order;
@@ -925,6 +928,16 @@ XrTest::SWakeOutput XrTest::CGpu::RunWake(const std::vector<float> &Start, const
   ID3D12Resource *const pIns[3] = { pState.Get(), pRows.Get(), pColumns.Get() }, *const pOuts[3] = { pRows.Get(), pColumns.Get(), pState.Get() };
   for (UINT k = 0; k < KERNELS; k++)
   {
+    if (k == HEIGHT_TABLE)
+    {
+      // The heights' (Wake.cpp's HEIGHT_TABLE): t0 the window, u0..u3 the levels.
+      SRV(k * TABLE, pState.Get(), STATE);
+      for (UINT i = 1; i < SRVS; i++)
+        SRV(k * TABLE + i, nullptr, STATE);
+      for (UINT i = 0; i < UAVS; i++)
+        UAV(k * TABLE + SRVS + i, i < MIPS ? pHeights.Get() : nullptr, HEIGHTS, i < MIPS ? i : 0);
+      continue;
+    }
     const bool bView = k >= 3;
     const UINT f = bView ? k - 3 : 0;
     for (UINT i = 0; i < SRVS; i++)
@@ -1023,12 +1036,16 @@ XrTest::SWakeOutput XrTest::CGpu::RunWake(const std::vector<float> &Start, const
     Move(pState.Get(), UAV_STATE, READ);
     Move(pFoam[f].Get(), READ, UAV_STATE);
     Dispatch(Kernels.View, 3 + f, N / 16, N / 16);
+    if (bHeight)
+      Dispatch(Kernels.Height, HEIGHT_TABLE, N / 16, N / 16);
     Move(pState.Get(), READ, UAV_STATE);
     Move(pFoam[f].Get(), UAV_STATE, READ);
   }
   Move(pState.Get(), UAV_STATE, D3D12_RESOURCE_STATE_COPY_SOURCE);
   Move(pFoam[f].Get(), READ, D3D12_RESOURCE_STATE_COPY_SOURCE);
   Move(pView.Get(), UAV_STATE, D3D12_RESOURCE_STATE_COPY_SOURCE);
+  if (bHeight)
+    Move(pHeights.Get(), UAV_STATE, D3D12_RESOURCE_STATE_COPY_SOURCE);
   auto Copy = [&](ID3D12Resource *pSrc, UINT nSub, ID3D12Resource *pDst, const D3D12_PLACED_SUBRESOURCE_FOOTPRINT &Layout) {
     D3D12_TEXTURE_COPY_LOCATION Dst = {}, Src = {};
     Dst.pResource = pDst;
@@ -1043,6 +1060,17 @@ XrTest::SWakeOutput XrTest::CGpu::RunWake(const std::vector<float> &Start, const
   Copy(pFoam[f].Get(), 0, pFoamBack.Get(), FoamLayout);
   for (UINT m = 0; m < MIPS; m++)
     Copy(pView.Get(), m, pViewBack.Get(), ViewLayout[m]);
+  std::vector<D3D12_PLACED_SUBRESOURCE_FOOTPRINT> HeightsLayout(MIPS);
+  ComPtr<ID3D12Resource> pHeightsBack;
+  UINT64 nHeightsBytes = 0;
+  if (bHeight)
+  {
+    const D3D12_RESOURCE_DESC HeightsDesc = pHeights->GetDesc();
+    m_pDevice->GetCopyableFootprints(&HeightsDesc, 0, MIPS, 0, HeightsLayout.data(), nullptr, nullptr, &nHeightsBytes);
+    pHeightsBack = Buffer(D3D12_HEAP_TYPE_READBACK, (size_t)nHeightsBytes, D3D12_RESOURCE_STATE_COPY_DEST, false);
+    for (UINT m = 0; m < MIPS; m++)
+      Copy(pHeights.Get(), m, pHeightsBack.Get(), HeightsLayout[m]);
+  }
   Execute();
 
   SWakeOutput Out;
@@ -1071,6 +1099,20 @@ XrTest::SWakeOutput XrTest::CGpu::RunWake(const std::vector<float> &Start, const
     Out.View[m] = HalfsToFloats(Halfs.data(), Halfs.size());
   }
   pViewBack->Unmap(0, &None);
+  if (bHeight)
+  {
+    Range = { 0, (SIZE_T)nHeightsBytes };
+    Ok(pHeightsBack->Map(0, &Range, &p), "Map");
+    for (UINT m = 0; m < MIPS; m++)
+    {
+      const UINT w = N >> m;
+      std::vector<uint16_t> Halfs((size_t)w * w);
+      for (UINT y = 0; y < w; y++)
+        memcpy(&Halfs[(size_t)y * w], (const uint8_t *)p + (size_t)HeightsLayout[m].Offset + (size_t)y * HeightsLayout[m].Footprint.RowPitch, (size_t)w * 2);
+      Out.Heights[m] = HalfsToFloats(Halfs.data(), Halfs.size());
+    }
+    pHeightsBack->Unmap(0, &None);
+  }
   return Out;
 }
 
