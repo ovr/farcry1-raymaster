@@ -23,7 +23,7 @@
 //	  - the surf: the swell (d3d12_WaterSurf) breaks where the water gets
 //	    shallower than its height over the breaker index and runs to the
 //	    shore as bores, a white roller on each front and the lace it leaves
-//	    (SurfFoam);
+//	    (SurfFoam), torn into clumps a metre or two across (SurfClumps);
 //	  - the pattern: foam is a lace of bubbles (FoamPattern.h, its values
 //	    ranked: uniform 0..1), white where it is above one less the amount
 //	    (the amount is the share of the surface white), softened over the
@@ -32,7 +32,7 @@
 //	  - the light: a white diffuse layer (FOAM_ALBEDO, fresh foam on sea
 //	    water reflects about half to two thirds of the light) under the sun
 //	    and the sky, thin foam (a low amount) letting some of the water's
-//	    light through.
+//	    light through, each patch brighter in its middle (FoamShade).
 //
 //////////////////////////////////////////////////////////////////////
 
@@ -128,6 +128,26 @@ float FoamValueNoise(float2 p)
   return lerp(lerp(FoamHash(q), FoamHash(q + int2(1, 0)), w.x), lerp(FoamHash(q + int2(0, 1)), FoamHash(q + int2(1, 1)), w.x), w.y);
 }
 
+//! How far the surf's foam gathers in clumps, either way about its amount (SurfClumps), and their size (m).
+static const float FOAM_SURF_CLUMPS = 0.9;
+static const float FOAM_SURF_CLUMP = 2.2;
+
+//! The factor of the surf's foam at the world position P (SurfFoam's fDepth, fBreak, fCycle): a bore's roller is torn into
+//! clumps and patches a metre or two across with gaps of water between them (the white of a breaking wave is not a band of
+//! even fog), each bore's its own (three octaves of value noise, FOAM_SURF_CLUMP m, a third and a seventh of it, moved by a
+//! hash of the bore; the bore whose front comes over the FOAM_SURF_FRONT before it already); steep about its mean, so that
+//! the clumps' edges are short of the pattern (the lace is finer than the pixel a few metres off). Its mean about 1,
+//! FOAM_SURF_CLUMPS of it either way at most.
+float SurfClumps(float2 P, float fDepth, float fBreak, float fCycle)
+{
+  const float fTau = sqrt(saturate(fDepth / max(fBreak, 1e-4)));
+  const int n = (int)floor(fCycle + XR_FOAM_SURF_BORES * fTau + FOAM_SURF_FRONT);
+  const float2 o = 61 * float2(FoamHash(int2(n, 11)), FoamHash(int2(n, 13)));
+  const float2 Q = P / FOAM_SURF_CLUMP;
+  const float v = 0.55 * FoamValueNoise(Q + o) + 0.3 * FoamValueNoise(3 * Q - o) + 0.15 * FoamValueNoise(7 * Q + o.yx);
+  return 1 + FOAM_SURF_CLUMPS * clamp(3.2 * (v - 0.5), -1, 1);
+}
+
 //! The breaker index where a wave meets the shore from the noise n (0..1, its mean 0.5): McCowan's 0.78 the mean,
 //! FOAM_INDEX_SPREAD either way (from one wave to the next and along a crest it breaks in deeper or shallower water: the
 //! beach's slope and the wave's steepness change it, measured from 0.6 to 1.2).
@@ -162,6 +182,20 @@ float FoamCover(float fAmount, float u, float fWidth, float fBlur)
   const float w = max(fWidth, 0.02);
   const float fSharp = 1 - (1 - saturate((u + a - 1) / w + 0.5) * saturate(2 * a / w)) * saturate(2 * (1 - a) / w);
   return lerp(fSharp, a, saturate(fBlur));
+}
+
+//! How far the foam's brightness changes either way across a patch (FoamShade).
+static const float FOAM_SHADE = 0.25;
+
+//! The brightness of the foam over a pixel, its mean 1 over the white part: a patch of foam is thicker in its middle and
+//! thins to its edge (the pattern's value u from 1 - fAmount, where the pixel turns white, to 1), so that even the dense
+//! foam of a roller (fAmount 1, all white) shows its bubbles' clusters; none where the pattern is finer than the pixel
+//! (fBlur 1, FoamCover's).
+float FoamShade(float u, float fAmount, float fBlur)
+{
+  const float a = max(saturate(fAmount), 1e-3);
+  const float v = saturate((u - (1 - a)) / a);
+  return 1 + FOAM_SHADE * (1 - saturate(fBlur)) * (2 * v - 1);
 }
 
 //! How much of the water's light the foam over a pixel hides: its share of the pixel white fCover, thin where the amount

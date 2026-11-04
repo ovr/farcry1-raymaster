@@ -25,9 +25,12 @@
 #include "Test_FoamLight.h"
 #include "Test_FoamContact.h"
 #include "Test_FoamSurf.h"
+#include "Test_FoamClumps.h"
+#include "Test_FoamShade.h"
 
 #include <algorithm>
 #include <cmath>
+#include <cstdio>
 #include <vector>
 
 using namespace XrTest;
@@ -327,6 +330,117 @@ XR_TEST(Foam_Surf)
     fMost = std::max(fMost, At(Out, i, 0));
   }
   CHECK(fLeast > 0.2f && fMost < 0.55f && fMost > 1.2f * fLeast);
+}
+
+// Why: a breaking wave's white is torn into clumps with water between them, not an even band: the surf's factor must be
+// 1 on the mean over the shore (the foam's share kept), spread far either way (gaps and dense clumps) within
+// FOAM_SURF_CLUMPS, metres across (alike 5 cm apart, unlike 3 m apart), the same while one bore passes a place (the
+// clumps stay where it left them, from just before its front), another bore's another.
+XR_TEST(Foam_SurfClumps)
+{
+  const float fBreak = 0.8f, fDepth = 0.2f;   // tau 0.5
+  const int nGrid = 48;
+  SDispatch d;
+  d.Shader = XR_BYTECODE(Test_FoamClumps);
+  // Bore 3's place over a grid 0.37 m apart, at its front's share 0.1 and 0.6 behind it, just before it, bore 4's.
+  const float fFront = 3 - XR_FOAM_SURF_BORES * 0.5f;
+  const float Phases[4] = { fFront + 0.1f, fFront + 0.6f, fFront - 0.01f, fFront + 1.1f };
+  for (float c : Phases)
+    for (int y = 0; y < nGrid; y++)
+      for (int x = 0; x < nGrid; x++)
+      {
+        Push(d.In, 0.37f * x + 5, 0.37f * y - 3, fDepth, fBreak);
+        Push(d.In, c, 0, 0, 0);
+      }
+  const size_t nGrids = d.In.size() / 8;
+  // Pairs 5 cm and 3 m apart.
+  for (int i = 0; i < 256; i++)
+    for (float dx : { 0.0f, 0.05f, 3.0f })
+    {
+      Push(d.In, 0.61f * (i % 16) + dx, 0.53f * (i / 16), fDepth, fBreak);
+      Push(d.In, Phases[0], 0, 0, 0);
+    }
+  const size_t n = d.In.size() / 8;
+  d.Test.nTest[0] = (uint32)n;
+  d.nGroups[0] = Groups64(n);
+  d.nOut = n;
+  const std::vector<uint32> Out = Gpu().Run(d);
+
+  const size_t m = (size_t)nGrid * nGrid;
+  double fMean = 0, fVar = 0, fLeast = 10, fMost = 0, fSame = 0, fA = 0, fB = 0, fAB = 0;
+  for (size_t i = 0; i < m; i++)
+  {
+    const double v = At(Out, i, 0);
+    fMean += v / m;
+    fLeast = std::min(fLeast, v);
+    fMost = std::max(fMost, v);
+    fSame = std::max(fSame, std::max(std::fabs(v - At(Out, m + i, 0)), std::fabs(v - At(Out, 2 * m + i, 0))));
+  }
+  for (size_t i = 0; i < m; i++)
+  {
+    const double a = At(Out, i, 0) - fMean, b = At(Out, 3 * m + i, 0) - fMean;
+    fVar += a * a / m;
+    fA += a * a;
+    fB += b * b;
+    fAB += a * b;
+  }
+  const double fCorrelation = fAB / std::sqrt(fA * fB);
+  double fNear = 0, fFar = 0;
+  for (size_t i = nGrids; i < n; i += 3)
+  {
+    fNear = std::max(fNear, (double)std::fabs(At(Out, i, 0) - At(Out, i + 1, 0)));
+    fFar += std::fabs(At(Out, i, 0) - At(Out, i + 2, 0)) / 256;
+  }
+  std::printf("  clumps: mean %.3f, RMS %.3f, %.3f..%.3f; the next bore's correlation %.3f; 5 cm apart at most %.4f, 3 m %.3f "
+              "on the mean\n", fMean, std::sqrt(fVar), fLeast, fMost, fCorrelation, fNear, fFar);
+  CHECK(std::fabs(fMean - 1) < 0.08);
+  CHECK(std::sqrt(fVar) > 0.2);
+  CHECK(fLeast >= 1 - 0.9 - 1e-5 && fMost <= 1 + 0.9 + 1e-5);
+  CHECK(fLeast < 0.6 && fMost > 1.4);
+  CHECK_NEAR(fSame, 0, 0);
+  CHECK(std::fabs(fCorrelation) < 0.3);
+  CHECK(fNear < 0.15);
+  CHECK(fFar > 0.2);
+}
+
+// Why: a patch of foam is thicker in its middle and thins to its edge, so dense foam (all white) still shows its bubbles'
+// clusters; the brightness over the white part of a pixel's pattern must be 1 on the mean (the foam's light kept), at
+// most FOAM_SHADE either way, rising towards the patch's middle, and none where the pattern is finer than the pixel.
+XR_TEST(Foam_Shade)
+{
+  SDispatch d;
+  d.Shader = XR_BYTECODE(Test_FoamShade);
+  const float Amounts[3] = { 0.1f, 0.5f, 1.0f };
+  const int nU = 200;
+  for (float a : Amounts)
+    for (int i = 0; i < nU; i++)
+      Push(d.In, 1 - a + a * (i + 0.5f) / nU, a, 0, 0);
+  for (int i = 0; i < 16; i++)
+    Push(d.In, i / 15.0f, 1, 1, 0);   // the pattern finer than the pixel
+  const size_t n = d.In.size() / 4;
+  d.Test.nTest[0] = (uint32)n;
+  d.nGroups[0] = Groups64(n);
+  d.nOut = n;
+  const std::vector<uint32> Out = Gpu().Run(d);
+  for (int k = 0; k < 3; k++)
+  {
+    double fMean = 0, fLeast = 10, fMost = 0;
+    bool bRises = true;
+    for (int i = 0; i < nU; i++)
+    {
+      const double v = At(Out, k * nU + i, 0);
+      fMean += v / nU;
+      fLeast = std::min(fLeast, v);
+      fMost = std::max(fMost, v);
+      if (i > 0 && v < At(Out, k * nU + i - 1, 0))
+        bRises = false;
+    }
+    CHECK_NEAR(fMean, 1, 1e-3);
+    CHECK(fLeast >= 0.75 - 1e-5 && fMost <= 1.25 + 1e-5 && fMost - fLeast > 0.45);
+    CHECK(bRises);
+  }
+  for (size_t i = 3 * nU; i < n; i++)
+    CHECK_NEAR(At(Out, i, 0), 1, 1e-6);
 }
 
 // Why: the amount is the share of the surface white, so over the pattern's uniform values the pixels' mean white share

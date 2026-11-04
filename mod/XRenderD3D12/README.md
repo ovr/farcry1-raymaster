@@ -1306,6 +1306,11 @@ and lists theirs (`NamesObjects`).
       leaves a lace that fades until the next one. The foam rises over the 3 % of the period before
       a front, so there is no hard edge in time or across the screen. The breaking grows over the
       first fifth of the way, and each bore has its own strength (0.55-1: the swell's sets).
+    - A breaking wave's white is torn into clumps with water between them: three octaves of value
+      noise (2.2 m, a third and a seventh of it), steep about their mean, scale each bore's foam
+      0.1-1.9 times, each bore's its own and in place while it passes. Without them the roller
+      was an even white band, like fog, a few metres off (where the pattern is finer than the
+      pixel).
     - The game's beaches drop steeply under the water, so the surf zone is a few metres wide: a
       white band that runs to the edge and its lace, under and beyond the game's strips.
   - Pattern. Foam is a lace of bubbles: a 512 x 512 tiling texture made at the start.
@@ -1318,7 +1323,10 @@ and lists theirs (`NamesObjects`).
       wind. Where it is finer than the pixel it is the amount itself.
   - Light. Thin foam (a low amount) lets some of the water's light through. The foam is a white
     diffuse layer (albedo 0.6) under the sun (wrapped a little, in its shadow none) and the sky,
-    over the water's colour; the glint and the crests' light are gone under it.
+    over the water's colour; the glint and the crests' light are gone under it. A patch is thicker
+    in its middle and thins to its edge: its brightness rises 0.75-1.25 times from its edge to its
+    middle by the pattern's value, 1 on the mean, so dense foam shows its bubbles' clusters (none
+    where the pattern is finer than the pixel).
   - None from below, in the environment cubes or in heat vision. `d3d12_WaterDebug` 21, 22 and 23
     show it.
   - Cost at 4K: the water 0.05-0.08 ms more (Carrier 0.58 -> 0.64 ms, Bunker's sunset 0.57 ->
