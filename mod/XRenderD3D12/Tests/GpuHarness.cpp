@@ -805,6 +805,275 @@ std::vector<float> XrTest::HalfsToFloats(const uint16_t *p, size_t n)
   return Out;
 }
 
+void XrTest::CGpu::CreateComputeRootSignature()
+{
+  if (m_pComputeRootSignature)
+    return;
+  // D3D12Compute.cpp's: 0 CBV b0; 1 table t0..t3; 2 table u0..u4 (its static samplers unused by the ocean's and the
+  // wakes' kernels).
+  D3D12_DESCRIPTOR_RANGE Ranges[2] = {};
+  Ranges[0].RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_SRV;
+  Ranges[0].NumDescriptors = 4;
+  Ranges[1].RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_UAV;
+  Ranges[1].NumDescriptors = 5;
+  D3D12_ROOT_PARAMETER Params[3] = {};
+  Params[0].ParameterType = D3D12_ROOT_PARAMETER_TYPE_CBV;
+  Params[0].ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
+  for (int i = 1; i < 3; i++)
+  {
+    Params[i].ParameterType = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
+    Params[i].DescriptorTable.NumDescriptorRanges = 1;
+    Params[i].DescriptorTable.pDescriptorRanges = &Ranges[i - 1];
+    Params[i].ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
+  }
+  D3D12_ROOT_SIGNATURE_DESC Rs = {};
+  Rs.NumParameters = 3;
+  Rs.pParameters = Params;
+  ComPtr<ID3DBlob> pBlob, pError;
+  Ok(D3D12SerializeRootSignature(&Rs, D3D_ROOT_SIGNATURE_VERSION_1, &pBlob, &pError), "D3D12SerializeRootSignature (compute)");
+  Ok(m_pDevice->CreateRootSignature(0, pBlob->GetBufferPointer(), pBlob->GetBufferSize(), IID_PPV_ARGS(&m_pComputeRootSignature)),
+     "CreateRootSignature (compute)");
+}
+
+ID3D12PipelineState *XrTest::CGpu::ComputePipeline(const SBytecode &Shader)
+{
+  ComPtr<ID3D12PipelineState> &pPso = m_ComputePipelines[Shader.pData];
+  if (!pPso)
+  {
+    D3D12_COMPUTE_PIPELINE_STATE_DESC Desc = {};
+    Desc.pRootSignature = m_pComputeRootSignature.Get();
+    Desc.CS = { Shader.pData, Shader.nSize };
+    Ok(m_pDevice->CreateComputePipelineState(&Desc, IID_PPV_ARGS(&pPso)), "CreateComputePipelineState (compute)");
+  }
+  return pPso.Get();
+}
+
+XrTest::SWakeOutput XrTest::CGpu::RunWake(const std::vector<float> &Start, const std::vector<SWakeFrame> &Frames, const SWakeKernels &Kernels)
+{
+  constexpr UINT N = XR_WAKE_SIZE, MIPS = XR_WAKE_MIPS, SRVS = 4, UAVS = 5, TABLE = SRVS + UAVS, KERNELS = 5;
+  if (!Start.empty() && Start.size() != (size_t)N * N * 2)
+    throw std::runtime_error("the wakes' start is not the window's texels");
+  if (Frames.empty())
+    throw std::runtime_error("the wakes run no frame");
+  CreateComputeRootSignature();
+  constexpr DXGI_FORMAT STATE = DXGI_FORMAT_R32G32_FLOAT, FOAM = DXGI_FORMAT_R32_FLOAT, VIEW = DXGI_FORMAT_R16G16B16A16_FLOAT;
+  constexpr D3D12_RESOURCE_STATES UAV_STATE = D3D12_RESOURCE_STATE_UNORDERED_ACCESS, READ = D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE;
+  auto Target = [&](UINT nMips, DXGI_FORMAT Format, D3D12_RESOURCE_STATES eState) {
+    D3D12_HEAP_PROPERTIES Heap = {};
+    Heap.Type = D3D12_HEAP_TYPE_DEFAULT;
+    D3D12_RESOURCE_DESC Desc = {};
+    Desc.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
+    Desc.Width = Desc.Height = N;
+    Desc.DepthOrArraySize = 1;
+    Desc.MipLevels = (UINT16)nMips;
+    Desc.Format = Format;
+    Desc.SampleDesc.Count = 1;
+    Desc.Flags = D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS;
+    ComPtr<ID3D12Resource> p;
+    Ok(m_pDevice->CreateCommittedResource(&Heap, D3D12_HEAP_FLAG_NONE, &Desc, eState, nullptr, IID_PPV_ARGS(&p)), "CreateCommittedResource (wakes)");
+    return p;
+  };
+  ComPtr<ID3D12Resource> pState = Target(1, STATE, D3D12_RESOURCE_STATE_COPY_DEST), pRows = Target(1, STATE, UAV_STATE),
+                         pColumns = Target(1, STATE, UAV_STATE), pFoam[2] = { Target(1, FOAM, UAV_STATE), Target(1, FOAM, UAV_STATE) },
+                         pView = Target(MIPS, VIEW, UAV_STATE);
+  // The constants of each step and each view at a multiple of 256 bytes, in the order they run.
+  constexpr size_t CB_STRIDE = (sizeof(SWakeConstants) + 255) & ~(size_t)255;
+  std::vector<const SWakeConstants *> Order;
+  for (const SWakeFrame &f : Frames)
+  {
+    for (const SWakeConstants &s : f.Steps)
+      Order.push_back(&s);
+    Order.push_back(&f.View);
+  }
+  std::vector<uint8_t> CBData(CB_STRIDE * Order.size());
+  for (size_t i = 0; i < Order.size(); i++)
+    memcpy(&CBData[i * CB_STRIDE], Order[i], sizeof(SWakeConstants));
+  ComPtr<ID3D12Resource> pCB = Upload(CBData.data(), CBData.size());
+
+  // The tables as Wake.cpp's EnsureWakeTargets writes them.
+  ComPtr<ID3D12DescriptorHeap> pHeap;
+  D3D12_DESCRIPTOR_HEAP_DESC HeapDesc = {};
+  HeapDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
+  HeapDesc.NumDescriptors = KERNELS * TABLE;
+  HeapDesc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
+  Ok(m_pDevice->CreateDescriptorHeap(&HeapDesc, IID_PPV_ARGS(&pHeap)), "CreateDescriptorHeap (wakes)");
+  auto Cpu = [&](UINT n) {
+    D3D12_CPU_DESCRIPTOR_HANDLE h = pHeap->GetCPUDescriptorHandleForHeapStart();
+    h.ptr += (SIZE_T)n * m_nDescriptorSize;
+    return h;
+  };
+  auto Gpu = [&](UINT n) {
+    D3D12_GPU_DESCRIPTOR_HANDLE h = pHeap->GetGPUDescriptorHandleForHeapStart();
+    h.ptr += (UINT64)n * m_nDescriptorSize;
+    return h;
+  };
+  auto SRV = [&](UINT nSlot, ID3D12Resource *p, DXGI_FORMAT Format) {
+    D3D12_SHADER_RESOURCE_VIEW_DESC v = {};
+    v.Format = Format;
+    v.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
+    v.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+    v.Texture2D.MipLevels = 1;
+    m_pDevice->CreateShaderResourceView(p, &v, Cpu(nSlot));
+  };
+  auto UAV = [&](UINT nSlot, ID3D12Resource *p, DXGI_FORMAT Format, UINT nMip) {
+    D3D12_UNORDERED_ACCESS_VIEW_DESC v = {};
+    v.Format = Format;
+    v.ViewDimension = D3D12_UAV_DIMENSION_TEXTURE2D;
+    v.Texture2D.MipSlice = nMip;
+    m_pDevice->CreateUnorderedAccessView(p, nullptr, &v, Cpu(nSlot));
+  };
+  ID3D12Resource *const pIns[3] = { pState.Get(), pRows.Get(), pColumns.Get() }, *const pOuts[3] = { pRows.Get(), pColumns.Get(), pState.Get() };
+  for (UINT k = 0; k < KERNELS; k++)
+  {
+    const bool bView = k >= 3;
+    const UINT f = bView ? k - 3 : 0;
+    for (UINT i = 0; i < SRVS; i++)
+    {
+      if (i == 0)
+        SRV(k * TABLE, bView ? pState.Get() : pIns[k], STATE);
+      else if (bView && i == 1)
+        SRV(k * TABLE + 1, pFoam[1 - f].Get(), FOAM);
+      else
+        SRV(k * TABLE + i, nullptr, STATE);
+    }
+    for (UINT i = 0; i < UAVS; i++)
+    {
+      if (!bView)
+        UAV(k * TABLE + SRVS + i, i == 0 ? pOuts[k] : nullptr, STATE, 0);
+      else if (i == 0)
+        UAV(k * TABLE + SRVS, pFoam[f].Get(), FOAM, 0);
+      else
+        UAV(k * TABLE + SRVS + i, pView.Get(), VIEW, i - 1);
+    }
+  }
+
+  // The readback of the window, the foam and every level of the view.
+  const D3D12_RESOURCE_DESC StateDesc = pState->GetDesc(), FoamDesc = pFoam[0]->GetDesc(), ViewDesc = pView->GetDesc();
+  D3D12_PLACED_SUBRESOURCE_FOOTPRINT StateLayout = {}, FoamLayout = {};
+  std::vector<D3D12_PLACED_SUBRESOURCE_FOOTPRINT> ViewLayout(MIPS);
+  UINT64 nStateBytes = 0, nFoamBytes = 0, nViewBytes = 0;
+  m_pDevice->GetCopyableFootprints(&StateDesc, 0, 1, 0, &StateLayout, nullptr, nullptr, &nStateBytes);
+  m_pDevice->GetCopyableFootprints(&FoamDesc, 0, 1, 0, &FoamLayout, nullptr, nullptr, &nFoamBytes);
+  m_pDevice->GetCopyableFootprints(&ViewDesc, 0, MIPS, 0, ViewLayout.data(), nullptr, nullptr, &nViewBytes);
+  ComPtr<ID3D12Resource> pStateBack = Buffer(D3D12_HEAP_TYPE_READBACK, (size_t)nStateBytes, D3D12_RESOURCE_STATE_COPY_DEST, false);
+  ComPtr<ID3D12Resource> pFoamBack = Buffer(D3D12_HEAP_TYPE_READBACK, (size_t)nFoamBytes, D3D12_RESOURCE_STATE_COPY_DEST, false);
+  ComPtr<ID3D12Resource> pViewBack = Buffer(D3D12_HEAP_TYPE_READBACK, (size_t)nViewBytes, D3D12_RESOURCE_STATE_COPY_DEST, false);
+
+  Ok(m_pAllocator->Reset(), "Reset");
+  Ok(m_pList->Reset(m_pAllocator.Get(), nullptr), "Reset");
+  std::vector<ComPtr<ID3D12Resource>> Keep;
+  {
+    // The window at the start (zeros without one).
+    std::vector<uint8_t> Rows((size_t)nStateBytes);
+    for (UINT y = 0; y < N && !Start.empty(); y++)
+      memcpy(Rows.data() + (size_t)StateLayout.Offset + (size_t)y * StateLayout.Footprint.RowPitch, &Start[(size_t)y * N * 2], N * 8);
+    ComPtr<ID3D12Resource> pStaging = Upload(Rows.data(), Rows.size());
+    D3D12_TEXTURE_COPY_LOCATION Dst = {}, Src = {};
+    Dst.pResource = pState.Get();
+    Dst.Type = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
+    Src.pResource = pStaging.Get();
+    Src.Type = D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT;
+    Src.PlacedFootprint = StateLayout;
+    m_pList->CopyTextureRegion(&Dst, 0, 0, 0, &Src, nullptr);
+    Keep.push_back(pStaging);
+  }
+  auto Move = [&](ID3D12Resource *p, D3D12_RESOURCE_STATES eFrom, D3D12_RESOURCE_STATES eTo) {
+    const D3D12_RESOURCE_BARRIER t = Transition(p, eFrom, eTo);
+    m_pList->ResourceBarrier(1, &t);
+  };
+  Move(pState.Get(), D3D12_RESOURCE_STATE_COPY_DEST, UAV_STATE);
+  // The foam's textures at rest where the view's kernel reads the one before.
+  for (ComPtr<ID3D12Resource> &p : pFoam)
+    Move(p.Get(), UAV_STATE, READ);
+  ID3D12DescriptorHeap *pHeaps[] = { pHeap.Get() };
+  m_pList->SetDescriptorHeaps(1, pHeaps);
+  m_pList->SetComputeRootSignature(m_pComputeRootSignature.Get());
+  size_t nCB = 0;
+  auto Dispatch = [&](const SBytecode &k, UINT nTable, UINT x, UINT y) {
+    m_pList->SetPipelineState(ComputePipeline(k));
+    m_pList->SetComputeRootDescriptorTable(1, Gpu(nTable * TABLE));
+    m_pList->SetComputeRootDescriptorTable(2, Gpu(nTable * TABLE + SRVS));
+    m_pList->Dispatch(x, y, 1);
+  };
+  // UpdateWakes' order and barriers, a frame after another.
+  UINT f = 0;
+  for (size_t i = 0; i < Frames.size(); i++)
+  {
+    for (size_t s = 0; s < Frames[i].Steps.size(); s++)
+    {
+      m_pList->SetComputeRootConstantBufferView(0, pCB->GetGPUVirtualAddress() + nCB++ * CB_STRIDE);
+      Move(pState.Get(), UAV_STATE, READ);
+      Dispatch(Kernels.Rows, 0, 1, N);
+      Move(pState.Get(), READ, UAV_STATE);
+      Move(pRows.Get(), UAV_STATE, READ);
+      Dispatch(Kernels.Columns, 1, 1, N);
+      Move(pRows.Get(), READ, UAV_STATE);
+      Move(pColumns.Get(), UAV_STATE, READ);
+      Dispatch(Kernels.RowsInverse, 2, 1, N);
+      Move(pColumns.Get(), READ, UAV_STATE);
+    }
+    m_pList->SetComputeRootConstantBufferView(0, pCB->GetGPUVirtualAddress() + nCB++ * CB_STRIDE);
+    f = i > 0 ? 1 - f : 0;
+    if (i > 0)
+    {
+      // The view of the frame before written before this frame's.
+      const D3D12_RESOURCE_BARRIER Uav = { D3D12_RESOURCE_BARRIER_TYPE_UAV };
+      m_pList->ResourceBarrier(1, &Uav);
+    }
+    Move(pState.Get(), UAV_STATE, READ);
+    Move(pFoam[f].Get(), READ, UAV_STATE);
+    Dispatch(Kernels.View, 3 + f, N / 16, N / 16);
+    Move(pState.Get(), READ, UAV_STATE);
+    Move(pFoam[f].Get(), UAV_STATE, READ);
+  }
+  Move(pState.Get(), UAV_STATE, D3D12_RESOURCE_STATE_COPY_SOURCE);
+  Move(pFoam[f].Get(), READ, D3D12_RESOURCE_STATE_COPY_SOURCE);
+  Move(pView.Get(), UAV_STATE, D3D12_RESOURCE_STATE_COPY_SOURCE);
+  auto Copy = [&](ID3D12Resource *pSrc, UINT nSub, ID3D12Resource *pDst, const D3D12_PLACED_SUBRESOURCE_FOOTPRINT &Layout) {
+    D3D12_TEXTURE_COPY_LOCATION Dst = {}, Src = {};
+    Dst.pResource = pDst;
+    Dst.Type = D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT;
+    Dst.PlacedFootprint = Layout;
+    Src.pResource = pSrc;
+    Src.Type = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
+    Src.SubresourceIndex = nSub;
+    m_pList->CopyTextureRegion(&Dst, 0, 0, 0, &Src, nullptr);
+  };
+  Copy(pState.Get(), 0, pStateBack.Get(), StateLayout);
+  Copy(pFoam[f].Get(), 0, pFoamBack.Get(), FoamLayout);
+  for (UINT m = 0; m < MIPS; m++)
+    Copy(pView.Get(), m, pViewBack.Get(), ViewLayout[m]);
+  Execute();
+
+  SWakeOutput Out;
+  void *p = nullptr;
+  D3D12_RANGE None = { 0, 0 };
+  D3D12_RANGE Range = { 0, (SIZE_T)nStateBytes };
+  Ok(pStateBack->Map(0, &Range, &p), "Map");
+  Out.State.resize((size_t)N * N * 2);
+  for (UINT y = 0; y < N; y++)
+    memcpy(&Out.State[(size_t)y * N * 2], (const uint8_t *)p + (size_t)StateLayout.Offset + (size_t)y * StateLayout.Footprint.RowPitch, N * 8);
+  pStateBack->Unmap(0, &None);
+  Range = { 0, (SIZE_T)nFoamBytes };
+  Ok(pFoamBack->Map(0, &Range, &p), "Map");
+  Out.Foam.resize((size_t)N * N);
+  for (UINT y = 0; y < N; y++)
+    memcpy(&Out.Foam[(size_t)y * N], (const uint8_t *)p + (size_t)FoamLayout.Offset + (size_t)y * FoamLayout.Footprint.RowPitch, N * 4);
+  pFoamBack->Unmap(0, &None);
+  Range = { 0, (SIZE_T)nViewBytes };
+  Ok(pViewBack->Map(0, &Range, &p), "Map");
+  for (UINT m = 0; m < MIPS; m++)
+  {
+    const UINT w = N >> m;
+    std::vector<uint16_t> Halfs((size_t)w * w * 4);
+    for (UINT y = 0; y < w; y++)
+      memcpy(&Halfs[(size_t)y * w * 4], (const uint8_t *)p + (size_t)ViewLayout[m].Offset + (size_t)y * ViewLayout[m].Footprint.RowPitch, (size_t)w * 8);
+    Out.View[m] = HalfsToFloats(Halfs.data(), Halfs.size());
+  }
+  pViewBack->Unmap(0, &None);
+  return Out;
+}
+
 XrTest::SOceanOutput XrTest::CGpu::RunOcean(const std::vector<float> &H0, const SOceanConstants &Constants, const SOceanKernels &Kernels)
 {
   SOceanKernels k = Kernels;
@@ -826,43 +1095,8 @@ XrTest::SOceanOutput XrTest::CGpu::RunOceanFrames(const std::vector<float> &H0, 
   const bool bFoam = Kernels.Foam.pData != nullptr, bCaustics = Kernels.Caustics.pData != nullptr;
   if (bFoam && !Kernels.FoamView.pData)
     throw std::runtime_error("the ocean's foam without its view's kernel");
-  if (!m_pComputeRootSignature)
-  {
-    // D3D12Compute.cpp's: 0 CBV b0; 1 table t0..t3; 2 table u0..u4 (its static samplers unused by the ocean's kernels).
-    D3D12_DESCRIPTOR_RANGE Ranges[2] = {};
-    Ranges[0].RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_SRV;
-    Ranges[0].NumDescriptors = SRVS;
-    Ranges[1].RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_UAV;
-    Ranges[1].NumDescriptors = UAVS;
-    D3D12_ROOT_PARAMETER Params[3] = {};
-    Params[0].ParameterType = D3D12_ROOT_PARAMETER_TYPE_CBV;
-    Params[0].ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
-    for (int i = 1; i < 3; i++)
-    {
-      Params[i].ParameterType = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
-      Params[i].DescriptorTable.NumDescriptorRanges = 1;
-      Params[i].DescriptorTable.pDescriptorRanges = &Ranges[i - 1];
-      Params[i].ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
-    }
-    D3D12_ROOT_SIGNATURE_DESC Rs = {};
-    Rs.NumParameters = 3;
-    Rs.pParameters = Params;
-    ComPtr<ID3DBlob> pBlob, pError;
-    Ok(D3D12SerializeRootSignature(&Rs, D3D_ROOT_SIGNATURE_VERSION_1, &pBlob, &pError), "D3D12SerializeRootSignature (compute)");
-    Ok(m_pDevice->CreateRootSignature(0, pBlob->GetBufferPointer(), pBlob->GetBufferSize(), IID_PPV_ARGS(&m_pComputeRootSignature)),
-       "CreateRootSignature (compute)");
-  }
-  auto Pso = [&](const SBytecode &Shader) {
-    ComPtr<ID3D12PipelineState> &pPso = m_ComputePipelines[Shader.pData];
-    if (!pPso)
-    {
-      D3D12_COMPUTE_PIPELINE_STATE_DESC Desc = {};
-      Desc.pRootSignature = m_pComputeRootSignature.Get();
-      Desc.CS = { Shader.pData, Shader.nSize };
-      Ok(m_pDevice->CreateComputePipelineState(&Desc, IID_PPV_ARGS(&pPso)), "CreateComputePipelineState (compute)");
-    }
-    return pPso.Get();
-  };
+  CreateComputeRootSignature();
+  auto Pso = [&](const SBytecode &Shader) { return ComputePipeline(Shader); };
   auto Array = [&](UINT w, UINT nSlices, UINT nMips, DXGI_FORMAT Format, D3D12_RESOURCE_STATES eState, bool bUav) {
     D3D12_HEAP_PROPERTIES Heap = {};
     Heap.Type = D3D12_HEAP_TYPE_DEFAULT;

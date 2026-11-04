@@ -115,6 +115,10 @@ enum ED3D12Kernel
   eD3D12K_OceanFoam,                //!< the foam's state (the whitecaps; d3d12_WaterFoam), from the frame before's
   eD3D12K_OceanFoamView,            //!< the state into the foam's view (RGBA16F, the water's), its mip levels 1 to 4
   eD3D12K_OceanCaustics,            //!< the caustics of the waves at four depths (d3d12_WaterCaustics; the sea floor's), mip levels 1 to 4
+  eD3D12K_WakeRows,                 //!< the wakes (d3d12_WaterWakes): the bodies' displacement, the sponge, the FFT along x (Shaders/Wake.hlsl)
+  eD3D12K_WakeColumns,              //!< the FFT along y, the waves' step, the inverse FFT along y
+  eD3D12K_WakeRowsInverse,          //!< the inverse FFT along x: the window
+  eD3D12K_WakeView,                 //!< the slopes and the foam into the view (the water's), its mip levels 1 to 3
   eD3D12K_Num
 };
 

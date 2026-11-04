@@ -428,6 +428,37 @@ struct SOceanConstants
   XR_FLOAT4_ARRAY(vCausticsDepths, XR_CAUSTICS_CASCADES);  //!< each caustics cascade's depths (m) of its texels' x, y, z, w
 };
 
+// The wakes (Wake.cpp, Wake.hlsl, Water.hlsl): the cells a side of the window of the ocean around the camera that the
+// waves of the bodies moving through its surface run in, a cell (m: the window 128 m a side; a swimmer's waves are under a
+// metre long, a quarter of a metre left them a blur of ripple finer than its cells), the most bodies a step,
+// the levels of the view the water reads (its kernel's 16 x 16 texels a group: 16, 8, 4, 2 a group).
+#define XR_WAKE_SIZE        1024
+#define XR_WAKE_CELL        0.125
+#define XR_WAKE_BODIES      32
+#define XR_WAKE_MIPS        4
+
+//! b0 of the wakes' kernels (Wake.hlsl, Wake.cpp). A cell of the world (x / XR_WAKE_CELL, floored) is the window's texel
+//! of its index modulo XR_WAKE_SIZE (the window wraps: as the camera moves, the cells it leaves are those it comes to).
+struct SWakeConstants
+{
+  XR_FLOAT4(vWindow);             //!< x, y the window's centre cell (world cells; the window from it less XR_WAKE_SIZE / 2 to it plus that),
+                                  //!< z, w the centre cell of the step before (the texels whose cell was not in that window are cleared)
+  XR_FLOAT4(vStep);               //!< x the step (s), y the share of the waves the uniform damping leaves, z the rate (1 / s) of the damping
+                                  //!< of the shortest waves times the step (as (k / k_N)^4, k_N = pi / the cell), w the sponge's most rate times
+                                  //!< the step
+  XR_FLOAT4(vSponge);             //!< x the sponge's width (cells in from the window's edge: the waves fade out there before they would wrap),
+                                  //!< y the view's: the foam the frame before left (exp(-dt / its life); 0: none, the first frame), z the share
+                                  //!< of a texel's foam spread to each of its four neighbours, w 1 / how much faster than WAKE_FOAM_SPEED (m/s) a
+                                  //!< body makes the most foam (vBreak.z) where it is
+  XR_FLOAT4(vBreak);              //!< the view: x the slope the waves break at, y 1 / the slopes over which the foam they make grows to z, the
+                                  //!< most foam's share white (a fast body's and the breaking waves': the foam made there that much at least)
+  XR_UINT4(nCounts);              //!< x the bodies, y 1: the step's window moved (its new texels cleared)
+  XR_FLOAT4_ARRAY(vBodies, 4 * XR_WAKE_BODIES);  //!< each body's (Wake.hlsli's WakeDepth): 4 i the body before the step (xy its centre, m
+                                  //!< from the window's centre point, zw the cos and sin of its axes' turn), 4 i + 1 its shape then (xy 1 / its
+                                  //!< half axes, z its depth, m; w the radius around its centres it reaches, m), 4 i + 2 and 4 i + 3 the same
+                                  //!< after the step (w of the last its foam's factor in the view: its speed less WAKE_FOAM_SPEED, m/s)
+};
+
 //! b0 of a level of the bloom from one twice its size (Bloom.hlsl, Hdr.cpp).
 struct SBloomConstants
 {

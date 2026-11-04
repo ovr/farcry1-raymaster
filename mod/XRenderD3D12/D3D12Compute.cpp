@@ -82,6 +82,10 @@
 #include "OceanFoam_CS.h"
 #include "OceanFoamView_CS.h"
 #include "OceanCaustics_CS.h"
+#include "WakeRows_CS.h"
+#include "WakeColumns_CS.h"
+#include "WakeRowsInverse_CS.h"
+#include "WakeView_CS.h"
 #if XRENDERD3D12_NRD
 #include "PathNrdPack_CS.h"
 #include "PathNrdResolve_CS.h"
@@ -185,6 +189,10 @@ const SKernel s_Kernels[eD3D12K_Num] =
   { "ocean (foam)", g_OceanFoam_CS, sizeof(g_OceanFoam_CS) },
   { "ocean (foam view)", g_OceanFoamView_CS, sizeof(g_OceanFoamView_CS) },
   { "ocean (caustics)", g_OceanCaustics_CS, sizeof(g_OceanCaustics_CS) },
+  { "wakes (rows)", g_WakeRows_CS, sizeof(g_WakeRows_CS) },
+  { "wakes (columns)", g_WakeColumns_CS, sizeof(g_WakeColumns_CS) },
+  { "wakes (rows, inverse)", g_WakeRowsInverse_CS, sizeof(g_WakeRowsInverse_CS) },
+  { "wakes (view)", g_WakeView_CS, sizeof(g_WakeView_CS) },
 };
 static_assert(sizeof(s_Kernels) / sizeof(s_Kernels[0]) == eD3D12K_Num, "a kernel for each ED3D12Kernel");
 

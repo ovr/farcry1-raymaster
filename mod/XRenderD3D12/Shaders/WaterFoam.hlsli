@@ -148,6 +148,22 @@ float SurfClumps(float2 P, float fDepth, float fBreak, float fCycle)
   return 1 + FOAM_SURF_CLUMPS * clamp(3.2 * (v - 0.5), -1, 1);
 }
 
+//! The size of the wakes' clumps of foam (m; WakeClumps): about a hull's width, the eddies of the water it stirred.
+static const float FOAM_WAKE_CLUMP = 1.2;
+
+//! The wakes' foam of the amount fAmount (Wake.hlsl's, at a texel of 0.25 m) at the world position P torn into clumps as
+//! SurfClumps tears the surf's (a trail of even white is fog a few metres off, where the lace is finer than the pixel):
+//! three octaves of value noise FOAM_WAKE_CLUMP m across, in place (the foam stays where the hull left it), steep about
+//! their mean, FOAM_SURF_CLUMPS either way; the less the thicker the foam (the white water just behind a hull is white
+//! all over, its trail patches with water between them): 1 at an amount of 1, all of it at none.
+float WakeClumps(float2 P, float fAmount)
+{
+  const float2 Q = P / FOAM_WAKE_CLUMP;
+  const float v = 0.55 * FoamValueNoise(Q) + 0.3 * FoamValueNoise(3 * Q + 17) + 0.15 * FoamValueNoise(7 * Q - 29);
+  const float a = saturate(fAmount);
+  return saturate(a * lerp(1 + FOAM_SURF_CLUMPS * clamp(3.2 * (v - 0.5), -1, 1), 1, a * a));
+}
+
 //! The breaker index where a wave meets the shore from the noise n (0..1, its mean 0.5): McCowan's 0.78 the mean,
 //! FOAM_INDEX_SPREAD either way (from one wave to the next and along a crest it breaks in deeper or shallower water: the
 //! beach's slope and the wave's steepness change it, measured from 0.6 to 1.2).

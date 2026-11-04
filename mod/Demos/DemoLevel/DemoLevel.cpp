@@ -55,12 +55,25 @@
 //	                             The run ends when the sequence has played
 //	                             (with --until beyond its length: a whole cut
 //	                             scene, e.g. into a video with --video)
+//	  actor = <entity name>      an entity moved along actorpath each frame (a
+//	                             boat, a character; player: the player), its
+//	                             position and angles set and its physics' velocity
+//	                             the path's (a character's left to it)
+//	  actorpath = x y z ax ay az frame | ...
+//	                             its keyframes as the camera path's (actorpath2,
+//	                             ... more; interpolated as it is), the angles as
+//	                             the entity's (az its heading)
 //
 //////////////////////////////////////////////////////////////////////
 
 #include "DemoHost.h"
 #include <IMovieSystem.h>
 #include <algorithm>
+// The engine's headers call min and max unqualified.
+using std::max;
+using std::min;
+#include <IEntitySystem.h>
+#include <physinterface.h>
 
 class CDemoLevel : public CDemo
 {
@@ -84,6 +97,7 @@ public:
       return false;
     }
     ReadPath(Host);
+    m_ActorPath = ReadKeys(Host, "actorpath");
     return Host.StartLevel(Level.c_str(), Host.GetScene().Get("mission").c_str());
   }
 
@@ -128,6 +142,7 @@ public:
       Host.Log("DemoLevel: sky shader '%s'", Sky.c_str());
     }
     m_Camera = Host.GetScene().GetFloats("camera");
+    FindActor(Host);
     const CCamera &View = Host.GetSystem()->GetViewCamera();
     Host.Log("DemoLevel: the game's camera %g %g %g %g %g %g", View.GetPos().x, View.GetPos().y, View.GetPos().z,
       View.GetAngles().x, View.GetAngles().y, View.GetAngles().z);
@@ -136,9 +151,10 @@ public:
 
   virtual bool GetCamera(CDemoHost &Host, int nFrame, CCamera &Cam)
   {
+    MoveActor(Host, nFrame);
     if (!m_Path.empty())
     {
-      Vec3 vPos = PathValue(&SKey::vPos, (float)nFrame);
+      Vec3 vPos = PathValue(m_Path, &SKey::vPos, (float)nFrame);
       if (m_fAbove >= 0)
       {
         const float fLow = Host.Get3DEngine()->GetTerrainElevation(vPos.x, vPos.y) + m_fAbove;
@@ -150,7 +166,7 @@ public:
         }
       }
       Cam.SetPos(vPos);
-      Cam.SetAngle(PathValue(&SKey::vAngles, (float)nFrame));
+      Cam.SetAngle(PathValue(m_Path, &SKey::vAngles, (float)nFrame));
       Cam.Update();
       return true;
     }
@@ -187,12 +203,13 @@ private:
     float fFrame;
   };
 
-  //! The keyframes of path, path2, ...: seven numbers each, sorted by their frames, every angle
-  //! within 180 degrees of the one before.
-  void ReadPath(CDemoHost &Host)
+  //! The keyframes of the keys szPrefix, szPrefix2, ... (path, actorpath): seven numbers each,
+  //! sorted by their frames, every angle within 180 degrees of the one before.
+  static std::vector<SKey> ReadKeys(CDemoHost &Host, const char *szPrefix)
   {
-    std::vector<std::string> Keys = Host.GetScene().GetKeys("path");
+    std::vector<std::string> Keys = Host.GetScene().GetKeys(szPrefix);
     std::vector<float> Numbers;
+    std::vector<SKey> Path;
     for (size_t i = 0; i < Keys.size(); i++)
     {
       bool bRead = false;
@@ -204,7 +221,7 @@ private:
       Numbers.insert(Numbers.end(), Line.begin(), Line.end());
     }
     if (Numbers.size() % 7)
-      Host.Log("DemoLevel: the path has %d numbers, not 7 per keyframe: the last %d are left out", (int)Numbers.size(),
+      Host.Log("DemoLevel: the %s has %d numbers, not 7 per keyframe: the last %d are left out", szPrefix, (int)Numbers.size(),
         (int)(Numbers.size() % 7));
     for (size_t i = 0; i + 7 <= Numbers.size(); i += 7)
     {
@@ -212,21 +229,28 @@ private:
       Key.vPos = Vec3(Numbers[i], Numbers[i + 1], Numbers[i + 2]);
       Key.vAngles = Vec3(Numbers[i + 3], Numbers[i + 4], Numbers[i + 5]);
       Key.fFrame = Numbers[i + 6];
-      m_Path.push_back(Key);
+      Path.push_back(Key);
     }
-    if (m_Path.empty())
-      return;
-    std::stable_sort(m_Path.begin(), m_Path.end(), [](const SKey &a, const SKey &b) { return a.fFrame < b.fFrame; });
-    for (size_t i = 1; i < m_Path.size(); i++)
+    std::stable_sort(Path.begin(), Path.end(), [](const SKey &a, const SKey &b) { return a.fFrame < b.fFrame; });
+    for (size_t i = 1; i < Path.size(); i++)
     {
       for (int c = 0; c < 3; c++)
       {
-        float fTurn = m_Path[i].vAngles[c] - m_Path[i - 1].vAngles[c];
+        float fTurn = Path[i].vAngles[c] - Path[i - 1].vAngles[c];
         fTurn -= 360.0f * floorf((fTurn + 180.0f) / 360.0f);
-        m_Path[i].vAngles[c] = m_Path[i - 1].vAngles[c] + fTurn;
+        Path[i].vAngles[c] = Path[i - 1].vAngles[c] + fTurn;
       }
     }
+    return Path;
+  }
+
+  //! The camera's keyframes (path, path2, ...) and how they are interpolated.
+  void ReadPath(CDemoHost &Host)
+  {
+    m_Path = ReadKeys(Host, "path");
     m_bLinear = !stricmp(Host.GetScene().Get("interpolation").c_str(), "linear");
+    if (m_Path.empty())
+      return;
     m_fAbove = Host.GetScene().GetFloat("above", -1);
     Host.Log("DemoLevel: camera path of %d keyframes, frames %g to %g, %s", (int)m_Path.size(), m_Path.front().fFrame,
       m_Path.back().fFrame, m_bLinear ? "linear" : "catmull-rom");
@@ -236,34 +260,87 @@ private:
 
   //! The velocity of a member of the keyframes at keyframe i, per frame: Catmull-Rom, from the
   //! keyframes before and after (at the ends half the one of the first or last segment).
-  Vec3 PathVelocity(Vec3 SKey::*pValue, size_t i) const
+  static Vec3 PathVelocity(const std::vector<SKey> &Path, Vec3 SKey::*pValue, size_t i)
   {
-    const size_t nPrev = i > 0 ? i - 1 : i, nNext = i + 1 < m_Path.size() ? i + 1 : i;
-    const float fFrames = m_Path[nNext].fFrame - m_Path[nPrev].fFrame;
+    const size_t nPrev = i > 0 ? i - 1 : i, nNext = i + 1 < Path.size() ? i + 1 : i;
+    const float fFrames = Path[nNext].fFrame - Path[nPrev].fFrame;
     if (fFrames <= 0)
       return Vec3(0, 0, 0);
     const float fScale = nPrev == i || nNext == i ? 0.5f : 1.0f;
-    return (m_Path[nNext].*pValue - m_Path[nPrev].*pValue) * (fScale / fFrames);
+    return (Path[nNext].*pValue - Path[nPrev].*pValue) * (fScale / fFrames);
   }
 
   //! A member of the keyframes at frame fFrame.
-  Vec3 PathValue(Vec3 SKey::*pValue, float fFrame) const
+  Vec3 PathValue(const std::vector<SKey> &Path, Vec3 SKey::*pValue, float fFrame) const
   {
-    if (fFrame <= m_Path.front().fFrame)
-      return m_Path.front().*pValue;
-    if (fFrame >= m_Path.back().fFrame)
-      return m_Path.back().*pValue;
+    if (fFrame <= Path.front().fFrame)
+      return Path.front().*pValue;
+    if (fFrame >= Path.back().fFrame)
+      return Path.back().*pValue;
     size_t i = 0;
-    while (m_Path[i + 1].fFrame <= fFrame)
+    while (Path[i + 1].fFrame <= fFrame)
       i++;
-    const SKey &A = m_Path[i], &B = m_Path[i + 1];
+    const SKey &A = Path[i], &B = Path[i + 1];
     const float fFrames = B.fFrame - A.fFrame, t = (fFrame - A.fFrame) / fFrames;
     if (m_bLinear)
       return A.*pValue + (B.*pValue - A.*pValue) * t;
     // Cubic Hermite curve between the two keyframes.
     const float t2 = t * t, t3 = t2 * t;
-    return A.*pValue * (2 * t3 - 3 * t2 + 1) + PathVelocity(pValue, i) * (fFrames * (t3 - 2 * t2 + t)) +
-      B.*pValue * (3 * t2 - 2 * t3) + PathVelocity(pValue, i + 1) * (fFrames * (t3 - t2));
+    return A.*pValue * (2 * t3 - 3 * t2 + 1) + PathVelocity(Path, pValue, i) * (fFrames * (t3 - 2 * t2 + t)) +
+      B.*pValue * (3 * t2 - 2 * t3) + PathVelocity(Path, pValue, i + 1) * (fFrames * (t3 - t2));
+  }
+
+  //! The entity of actor (player: the first of class Player), when there is an actor path.
+  void FindActor(CDemoHost &Host)
+  {
+    const std::string Name = Host.GetScene().Get("actor");
+    IEntitySystem *pEntities = Host.GetSystem()->GetIEntitySystem();
+    if (Name.empty() || m_ActorPath.empty() || !pEntities)
+      return;
+    IEntity *pActor = NULL;
+    if (!stricmp(Name.c_str(), "player"))
+    {
+      IEntityIt *pIt = pEntities->GetEntityIterator();
+      while (pIt && !pIt->IsEnd() && !pActor)
+      {
+        IEntity *pEntity = pIt->Next();
+        if (pEntity && pEntity->GetEntityClassName() && !strcmp(pEntity->GetEntityClassName(), "Player"))
+          pActor = pEntity;
+      }
+      if (pIt)
+        pIt->Release();
+    }
+    else
+      pActor = pEntities->GetEntity(Name.c_str());
+    if (!pActor)
+    {
+      Host.Log("DemoLevel: no actor '%s'", Name.c_str());
+      return;
+    }
+    m_nActor = (int)pActor->GetId();
+    Host.Log("DemoLevel: actor '%s' (class '%s') along a path of %d keyframes, frames %g to %g", Name.c_str(),
+      pActor->GetEntityClassName(), (int)m_ActorPath.size(), m_ActorPath.front().fFrame, m_ActorPath.back().fFrame);
+  }
+
+  //! The actor where its path is at frame nFrame; its physics' velocity the path's (a rigid body
+  //! or a vehicle would else fall and drift between the frames; a character's moves itself).
+  void MoveActor(CDemoHost &Host, int nFrame)
+  {
+    IEntitySystem *pEntities = Host.GetSystem()->GetIEntitySystem();
+    IEntity *pActor = m_nActor >= 0 && pEntities ? pEntities->GetEntity((EntityId)m_nActor) : NULL;
+    if (!pActor)
+      return;
+    const Vec3 vPos = PathValue(m_ActorPath, &SKey::vPos, (float)nFrame);
+    pActor->SetPos(vPos);
+    pActor->SetAngles(PathValue(m_ActorPath, &SKey::vAngles, (float)nFrame));
+    IPhysicalEntity *pPhysics = pActor->GetPhysics();
+    if (pPhysics && pPhysics->GetType() != PE_LIVING && Host.GetFrameTime() > 0)
+    {
+      pe_action_set_velocity Velocity;
+      Velocity.v = (PathValue(m_ActorPath, &SKey::vPos, (float)nFrame + 1) - vPos) * (1 / Host.GetFrameTime());
+      Velocity.w = vectorf(0, 0, 0);
+      pPhysics->Action(&Velocity);
+    }
   }
 
   static void ListSequences(CDemoHost &Host)
@@ -281,6 +358,9 @@ private:
   IAnimSequence *m_pSequence = NULL;
   std::vector<float> m_Camera;
   std::vector<SKey> m_Path;
+  //! The actor's keyframes and its entity's id (-1: none).
+  std::vector<SKey> m_ActorPath;
+  int m_nActor = -1;
   bool m_bLinear = false;
   //! above, or -1 without it; the frames it raised the camera in and the most it did.
   float m_fAbove = -1;
