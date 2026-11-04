@@ -29,6 +29,7 @@
 #include "WaterCaustics.hlsli"
 #include "WaterVolume.hlsli"
 #include "OceanFFT.hlsli"
+#include "Wake.hlsli"
 
 //! The FXAA tests' picture (Fxaa.hlsli): g_Test.nTest.y x g_Test.nTest.z pixels, g_TestIn[y * width + x] the rgba of
 //! pixel (x, y) as floats, clamped to the picture as AntiAlias.hlsl clamps its loads.
@@ -401,14 +402,14 @@ void CSFoamSurf(uint i : SV_DispatchThreadID)
 }
 
 //! SurfClumps (WaterFoam.hlsli) at the position g_TestIn[2i].xy, the depth .z, the break's depth .w, the phase
-//! g_TestIn[2i + 1].x.
+//! g_TestIn[2i + 1].x; .y WakeClumps there of the amount g_TestIn[2i + 1].y.
 [numthreads(64, 1, 1)]
 void CSFoamClumps(uint i : SV_DispatchThreadID)
 {
   if (i >= g_Test.nTest.x)
     return;
-  const float4 a = TestIn(2 * i);
-  TestOut(i, float4(SurfClumps(a.xy, a.z, a.w, TestIn(2 * i + 1).x), 0, 0, 0));
+  const float4 a = TestIn(2 * i), b = TestIn(2 * i + 1);
+  TestOut(i, float4(SurfClumps(a.xy, a.z, a.w, b.x), WakeClumps(a.xy, b.y), 0, 0));
 }
 
 //! FoamShade (WaterFoam.hlsli) of the pattern's value g_TestIn[i].x, the amount .y, the blur .z.
@@ -516,4 +517,18 @@ void CSFoamLight(uint i : SV_DispatchThreadID)
     return;
   const float4 n = TestIn(i * 4);
   TestOut(i, float4(FoamLight(n.xyz, TestIn(i * 4 + 1).xyz, TestIn(i * 4 + 2).rgb, n.w, TestIn(i * 4 + 3).rgb), 0));
+}
+
+//! The wakes' window and bodies (Wake.hlsli): WakeShape and WakeDepth at X g_TestIn[3i].xy of the pose g_TestIn[3i + 1]
+//! and the shape g_TestIn[3i + 2] (out[i].xy); WakeCell and WakeOffset of texel g_TestIn[3i].z around cell
+//! g_TestIn[3i].w (out[i].zw).
+[numthreads(64, 1, 1)]
+void CSWakeShape(uint i : SV_DispatchThreadID)
+{
+  if (i >= g_Test.nTest.x)
+    return;
+  const float4 a = TestIn(3 * i), vPose = TestIn(3 * i + 1), vShape = TestIn(3 * i + 2);
+  const uint t = (uint)a.z;
+  const int c = (int)a.w;
+  TestOut(i, float4(WakeShape(a.xy, vPose, vShape), WakeDepth(a.xy, vPose, vShape), (float)WakeCell(t, c), WakeOffset(t, c)));
 }

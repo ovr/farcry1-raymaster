@@ -986,6 +986,12 @@ bool CD3D12Renderer::SetupWaterDraw(SPipelineKey &Key, SDrawConstants &dc, const
   Set4(dc.vTexGen1U, 0, 0, 0, 0);
   const bool bFoam = bSunLight && !bVolume && CV_d3d12_WaterFoam > 0;
   const bool bOceanFFT = SetOceanConstants(dc, dc.vParams0[0], bFoam ? GetFoamTexture() : -1);
+  // The wakes (d3d12_WaterWakes; Wake.cpp) on the ocean (none in an environment cube, on a water volume), their foam with
+  // the ocean's.
+  if (bVolume || m_bEnvCubePass)
+    memset(dc.vLightPos[0], 0, 2 * sizeof(dc.vLightPos[0]));
+  else
+    SetWakeConstants(dc, bFoam && dc.vTexGen1U[0] > 0);
 
   // The sky box the scene's sky drew (as it drew it).
   dc.nTex2 = dc.nTex3 = dc.nTex4 = D3D12_SRV_WHITE;

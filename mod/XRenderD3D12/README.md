@@ -1206,7 +1206,10 @@ and lists theirs (`NamesObjects`).
   of its RMS); with the foam 21 how much of the water's light it hides, 22 the whitecaps' amount, 23
   the shore's (the three without the game's foam strips on the beaches); with the light in the ocean's
   water 24 the light it scatters towards the camera, 25 the share of the scene behind it left (from
-  below the share of Snell's window), 26 the share of the sun's light left in the light it scatters.
+  below the share of Snell's window), 26 the share of the sun's light left in the light it scatters;
+  with the wakes 27 their slopes (red and green along x and y, 0.5 none, saturated at 0.25 either
+  way; blue the RMS of the slopes their mip levels smoothed out, white 0.1), 28 their foam's share
+  white.
 - The FFT ocean (`d3d12_WaterFFT`, 1; 0 draws the static wave texture and the frames of the water
   before it; not saved; `OceanSpectrum.h`, `OceanFFT.cpp`, `Shaders/OceanFFT.hlsl`): the ocean's
   waves are a wind sea made by inverse FFTs on the GPU each frame (Tessendorf's "Simulating Ocean
@@ -1412,6 +1415,51 @@ and lists theirs (`NamesObjects`).
     Carrier, the quad's shared 0.05); with `d3d12_WaterVolume 0` 0.01-0.02 ms. The debug views'
     terms are returned where they are made: kept to the end of the program they held registers
     through all of it, the water 0.05 ms slower with `d3d12_WaterVolume 0` too.
+- The wakes (`d3d12_WaterWakes`, 1; 0 draws the frames before; not saved; `Wake.cpp`, `WakeBodies.h`,
+  `Shaders/Wake.hlsl`, `Shaders/Wake.hlsli`): the waves of what moves through the ocean's surface, a
+  boat's wake and the ripple round a swimmer, and their foam.
+  - Waves. Linear deep water's waves in a window of 1024 x 1024 cells of 12.5 cm (128 m) around the
+    camera, Tessendorf's eWave: the height and the velocity potential's filtered part, each wave
+    number turned exactly over a step (FFTs along the rows and the columns in group shared memory,
+    three kernels a step), so the waves run at deep water's speeds whatever the frame's time (within
+    1e-6 m over 50 steps, `Wake_Dispersion`). Each texel is the cell of its index modulo the window's
+    size: the window follows the camera by cells with nothing copied (the cells new to it start
+    calm), and a sponge 12 m wide at its edge takes the waves before they would wrap (0.0001 of their
+    energy left). They fade over a minute (0.02/s), the shortest the cells carry faster.
+  - Bodies. The entities with physics that move (rigid bodies, vehicles, characters, ragdolls) whose
+    box crosses the ocean's level over water in the window, the 32 nearest the camera, none inside a
+    larger one (a crew in its boat). Each is an ellipse across its box at the waterline (0.85 of its
+    half sides, a hull narrows to its ends; at least 0.5 m) pushing aside its depth below the level
+    (at most 1 m), deepest in its middle ((1 - r^2)^2); a character's 0.35 m across and 0.05 m deep
+    (only a swimmer's head and shoulders cross the surface). Each step adds the change of that
+    displacement to the height: a body at rest makes no waves, a moving one its wake (Michell's thin
+    ship). The steps follow the frame's time, up to four a frame, a body moving at most 0.5 m a step;
+    a frame longer than 0.1 s steps 0.1 s (the waves slow down rather than jump), a pause of more
+    than 0.5 s (a load, a cut scene) clears the window, a body first seen makes none.
+  - Behind a slow body the wedge is Kelvin's 19.47 degrees (`Wake_Kelvin`: 17.7 at 2.5 m/s), a fast
+    hull's narrower, as Rabaud and Moisy measured (about 0.2 / Fr at a Froude number over its length
+    above 0.6): Fort's Zodiac at 7.5 m/s draws its strongest crests at 5.5 degrees and the wedge's
+    edge at 12. A boat's waves are 0.29 m high (a planing boat's 0.1-0.5 m), a swimmer's at 1.5 m/s
+    6 cm with slopes up to 0.35, below breaking (`Wake_Height`). In cells of 25 cm a swimmer's
+    waves, under a metre long, were left a blur of ripple finer than the cells.
+  - Foam. Once a frame the view: the slopes (central differences), their squares and the foam's
+    share of the surface white, RGBA16F with 4 mip levels. The foam is at least a fast body's where it
+    is (from 1.5 m/s, 0.7 at 5.5 m/s: its white water) and the waves' that break (steeper than
+    Stokes' limit, k A 0.44; none under a body, its hollow's sides), fading over 4 s and spreading
+    0.18 m^2/s: a trail widening behind a boat. The water tears it into clumps (three octaves of value
+    noise 1.2 m across, in place, the less the thicker the foam: the white water just behind a hull
+    white all over, its trail patches with water between them; even it was fog a few metres off).
+  - The water adds the view's slopes to the ocean's waves (the variance their mip levels smoothed out
+    to the reflections' blur and the glint's, as LEAN's) and its foam to the ocean's, faded out over
+    the sponge. None on the water volumes, in the environment cubes or from below.
+  - Calm. After 60 s with nothing in the window faster than 0.1 m/s (a boat at its mooring bobs at
+    0.03) the waves have faded and most have run out through the sponge: no more steps, the water's
+    wakes fading out over the last 15 s; the first body that moves again clears the window. A window
+    cleared (at the start, after a pause) is calm until something stirs it.
+  - Cost at 3840 x 2160: the wakes' kernels 0.08 ms a step (one a frame at 50 frames a second; the
+    window of 512 cells of 25 cm cost 0.03 ms), the water 0.09 ms more with a boat's wake in view
+    (Fort's chase 0.84 -> 0.93 ms, with the rays' reflections and sun shadows 1.23 -> 1.39; the frame
+    4.27 -> 4.42 ms, 5.53 -> 5.76), nothing where nothing moves (Carrier's water 0.75 ms either way).
 - The sun's glint (`d3d12_WaterGlint`, 1; 0 draws the frames of the water before it; not saved;
   `d3d12_WaterSunGlint`, a highlight fitted by eye and off as in the game, is gone with it) is the
   sun mirrored by the waves' facets (`Shaders/WaterLight.hlsli`): Beckmann's distribution of the

@@ -121,6 +121,26 @@ namespace XrTest
     std::vector<float> Caustics[XR_CAUSTICS_MIPS];
   };
 
+  //! The wakes' kernels (Shaders/Wake.hlsl).
+  struct SWakeKernels
+  {
+    SBytecode Rows, Columns, RowsInverse, View;
+  };
+  //! A frame of RunWake: its steps' constants (each the three kernels of a step), then its view's.
+  struct SWakeFrame
+  {
+    std::vector<SWakeConstants> Steps;
+    SWakeConstants View = {};
+  };
+  //! What RunWake leaves: the window (XR_WAKE_SIZE x XR_WAKE_SIZE RG32F texels, row after row: the height, the filtered
+  //! potential), the last view's foam (R32F) and the view's XR_WAKE_MIPS levels (RGBA16F texels, as floats).
+  struct SWakeOutput
+  {
+    std::vector<float> State;
+    std::vector<float> Foam;
+    std::vector<float> View[XR_WAKE_MIPS];
+  };
+
   //! What a run binds; the output is nOut uint4 items, zeroed before the kernel runs.
   struct SDispatch
   {
@@ -170,6 +190,11 @@ namespace XrTest
     //! after each frame's waves and with Kernels.Foam the foam as UpdateOcean runs them (the foam's state into one of its two
     //! targets from the other, in turn, then the view of it and the view's mip levels). What the last frame leaves.
     SOceanOutput RunOceanFrames(const std::vector<float> &H0, const std::vector<SOceanConstants> &Frames, const SOceanKernels &Kernels);
+    //! The wakes' pass as Wake.cpp's UpdateWakes runs it: the standard root signature, its targets in their formats, each
+    //! frame's steps (the rows, the columns, the rows' inverse) and its view (the foam into one of its two textures from the
+    //! other, in turn) with its barriers, in one command list. Start: the window's texels at the start (empty: zeros).
+    //! What the last frame leaves.
+    SWakeOutput RunWake(const std::vector<float> &Start, const std::vector<SWakeFrame> &Frames, const SWakeKernels &Kernels);
     //! Whether the device stores the format through a typed UAV (CMAA2's output).
     bool HasTypedStore(DXGI_FORMAT Format);
     //! The radiance cache emptied (every word 0).
@@ -179,6 +204,9 @@ namespace XrTest
     ComPtr<ID3D12Resource> Buffer(D3D12_HEAP_TYPE eHeap, size_t nBytes, D3D12_RESOURCE_STATES eState, bool bUav);
     ComPtr<ID3D12Resource> Upload(const void *pData, size_t nBytes);
     ID3D12PipelineState *Pipeline(const SBytecode &Shader);
+    //! D3D12Compute.h's standard root signature (RunOcean, RunWake), made at the first; a kernel's pipeline on it.
+    void CreateComputeRootSignature();
+    ID3D12PipelineState *ComputePipeline(const SBytecode &Shader);
     //! The scene's BLAS and TLAS built into the open list (the buffers kept in Keep until the run ends); the TLAS.
     D3D12_GPU_VIRTUAL_ADDRESS BuildScene(const SRayScene &Scene, std::vector<ComPtr<ID3D12Resource>> &Keep);
     //! The texture uploaded by the open list into a resource of its own (kept in Keep until the run ends), its SRV in

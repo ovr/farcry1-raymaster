@@ -403,6 +403,64 @@ XR_TEST(Foam_SurfClumps)
   CHECK(fFar > 0.2);
 }
 
+// Why: a wake's trail of even white is fog a few metres off (its lace finer than the pixel); its thin foam must be torn
+// into clumps metres across (alike 5 cm apart, unlike 3 m apart) with gaps between them, its amount kept on the mean,
+// within FOAM_SURF_CLUMPS either way, while the white water just behind a hull (an amount of 1) stays white all over and
+// no foam makes none.
+XR_TEST(Foam_WakeClumps)
+{
+  const float fThin = 0.3f;
+  const int nGrid = 48;
+  SDispatch d;
+  d.Shader = XR_BYTECODE(Test_FoamClumps);
+  for (float a : { fThin, 1.0f, 0.0f })
+    for (int y = 0; y < nGrid; y++)
+      for (int x = 0; x < nGrid; x++)
+      {
+        Push(d.In, 0.37f * x - 7, 0.37f * y + 4, 0, 0);
+        Push(d.In, 0, a, 0, 0);
+      }
+  const size_t m = (size_t)nGrid * nGrid;
+  for (int i = 0; i < 256; i++)
+    for (float dx : { 0.0f, 0.05f, 3.0f })
+    {
+      Push(d.In, 0.61f * (i % 16) + dx, 0.53f * (i / 16), 0, 0);
+      Push(d.In, 0, fThin, 0, 0);
+    }
+  const size_t n = d.In.size() / 8;
+  d.Test.nTest[0] = (uint32)n;
+  d.nGroups[0] = Groups64(n);
+  d.nOut = n;
+  const std::vector<uint32> Out = Gpu().Run(d);
+
+  double fMean = 0, fLeast = 10, fMost = 0, fFull = 0, fNone = 0;
+  for (size_t i = 0; i < m; i++)
+  {
+    const double v = At(Out, i, 1) / fThin;
+    fMean += v / m;
+    fLeast = std::min(fLeast, v);
+    fMost = std::max(fMost, v);
+    fFull = std::max(fFull, (double)std::fabs(At(Out, m + i, 1) - 1));
+    fNone = std::max(fNone, (double)std::fabs(At(Out, 2 * m + i, 1)));
+  }
+  double fNear = 0, fFar = 0;
+  for (size_t i = 3 * m; i < n; i += 3)
+  {
+    fNear = std::max(fNear, (double)std::fabs(At(Out, i, 1) - At(Out, i + 1, 1)) / fThin);
+    fFar += std::fabs(At(Out, i, 1) - At(Out, i + 2, 1)) / fThin / 256;
+  }
+  std::printf("  wake clumps of %.1f: factor mean %.3f, %.3f..%.3f; 5 cm apart at most %.4f, 3 m %.3f on the mean; of 1 at most "
+              "%.1e off, of 0 %.1e\n", fThin, fMean, fLeast, fMost, fNear, fFar, fFull, fNone);
+  CHECK(std::fabs(fMean - 1) < 0.08);
+  CHECK(fLeast >= 1 - 0.9 - 1e-5 && fMost <= 1 + 0.9 + 1e-5);
+  CHECK(fLeast < 0.6 && fMost > 1.4);
+  // Its finest octave 17 cm across: 5 cm apart a ninth of the factor's span at most.
+  CHECK(fNear < 0.25);
+  CHECK(fFar > 0.2);
+  CHECK(fFull < 1e-6);
+  CHECK(fNone == 0);
+}
+
 // Why: a patch of foam is thicker in its middle and thins to its edge, so dense foam (all white) still shows its bubbles'
 // clusters; the brightness over the white part of a pixel's pattern must be 1 on the mean (the foam's light kept), at
 // most FOAM_SHADE either way, rising towards the patch's middle, and none where the pattern is finer than the pixel.

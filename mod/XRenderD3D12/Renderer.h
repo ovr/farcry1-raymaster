@@ -29,6 +29,7 @@
 #include "Upscaler.h"
 #include "AmbientOcclusion.h"
 #include "Shaders/Constants.h"
+#include "WakeBodies.h"
 
 struct SRaySunConstants;
 
@@ -1177,6 +1178,40 @@ public:
   SOceanState m_Ocean;
 
   //////////////////////////////////////////////////////////////////////////
+  // Wake.cpp: the wakes of the bodies moving through the ocean (d3d12_WaterWakes)
+
+  //! Once a frame before the main view's scenes when its list (Items) has the ocean: the bodies
+  //! crossing its surface, the steps of the waves in the window around the camera over the frame's
+  //! time, their view (the targets made on the first call). d3d12_WaterWakes 0: released.
+  void UpdateWakes(std::span<const SRenderItem> Items);
+  bool EnsureWakeTargets();
+  //! The bodies of the frame that moved since the last step (m_Wakes.Seen the frame's; dt the time since it).
+  void GatherWakeBodies(std::vector<WakeBodies::SStepBody> &Bodies, float dt);
+  //! The water's constants of the wakes (SetupWaterDraw: vLightPos[0..1]; bFoam their foam): false (and none) without them.
+  bool SetWakeConstants(SDrawConstants &dc, bool bFoam) const;
+  void ReleaseWakes();
+  struct SWakeState
+  {
+    CD3D12Texture *pState = nullptr;        //!< the window (RG32F: Shaders/Wake.hlsli's q)
+    CD3D12Texture *pRows = nullptr;         //!< its spectrum along x (RG32F)
+    CD3D12Texture *pColumns = nullptr;      //!< and along y, turned over the step and transformed back (RG32F)
+    CD3D12Texture *pFoam[2] = {};           //!< the foam (R32F), the frame's and the one before's taking turns (nFoam the frame's)
+    CD3D12Texture *pView = nullptr;         //!< the view (RGBA16F, XR_WAKE_MIPS levels: the slopes, their square, the foam; its SRV the water's)
+    int nFoam = 0;
+    int nTables = -1;                       //!< the kernels' descriptor tables
+    int nFrame = -1;                        //!< the frame of the last step, -1 none yet
+    double fTime = 0;                       //!< its time (s)
+    int nCell[2] = {};                      //!< the cell of the window's centre then
+    double fStirred = 0;                    //!< the time (s) something last stirred the window (WakeBodies.h's Stirred)
+    bool bCalm = false;                     //!< nothing for WAKE_QUIET s: no steps, the water without wakes
+    float fShare = 1;                       //!< the share of the wakes the water shows (CalmShare)
+    bool bFailed = false;                   //!< no targets (until d3d12_WaterWakes 0)
+    std::vector<std::pair<int, WakeBodies::SBody>> Seen;  //!< the bodies crossing the surface at the last step, by entity
+    std::vector<WakeBodies::SStepBody> Bodies;            //!< the frame's that make waves
+  };
+  SWakeState m_Wakes;
+
+  //////////////////////////////////////////////////////////////////////////
   // EnvCubes.cpp: the cubes of the scene around the objects of TemplReflEnvCM (EEnvMap::Auto)
 
   //! A cube of the scene seen from a point.
@@ -1988,6 +2023,7 @@ public:
   float CV_d3d12_WaterSurf = 0.8f;    //!< m: the height of the swell breaking on the ocean's shores, its surf's foam (0: none)
   int CV_d3d12_WaterCaustics = 1;     //!< the caustics on the sea floor of the FFT ocean's waves (0: the static texture, the frames before)
   int CV_d3d12_WaterVolume = 1;       //!< the light in the ocean's water: attenuation by channel, scattering, Snell's window (0: the fog volume's fog, the frames before)
+  int CV_d3d12_WaterWakes = 1;        //!< the wakes of the bodies moving through the ocean, their foam (Wake.cpp; 0: none, the frames before)
   int CV_d3d12_GpuTimes = 0;          //!< N: the GPU time of the frame's sections to the log every N frames
   int CV_d3d12_FrameLog = 0;          //!< 1: a line per frame to XRenderD3D12_frames.txt (LogFrame), 2 with the engine's profilers
   int CV_d3d12_CpuSamples = 0;        //!< N: the render thread's stack every N microseconds, to XRenderD3D12_samples.txt at 0 (CpuSampler)

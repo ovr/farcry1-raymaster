@@ -207,6 +207,10 @@ void CD3D12Renderer::RegisterVariables()
                      "The light in the ocean's water: each colour channel attenuated as fast as the level's water colour is "
                      "dark in it (turquoise shallows, the floor fading into deep water), the light it scatters fading with the "
                      "depth, in the sun's shadow less; from below Snell's window; 0: the fog volume's fog, the frames before");
+  iConsole->Register("d3d12_WaterWakes", &CV_d3d12_WaterWakes, 1, 0,
+                     "The waves of what moves through the ocean's surface (boats, swimmers, bodies: their part in the water), "
+                     "in a window of 128 m around the camera (deep water's waves, Kelvin's wedge behind a boat, rings round "
+                     "a swimmer), the foam of a fast hull and of the waves breaking; 0: none, the frames before");
   iConsole->Register("d3d12_GpuTimes", &CV_d3d12_GpuTimes, 0, 0,
                      "N: every N frames, the average GPU time of the frame's sections (shadow maps, water reflection, opaque, "
                      "water, blended, ...) and the time between frames to the console and XRenderD3D12_gpu.txt; 0 off");
@@ -1000,6 +1004,7 @@ void CD3D12Renderer::Release()
   ReleaseWaterResources();
   ReleaseWaterReflection();
   ReleaseOcean();
+  ReleaseWakes();
   ReleaseMirror();
   ReleaseEnvCubes();
   ReleaseSprites();

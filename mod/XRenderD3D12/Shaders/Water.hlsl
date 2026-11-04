@@ -72,6 +72,10 @@
 //	    than their height over the breaker index), in a lace of bubbles that
 //	    sways with the waves; white under the sun and the sky over the
 //	    colour, the glint and the crests' light gone under it;
+//	  - the wakes (WaterWake; d3d12_WaterWakes 0 leaves them out): the
+//	    waves of the bodies moving through the ocean in a window around the
+//	    camera (Wake.cpp), their slopes added to the waves' and their foam
+//	    to the foam's, fading out at the window's edge;
 //	  - near the shore (close to the camera) the surface fades into the
 //	    scene behind it, so the water has no hard edge; seen from below,
 //	    the ocean shows the scene above bent by large swells, in its fog
@@ -149,6 +153,10 @@
 //	  vTexMat0  the foam: xy, zw the pattern's two samples' drift with the
 //	            wind (m)
 //	  vTexMat1  the foam: xy the breaker index's noise's drift (m)
+//	  vLightPos the wakes (WaterWake): [1].w the share shown (0: none), [0] xy the
+//	            window's centre point (m), zw its texel there over the
+//	            window's size, [1] x 1 / the sponge's width (m), y 1 their
+//	            foam, z (as uint) the view's SRV (Shaders/Wake.hlsl's view)
 //	  vAddColor with vTexGenU.w: x the RMS along an axis of the FFT ocean's
 //	            slopes, y the variance of its ripple finer than the short
 //	            cascade (both axes, times the bump amounts' factor; the
@@ -270,6 +278,20 @@ float3 WaveNormal(float2 vPos, float fTime, float fScale, out float fLostVar, ou
   fLostVar *= fScale * fScale;
   fHeight *= HEIGHT_NORM;
   return normalize(float3(-vSlope * fScale, 1));
+}
+
+//! The wakes (d3d12_WaterWakes, vLightPos[1].w; Wake.cpp, Shaders/Wake.hlsl) at P: their slopes (xy: dh/dx, dh/dy), the
+//! variance their mip levels smoothed out of the pixel (z), their foam's share white (w; none without vLightPos[1].y), fading
+//! out over the sponge at the window's edge. vLightPos[0] xy the window's centre point (m), zw its texel there over the
+//! window's size (each texel the cell of its index modulo the size: the sampler wraps); vLightPos[1] x 1 / the sponge's
+//! width (m), z (as uint) the view's SRV, w the share shown (fading out as the window calms down).
+float4 WaterWake(float2 P)
+{
+  const float4 c0 = g_Draw.vLightPos[0], c1 = g_Draw.vLightPos[1];
+  const float2 d = P - c0.xy;
+  const float fFade = saturate((0.5 * XR_WAKE_SIZE * XR_WAKE_CELL - max(abs(d.x), abs(d.y))) * c1.x) * c1.w;
+  const float4 t = g_Textures[asuint(c1.z)].Sample(g_SamplerLinearWrap, d / (XR_WAKE_SIZE * XR_WAKE_CELL) + c0.zw);
+  return float4(t.xy * fFade, max(t.z - dot(t.xy, t.xy), 0) * (fFade * fFade), t.w * c1.y * fFade);
 }
 
 //! The RMS along one axis of WaveNormal's slopes before fScale: the layers' together, sqrt of the
@@ -604,8 +626,9 @@ bool FoamQuadAny(bool b)
 //! highest of the long waves' now and as they were 0.7 and 1.4 s ago, what was here then that far ahead now at the speed
 //! of the spectrum's peak, vTexGen1V.xy, weaker as it passes; scaled as the slopes, vParams0.x). The shore's foam only
 //! in the shallows and by what stands in the water, the pattern only where there is foam (most of the sea has none).
-//! fShade the foam's brightness there (FoamShade, 1 on the mean).
-float WaterFoam(float2 P, float fDepth, float fPath, out float fWhitecaps, out float fShore, out float fShade)
+//! fShade the foam's brightness there (FoamShade, 1 on the mean). fWake the wakes' foam (WaterWake), torn into clumps
+//! (WakeClumps) and added to the amount.
+float WaterFoam(float2 P, float fDepth, float fPath, float fWake, out float fWhitecaps, out float fShore, out float fShade)
 {
   const uint t = g_Draw.nShadowTex.w;
   fShade = 1;
@@ -637,7 +660,7 @@ float WaterFoam(float2 P, float fDepth, float fPath, out float fWhitecaps, out f
         fShore = max(fShore, saturate(fSurf * SurfClumps(P, fDepth, fBreak, fCycle)));
     }
   }
-  const float fAmount = saturate((fWhitecaps + fShore) * g_Draw.vTexGen1U.x);
+  const float fAmount = saturate((fWhitecaps + fShore + (fWake > 0 ? WakeClumps(P, fWake) : 0)) * g_Draw.vTexGen1U.x);
   if (!FoamQuadAny(fAmount > 0))
     return 0;
 
@@ -784,6 +807,20 @@ float4 ShadeWater(SWaterOutput In)
 
   float fLostVar, fHeight;
   float3 N = WaveNormal(In.vWorldPos.xy, g_Frame.vTime.x, g_Draw.vParams0.x, fLostVar, fHeight);
+  // The wakes (WaterWake): their slopes added to the waves', the variance their mip levels lost to the blur of the
+  // reflection and the glint; their foam to the ocean's (its debug views here: kept on they would hold registers).
+  float fWakeFoam = 0;
+  if (g_Draw.vLightPos[1].w != 0)
+  {
+    const float4 vWake = WaterWake(In.vWorldPos.xy);
+    N = normalize(float3(N.xy / N.z - vWake.xy, 1));
+    fLostVar += vWake.z;
+    fWakeFoam = vWake.w;
+    if (g_Draw.vParams0.z == 27)
+      return float4(saturate(vWake.xy * 2 + 0.5), saturate(sqrt(vWake.z) * 10), 1);
+    if (g_Draw.vParams0.z == 28)
+      return float4(vWake.www, 1);
+  }
   if (bBelow)
     N = -N;
 
@@ -842,7 +879,8 @@ float4 ShadeWater(SWaterOutput In)
   float fFoam = 0, fWhitecaps = 0, fShoreFoam = 0, fFoamShade = 1;
   if (g_Draw.vTexGen1U.x > 0)
   {
-    fFoam = WaterFoam(In.vWorldPos.xy, fDepthBelow, fThick0 * fDistance / max(fSurface, 1e-3), fWhitecaps, fShoreFoam, fFoamShade);
+    fFoam = WaterFoam(In.vWorldPos.xy, fDepthBelow, fThick0 * fDistance / max(fSurface, 1e-3), fWakeFoam, fWhitecaps, fShoreFoam,
+                      fFoamShade);
     if (bBelow)
       fFoam = 0;
   }
