@@ -370,6 +370,8 @@ CD3D12Texture *CD3D12Renderer::ResolveHdr(int nSceneSRV, ID3D12Resource *pScene,
   Set4(dc.vParams2, CV_d3d12_ToneMapKnee, bHeat ? 1.0f : 0.0f, (float)CV_d3d12_HDRDebug, nLutSRV >= 0 ? 1.0f : 0.0f);
   SetHighlightConstants(dc);
   dc.vParams3[2] = std::max(CV_d3d12_ToneMapDesaturation, 0.0f);
+  // Under the water the eye's white balance (d3d12_WaterUnderAdapt, Underwater.cpp): each channel's factor in vUnderColor.
+  UnderBalance(dc.vUnderColor);
   // d3d12_HDRDebug 3, the sky mask: white where the depth buffer is at the far plane (nothing but
   // the sky drawn there), black elsewhere; the depth instead of the volumetric light's. The light
   // upscaled has it already (HdrSceneLight), and the volumetric light.

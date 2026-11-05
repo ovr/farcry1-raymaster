@@ -23,7 +23,10 @@
 //	sun's light its mean along the way); the sprites come after it. With
 //	d3d12_WaterUnderClear the light the water scatters from the scene's
 //	sun and sky (Underwater.hlsli's UnderClearSource), the surface beyond
-//	Snell's window the light the water below sends up (Water.hlsl).
+//	Snell's window the light the water below sends up (Water.hlsl). And
+//	the eye under the water (UnderBalance, the HDR resolve's factors): its
+//	white balance at the camera's depth (d3d12_WaterUnderAdapt) and its
+//	exposure there (d3d12_WaterUnderExposure).
 //
 //////////////////////////////////////////////////////////////////////
 
@@ -115,6 +118,26 @@ void CD3D12Renderer::UpdateUnderwater(std::span<const SRenderItem> Items)
   if (!pFV || m_Camera.GetPos().z >= pFV->fFogLayerZ)
     return;
   m_bUnderwater = std::any_of(Items.begin(), Items.end(), IsOceanItem);
+  m_fUnderDepth = pFV->fFogLayerZ - m_Camera.GetPos().z;
+}
+
+bool CD3D12Renderer::UnderBalance(float vGain[4]) const
+{
+  const SFogVolume *pFV = m_pScene ? m_pScene->GetOceanFogVolume() : nullptr;
+  if (!m_bUnderwater || !pFV || (CV_d3d12_WaterUnderAdapt <= 0 && CV_d3d12_WaterUnderExposure == 0) || m_bHeatVision)
+    return false;
+  // The light coming down as the light the water scatters takes it (UnderClearSource), the water's attenuation as its.
+  const float fLen = std::sqrt(m_SunDir[0] * m_SunDir[0] + m_SunDir[1] * m_SunDir[1] + m_SunDir[2] * m_SunDir[2]);
+  const float vFog[3] = { pFV->Color.r, pFV->Color.g, pFV->Color.b };
+  float c[3], vDown[3];
+  UnderwaterLight::FogAttenuation(vFog, UnderDensity(*pFV), c);
+  UnderwaterLight::DownLight(m_SunColor, m_FogColor, fLen > 0 ? m_SunDir[2] / fLen : 0, vDown);
+  UnderwaterLight::Balance(c, vDown, m_fUnderDepth, std::min(CV_d3d12_WaterUnderAdapt, 1.0f), vGain);
+  const float fExposure = UnderwaterLight::UnderExposure(CV_d3d12_WaterUnderExposure, m_fUnderDepth);
+  for (int i = 0; i < 3; i++)
+    vGain[i] *= fExposure;
+  vGain[3] = 1;
+  return true;
 }
 
 bool CD3D12Renderer::UnderwaterOn() const
