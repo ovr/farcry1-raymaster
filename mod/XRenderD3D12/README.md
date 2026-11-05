@@ -1849,6 +1849,20 @@ and lists theirs (`NamesObjects`).
   The unit tests `Fade_*` check the alpha: the fade's alone whatever the texture's alpha, the
   alpha test first, the texture's without a fade, and an even fade.
 
+## The first person weapon
+
+- The engine draws the first person weapon and arms (sorted `eS_Nearest`, the muzzle flash with
+  `FOB_NEAREST` alone) at the player's eyes. From a camera that is not the player's (a demo's
+  fly-through) they hang there in the world. Fort starts with Jack sitting in the inflatable boat
+  `Zodiac0`: moved along a path, the boat carried his arms and his M4 over its stern.
+- `r_NoDrawNear 1` (the original renderer's variable) leaves them out, as the original leaves them
+  out. Until now this renderer registered the variable without reading it. `0`, the default, draws
+  them as before. With a frame dump, each item left out gets a line `not drawn (r_NoDrawNear)`.
+- Tests: `render_tests` suite `nodrawnear` (`NoDrawNear_fort.ini`, Fort's start from the game's own
+  camera at 1080p). `r_NoDrawNear 1` leaves out 11-12 % of the frame, the original's 13-14 %, the
+  two the same place (0.82-0.87 of their union). Off the weapon nothing changes, and `0` gives the
+  build before's frames (0 px in the nearest of 2 x 2 runs).
+
 ## Light beams
 
 - A lamp whose light shader has a `ClientEffect 'Beam'` block in its script (the `LightBeam*`

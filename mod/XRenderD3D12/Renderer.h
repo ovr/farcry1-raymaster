@@ -108,6 +108,9 @@ public:
   bool IsVolumetricFogOn();
   //! r_ScopeLens_fx (one of them): the glass of the scopes is drawn.
   bool IsScopeLensOn();
+  //! r_NoDrawNear (one of them) not 0: the first person weapon and arms (FOB_NEAREST, eS_Nearest) are not drawn, as the
+  //! original leaves them out (a fly-through's camera is not the player's: they hang where his eyes are).
+  bool IsNoDrawNear();
   //! r_HDRRendering (one of them) not 0: the main view is drawn through the HDR pipeline (Hdr.cpp).
   bool IsHdrOn() const;
 
@@ -2083,6 +2086,7 @@ public:
   int CV_d3d12_DumpFrame = 0;         //!< non-zero: the next frame's 3D draws go to XRenderD3D12_frame.txt, then 0
   ICVar *m_pVolumetricFog = nullptr;  //!< r_VolumetricFog, looked up on first use
   ICVar *m_pScopeLens = nullptr;      //!< r_ScopeLens_fx, looked up on first use
+  ICVar *m_pNoDrawNear = nullptr;     //!< r_NoDrawNear, looked up on first use
   mutable ICVar *m_pHdrRendering = nullptr;  //!< r_HDRRendering, looked up on first use
   int CV_d3d12_WaterDebug = 0;        //!< non-zero: the water shows one term of its colour (Water.hlsl)
   int CV_d3d12_Caustics = 1;          //!< 0: no caustics under the ocean
