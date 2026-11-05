@@ -276,9 +276,10 @@ struct SDrawConstants
                                   //!< by the source's alpha or none), 2 attenuated alone (an added light); plus 10, 20, 30 for d3d12_WaterDebug
                                   //!< 31-33: the view's term (the light, the sun's share 0.5, T)
   XR_UINT4(nParallax);            //!< r_Parallax (General.hlsl's ParallaxFetch, Parallax.hlsli): x the RayMaster material map's texture table index
-                                  //!< (its alpha the height; 0 none), y its sampler (XR_SAMPLER_*, the texture's), z the most steps of the march
-  XR_FLOAT4(vParallax);           //!< x the depth from the hollows to the bumps in uv0, y the height map's mip level from which it fades, z the
-                                  //!< level it is gone at, w the reference height (none to offset)
+                                  //!< (its alpha the height; 0 none), y its sampler (XR_SAMPLER_*, the texture's), z the most steps of the march,
+                                  //!< w the march's height over this many texels at least and its step (r_ParallaxFilter, ParallaxMarchGrad; 0 none)
+  XR_FLOAT4(vParallax);           //!< x the depth from the hollows to the bumps in uv0 (r_ParallaxDepth times the material's share), y the
+                                  //!< depth in pixels from which it fades, z the pixels at which it is gone, w the reference height (none to offset)
 };
 
 //! b0 of the ambient occlusion's resolve (AoResolve.hlsl, AmbientOcclusion.cpp).

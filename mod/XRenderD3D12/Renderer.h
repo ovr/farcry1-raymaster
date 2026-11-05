@@ -112,6 +112,9 @@ public:
   //! r_NoDrawNear (one of them) not 0: the first person weapon and arms (FOB_NEAREST, eS_Nearest) are not drawn, as the
   //! original leaves them out (a fly-through's camera is not the player's: they hang where his eyes are).
   bool IsNoDrawNear();
+  //! r_Parallax's depth for a surface of this diffuse texture: r_ParallaxDepth times, with r_ParallaxMaterials, its share
+  //! by its physical material (CTexture::m_fParallaxShare); 0 with r_Parallax 0 (Draw3D.cpp).
+  float ParallaxDepthOf(const CTexture &Diffuse) const;
   //! r_HDRRendering (one of them) not 0: the main view is drawn through the HDR pipeline (Hdr.cpp).
   bool IsHdrOn() const;
 
@@ -2090,6 +2093,8 @@ public:
   float CV_r_DetailScale = 8;         //!< metres per repeat of the detail texture
   int CV_r_Parallax = 1;              //!< 1: parallax occlusion mapping by the RayMaster maps' height (raymaster/<texture>_pbr_m.dds; 0: none, the frames before)
   float CV_r_ParallaxDepth = 0.03f;   //!< its depth in the texture's coordinates (a fraction of its side), hollow to bump
+  int CV_r_ParallaxMaterials = 1;     //!< 1: the depth times the texture's share by its material (RayMaster/pbr_depth.tsv; 0: the same for all)
+  int CV_r_ParallaxFilter = 4;        //!< the march reads the height over this many texels at least and its step (no grazing spikes; 0: at the pixel's)
   int CV_r_PbrNormals = 1;            //!< 1: the RayMaster maps' normals (raymaster/<texture>_pbr_n.dds) where a material has no normal map (0: none)
   float CV_r_DetailDistance = 4;      //!< the terrain's detail layers fade out from here to twice this far
   int CV_d3d12_debug = 0;             //!< debug layer, 1 with GPU based validation, 2 without (also XRENDERD3D12_DEBUG); only read at Init

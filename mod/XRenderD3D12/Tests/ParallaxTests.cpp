@@ -12,7 +12,9 @@
 //	of a constant height and of a ramp, the step's wall within a step of
 //	the march, the shift bounded edge on and none from behind, the fade
 //	by the depth's size in pixels, the texture matrix's turn without its
-//	scale, the steps by the view's angle.
+//	scale, the steps by the view's angle; the depth table's rows
+//	(r_ParallaxMaterials) and the march's gradients stretched to its step
+//	(r_ParallaxFilter).
 //
 //////////////////////////////////////////////////////////////////////
 
@@ -24,9 +26,12 @@
 
 #include "Test_ParallaxUV.h"
 #include "Test_ParallaxParts.h"
+#include "Test_ParallaxMarchGrad.h"
 
 #include <cmath>
 #include <cstdint>
+#include <map>
+#include <string>
 #include <vector>
 
 using namespace XrTest;
@@ -140,6 +145,38 @@ namespace
   {
     return { vToEye, 0.03f, { 1, 0, 0 }, { 0, 1, 0 }, { 0, 0, 1 }, 1.0f / 1024, 1.0f / 1024 };
   }
+
+  //! One march's gradients for CSParallaxMarchGrad: the shift, the steps, the pixel's dx and dy, the least length.
+  struct SGrad
+  {
+    float su, sv;
+    int nSteps;
+    float dx[2], dy[2];
+    float fLeast = 0;
+  };
+
+  //! ParallaxMarchGrad of each: In with its dx and dy replaced by what it gave.
+  std::vector<SGrad> MarchGrad(std::vector<SGrad> In)
+  {
+    SDispatch d;
+    d.Shader = XR_BYTECODE(Test_ParallaxMarchGrad);
+    d.Test.nTest[0] = (uint32)In.size();
+    d.nGroups[0] = Groups64(In.size());
+    for (const SGrad &g : In)
+    {
+      Push(d.In, g.su, g.sv, (float)g.nSteps, g.fLeast);
+      Push(d.In, g.dx[0], g.dx[1], g.dy[0], g.dy[1]);
+    }
+    d.nOut = In.size();
+    const std::vector<uint32> Out = Gpu().Run(d);
+    for (size_t i = 0; i < In.size(); i++)
+      for (int k = 0; k < 2; k++)
+      {
+        In[i].dx[k] = At(Out, i, k);
+        In[i].dy[k] = At(Out, i, 2 + k);
+      }
+    return In;
+  }
 }
 
 // Why: Texture.cpp finds a texture's maps by the file it was read from (lower case, '/' separated, without the
@@ -224,6 +261,44 @@ XR_TEST(Pbr_Usable)
   CHECK(!PbrCompanion::IsUsable(8, 8, 1, 1, 8, 8));
   CHECK(!PbrCompanion::IsUsable(0, 512, 10, 1, 512, 512));
   CHECK(PbrCompanion::IsUsable(256, 64, 7, 1, 0, 0));          // a texture of no known size: its aspect not checked
+}
+
+// Why: r_ParallaxMaterials takes each texture's depth from RayMaster/pbr_depth.tsv (AssetViewer's --pbr-depth) by the
+// texture's file as Texture.cpp keys it (lower case, '/' separated); a row read wrongly gives a texture another
+// material's depth (metal as deep as stone) or a glass one a relief. Comments, the Windows line ends, a missing last line
+// end and a third column are the file's; a share not a number is left out, out of range clamped, the last row counts.
+XR_TEST(Pbr_DepthTable)
+{
+  std::map<std::string, float> m;
+  const std::string Text = "# texture\tshare of r_ParallaxDepth\tphysical material\n"
+                           "textures/stone\t1.00\tmat_rock\r\n"
+                           "Objects\\Indoor\\Glass\t0.00\tmat_glass\r\n"
+                           "textures/metal\t0.25\n"
+                           "\n"
+                           "\r\n"
+                           "textures/bad\tabc\tmat_rock\n"
+                           "textures/half\t0.5x\n"
+                           "textures/nan\tnan\n"
+                           "textures/none\n"
+                           "textures/empty\t\tmat_rock\n"
+                           "\t0.5\n"
+                           "textures/huge\t9\n"
+                           "textures/neg\t-1\n"
+                           "textures/stone\t0.7\tmat_rock\n"
+                           "textures/last\t0.3";
+  const int nRows = PbrCompanion::ParseDepthTable(Text, [&](const std::string &Base, float f) { m[Base] = f; });
+  CHECK(nRows == 7);
+  CHECK(m.size() == 6);
+  CHECK(!m.count("textures/bad") && !m.count("textures/half") && !m.count("textures/nan") && !m.count("textures/none") &&
+        !m.count("textures/empty"));
+  CHECK_NEAR(m["textures/stone"], 0.7f, 0);
+  CHECK_NEAR(m["objects/indoor/glass"], 0, 0);
+  CHECK_NEAR(m["textures/metal"], 0.25f, 0);
+  CHECK_NEAR(m["textures/huge"], PbrCompanion::DEPTH_SHARE_MOST, 0);
+  CHECK_NEAR(m["textures/neg"], 0, 0);
+  CHECK_NEAR(m["textures/last"], 0.3f, 0);
+  CHECK(PbrCompanion::ParseDepthTable("", [&](const std::string &, float) { m.clear(); }) == 0);
+  CHECK(m.size() == 6);
 }
 
 // Why: the reference height is the plane of the geometry: there the offset must be none, or the whole of a flat wall
@@ -433,4 +508,51 @@ XR_TEST(Parallax_Steps)
   CHECK_NEAR(R[1].fSteps, 24 - 16 * std::sqrt(0.5f), 0.5);
   CHECK_NEAR(R[2].fSteps, 24, 0);
   CHECK(R[3].fSteps > R[1].fSteps && R[3].fSteps <= 24);
+}
+
+// Why: a height map's fine noise cut r_ParallaxDepth deep stood out of River's temple threshold as spikes at a slanting
+// view; with r_ParallaxFilter N the march reads the height over N texels at least and over its step (each gradient that
+// long, its direction kept; a gradient of none along its axis), the longer ones as they are; isotropic (a coarser level,
+// not the anisotropic filter's taps along the march, which cost more). With r_ParallaxFilter 0 General.hlsl calls none.
+XR_TEST(Parallax_MarchGrad)
+{
+  const float p = 1.0f / 1024, t = 4.0f / 512;
+  std::vector<SGrad> In = {
+    { 0.15f, 0, 24, { p, 0 }, { 0, p } },                 // the step (0.00625) longer than the pixel: both to it
+    { 0.005f, 0, 8, { p, 0 }, { 0, p } },                 // the step under the pixel: as they are
+    { 0, 0, 8, { p, 0 }, { 0, p } },                      // no shift, no least: as they are
+    { 0, 0, 8, { p, 0 }, { 0, p }, t },                   // the least t: both to it
+    { 0, 0, 8, { 0.6f * p, 0.8f * p }, { 0.02f, 0 }, t }, // dx turned, to t along itself; dy longer: as it is
+    { 0, 0, 8, { 0, 0 }, { 0, 0 }, t },                   // none: t along u and v
+    { 0.3f, 0, 4, { p, 0 }, { 0, p }, t },                // the step (0.075) longer than t: both to the step
+    { 0.01f, 0.004f, 8, { -p, 0.3f * p }, { 0.2f * p, -p }, t },
+  };
+  const std::vector<SGrad> R = MarchGrad(In);
+  CHECK_NEAR(R[0].dx[0], 0.15f / 24, 1e-7);
+  CHECK_NEAR(R[0].dy[1], 0.15f / 24, 1e-7);
+  CHECK_NEAR(R[4].dx[0], 0.6f * t, 1e-7);
+  CHECK_NEAR(R[4].dx[1], 0.8f * t, 1e-7);
+  CHECK(R[4].dy[0] == 0.02f && R[4].dy[1] == 0);
+  CHECK_NEAR(R[5].dx[0], t, 1e-7);
+  CHECK_NEAR(R[5].dy[1], t, 1e-7);
+  CHECK_NEAR(R[6].dx[0], 0.3f / 4, 1e-7);
+  CHECK_NEAR(R[6].dy[1], 0.3f / 4, 1e-7);
+  for (size_t i = 0; i < In.size(); i++)
+  {
+    const float fLen = std::fmax(In[i].fLeast, std::hypot(In[i].su, In[i].sv) / In[i].nSteps);
+    for (int k = 0; k < 2; k++)
+    {
+      const float *a = k ? In[i].dy : In[i].dx, *b = k ? R[i].dy : R[i].dx;
+      const float la = std::hypot(a[0], a[1]), lb = std::hypot(b[0], b[1]);
+      // As long as it was or the least, whichever is longer; its direction kept; unchanged when long enough.
+      CHECK_NEAR(lb, std::fmax(la, fLen), 1e-7);
+      if (la > 0)
+      {
+        CHECK_NEAR(a[0] * b[1] - a[1] * b[0], 0, 1e-9);
+        CHECK(a[0] * b[0] + a[1] * b[1] > 0);
+      }
+      if (la >= fLen)
+        CHECK(a[0] == b[0] && a[1] == b[1]);
+    }
+  }
 }

@@ -13,7 +13,9 @@
 //	normals (green along growing v, as the game's _ddn maps), only where
 //	the material has no normal map of its own; both of the texture's
 //	size, with their mips. r_Parallax takes the height (parallax
-//	occlusion mapping), r_PbrNormals the normals.
+//	occlusion mapping), r_PbrNormals the normals; RayMaster/pbr_depth.tsv
+//	(AssetViewer's --pbr-depth) each texture's share of r_ParallaxDepth by
+//	its physical material (r_ParallaxMaterials).
 //
 //////////////////////////////////////////////////////////////////////
 
@@ -23,6 +25,7 @@
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
+#include <cctype>
 #include <cstdlib>
 #include <string>
 #include <string_view>
@@ -81,6 +84,43 @@ namespace PbrCompanion
           return false;
     }
     return true;
+  }
+
+  //! The table of each texture's parallax depth (r_ParallaxMaterials): beside the maps, AssetViewer's --pbr-depth.
+  constexpr std::string_view DEPTH_TABLE = "raymaster/pbr_depth.tsv";
+  constexpr float DEPTH_SHARE_MOST = 4.0f;           //!< the largest share of r_ParallaxDepth a row may give
+
+  //! The rows of the depth table's text: "<texture>\t<share>[\t...]", the texture the base of its file (lower case, '/'
+  //! separated, no extension: Path's Base; the text's own taken so, '\\' as '/'), the share of r_ParallaxDepth its parallax
+  //! gets (0 none, at most DEPTH_SHARE_MOST); '#' starts a comment line; a row without a share or with one not a number
+  //! left out; the last of the same texture's rows counts. Calls Add(Base, fShare) for each; returns the rows taken.
+  template <class FAdd>
+  int ParseDepthTable(std::string_view Text, FAdd &&Add)
+  {
+    int nRows = 0;
+    while (!Text.empty())
+    {
+      const size_t nEnd = Text.find('\n');
+      std::string_view Line = Text.substr(0, nEnd);
+      Text = nEnd == std::string_view::npos ? std::string_view() : Text.substr(nEnd + 1);
+      if (!Line.empty() && Line.back() == '\r')
+        Line.remove_suffix(1);
+      const size_t nTab = Line.find('\t');
+      if (Line.empty() || Line[0] == '#' || nTab == 0 || nTab == std::string_view::npos)
+        continue;
+      std::string Base(Line.substr(0, nTab));
+      for (char &c : Base)
+        c = c == '\\' ? '/' : (char)std::tolower((unsigned char)c);
+      std::string_view Rest = Line.substr(nTab + 1);
+      const std::string Share(Rest.substr(0, Rest.find('\t')));
+      char *pEnd = nullptr;
+      const float f = std::strtof(Share.c_str(), &pEnd);
+      if (Share.empty() || pEnd != Share.c_str() + Share.size() || !(f == f))
+        continue;
+      Add(Base, std::clamp(f, 0.0f, DEPTH_SHARE_MOST));
+      nRows++;
+    }
+    return nRows;
   }
 
   //! The levels a full mip chain of a w x h picture has (to 1 x 1).

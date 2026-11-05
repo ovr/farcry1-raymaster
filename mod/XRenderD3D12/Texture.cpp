@@ -559,6 +559,8 @@ void CTextureManager::Shutdown()
   m_Missing.clear();
   m_Warned.clear();
   m_WarnedFormats.clear();
+  m_DepthShares.clear();
+  m_bDepthRead = false;
   m_pWhite = nullptr;
   m_pPlaceholder = nullptr;
   m_bInit = false;
@@ -1012,6 +1014,27 @@ void CTextureManager::FindPbrCompanions(CTexture *pTex)
     return;
   pTex->m_pPbrM = LoadPbrMap(pTex, PbrCompanion::Path(pTex->m_File, "_pbr_m"), true);
   pTex->m_pPbrN = LoadPbrMap(pTex, PbrCompanion::Path(pTex->m_File, "_pbr_n"), false);
+  if (pTex->m_pPbrM)
+  {
+    ReadDepthTable();
+    const auto It = m_DepthShares.find(pTex->m_File);
+    pTex->m_fParallaxShare = It != m_DepthShares.end() ? It->second : 1.0f;
+  }
+}
+
+void CTextureManager::ReadDepthTable()
+{
+  if (m_bDepthRead)
+    return;
+  m_bDepthRead = true;
+  std::vector<byte> File;
+  if (!ReadFile(std::string(PbrCompanion::DEPTH_TABLE).c_str(), File))
+    return;
+  const int nRows = PbrCompanion::ParseDepthTable(std::string_view((const char *)File.data(), File.size()),
+                                                  [this](const std::string &Base, float fShare) { m_DepthShares[Base] = fShare; });
+  if (iLog)
+    iLog->Log("RayMaster depth table '%s': %d rows, %d textures", std::string(PbrCompanion::DEPTH_TABLE).c_str(), nRows,
+              (int)m_DepthShares.size());
 }
 
 CTexture *CTextureManager::LoadPbrMap(CTexture *pTex, const std::string &Path, bool bHeight)
@@ -1061,6 +1084,7 @@ void CTextureManager::ReleasePbrCompanions(CTexture *pTex)
   CTexture *pMaps[2] = { pTex->m_pPbrM, pTex->m_pPbrN };
   pTex->m_pPbrM = pTex->m_pPbrN = nullptr;
   pTex->m_bPbrLooked = false;
+  pTex->m_fParallaxShare = 1.0f;
   pTex->m_File.clear();
   for (CTexture *pMap : pMaps)
     ReleaseTexture(pMap, false);

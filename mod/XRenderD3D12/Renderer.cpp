@@ -372,6 +372,13 @@ void CD3D12Renderer::RegisterVariables()
   iConsole->Register("r_ParallaxDepth", &CV_r_ParallaxDepth, 0.03f, 0,
                      "r_Parallax's depth from the hollows to the bumps in the texture's coordinates (a fraction of its side; 0.03: 3 cm "
                      "of a texture a metre wide)");
+  iConsole->Register("r_ParallaxMaterials", &CV_r_ParallaxMaterials, 1, 0,
+                     "1: r_ParallaxDepth times each texture's share by its physical material (RayMaster/pbr_depth.tsv: stone and "
+                     "brick 1, sand 0.7, wood 0.6, cloth 0.5, metal 0.25, leaves 0.3, glass and flesh 0: none); 0: the same depth for all");
+  iConsole->Register("r_ParallaxFilter", &CV_r_ParallaxFilter, 4, 0,
+                     "r_Parallax's march reads the height averaged over this many texels of the height map at least (and over its step "
+                     "where that is longer): the blocks and joints in relief, the height's fine noise not cut deep (spikes at a slanting "
+                     "view); 0: the height at the pixel (1 to 64)");
   iConsole->Register("r_PbrNormals", &CV_r_PbrNormals, 1, 0,
                      "1: a lit surface whose material has no normal map gets the normals made from its texture in the game's folder "
                      "RayMaster (raymaster/<texture>_pbr_n.dds) with bump mapping on (r_Quality_BumpMapping); 0: none (the frames before)");

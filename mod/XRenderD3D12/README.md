@@ -563,6 +563,27 @@ reference of its features and console variables.
 - `r_PbrNormals` (1) gives a material without a normal map (and without the bump offset) the
   generated one: the bump mapping's own path (`DF_BUMP`, its tangent frames), the normal map in
   place of none. A diffuse texture shared with a material that has its own normal map keeps that.
+- `r_ParallaxMaterials` (1) gives each texture its own depth: `r_ParallaxDepth` times its share in
+  the table `RayMaster/pbr_depth.tsv` beside the maps, a row `<texture>`, tab, `<share>` (a note
+  after another tab), the texture as the maps' path has it (its pak path, lower case, `/`
+  separated, no extension), `#` a comment, the share 0 to 4 (`PbrCompanion.h`'s
+  `ParseDepthTable`). The texture tool writes it by the physical material most of the texture's
+  materials have: stone, rock, brick and concrete 1; sand, mud and dirt 0.7; wood 0.6; cloth and
+  canvas 0.5; ceramic 0.4; leaves, grass and rubber 0.3; metal and plastic 0.25 (the height
+  networks make their panels, screws and print into bumps); glass, water and flesh 0 (none). A
+  material of no class (the weapons, the barrels and the crates are `mat_default`) goes by the
+  words of its path (`weapons`, `barrel`, `vehicles` metal; `crate`, `palette` wood), else 0.5.
+  The table is read once, when the first map is found; a texture not in it, or no table, gets 1.
+  Edit it and load the level again to tune a material. Of the game's 2286 textures with maps 290
+  get 1, 26 0.7, 193 0.6, 405 0.5, 10 0.4, 189 0.3, 1126 0.25 and 47 none.
+- `r_ParallaxFilter` (4) has the march read the height averaged over that many texels of the
+  height map at least, and over its step where that is longer (each of the pixel's uv gradients
+  that long, its direction kept: a coarser level of the map). The blocks and the joints stay in
+  relief, and the height map's fine noise is no longer cut 3 % of the texture deep: at a slanting
+  view that noise stood up out of a flat stone as spikes (the moss on River's temple threshold).
+  The textures are still read at the pixel's footprint. 0 reads the height at the pixel, as
+  before; 1 to 64. Filtering by the march's step alone (its gradient stretched along the march)
+  changed nothing there: the spikes are the map's noise, not the steps missing it.
 - Both look the maps up when a scene first draws a material (`Scene.cpp`'s `WantsPbrMaps`,
   `CTextureManager::FindPbrCompanions`), once for each texture (a miss is remembered), and only
   while either of them is 1: with both 0 from the start no map loads and the frames are the build
@@ -580,10 +601,14 @@ reference of its features and console variables.
   offset texture and normal (its G-buffer is the raster's pass), its later hits the geometry's uv.
   A large `r_ParallaxDepth` stretches the steep edges of a height map (grout lines at 0.05).
 - With a frame dump an item with the maps gets the line `RayMaster maps: material '...' normals
-  '...'`, a draw ` parallax (r_Parallax) depth D` or ` normals (r_PbrNormals)`.
+  '...' depth share S`, a draw ` parallax (r_Parallax) depth D filter N` or ` normals
+  (r_PbrNormals)`.
 - Cost (RX 7900 XTX, 3840 x 2160, the raster without the upscaler, `Parallax_river.ini`'s views): in
   River's temple the opaque list 0.65-0.72 to 0.77-0.84 ms, the frame 2.79-2.95 to 2.91-3.05 ms;
-  from outside, 37 m off, the same (the depth under a pixel: no march).
+  from outside, 37 m off, the same (the depth under a pixel: no march). `r_ParallaxMaterials` and
+  `r_ParallaxFilter` add 0.04-0.12 ms to the temple's opaque list (0.74-0.81 to 0.81-0.92 ms, the
+  frame 2.83-3.03 to 2.92-3.11 ms), the filter: over the smoother height the ray goes more steps
+  before it meets it.
 - Tests: `render_tests` suite `parallax` (`Parallax_river.ini`, River's temple by day at 1080p, the
   exposure fixed). Both on change 0.17-0.26 of each view in the temple and 0.0004 of the view from
   outside, with no more black pixels than both off (the grout's dark bottoms seen deeper: at most
@@ -595,6 +620,20 @@ reference of its features and console variables.
   the BC3 alpha decoding of both modes, the flat height and the mip chain; `Parallax_*` the march
   (no offset at the reference height or straight on, a constant height's shift, a ramp's and a
   step's hit, grazing views bounded), the fade, the texture matrix and the steps.
+- Tests of the depth by material and the filter (the suite `parallax` too): each of the 94 draws
+  with parallax in the frame dump has `r_ParallaxDepth` times its material's share of the table
+  (0.25, 0.6 and 1 there) and the filter 4; at the temple's threshold (view 20) the moss's
+  streaks (its luma's steps across over those along the view) exceed both maps off's by 0.36 of
+  what they do without the filter, the relief kept (the mean change against the normals alone 4.09
+  levels, 4.17 without it); `r_ParallaxMaterials 0` and `r_ParallaxFilter 0` give the build
+  before's frames (0 px in the nearest of 3 x 3 runs there; the PerfSweep frames of Pier and
+  River 0 px in the nearest of 3 x 4, Swamp's 1 and 8 px of 1 level at its frames 181 and 661,
+  its frame 1 1 to 2 levels over the frame, another state of the glare: the build before's own
+  runs 893712 px apart there). Where the materials show: Treehouse's lab corridor (its metal
+  tread plates, share 0.25) changes 0.076 of the frame, Training's hut (wood 0.6) 0.082,
+  Research's pump hall 0.028. The unit tests `Pbr_DepthTable` (the table's rows, comments, Windows line ends, numbers
+  left out or clamped, the last row counting) and `Parallax_MarchGrad` (the gradients at least the
+  texels and the step, their directions kept).
 
 ## Depth prepass
 

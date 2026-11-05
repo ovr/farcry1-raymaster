@@ -117,8 +117,10 @@
 //	      vParallax.x deep in uv0 from 0 (a hollow) to 1 (a bump), the height
 //	      vParallax.w not offset, fading from vParallax.y pixels of depth to
 //	      none at vParallax.z; those textures read by uv0's gradients (no
-//	      seams where the offset jumps); the depth, the light map, the decal
-//	      fade and the glow falloff the geometry's
+//	      seams where the offset jumps), the march's height with nParallax.w
+//	      (r_ParallaxFilter) by them at least nParallax.w texels and the
+//	      march's step long (ParallaxMarchGrad); the depth, the light map,
+//	      the decal fade and the glow falloff the geometry's
 //	    DF_SPECULAR (with DF_PIXEL_LIGHTING): rgb += 2 * vSpecular.rgb * gloss
 //	      (texture alpha if vSpecular.w, else 1) * the sum over the sun (times
 //	      v) and the lights of their specular colour (clamped to 1) * falloff
@@ -1083,7 +1085,18 @@ float2 ParallaxFetch(SVertexOutput In)
   float2 vShift = ParallaxShift(vView, g_Draw.vParallax.x * fFade);
   if (HasFlag(DF_TEXMATRIX))
     vShift = ParallaxTexMatrix(vShift, g_Draw.vTexMat0.xy, g_Draw.vTexMat1.xy);
-  return ParallaxUV(In.vTex0, s_vParallaxDx, s_vParallaxDy, vShift, g_Draw.vParallax.w, ParallaxSteps(vView.z, g_Draw.nParallax.z));
+  const uint nSteps = ParallaxSteps(vView.z, g_Draw.nParallax.z);
+  // r_ParallaxFilter: the march's height over nParallax.w texels at least and its step; the textures read there by the
+  // pixel's footprint.
+  float2 vMarchDx = s_vParallaxDx, vMarchDy = s_vParallaxDy;
+  [branch]
+  if (g_Draw.nParallax.w != 0)
+  {
+    uint nWidth, nHeight;
+    g_Textures[g_Draw.nParallax.x].GetDimensions(nWidth, nHeight);
+    ParallaxMarchGrad(vShift, nSteps, g_Draw.nParallax.w / (float)max(max(nWidth, nHeight), 1u), vMarchDx, vMarchDy);
+  }
+  return ParallaxUV(In.vTex0, vMarchDx, vMarchDy, vShift, g_Draw.vParallax.w, nSteps);
 }
 
 float4 ShadePixel(SVertexOutput In)
