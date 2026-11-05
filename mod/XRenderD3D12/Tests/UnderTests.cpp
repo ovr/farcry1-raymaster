@@ -21,6 +21,10 @@
 //	meeting the water at the horizon, and under Fort's water the water far
 //	off darker than the floor the sun lights, bluer, darker looking down;
 //	the same light worked out on the CPU once a frame (UnderwaterLight.h).
+//	d3d12_WaterUnderAdapt and d3d12_WaterUnderExposure: the eye's white
+//	balance at the camera's depth (none at the surface, the light there
+//	the colour of the light at the surface, its luminance kept, red's
+//	factor the most) and its exposure coming in under the surface.
 //
 //////////////////////////////////////////////////////////////////////
 
@@ -734,4 +738,74 @@ XR_TEST(Under_ClearCpu)
                                                                      std::to_string(vSource[q]) + " " + std::to_string(e));
     }
   }
+}
+
+// Why: under the water the eye takes the light at its depth, which the water has taken its red from first, towards the light
+// just under the surface (d3d12_WaterUnderAdapt): the HDR resolve's factors must leave the view through the surface as it is
+// (none at the surface, else the picture would jump as the camera crosses it), keep the exposure (the luminance of the light
+// at the depth), give that light the surface's colour with all of the balance and part of the way with part of it (von Kries'
+// factors raised to the degree), red's factor the most; deeper (Fort's from 5.7 m) the factors no more than BALANCE_MOST
+// apart (at 20 m red's would be 53 times: a lamp or the sky in Snell's window red), the luminance still kept; without light
+// (no sun, no sky) none (the raw factors would make whatever else lights the water red); the exposure under the water
+// (d3d12_WaterUnderExposure) coming in over the first half metre, none at the surface.
+XR_TEST(Under_Balance)
+{
+  // Fort's water (its fog volume, 30 m) and sun (Under_ClearFort's).
+  const float Fog[3] = { 0.341f, 0.635f, 0.875f }, Sun[3] = { 0.96f, 0.89f, 0.68f }, Sky[3] = { 0.384f, 0.549f, 0.788f };
+  float c[3], vDown[3];
+  UnderwaterLight::FogAttenuation(Fog, std::log(100.0f) / 60, c);
+  UnderwaterLight::DownLight(Sun, Sky, 0.853f, vDown);
+  auto Y = [](const float v[3]) { return 0.2126f * v[0] + 0.7152f * v[1] + 0.0722f * v[2]; };
+  float g[3];
+  UnderwaterLight::Balance(c, vDown, 0, 1, g);
+  for (int i = 0; i < 3; i++)
+    CHECK_NEAR(g[i], 1, 1e-6);
+  UnderwaterLight::Balance(c, vDown, 4, 0, g);
+  for (int i = 0; i < 3; i++)
+    CHECK_NEAR(g[i], 1, 1e-6);
+  for (const float fDepth : { 1.0f, 4.0f, 5.5f })
+  {
+    float vLight[3], vAfter[3], g1[3], gh[3];
+    for (int i = 0; i < 3; i++)
+      vLight[i] = vDown[i] * std::exp(-c[i] * fDepth);
+    UnderwaterLight::Balance(c, vDown, fDepth, 1, g1);
+    UnderwaterLight::Balance(c, vDown, fDepth, 0.5f, gh);
+    for (int i = 0; i < 3; i++)
+      vAfter[i] = vLight[i] * g1[i];
+    const std::string d = std::to_string(fDepth) + " m";
+    CHECK_MSG(std::fabs(Y(vAfter) / Y(vLight) - 1) < 1e-5f, d);
+    for (int i = 0; i < 3; i++)
+    {
+      CHECK_MSG(std::fabs((vAfter[i] / Y(vAfter)) / (vDown[i] / Y(vDown)) - 1) < 1e-4f, d + " / " + std::to_string(i));
+      CHECK_MSG(std::fabs(std::log(gh[i] / gh[1]) - 0.5f * std::log(g1[i] / g1[1])) < 1e-5f, d + " / " + std::to_string(i));
+    }
+    CHECK_MSG(g1[0] > g1[1] && g1[1] > g1[2] && gh[0] > 1 && gh[2] < 1, d);
+  }
+  // Deeper the factors BALANCE_MOST apart at most, all of the balance or half of it, the luminance kept, red's still the most.
+  for (const float fDepth : { 6.0f, 12.0f, 20.0f, 30.0f })
+    for (const float fDegree : { 1.0f, 0.5f })
+    {
+      float vLight[3], vAfter[3], gd[3];
+      for (int i = 0; i < 3; i++)
+        vLight[i] = vDown[i] * std::exp(-c[i] * fDepth);
+      UnderwaterLight::Balance(c, vDown, fDepth, fDegree, gd);
+      for (int i = 0; i < 3; i++)
+        vAfter[i] = vLight[i] * gd[i];
+      const std::string d = std::to_string(fDepth) + " m, " + std::to_string(fDegree);
+      const float fFull = std::exp(fDegree * (c[0] - c[2]) * fDepth);
+      CHECK_MSG(std::fabs(gd[0] / gd[2] - std::min(fFull, UnderwaterLight::BALANCE_MOST)) < 1e-3f * gd[0] / gd[2], d);
+      CHECK_MSG(std::fabs(Y(vAfter) / Y(vLight) - 1) < 1e-5f, d);
+      CHECK_MSG(gd[0] > gd[1] && gd[1] > gd[2], d);
+    }
+  // Without the light all 1.
+  const float vNone[3] = { 0, 0, 0 };
+  UnderwaterLight::Balance(c, vNone, 4, 1, g);
+  for (int i = 0; i < 3; i++)
+    CHECK_NEAR(g[i], 1, 1e-6);
+  CHECK_NEAR(UnderwaterLight::UnderExposure(1, 0), 1, 1e-6);
+  CHECK_NEAR(UnderwaterLight::UnderExposure(1, 0.25f), std::sqrt(2.0f), 1e-5);
+  CHECK_NEAR(UnderwaterLight::UnderExposure(1, 0.5f), 2, 1e-5);
+  CHECK_NEAR(UnderwaterLight::UnderExposure(1, 8), 2, 1e-5);
+  CHECK_NEAR(UnderwaterLight::UnderExposure(0, 8), 1, 1e-6);
+  CHECK_NEAR(UnderwaterLight::UnderExposure(1, -1), 1, 1e-6);
 }

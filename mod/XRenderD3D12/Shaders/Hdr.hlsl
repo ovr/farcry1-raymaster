@@ -43,7 +43,10 @@
 //	                  uv: a 3 x 3 tent, added to the target (ONE, ONE)
 //	  HDR_RESOLVE     tex0 the scene, tex1 the bloom, tex2 the EV: the light
 //	                  exposed (vParams1.x the compensation, vParams1.y 1 with
-//	                  the adapted EV) plus the bloom times vParams1.z, tone
+//	                  the adapted EV) plus the bloom times vParams1.z, with
+//	                  vUnderColor.w 1 times each channel's factor
+//	                  vUnderColor.rgb (under the water the eye's white
+//	                  balance, d3d12_WaterUnderAdapt), tone
 //	                  mapped by vParams1.w (0 clamp, 1 soft shoulder from the
 //	                  knee vParams2.x, 2 ACES fitted, 3 AgX, 4 neutral from the
 //	                  knee, vParams3.z its desaturation); vParams2.y 1: the
@@ -377,6 +380,9 @@ float4 Resolve(float2 vPixel, out float3 vRatio)
     vLight = vBloom;
   else
     vLight += vBloom;
+  // Under the water the eye's white balance: each channel's factor (d3d12_WaterUnderAdapt).
+  if (g_Draw.vUnderColor.w > 0 && nDebug == 0)
+    vLight *= g_Draw.vUnderColor.rgb;
   float3 c = ToneMap(vLight, (int)g_Draw.vParams1.w, g_Draw.vParams2.x);
   if (nDebug == 0)
     vRatio = HighlightRatio(vLight, c, (int)g_Draw.vParams1.w, g_Draw.vParams2.x);

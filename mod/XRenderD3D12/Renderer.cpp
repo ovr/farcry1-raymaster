@@ -241,6 +241,15 @@ void CD3D12Renderer::RegisterVariables()
                      "bluer than a floor the sun lights, darker with the depth and looking down), the surface beyond Snell's "
                      "window the light the water below sends up (meeting the water at the horizon); 0: the water's light "
                      "twice its fog volume's colour, as seen from above (the frames before)");
+  iConsole->Register("d3d12_WaterUnderAdapt", &CV_d3d12_WaterUnderAdapt, 1.0f, 0,
+                     "With d3d12_WaterUnder and r_HDRRendering: the eye's white balance with the camera under the water, as a "
+                     "diver's (or a camera's set at the depth): the light at the camera's depth, the water having taken its red "
+                     "first, taken towards the light just under the surface by this much, 0 to 1, its luminance kept (none at the "
+                     "surface, more the deeper); 0: none (the frames before)");
+  iConsole->Register("d3d12_WaterUnderExposure", &CV_d3d12_WaterUnderExposure, 1.0f, 0,
+                     "With d3d12_WaterUnder and r_HDRRendering: the eye's exposure with the camera under the water, this many EV "
+                     "more than above it (the water's light dimmer than the day's: the clear water's blue lighter, less dense), "
+                     "coming in over the first half metre under the surface; 0: none (the frames before)");
   iConsole->Register("d3d12_GpuTimes", &CV_d3d12_GpuTimes, 0, 0,
                      "N: every N frames, the average GPU time of the frame's sections (shadow maps, water reflection, opaque, "
                      "water, blended, ...) and the time between frames to the console and XRenderD3D12_gpu.txt; 0 off");

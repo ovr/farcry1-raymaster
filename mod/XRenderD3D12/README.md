@@ -1638,6 +1638,26 @@ and lists theirs (`NamesObjects`).
     raster: the water above the floor 0.47 of the luma it had, the near sand 2.1 times the far
     water's in place of 0.94, green 14 times red, Snell's window 0.90 of the surface beyond it in
     place of 0.56, the horizon's steepest step 0.42 of what it was).
+  - The eye under the water (`d3d12_WaterUnderAdapt`, 1, and `d3d12_WaterUnderExposure`, 1 EV; not
+    saved; with `r_HDRRendering`): the HDR resolve multiplies each channel of the light by a factor
+    before the tone map (`UnderBalance`, `UnderwaterLight.h`'s `Balance` and `UnderExposure`). The
+    white balance at the camera's depth z, as a diver's eye (or a camera set at the depth): the
+    light there, the light coming down just under the surface times exp(-c z) (red gone first),
+    taken towards that light's colour by von Kries' factors exp(c z) raised to the degree
+    (0 to 1), scaled to keep that light's luminance (the exposure as without); none at the surface.
+    The factors at most 4 times apart, the degree less where they would be more (under Fort's water
+    deeper than 5.7 m: at 20 m red's would be 53 times, a lamp or the sky in Snell's window red
+    there), as an eye adapts only so far: the deep water bluer again; without light all 1.
+    The exposure: 2^EV times the light, coming in over the first half metre under the surface (the
+    view through the surface the same either side of it). The clear water's light (above) is about
+    middle grey in luminance but a dense blue in colour, red's share a tenth of green's at a few
+    metres: through the ACES tone map it was a dark saturated blue, the sand in it blue too. With
+    both (the user's choice of four: neither, the balance, the balance and 0.5 or 1 EV) the water
+    is a lighter, less saturated blue, the floor nearer its own colour. 0 and 0: the frames before.
+    Under Fort's water (`Under_fort.ini`, 1280 x 720, the raster, the game's glare off): the
+    balance takes the water's saturation 1.00 -> 0.75, its red 0 -> 0.36 of green, the near sand's
+    blue over red 3.1 -> 2.0; the exposure the frames 1.6 times brighter; above the surface
+    nothing changes (0 px); the resolve's time at 3840 x 2160 the same (0.23-0.24 ms).
   - The sun's share of it (0.6, less at a low sun) is the sun's light at a point of each segment (one
     bilinear comparison of the cascades where the sun's refracted ray to it left the surface, then
     the FFT ocean's caustics there at its depth, as on the floor: their mip level from the pixel's
