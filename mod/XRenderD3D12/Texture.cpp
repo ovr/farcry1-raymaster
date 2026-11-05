@@ -22,6 +22,7 @@
 #include "D3D12Descriptors.h"
 #include "Texture.h"
 #include "NormalMapHeight.h"
+#include "PbrCompanion.h"
 #include "LightImage.h"
 #include "Shaders/Constants.h"
 
@@ -643,6 +644,7 @@ void CTextureManager::Remove(CTexture *pTex)
   Sequence.swap(pTex->m_Sequence);
   for (CTexture *pFrame : Sequence)
     ReleaseTexture(pFrame, false);
+  ReleasePbrCompanions(pTex);
   for (const std::string &Key : pTex->m_Keys)
   {
     auto It = m_ByName.find(Key);
@@ -897,6 +899,7 @@ CTexture *CTextureManager::Load(const char *szName, const char *szTexturePath, u
     pTex->m_bClamp = (nFlags & FT_CLAMP) || (nFlags2 & (FT2_UCLAMP | FT2_VCLAMP));
     pTex->m_bPoint = (nFlags2 & FT2_FILTER_NEAREST) != 0;
     pTex->m_bLoaded = (pTex->m_pGPU != nullptr);
+    pTex->m_File = Res.Base;
     AddKey(pTex, FoundKey);
   }
   if (!Res.bViaDir)
@@ -1000,6 +1003,69 @@ CTexture *CTextureManager::LoadNormalWithHeight(const char *szNormal, const char
   return pTex;
 }
 
+void CTextureManager::FindPbrCompanions(CTexture *pTex)
+{
+  if (!pTex || pTex->m_bPbrLooked || pTex->m_bRemoved || pTex->m_bPermanent)
+    return;
+  pTex->m_bPbrLooked = true;
+  if (pTex->m_File.empty() || pTex->m_bCube || pTex->m_bArray || !pTex->m_pGPU)
+    return;
+  pTex->m_pPbrM = LoadPbrMap(pTex, PbrCompanion::Path(pTex->m_File, "_pbr_m"), true);
+  pTex->m_pPbrN = LoadPbrMap(pTex, PbrCompanion::Path(pTex->m_File, "_pbr_n"), false);
+}
+
+CTexture *CTextureManager::LoadPbrMap(CTexture *pTex, const std::string &Path, bool bHeight)
+{
+  // Loaded once for all the textures of the file (the engine's flags make one of each).
+  const std::string Key = "#raymaster#" + Path;
+  if (CTexture *pMap = FindKey(Key))
+  {
+    pMap->m_nRefs++;
+    return pMap;
+  }
+  if (m_Missing.count(Key))
+    return nullptr;
+  std::vector<byte> File;
+  SImage Image;
+  if (!ReadFile(Path.c_str(), File))
+  {
+    m_Missing.insert(Key);
+    return nullptr;
+  }
+  if (!Img::LoadDDS(File, Image) || (bHeight && Image.Format != DXGI_FORMAT_BC3_UNORM) ||
+      !PbrCompanion::IsUsable(Image.nWidth, Image.nHeight, Image.nMips, Image.nFaces, pTex->m_nOrigWidth, pTex->m_nOrigHeight))
+  {
+    m_Missing.insert(Key);
+    if (iLog && m_Warned.insert(Key).second)
+      iLog->LogWarning("RayMaster map '%s': not used (not a DDS of one face with its levels and the texture's aspect%s)", Path.c_str(),
+                       bHeight ? ", BC3" : "");
+    return nullptr;
+  }
+  const bool bFlat = bHeight && PbrCompanion::IsFlatHeight(Image.Bits(0, 0), Image.MipSize(0) / 16);
+  DropLevels(Image, GetCVarInt(bHeight ? "r_TexResolution" : "r_TexBumpResolution", 0));
+  CTexture *pMap = NewTexture(Path.c_str());
+  if (!pMap)
+    return nullptr;
+  Upload(pMap, Image);
+  pMap->m_nFlags = Image.nSrcFlags | (Image.nMips > 1 ? FT_HASMIPS : 0);
+  pMap->m_nFlags2 = FT2_WASLOADED;
+  pMap->m_bFlatHeight = bFlat;
+  pMap->m_bClamp = pTex->m_bClamp;
+  pMap->m_bLoaded = (pMap->m_pGPU != nullptr);
+  AddKey(pMap, Key);
+  return pMap;
+}
+
+void CTextureManager::ReleasePbrCompanions(CTexture *pTex)
+{
+  CTexture *pMaps[2] = { pTex->m_pPbrM, pTex->m_pPbrN };
+  pTex->m_pPbrM = pTex->m_pPbrN = nullptr;
+  pTex->m_bPbrLooked = false;
+  pTex->m_File.clear();
+  for (CTexture *pMap : pMaps)
+    ReleaseTexture(pMap, false);
+}
+
 int CTextureManager::LoadTextureID(const char *szName, int nDefault, uint nFlags, uint nFlags2)
 {
   CTexture *pTex = Load(szName, nullptr, nFlags, nFlags2, eTT_Base, true, true);
@@ -1048,6 +1114,7 @@ int CTextureManager::CreateFromMemory(const byte *pData, int nWidth, int nHeight
   {
     if (szName)
       pTex->m_Name = szName;
+    ReleasePbrCompanions(pTex);
   }
   else if (!(pTex = NewTexture(szName ? szName : "$Memory", nID)))
     return 0;
@@ -1071,6 +1138,7 @@ int CTextureManager::CreateFromImage(const SImage &Image, const char *szName, bo
   {
     if (szName)
       pTex->m_Name = szName;
+    ReleasePbrCompanions(pTex);
   }
   else if (!(pTex = NewTexture(szName ? szName : "$Memory", nID)))
     return 0;

@@ -2088,6 +2088,9 @@ public:
   int CV_r_TexSkyResolution = 0;
   int CV_r_DetailTextures = 1;        //!< 0: the terrain's detail layers are not drawn
   float CV_r_DetailScale = 8;         //!< metres per repeat of the detail texture
+  int CV_r_Parallax = 1;              //!< 1: parallax occlusion mapping by the RayMaster maps' height (raymaster/<texture>_pbr_m.dds; 0: none, the frames before)
+  float CV_r_ParallaxDepth = 0.03f;   //!< its depth in the texture's coordinates (a fraction of its side), hollow to bump
+  int CV_r_PbrNormals = 1;            //!< 1: the RayMaster maps' normals (raymaster/<texture>_pbr_n.dds) where a material has no normal map (0: none)
   float CV_r_DetailDistance = 4;      //!< the terrain's detail layers fade out from here to twice this far
   int CV_d3d12_debug = 0;             //!< debug layer, 1 with GPU based validation, 2 without (also XRENDERD3D12_DEBUG); only read at Init
   int CV_d3d12_DRED = 1;              //!< DRED, 1 the page faults and our markers, 2 and every command (XRENDERD3D12_DRED before it); only read at Init

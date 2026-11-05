@@ -110,6 +110,15 @@
 //	      vertex normal or, with DF_BUMP (bump mapping), N' = the normal map
 //	      (tex3 at uv0, its y times vParams1.y) in the vertex's tangent frame;
 //	      the dot3 light map takes N'.D for D.z
+//	    nParallax.x non-zero (r_Parallax, a lit opaque surface with the tangent
+//	      frames): uv0 of tex0, tex3 and tex4 (DF2_TEX4_LAYER, DF2_ADD_TEX4)
+//	      is where the view meets the height g_Textures[nParallax.x].a
+//	      (sampler nParallax.y; Parallax.hlsli, at most nParallax.z steps),
+//	      vParallax.x deep in uv0 from 0 (a hollow) to 1 (a bump), the height
+//	      vParallax.w not offset, fading from vParallax.y pixels of depth to
+//	      none at vParallax.z; those textures read by uv0's gradients (no
+//	      seams where the offset jumps); the depth, the light map, the decal
+//	      fade and the glow falloff the geometry's
 //	    DF_SPECULAR (with DF_PIXEL_LIGHTING): rgb += 2 * vSpecular.rgb * gloss
 //	      (texture alpha if vSpecular.w, else 1) * the sum over the sun (times
 //	      v) and the lights of their specular colour (clamped to 1) * falloff
@@ -244,6 +253,9 @@
 #include "WaterCaustics.hlsli"
 #include "Underwater.hlsli"
 #include "AlphaCoverage.hlsli"
+// r_Parallax's height: the RayMaster material map's alpha (Draw3D.cpp's nParallax).
+#define PARALLAX_HEIGHT(uv, dx, dy) SampleTextureGrad(g_Draw.nParallax.x, g_Draw.nParallax.y, uv, dx, dy).a
+#include "Parallax.hlsli"
 #if defined(XR_RAY_REFL) || defined(XR_RAY_LIGHT)
 #include "RayShade.hlsli"
 #endif
@@ -1039,6 +1051,41 @@ float4 CubeShader(SVertexOutput In, float3 vView, float3 vN, uint nSampler)
   return float4(nMode == 5 ? vDecal.rgb + vRefl * vDecal.a : vRefl * vDecal.rgb, 1);
 }
 
+// r_Parallax (nParallax.x): the textures at uv0 read where the view meets the height, by uv0's own gradients (scaled for
+// vMipBias.x as SampleTexture's bias), not the offset's (SampleUV0).
+static bool s_bParallax = false;
+static float2 s_vParallaxDx = 0, s_vParallaxDy = 0;
+
+//! A texture at uv0 (or a uv moving with it): SampleTexture, or with r_Parallax by uv0's gradients (ParallaxFetch).
+float4 SampleUV0(uint nIndex, uint nSampler, float2 vUV)
+{
+  [branch]
+  if (s_bParallax)
+    return SampleTextureGrad(nIndex, nSampler, vUV, s_vParallaxDx, s_vParallaxDy);
+  return SampleTexture(nIndex, nSampler, vUV);
+}
+
+//! r_Parallax: the uv0 where the view meets the height of g_Textures[nParallax.x] (Parallax.hlsli's ParallaxUV), in the
+//! tangent frame, the shift turned by DF_TEXMATRIX's matrix; uv0 itself where its depth is under vParallax.z pixels. Sets
+//! SampleUV0's gradients. Not in a branch of the pixel (derivatives): of the draw's constants alone.
+float2 ParallaxFetch(SVertexOutput In)
+{
+  const float2 vDx = ddx(In.vTex0), vDy = ddy(In.vTex0);
+  const float fBias = exp2(g_Frame.vMipBias.x);
+  s_vParallaxDx = vDx * fBias;
+  s_vParallaxDy = vDy * fBias;
+  s_bParallax = true;
+  const float fFade = ParallaxFade(g_Draw.vParallax.x, vDx, vDy, g_Draw.vParallax.y, g_Draw.vParallax.z);
+  [branch]
+  if (fFade <= 0)
+    return In.vTex0;
+  const float3 vView = ParallaxView(g_Frame.vCameraPos.xyz - In.vWorldPos, In.vTangent, In.vBinormal, In.vTNormal);
+  float2 vShift = ParallaxShift(vView, g_Draw.vParallax.x * fFade);
+  if (HasFlag(DF_TEXMATRIX))
+    vShift = ParallaxTexMatrix(vShift, g_Draw.vTexMat0.xy, g_Draw.vTexMat1.xy);
+  return ParallaxUV(In.vTex0, s_vParallaxDx, s_vParallaxDy, vShift, g_Draw.vParallax.w, ParallaxSteps(vView.z, g_Draw.nParallax.z));
+}
+
 float4 ShadePixel(SVertexOutput In)
 {
 #ifdef XR_AMBIENT
@@ -1087,13 +1134,18 @@ float4 ShadePixel(SVertexOutput In)
 #endif
   uint nSampler0 = g_Draw.nSamplers & 15;
   uint nSampler1 = (g_Draw.nSamplers >> 4) & 15;
+  // r_Parallax: uv0 where the view meets the texture's height (ParallaxFetch), for the textures at uv0 (SampleUV0).
+  float2 vUVf = In.vTex0;
+  [branch]
+  if (g_Draw.nParallax.x != 0)
+    vUVf = ParallaxFetch(In);
 
   // Bump mapping: the normal map in tangent space (vMap) and in world space (vBumpN).
   float3 vMap = float3(0, 0, 1);
   float3 vBumpN = 0;
   if (HasFlag(DF_BUMP))
   {
-    vMap = SafeNormalize(SampleTexture(g_Draw.nTex3, XR_SAMPLER_LINEAR_WRAP, In.vTex0).rgb * 2 - 1);
+    vMap = SafeNormalize(SampleUV0(g_Draw.nTex3, XR_SAMPLER_LINEAR_WRAP, vUVf).rgb * 2 - 1);
     vMap.y *= g_Draw.vParams1.y;
     vBumpN = SafeNormalize(vMap.x * In.vTangent + vMap.y * In.vBinormal + vMap.z * In.vTNormal);
 #ifdef XR_PT
@@ -1134,15 +1186,15 @@ float4 ShadePixel(SVertexOutput In)
     vTex = SampleTextureArrayCoords(g_Draw.nTex0, nSampler0, In.vTex0, PictureNoise(In.vPos.xy, g_Frame.vTime.y));
   else if (HasFlag(DF_TEX0))
   {
-    float2 vUV0 = In.vTex0;
+    float2 vUV0 = vUVf;
     if (HasFlag2(DF2_BUMP_OFFSET))
       vUV0 += (SampleTexture(g_Draw.nTex3, XR_SAMPLER_LINEAR_WRAP, In.vTex1).rg * 2 - 1) * g_Draw.vParams0.x;
-    vTex = SampleTexture(g_Draw.nTex0, nSampler0, vUV0);
+    vTex = SampleUV0(g_Draw.nTex0, nSampler0, vUV0);
     if (HasFlag2(DF2_TEX4_LAYER))
     {
       // A second layer over the texture by its alpha, moving on its own (the fixed function
       // templates' second pass); added with vAddColor.x (TemplDecalLight_SpecAdd's gloss map, lit as the texture).
-      float4 vLayer = SampleTexture(g_Draw.nTex4, XR_SAMPLER_LINEAR_WRAP, In.vTex0 + float2(g_Draw.vTexMat0.w, g_Draw.vTexMat1.w));
+      float4 vLayer = SampleUV0(g_Draw.nTex4, XR_SAMPLER_LINEAR_WRAP, vUVf + float2(g_Draw.vTexMat0.w, g_Draw.vTexMat1.w));
       if (g_Draw.vAddColor.x > 0)
         vTex.rgb += vLayer.rgb * g_Draw.vAddColor.x;
       else
@@ -1247,7 +1299,7 @@ float4 ShadePixel(SVertexOutput In)
 #endif
   if (HasFlag2(DF2_ADD_TEX4))
   {
-    float4 vTex4 = SampleTexture(g_Draw.nTex4, XR_SAMPLER_LINEAR_WRAP, In.vTex0 + float2(g_Draw.vTexMat0.w, g_Draw.vTexMat1.w));
+    float4 vTex4 = SampleUV0(g_Draw.nTex4, XR_SAMPLER_LINEAR_WRAP, vUVf + float2(g_Draw.vTexMat0.w, g_Draw.vTexMat1.w));
     vColor.rgb += vTex4.rgb * g_Draw.vAddColor.rgb + g_Draw.vAddColor.w;
 #ifdef XR_PT
     s_vPTEmission += vTex4.rgb * g_Draw.vAddColor.rgb + g_Draw.vAddColor.w;

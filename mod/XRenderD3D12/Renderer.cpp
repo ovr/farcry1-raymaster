@@ -364,6 +364,17 @@ void CD3D12Renderer::RegisterVariables()
   iConsole->Register("d3d12_AlphaToCoverage", &CV_d3d12_AlphaToCoverage, 1, VF_DUMPTODISK,
                      "With MSAA (d3d12_AA msaa2, msaa4, msaa8), 1: the alpha-tested surfaces (grass, leaves, gratings) cover the samples "
                      "their alpha sharpened to the test's edge covers (alpha to coverage): their edges smooth; 0: the alpha test, a step");
+  // The RayMaster maps beside the game's textures (Texture.cpp's FindPbrCompanions, PbrCompanion.h): not this renderer's alone.
+  iConsole->Register("r_Parallax", &CV_r_Parallax, 1, 0,
+                     "1: parallax occlusion mapping: the lit opaque surfaces whose texture has a height in the game's folder RayMaster "
+                     "(raymaster/<texture>_pbr_m.dds, its alpha) look hollow and raised by it, their texture, normal map and highlights "
+                     "shifted along the view (r_ParallaxDepth; not the silhouettes, the depth, the shadows); 0: none (the frames before)");
+  iConsole->Register("r_ParallaxDepth", &CV_r_ParallaxDepth, 0.03f, 0,
+                     "r_Parallax's depth from the hollows to the bumps in the texture's coordinates (a fraction of its side; 0.03: 3 cm "
+                     "of a texture a metre wide)");
+  iConsole->Register("r_PbrNormals", &CV_r_PbrNormals, 1, 0,
+                     "1: a lit surface whose material has no normal map gets the normals made from its texture in the game's folder "
+                     "RayMaster (raymaster/<texture>_pbr_n.dds) with bump mapping on (r_Quality_BumpMapping); 0: none (the frames before)");
   iConsole->Register("d3d12_FadeBlend", &CV_d3d12_FadeBlend, 1, 0,
                      "1: the objects the engine fades in or out by their distance (their alpha below 1: the crates, the gas "
                      "cylinders and the crane on Carrier's deck) drawn blended by that alpha among the blended surfaces, as the original draws them "
