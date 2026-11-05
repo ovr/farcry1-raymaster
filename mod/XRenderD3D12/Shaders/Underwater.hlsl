@@ -33,7 +33,9 @@
 //	vColor rgb the ocean's fog volume's colour (the game's), w its density;
 //	vParams0 x the level, y how far over it the surface may be (the
 //	grid's crests: where the copy has no surface), z d3d12_WaterDebug;
-//	vParams1 x the sun's share of the light the water scatters, z the depth
+//	vParams1 x the sun's share of the light the water scatters, y 1 its
+//	light from the scene's sun and sky (d3d12_WaterUnderClear: vUnderColor
+//	rgb, UnderwaterLight.h's on the CPU), z the depth
 //	the caustics are gone by, w the most they brighten; vParams2.xy each
 //	caustics cascade's 1 / tile, vParams3.xy its first depth; PSTaps:
 //	vParams2.zw the main view's jitter, vParams3.z its noise's frame (an off
@@ -68,6 +70,17 @@ float3 UnderDecode(float3 c)
 float3 UnderEncode(float3 v)
 {
   return float3(HdrEncode(v.r), HdrEncode(v.g), HdrEncode(v.b));
+}
+
+//! The light the water of colour vDeep and attenuation c scatters a metre at the surface: with d3d12_WaterUnderClear
+//! (vParams1.y) from the scene's sun (its colour twice, a white face turned to it) and sky (the fog's colour) coming down
+//! through the surface, the same for every pixel (Underwater.hlsli's UnderClearSource of UnderDownLight, worked out once a
+//! frame on the CPU: vUnderColor rgb), else as the water seen from above shows it (UnderDeepSource).
+float3 UnderSource(float3 vDeep, float3 c)
+{
+  if (g_Draw.vParams1.y > 0)
+    return g_Draw.vUnderColor.rgb;
+  return UnderDeepSource(vDeep, c);
 }
 
 //! The view depth of the depth buffer's value z.
@@ -216,7 +229,8 @@ float4 PSMain(SUnderOutput In) : SV_Target
   // Scattered forwards most: towards the camera from the sun's refracted rays.
   const float fPhase = UnderSunPhase(L, D);
   float fLit;
-  const float3 vInscatter = UnderInscatterClosed(vDeep, c, fCameraDepth, fMu, fPath, fReach, bTaps ? fShare : 0, fPhase, vSun, fLit);
+  const float3 vInscatter = UnderInscatterClosed(UnderSource(vDeep, c), c, fCameraDepth, fMu, fPath, fReach, bTaps ? fShare : 0, fPhase,
+                                                 vSun, fLit);
   const float fDepth = max(fLevel - P.z, 0);
   const float3 T = exp(-c * (fPath + fDepth / VolumeRefractedCos(saturate(L.z))));
   if (g_Draw.vParams0.z == 31)
@@ -229,7 +243,8 @@ float4 PSMain(SUnderOutput In) : SV_Target
   return SceneOutput(float4(UnderEncode(vScene * T + vInscatter), 1));
 }
 #else
-//! The view's pass without it (eD3D12P_Underwater; the program before d3d12_WaterUnderShare, instruction for instruction).
+//! The view's pass without it (eD3D12P_Underwater; the program before d3d12_WaterUnderShare, instruction for instruction, but
+//! for the light the water scatters, UnderSource's).
 float4 PSMain(SUnderOutput In) : SV_Target
 {
   const int3 vAt = int3(In.vPos.xy, 0);
@@ -286,7 +301,8 @@ float4 PSMain(SUnderOutput In) : SV_Target
   // Scattered forwards most: towards the camera from the sun's refracted rays.
   const float fPhase = UnderSunPhase(L, D);
   float fLit;
-  const float3 vInscatter = UnderInscatter(vDeep, c, fCameraDepth, fMu, fPath, fReach, bTaps ? fShare : 0, fPhase, vSun, fLit);
+  const float3 vInscatter = UnderInscatter(UnderSource(vDeep, c), c, fCameraDepth, fMu, fPath, fReach, bTaps ? fShare : 0, fPhase, vSun,
+                                           fLit);
   const float fDepth = max(fLevel - P.z, 0);
   const float3 T = exp(-c * (fPath + fDepth / VolumeRefractedCos(saturate(L.z))));
   if (g_Draw.vParams0.z == 31)

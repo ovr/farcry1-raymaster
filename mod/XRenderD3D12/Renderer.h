@@ -52,6 +52,7 @@ class CTextureManager;
 class CShaderManager;
 class CScene;
 struct SRenderItem;
+struct SFogVolume;
 struct SScreenFxState;
 struct SShaderProps;
 
@@ -1281,6 +1282,9 @@ public:
   void SetUnderwaterFog(SDrawConstants &dc, uint32 nState) const;
   //! How far over the level the ocean's surface may be (the grid's crests), for the view's path through the water.
   float UnderCap() const;
+  //! d3d12_WaterUnderClear: the light the water of the fog volume FV scatters a metre at the surface from this frame's sun
+  //! and sky (UnderwaterLight.h's ClearSource; rgb, w 1), for the view's pass and the surface seen from below.
+  void UnderClearSource(const SFogVolume &FV, float vSource[4]) const;
   void ReleaseUnderwater();
   bool m_bUnderwater = false;
   bool m_bUnderDrawn = false;     //!< the blended list being drawn has drawn the light in the water (DrawItems resets it)
@@ -2106,6 +2110,7 @@ public:
   int CV_d3d12_WaterDeferred = 1;     //!< the grid's depth first, then its water shaded once a pixel over the view (DrawOceanGrid; 0: the grid shaded as drawn)
   int CV_d3d12_WaterUnder = 1;        //!< the view from under the ocean's surface: the light in its water, the sun's shafts (Underwater.cpp; 0: the fog volume's fog, the frames before)
   int CV_d3d12_WaterUnderShare = 1;   //!< under the ocean's surface the sun's light at one point of each pixel's ray, the 4 x 4 window round a pixel its ray's segments, the segments' weights in closed form (Underwater.cpp; 0: four points a pixel shared by its quad, the frames before)
+  int CV_d3d12_WaterUnderClear = 1;   //!< under the ocean's surface the light its water scatters from the scene's sun and sky, its scattering the attenuation less pure water's absorption; the surface beyond Snell's window the water below's light (Underwater.hlsli's UnderClearSource; 0: twice the fog volume's colour, the frames before)
   int CV_d3d12_GpuTimes = 0;          //!< N: the GPU time of the frame's sections to the log every N frames
   int CV_d3d12_FrameLog = 0;          //!< 1: a line per frame to XRenderD3D12_frames.txt (LogFrame), 2 with the engine's profilers
   int CV_d3d12_CpuSamples = 0;        //!< N: the render thread's stack every N microseconds, to XRenderD3D12_samples.txt at 0 (CpuSampler)

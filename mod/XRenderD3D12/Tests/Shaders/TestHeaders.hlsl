@@ -599,7 +599,8 @@ void CSUnderWindow(uint i : SV_DispatchThreadID)
     TestOut(4 * i + q, float4(v[4 * q], v[4 * q + 1], v[4 * q + 2], v[4 * q + 3]));
 }
 
-//! UnderInscatter (Underwater.hlsli) of the deep colour g_TestIn[4i].rgb, the camera's depth .w, the attenuation
+//! UnderInscatter (Underwater.hlsli) of the deep colour g_TestIn[4i].rgb (its light UnderDeepSource's; g_TestIn[4i + 3].z
+//! over 0: the light the water scatters a metre at the surface itself), the camera's depth .w, the attenuation
 //! g_TestIn[4i + 1].rgb, the cosine .w, the path g_TestIn[4i + 2].x, the reach .y, the sun's share .z, the phase .w, the
 //! sun's light at segment j g_TestIn[4i + 3].x + j g_TestIn[4i + 3].y (at least 0): out[i] (the light, fLit).
 [numthreads(64, 1, 1)]
@@ -613,7 +614,8 @@ void CSUnderInscatter(uint i : SV_DispatchThreadID)
   for (uint j = 0; j < XR_UNDER_TAPS; j++)
     v[j] = max(s.x + j * s.y, 0);
   float fLit;
-  const float3 L = UnderInscatter(a.rgb, b.rgb, a.w, b.w, c.x, c.y, c.z, c.w, v, fLit);
+  const float3 vSource = s.z > 0 ? a.rgb : UnderDeepSource(a.rgb, b.rgb);
+  const float3 L = UnderInscatter(vSource, b.rgb, a.w, b.w, c.x, c.y, c.z, c.w, v, fLit);
   TestOut(i, float4(L, fLit));
 }
 
@@ -629,11 +631,13 @@ void CSUnderInscatterClosed(uint i : SV_DispatchThreadID)
   for (uint j = 0; j < XR_UNDER_TAPS; j++)
     v[j] = max(s.x + j * s.y, 0);
   float fLit;
-  const float3 L = UnderInscatterClosed(a.rgb, b.rgb, a.w, b.w, c.x, c.y, c.z, c.w, v, fLit);
+  const float3 vSource = s.z > 0 ? a.rgb : UnderDeepSource(a.rgb, b.rgb);
+  const float3 L = UnderInscatterClosed(vSource, b.rgb, a.w, b.w, c.x, c.y, c.z, c.w, v, fLit);
   TestOut(i, float4(L, fLit));
 }
 
-//! UnderFog (Underwater.hlsli) of the deep colour g_TestIn[4i].rgb, the camera's depth .w, the attenuation g_TestIn[4i + 1].rgb,
+//! UnderFog (Underwater.hlsli) of the deep colour g_TestIn[4i].rgb (its light UnderDeepSource's), the camera's depth .w, the
+//! attenuation g_TestIn[4i + 1].rgb,
 //! the distance .w, the view's direction g_TestIn[4i + 2].xyz, the surface's depth .w, the sun g_TestIn[4i + 3].xyz, the sun's
 //! share .w, the cap 4 (with a positive distance; 0 with a negative one, its absolute value): out[2i] (the light, the phase
 //! UnderSunPhase), out[2i + 1].rgb T.
@@ -644,7 +648,7 @@ void CSUnderFog(uint i : SV_DispatchThreadID)
     return;
   const float4 a = TestIn(4 * i), b = TestIn(4 * i + 1), d = TestIn(4 * i + 2), e = TestIn(4 * i + 3);
   float3 T;
-  const float3 L = UnderFog(a.rgb, b.rgb, a.w, d.xyz, abs(b.w), d.w, b.w > 0 ? 4 : 0, e.xyz, e.w, T);
+  const float3 L = UnderFog(UnderDeepSource(a.rgb, b.rgb), b.rgb, a.w, d.xyz, abs(b.w), d.w, b.w > 0 ? 4 : 0, e.xyz, e.w, T);
   TestOut(2 * i, float4(L, UnderSunPhase(e.xyz, d.xyz)));
   TestOut(2 * i + 1, float4(T, 0));
 }
@@ -658,6 +662,21 @@ void CSUnderSurface(uint i : SV_DispatchThreadID)
     return;
   const float4 a = TestIn(2 * i), b = TestIn(2 * i + 1);
   TestOut(i, float4(UnderSurface(a.rgb, b.rgb, a.w, b.w), 0));
+}
+
+//! d3d12_WaterUnderClear (Underwater.hlsli) of the attenuation g_TestIn[3i].rgb, the sun's height .w, the sun's light
+//! g_TestIn[3i + 1].rgb, the cosine .w, the sky's light g_TestIn[3i + 2].rgb, the phase function's share .w: out[3i].rgb
+//! UnderDownLight, out[3i + 1].rgb UnderClearSource of it, out[3i + 2].rgb UnderClearBelow of that.
+[numthreads(64, 1, 1)]
+void CSUnderClear(uint i : SV_DispatchThreadID)
+{
+  if (i >= g_Test.nTest.x)
+    return;
+  const float4 a = TestIn(3 * i), b = TestIn(3 * i + 1), c = TestIn(3 * i + 2);
+  const float3 vDown = UnderDownLight(b.rgb, c.rgb, a.w), vSource = UnderClearSource(a.rgb, vDown);
+  TestOut(3 * i, float4(vDown, 0));
+  TestOut(3 * i + 1, float4(vSource, 0));
+  TestOut(3 * i + 2, float4(UnderClearBelow(vSource, a.rgb, b.w, c.w), 0));
 }
 
 //! FoamLight (WaterFoam.hlsli) of the normal g_TestIn[4i].xyz in the sun's shadow g_TestIn[4i].w, the sun's direction

@@ -16,6 +16,11 @@
 //	pass with the sun's light its mean), and what they give under Carrier's
 //	water: the water bluer and darker with the depth, the floor fading into
 //	it, a glow towards the sun, shafts where the caustics focus the sun.
+//	d3d12_WaterUnderClear: the light coming down through the surface, the
+//	light clear water scatters of it, the surface beyond Snell's window
+//	meeting the water at the horizon, and under Fort's water the water far
+//	off darker than the floor the sun lights, bluer, darker looking down;
+//	the same light worked out on the CPU once a frame (UnderwaterLight.h).
 //
 //////////////////////////////////////////////////////////////////////
 
@@ -31,11 +36,14 @@
 #include "Test_UnderWindow.h"
 #include "Test_UnderSurface.h"
 #include "Test_UnderFog.h"
+#include "Test_UnderClear.h"
 #include "Test_VolumeAttenuation.h"
+#include "UnderwaterLight.h"
 
 #include <algorithm>
 #include <cmath>
 #include <string>
+#include <tuple>
 #include <vector>
 
 using namespace XrTest;
@@ -71,6 +79,7 @@ namespace
     SVec3 Deep, c;
     float fDepth, fMu, fPath, fReach, fShare, fPhase;
     float fSun0 = 1, fSunStep = 0;   //!< the sun's light at segment j: fSun0 + j fSunStep (at least 0)
+    bool bSource = false;            //!< Deep the light the water scatters a metre at the surface (else its colour, UnderDeepSource)
   };
 
   struct SLight
@@ -89,7 +98,7 @@ namespace
       Push(d.In, c.Deep, c.fDepth);
       Push(d.In, c.c, c.fMu);
       Push(d.In, c.fPath, c.fReach, c.fShare, c.fPhase);
-      Push(d.In, c.fSun0, c.fSunStep, 0.0f, 0.0f);
+      Push(d.In, c.fSun0, c.fSunStep, c.bSource ? 1.0f : 0.0f, 0.0f);
     }
     d.Test.nTest[0] = (uint32)Cases.size();
     d.nGroups[0] = Groups64(Cases.size());
@@ -114,6 +123,39 @@ namespace
       s += w * 2 * c * fDeep * std::exp(-c * (fDepth + mu * t)) * std::exp(-c * t);
     }
     return s * h / 3;
+  }
+
+  struct SClear
+  {
+    SVec3 Down, Source, Below;
+  };
+
+  //! d3d12_WaterUnderClear's functions (Test_UnderClear) of the attenuation c, the sun's height fSunZ, its light Sun and the
+  //! sky's Sky: UnderDownLight, UnderClearSource and UnderClearBelow at the cosine fCos with the phase function's share fScatter.
+  std::vector<SClear> Clear(const std::vector<std::tuple<SVec3, float, SVec3, SVec3, float, float>> &Cases)
+  {
+    SDispatch d;
+    d.Shader = XR_BYTECODE(Test_UnderClear);
+    for (const auto &[c, fSunZ, Sun, Sky, fCos, fScatter] : Cases)
+    {
+      Push(d.In, c, fSunZ);
+      Push(d.In, Sun, fCos);
+      Push(d.In, Sky, fScatter);
+    }
+    d.Test.nTest[0] = (uint32)Cases.size();
+    d.nGroups[0] = Groups64(Cases.size());
+    d.nOut = 3 * Cases.size();
+    const std::vector<uint32> Out = Gpu().Run(d);
+    std::vector<SClear> v;
+    for (size_t i = 0; i < Cases.size(); i++)
+      v.push_back({ Vec(Out, 3 * i), Vec(Out, 3 * i + 1), Vec(Out, 3 * i + 2) });
+    return v;
+  }
+
+  //! The game's light of a colour (HdrLight.hlsli's HdrDecode): gamma 2.2, above 1 linear on.
+  float Decode(float c)
+  {
+    return c > 1 ? 1 + 2.2f * (c - 1) : std::pow(std::max(c, 0.0f), 2.2f);
   }
 
   //! Sea water's phase function in double (Underwater.hlsli's UnderPhase).
@@ -516,4 +558,180 @@ XR_TEST(Under_Carrier)
   // (only the light not the sun's: 0.4 against 1.6).
   CHECK_NEAR(v[8].fLit, 2, 1e-5);
   CHECK_NEAR(v[9].L.y, 0.25f * v[8].L.y, 1e-5 * v[8].L.y);
+}
+
+// Why: with d3d12_WaterUnderClear the light the water scatters comes from the scene's light coming down through the surface:
+// the sun's through the flat surface (Fresnel's transmission at its refracted ray, its beam's light over a horizontal face's:
+// none under the horizon) and the sky's (0.934 through, within Snell's window, mean cosine 0.83), with as much again coming
+// back up; the water scatters as pure water's molecules and its particles do (in green all it takes beyond pure water,
+// in red and blue as 1 / wavelength, at most what each takes beyond pure water; pure water its molecules' alone); beyond
+// Snell's window the surface sends down the light the water below scatters up along the mirrored ray, the same as a level
+// view at the surface's depth sees far off (at the horizon the two meet).
+XR_TEST(Under_ClearSource)
+{
+  const SVec3 c = { 0.275f, 0.0702f, 0.0347f }, Sun = { 3.0f, 2.7f, 1.8f }, Sky = { 0.12f, 0.27f, 0.59f };
+  const SVec3 Pure = { 0.2644f, 0.0565f, 0.0106f }, Molecules = { 0.00122f, 0.00191f, 0.00376f };
+  const double Spectrum[3] = { 550.0 / 610, 1, 550.0 / 470 };
+  auto Scattering = [&](SVec3 a, int k) {
+    const double g = std::max(a.y - Pure.y - Molecules.y, 0.0f), m = std::max(Comp(a, k) - Comp(Pure, k) - Comp(Molecules, k), 0.0f);
+    return Comp(Molecules, k) + std::min(g * Spectrum[k], m);
+  };
+  const float Heights[] = { 1, 0.853f, 0.3f, 0.05f, 0, -0.4f };
+  std::vector<std::tuple<SVec3, float, SVec3, SVec3, float, float>> Cases;
+  for (float z : Heights)
+    Cases.push_back({ c, z, Sun, Sky, 0.0f, 1.0f });
+  // Pure water: no scattering; the mirrored ray at 0.5 and 0.9 with the phase's share 1.3.
+  Cases.push_back({ Pure, 0.853f, Sun, Sky, 0.0f, 1.0f });
+  Cases.push_back({ c, 0.853f, Sun, Sky, 0.5f, 1.3f });
+  Cases.push_back({ c, 0.853f, Sun, Sky, 0.9f, 1.3f });
+  const std::vector<SClear> v = Clear(Cases);
+  const double eta = 1.333;
+  for (size_t i = 0; i < std::size(Heights); i++)
+  {
+    const double z = std::max((double)Heights[i], 0.0), cw = std::sqrt(1 - (1 - z * z) / (eta * eta));
+    // Fresnel's transmission (unpolarised) at the refracted ray.
+    const double st2 = eta * eta * (1 - cw * cw), ct = std::sqrt(std::max(1 - st2, 0.0));
+    const double rs = (eta * cw - ct) / (eta * cw + ct), rp = (cw - eta * ct) / (cw + eta * ct);
+    const double fT = st2 >= 1 ? 0 : 1 - 0.5 * (rs * rs + rp * rp);
+    for (int k = 0; k < 3; k++)
+    {
+      const double e = 2 * 0.25 * (Comp(Sun, k) * fT * z / cw + 0.934 / 0.83 * Comp(Sky, k));
+      CHECK_MSG(std::fabs(Comp(v[i].Down, k) - e) <= 2e-5 * e, std::to_string(Heights[i]) + "/" + std::to_string(k) + ": " +
+                                                                    std::to_string(Comp(v[i].Down, k) / e));
+      CHECK_NEAR(Comp(v[i].Source, k), Scattering(c, k) * Comp(v[i].Down, k), 1e-5 * Comp(v[i].Down, k));
+      // At the horizon (cos 0) the water's light at the surface far off along a level ray: source / c.
+      CHECK_NEAR(Comp(v[i].Below, k), Comp(v[i].Source, k) / Comp(c, k), 1e-5 * Comp(v[i].Source, k) / Comp(c, k));
+    }
+    // The sun straight up: 0.98 of its light through (Fresnel), less as it sinks; under the horizon the sky's alone.
+    if (i > 0)
+      CHECK(v[i].Down.y < v[i - 1].Down.y || Heights[i] <= 0);
+  }
+  CHECK_NEAR(v[0].Down.y, 0.5 * (0.9796 * Sun.y + 0.934 / 0.83 * Sky.y), 1e-4 * v[0].Down.y);
+  CHECK_NEAR(v[5].Down.y, 0.5 * 0.934 / 0.83 * Sky.y, 1e-5);
+  CHECK_NEAR(v[4].Down.y, v[5].Down.y, 1e-6);
+  // Pure water its molecules' scattering alone; Fort's water blue most, red hardly any of what it takes: far off its red
+  // under a tenth of its blue; blue's particles green's times 550 / 470.
+  for (int k = 0; k < 3; k++)
+    CHECK_NEAR(Comp(v[6].Source, k), Comp(Molecules, k) * Comp(v[6].Down, k), 1e-5 * Comp(v[6].Down, k));
+  CHECK_NEAR(Scattering(c, 2) - Molecules.z, (Scattering(c, 1) - Molecules.y) * 550 / 470, 1e-6);
+  CHECK_MSG(v[1].Below.x < 0.1f * v[1].Below.z && v[1].Source.y < v[1].Source.z, std::to_string(v[1].Below.x / v[1].Below.z));
+  // Down the mirrored ray steeper the water below darker: 1 / (1 + cos), times the phase's share.
+  for (int k = 0; k < 3; k++)
+  {
+    CHECK_NEAR(Comp(v[7].Below, k), 1.3 * Comp(v[1].Below, k) / 1.5, 1e-5 * Comp(v[1].Below, k));
+    CHECK(Comp(v[8].Below, k) < Comp(v[7].Below, k));
+  }
+}
+
+// Why: what d3d12_WaterUnderClear is for, under Fort's water (its fog volume (0.341, 0.635, 0.875), 30 m, the sun of the
+// level's start): as the water seen from above shows it (twice its colour) the water far off was as bright as the sand
+// the sun lights a few metres away, a milky fog; from the scene's sun and sky, clear water scattering little of what it
+// takes, it is under half as bright as that sand, about the fog colour's hue (a little bluer), darker deeper and looking
+// down; the surface beyond Snell's window meets it at the horizon.
+XR_TEST(Under_ClearFort)
+{
+  const SVec3 Deep = Linear(0.341f, 0.635f, 0.875f);
+  SDispatch d;
+  d.Shader = XR_BYTECODE(Test_VolumeAttenuation);
+  Push(d.In, Deep, std::log(100.0f) / (2 * 30.0f));
+  d.Test.nTest[0] = 1;
+  d.nGroups[0] = 1;
+  d.nOut = 1;
+  const SVec3 c = Vec(Gpu().Run(d), 0);
+  const float fSunZ = 0.853f;
+  const SVec3 Sun = { Decode(2 * 0.96f), Decode(2 * 0.89f), Decode(2 * 0.68f) }, Sky = { Decode(0.384f), Decode(0.549f), Decode(0.788f) };
+  const std::vector<SClear> s = Clear({ { c, fSunZ, Sun, Sky, 0.001f, 1.0f } });
+  const SVec3 Source = s[0].Source;
+  auto Reach = [&](float mu, float fPath) { return std::min(fPath, 3 / std::max(c.y * (1 + mu), 1e-4f)); };
+  std::vector<SInscatter> Cases;
+  // Level from 3 m and 8 m far off; down at 0.7 from 3 m (a floor 40 m off); up at 0.5 from 3 m to the surface; level
+  // just under the surface far off; the same level from 3 m as the water seen from above shows it.
+  for (float d0 : { 3.0f, 8.0f })
+    Cases.push_back({ Source, c, d0, 0, 400, Reach(0, 400), 0.6f, 1, 1, 0, true });
+  Cases.push_back({ Source, c, 3, 0.7f, 400, Reach(0.7f, 400), 0.6f, 1, 1, 0, true });
+  Cases.push_back({ Source, c, 3, -0.5f, 6, Reach(-0.5f, 6), 0.6f, 1, 1, 0, true });
+  Cases.push_back({ Source, c, 0, 0, 1e4f, Reach(0, 1e4f), 0, 1, 1, 0, true });
+  Cases.push_back({ Deep, c, 3, 0, 400, Reach(0, 400), 0.6f, 1 });
+  const std::vector<SLight> v = Inscatter(Cases, true);
+  // The sand (0.45, 0.40, 0.30) 4 m down lit by the sun (its ray refracted, 0.92 to the vertical) and the sky, seen 5 m off
+  // from 3 m (the water in front added).
+  const SVec3 Sand = { 0.45f, 0.40f, 0.30f };
+  const double cw = std::sqrt(1 - (1 - fSunZ * fSunZ) / (1.333 * 1.333));
+  SVec3 Floor;
+  for (int k = 0; k < 3; k++)
+  {
+    const double ck = Comp(c, k), fLit = Comp(Sand, k) * (Comp(Sun, k) * cw + Comp(Sky, k)) * std::exp(-ck * 4 / cw);
+    const float f = (float)(fLit * std::exp(-ck * 5));
+    (k == 0 ? Floor.x : k == 1 ? Floor.y : Floor.z) = f;
+  }
+  // The fog's way: the water far off as bright as the sand (its luminance, Rec. 709, at least 0.9 of it); now under half.
+  auto Y = [](SVec3 a) { return 0.2126f * a.x + 0.7152f * a.y + 0.0722f * a.z; };
+  CHECK_MSG(Y(v[5].L) > 0.9f * Y(Floor), std::to_string(Y(v[5].L) / Y(Floor)));
+  CHECK_MSG(Y(v[0].L) < 0.5f * Y(Floor), std::to_string(Y(v[0].L) / Y(Floor)));
+  // Its hue about the fog colour's: blue over green at least as the colour's, under 1.5 times; red under a sixth of green.
+  const float fBlue = v[0].L.z / v[0].L.y, fDeepBlue = Deep.z / Deep.y;
+  CHECK_MSG(fBlue > fDeepBlue && fBlue < 1.5f * fDeepBlue, std::to_string(fBlue) + " " + std::to_string(fDeepBlue));
+  CHECK_MSG(v[0].L.x < v[0].L.y / 6, std::to_string(v[0].L.x / v[0].L.y));
+  // Deeper darker; looking down darker, up brighter than level.
+  CHECK(v[1].L.y < 0.8f * v[0].L.y && v[1].L.z < v[0].L.z);
+  CHECK(v[2].L.y < 0.8f * v[0].L.y && v[2].L.z < 0.8f * v[0].L.z);
+  // Up at 30 degrees to the surface 6 m off: the surface beyond Snell's window, the water below mirrored (UnderClearBelow at
+  // 0.5), over the water in front; darker than at the horizon (the ring round the window), brighter than looking down.
+  const std::vector<SClear> m = Clear({ { c, fSunZ, Sun, Sky, 0.5f, 1.0f } });
+  for (int k = 1; k < 3; k++)
+  {
+    const double fUp = Comp(v[3].L, k) + Comp(m[0].Below, k) * std::exp(-Comp(c, k) * 6);
+    CHECK_MSG(Comp(m[0].Below, k) < Comp(s[0].Below, k) && fUp > Comp(v[2].L, k),
+              std::to_string(k) + ": " + std::to_string(fUp) + " " + std::to_string(Comp(v[2].L, k)));
+  }
+  // The horizon: the surface beyond the window grazing (cos 0.001) the same as the water level at its depth far off.
+  for (int k = 0; k < 3; k++)
+    CHECK_NEAR(Comp(s[0].Below, k), Comp(v[4].L, k), 2e-3 * Comp(v[4].L, k));
+}
+
+// Why: the view's pass and the surface seen from below take the light the water scatters a metre at the surface from their
+// constants, worked out once a frame on the CPU (UnderwaterLight.h's ClearSource from the game's colours) in place of in
+// each pixel: it must be the shaders' (VolumeAttenuation of the decoded colour, UnderDownLight, UnderClearSource), else the
+// surface and the water below it would part at the horizon from the plants' (which still work it out in their program).
+XR_TEST(Under_ClearCpu)
+{
+  struct SCase
+  {
+    float Fog[3], fMaxDist, Sun[3], Sky[3], fSunZ;
+  };
+  const SCase Cases[] = {
+    { { 0.341f, 0.635f, 0.875f }, 30, { 0.96f, 0.89f, 0.68f }, { 0.384f, 0.549f, 0.788f }, 0.853f },  // Fort
+    { { 0.180f, 0.353f, 0.573f }, 60, { 0.9f, 0.85f, 0.75f }, { 0.5f, 0.6f, 0.7f }, 0.52f },          // Carrier's colour
+    { { 0.25f, 0.45f, 0.30f }, 12, { 0.7f, 0.6f, 0.5f }, { 0.2f, 0.25f, 0.3f }, 0.15f },              // green, a low sun
+    { { 0.341f, 0.635f, 0.875f }, 30, { 0.3f, 0.3f, 0.4f }, { 0.05f, 0.06f, 0.1f }, -0.3f },         // the sun down
+  };
+  SDispatch a;
+  a.Shader = XR_BYTECODE(Test_VolumeAttenuation);
+  for (const SCase &k : Cases)
+    Push(a.In, SVec3{ Decode(k.Fog[0]), Decode(k.Fog[1]), Decode(k.Fog[2]) }, std::log(100.0f) / (2 * k.fMaxDist));
+  const size_t n = std::size(Cases);
+  a.Test.nTest[0] = (uint32)n;
+  a.nGroups[0] = Groups64(n);
+  a.nOut = n;
+  const std::vector<uint32> Out = Gpu().Run(a);
+  std::vector<std::tuple<SVec3, float, SVec3, SVec3, float, float>> Gpus;
+  for (size_t i = 0; i < n; i++)
+  {
+    const SCase &k = Cases[i];
+    Gpus.push_back({ Vec(Out, i), k.fSunZ, SVec3{ Decode(2 * k.Sun[0]), Decode(2 * k.Sun[1]), Decode(2 * k.Sun[2]) },
+                     SVec3{ Decode(k.Sky[0]), Decode(k.Sky[1]), Decode(k.Sky[2]) }, 0.0f, 1.0f });
+  }
+  const std::vector<SClear> v = Clear(Gpus);
+  for (size_t i = 0; i < n; i++)
+  {
+    const SCase &k = Cases[i];
+    float vSource[3];
+    UnderwaterLight::ClearSource(k.Fog, std::log(100.0f) / (2 * k.fMaxDist), k.Sun, k.Sky, k.fSunZ, vSource);
+    for (int q = 0; q < 3; q++)
+    {
+      const float e = Comp(v[i].Source, q);
+      CHECK_MSG(e > 0 && std::fabs(vSource[q] - e) <= 2e-5f * e, std::to_string(i) + "/" + std::to_string(q) + ": " +
+                                                                     std::to_string(vSource[q]) + " " + std::to_string(e));
+    }
+  }
 }

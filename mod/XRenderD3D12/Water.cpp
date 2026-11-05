@@ -1059,8 +1059,11 @@ bool CD3D12Renderer::SetupWaterDraw(SPipelineKey &Key, SDrawConstants &dc, const
     if (CV_d3d12_WaterVolume > 0)
     {
       dc.vAddColor[2] = bSunLight ? WATER_VOLUME_SUN_SHARE * std::clamp(m_SunDir[2] * 4, 0.0f, 1.0f) : 0.0f;
-      // From below with d3d12_WaterUnder (2) the surface's light alone, the water's between it and the camera DrawUnderwater's.
-      dc.vAddColor[3] = UnderwaterOn() ? 2.0f : 1.0f;
+      // From below with d3d12_WaterUnder (2) the surface's light alone, the water's between it and the camera DrawUnderwater's;
+      // with d3d12_WaterUnderClear (3) beyond Snell's window the light the water below sends up.
+      dc.vAddColor[3] = UnderwaterOn() ? (CV_d3d12_WaterUnderClear > 0 ? 3.0f : 2.0f) : 1.0f;
+      if (UnderwaterOn() && CV_d3d12_WaterUnderClear > 0)
+        UnderClearSource(*pFV, dc.vUnderColor);
     }
   }
   else

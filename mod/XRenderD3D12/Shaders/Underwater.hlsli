@@ -10,7 +10,11 @@
 //	towards a camera under the surface, the light coming down fading with
 //	the depth (WaterVolume.hlsli's model seen from inside), the sun's share
 //	of it taken at the segments of the view's ray (its shadow and the
-//	waves' caustics there: the shafts of light under the waves).
+//	waves' caustics there: the shafts of light under the waves). With
+//	d3d12_WaterUnderClear the light the water scatters from the scene's sun
+//	and sky (UnderClearSource: its scattering, UnderScattering, the
+//	molecules' and the particles'), else as the water seen from above
+//	shows it (UnderDeepSource: twice its colour, the frames before).
 //
 //////////////////////////////////////////////////////////////////////
 
@@ -27,6 +31,19 @@
 //! water far less.
 static const float UNDER_MOLECULAR = 0.5;
 static const float UNDER_PARTICLE_G = 0.924;
+//! The scalar irradiance just under the surface of a uniform sky's light over its light on a face facing up in the air: the
+//! surface lets 0.934 of it through (Fresnel's transmission over the sky's hemisphere), within Snell's window, where its
+//! mean cosine is 0.83 (a uniform radiance over the cone of 48.6 degrees round the vertical).
+static const float UNDER_SKY_IN = 0.934 / 0.83;
+//! d3d12_WaterUnderClear: the light coming down times 1 plus this, the light that comes back up added (from the floor and
+//! the water below, scattered more than once: a sandy floor a few metres down sends up about as much as comes down; in deep
+//! clear water far less).
+static const float UNDER_CLEAR_UP = 1;
+//! Pure water's scattering per metre in the red, green and blue channels (its molecules': 0.00288 (500 / wavelength)^4.32,
+//! Morel 1974, at 610, 550 and 470 nm).
+static const float3 UNDER_PURE_SCATTERING = float3(0.00122, 0.00191, 0.00376);
+//! The particles' scattering in each channel over its green's: as 1 / wavelength (Morel's), at 610, 550 and 470 nm.
+static const float3 UNDER_PARTICLE_SPECTRUM = float3(550.0 / 610, 1, 550.0 / 470);
 
 //! The view's path through the water (m) from a camera fDepth metres under the level to the scene fDist metres away along
 //! a direction whose z is fDirZ: all of it down and level; up at most to fCap metres over the level (the surface the water
@@ -53,6 +70,46 @@ float UnderSunPhase(float3 L, float3 D)
   const float2 h = L.xy / VOLUME_ETA;
   const float3 S = float3(h, sqrt(saturate(1 - dot(h, h))));
   return L.z > 0 ? UnderPhase(dot(S, D)) : 1;
+}
+
+//! The light the water scatters a metre at the surface towards each way (times the phase function's share there, 1 its mean;
+//! fading as exp(-c d) with the depth d) as the water seen from above shows it (d3d12_WaterUnderClear 0, the frames before):
+//! 2 c vDeep, so that deep water seen straight down from the surface is its fog volume's colour vDeep (WaterVolume.hlsli's
+//! VolumeInscatter).
+float3 UnderDeepSource(float3 vDeep, float3 c)
+{
+  return 2 * c * vDeep;
+}
+
+//! The light coming down just under the surface over 4 pi (a steradian's share of its scalar irradiance, the light reaching
+//! a point from every way), in the units of the light of a white face (E / pi): the sun's vSun (a white face turned to it)
+//! through the flat surface at the height fSunZ of its direction (Fresnel's transmission, SnellWindow of its refracted ray;
+//! its beam's light over a horizontal face's, cos in the air over cos in the water: none under the horizon), the sky's vSky
+//! (a white face facing up) UNDER_SKY_IN times; the light that comes back up from below UNDER_CLEAR_UP of it.
+float3 UnderDownLight(float3 vSun, float3 vSky, float fSunZ)
+{
+  const float fCos = saturate(fSunZ), fWater = VolumeRefractedCos(fCos);
+  return (1 + UNDER_CLEAR_UP) * 0.25 * (vSun * (SnellWindow(fWater) * fCos / fWater) + UNDER_SKY_IN * vSky);
+}
+
+//! Sea water's scattering per metre in each channel from its attenuation c (VolumeAttenuation): pure water's own
+//! (UNDER_PURE_SCATTERING) and the particles': in green all the water takes beyond pure water's (VOLUME_PURE_WATER's
+//! absorption and its scattering: clear water's particles absorb little there), in red and blue as much as green's over
+//! the wavelength (UNDER_PARTICLE_SPECTRUM), at most what each takes beyond pure water's (the rest of blue's absorbed by
+//! what is dissolved in the water and the plankton).
+float3 UnderScattering(float3 c)
+{
+  const float3 vMore = max(c - VOLUME_PURE_WATER - UNDER_PURE_SCATTERING, 0);
+  return UNDER_PURE_SCATTERING + min(vMore.g * UNDER_PARTICLE_SPECTRUM, vMore);
+}
+
+//! d3d12_WaterUnderClear: the light the water scatters a metre at the surface towards each way (as UnderDeepSource's) from
+//! the light coming down vDown (UnderDownLight): the water's scattering (UnderScattering) times vDown. Clear water scatters
+//! little of what it takes (red hardly any of it), so the water far off is a few times darker than a floor the sun lights,
+//! darker with the depth and looking down.
+float3 UnderClearSource(float3 c, float3 vDown)
+{
+  return UnderScattering(c) * vDown;
 }
 
 //! 1 - exp(-x) for x >= 0, to a float's precision also for small x (its series below 0.01).
@@ -128,18 +185,18 @@ void UnderWindowOrder(float4 G[4], uint2 vStart, out float v[XR_UNDER_TAPS])
 }
 
 //! The light the water scatters towards a camera fDepth metres under the level along a view ray going down at fMu (the cosine
-//! of its direction to the vertical down; negative up), from the camera out to fPath: the light coming down, attenuated by
-//! exp(-c d) to the depth d of each point (as WaterVolume.hlsli's VolumeInscatter: deep water seen straight down from the
-//! surface its colour vDeep), scattered towards the camera and taken by the water on the way back (exp(-c t)). The sun's
+//! of its direction to the vertical down; negative up), from the camera out to fPath: the light it scatters a metre at the
+//! surface vSource (UnderDeepSource or UnderClearSource), fading by exp(-c d) to the depth d of each point, scattered towards
+//! the camera and taken by the water on the way back (exp(-c t)). The sun's
 //! share fShare of it at each segment j (UnderSegmentEnd out to fReach, the green channel's) times the sun's light v[j] there
 //! (1 its mean: 0 in its shadow, the caustics' light), beyond the last segment the last's, and times fPhase (UnderPhase
 //! towards the camera); the rest the same every way. fLit the share of the sun's light left (the green channel's, 1 all of
 //! it).
-float3 UnderInscatter(float3 vDeep, float3 c, float fDepth, float fMu, float fPath, float fReach, float fShare, float fPhase,
+float3 UnderInscatter(float3 vSource, float3 c, float fDepth, float fMu, float fPath, float fReach, float fShare, float fPhase,
                       float v[XR_UNDER_TAPS], out float fLit)
 {
   const float3 k = c * (1 + fMu);
-  const float3 J = 2 * c * vDeep * exp(-c * fDepth);
+  const float3 J = vSource * exp(-c * fDepth);
   float3 vAll = 0, vSun = 0;
   float fWeight = 0, fSum = 0, t0 = 0;
   [unroll]
@@ -174,11 +231,11 @@ static const float UNDER_CLOSED_LEAST = 0.05;
 //! weights segment by segment, the light at a segment's start times its length times (1 - exp(-k d)) / (k d), the start's
 //! light carried on by exp(-k d) (two exps a segment), green's as above or, where UnderSegmentAt's segments are the same
 //! length, each the last's times exp(-k.g d).
-float3 UnderInscatterClosed(float3 vDeep, float3 c, float fDepth, float fMu, float fPath, float fReach, float fShare, float fPhase,
+float3 UnderInscatterClosed(float3 vSource, float3 c, float fDepth, float fMu, float fPath, float fReach, float fShare, float fPhase,
                             float v[XR_UNDER_TAPS], out float fLit)
 {
   const float3 k = c * (1 + fMu);
-  const float3 J = 2 * c * vDeep * exp(-c * fDepth);
+  const float3 J = vSource * exp(-c * fDepth);
   // The segments' light times their sun's (vSeg) and green's weights (fSeg).
   float3 vSeg = 0;
   float fSeg = 0;
@@ -246,23 +303,35 @@ float3 UnderInscatterClosed(float3 vDeep, float3 c, float fDepth, float fMu, flo
 //! The light in the water over a surface fDist metres along the view's ray D from a camera fCameraDepth metres under the
 //! level, the surface itself fDepth metres under it (0 over it): the share T of its light left, along the view's path through
 //! the water (UnderPath with fCap) and along the sun's refracted way (L the sun) down to its depth, as Underwater.hlsl's; the
-//! light the water scatters towards the camera in front of it returned, as UnderInscatter's with the sun's light its mean all
-//! along (v 1: the shafts are the view's taps alone).
-float3 UnderFog(float3 vDeep, float3 c, float fCameraDepth, float3 D, float fDist, float fDepth, float fCap, float3 L, float fShare,
+//! light the water scatters towards the camera in front of it returned, as UnderInscatter's (vSource its light a metre at the
+//! surface) with the sun's light its mean all along (v 1: the shafts are the view's taps alone).
+float3 UnderFog(float3 vSource, float3 c, float fCameraDepth, float3 D, float fDist, float fDepth, float fCap, float3 L, float fShare,
                 out float3 T)
 {
   const float fPath = UnderPath(fDist, D.z, fCameraDepth, fCap);
   T = exp(-c * (fPath + fDepth / VolumeRefractedCos(saturate(L.z))));
-  const float3 J = 2 * c * vDeep * exp(-c * fCameraDepth);
+  const float3 J = vSource * exp(-c * fCameraDepth);
   return J * UnderSegment(c * (1 - D.z), 0, fPath) * (1 - fShare + fShare * UnderSunPhase(L, D));
 }
 
 //! The light of the ocean's surface seen from below at the cosine fCos of the view's ray to the vertical (up), Snell's window
 //! fWindow (SnellWindow) of the light from the air vAbove through it, the rest the water below it mirrors: the light deep water
-//! scatters up towards the surface along the mirrored ray (VolumeInscatter's 2 / (1 + mu) of its colour vDeep).
+//! scatters up towards the surface along the mirrored ray (VolumeInscatter's 2 / (1 + mu) of its colour vDeep; with
+//! d3d12_WaterUnderClear 0, the frames before).
 float3 UnderSurface(float3 vDeep, float3 vAbove, float fWindow, float fCos)
 {
   return lerp(vDeep * 2 / (1 + saturate(fCos)), vAbove, fWindow);
+}
+
+//! d3d12_WaterUnderClear: the light the water below the surface sends up along the mirrored ray (down at fCos, the cosine of
+//! the view's ray to the vertical): what it scatters towards the surface all along that ray, from the light it scatters a
+//! metre at the surface vSource fading as exp(-c d) with the depth, taken by the water on the way up (exp(-c t)), fScatter
+//! the phase function's share towards it (1 - fShare + fShare UnderSunPhase): vSource fScatter / (c (1 + fCos)). The same as
+//! the view sees along a level ray at the surface's depth: at the horizon the surface beyond Snell's window and the water
+//! below it meet.
+float3 UnderClearBelow(float3 vSource, float3 c, float fCos, float fScatter)
+{
+  return vSource * fScatter / (c * (1 + saturate(fCos)));
 }
 
 #endif

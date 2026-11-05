@@ -1504,7 +1504,8 @@ float4 ShadePixel(SVertexOutput In)
   }
   // Under the ocean's surface, a blended object drawn after the light in its water (Underwater.cpp): that light over it, its
   // colour attenuated along its path through the water and the light's way down to it, the light the water scatters in front
-  // of it added (by its alpha in the blend: over the water behind, already so, exactly).
+  // of it added (by its alpha in the blend: over the water behind, already so, exactly). The light the water scatters as the
+  // view's (Underwater.hlsl's UnderSource: vUnder.w over 100 with d3d12_WaterUnderClear, from the scene's sun and sky).
   [branch]
   if (g_Draw.vUnder.w > 0)
   {
@@ -1512,12 +1513,21 @@ float4 ShadePixel(SVertexOutput In)
     const float fDist = length(vToPixel);
     const float3 vDeep = float3(HdrDecode(g_Draw.vUnderColor.r), HdrDecode(g_Draw.vUnderColor.g), HdrDecode(g_Draw.vUnderColor.b));
     const float3 c = VolumeAttenuation(vDeep, g_Draw.vUnderColor.w);
+    const bool bClear = g_Draw.vUnder.w > 100;
+    const float fUnder = bClear ? g_Draw.vUnder.w - 100 : g_Draw.vUnder.w;
+    float3 vSource = UnderDeepSource(vDeep, c);
+    if (bClear)
+    {
+      const float3 vSun = 2 * g_Frame.vSunColor.rgb, vSky = g_Frame.vFogColor.rgb;
+      vSource = UnderClearSource(c, UnderDownLight(float3(HdrDecode(vSun.r), HdrDecode(vSun.g), HdrDecode(vSun.b)),
+                                                   float3(HdrDecode(vSky.r), HdrDecode(vSky.g), HdrDecode(vSky.b)), g_Frame.vSunDir.z));
+    }
     float3 T;
-    const float3 vScatter = UnderFog(vDeep, c, max(g_Draw.vUnder.x - g_Frame.vCameraPos.z, 0), vToPixel / max(fDist, 1e-4), fDist,
+    const float3 vScatter = UnderFog(vSource, c, max(g_Draw.vUnder.x - g_Frame.vCameraPos.z, 0), vToPixel / max(fDist, 1e-4), fDist,
                                      max(g_Draw.vUnder.x - In.vWorldPos.z, 0), g_Draw.vUnder.y, g_Frame.vSunDir.xyz, g_Draw.vUnder.z, T);
     // The mode, and d3d12_WaterDebug 31-33 by tens (the view's terms: an added light none).
-    const bool bOver = fmod(g_Draw.vUnder.w, 10) < 1.5;
-    const float fDebug = floor(g_Draw.vUnder.w / 10);
+    const bool bOver = fmod(fUnder, 10) < 1.5;
+    const float fDebug = floor(fUnder / 10);
     const float3 v = fDebug == 1 ? (bOver ? vScatter : 0)
                      : fDebug == 2 ? (bOver ? float3(1, 1, 1) * HdrDecode(0.5) : 0)
                      : fDebug == 3 ? (bOver ? float3(HdrDecode(T.r), HdrDecode(T.g), HdrDecode(T.b)) : 0)

@@ -235,6 +235,12 @@ void CD3D12Renderer::RegisterVariables()
                      "own, each pixel taking the 16 of the 4 x 4 window round it as the 16 segments of its ray, the segments' "
                      "weights in closed form; 0: four points a pixel shared by its 2 x 2 quad, each segment's weights by its "
                      "own exponentials (the frames before)");
+  iConsole->Register("d3d12_WaterUnderClear", &CV_d3d12_WaterUnderClear, 1, 0,
+                     "With d3d12_WaterUnder: the light the water scatters from the scene's sun and sky coming down through the "
+                     "surface, the water's scattering its attenuation less pure water's absorption (clear water: darker and "
+                     "bluer than a floor the sun lights, darker with the depth and looking down), the surface beyond Snell's "
+                     "window the light the water below sends up (meeting the water at the horizon); 0: the water's light "
+                     "twice its fog volume's colour, as seen from above (the frames before)");
   iConsole->Register("d3d12_GpuTimes", &CV_d3d12_GpuTimes, 0, 0,
                      "N: every N frames, the average GPU time of the frame's sections (shadow maps, water reflection, opaque, "
                      "water, blended, ...) and the time between frames to the console and XRenderD3D12_gpu.txt; 0 off");
