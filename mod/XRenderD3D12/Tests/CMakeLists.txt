@@ -77,7 +77,7 @@ endforeach()
 xrender_d3d12_test_shader(Msaa "${CMAKE_CURRENT_SOURCE_DIR}/Shaders/TestMsaa.hlsl" cs_6_0 CSMsaa)
 # Parallax occlusion mapping (r_Parallax: Parallax.hlsli as General.hlsl includes it, its height the test's).
 set(parallax "${CMAKE_CURRENT_SOURCE_DIR}/Shaders/TestParallax.hlsl")
-foreach(k UV Parts)
+foreach(k UV Parts MarchGrad)
     xrender_d3d12_test_shader(Parallax${k} "${parallax}" cs_6_0 CSParallax${k})
 endforeach()
 # The path tracer's functions, PathTrace.hlsl included as it is (Shader Model 6.5, as Shaders.cmake compiles it).

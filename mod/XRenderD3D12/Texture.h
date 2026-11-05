@@ -149,6 +149,9 @@ public:
   CTexture *m_pPbrN = nullptr;
   bool m_bPbrLooked = false;          //!< looked for (found or not: not looked for again)
   bool m_bFlatHeight = false;         //!< a RayMaster material map whose height is flat (PbrCompanion::IsFlatHeight): nothing to offset
+  //! Its share of r_ParallaxDepth by its physical material (r_ParallaxMaterials): its row of RayMaster/pbr_depth.tsv, 1
+  //! for none (no table, a texture not in it); set with the maps (FindPbrCompanions).
+  float m_fParallaxShare = 1.0f;
   int m_nID;
   int m_nRefs = 1;
   int m_nWidth = 0, m_nHeight = 0;
@@ -197,6 +200,7 @@ public:
   //! into its m_pPbrM and m_pPbrN, looked for once (a miss remembered); each loaded once for every texture of its file. Not
   //! for cubes, arrays, the white texture and the placeholder, nor the textures without a file. A map of one face, with its
   //! levels and the texture's aspect (PbrCompanion::IsUsable), else none; r_TexResolution drops its levels as the texture's.
+  //! With the material map its m_fParallaxShare from the depth table (ReadDepthTable).
   void FindPbrCompanions(CTexture *pTex);
 
   //! A material texture (SInputShaderResources::m_Textures): searched as LoadTexture does, then
@@ -257,6 +261,9 @@ private:
   //! One RayMaster map (FindPbrCompanions) of the file szPath for pTex, with a reference for it; nullptr when it is missing
   //! or not fit (bHeight: the material map, BC3, its height's flatness in its m_bFlatHeight).
   CTexture *LoadPbrMap(CTexture *pTex, const std::string &Path, bool bHeight);
+  //! Reads RayMaster/pbr_depth.tsv (PbrCompanion::DEPTH_TABLE, ParseDepthTable) into m_DepthShares, once (a missing table:
+  //! none, every share 1).
+  void ReadDepthTable();
   //! Makes the GPU texture of pTex from Image (replacing one it has) and sets its sizes.
   bool Upload(CTexture *pTex, const SImage &Image);
   void AddKey(CTexture *pTex, const std::string &Key);
@@ -295,6 +302,8 @@ private:
   std::unordered_set<std::string> m_Warned;           //!< missing names already logged
   std::vector<SAnimTex> m_AnimTex;                    //!< [ID - 1], pInfo NULL: free
   std::unordered_set<int> m_WarnedFormats;            //!< unsupported ETEX_Formats already logged
+  std::unordered_map<std::string, float> m_DepthShares;  //!< the depth table's shares by file (ReadDepthTable)
+  bool m_bDepthRead = false;                          //!< the depth table read (or found missing)
   CTexture *m_pWhite = nullptr;
   CTexture *m_pPlaceholder = nullptr;
   bool m_bInit = false;

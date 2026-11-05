@@ -269,7 +269,8 @@ namespace
     if (!pTex)
       return false;
     g_pRenderer->m_pTextures->FindPbrCompanions(pTex);
-    return (g_pRenderer->CV_r_Parallax && pTex->m_pPbrM && !pTex->m_pPbrM->m_bFlatHeight) || (g_pRenderer->CV_r_PbrNormals && pTex->m_pPbrN);
+    return (g_pRenderer->ParallaxDepthOf(*pTex) > 0 && pTex->m_pPbrM && !pTex->m_pPbrM->m_bFlatHeight) ||
+           (g_pRenderer->CV_r_PbrNormals && pTex->m_pPbrN);
   }
 
   //! The CheckUpdate flags of an element: characters get nCheckUpdate_Character; with bump mapping

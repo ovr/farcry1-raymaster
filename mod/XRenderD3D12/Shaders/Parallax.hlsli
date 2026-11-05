@@ -78,6 +78,22 @@ uint ParallaxSteps(float fCos, uint nMost)
   return max((uint)round(lerp((float)nMost, nMost / 3.0, saturate(fCos))), 2u);
 }
 
+//! The gradients the march reads the height by with r_ParallaxFilter (nParallax.w): the pixel's, vDx and vDy, each at
+//! least as long in uv as fLeast (r_ParallaxFilter texels of the height map) and the march's step (vShift / nSteps), its
+//! direction kept: the height read as its mean over that (a coarser level), its noise finer than it not cut deep (at a
+//! slanting view a height map's fine noise, r_ParallaxDepth deep, stood out of a flat stone as spikes), the blocks and
+//! joints kept. Not stretched along the march alone: the anisotropic filter's taps cost more than the coarser level. As
+//! they are where they are longer.
+void ParallaxMarchGrad(float2 vShift, uint nSteps, float fLeast, inout float2 vDx, inout float2 vDy)
+{
+  const float fLen = max(fLeast, length(vShift) / max(nSteps, 1u));
+  const float lx = length(vDx), ly = length(vDy);
+  if (lx < fLen)
+    vDx = lx > 1e-12 ? vDx * (fLen / lx) : float2(fLen, 0);
+  if (ly < fLen)
+    vDy = ly > 1e-12 ? vDy * (fLen / ly) : float2(0, fLen);
+}
+
 //! The uv where the view meets the height: along vUV + (h - fRef) vShift (ParallaxShift) from the height h = 1 down to 0 in
 //! nSteps steps, the first at or under the height (PARALLAX_HEIGHT, by the gradients vDx and vDy) and the step before by
 //! the secant; the top where the height is 1 there. A height fRef all over: vUV.

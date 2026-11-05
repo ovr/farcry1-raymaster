@@ -21,6 +21,9 @@
 //	                   ParallaxTexMatrix of it by the rows g_Test.vTest2.xy
 //	                   and .zw), out[3i + 2] = (ParallaxFade of the depth by
 //	                   the gradients, from 4 pixels to 1, 0, 0, 0)
+//	  CSParallaxMarchGrad  g_TestIn[2i] (the shift, the steps, the least
+//	                   length), [2i + 1] (dx, dy): out[i] =
+//	                   ParallaxMarchGrad's (dx, dy)
 //
 //////////////////////////////////////////////////////////////////////
 
@@ -69,4 +72,15 @@ void CSParallaxParts(uint i : SV_DispatchThreadID)
   TestOut(3 * i, float4(vView, ParallaxSteps(vView.z, 24)));
   TestOut(3 * i + 1, float4(vShift, ParallaxTexMatrix(vShift, g_Test.vTest2.xy, g_Test.vTest2.zw)));
   TestOut(3 * i + 2, float4(ParallaxFade(e.w, g.xy, g.zw, 4, 1), 0, 0, 0));
+}
+
+[numthreads(64, 1, 1)]
+void CSParallaxMarchGrad(uint i : SV_DispatchThreadID)
+{
+  if (i >= g_Test.nTest.x)
+    return;
+  const float4 a = TestIn(2 * i), g = TestIn(2 * i + 1);
+  float2 dx = g.xy, dy = g.zw;
+  ParallaxMarchGrad(a.xy, (uint)a.z, a.w, dx, dy);
+  TestOut(i, float4(dx, dy));
 }

@@ -40,6 +40,8 @@ constexpr float TERRAIN_SECTOR_SIZE = 64.0f;
 //! in pixels (seen straight on) below which it fades and at which it is gone (a pixel's shift is not seen: far off none).
 constexpr uint32 PARALLAX_MOST_STEPS = 24;
 constexpr float PARALLAX_FADE_FROM = 4, PARALLAX_FADE_TO = 1;
+//! r_ParallaxFilter's most texels.
+constexpr int PARALLAX_MOST_FILTER = 64;
 
 bool HasNormal(int nFormat)
 {
@@ -454,6 +456,13 @@ float CD3D12Renderer::ItemHeat(const SRenderItem &it) const
       fHeat = std::max(fHeat, 0.7f);
   }
   return fHeat;
+}
+
+float CD3D12Renderer::ParallaxDepthOf(const CTexture &Diffuse) const
+{
+  if (!CV_r_Parallax || !(CV_r_ParallaxDepth > 0))
+    return 0;
+  return CV_r_ParallaxDepth * (CV_r_ParallaxMaterials ? Diffuse.m_fParallaxShare : 1.0f);
 }
 
 void CD3D12Renderer::DrawLeafItem(const SRenderItem &it)
@@ -945,8 +954,10 @@ void CD3D12Renderer::DrawLeafItem(const SRenderItem &it)
       // the light map and the decals stay on its flat parts. Not alpha tested (the depth prepass, the fog pass and alpha
       // to coverage take the texture's alpha where the geometry is), not a decal, not of world coordinates nor point
       // sampled. The depth and the shadows stay the geometry's.
+      // Its depth by the texture's material (r_ParallaxMaterials: none for glass and flesh).
       CTexture *pHeight = pDiffuse->m_pPbrM;
-      if (CV_r_Parallax && CV_r_ParallaxDepth > 0 && pHeight && !pHeight->m_bFlatHeight && pHeight->IsTextureLoaded() &&
+      const float fParallaxDepth = ParallaxDepthOf(*pDiffuse);
+      if (fParallaxDepth > 0 && pHeight && !pHeight->m_bFlatHeight && pHeight->IsTextureLoaded() &&
           eDC == eDC_Opaque && GetAlphaRef(pSh, pRes) <= 0 && !pDiffuse->m_bPoint && (it.nSort & ~EFSLIST_MASK) != eS_Decal &&
           !(dc.nFlags & (DF_CUBE0 | DF_TEX0_ARRAY | DF_TEXGEN_WORLD | DF_DECAL_FADE)) &&
           !(dc.nFlags2 & (DF2_SHADER_FX | DF2_BUMP_OFFSET | DF2_GLOW_FALLOFF | DF2_CUBE_SHADER)))
@@ -958,7 +969,8 @@ void CD3D12Renderer::DrawLeafItem(const SRenderItem &it)
           dc.nParallax[0] = (uint32)pHeight->GetSRV();
           dc.nParallax[1] = (uint32)pDiffuse->GetSampler();
           dc.nParallax[2] = PARALLAX_MOST_STEPS;
-          Set4(dc.vParallax, CV_r_ParallaxDepth, PARALLAX_FADE_FROM, PARALLAX_FADE_TO, PbrCompanion::FLAT_HEIGHT / 255.0f);
+          dc.nParallax[3] = (uint32)std::clamp(CV_r_ParallaxFilter, 0, PARALLAX_MOST_FILTER);
+          Set4(dc.vParallax, fParallaxDepth, PARALLAX_FADE_FROM, PARALLAX_FADE_TO, PbrCompanion::FLAT_HEIGHT / 255.0f);
         }
       }
     }
@@ -1663,8 +1675,9 @@ void CD3D12Renderer::DumpItem(int nIndex, const SRenderItem &it, int eList)
   if (it.bFade)
     fprintf(m_pFrameDump.get(), "    fading in or out by its distance: blended by its alpha %.3f (d3d12_FadeBlend)\n", FadeAlpha(pObj));
   if (pTex && (pTex->m_pPbrM || pTex->m_pPbrN))
-    fprintf(m_pFrameDump.get(), "    RayMaster maps: material '%s'%s normals '%s'\n", pTex->m_pPbrM ? pTex->m_pPbrM->m_Name.c_str() : "",
-            pTex->m_pPbrM && pTex->m_pPbrM->m_bFlatHeight ? " (its height flat)" : "", pTex->m_pPbrN ? pTex->m_pPbrN->m_Name.c_str() : "");
+    fprintf(m_pFrameDump.get(), "    RayMaster maps: material '%s'%s normals '%s' depth share %.2f\n",
+            pTex->m_pPbrM ? pTex->m_pPbrM->m_Name.c_str() : "", pTex->m_pPbrM && pTex->m_pPbrM->m_bFlatHeight ? " (its height flat)" : "",
+            pTex->m_pPbrN ? pTex->m_pPbrN->m_Name.c_str() : "", pTex->m_fParallaxShare);
   // The rotation and scale of the object's matrix, when it has one.
   const float *m = pObj->m_Matrix.data;
   if (m[0] != 1 || m[1] != 0 || m[2] != 0 || m[4] != 0 || m[5] != 1 || m[6] != 0 || m[8] != 0 || m[9] != 0 || m[10] != 1)
@@ -1867,7 +1880,7 @@ void CD3D12Renderer::DumpDraw(const SDrawConstants &dc, const SPipelineKey &Key,
     fprintf(f, " texgen u (%g %g %g %g) v (%g %g %g %g)", dc.vTexGenU[0], dc.vTexGenU[1], dc.vTexGenU[2], dc.vTexGenU[3], dc.vTexGenV[0],
             dc.vTexGenV[1], dc.vTexGenV[2], dc.vTexGenV[3]);
   if (dc.nParallax[0])
-    fprintf(f, " parallax (r_Parallax) depth %.3f", dc.vParallax[0]);
+    fprintf(f, " parallax (r_Parallax) depth %.4f filter %u", dc.vParallax[0], dc.nParallax[3]);
   if ((dc.nFlags & DF_BUMP) && pTex && pTex->m_pPbrN && dc.nTex3 == (uint32)pTex->m_pPbrN->GetSRV())
     fprintf(f, " normals (r_PbrNormals)");
   for (uint32 i = 0; i < dc.nLights; i++)
