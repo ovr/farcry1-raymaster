@@ -8,7 +8,7 @@
 //	variables up by name (IConsole::GetCVar) and do not all check for NULL
 //	(r_VolumetricFog with a screen effect), so every one exists, even when
 //	this renderer does not read it. The few it reads are looked up by name
-//	too (IsVolumetricFogOn, IsScopeLensOn, IsHdrOn).
+//	too (IsVolumetricFogOn, IsScopeLensOn, IsNoDrawNear, IsHdrOn).
 //
 //////////////////////////////////////////////////////////////////////
 
@@ -284,6 +284,13 @@ bool CD3D12Renderer::IsScopeLensOn()
   if (!m_pScopeLens && iConsole)
     m_pScopeLens = iConsole->GetCVar("r_ScopeLens_fx");
   return m_pScopeLens && m_pScopeLens->GetIVal() != 0;
+}
+
+bool CD3D12Renderer::IsNoDrawNear()
+{
+  if (!m_pNoDrawNear && iConsole)
+    m_pNoDrawNear = iConsole->GetCVar("r_NoDrawNear");
+  return m_pNoDrawNear && m_pNoDrawNear->GetIVal() != 0;
 }
 
 bool CD3D12Renderer::IsShadowMapsOn()

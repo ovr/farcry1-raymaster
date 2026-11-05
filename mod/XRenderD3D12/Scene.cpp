@@ -438,6 +438,16 @@ void CScene::AddEf(int nFog, CRendElement *pRE, IShader *pEf, SRenderShaderResou
       nShSort = eS_Banner | (nShSort & EFSLIST_MASK);
     it.nSort = nShSort;
   }
+  // r_NoDrawNear: the first person weapon and arms (everything sorted eS_Nearest, the muzzle flash with FOB_NEAREST
+  // alone) are left out, as the original leaves them out. The engine draws them at the player's eyes: from a
+  // fly-through's camera they hang there in the world (Fort's Zodiac0 carries Jack, his arms and his gun over the boat).
+  if (((it.pObj->m_ObjFlags & FOB_NEAREST) || SortGroup(it.nSort) == eS_Nearest) && g_pRenderer && g_pRenderer->IsNoDrawNear())
+  {
+    if (g_pRenderer->m_pFrameDump)
+      fprintf(g_pRenderer->m_pFrameDump.get(), "not drawn (r_NoDrawNear): the first person's RE %d shader '%s'\n", (int)pRE->m_Type,
+              pSh ? pSh->GetName() : "");
+    return;
+  }
   it.bFade = IsFadeItem(it);
   it.eList = ChooseList(it);
 
