@@ -1822,6 +1822,33 @@ and lists theirs (`NamesObjects`).
   marks cliffs; without them (shader "terrainwithdefaultdetailtexture") the detail texture
   everywhere.
 
+## Objects fading with the distance
+
+- An object the engine fades in or out by its distance (its render parameters' alpha below 1: the
+  leaf buffer's draw sets `FOB_HASALPHA` and puts the alpha in the object's colour) is drawn as the
+  original draws it (`d3d12_FadeBlend 1`): among the blended surfaces after the water, laid over
+  what is behind it by its alpha (SRCALPHA, INVSRCALPHA) without depth writes, its light passes
+  added by it. The alpha is the object's alpha squared, as the original's ambient pass takes it (its
+  `c0.w`; the vegetation's is the same), not the texture's: most of the bump templates keep their
+  gloss in the texture's alpha, and through it the crates would have faded in with holes. The alpha
+  test still cuts out what it cuts out (a grating's holes stay holes). The decals multiplied over
+  such an object are blended with it: they write no depth, and in the opaque list they multiplied
+  the scene behind it.
+- Drawn opaque (`d3d12_FadeBlend 0`, the frames before), the crates, the gas cylinders and the
+  crane on Carrier's deck popped in whole at the far end of their fade. In the comparison film's
+  `carrier-wreck` flight 22 of them are between the ends of their fade at its frame 261 (alpha
+  0.00-0.97).
+- The sun's cascades and the scene for rays take the object as opaque all through its fade (it
+  casts its shadow and is seen in the reflections from the start, as before). The path tracer keeps
+  it opaque, as the grass fading in or out (its G-buffer), and so does the first person weapon.
+  The water reflection's own capture for the rays takes no blended draw: an object fading in or
+  out that only the reflection sees is not in the scene for rays until its fade ends.
+- Tests: `render_tests` suite `fade` (`Fade_carrier.ini`, Carrier's deck from the film at 1080p).
+  Over the water the blend changes the frame where the objects fade, and three quarters of those
+  pixels come nearer the original's: the mean |d| to it is 26.5-27.8 levels in place of 52.8-56.6.
+  The unit tests `Fade_*` check the alpha: the fade's alone whatever the texture's alpha, the
+  alpha test first, the texture's without a fade, and an even fade.
+
 ## Light beams
 
 - A lamp whose light shader has a `ClientEffect 'Beam'` block in its script (the `LightBeam*`

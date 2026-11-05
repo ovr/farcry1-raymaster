@@ -1010,7 +1010,7 @@ uint32 CD3D12Renderer::RayMask() const
   return ((uint32)CV_d3d12_RTMask & 0xff & ~(uint32)XR_RAY_TERRAIN) | (CV_d3d12_RTShadows ? 0x100u : 0u);
 }
 
-void CD3D12Renderer::BuildRayScene(std::span<const SRenderItem> Opaque, bool bTraced)
+void CD3D12Renderer::BuildRayScene(std::span<const SRenderItem> Opaque, std::span<const SRenderItem> Blended, bool bTraced)
 {
   FUNCTION_PROFILER(iSystem, PROFILE_RENDERER);
   if (!m_pRayScene)
@@ -1050,6 +1050,12 @@ void CD3D12Renderer::BuildRayScene(std::span<const SRenderItem> Opaque, bool bTr
     if (IsRayWalked(it))
       Walk(it);
   }
+  // The objects fading in or out by their distance (drawn blended, after the water): in the scene as they were opaque.
+  for (const SRenderItem &it : Blended)
+  {
+    if (it.bFade && IsRayWalked(it))
+      Walk(it);
+  }
   // The parts of the sun's cascades out of the main view (their objects are the frame's): set up as
   // the main view would draw them.
   if (WantsOffscreenRays() && m_nRayOffscreenFrame == m_nFrames && !m_RayOffscreenItems.empty())
@@ -1059,6 +1065,11 @@ void CD3D12Renderer::BuildRayScene(std::span<const SRenderItem> Opaque, bool bTr
     for (const SRenderItem &it : Opaque)
     {
       if (IsRayWalked(it))
+        Parts.insert(PartKey(it));
+    }
+    for (const SRenderItem &it : Blended)
+    {
+      if (it.bFade && IsRayWalked(it))
         Parts.insert(PartKey(it));
     }
     m_pRayScene->SetCaptureSource(CD3D12RayScene::SOURCE_OFFSCREEN);
