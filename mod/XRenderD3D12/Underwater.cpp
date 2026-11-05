@@ -20,7 +20,10 @@
 //	pixel the segments of its ray, the segments' weights in closed form. The blended objects after it
 //	(the plants in the water) take that light over their own colour
 //	(SetUnderwaterFog: General.hlsl with Underwater.hlsli's UnderFog, the
-//	sun's light its mean along the way); the sprites come after it.
+//	sun's light its mean along the way); the sprites come after it. With
+//	d3d12_WaterUnderClear the light the water scatters from the scene's
+//	sun and sky (Underwater.hlsli's UnderClearSource), the surface beyond
+//	Snell's window the light the water below sends up (Water.hlsl).
 //
 //////////////////////////////////////////////////////////////////////
 
@@ -30,6 +33,7 @@
 #include "D3D12Descriptors.h"
 #include "D3D12Upload.h"
 #include "Scene.h"
+#include "UnderwaterLight.h"
 
 namespace
 {
@@ -67,6 +71,15 @@ namespace
   }
 }
 
+void CD3D12Renderer::UnderClearSource(const SFogVolume &FV, float vSource[4]) const
+{
+  // The sun's direction as the frame constants' (a unit vector), the sky's light the fog's colour (MakeFrameConstants).
+  const float fLen = std::sqrt(m_SunDir[0] * m_SunDir[0] + m_SunDir[1] * m_SunDir[1] + m_SunDir[2] * m_SunDir[2]);
+  const float vFog[3] = { FV.Color.r, FV.Color.g, FV.Color.b };
+  UnderwaterLight::ClearSource(vFog, UnderDensity(FV), m_SunColor, m_FogColor, fLen > 0 ? m_SunDir[2] / fLen : 0, vSource);
+  vSource[3] = 1;
+}
+
 float CD3D12Renderer::UnderCap() const
 {
   return CV_d3d12_WaterGeometry > 0 && CV_d3d12_WaterFFT > 0 ? UNDER_GRID_CAP : 0.0f;
@@ -85,11 +98,12 @@ void CD3D12Renderer::SetUnderwaterFog(SDrawConstants &dc, uint32 nState) const
                                                                                                                    : 0.0f;
   if (fMode == 0)
     return;
-  // The view's debug views (d3d12_WaterDebug 31-33) by tens: the object shows the same term.
+  // The view's debug views (d3d12_WaterDebug 31-33) by tens: the object shows the same term; d3d12_WaterUnderClear 100 more.
   const int nDebug = CV_d3d12_WaterDebug;
   const float fDebug = nDebug >= 31 && nDebug <= 33 ? 10.0f * (float)(nDebug - 30) : 0.0f;
+  const float fClear = CV_d3d12_WaterUnderClear > 0 ? 100.0f : 0.0f;
   Set4(dc.vUnderColor, pFV->Color.r, pFV->Color.g, pFV->Color.b, UnderDensity(*pFV));
-  Set4(dc.vUnder, pFV->fFogLayerZ, UnderCap(), UNDER_SUN_SHARE * UnderSun(m_SunDir[2]), fMode + fDebug);
+  Set4(dc.vUnder, pFV->fFogLayerZ, UnderCap(), UNDER_SUN_SHARE * UnderSun(m_SunDir[2]), fMode + fDebug + fClear);
 }
 
 void CD3D12Renderer::UpdateUnderwater(std::span<const SRenderItem> Items)
@@ -133,10 +147,13 @@ void CD3D12Renderer::DrawUnderwater()
   dc.nTex0 = (uint32)m_UnderCopy.nColorSRV;
   dc.nTex2 = (uint32)m_UnderCopy.nDepthSRV;
   // The water's colour and density as the water's (SetupWaterDraw), the sun's share of the light it scatters less at a
-  // low sun; the FFT ocean's caustics made this frame (UpdateOcean), else none.
+  // low sun, that light from the scene's sun and sky (d3d12_WaterUnderClear); the FFT ocean's caustics made this frame
+  // (UpdateOcean), else none.
   Set4(dc.vColor, pFV->Color.r, pFV->Color.g, pFV->Color.b, UnderDensity(*pFV));
   const float fSun = UnderSun(m_SunDir[2]);
-  Set4(dc.vParams1, UNDER_SUN_SHARE * fSun, 0, 1, 1);
+  Set4(dc.vParams1, UNDER_SUN_SHARE * fSun, CV_d3d12_WaterUnderClear > 0 ? 1.0f : 0.0f, 1, 1);
+  if (CV_d3d12_WaterUnderClear > 0)
+    UnderClearSource(*pFV, dc.vUnderColor);
   const bool bCaustics = SetOceanCaustics(dc, fSun) && m_Ocean.nCausticsFrame == m_nFrames;
   Set4(dc.vParams0, pFV->fFogLayerZ, UnderCap(), (float)nDebug, bCaustics && fSun > 0 ? 1.0f : 0.0f);
   float vCamera[4];

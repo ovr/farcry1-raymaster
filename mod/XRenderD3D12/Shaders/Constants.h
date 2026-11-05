@@ -267,7 +267,9 @@ struct SDrawConstants
   XR_FLOAT4(vEdgeFade);           //!< x 1: the colour per vertex times min((2 |N.V|)^4, 1), N the vertex normal, V the view direction: planes
                                   //!< fading out seen edge on (TemplMuzzleFlash_Auto, d3d12_MuzzleFlashAuto); y above 0: the alpha after
                                   //!< the alpha test (FadeAlpha, AlphaCoverage.hlsli: an object fading in or out by its distance, d3d12_FadeBlend)
-  XR_FLOAT4(vUnderColor);         //!< vUnder.w > 0: rgb the ocean's fog volume's colour (the game's), w its density
+  XR_FLOAT4(vUnderColor);         //!< vUnder.w > 0: rgb the ocean's fog volume's colour (the game's), w its density; Underwater.hlsl and
+                                  //!< Water.hlsl from below with d3d12_WaterUnderClear: rgb the light the water scatters a metre at the
+                                  //!< surface (UnderwaterLight.h)
   XR_FLOAT4(vUnder);              //!< under the ocean's surface, drawn after the light in its water (Underwater.cpp): the light in the water over the
                                   //!< colour after the fog (Underwater.hlsli's UnderFog): x the level, y how far over it the surface may be, z the
                                   //!< sun's share of the light the water scatters; w 0 none, 1 the colour attenuated and that light added (a blend

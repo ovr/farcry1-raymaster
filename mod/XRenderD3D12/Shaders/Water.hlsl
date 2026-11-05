@@ -1268,8 +1268,18 @@ float4 ShadeWater(SWaterOutput In)
       float3 vAbove = vScatter;
       if (fWindow > 0)
         vAbove = SceneAbove(In.vWorldPos, refract(-V, N, VOLUME_ETA), g_Frame.vScreen.xy * vInvSize);
-      // With d3d12_WaterUnder (w 2) the surface's own light, the water's between it and the camera Underwater.hlsl's.
-      if (g_Draw.vAddColor.w > 1.5)
+      // With d3d12_WaterUnder (w 2) the surface's own light, the water's between it and the camera Underwater.hlsl's; with
+      // d3d12_WaterUnderClear (w 3) beyond the window the light the water below sends up along the mirrored ray (the light
+      // it scatters a metre at the surface from the scene's sun and sky vUnderColor rgb, Underwater.hlsl's; the flat
+      // surface's mirror, as UnderSurface's), the same as the view's water at the horizon.
+      if (g_Draw.vAddColor.w > 2.5)
+      {
+        const float3 vDeep = WaterDecode(vScatter), c = VolumeAttenuation(vDeep, g_Draw.vParams2.y), R = float3(-V.xy, V.z);
+        const float fShare = g_Draw.vAddColor.z;
+        const float3 vBelow = UnderClearBelow(g_Draw.vUnderColor.rgb, c, saturate(-V.z), 1 - fShare + fShare * UnderSunPhase(g_Frame.vSunDir.xyz, R));
+        vColor = WaterEncode(lerp(vBelow, WaterDecode(vAbove), fWindow));
+      }
+      else if (g_Draw.vAddColor.w > 1.5)
         vColor = WaterEncode(UnderSurface(WaterDecode(vScatter), WaterDecode(vAbove), fWindow, saturate(-V.z)));
       else
         vColor = lerp(WaterEncode(lerp(WaterDecode(vScatter), WaterDecode(vAbove), fWindow)), vScatter,

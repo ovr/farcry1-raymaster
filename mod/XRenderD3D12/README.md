@@ -1599,7 +1599,7 @@ and lists theirs (`NamesObjects`).
   distance.
   - The pass. The main view leaves out the ocean's fog volume's fog passes, the ocean seen from below
     gives its surface's light alone (Snell's window and, beyond it, the water below it mirrors: the
-    deep water's light along the mirrored ray, 2 / (1 + m) of its colour), and after the water
+    deep water's light along the mirrored ray, below), and after the water
     surfaces the blended list copies the scene and draws a triangle over the view: each pixel's
     scene, at its distance from the depth copy (through the water up to the surface at most: the
     level, or 4 m over it with the ocean's grid where the copy has none of its surface), keeps
@@ -1611,8 +1611,33 @@ and lists theirs (`NamesObjects`).
     distance t), in closed form over each of 16 segments of the ray, each the same share of that
     light in green (the nearer ones shorter; out to the reach, 3 over green's attenuation along the
     ray, the last one's sun beyond). Looking level from 5 m under Carrier's water: blue over green
-    over red, brighter than the deep water seen from above, darker the deeper the camera; the
-    floor's red gone within some 10 m of its light's path, its sand blue further off.
+    over red, darker the deeper the camera; the floor's red gone within some 10 m of its light's
+    path, its sand blue further off.
+  - Where that light comes from (`d3d12_WaterUnderClear`, 1; not saved): the scene's sun and sky
+    coming down through the surface, scattered by the water as clear sea water scatters
+    (`UnderDownLight`, `UnderScattering`, `UnderClearSource`; the same for every pixel, worked out
+    once a frame on the CPU, `UnderwaterLight.h`, the plants' program in its own). The light
+    coming down just under the surface: the sun's (a white face turned to it, twice its colour) through the flat surface
+    (Fresnel's transmission at its refracted ray, the beam's light over a horizontal face's: cos in
+    the air over cos in the water, none under the horizon), the sky's (the fog's colour, on a face
+    facing up) 0.934 / 0.83 times (through the surface within Snell's window), as much again coming
+    back up from the floor and the water below; over 4 pi a steradian's share. The scattering: pure
+    water's molecules' (0.00288 (500 / wavelength)^4.32, Morel 1974) and the particles': in green
+    all that the water takes beyond pure water, in red and blue green's over the wavelength (610,
+    550, 470 nm), at most what each takes beyond pure water (the rest of blue's absorbed by what is
+    dissolved and the plankton). Clear water scatters little of what it takes, so the water far off
+    is a few times darker than the sand the sun lights, about its fog colour's hue (a little bluer),
+    hardly any red, darker deeper and looking down. Beyond Snell's window the surface sends down
+    the light the water below scatters up along the mirrored ray, s / (c (1 + m)) times the phase
+    function's share towards it, the same as a level view sees far off at the surface's depth: at
+    the horizon the surface and the water below it meet without a line. 0: the water seen from
+    above's light (2 c times its fog colour, deep water seen straight down that colour), the
+    surface beyond the window 2 / (1 + m) of its colour: the water far off as bright as the sunlit
+    sand (a milky fog), the surface over a line at the horizon (the frames before). Under Fort's
+    water (`Under_fort.ini`, the film fort-islet's underwater views; at 1280 x 720 the
+    raster: the water above the floor 0.47 of the luma it had, the near sand 2.1 times the far
+    water's in place of 0.94, green 14 times red, Snell's window 0.90 of the surface beyond it in
+    place of 0.56, the horizon's steepest step 0.42 of what it was).
   - The sun's share of it (0.6, less at a low sun) is the sun's light at a point of each segment (one
     bilinear comparison of the cascades where the sun's refracted ray to it left the surface, then
     the FFT ocean's caustics there at its depth, as on the floor: their mip level from the pixel's
