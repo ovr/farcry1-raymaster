@@ -563,6 +563,29 @@ void CSUnderSegments(uint i : SV_DispatchThreadID)
   TestOut(5 * i + 4, float4(UnderSegmentAt(a.z, a.x, a.y), XR_UNDER_TAPS, 0, 0));
 }
 
+//! UnderWindowOrder (Underwater.hlsli) of the 4 x 4 window starting at the pixel g_TestIn[i].xy, each texel (a, b) given
+//! UnderBlockSegment of its pixel plus 16 (a + 4 b): out[4i + q][r] the segment 4 q + r's.
+[numthreads(64, 1, 1)]
+void CSUnderWindow(uint i : SV_DispatchThreadID)
+{
+  if (i >= g_Test.nTest.x)
+    return;
+  const uint2 vStart = (uint2)TestIn(i).xy;
+  float4 G[4];
+  [unroll]
+  for (uint b = 0; b < 4; b++)
+  {
+    [unroll]
+    for (uint a = 0; a < 4; a++)
+      G[b][a] = UnderBlockSegment(float2(vStart + uint2(a, b)) + 0.5) + 16 * (a + 4 * b);
+  }
+  float v[XR_UNDER_TAPS];
+  UnderWindowOrder(G, vStart, v);
+  [unroll]
+  for (uint q = 0; q < XR_UNDER_TAPS / 4; q++)
+    TestOut(4 * i + q, float4(v[4 * q], v[4 * q + 1], v[4 * q + 2], v[4 * q + 3]));
+}
+
 //! UnderInscatter (Underwater.hlsli) of the deep colour g_TestIn[4i].rgb, the camera's depth .w, the attenuation
 //! g_TestIn[4i + 1].rgb, the cosine .w, the path g_TestIn[4i + 2].x, the reach .y, the sun's share .z, the phase .w, the
 //! sun's light at segment j g_TestIn[4i + 3].x + j g_TestIn[4i + 3].y (at least 0): out[i] (the light, fLit).
@@ -578,6 +601,22 @@ void CSUnderInscatter(uint i : SV_DispatchThreadID)
     v[j] = max(s.x + j * s.y, 0);
   float fLit;
   const float3 L = UnderInscatter(a.rgb, b.rgb, a.w, b.w, c.x, c.y, c.z, c.w, v, fLit);
+  TestOut(i, float4(L, fLit));
+}
+
+//! UnderInscatterClosed (Underwater.hlsli) of the same inputs as CSUnderInscatter: out[i] (the light, fLit).
+[numthreads(64, 1, 1)]
+void CSUnderInscatterClosed(uint i : SV_DispatchThreadID)
+{
+  if (i >= g_Test.nTest.x)
+    return;
+  const float4 a = TestIn(4 * i), b = TestIn(4 * i + 1), c = TestIn(4 * i + 2), s = TestIn(4 * i + 3);
+  float v[XR_UNDER_TAPS];
+  [unroll]
+  for (uint j = 0; j < XR_UNDER_TAPS; j++)
+    v[j] = max(s.x + j * s.y, 0);
+  float fLit;
+  const float3 L = UnderInscatterClosed(a.rgb, b.rgb, a.w, b.w, c.x, c.y, c.z, c.w, v, fLit);
   TestOut(i, float4(L, fLit));
 }
 

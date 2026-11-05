@@ -230,6 +230,11 @@ void CD3D12Renderer::RegisterVariables()
                      "colour channel attenuated along the view and the light's way down, the light the water scatters fading "
                      "with the depth), the sun's shafts through the waves (its shadow and the FFT ocean's caustics along the "
                      "view), the glow round the sun (sea water scatters forwards); 0: the fog volume's fog, the frames before");
+  iConsole->Register("d3d12_WaterUnderShare", &CV_d3d12_WaterUnderShare, 1, 0,
+                     "With d3d12_WaterUnder: the sun's light in the water at one point of each pixel's view ray in a pass of its "
+                     "own, each pixel taking the 16 of the 4 x 4 window round it as the 16 segments of its ray, the segments' "
+                     "weights in closed form; 0: four points a pixel shared by its 2 x 2 quad, each segment's weights by its "
+                     "own exponentials (the frames before)");
   iConsole->Register("d3d12_GpuTimes", &CV_d3d12_GpuTimes, 0, 0,
                      "N: every N frames, the average GPU time of the frame's sections (shadow maps, water reflection, opaque, "
                      "water, blended, ...) and the time between frames to the console and XRenderD3D12_gpu.txt; 0 off");

@@ -178,6 +178,11 @@ xrender_d3d12_shader(PathComposite_PS PathComposite.hlsl ps_6_0 PSMain)
 # The view from under the ocean's surface (eD3D12P_Underwater, d3d12_WaterUnder, Underwater.cpp).
 xrender_d3d12_shader(Underwater_VS Underwater.hlsl vs_6_0 VSMain)
 xrender_d3d12_shader(Underwater_PS Underwater.hlsl ps_6_0 PSMain)
+# With d3d12_WaterUnderShare its sun's light at one point of each pixel's ray, into an R32_FLOAT target
+# (eD3D12P_UnderwaterTaps), and the view's pass taking it, the segments' weights in closed form (eD3D12P_UnderwaterShare,
+# XR_UNDER_SHARE); Underwater_PS stays the program before it.
+xrender_d3d12_shader(UnderwaterTaps_PS Underwater.hlsl ps_6_0 PSTaps)
+xrender_d3d12_shader(UnderwaterShare_PS Underwater.hlsl ps_6_0 PSMain XR_UNDER_SHARE)
 
 # The compute kernels (D3D12Compute.h, ED3D12Kernel): Intel XeGTAO's passes (XeGtao.hlsl, one per
 # compile), the ambient occlusion's resolve, the HDR meter's first level, the bloom's levels, the

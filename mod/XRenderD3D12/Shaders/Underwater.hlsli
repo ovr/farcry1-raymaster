@@ -93,6 +93,40 @@ float UnderSegmentEnd(uint j, float k, float fReach)
   return j >= XR_UNDER_TAPS ? fReach : UnderSegmentAt(j / (float)XR_UNDER_TAPS, k, fReach);
 }
 
+//! The segment of the view's ray whose sun the pixel at vPixel (SV_Position) takes in d3d12_WaterUnderShare's taps pass
+//! (Underwater.hlsl's PSTaps): its place modulo 4, x + 4 y (any 4 x 4 window holds each once).
+uint UnderBlockSegment(float2 vPixel)
+{
+  return (uint)vPixel.x % 4 + 4 * ((uint)vPixel.y % 4);
+}
+
+//! v turned by n places: u[i] = v[(i - n) mod 4], two selects a component.
+float4 UnderTurn(float4 v, uint n)
+{
+  v = (n & 1) ? v.wxyz : v;
+  return (n & 2) ? v.zwxy : v;
+}
+
+//! The taps of a 4 x 4 window starting at the pixel vStart (G[b][a] the pixel vStart + (a, b)) in the order of their
+//! segments (UnderBlockSegment): the texel (a, b) is the segment ((x + a) mod 4) + 4 ((y + b) mod 4), so each row's columns
+//! turned by x mod 4 and the rows by y mod 4 (selects, no indexing by the pixel: XR_UNDER_TAPS 16).
+void UnderWindowOrder(float4 G[4], uint2 vStart, out float v[XR_UNDER_TAPS])
+{
+  const uint2 n = vStart % 4;
+  const float4 R0 = UnderTurn(G[0], n.x), R1 = UnderTurn(G[1], n.x), R2 = UnderTurn(G[2], n.x), R3 = UnderTurn(G[3], n.x);
+  const bool bOne = (n.y & 1) != 0, bTwo = (n.y & 2) != 0;
+  const float4 V0 = bOne ? R3 : R0, V1 = bOne ? R0 : R1, V2 = bOne ? R1 : R2, V3 = bOne ? R2 : R3;
+  const float4 W0 = bTwo ? V2 : V0, W1 = bTwo ? V3 : V1, W2 = bTwo ? V0 : V2, W3 = bTwo ? V1 : V3;
+  [unroll]
+  for (uint i = 0; i < 4; i++)
+  {
+    v[i] = W0[i];
+    v[4 + i] = W1[i];
+    v[8 + i] = W2[i];
+    v[12 + i] = W3[i];
+  }
+}
+
 //! The light the water scatters towards a camera fDepth metres under the level along a view ray going down at fMu (the cosine
 //! of its direction to the vertical down; negative up), from the camera out to fPath: the light coming down, attenuated by
 //! exp(-c d) to the depth d of each point (as WaterVolume.hlsli's VolumeInscatter: deep water seen straight down from the
@@ -125,6 +159,87 @@ float3 UnderInscatter(float3 vDeep, float3 c, float fDepth, float fMu, float fPa
   fWeight += w.g;
   fSum += w.g * v[XR_UNDER_TAPS - 1];
   fLit = fWeight > 0 ? fSum / fWeight : 1;
+  return J * ((1 - fShare) * vAll + fShare * fPhase * vSun);
+}
+
+//! Below this attenuation along the reach (k fReach) in its least channel UnderInscatterClosed weighs the segments one by
+//! one: the differences of the light at the segments' ends lose the digits there (looking up, a surface within half a metre).
+static const float UNDER_CLOSED_LEAST = 0.05;
+
+//! UnderInscatter's light (the same to a float's rounding, some 1e-5 of it) with the segments' weights in closed form: in green
+//! each segment by its making the same share 1 / XR_UNDER_TAPS of that channel's light out to fReach; in red and blue the light
+//! at the j-th end u^(k / k.g), u = exp(-k.g t) = 1 - (j / XR_UNDER_TAPS) (1 - exp(-k.g fReach)), a segment's weight the
+//! difference of its ends' over k (one log and two exps an end in place of six exps and three divisions a segment); every way
+//! the same (vAll) the closed form out to fPath. Where k fReach of a channel is under UNDER_CLOSED_LEAST red's and blue's
+//! weights segment by segment, the light at a segment's start times its length times (1 - exp(-k d)) / (k d), the start's
+//! light carried on by exp(-k d) (two exps a segment), green's as above or, where UnderSegmentAt's segments are the same
+//! length, each the last's times exp(-k.g d).
+float3 UnderInscatterClosed(float3 vDeep, float3 c, float fDepth, float fMu, float fPath, float fReach, float fShare, float fPhase,
+                            float v[XR_UNDER_TAPS], out float fLit)
+{
+  const float3 k = c * (1 + fMu);
+  const float3 J = 2 * c * vDeep * exp(-c * fDepth);
+  // The segments' light times their sun's (vSeg) and green's weights (fSeg).
+  float3 vSeg = 0;
+  float fSeg = 0;
+  [branch]
+  if (min(k.r, min(k.g, k.b)) * fReach >= UNDER_CLOSED_LEAST)
+  {
+    const float fStep = UnderOneLessExp(k.g * fReach) / XR_UNDER_TAPS;
+    const float2 vPower = k.rb / k.g;
+    const float2 vLast = exp(-k.rb * fReach);
+    float2 vStart = 1, vRB = 0;
+    float fSum = 0;
+    [unroll]
+    for (uint j = 0; j < XR_UNDER_TAPS; j++)
+    {
+      const float2 vEnd = j + 1 < XR_UNDER_TAPS ? exp2(vPower * log2(1 - (j + 1) * fStep)) : vLast;
+      vRB += (vStart - vEnd) * v[j];
+      fSum += v[j];
+      vStart = vEnd;
+    }
+    const float fGreen = fStep / k.g;
+    vSeg = float3(vRB.x / k.r, fGreen * fSum, vRB.y / k.b);
+    fSeg = fGreen * XR_UNDER_TAPS;
+  }
+  else
+  {
+    // Green's weights each segment's same share, or where UnderSegmentAt's segments are the same length (the light hardly
+    // fading along the ray) each the last's times exp(-k.g d).
+    float fGreen, fFade;
+    if (k.g * fReach < 1e-3)
+    {
+      const float d = fReach / XR_UNDER_TAPS;
+      fGreen = UnderSegment1(k.g, 0, d);
+      fFade = exp(-k.g * d);
+    }
+    else
+    {
+      fGreen = UnderSegment1(k.g, 0, fReach) / XR_UNDER_TAPS;
+      fFade = 1;
+    }
+    float2 vStart = 1;
+    float t0 = 0;
+    [unroll]
+    for (uint j = 0; j < XR_UNDER_TAPS; j++)
+    {
+      const float t1 = UnderSegmentEnd(j + 1, k.g, fReach), d = t1 - t0;
+      const float2 x = k.rb * d, e = exp(-x);
+      const float2 s = select(x > 0.01, (1 - e) / max(x, 1e-30), 1 - x * (0.5 - x * (1.0 / 6 - x * (1.0 / 24))));
+      vSeg.xz += vStart * d * s * v[j];
+      vSeg.y += fGreen * v[j];
+      fSeg += fGreen;
+      vStart *= e;
+      fGreen *= fFade;
+      t0 = t1;
+    }
+  }
+  // Beyond the last segment the last's sun.
+  const float3 vTail = UnderSegment(k, fReach, max(fPath, fReach));
+  const float3 vSun = vSeg + vTail * v[XR_UNDER_TAPS - 1];
+  const float3 vAll = UnderSegment(k, 0, max(fPath, fReach));
+  const float fWeight = fSeg + vTail.g;
+  fLit = fWeight > 0 ? vSun.g / fWeight : 1;
   return J * ((1 - fShare) * vAll + fShare * fPhase * vSun);
 }
 

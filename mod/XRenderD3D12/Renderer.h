@@ -1267,8 +1267,11 @@ public:
   //! m_bUnderwater in the main view's lists (not in the scenes it shows: the reflection, the cubes, the shadow maps).
   bool UnderwaterOn() const;
   //! The blended list's pass after the water surfaces (UnderwaterOn): the scene as drawn so far copied (m_UnderCopy; the
-  //! copy of the list's start stays the flares'), then a triangle over the view of Underwater.hlsl; m_bUnderDrawn.
+  //! copy of the list's start stays the flares'), with d3d12_WaterUnderShare the sun's light at one point of each pixel's
+  //! ray into m_pUnderTaps (Underwater.hlsl's PSTaps), then a triangle over the view of Underwater.hlsl; m_bUnderDrawn.
   void DrawUnderwater();
+  //! m_pUnderTaps of the main view's target's size (R32_FLOAT, a render target); false without it.
+  bool EnsureUnderTaps();
   //! A draw of the blended list after DrawUnderwater (m_bUnderDrawn) with the blend nState: the light in the water over its
   //! colour (SDrawConstants::vUnder); none for a blend that multiplies the frame.
   void SetUnderwaterFog(SDrawConstants &dc, uint32 nState) const;
@@ -1278,6 +1281,7 @@ public:
   bool m_bUnderwater = false;
   bool m_bUnderDrawn = false;     //!< the blended list being drawn has drawn the light in the water (DrawItems resets it)
   SSceneCopy m_UnderCopy;
+  CD3D12Texture *m_pUnderTaps = nullptr;  //!< d3d12_WaterUnderShare: each pixel's sun at one segment of its ray (Underwater.hlsl's PSTaps)
 
   //////////////////////////////////////////////////////////////////////////
   // EnvCubes.cpp: the cubes of the scene around the objects of TemplReflEnvCM (EEnvMap::Auto)
@@ -2096,6 +2100,7 @@ public:
   int CV_d3d12_WaterGeometry = 1;     //!< the ocean's grid raised to the waves in place of the game's flat disc (OceanGrid.cpp; 0: the disc, the frames before)
   int CV_d3d12_WaterDeferred = 1;     //!< the grid's depth first, then its water shaded once a pixel over the view (DrawOceanGrid; 0: the grid shaded as drawn)
   int CV_d3d12_WaterUnder = 1;        //!< the view from under the ocean's surface: the light in its water, the sun's shafts (Underwater.cpp; 0: the fog volume's fog, the frames before)
+  int CV_d3d12_WaterUnderShare = 1;   //!< under the ocean's surface the sun's light at one point of each pixel's ray, the 4 x 4 window round a pixel its ray's segments, the segments' weights in closed form (Underwater.cpp; 0: four points a pixel shared by its quad, the frames before)
   int CV_d3d12_GpuTimes = 0;          //!< N: the GPU time of the frame's sections to the log every N frames
   int CV_d3d12_FrameLog = 0;          //!< 1: a line per frame to XRenderD3D12_frames.txt (LogFrame), 2 with the engine's profilers
   int CV_d3d12_CpuSamples = 0;        //!< N: the render thread's stack every N microseconds, to XRenderD3D12_samples.txt at 0 (CpuSampler)
