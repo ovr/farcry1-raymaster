@@ -67,6 +67,8 @@ struct SRenderItem
   int nOrder = 0;                           //!< position in the scene (EF_AddEf order)
   bool bFogPass = false;                    //!< the fog volume pass the renderer adds itself (see CScene::AddEf)
   bool bBakedLightCopy = false;             //!< a light mapped surface again for a light its light map has, not drawn (CScene::BuildLists)
+  bool bFade = false;                       //!< an opaque or alpha tested surface (or a decal multiplied over it) of an object the engine
+                                            //!< fades in or out by its distance: drawn in the blended list by its alpha (CScene::AddEf, d3d12_FadeBlend)
 };
 
 //! A leaf item's part at its place: its render element and its object's position (Cascades.cpp).

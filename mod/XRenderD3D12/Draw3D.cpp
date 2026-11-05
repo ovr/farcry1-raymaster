@@ -77,6 +77,16 @@ void Set4(float v[4], float x, float y, float z, float w)
   v[0] = x; v[1] = y; v[2] = z; v[3] = w;
 }
 
+//! The alpha of an object fading in or out by its distance (SRenderItem::bFade): its colour's alpha a squared, as the
+//! original's ambient pass takes it (its c0.w a^2, c6.w a: 0.706 for 0.840, 0.206 for 0.454 on Carrier's deck; the
+//! vegetation's a^2 the same), above 0 (General.hlsl takes SDrawConstants::vEdgeFade.y above 0 as the draw's alpha
+//! after the alpha test).
+float FadeAlpha(const CCObject *pObj)
+{
+  const float a = std::clamp(pObj->m_Color.a, 0.0f, 1.0f);
+  return std::max(a * a, 1e-6f);
+}
+
 float Det3(const Matrix44 &m)
 {
   const float *d = m.data;
@@ -758,7 +768,7 @@ void CD3D12Renderer::DrawLeafItem(const SRenderItem &it)
   if (pFogVolume)
   {
     const bool bCap = eDC == eDC_FogLayer;
-    const bool bBlended = eDC == eDC_AlphaBlend || IsBlendedVColor(eDC, pRes, pObj);
+    const bool bBlended = eDC == eDC_AlphaBlend || IsBlendedVColor(eDC, pRes, pObj) || it.bFade;
     const float fAlphaRef = GetAlphaRef(pSh, pRes);
     const bool bAlphaTest = eDC == eDC_AlphaTest || eDC == eDC_AlphaTestVColor || fAlphaRef > 0;
     dc.nFlags &= (bBlended || bAlphaTest) ? (DF_TEX0 | DF_TEXMATRIX) : 0;
@@ -769,7 +779,10 @@ void CD3D12Renderer::DrawLeafItem(const SRenderItem &it)
       dc.fAlphaRef = fAlphaRef > 0 ? fAlphaRef : eDC == eDC_AlphaTestVColor ? 128.0f / 255.0f : 0.5f;
     }
     const CFColor &c = pFogVolume->Color;
-    Set4(dc.vColor, c.r, c.g, c.b, bBlended ? fOpacity * pObj->m_Color.a : 1.0f);
+    Set4(dc.vColor, c.r, c.g, c.b, bBlended && !it.bFade ? fOpacity * pObj->m_Color.a : 1.0f);
+    // An object fading in or out: the fog by its alpha alone (as its first pass, below).
+    if (it.bFade)
+      dc.vEdgeFade[1] = FadeAlpha(pObj);
     Set4(dc.vParams0, pFogVolume->fFogLayerZ, logf(100) / (2 * std::max(pFogVolume->fMaxFogDist, 0.01f)), bCap ? 1.0f : 0.0f,
          bBlended ? 1.0f : 0.0f);
     Key.nState = GS_BLSRC_SRCALPHA | GS_BLDST_ONEMINUSSRCALPHA | (bBlended || bCap ? 0 : GS_DEPTHFUNC_EQUAL);
@@ -966,6 +979,16 @@ void CD3D12Renderer::DrawLeafItem(const SRenderItem &it)
     {
       dc.nFlags |= DF_ALPHATEST;
       dc.fAlphaRef = GetAlphaRef(pSh, pRes) > 0 ? GetAlphaRef(pSh, pRes) : 0.5f;
+    }
+    // An object fading in or out by its distance (SRenderItem::bFade, d3d12_FadeBlend): laid over what is behind it by its
+    // alpha (SRCALPHA, INVSRCALPHA), no depth writes; the texture's alpha its alpha test's alone, as the original's
+    // ambient pass gives the object's alpha squared (FadeAlpha; the templates' texture alpha is their gloss: the crates
+    // of Carrier's deck would have faded in through holes); its light passes added by it (below). Set up for the scene
+    // for rays as drawn opaque: it stays there while it fades.
+    if (it.bFade && !m_bRayCaptureWalk && !m_bSpritePass)
+    {
+      Key.nState = GS_BLSRC_SRCALPHA | GS_BLDST_ONEMINUSSRCALPHA;
+      dc.vEdgeFade[1] = FadeAlpha(pObj);
     }
     break;
   }
@@ -1587,6 +1610,8 @@ void CD3D12Renderer::DumpItem(int nIndex, const SRenderItem &it, int eList)
           pObj->m_pShadowCasters ? reinterpret_cast<const int *>(pObj->m_pShadowCasters)[2] : -1);
   if (it.bBakedLightCopy)
     fprintf(m_pFrameDump.get(), "    not drawn: a light mapped surface again for a light its light map has\n");
+  if (it.bFade)
+    fprintf(m_pFrameDump.get(), "    fading in or out by its distance: blended by its alpha %.3f (d3d12_FadeBlend)\n", FadeAlpha(pObj));
   // The rotation and scale of the object's matrix, when it has one.
   const float *m = pObj->m_Matrix.data;
   if (m[0] != 1 || m[1] != 0 || m[2] != 0 || m[4] != 0 || m[5] != 1 || m[6] != 0 || m[8] != 0 || m[9] != 0 || m[10] != 1)

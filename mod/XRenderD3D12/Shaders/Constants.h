@@ -265,7 +265,8 @@ struct SDrawConstants
   XR_FLOAT4X4(mPrevWorldViewProj);  //!< the motion vectors of an upscaler: object to clip in the frame before (all 0: as mWorldViewProj, still on the screen)
   XR_FLOAT4(vHdrCore);            //!< DF2_HDR_CORE: x the factor of the light in its core, y 1: the shape times tex0 a (a SRCALPHA blend)
   XR_FLOAT4(vEdgeFade);           //!< x 1: the colour per vertex times min((2 |N.V|)^4, 1), N the vertex normal, V the view direction: planes
-                                  //!< fading out seen edge on (TemplMuzzleFlash_Auto, d3d12_MuzzleFlashAuto)
+                                  //!< fading out seen edge on (TemplMuzzleFlash_Auto, d3d12_MuzzleFlashAuto); y above 0: the alpha after
+                                  //!< the alpha test (FadeAlpha, AlphaCoverage.hlsli: an object fading in or out by its distance, d3d12_FadeBlend)
   XR_FLOAT4(vUnderColor);         //!< vUnder.w > 0: rgb the ocean's fog volume's colour (the game's), w its density
   XR_FLOAT4(vUnder);              //!< under the ocean's surface, drawn after the light in its water (Underwater.cpp): the light in the water over the
                                   //!< colour after the fog (Underwater.hlsli's UnderFog): x the level, y how far over it the surface may be, z the

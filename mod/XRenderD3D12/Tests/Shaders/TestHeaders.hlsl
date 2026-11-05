@@ -47,6 +47,19 @@ void CSCoverageAlpha(uint i : SV_DispatchThreadID)
   TestOut(i, float4(CoverageAlpha(a.x, a.y, a.z), 0, 0, 0));
 }
 
+//! General.hlsl's alpha test, then FadeAlpha (AlphaCoverage.hlsli): g_TestIn[i].x the texture's alpha, .y the test's
+//! reference (0: none), .z the draw's fade (SDrawConstants::vEdgeFade.y, 0: none): out[i].x 1 where the test keeps the
+//! pixel (clip(a - ref)), .y the alpha after it.
+[numthreads(64, 1, 1)]
+void CSFadeAlpha(uint i : SV_DispatchThreadID)
+{
+  if (i >= g_Test.nTest.x)
+    return;
+  const float4 a = TestIn(i);
+  const bool bKept = a.y <= 0 || a.x - a.y >= 0;
+  TestOut(i, float4(bKept ? 1 : 0, FadeAlpha(a.x, a.z), 0, 0));
+}
+
 //! The FXAA tests' picture (Fxaa.hlsli): g_Test.nTest.y x g_Test.nTest.z pixels, g_TestIn[y * width + x] the rgba of
 //! pixel (x, y) as floats, clamped to the picture as AntiAlias.hlsl clamps its loads.
 float4 FxaaLoad(int2 p)

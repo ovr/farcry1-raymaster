@@ -1388,6 +1388,8 @@ float4 ShadePixel(SVertexOutput In)
   }
   if (HasFlag(DF_ALPHA_ONE))
     vColor.a = 1;
+  // An object fading in or out by its distance (d3d12_FadeBlend): its alpha alone after the alpha test (FadeAlpha).
+  vColor.a = FadeAlpha(vColor.a, g_Draw.vEdgeFade.y);
   if (HasFlag2(DF2_FOG_VOLUME))
     return float4(g_Draw.vColor.rgb, FogVolumeAlpha(In.vWorldPos) * (g_Draw.vParams0.w > 0 ? vColor.a : 1));
 #ifdef XR_AMBIENT

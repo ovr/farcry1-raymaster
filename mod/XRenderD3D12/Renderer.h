@@ -788,12 +788,13 @@ public:
   //! Before the main view's opaque list is drawn (not its reflection, sprites, shadow maps, cubes or
   //! heat vision; the first such view of a frame): its draws make the scene for rays (a walk over
   //! Opaque, m_bRayCaptureWalk: DrawLeafItem sets each draw up without its lights, DrawGeometry hands
-  //! it to the scene and draws nothing; the far vegetation sprites drawn by the 3D engine for it),
+  //! it to the scene and draws nothing; the far vegetation sprites drawn by the 3D engine for it;
+  //! then the objects fading in or out of Blended, SRenderItem::bFade, as drawn opaque),
   //! with the water reflection's, and its builds go to the GPU (on the compute queue, which the
   //! frame's list waits for at the first draw or pass with rays). bTraced: the view draws with rays
   //! (a water surface), else only the static BLAS are built. Without a cvar that wants rays the
   //! scene's memory goes.
-  void BuildRayScene(std::span<const SRenderItem> Opaque, bool bTraced);
+  void BuildRayScene(std::span<const SRenderItem> Opaque, std::span<const SRenderItem> Blended, bool bTraced);
   //! The sun's cascades draw the scene of a camera towards the sun or the live casters (Items): with
   //! d3d12_RTOffscreen their parts join the scene for rays, walked by BuildRayScene after the main
   //! view's (those it has too left out); with d3d12_RTSunShadows the live casters' are XR_RAY_LIVE
@@ -2137,6 +2138,7 @@ public:
   int CV_d3d12_AAQuality = 2;               //!< the anti-aliasing's (d3d12_AA, a string) quality, 0 (low) to 3 (ultra)
   int CV_d3d12_AADebug = 0;                 //!< 1: the anti-aliasing's view of the edges
   int CV_d3d12_AlphaToCoverage = 1;         //!< with MSAA, 1: the alpha-tested draws' edges by the samples their alpha covers
+  int CV_d3d12_FadeBlend = 1;               //!< 1: the objects fading in or out by their distance blended by their alpha (SRenderItem::bFade; 0: opaque, the frames before)
                                             //!< (sharpened to the test's edge, Draw.cpp's DrawGeometry); 0 the test, a step
   int CV_d3d12_AOQuality = 2;               //!< the ambient occlusion's (d3d12_AO, a string) quality, 0 to 3
   float CV_d3d12_AORadius = 1;              //!< its radius (m)

@@ -108,6 +108,25 @@ namespace
     return std::clamp(nSort & ~EFSLIST_MASK, 0, (int)eS_Max - 1);
   }
 
+  //! An object the engine fades in or out by its distance (SRendParams::fAlpha below 1: CLeafBuffer::Render sets
+  //! FOB_HASALPHA, the alpha in its colour) drawn blended by that alpha (d3d12_FadeBlend): its opaque and alpha tested
+  //! surfaces, and the decals multiplied over them (they write no depth: drawn over what the object no longer hides, in
+  //! the opaque list they multiplied the scene behind it). The original draws such an object after the water among the
+  //! blended surfaces (SRCALPHA, INVSRCALPHA, no depth writes; its ambient pass's alpha the object's squared, c0.w);
+  //! drawn opaque the crates and the gas cylinders on Carrier's deck popped in at the far end of their fade. The class stays:
+  //! the sun's cascades and the scene for rays take the object as before. Not with the path tracer (its G-buffer, as the
+  //! grass fading in or out), nor for the first person weapon.
+  bool IsFadeItem(const SRenderItem &it)
+  {
+    if (!g_pRenderer || !g_pRenderer->CV_d3d12_FadeBlend || !it.pRE || it.pRE->m_Type != eDATA_OcLeaf)
+      return false;
+    if (!(it.pObj->m_ObjFlags & FOB_HASALPHA) || (it.pObj->m_ObjFlags & FOB_NEAREST) || !(it.pObj->m_Color.a < 1.0f))
+      return false;
+    if (it.eDrawClass != eDC_Opaque && it.eDrawClass != eDC_AlphaTest && it.eDrawClass != eDC_Modulate)
+      return false;
+    return SortGroup(it.nSort) != eS_Nearest && !g_pRenderer->WantsPathTracing();
+  }
+
   ERenderList ChooseList(const SRenderItem &it)
   {
     const int nList = (it.nSort & EFSLIST_MASK) >> 28;
@@ -119,7 +138,7 @@ namespace
       return eRL_Nearest;
     // (with the path tracer the grass that fades in or out is alpha tested among the opaque surfaces: the paths light
     // what is in its G-buffer; DrawLeafItem)
-    if (IsBlendedClass(it.eDrawClass) ||
+    if (IsBlendedClass(it.eDrawClass) || it.bFade ||
         (IsBlendedVColor(it.eDrawClass, it.pRes, it.pObj) && !(it.eDrawClass == eDC_AlphaTestVColor && g_pRenderer->WantsPathTracing())))
       return eRL_Blended;
     if (it.pObj->m_ObjFlags & FOB_NEAREST)
@@ -419,6 +438,7 @@ void CScene::AddEf(int nFog, CRendElement *pRE, IShader *pEf, SRenderShaderResou
       nShSort = eS_Banner | (nShSort & EFSLIST_MASK);
     it.nSort = nShSort;
   }
+  it.bFade = IsFadeItem(it);
   it.eList = ChooseList(it);
 
   SSceneSlot &s = Cur();
@@ -629,7 +649,8 @@ void CScene::EndEf3D(int nFlags)
           const bool bSurfaces = g_pRenderer->WantsRaySurfaces();
           const bool bLamps = g_pRenderer->WantsRayLights() &&
                               std::any_of(s.Lights.begin(), s.Lights.end(), [](const CDLight *pLight) { return !(pLight->m_Flags & DLF_SUN); });
-          g_pRenderer->BuildRayScene({ list.data(), list.size() }, bLamps || std::any_of(s.Lists.begin(), s.Lists.end(), [&](const std::vector<SRenderItem> &Items)
+          const std::vector<SRenderItem> &Blended = s.Lists[eRL_Blended];
+          g_pRenderer->BuildRayScene({ list.data(), list.size() }, { Blended.data(), Blended.size() }, bLamps || std::any_of(s.Lists.begin(), s.Lists.end(), [&](const std::vector<SRenderItem> &Items)
             { return std::any_of(Items.begin(), Items.end(), [&](const SRenderItem &it)
               { return it.eDrawClass == eDC_Water || (bSurfaces && it.pShader && it.pShader->GetProps().eEnvMap != EEnvMap::None); }); }));
           // The path tracer's lights of the frame.
