@@ -9,7 +9,9 @@
 //	1, strongly forwards), the segments of the view's ray whose sun the
 //	light it scatters takes (each the same share of that light), the light
 //	scattered towards a camera under the surface against its integral in
-//	double, the surface seen from below, the light in the water over a
+//	double (its segments' weights in closed form against their loop; the
+//	4 x 4 window of taps in the segments' order), the
+//	surface seen from below, the light in the water over a
 //	blended object (the closed form the plants take, against the view's
 //	pass with the sun's light its mean), and what they give under Carrier's
 //	water: the water bluer and darker with the depth, the floor fading into
@@ -25,6 +27,8 @@
 #include "Test_UnderPhase.h"
 #include "Test_UnderSegments.h"
 #include "Test_UnderInscatter.h"
+#include "Test_UnderInscatterClosed.h"
+#include "Test_UnderWindow.h"
 #include "Test_UnderSurface.h"
 #include "Test_UnderFog.h"
 #include "Test_VolumeAttenuation.h"
@@ -75,10 +79,11 @@ namespace
     float fLit;
   };
 
-  std::vector<SLight> Inscatter(const std::vector<SInscatter> &Cases)
+  //! UnderInscatter of the cases (bClosed: UnderInscatterClosed).
+  std::vector<SLight> Inscatter(const std::vector<SInscatter> &Cases, bool bClosed = false)
   {
     SDispatch d;
-    d.Shader = XR_BYTECODE(Test_UnderInscatter);
+    d.Shader = bClosed ? XR_BYTECODE(Test_UnderInscatterClosed) : XR_BYTECODE(Test_UnderInscatter);
     for (const SInscatter &c : Cases)
     {
       Push(d.In, c.Deep, c.fDepth);
@@ -277,6 +282,92 @@ XR_TEST(Under_Inscatter)
     CHECK_NEAR(Comp(v[2 * 3 + 2].L, k) / Comp(v[2 * 3].L, k), std::exp(-Comp(c, k) * 9), 1e-4);
   CHECK_NEAR(v[j + 2].fLit, 0, 1e-7);
   CHECK_NEAR(v[j + 4].fLit, 0.5, 1e-5);
+}
+
+// Why: with d3d12_WaterUnderShare the view's pass weighs the segments in closed form (each the same share in green by its
+// making, red's and blue's from the light at the segments' ends); it must give UnderInscatter's light and fLit to a float's
+// rounding for any ray, sun and path: down, level, up nearly straight (the light hardly fading along the ray: red and blue
+// segment by segment there, green too where the segments are the same length), a surface a few centimetres to a hundred
+// metres off, the sun even, in the shadow, three times its mean, a
+// gradient along the ray.
+XR_TEST(Under_Closed)
+{
+  const SVec3 Deep = CARRIER, c = CarrierAttenuation();
+  std::vector<SInscatter> Cases;
+  const float Mus[] = { 1, 0.7f, 0.3f, 0, -0.3f, -0.7f, -0.95f, -0.999f };
+  const float Depths[] = { 0.2f, 3, 12 };
+  const float Paths[] = { 0.05f, 0.4f, 2, 9, 40, 150 };
+  const float Suns[][2] = { { 1, 0 }, { 0, 0 }, { 3, 0 }, { 0, 1 / 15.0f }, { 2.5f, -0.15f } };
+  int nClosed = 0, nLoop = 0;
+  for (float mu : Mus)
+    for (float d0 : Depths)
+      for (float p : Paths)
+        for (const auto &s : Suns)
+        {
+          // Up only to the surface, as UnderPath.
+          const float fPath = mu < 0 ? std::min(p, d0 / -mu) : p;
+          const float fReach = std::min(fPath, 3 / std::max(c.y * (1 + mu), 1e-4f));
+          Cases.push_back({ Deep, c, d0, mu, fPath, fReach, 0.6f, 1.7f, s[0], s[1] });
+          const float fLeast = std::min(c.x, std::min(c.y, c.z)) * (1 + mu) * fReach;
+          (fLeast < 0.05f ? nLoop : nClosed)++;
+        }
+  const std::vector<SLight> a = Inscatter(Cases), b = Inscatter(Cases, true);
+  double fWorst = 0, fWorstLit = 0;
+  for (size_t i = 0; i < Cases.size(); i++)
+  {
+    for (int k = 0; k < 3; k++)
+    {
+      const double e = Comp(a[i].L, k);
+      fWorst = std::max(fWorst, std::fabs(Comp(b[i].L, k) - e) / std::max(std::fabs(e), 1e-9));
+    }
+    fWorstLit = std::max(fWorstLit, (double)std::fabs(b[i].fLit - a[i].fLit));
+  }
+  CHECK_MSG(nClosed > 100 && nLoop > 20, "cases in closed form " + std::to_string(nClosed) + ", by the loop " + std::to_string(nLoop));
+  CHECK_MSG(fWorst < 1e-4, "the closed form against the segments' loop: " + std::to_string(fWorst));
+  CHECK_MSG(fWorstLit < 1e-5, "fLit: " + std::to_string(fWorstLit));
+}
+
+// Why: with d3d12_WaterUnderShare each pixel takes the sun's light at its ray's sixteen segments from the 4 x 4 window round
+// it, each texel of which took the segment of its place modulo 4 in the taps pass; the window's texels must come out in
+// the order of those segments, each once, wherever the window starts (its place modulo 4 turns its rows and columns): a
+// texel in the wrong place weighs one segment's sun as another's.
+XR_TEST(Under_Window)
+{
+  std::vector<std::pair<uint32, uint32>> Starts;
+  for (uint32 y = 0; y < 8; y++)
+    for (uint32 x = 0; x < 8; x++)
+      Starts.push_back({ x, y });
+  Starts.push_back({ 1913, 1077 });
+  Starts.push_back({ 3836, 2156 });
+  Starts.push_back({ 1278, 717 });
+  SDispatch d;
+  d.Shader = XR_BYTECODE(Test_UnderWindow);
+  for (const auto &s : Starts)
+    Push(d.In, (float)s.first, (float)s.second, 0.0f, 0.0f);
+  const size_t n = Starts.size();
+  d.Test.nTest[0] = (uint32)n;
+  d.nGroups[0] = Groups64(n);
+  d.nOut = 4 * n;
+  const std::vector<uint32> Out = Gpu().Run(d);
+  int nWrong = 0;
+  std::string First;
+  for (size_t i = 0; i < n; i++)
+  {
+    uint32 nSeen = 0;
+    for (uint32 j = 0; j < 16; j++)
+    {
+      const uint32 v = (uint32)At(Out, 4 * i + j / 4, j % 4);
+      const uint32 p = v / 16, a = p % 4, b = p / 4;
+      // The texel's segment as the taps pass gave it (UnderBlockSegment) and as its place in the window says.
+      const uint32 nSegment = (Starts[i].first + a) % 4 + 4 * ((Starts[i].second + b) % 4);
+      const bool bRight = p < 16 && v % 16 == j && nSegment == j && !(nSeen & (1u << p));
+      nSeen |= p < 16 ? 1u << p : 0;
+      if (!bRight && nWrong++ == 0)
+        First = "start " + std::to_string(Starts[i].first) + ", " + std::to_string(Starts[i].second) + ": segment " + std::to_string(j) +
+                " got the texel " + std::to_string(a) + ", " + std::to_string(b) + " (" + std::to_string(v) + ")";
+    }
+  }
+  CHECK_MSG(nWrong == 0, std::to_string(nWrong) + " wrong, the first " + First);
 }
 
 // Why: from below the surface lets the light from the air through Snell's window, and mirrors the water under it outside

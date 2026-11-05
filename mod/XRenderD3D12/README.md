@@ -1617,10 +1617,27 @@ and lists theirs (`NamesObjects`).
     bilinear comparison of the cascades where the sun's refracted ray to it left the surface, then
     the FFT ocean's caustics there at its depth, as on the floor: their mip level from the pixel's
     footprint and the sun's disc's blur): the shafts of light under the waves, radiating from the
-    sun's refracted direction, and the dark between them in the shadows of the cliffs. A pixel's
-    quad shares them, lane q the segments 4 i + q of its own ray, the point in each moved by the
-    pixel's noise over the frames (the temporal anti-aliasing's) and by the golden ratio from one
-    to the next. Scattered forwards most: sea water's phase function, half the molecules'
+    sun's refracted direction, and the dark between them in the shadows of the cliffs. They are
+    taken in a pass of their own (`d3d12_WaterUnderShare`, 1; not saved; the GPU section
+    `underwater taps`): one point of each pixel's ray into a target of the scene's size (R32F),
+    in the segment (x mod 4) + 4 (y mod 4) of the sixteen, moved within it by the pixel's noise
+    over the frames (the temporal anti-aliasing's); the view's pass reads the sixteen of the 4 x 4
+    window round the pixel (each segment once wherever it starts) in four gathers, its rows and
+    columns turned by the window's place modulo 4 (the aligned blocks' sixteen, apart from their
+    neighbours', were squares in the shafts' noise), and weighs them along its own ray, the
+    segments' weights in closed form: green's each
+    1/16 of its light by the segments' making, red's and blue's the light at the j-th end
+    u^(k / k_g), u = 1 - (j / 16) (1 - exp(-k_g r)) (one log and two exps an end in place of six
+    exps and three divisions a segment; segment by segment, two exps each, where a channel's
+    attenuation along the reach is under 0.05: looking up at a surface within half a metre). The
+    same light along each ray as before to a float's rounding (test `Under_Closed`: 1e-4 of it);
+    the shafts' points over a window of 16 pixels in place of a quad's 4, their noise elsewhere
+    (Under_carrier's views at 1280 x 720 against `d3d12_WaterUnderShare 0`: the means of the
+    debug views 31 and 32 within 0.08 %, their differences blurred over 32 x 32 pixels 0.2-0.4 %
+    and 0.9-1.2 % of them, the frames' mean |d| 0.5-1.2 levels). 0: a pixel's quad shares them,
+    lane q the segments 4 i + q of its own ray, the point in each moved by the pixel's noise and by
+    the golden ratio from one to the next, each segment's weights by its own exponentials (the
+    frames before). Scattered forwards most: sea water's phase function, half the molecules'
     (Morel's, 1 + 0.835 cos^2), half the particles' (Henyey and Greenstein at Petzold's mean cosine
     0.924), its mean 1: looking up the sun's refracted rays the water glows round them (half the
     peak within 3.5 degrees, a tenth at 8.6), some 230 times as bright as away from them.
@@ -1638,10 +1655,12 @@ and lists theirs (`NamesObjects`).
   - `d3d12_WaterDebug` 31 the light the water scatters, 32 the sun's light in it over its mean (grey
     1, white 2: the shafts), 33 the share of the scene left (with `r_HDRRendering 0`); the blended
     objects after the pass show the same term.
-  - The cost at 3840 x 2160 (`d3d12_GpuTimes`, `Under_carrier.ini`'s five views, no upscaler): the
-    pass (`underwater`) 1.12-1.33 ms, the frame 2.20-3.29 -> 3.38-4.48 ms; with the rays' sun
-    shadows and reflections the pass 1.09-1.32 ms, the frame 3.02-4.15 -> 4.24-5.34 ms. Above the
-    water none of it runs.
+  - The cost at 3840 x 2160 (`d3d12_GpuTimes`, `Under_carrier.ini`'s five views, no upscaler, RX
+    7900 XTX): the pass (`underwater` and `underwater taps`) 0.77-0.84 ms (0.45-0.55 and
+    0.22-0.39), the frame 3.01-3.93 ms; with the rays' sun shadows and reflections 0.74-0.85 ms,
+    the frame 3.78-4.76 ms. With `d3d12_WaterUnderShare 0` the pass 1.10-1.31 ms, the frame
+    3.32-4.42 ms; with the rays 1.06-1.29 ms, 4.17-5.27 ms (without the light in the water, step
+    293's frames, 2.20-3.29 ms and with the rays 3.02-4.15). Above the water none of it runs.
 - The sun's glint (`d3d12_WaterGlint`, 1; 0 draws the frames of the water before it; not saved;
   `d3d12_WaterSunGlint`, a highlight fitted by eye and off as in the game, is gone with it) is the
   sun mirrored by the waves' facets (`Shaders/WaterLight.hlsli`): Beckmann's distribution of the

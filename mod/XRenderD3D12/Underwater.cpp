@@ -14,7 +14,10 @@
 //	each channel along its path through the water and the light's way down
 //	to it, and the light the water scatters towards the camera, its sun's
 //	share in the sun's shadow and the FFT ocean's caustics at points along
-//	the view (the shafts under the waves). The blended objects after it
+//	the view (the shafts under the waves); with d3d12_WaterUnderShare that
+//	sun's light from a pass before it at one point of each pixel's ray
+//	(PSTaps into m_pUnderTaps), the sixteen of the 4 x 4 window round each
+//	pixel the segments of its ray, the segments' weights in closed form. The blended objects after it
 //	(the plants in the water) take that light over their own colour
 //	(SetUnderwaterFog: General.hlsl with Underwater.hlsli's UnderFog, the
 //	sun's light its mean along the way); the sprites come after it.
@@ -25,6 +28,7 @@
 #include "Renderer.h"
 #include "D3D12Device.h"
 #include "D3D12Descriptors.h"
+#include "D3D12Upload.h"
 #include "Scene.h"
 
 namespace
@@ -147,14 +151,66 @@ void CD3D12Renderer::DrawUnderwater()
   m_Viewport[3] = m_pDevice->GetHeight();
   m_bScissor = m_bItemScissor = false;
   static const float s_Triangle[3][3] = { { -1, -1, 0 }, { -1, 3, 0 }, { 3, -1, 0 } };
+  // d3d12_WaterUnderShare: the segments' weights in closed form (vParams3.w 1), and with the sun's share the taps pass first
+  // (2): the sun's light at one point of each pixel's ray into m_pUnderTaps, the main view's jitter and its noise's frame
+  // given it (an off screen target's frame constants have neither).
+  if (CV_d3d12_WaterUnderShare > 0)
+  {
+    Key.nProgram = eD3D12P_UnderwaterShare;
+    dc.vParams3[3] = 1;
+    if (dc.vParams1[0] > 0 && EnsureUnderTaps())
+    {
+      SFrameConstants fc;
+      MakeFrameConstants(fc, m_pDevice->IsSceneBound());
+      SDrawConstants tc = dc;
+      tc.vParams2[2] = fc.vJitter[0];
+      tc.vParams2[3] = fc.vJitter[1];
+      tc.vParams3[2] = fc.vTime[1];
+      SPipelineKey TapsKey = {};
+      TapsKey.nProgram = eD3D12P_UnderwaterTaps;
+      TapsKey.nState = GS_NODEPTHTEST;
+      TapsKey.nCull = R_CULL_NONE;
+      TapsKey.nTarget = 1;
+      TapsKey.nColorFormat = PIPELINE_COLOR_R32F;
+      // (Its own GPU section; the copy and the view's pass the section "underwater".)
+      GpuSection("underwater taps");
+      m_pDevice->SetOffscreenTargets(m_pUnderTaps->m_pResource, m_pUnderTaps->m_RTV, {}, m_pUnderTaps->m_nWidth, m_pUnderTaps->m_nHeight);
+      DrawImmediate(TapsKey, tc, D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST, VERTEX_FORMAT_P3F, s_Triangle, 3);
+      m_pDevice->SetBackBufferTargets();
+      GpuSection("underwater");
+      dc.nTex3 = (uint32)m_pUnderTaps->m_nSRV;
+      dc.vParams3[3] = 2;
+    }
+  }
   DrawImmediate(Key, dc, D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST, VERTEX_FORMAT_P3F, s_Triangle, 3);
   memcpy(m_Viewport, Viewport, sizeof(Viewport));
   m_bScissor = bScissor;
   m_bItemScissor = bItemScissor;
 }
 
+bool CD3D12Renderer::EnsureUnderTaps()
+{
+  if (!m_pDevice || !m_pUpload || !m_pDescriptors)
+    return false;
+  const int w = m_pDevice->GetMainWidth(), h = m_pDevice->GetMainHeight();
+  if (m_pUnderTaps && m_pUnderTaps->m_nWidth == w && m_pUnderTaps->m_nHeight == h)
+    return true;
+  if (m_pUnderTaps)
+    m_pUpload->ReleaseTexture(m_pUnderTaps);
+  m_pUnderTaps = m_pUpload->CreateRenderTarget(w, h, DXGI_FORMAT_R32_FLOAT);
+  if (m_pUnderTaps && m_pUnderTaps->m_nSRV < 0)
+  {
+    m_pUpload->ReleaseTexture(m_pUnderTaps);
+    m_pUnderTaps = nullptr;
+  }
+  return m_pUnderTaps != nullptr;
+}
+
 void CD3D12Renderer::ReleaseUnderwater()
 {
   FreeSceneCopy(m_UnderCopy);
+  if (m_pUnderTaps && m_pUpload)
+    m_pUpload->ReleaseTexture(m_pUnderTaps);
+  m_pUnderTaps = nullptr;
   m_bUnderwater = false;
 }

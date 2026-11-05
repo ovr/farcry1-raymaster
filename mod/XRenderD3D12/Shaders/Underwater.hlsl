@@ -18,15 +18,27 @@
 //	ocean's caustics at XR_UNDER_TAPS points of the ray (the shafts of
 //	light under the waves), scattered forwards most (sea water's phase
 //	function: the glow round the sun).
+//	With d3d12_WaterUnderShare the sun's light comes from a pass before it
+//	(PSTaps, eD3D12P_UnderwaterTaps, into an R32_FLOAT target): one point of
+//	each pixel's ray, in the segment of its place modulo 4, the 4 x 4 window
+//	round each pixel taking the 16 as its ray's segments; the segments'
+//	weights in closed form (UnderInscatterClosed; the view's pass compiled
+//	with XR_UNDER_SHARE, eD3D12P_UnderwaterShare). Without it (the program
+//	before it) each pixel takes four of its own ray, its 2 x 2 quad's
+//	sixteen.
 //	tex0 the scene's colour copy, tex2 its depth copy, tex1 the caustics
-//	(OceanFFT.cpp's SetOceanCaustics, an array; vParams0.w 0: none).
+//	(OceanFFT.cpp's SetOceanCaustics, an array; vParams0.w 0: none), tex3
+//	the taps pass's target; vParams3.w 0 the quad's taps, 1 the closed form
+//	without the sun's share (no taps), 2 the closed form and tex3.
 //	vColor rgb the ocean's fog volume's colour (the game's), w its density;
 //	vParams0 x the level, y how far over it the surface may be (the
 //	grid's crests: where the copy has no surface), z d3d12_WaterDebug;
 //	vParams1 x the sun's share of the light the water scatters, z the depth
 //	the caustics are gone by, w the most they brighten; vParams2.xy each
-//	caustics cascade's 1 / tile, vParams3.xy its first depth;
-//	vLightPos[2..4] xyz the view's rays (GetRayView).
+//	caustics cascade's 1 / tile, vParams3.xy its first depth; PSTaps:
+//	vParams2.zw the main view's jitter, vParams3.z its noise's frame (an off
+//	screen target's frame constants have neither); vLightPos[2..4] xyz the
+//	view's rays (GetRayView).
 //
 //////////////////////////////////////////////////////////////////////
 
@@ -70,6 +82,16 @@ bool UnderQuadAny(bool b)
   return (u | QuadReadAcrossX(u) | QuadReadAcrossY(u) | QuadReadAcrossDiagonal(u)) != 0;
 }
 
+//! The view's ray (a unit vector) of the pixel at vNDC, the jitter vJitter (the upscaler's, which moved the scene) taken off,
+//! and fRayLength, the length of the ray of a unit view depth.
+float3 UnderRay(float2 vNDC, float2 vJitter, out float fRayLength)
+{
+  const float2 v = vNDC - vJitter;
+  const float3 vRay = g_Draw.vLightPos[4].xyz + v.x * g_Draw.vLightPos[2].xyz + v.y * g_Draw.vLightPos[3].xyz;
+  fRayLength = length(vRay);
+  return vRay / fRayLength;
+}
+
 //! The sun's light (1 its mean) at the point x of the view's ray fDepth metres under the level, a pixel's fFootprint metres
 //! across there: in the sun's shadow where its ray refracted to x left the surface (one bilinear comparison of the cascades,
 //! 1 beyond them; as WaterVolume's), times the FFT ocean's caustics there at x's depth (each cascade's mip level from the
@@ -97,6 +119,117 @@ float UnderSun(float3 x, float fDepth, float fFootprint)
   return v;
 }
 
+//! The taps pass (d3d12_WaterUnderShare): the sun's light (UnderSun) at one point of the pixel's view ray, in the segment
+//! UnderBlockSegment of the UnderSegmentAt segments, moved by the pixel's noise over the frames (the temporal anti-aliasing's);
+//! 1, the mean, where the pixel takes none (no sun, the scene at the camera).
+float4 PSTaps(SUnderOutput In) : SV_Target
+{
+  const int3 vAt = int3(In.vPos.xy, 0);
+  float fRayLength;
+  const float3 D = UnderRay(In.vNDC, g_Draw.vParams2.zw, fRayLength);
+  const float fPixelAngle = max(length(ddx(D)), length(ddy(D)));
+
+  const float3 vCamera = g_Frame.vCameraPos.xyz;
+  const float fLevel = g_Draw.vParams0.x;
+  const float fCameraDepth = max(fLevel - vCamera.z, 0);
+  const float fDistance = UnderViewDepth(g_Textures[g_Draw.nTex2].Load(vAt).r) * fRayLength;
+  const float fPath = UnderPath(fDistance, D.z, fCameraDepth, g_Draw.vParams0.y);
+  const float3 c = VolumeAttenuation(UnderDecode(g_Draw.vColor.rgb), g_Draw.vColor.w);
+  const float k = c.g * (1 - D.z);
+  const float fReach = min(fPath, VOLUME_REACH / max(k, 1e-4));
+  if (!(g_Draw.vParams1.x > 0 && fReach > 0.01))
+    return 1;
+  const float fNoise = PictureNoise(In.vPos.xy, g_Draw.vParams3.z);
+  const float t = UnderSegmentAt((UnderBlockSegment(In.vPos.xy) + fNoise) / XR_UNDER_TAPS, k, fReach);
+  const float3 x = vCamera + D * t;
+  return UnderSun(x, max(fLevel - x.z, 0), t * fPixelAngle);
+}
+
+//! The sun's light at the XR_UNDER_TAPS segments of the pixel's ray from the taps pass (tex3): the pixels' of the 4 x 4 window
+//! from one left of it and one up (moved in at the view's edges), which holds each segment (UnderBlockSegment) once, in that
+//! order (UnderWindowOrder); four gathers of its 2 x 2 quarters. A window around each pixel in place of its block's: the
+//! blocks' sixteen apart from their neighbours' were squares in the shafts' noise.
+void UnderBlockTaps(float2 vPixel, out float v[XR_UNDER_TAPS])
+{
+  const Texture2D Taps = g_Textures[g_Draw.nTex3];
+  uint w, h;
+  Taps.GetDimensions(w, h);
+  const uint2 vStart = (uint2)clamp(int2(vPixel) - 1, 0, int2(w, h) - 4);
+  float4 G[4];
+  [unroll]
+  for (uint s = 0; s < 4; s++)
+  {
+    // The corner shared by the quarter's four texels: Gather's w at its top left, z top right, x bottom left, y bottom right.
+    const uint2 q = uint2(s % 2, s / 2);
+    const float4 g = Taps.GatherRed(g_SamplerPointClamp, (float2(vStart + 2 * q) + 1) / float2(w, h));
+    if (q.x == 0)
+    {
+      G[2 * q.y] = float4(g.w, g.z, 0, 0);
+      G[2 * q.y + 1] = float4(g.x, g.y, 0, 0);
+    }
+    else
+    {
+      G[2 * q.y].zw = float2(g.w, g.z);
+      G[2 * q.y + 1].zw = float2(g.x, g.y);
+    }
+  }
+  UnderWindowOrder(G, vStart, v);
+}
+
+#ifdef XR_UNDER_SHARE
+//! The view's pass with d3d12_WaterUnderShare (eD3D12P_UnderwaterShare): the sun's light at the ray's segments the taps
+//! pass's (vParams3.w 2), else 1 (no sun's share), the segments' weights in closed form (UnderInscatterClosed).
+float4 PSMain(SUnderOutput In) : SV_Target
+{
+  const int3 vAt = int3(In.vPos.xy, 0);
+  // The pixel's view ray (the upscaler's jitter, which moved the scene, taken off).
+  float fRayLength;
+  const float3 D = UnderRay(In.vNDC, g_Frame.vJitter.xy, fRayLength);
+
+  const float3 vCamera = g_Frame.vCameraPos.xyz;
+  const float fLevel = g_Draw.vParams0.x;
+  const float fCameraDepth = max(fLevel - vCamera.z, 0);
+  const float fDistance = UnderViewDepth(g_Textures[g_Draw.nTex2].Load(vAt).r) * fRayLength;
+  const float fPath = UnderPath(fDistance, D.z, fCameraDepth, g_Draw.vParams0.y);
+  const float3 P = vCamera + D * fDistance;
+  const float3 L = g_Frame.vSunDir.xyz;
+
+  const float3 vDeep = UnderDecode(g_Draw.vColor.rgb);
+  const float3 c = VolumeAttenuation(vDeep, g_Draw.vColor.w);
+  const float fMu = -D.z;
+  const float3 k = c * (1 + fMu);
+  const float fReach = min(fPath, VOLUME_REACH / max(k.g, 1e-4));
+
+  const float fShare = g_Draw.vParams1.x;
+  const bool bTaps = fShare > 0 && fReach > 0.01;
+  float vSun[XR_UNDER_TAPS];
+  [branch]
+  if (g_Draw.vParams3.w > 1)
+    UnderBlockTaps(In.vPos.xy, vSun);
+  else
+  {
+    [unroll]
+    for (uint i = 0; i < XR_UNDER_TAPS; i++)
+      vSun[i] = 1;
+  }
+
+  // Scattered forwards most: towards the camera from the sun's refracted rays.
+  const float fPhase = UnderSunPhase(L, D);
+  float fLit;
+  const float3 vInscatter = UnderInscatterClosed(vDeep, c, fCameraDepth, fMu, fPath, fReach, bTaps ? fShare : 0, fPhase, vSun, fLit);
+  const float fDepth = max(fLevel - P.z, 0);
+  const float3 T = exp(-c * (fPath + fDepth / VolumeRefractedCos(saturate(L.z))));
+  if (g_Draw.vParams0.z == 31)
+    return float4(UnderEncode(vInscatter), 1);
+  if (g_Draw.vParams0.z == 32)
+    return float4(saturate(fLit * 0.5).xxx, 1);
+  if (g_Draw.vParams0.z == 33)
+    return float4(T, 1);
+  const float3 vScene = UnderDecode(g_Textures[g_Draw.nTex0].Load(vAt).rgb);
+  return SceneOutput(float4(UnderEncode(vScene * T + vInscatter), 1));
+}
+#else
+//! The view's pass without it (eD3D12P_Underwater; the program before d3d12_WaterUnderShare, instruction for instruction).
 float4 PSMain(SUnderOutput In) : SV_Target
 {
   const int3 vAt = int3(In.vPos.xy, 0);
@@ -165,3 +298,4 @@ float4 PSMain(SUnderOutput In) : SV_Target
   const float3 vScene = UnderDecode(g_Textures[g_Draw.nTex0].Load(vAt).rgb);
   return SceneOutput(float4(UnderEncode(vScene * T + vInscatter), 1));
 }
+#endif

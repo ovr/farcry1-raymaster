@@ -59,6 +59,8 @@ enum ED3D12Program
   eD3D12P_PathComposite,  //!< Shaders/PathComposite.hlsl: the path tracer's light added to the picture (d3d12_PathTracing)
   eD3D12P_AntiAlias,      //!< Shaders/AntiAlias.hlsl: the anti-aliasing of the finished picture (d3d12_AA, AA_* flags)
   eD3D12P_Underwater,     //!< Shaders/Underwater.hlsl: the light in the ocean's water over the view from under its surface (d3d12_WaterUnder)
+  eD3D12P_UnderwaterTaps, //!< Shaders/Underwater.hlsl's PSTaps: the sun's light at one point of each pixel's ray (d3d12_WaterUnderShare)
+  eD3D12P_UnderwaterShare,  //!< Shaders/Underwater.hlsl with XR_UNDER_SHARE: the view's pass taking PSTaps' sun (d3d12_WaterUnderShare)
   eD3D12P_Num
 };
 
