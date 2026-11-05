@@ -25,6 +25,7 @@
 #include "D3D12Device.h"
 #include "D3D12Descriptors.h"
 #include "Texture.h"
+#include "PbrCompanion.h"
 #include "Scene.h"
 #include "Geometry.h"
 #include "RayTracing.h"
@@ -35,6 +36,10 @@ namespace
 {
 
 constexpr float TERRAIN_SECTOR_SIZE = 64.0f;
+//! r_Parallax's march (Shaders/Parallax.hlsli): its most steps (seen straight on a third of them), and the size of its depth
+//! in pixels (seen straight on) below which it fades and at which it is gone (a pixel's shift is not seen: far off none).
+constexpr uint32 PARALLAX_MOST_STEPS = 24;
+constexpr float PARALLAX_FADE_FROM = 4, PARALLAX_FADE_TO = 1;
 
 bool HasNormal(int nFormat)
 {
@@ -913,6 +918,50 @@ void CD3D12Renderer::DrawLeafItem(const SRenderItem &it)
       dc.nFlags |= DF_PIXEL_LIGHTING;
       dc.nFlags2 |= DF2_VERTEX_LIGHTS | (pObj->m_pCharInstance ? 0 : DF2_SMOOTH_FALLOFF);
     }
+    // The RayMaster maps of the texture (PbrCompanion.h; Scene.cpp's WantsPbrMaps looked for them and asked for the
+    // tangent frames), with bump mapping on, for a lit surface (not a character's: its tangents are the bind pose's).
+    // Decided the same in every pass of the draw (the depth prepass binds the tangents as the main pass: its input layout).
+    if (pDiffuse && (dc.nFlags & DF_TEX0) && CV_r_Quality_BumpMapping > 0 && (dc.nFlags & (DF_LIGHTING | DF_TEX1_LIGHTMAP)) &&
+        !pObj->m_pCharInstance && !m_bRayCaptureWalk)
+    {
+      // r_PbrNormals: a material without a normal map gets the normals made from its texture, over the tangent frames as a
+      // normal map (lit per pixel where it is so lit: the bump templates, d3d12_PixelLighting's others; a dot3 light map).
+      CTexture *pNormals = pDiffuse->m_pPbrN;
+      if (CV_r_PbrNormals && pNormals && pNormals->IsTextureLoaded() && !(dc.nFlags & DF_BUMP) && !(dc.nFlags2 & DF2_BUMP_OFFSET) &&
+          !GetNormalMap(it.pRes))
+      {
+        if (!Tangents)
+          Tangents = Geometry::GetTangentStream(pLB);
+        if (Tangents)
+        {
+          dc.nFlags |= DF_BUMP;
+          dc.nTex3 = pNormals->GetSRV();
+          dc.vParams1[1] = 1;
+        }
+      }
+      // r_Parallax: an opaque surface whose texture's height is not flat seen offset along the view by it, parallax
+      // occlusion mapping (General.hlsl's ParallaxFetch): its texture, normal map and gloss layers read where the view
+      // meets the height, r_ParallaxDepth deep from the hollows to the bumps; the reference height (0.5) not offset, so
+      // the light map and the decals stay on its flat parts. Not alpha tested (the depth prepass, the fog pass and alpha
+      // to coverage take the texture's alpha where the geometry is), not a decal, not of world coordinates nor point
+      // sampled. The depth and the shadows stay the geometry's.
+      CTexture *pHeight = pDiffuse->m_pPbrM;
+      if (CV_r_Parallax && CV_r_ParallaxDepth > 0 && pHeight && !pHeight->m_bFlatHeight && pHeight->IsTextureLoaded() &&
+          eDC == eDC_Opaque && GetAlphaRef(pSh, pRes) <= 0 && !pDiffuse->m_bPoint && (it.nSort & ~EFSLIST_MASK) != eS_Decal &&
+          !(dc.nFlags & (DF_CUBE0 | DF_TEX0_ARRAY | DF_TEXGEN_WORLD | DF_DECAL_FADE)) &&
+          !(dc.nFlags2 & (DF2_SHADER_FX | DF2_BUMP_OFFSET | DF2_GLOW_FALLOFF | DF2_CUBE_SHADER)))
+      {
+        if (!Tangents)
+          Tangents = Geometry::GetTangentStream(pLB);
+        if (Tangents)
+        {
+          dc.nParallax[0] = (uint32)pHeight->GetSRV();
+          dc.nParallax[1] = (uint32)pDiffuse->GetSampler();
+          dc.nParallax[2] = PARALLAX_MOST_STEPS;
+          Set4(dc.vParallax, CV_r_ParallaxDepth, PARALLAX_FADE_FROM, PARALLAX_FADE_TO, PbrCompanion::FLAT_HEIGHT / 255.0f);
+        }
+      }
+    }
     // The depth prepass: the vertex streams as above, without the lights. The draw's input layout
     // is the main pass's: in a pipeline without an object's tangents the GPU's compiler put some
     // of its pixels a step nearer than with them (fish under Steam's water).
@@ -1582,7 +1631,8 @@ void CD3D12Renderer::DrawLeafItem(const SRenderItem &it)
     if (m_bUnderDrawn && it.eList == eRL_Blended)
       SetUnderwaterFog(dc, Key.nState);
     TexCoord1.reset();
-    if (!(dc.nFlags & DF_BUMP))
+    // (r_Parallax: its texture offset as the first pass's, with the tangent frames.)
+    if (!(dc.nFlags & DF_BUMP) && !dc.nParallax[0])
       Tangents.reset();
     pTex = pDiffuse;
     Draw();
@@ -1612,6 +1662,9 @@ void CD3D12Renderer::DumpItem(int nIndex, const SRenderItem &it, int eList)
     fprintf(m_pFrameDump.get(), "    not drawn: a light mapped surface again for a light its light map has\n");
   if (it.bFade)
     fprintf(m_pFrameDump.get(), "    fading in or out by its distance: blended by its alpha %.3f (d3d12_FadeBlend)\n", FadeAlpha(pObj));
+  if (pTex && (pTex->m_pPbrM || pTex->m_pPbrN))
+    fprintf(m_pFrameDump.get(), "    RayMaster maps: material '%s'%s normals '%s'\n", pTex->m_pPbrM ? pTex->m_pPbrM->m_Name.c_str() : "",
+            pTex->m_pPbrM && pTex->m_pPbrM->m_bFlatHeight ? " (its height flat)" : "", pTex->m_pPbrN ? pTex->m_pPbrN->m_Name.c_str() : "");
   // The rotation and scale of the object's matrix, when it has one.
   const float *m = pObj->m_Matrix.data;
   if (m[0] != 1 || m[1] != 0 || m[2] != 0 || m[4] != 0 || m[5] != 1 || m[6] != 0 || m[8] != 0 || m[9] != 0 || m[10] != 1)
@@ -1813,6 +1866,10 @@ void CD3D12Renderer::DumpDraw(const SDrawConstants &dc, const SPipelineKey &Key,
   if (dc.nFlags & DF_TEXGEN_WORLD)
     fprintf(f, " texgen u (%g %g %g %g) v (%g %g %g %g)", dc.vTexGenU[0], dc.vTexGenU[1], dc.vTexGenU[2], dc.vTexGenU[3], dc.vTexGenV[0],
             dc.vTexGenV[1], dc.vTexGenV[2], dc.vTexGenV[3]);
+  if (dc.nParallax[0])
+    fprintf(f, " parallax (r_Parallax) depth %.3f", dc.vParallax[0]);
+  if ((dc.nFlags & DF_BUMP) && pTex && pTex->m_pPbrN && dc.nTex3 == (uint32)pTex->m_pPbrN->GetSRV())
+    fprintf(f, " normals (r_PbrNormals)");
   for (uint32 i = 0; i < dc.nLights; i++)
     fprintf(f, " {(%.1f %.1f %.1f %.0f) col (%.2f %.2f %.2f) att (%.3f %.3f %.1f) 1/r %.4f}", dc.vLightPos[i][0], dc.vLightPos[i][1], dc.vLightPos[i][2],
             dc.vLightPos[i][3], dc.vLightColor[i][0], dc.vLightColor[i][1], dc.vLightColor[i][2], dc.vLightAtten[i][0], dc.vLightAtten[i][1], dc.vLightAtten[i][2],

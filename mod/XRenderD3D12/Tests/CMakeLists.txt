@@ -75,6 +75,11 @@ foreach(k Resolve Dilate Sharpen Working)
 endforeach()
 # MSAA's resolve (Msaa.hlsli as Msaa.hlsl's passes use it).
 xrender_d3d12_test_shader(Msaa "${CMAKE_CURRENT_SOURCE_DIR}/Shaders/TestMsaa.hlsl" cs_6_0 CSMsaa)
+# Parallax occlusion mapping (r_Parallax: Parallax.hlsli as General.hlsl includes it, its height the test's).
+set(parallax "${CMAKE_CURRENT_SOURCE_DIR}/Shaders/TestParallax.hlsl")
+foreach(k UV Parts)
+    xrender_d3d12_test_shader(Parallax${k} "${parallax}" cs_6_0 CSParallax${k})
+endforeach()
 # The path tracer's functions, PathTrace.hlsl included as it is (Shader Model 6.5, as Shaders.cmake compiles it).
 set(pathtrace "${CMAKE_CURRENT_SOURCE_DIR}/Shaders/TestPathTrace.hlsl")
 foreach(k LeafSide Cosine Checkerboard Layout PixelSurface TerrainShare SurfaceNormal LampLight LampShadow LightmapFill)
@@ -131,6 +136,7 @@ set(XRENDERD3D12_TESTS_SOURCES
     GridTests.cpp
     UnderTests.cpp
     FadeTests.cpp
+    ParallaxTests.cpp
 )
 file(GLOB XRENDERD3D12_TESTS_HLSL "${CMAKE_CURRENT_SOURCE_DIR}/Shaders/*.hlsl" "${CMAKE_CURRENT_SOURCE_DIR}/Shaders/*.hlsli")
 set_source_files_properties(${XRENDERD3D12_TESTS_HLSL} PROPERTIES HEADER_FILE_ONLY ON)

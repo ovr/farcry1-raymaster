@@ -140,6 +140,15 @@ public:
   //! A light image loaded with FT2_CHECKFORALLSEQUENCES (d3d12_LightImages): its frames after this one (the digits in
   //! front of the extension counting up, while they are found), each a texture of its own, held by this one.
   std::vector<CTexture *> m_Sequence;
+  //! The file it was read from (SSearch::Base: lower case, '/' separated, without the extension); empty for the textures
+  //! made otherwise (in memory, of two files, the cubes of six). The RayMaster maps beside it are found by it.
+  std::string m_File;
+  //! The RayMaster maps beside the file (CTextureManager::FindPbrCompanions, PbrCompanion.h), each held by this texture:
+  //! the material map (its alpha the height: r_Parallax) and the normals (r_PbrNormals); nullptr for none.
+  CTexture *m_pPbrM = nullptr;
+  CTexture *m_pPbrN = nullptr;
+  bool m_bPbrLooked = false;          //!< looked for (found or not: not looked for again)
+  bool m_bFlatHeight = false;         //!< a RayMaster material map whose height is flat (PbrCompanion::IsFlatHeight): nothing to offset
   int m_nID;
   int m_nRefs = 1;
   int m_nWidth = 0, m_nHeight = 0;
@@ -184,6 +193,12 @@ public:
   //! EF_LoadTexture semantics (flags FT_*, FT2_*, eTT ETexType); never NULL (a placeholder for a
   //! missing file). The texture gets one reference for the caller.
   CTexture *LoadTexture(const char *szName, uint nFlags, uint nFlags2, byte eTT, float fAmount1, float fAmount2, int nID, int nBindID);
+  //! The RayMaster maps beside a texture read from a file (PbrCompanion.h: raymaster/<its file>_pbr_m.dds and _pbr_n.dds),
+  //! into its m_pPbrM and m_pPbrN, looked for once (a miss remembered); each loaded once for every texture of its file. Not
+  //! for cubes, arrays, the white texture and the placeholder, nor the textures without a file. A map of one face, with its
+  //! levels and the texture's aspect (PbrCompanion::IsUsable), else none; r_TexResolution drops its levels as the texture's.
+  void FindPbrCompanions(CTexture *pTex);
+
   //! A material texture (SInputShaderResources::m_Textures): searched as LoadTexture does, then
   //! as szTexturePath (the folder of the object, may be NULL or "") + the whole name and as
   //! szTexturePath + the file name. Never NULL; one reference for the caller.
@@ -237,6 +252,11 @@ private:
   CTexture *NewTexture(const char *szName, int nID = 0);
   //! Gives up the texture: GPU texture, ID and keys; the object moves to m_Removed.
   void Remove(CTexture *pTex);
+  //! Drops the RayMaster maps a texture holds and its file (a texture given a picture of another kind, or removed).
+  void ReleasePbrCompanions(CTexture *pTex);
+  //! One RayMaster map (FindPbrCompanions) of the file szPath for pTex, with a reference for it; nullptr when it is missing
+  //! or not fit (bHeight: the material map, BC3, its height's flatness in its m_bFlatHeight).
+  CTexture *LoadPbrMap(CTexture *pTex, const std::string &Path, bool bHeight);
   //! Makes the GPU texture of pTex from Image (replacing one it has) and sets its sizes.
   bool Upload(CTexture *pTex, const SImage &Image);
   void AddKey(CTexture *pTex, const std::string &Key);

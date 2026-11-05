@@ -539,6 +539,63 @@ reference of its features and console variables.
   each channel of the light clamped to 1 first, as before, gave 0.59 0.65 0.65, the lamp's green
   lost. The highlight's colour likewise. 0: clamped as before.
 
+## Parallax and generated normals (RayMaster)
+
+- A texture tool (a local one, not in this repository) makes, for the game's textures, a material
+  map `<texture>_pbr_m.dds` (BC3: red the roughness, green the metalness, blue the occlusion,
+  alpha the height: 0 a hollow, 1 a bump, 0.5 flat; with its mips) and, where the material has no
+  normal map of its own, a normal map `<texture>_pbr_n.dds` (BC1, the game's green). They go into
+  the game's folder `RayMaster`, at the texture's path in the paks:
+  `RayMaster/textures/terrain/stone_01_pbr_m.dds` for `textures/terrain/stone_01.dds`
+  (`PbrCompanion.h`'s `Path`: the path the texture loaded from, lower case, its extension off).
+  Without the folder nothing changes.
+- `r_Parallax` (1) draws a lit opaque surface with parallax occlusion mapping from the material
+  map's height (`Shaders/Parallax.hlsli`): the textures at uv0 (the diffuse, the normal map, the
+  detail layers that move with it) are read where the view meets the height, `r_ParallaxDepth`
+  (0.03) deep in the texture's coordinates (a share of its side; DF_TEXMATRIX's turn and stretch
+  taken into the shift, its scale out). The ray from the height 1 down to 0 in 8 to 24 steps (more
+  the more slanting the view), the first step under the height refined by the secant, as
+  Tatarchuk's (2006). The height 0.5 is not offset: on a surface's flat parts the light map, the
+  decals and the depth, all the geometry's, stay where they were. The depth less where the view is
+  under 0.2 of the normal (none edge on), and none where it is under a pixel on the screen (from 4
+  pixels on all of it): far off the march costs nothing. The textures read by the geometry's uv
+  gradients, not the offset's (no seams where the offset jumps).
+- `r_PbrNormals` (1) gives a material without a normal map (and without the bump offset) the
+  generated one: the bump mapping's own path (`DF_BUMP`, its tangent frames), the normal map in
+  place of none. A diffuse texture shared with a material that has its own normal map keeps that.
+- Both look the maps up when a scene first draws a material (`Scene.cpp`'s `WantsPbrMaps`,
+  `CTextureManager::FindPbrCompanions`), once for each texture (a miss is remembered), and only
+  while either of them is 1: with both 0 from the start no map loads and the frames are the build
+  before's. A height map flat all over (each texel within 1 of 128) takes no parallax. A map
+  without its mips (to 4 texels), of another aspect than its texture, or of another format, is
+  left out with a warning in the log. `r_TexResolution` and `r_TexBumpResolution` drop their top
+  levels as they do the textures'.
+- Parallax not with: the alpha tested and the blended surfaces, the decals, the characters (their
+  tangents the bind pose's), the world texgen, the cube and array textures, the point sampled
+  textures, the shader effects (`DF2_SHADER_FX`), the bump offset, the glow falloff and the bump
+  refraction. The generated normals not on the characters, nor where the bump offset reads the
+  normal map's slot.
+- Limits: no silhouettes, no change of the depth (the shadows, the rays, the ambient occlusion and
+  the decals take the flat surface), no self shadowing; the path tracer's first hit takes the
+  offset texture and normal (its G-buffer is the raster's pass), its later hits the geometry's uv.
+  A large `r_ParallaxDepth` stretches the steep edges of a height map (grout lines at 0.05).
+- With a frame dump an item with the maps gets the line `RayMaster maps: material '...' normals
+  '...'`, a draw ` parallax (r_Parallax) depth D` or ` normals (r_PbrNormals)`.
+- Cost (RX 7900 XTX, 3840 x 2160, the raster without the upscaler, `Parallax_river.ini`'s views): in
+  River's temple the opaque list 0.65-0.72 to 0.77-0.84 ms, the frame 2.79-2.95 to 2.91-3.05 ms;
+  from outside, 37 m off, the same (the depth under a pixel: no march).
+- Tests: `render_tests` suite `parallax` (`Parallax_river.ini`, River's temple by day at 1080p, the
+  exposure fixed). Both on change 0.17-0.26 of each view in the temple and 0.0004 of the view from
+  outside, with no more black pixels than both off (the grout's dark bottoms seen deeper: at most
+  0.0003 of a frame). Against the generated normals alone the frames change more the deeper the
+  depth: 2.7, 4.2 and 5.3 levels on average at 0.015, 0.03 and 0.05. The frame dump has 94 draws
+  with parallax and 40 with the generated normals. Both 0 give the build before's frames (0 px in
+  the nearest of 3 x 3 runs; the PerfSweep frames of Pier, River and Swamp 0-1 px in the nearest of
+  3 x 4, the build before's own runs as far apart). The unit tests `Pbr_*` check the path rule,
+  the BC3 alpha decoding of both modes, the flat height and the mip chain; `Parallax_*` the march
+  (no offset at the reference height or straight on, a constant height's shift, a ramp's and a
+  step's hit, grazing views bounded), the fade, the texture matrix and the steps.
+
 ## Depth prepass
 
 - `d3d12_DepthPrepass` (1, read every frame) draws the main view's opaque surfaces that write the

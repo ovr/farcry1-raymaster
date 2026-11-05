@@ -212,6 +212,24 @@ float4 SampleTexture(uint nIndex, uint nSampler, float2 vUV)
   }
 }
 
+//! Samples g_Textures[nIndex] with sampler nSampler (XR_SAMPLER_*) by the gradients vDx and vDy of vUV across the pixel (a
+//! uv the implicit gradients would not do: General.hlsl's r_Parallax, the uv where the view meets the height; scaled by
+//! exp2(vMipBias.x) for SampleTexture's bias).
+float4 SampleTextureGrad(uint nIndex, uint nSampler, float2 vUV, float2 vDx, float2 vDy)
+{
+  switch (nSampler)
+  {
+  case XR_SAMPLER_LINEAR_CLAMP:
+    return g_Textures[nIndex].SampleGrad(g_SamplerLinearClamp, vUV, vDx, vDy);
+  case XR_SAMPLER_POINT_WRAP:
+    return g_Textures[nIndex].SampleGrad(g_SamplerPointWrap, vUV, vDx, vDy);
+  case XR_SAMPLER_POINT_CLAMP:
+    return g_Textures[nIndex].SampleGrad(g_SamplerPointClamp, vUV, vDx, vDy);
+  default:
+    return g_Textures[nIndex].SampleGrad(g_SamplerLinearWrap, vUV, vDx, vDy);
+  }
+}
+
 //! Samples slice vUVW.z of g_TextureArrays[nIndex] with sampler nSampler (XR_SAMPLER_*), biased as
 //! SampleTexture.
 float4 SampleTextureArray(uint nIndex, uint nSampler, float3 vUVW)

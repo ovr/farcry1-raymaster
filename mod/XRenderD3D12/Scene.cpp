@@ -11,6 +11,7 @@
 #include "StdAfx.h"
 #include "Renderer.h"
 #include "Scene.h"
+#include "Texture.h"
 
 #include <ICryAnimation.h>
 
@@ -254,9 +255,27 @@ namespace
     return it.pShader->GetVertexFormat();
   }
 
+  //! With bump mapping on and r_Parallax or r_PbrNormals, whether the diffuse texture of a lit element's material has the
+  //! RayMaster maps those draw (Draw3D.cpp's DrawLeafItem): looked for here, once a texture (CTextureManager::FindPbrCompanions),
+  //! before the frame's draws. Not a character's (its tangents are the bind pose's without EF_NEEDTANGENTS).
+  bool WantsPbrMaps(const SRenderItem &it)
+  {
+    if (!g_pRenderer || g_pRenderer->CV_r_Quality_BumpMapping <= 0 || (!g_pRenderer->CV_r_Parallax && !g_pRenderer->CV_r_PbrNormals) ||
+        !it.pRes || it.pObj->m_pCharInstance || !g_pRenderer->m_pTextures)
+      return false;
+    if (it.eDrawClass != eDC_Opaque && it.eDrawClass != eDC_AlphaTest && it.eDrawClass != eDC_AlphaBlend)
+      return false;
+    CTexture *pTex = GetDiffuseTexture(it.pRes);
+    if (!pTex)
+      return false;
+    g_pRenderer->m_pTextures->FindPbrCompanions(pTex);
+    return (g_pRenderer->CV_r_Parallax && pTex->m_pPbrM && !pTex->m_pPbrM->m_bFlatHeight) || (g_pRenderer->CV_r_PbrNormals && pTex->m_pPbrN);
+  }
+
   //! The CheckUpdate flags of an element: characters get nCheckUpdate_Character; with bump mapping
   //! on, a material lit per pixel that has a normal map asks for the tangent stream too
-  //! (VSM_TANGENTS; a character's tangents are skinned when the material reports EF_NEEDTANGENTS).
+  //! (VSM_TANGENTS; a character's tangents are skinned when the material reports EF_NEEDTANGENTS),
+  //! and so one whose texture has the RayMaster maps (WantsPbrMaps).
   int CheckUpdateFlagsOf(const SRenderItem &it)
   {
     int nFlags = it.pObj->m_pCharInstance ? nCheckUpdate_Character : 0;
@@ -264,6 +283,8 @@ namespace
     auto Named = [pRes](int nSlot) { return pRes->m_Textures[nSlot] && !pRes->m_Textures[nSlot]->m_Name.empty(); };
     if (pRes && g_pRenderer && g_pRenderer->CV_r_Quality_BumpMapping > 0 && it.pShader->GetProps().bPixelLighting &&
       (Named(EFTT_NORMALMAP) || Named(EFTT_BUMP)))
+      nFlags |= VSM_TANGENTS;
+    if (WantsPbrMaps(it))
       nFlags |= VSM_TANGENTS;
     return nFlags;
   }
