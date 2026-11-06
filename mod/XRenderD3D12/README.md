@@ -698,9 +698,29 @@ reference of its features and console variables.
   objects, and with the ambient alone a lit object under a roof was nearly black: the papers on the
   floor of Training's hut 7 of 255 where the original has 46, now 15, as dark as the ground in the
   shadow beside the hut.
+  `d3d12_StaticCasters` (1) puts the full set's static casters into the live set too, and into the
+  rays' live casters (`XR_RAY_LIVE`): the parts of the objects the engine makes shadow maps for at
+  the level's load (`MakeShadowMapFrustum`'s objects, every level of detail's leaf buffer: the
+  palms and the trees that cast; not the grass and the bushes it makes none for). The engine names
+  such an object for its receivers near the camera only: a palm on Training's beach for the player
+  standing in its shadow or a mercenary beside it, as well as for the terrain. Its sharp shadow on
+  the ground was there while they were near and gone a few metres farther off, and back again as
+  one walked up to it (the user: 8 to 10 m); the terrain's own light has only a blurred one of it.
+  0 gives the frames before. At 3840 x 2160 (RX 7900 XTX, the rays' sun, the camera backing away
+  along the beach) the rays' sun shadows 0.39 -> 0.44 ms, the cascades 0.13 -> 0.14 ms, the GPU's
+  frame 6.22 -> 6.27 ms; with the cascades alone the frame the same.
   `d3d12_ShadowSoftness` (0.05 m) is the filter's radius (at least a texel and a half).
   `d3d12_ShadowDebug` 1 also shows the slices, 3 colours the cascades, 4 shows the full set's
-  shadow in red and the live set's in green. With `d3d12_ShadowCascades 0` (from the start,
+  shadow in red and the live set's in green. The frame dump's line `static casters
+  (d3d12_StaticCasters): N parts of the full set in the live set too, of M leaf buffers` counts
+  them (158 of 47 on Training's beach). Tests: the suite `casters` (`ShadowRange_training.ini`, the
+  camera backing away from a palm on Training's beach; `ShadowToggle_training.ini`, the player
+  walking up to it and away): on against off at 14 to 36 m 0.039 of the frame darker by more than 8
+  levels with the cascades and with the rays, 0.049 at the walk's middle, none brighter; off the
+  build before's frames (0 px in the nearest of 2 x 2 runs); the PerfSweep frames with 0 on the
+  game's command line (before the level loads) 0 px in the nearest of 3 x 2 runs at River's three
+  and Pier's frame 181 and Swamp's frame 1, 1 px of 1 level at Swamp's 181 and 661, Pier's frames
+  1 and 661 as far apart as the build before's own runs. With `d3d12_ShadowCascades 0` (from the start,
   `--exec-at 0`) or `e_shadow_maps 0` the frames are those of the renderer without them
   (DemoCompare difference 0 for the former). The cascades' code is in pixel shaders of its own
   (`XR_CASCADES`, for the draws with their flags): in the general one, with dxc's code for the old

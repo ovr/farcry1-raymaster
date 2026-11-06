@@ -1151,6 +1151,23 @@ void CD3D12Renderer::NoteRayOffscreenItems(std::span<const SRenderItem> Items)
   }
 }
 
+void CD3D12Renderer::NoteRayLiveParts(std::span<const SRenderItem> Items)
+{
+  if (m_bRayBehindPass || !WantsRaySun())
+    return;
+  if (m_nRayOffscreenFrame != m_nFrames)
+  {
+    m_RayOffscreenItems.clear();
+    m_RayLiveParts.clear();
+    m_nRayOffscreenFrame = m_nFrames;
+  }
+  for (const SRenderItem &it : Items)
+  {
+    if (IsRayWalked(it))
+      m_RayLiveParts.insert(PartKey(it));
+  }
+}
+
 D3D12_GPU_VIRTUAL_ADDRESS CD3D12Renderer::UseRayScene()
 {
   const D3D12_GPU_VIRTUAL_ADDRESS nTlas = m_pRayScene ? m_pRayScene->GetTLAS() : 0;
