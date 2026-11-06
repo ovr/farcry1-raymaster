@@ -992,11 +992,22 @@ void CD3D12Renderer::DrawLeafItem(const SRenderItem &it)
     // of its pixels a step nearer than with them (fish under Steam's water).
     if (m_bDepthPrepass)
       return;
+    // r_Skin: a character's face or head (its texture's file, PbrCompanion.h's IsSkin) lit per pixel as skin (General.hlsl,
+    // Skin.hlsli): its light wrapped a little past the line where the light passes it, red the farthest, and with
+    // DF_SPECULAR the broad highlight of skin's oil (its roughness by the texture's alpha, the gloss) in place of the
+    // templates' plastic one; neither the RayMaster roughness nor the reflections by rays (the alpha is the gloss's
+    // intensity, not smoothness). Also the paths' G-buffer's (its skin, PathGBufferSkin).
+    const bool bSkin = CV_r_Skin && pDiffuse && pDiffuse->m_bSkin && (dc.nFlags & DF_PIXEL_LIGHTING) && !m_bRayCaptureWalk;
+    if (bSkin)
+    {
+      Set4(dc.vSkin, 1, std::clamp(CV_r_SkinRoughness, 0.02f, 1.0f), std::clamp(CV_r_SkinRoughnessOily, 0.02f, 1.0f),
+           std::max(CV_r_SkinScatter, 0.0f));
+    }
     // r_PbrRoughness: a specular material's highlights by the roughness of its texture's RayMaster roughness map (BC4),
     // else of its material map (their red where the view meets the texture; General.hlsl's Specular, PbrSpecular.hlsli),
     // a character's too (no tangent frames needed). Not the scene for rays (the paths' highlights are their own).
     CTexture *pRough = !pDiffuse ? nullptr : pDiffuse->m_pPbrR && pDiffuse->m_pPbrR->IsTextureLoaded() ? pDiffuse->m_pPbrR : pDiffuse->m_pPbrM;
-    if (CV_r_PbrRoughness && pRough && (dc.nFlags & DF_SPECULAR) && pRough->IsTextureLoaded() && !m_bRayCaptureWalk &&
+    if (CV_r_PbrRoughness && pRough && (dc.nFlags & DF_SPECULAR) && pRough->IsTextureLoaded() && !m_bRayCaptureWalk && !bSkin &&
         !(dc.nFlags & (DF_CUBE0 | DF_TEX0_ARRAY)))
     {
       dc.nPbr[0] = (uint32)pRough->GetSRV();
@@ -1007,7 +1018,7 @@ void CD3D12Renderer::DrawLeafItem(const SRenderItem &it)
     // metalness the material map's red and green where the view meets it (a light mapped surface's first pass has no
     // highlight: its lamps' are in their passes). Its light passes (XR_PBR_LIGHT_PASS) trace none: their light on a
     // metal as much less as the first pass's diffuse.
-    if (pDiffuse && PbrReflects(*pDiffuse) && (eDC == eDC_Opaque || eDC == eDC_AlphaTest) && !m_bRayCaptureWalk &&
+    if (pDiffuse && PbrReflects(*pDiffuse) && (eDC == eDC_Opaque || eDC == eDC_AlphaTest) && !m_bRayCaptureWalk && !bSkin &&
         (dc.nFlags & (DF_LIGHTING | DF_TEX1_LIGHTMAP)) && !(dc.nFlags & (DF_CUBE0 | DF_TEX0_ARRAY)) && !(dc.nFlags2 & DF2_SHADER_FX))
     {
       dc.nPbr[1] = (uint32)pDiffuse->GetSampler();
@@ -1716,6 +1727,8 @@ void CD3D12Renderer::DumpItem(int nIndex, const SRenderItem &it, int eList)
     fprintf(m_pFrameDump.get(), "    RayMaster maps: material '%s'%s normals '%s' depth share %.2f\n",
             pTex->m_pPbrM ? pTex->m_pPbrM->m_Name.c_str() : "", pTex->m_pPbrM && pTex->m_pPbrM->m_bFlatHeight ? " (its height flat)" : "",
             pTex->m_pPbrN ? pTex->m_pPbrN->m_Name.c_str() : "", pTex->m_fParallaxShare);
+  if (pTex && pTex->m_bSkin)
+    fprintf(m_pFrameDump.get(), "    skin (r_Skin %d): lit as skin where lit per pixel\n", CV_r_Skin);
   if (pTex && pTex->m_bUpscaled)
     fprintf(m_pFrameDump.get(), "    upscaled (r_TexUpscaled): %d x %d, its file's own %d x %d\n", pTex->m_nWidth, pTex->m_nHeight,
             pTex->m_nOrigWidth, pTex->m_nOrigHeight);
@@ -1924,6 +1937,8 @@ void CD3D12Renderer::DumpDraw(const SDrawConstants &dc, const SPipelineKey &Key,
     fprintf(f, " parallax (r_Parallax) depth %.4f filter %u", dc.vParallax[0], dc.nParallax[3]);
   if ((dc.nFlags & DF_BUMP) && pTex && pTex->m_pPbrN && dc.nTex3 == (uint32)pTex->m_pPbrN->GetSRV())
     fprintf(f, " normals (r_PbrNormals)");
+  if (dc.vSkin[0] > 0)
+    fprintf(f, " skin (r_Skin) roughness %.2f to %.2f scatter %.2f", dc.vSkin[1], dc.vSkin[2], dc.vSkin[3]);
   if (dc.nPbr[0] && (dc.nFlags & DF_SPECULAR))
     fprintf(f, " roughness (r_PbrRoughness) %s specular (%.2f %.2f %.2f) gloss %s",
             pTex && pTex->m_pPbrR && dc.nPbr[0] == (uint32)pTex->m_pPbrR->GetSRV() ? "map" : "material map", dc.vSpecular[0], dc.vSpecular[1],

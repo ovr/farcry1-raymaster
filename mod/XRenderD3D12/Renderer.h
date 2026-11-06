@@ -2145,6 +2145,10 @@ public:
   int CV_r_PbrRoughness = 1;          //!< 1: the specular materials' highlights by the RayMaster maps' roughness (raymaster/<texture>_pbr_m.dds; 0: the templates')
   int CV_r_TexUpscaled = 1;           //!< 1: the textures' upscaled pictures from RayMaster (<texture>.dds), read at their load (0: the paks' own)
   int CV_r_PbrAO = 1;                 //!< 1: the reflections by rays less where the RayMaster maps' ambient occlusion hides them (0: none)
+  int CV_r_Skin = 1;                  //!< 1: the characters' faces and heads lit as skin (Skin.hlsli; 0: as the templates, the frames before)
+  float CV_r_SkinRoughness = 0.55f;   //!< the matte skin's perceptual roughness (no gloss in the texture's alpha)
+  float CV_r_SkinRoughnessOily = 0.35f; //!< the oily skin's (the gloss at SKIN_GLOSS_OILY: the lips, the nose; the wet rims smoother)
+  float CV_r_SkinScatter = 1;         //!< how far the light under the skin reaches past the shadow's line (times SKIN_WRAP; 0: lambert's)
   float CV_r_DetailDistance = 4;      //!< the terrain's detail layers fade out from here to twice this far
   int CV_d3d12_debug = 0;             //!< debug layer, 1 with GPU based validation, 2 without (also XRENDERD3D12_DEBUG); only read at Init
   int CV_d3d12_DRED = 1;              //!< DRED, 1 the page faults and our markers, 2 and every command (XRENDERD3D12_DRED before it); only read at Init

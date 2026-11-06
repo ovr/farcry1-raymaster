@@ -192,6 +192,25 @@ namespace PbrCompanion
       return nTexSide;
     return std::max(1, (int)((int64_t)nTexSide * nSide / nUpSide));
   }
+
+  //! r_Skin: the characters' skin is the texture of their faces and heads, read from Base (as Path's: lower case, '/'
+  //! separated, without the extension): a file under objects/characters/ whose name says face or head (jc_head_dark2,
+  //! valeriface, merc_rear_face_blood), not a normal or height map of one (_ddn, _ddp, _bump). The physical materials
+  //! do not tell it (most faces are mat_default, Jack's hair mat_head).
+  inline bool IsSkin(std::string_view Base)
+  {
+    constexpr std::string_view CHARACTERS = "objects/characters/";
+    if (Base.substr(0, CHARACTERS.size()) != CHARACTERS)
+      return false;
+    const size_t nSlash = Base.rfind('/');
+    const std::string_view Name = Base.substr(nSlash + 1);
+    if (Name.find("face") == std::string_view::npos && Name.find("head") == std::string_view::npos)
+      return false;
+    for (std::string_view Map : { "_ddn", "_ddp", "_bump" })
+      if (Name.size() >= Map.size() && Name.substr(Name.size() - Map.size()) == Map)
+        return false;
+    return true;
+  }
 }
 
 #endif

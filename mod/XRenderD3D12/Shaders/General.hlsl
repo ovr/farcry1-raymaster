@@ -129,6 +129,13 @@
 //	      g_Textures[nPbr.x].r at uv0 (sampler nPbr.y; PbrSpecular.hlsli):
 //	      saturate(R.V)^n * (n + 1) / 33, widened by the normal's change
 //	      across the pixel
+//	    vSkin.x > 0 (r_Skin, a character's face or head lit per pixel;
+//	      Skin.hlsli): N.L of the sun and the lights SkinWrap's (vSkin.w the
+//	      scatter), and with DF_SPECULAR rgb += vAmbient.w * vSpecular.rgb *
+//	      SkinSpecularShare(gloss) * the sum of the lights' specular colours *
+//	      falloff * SkinSpecular (GGX, F0 0.028) of the roughness
+//	      SkinRoughness(gloss, vSkin.y, vSkin.z), widened by the normal's
+//	      change across the pixel, in place of the templates' highlight
 //	    DF2_ADD_TEX4: rgb += tex4 at uv0 + (vTexMat0.w, vTexMat1.w) * vAddColor.rgb
 //	      + vAddColor.w (a glow map or a texture added, unlit); with DF2_GLASS
 //	      also a *= tex4 a
@@ -258,7 +265,9 @@
 //	a dot3 one with its direction map's share) writes the light map's
 //	light / 4 to SV_Target7 instead of multiplying its colour by it: the
 //	path tracer takes what the map lights beyond its own lamps
-//	(PathLightmapFill, PathShade.hlsli).
+//	(PathLightmapFill, PathShade.hlsli). Skin (vSkin.x > 0, r_Skin) writes
+//	its highlights' colour times SkinSpecularShare(gloss) and their
+//	roughness to SV_Target7's alpha (PathGBufferSkin; 1 elsewhere).
 //
 //////////////////////////////////////////////////////////////////////
 
@@ -271,6 +280,7 @@
 #define PARALLAX_HEIGHT(uv, dx, dy) SampleTextureGrad(g_Draw.nParallax.x, g_Draw.nParallax.y, uv, dx, dy).a
 #include "Parallax.hlsli"
 #include "PbrSpecular.hlsli"
+#include "Skin.hlsli"
 #if defined(XR_RAY_REFL) || defined(XR_RAY_LIGHT)
 #include "RayShade.hlsli"
 #endif
@@ -308,9 +318,9 @@ static float3 s_vAmbientLight, s_vAmbientNoSun, s_vAmbient;
 #ifdef XR_PT
 //! The path tracer's G-buffer of the pixel (PathGBuffer.hlsli): what the colour adds unlit, the albedo, the normal
 //! (N' with DF_BUMP), the side of its triangle the camera sees, the highlights' colour / 2, the fog's share, the sun's
-//! visibility, the light map's light / 4.
+//! visibility, the light map's light / 4, the skin (the light map target's alpha, PathGBufferSkin; 1 not skin).
 static float3 s_vPTEmission, s_vPTAlbedo, s_vPTNormal, s_vPTFace, s_vPTSpecular, s_vPTLightmap;
-static float s_fPTFog, s_fPTSun;
+static float s_fPTFog, s_fPTSun, s_fPTSkin;
 #endif
 
 #ifdef XR_RAY_LIGHT
@@ -347,6 +357,8 @@ float LightVisible(float3 vPos, float3 vToLight, float fDistance, float fMinGap,
 //! r_PbrRoughness (nPbr.x): the highlights' lobe by the RayMaster roughness, x its power of saturate(R.V), y its height
 //! (PbrSpecular.hlsli's PbrSpecLobe); x 0: the templates' lobe.
 static float2 s_vSpecLobe = 0;
+//! r_Skin (vSkin.x > 0, ShadePixel): alpha^2 of the skin's highlights (Skin.hlsli's SkinSpecular), 0 not skin.
+static float s_fSkinAlpha2 = 0;
 #ifdef XR_RAY_REFL
 //! The pixel's coverage (SV_Coverage, PSMain): 0 a helper lane (the quad's lanes outside the triangle, for the
 //! derivatives), not to trace the quad's ray of d3d12_RTPbrQuad (its point off the surface).
@@ -370,11 +382,22 @@ float Specular(float3 vN, float3 vToLight, float3 vToEye)
   return fNL > 0 ? f16 * f16 : 0;
 }
 
-float3 DrawLighting(float3 vPos, float3 vN, bool bPerPixel, out float3 vNoSunLight, out float3 vSunSpec, out float3 vOtherSpec)
+//! A light's highlight as DrawLightingT takes it: Specular's, on skin (SKIN, r_Skin) SkinSpecular's of s_fSkinAlpha2.
+template<bool SKIN> float LightSpecular(float3 vN, float3 vToLight, float3 vToEye)
+{
+  return SKIN ? SkinSpecular(vN, vToLight, vToEye, s_fSkinAlpha2) : Specular(vN, vToLight, vToEye);
+}
+
+//! DrawLighting; SKIN (r_Skin per pixel, ShadePixel): N.L of the sun and the lights SkinWrap's (vSkin.w the scatter),
+//! the highlights SkinSpecular's. A template: without SKIN it compiles as it did before skin.
+template<bool SKIN>
+float3 DrawLightingT(float3 vPos, float3 vN, bool bPerPixel, out float3 vNoSunLight, out float3 vSunSpec, out float3 vOtherSpec)
 {
   float fScale = g_Draw.vAmbient.w;
   bool bSun = !HasFlag2(DF2_NO_SUN);
   float3 vLight = g_Draw.vAmbient.rgb / fScale + (bSun ? g_Frame.vSunColor.rgb * saturate(dot(vN, g_Frame.vSunDir.xyz)) : 0);
+  if (SKIN && bSun)
+    vLight = g_Draw.vAmbient.rgb / fScale + g_Frame.vSunColor.rgb * SkinWrap(dot(vN, g_Frame.vSunDir.xyz), g_Draw.vSkin.w);
   float3 vNoSun = g_Draw.vAmbient.rgb / fScale;
   float3 vOthers = 0;
   // With a light map (DF_TEX1_LIGHTMAP) the highlights are its lamps' alone (XR_LIGHT_LIGHTMAP_LAMP, below).
@@ -382,7 +405,7 @@ float3 DrawLighting(float3 vPos, float3 vN, bool bPerPixel, out float3 vNoSunLig
   // The per pixel lights of the bump templates; DF2_VERTEX_LIGHTS: those of the vertex lighting.
   bool bClamp = bPerPixel && !HasFlag2(DF2_VERTEX_LIGHTS);
   float3 vToEye = SafeNormalize(g_Frame.vCameraPos.xyz - vPos);
-  vSunSpec = bSpecular && bSun ? saturate(g_Frame.vSunSpec.rgb) * Specular(vN, g_Frame.vSunDir.xyz, vToEye) : 0;
+  vSunSpec = bSpecular && bSun ? saturate(g_Frame.vSunSpec.rgb) * LightSpecular<SKIN>(vN, g_Frame.vSunDir.xyz, vToEye) : 0;
   vOtherSpec = 0;
   for (uint i = 0; i < min(g_Draw.nLights, XR_MAX_DRAW_LIGHTS); i++)
   {
@@ -439,6 +462,8 @@ float3 DrawLighting(float3 vPos, float3 vN, bool bPerPixel, out float3 vNoSunLig
     else if (bClamp)
       vColor = saturate(vColor);
     float3 vThis = vColor * saturate(dot(vN, vToLight)) * fAtten;
+    if (SKIN)
+      vThis = vColor * SkinWrap(dot(vN, vToLight), g_Draw.vSkin.w) * fAtten;
 #ifdef XR_RAY_LIGHT
     // A point light the pixel's ray does not reach: none of its light, nor its highlight.
     float fHit;
@@ -456,7 +481,7 @@ float3 DrawLighting(float3 vPos, float3 vN, bool bPerPixel, out float3 vNoSunLig
     if (bSpecular)
     {
       const float3 s = g_Draw.vLightSpec[i].rgb;
-      vOtherSpec += (bScale ? s / max(1, max(s.r, max(s.g, s.b))) : saturate(s)) * (fAtten * Specular(vN, vToLight, vToEye));
+      vOtherSpec += (bScale ? s / max(1, max(s.r, max(s.g, s.b))) : saturate(s)) * (fAtten * LightSpecular<SKIN>(vN, vToLight, vToEye));
     }
     if (i == 0 && !bScale)
     {
@@ -474,6 +499,12 @@ float3 DrawLighting(float3 vPos, float3 vN, bool bPerPixel, out float3 vNoSunLig
 #endif
   vNoSunLight = fScale * (saturate(vNoSun) + vOthers);
   return fScale * (saturate(vLight) + vOthers);
+}
+
+//! DrawLightingT<false>: the lights as the game's material takes them (all but r_Skin's draws).
+float3 DrawLighting(float3 vPos, float3 vN, bool bPerPixel, out float3 vNoSunLight, out float3 vSunSpec, out float3 vOtherSpec)
+{
+  return DrawLightingT<false>(vPos, vN, bPerPixel, vNoSunLight, vSunSpec, vOtherSpec);
 }
 
 //! The light of a material as the fixed function lights it (DF2_MATERIAL_LIGHT) at vPos with the
@@ -1201,6 +1232,7 @@ float4 ShadePixel(SVertexOutput In)
   s_vPTNormal = In.vNormal;
   s_fPTFog = 1;
   s_fPTSun = 1;
+  s_fPTSkin = 1;
   // The side of the triangle the camera sees (before any branch or discard: derivatives); the view's direction where the
   // triangle has none (edge on).
   s_vPTFace = cross(ddx(In.vWorldPos), ddy(In.vWorldPos));
@@ -1347,7 +1379,22 @@ float4 ShadePixel(SVertexOutput In)
   {
     float3 vNoSunLight, vSunSpec, vOtherSpec;
     float3 vN = HasFlag(DF_BUMP) ? vBumpN : SafeNormalize(In.vNormal);
-    float3 vLight = DrawLighting(In.vWorldPos, vN, true, vNoSunLight, vSunSpec, vOtherSpec);
+    // r_Skin (uniform per draw): the lights DrawLightingT<true>'s, the skin's highlights of the roughness by its gloss
+    // (the texture's alpha), widened where the normal changes across the pixel (PbrSpecular.hlsli).
+    const float fSkinGloss = g_Draw.vSpecular.w > 0 ? vTex.a : SKIN_GLOSS_PLAIN;
+    float3 vLight;
+    [branch]
+    if (g_Draw.vSkin.x > 0)
+    {
+      if (HasFlag(DF_SPECULAR))
+      {
+        const float3 vDx = ddx(vN), vDy = ddy(vN);
+        s_fSkinAlpha2 = PbrSpecAlpha2(SkinRoughness(fSkinGloss, g_Draw.vSkin.y, g_Draw.vSkin.z), dot(vDx, vDx) + dot(vDy, vDy));
+      }
+      vLight = DrawLightingT<true>(In.vWorldPos, vN, true, vNoSunLight, vSunSpec, vOtherSpec);
+    }
+    else
+      vLight = DrawLighting(In.vWorldPos, vN, true, vNoSunLight, vSunSpec, vOtherSpec);
     float3 vShadowLight = vNoSunLight;
 #ifdef XR_AMBIENT
     float3 vShadowAmb = s_vAmbientNoSun;
@@ -1371,6 +1418,10 @@ float4 ShadePixel(SVertexOutput In)
 #endif
     if (HasFlag(DF_SPECULAR))
       vSpecular = 2 * g_Draw.vSpecular.rgb * (g_Draw.vSpecular.w > 0 ? vTex.a : 1) * (fSun * vSunSpec + vOtherSpec);
+    // On skin its highlights' share by the gloss (SkinSpecularShare) times the light's scale, their lobe the gloss's.
+    [branch]
+    if (g_Draw.vSkin.x > 0 && HasFlag(DF_SPECULAR))
+      vSpecular = g_Draw.vAmbient.w * g_Draw.vSpecular.rgb * SkinSpecularShare(fSkinGloss) * (fSun * vSunSpec + vOtherSpec);
   }
   else if (HasFlag(DF_LIGHTING) && HasFlag2(DF2_MATERIAL_LIGHT))
   {
@@ -1683,6 +1734,18 @@ float4 ShadePixel(SVertexOutput In)
   {
     s_vPTAlbedo = max(vColor.rgb - s_vPTEmission, 0);
     s_vPTSpecular = saturate(g_Draw.vSpecular.rgb * (g_Draw.vSpecular.w > 0 ? vTex.a : 1));
+    // r_Skin: its highlights' colour by the share its gloss leaves, their roughness by the gloss into the light map
+    // target's alpha (CSSpecular's SkinSpecular; the composite's sun SkinWrap's).
+    [branch]
+    if (g_Draw.vSkin.x > 0)
+    {
+      const float fGloss = g_Draw.vSpecular.w > 0 ? vTex.a : SKIN_GLOSS_PLAIN;
+      const float3 vN = SafeNormalize(s_vPTNormal);
+      const float3 vDx = ddx(vN), vDy = ddy(vN);
+      s_vPTSpecular = saturate(g_Draw.vSpecular.rgb * SkinSpecularShare(fGloss));
+      s_fPTSkin = PathGBufferSkin(sqrt(sqrt(PbrSpecAlpha2(SkinRoughness(fGloss, g_Draw.vSkin.y, g_Draw.vSkin.z),
+                                                          dot(vDx, vDx) + dot(vDy, vDy)))));
+    }
     vColor.rgb = s_vPTEmission;
   }
 #endif
@@ -1846,7 +1909,7 @@ struct SPixelOutput
   float4 vNormal : SV_Target4;    //!< the normal, the fog's share, the path material (PathGBufferNormal)
   float4 vSun : SV_Target5;       //!< r the sun's visibility, gba the game's ambient light / 2 (the draw's vAmbient)
   float4 vSpecular : SV_Target6;  //!< the highlights' colour / 2, with the colour's alpha for the blend
-  float4 vLightmap : SV_Target7;  //!< the light map's light / 4 (rgb; 0 without one)
+  float4 vLightmap : SV_Target7;  //!< the light map's light / 4 (rgb; 0 without one), a the skin (PathGBufferSkin)
 };
 
 SPixelOutput PSMain(XR_PS_INPUT)
@@ -1887,7 +1950,7 @@ SPixelOutput PSMain(XR_PS_INPUT)
 #endif
   Out.vSun = float4(s_fPTSun, saturate(0.5 * vAmbient));
   Out.vSpecular = float4(saturate(s_vPTSpecular), Out.vColor.a);
-  Out.vLightmap = float4(saturate(s_vPTLightmap), 1);
+  Out.vLightmap = float4(saturate(s_vPTLightmap), s_fPTSkin);
   return Out;
 }
 #elif defined(XR_VELOCITY)

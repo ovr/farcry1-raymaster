@@ -911,6 +911,7 @@ CTexture *CTextureManager::Load(const char *szName, const char *szTexturePath, u
     pTex->m_bPoint = (nFlags2 & FT2_FILTER_NEAREST) != 0;
     pTex->m_bLoaded = (pTex->m_pGPU != nullptr);
     pTex->m_File = Res.Base;
+    pTex->m_bSkin = eTT != eTT_Bumpmap && PbrCompanion::IsSkin(Res.Base);
     if (bUpscaled)
     {
       // The engine is told the file's own sides (the interface's texel rectangles), as much smaller as r_TexResolution made it.
@@ -1180,6 +1181,7 @@ void CTextureManager::ReleasePbrCompanions(CTexture *pTex)
   pTex->m_fParallaxShare = 1.0f;
   pTex->m_File.clear();
   pTex->m_bUpscaled = false;
+  pTex->m_bSkin = false;
   for (CTexture *pMap : pMaps)
     ReleaseTexture(pMap, false);
 }

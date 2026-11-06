@@ -64,7 +64,9 @@
 //	    sum of the sun's (vSpecular.rgb times the visibility the raster
 //	    found) and each lamp's specular colour (times vSpecular.w;
 //	    saturate(1 - d / radius) of its sphere, a projector's cube) times
-//	    saturate(R.V)^32, R the light reflected about the normal; a lamp's
+//	    saturate(R.V)^32, R the light reflected about the normal (on skin,
+//	    r_Skin, the light map target's alpha: SkinSpecular of its roughness,
+//	    PathGBufferSkinRough; the colour its share's, Skin.hlsli); a lamp's
 //	    where its ray reaches it, SPECULAR_RAYS of them at most (the
 //	    nearest), only where it gives SPECULAR_MIN or more. The same in the
 //	    reference: one frame has it all.
@@ -73,6 +75,7 @@
 
 #include "PathShade.hlsli"
 #include "PathGBuffer.hlsli"
+#include "Skin.hlsli"
 #include "PathCache.hlsli"
 
 ConstantBuffer<SPathTraceConstants> g_PT : register(b2);
@@ -463,6 +466,12 @@ float PathPhong(float3 vN, float3 vToLight, float3 vToEye)
   return fNL > 0 ? f16 * f16 : 0;
 }
 
+//! The highlight's lobe: PathPhong's, on skin (fSkinAlpha2 > 0, alpha^2 of its roughness) SkinSpecular's.
+float PathLobe(float3 vN, float3 vToLight, float3 vToEye, float fSkinAlpha2)
+{
+  return fSkinAlpha2 > 0 ? SkinSpecular(vN, vToLight, vToEye, fSkinAlpha2) : PathPhong(vN, vToLight, vToEye);
+}
+
 [numthreads(XR_PT_GROUP, XR_PT_GROUP, 1)]
 void CSSpecular(uint3 vId : SV_DispatchThreadID)
 {
@@ -484,8 +493,11 @@ void CSSpecular(uint3 vId : SV_DispatchThreadID)
   PixelSurface(vPos, vFace, PathGBufferMaterial(vGBuffer), g_PT.nFlags.w & 0xff);
   const float3 vN = PixelNormal(vGBuffer);
   const float3 vToEye = normalize(g_PT.vCameraPos.xyz - vPos);
+  // r_Skin: the skin's lobe of the G-buffer's roughness (the light map target's alpha).
+  const float fSkinRough = PathGBufferSkinRough(g_Textures[g_PT.nTextures4.x].Load(int3(p, 0)).a);
+  const float fSkinAlpha2 = fSkinRough * fSkinRough * fSkinRough * fSkinRough;
   // The sun's, with the visibility the raster found.
-  float3 vSpecular = g_PT.vSpecular.rgb * (g_Textures[g_PT.nTextures2.w].Load(int3(p, 0)).r * PathPhong(vN, g_Frame.vSunDir.xyz, vToEye));
+  float3 vSpecular = g_PT.vSpecular.rgb * (g_Textures[g_PT.nTextures2.w].Load(int3(p, 0)).r * PathLobe(vN, g_Frame.vSunDir.xyz, vToEye, fSkinAlpha2));
   // The lamps', each by a ray towards it.
   const SPathShade P = PathShadeParams(g_PT.nPath.z);
   uint nRays = 0;
@@ -504,7 +516,7 @@ void CSSpecular(uint3 vId : SV_DispatchThreadID)
     }
     if (fFalloff <= 0)
       continue;
-    float3 vLamp = saturate(L.vSpecular.rgb) * (g_PT.vSpecular.w * fFalloff * PathPhong(vN, vToLight, vToEye));
+    float3 vLamp = saturate(L.vSpecular.rgb) * (g_PT.vSpecular.w * fFalloff * PathLobe(vN, vToLight, vToEye, fSkinAlpha2));
     if (L.nParams.x == XR_PT_LIGHT_PROJECTOR && L.nParams.z != XR_RAY_NONE && any(vLamp > 0))
       vLamp *= g_Cubes[NonUniformResourceIndex(L.nParams.z)].SampleLevel(g_SamplerLinearClamp, mul(float4(vPos, 1), L.mProject).xyz, 0).rgb;
     const float3 vGives = vColor * vLamp;

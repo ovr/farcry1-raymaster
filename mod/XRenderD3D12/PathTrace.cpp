@@ -932,6 +932,10 @@ void CD3D12Renderer::DrawPathTrace()
   dc.nTex2 = (uint32)s.pSun->m_nSRV;
   dc.nTex3 = (uint32)s.pLight->m_nSRV;
   dc.nTex4 = (uint32)s.pHighlights->m_nSRV;
+  // r_Skin: the skin of the G-buffer's light map target (its alpha) lit by the sun as the raster lights it, wrapped round
+  // the line where the sun passes it by the scatter (Skin.hlsli's SkinWrap).
+  dc.nTex5 = (uint32)s.pLightmap->m_nSRV;
+  Set4(dc.vSkin, 1, 0, 0, std::max(CV_r_SkinScatter, 0.0f));
   static const float s_Triangle[3][3] = { { -1, -1, 0 }, { -1, 3, 0 }, { 3, -1, 0 } };
   DrawImmediate(Key, dc, D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST, VERTEX_FORMAT_P3F, s_Triangle, 3);
   memcpy(m_Viewport, Viewport, sizeof(Viewport));

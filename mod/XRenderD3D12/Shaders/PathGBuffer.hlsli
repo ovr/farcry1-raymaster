@@ -34,7 +34,10 @@
 //	    half of the raster's 2 * vSpecular * gloss (DF_SPECULAR lit per
 //	    pixel; the fixed function's material light about as much), the game's
 //	    colour, 0 where it has none; it blends as the albedo. The highlights
-//	    of the sun and the lamps on it are PathTrace.hlsl's CSSpecular.
+//	    of the sun and the lamps on it are PathTrace.hlsl's CSSpecular;
+//	  - the light map's light / 4 (D3D12_PT_LIGHTMAP_FORMAT, SV_Target7,
+//	    rgb) and the skin (a: r_Skin's roughness of its highlights,
+//	    PathGBufferSkin; 1 not skin), the opaque surface's.
 //	The picture is then the colour plus the fog's share of the albedo's
 //	surfaces lit by the path tracer (PathComposite.hlsl).
 //
@@ -84,6 +87,19 @@ float4 PathGBufferNormal(float3 vNormal, float3 vFace, float fFog, uint nMateria
 uint PathGBufferMaterial(float4 vNormal)
 {
   return (uint)round(vNormal.a * 3);
+}
+
+//! The light map target's alpha of skin whose highlights' perceptual roughness is fRough (r_Skin, Skin.hlsli; below 1,
+//! which is not skin).
+float PathGBufferSkin(float fRough)
+{
+  return min(saturate(fRough), 254.0 / 255);
+}
+
+//! The perceptual roughness of the skin of a light map target's alpha (PathGBufferSkin), 0 where it is not skin.
+float PathGBufferSkinRough(float a)
+{
+  return a < 254.5 / 255 ? max(a, 1.0 / 255) : 0;
 }
 
 #endif
