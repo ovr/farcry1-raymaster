@@ -1207,6 +1207,22 @@ reference of its features and console variables.
   At 3840 x 2160 under 8 lamps (DemoMultiLight with `DemoMultiLightTeapot.ini`: `main_view = 1`
   draws it as the main view) the opaque list takes 0.05 -> 0.23 ms, the GPU 0.96 -> 1.18; in
   Research's hall 1.05 -> 1.23 (the opaque list waits for the scene for rays).
+  `d3d12_RTFaceNormal` (1; read every frame, not registered without rays) picks the side of its
+  surface these rays (the lamps' shadows', the reflections') start from by the face of the pixel's
+  triangle from the plane 1 / w makes over the screen (`RayFace.hlsli`, `nRaySun.z`'s bit 20; the
+  cube maps' mode now bits 16-19). The cross product of the world position's differences from pixel
+  to pixel took it before, and they round where the camera is close: a pixel of Jack's face in
+  Training's opening cut scene is 0.1 mm, a float step of a position 400 m from the level's origin
+  0.03 mm, and that face turned by degrees from pixel to pixel (the unit test: over 3 degrees, the
+  plane's under 0.25). Where a lamp grazed the face its side flipped too: the ray started behind the
+  surface in every other pixel and met the head itself, a stipple of the lamp's shadow on the
+  temple, the cheek and the neck. Where the face is turned from a lamp but the vertices' normal
+  faces it (the coarse mesh's terminator: the smooth shading lights past the triangle's edge), the
+  ray towards that lamp starts by the vertices' normal (bit 21), so a head is not cut into its
+  triangles' shadows; on skin (`r_Skin`'s wrap and the normal map light past where the light
+  passes) for every lit pixel. A thin surface lit from behind (its vertices' normal turned from the
+  lamp too) keeps its face. 2 takes the face alone, 0 gives the frames before. That cut scene's
+  close up at 3840 x 2160 with the film's RT settings: the GPU's frame 14.36 -> 14.39 ms (noise).
   `d3d12_PathTracing`, the path tracer of the main view's lighting, has its own section (Path tracing).
   `d3d12_RTDebug` views the scene for rays from the camera: 1 instances (a colour of the mesh and
   where it is to 0.25 m, the same from frame to frame), 2 shaded hits on the right

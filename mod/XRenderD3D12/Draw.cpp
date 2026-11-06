@@ -149,9 +149,10 @@ void CD3D12Renderer::MakeFrameConstants(SFrameConstants &fc, bool bScene) const
   if (m_RaySun.bActive && m_RaySun.pMask)
     fc.nRaySun[0] = (uint32)m_RaySun.pMask->m_nSRV;
   // The general program's rays (General.hlsl's XR_RAY_REFL and XR_RAY_LIGHT): their length, the mask with
-  // the cube maps' mode (bits 16-23), the lamps' (24-25), how many lamps a pixel (28-31) and how far short of a
+  // the cube maps' mode (bits 16-19), the lamps' (24-25), how many lamps a pixel (28-31) and how far short of a
   // lamp its rays end (9-15, 2 cm steps), the RayMaster reflections' ray a quad (26, d3d12_RTPbrQuad) and their
-  // occlusion by the material map's (27, r_PbrAO), the ocean's level.
+  // occlusion by the material map's (27, r_PbrAO), the side they start from by 1 / w's plane (20,
+  // d3d12_RTFaceNormal) and by the vertices' normal where a face is turned from a lamp (21), the ocean's level.
   const bool bSurfaceRays = WantsRaySurfaces(), bLightRays = WantsRayLights();
   if (bSurfaceRays || bLightRays)
   {
@@ -159,8 +160,9 @@ void CD3D12Renderer::MakeFrameConstants(SFrameConstants &fc, bool bScene) const
     I3DEngine *p3D = iSystem ? iSystem->GetI3DEngine() : nullptr;
     const float fWater = p3D ? p3D->GetWaterLevel() : -FLT_MAX;
     memcpy(&fc.nRaySun[1], &fLength, sizeof(fLength));
-    fc.nRaySun[2] = RayMask() | (bSurfaceRays ? (uint32)std::clamp(CV_d3d12_RTReflectionSurfaces, 0, 255) << 16 : 0) |
-                    (bSurfaceRays && CV_d3d12_RTPbrQuad ? 1u << 26 : 0u) | (bSurfaceRays && CV_r_PbrAO ? 1u << 27 : 0u);
+    fc.nRaySun[2] = RayMask() | (bSurfaceRays ? (uint32)std::clamp(CV_d3d12_RTReflectionSurfaces, 0, 15) << 16 : 0) |
+                    (bSurfaceRays && CV_d3d12_RTPbrQuad ? 1u << 26 : 0u) | (bSurfaceRays && CV_r_PbrAO ? 1u << 27 : 0u) |
+                    (CV_d3d12_RTFaceNormal == 1 ? 3u << 20 : CV_d3d12_RTFaceNormal == 2 ? 1u << 20 : 0u);
     if (bLightRays)
       fc.nRaySun[2] |= ((uint32)std::clamp((int)(CV_d3d12_RTLightShadowGap * 50 + 0.5f), 0, 127) << 9) |
                        ((uint32)std::clamp(CV_d3d12_RTLightShadows, 0, 3) << 24) | ((uint32)std::clamp(CV_d3d12_RTLightShadowsMax, 1, 15) << 28);

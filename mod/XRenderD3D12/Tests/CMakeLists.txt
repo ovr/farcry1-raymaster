@@ -46,7 +46,7 @@ foreach(k Oct GBufferNormal Hdr HdrStats ToneMap HdrOutput SkyGlow FrameAverage 
           LightmapLight RenderMode Fxaa ArrayCoords BlendPictures PictureNoise WaterGlint WaterCap WaterCrest Foam FoamMix FoamLight FoamContact FoamSurf FoamClumps FoamShade CausticsRay CausticsDepth CausticsFar
           VolumeAttenuation VolumeInscatter VolumeSegments VolumeRay WakeShape Grid GridDisc UnderPath UnderPhase UnderSegments
           UnderInscatter UnderInscatterClosed UnderWindow UnderSurface UnderFog UnderClear CoverageAlpha FadeAlpha PbrSpecLobe PbrReflect PbrPrev PbrQuad PbrQuadShares PbrSpecOcclusion
-          SkinSpecular SkinParts)
+          SkinSpecular SkinParts RayFace)
     xrender_d3d12_test_shader(${k} "${headers}" cs_6_0 CS${k})
 endforeach()
 # SMAA 1x (Smaa.hlsli with third_party/smaa's SMAA.hlsl, SmaaBlend.hlsli): its edges and its blending at the high
@@ -140,6 +140,7 @@ set(XRENDERD3D12_TESTS_SOURCES
     ParallaxTests.cpp
     PbrSpecularTests.cpp
     SkinTests.cpp
+    RayFaceTests.cpp
 )
 file(GLOB XRENDERD3D12_TESTS_HLSL "${CMAKE_CURRENT_SOURCE_DIR}/Shaders/*.hlsl" "${CMAKE_CURRENT_SOURCE_DIR}/Shaders/*.hlsli")
 set_source_files_properties(${XRENDERD3D12_TESTS_HLSL} PROPERTIES HEADER_FILE_ONLY ON)

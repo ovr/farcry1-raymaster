@@ -2243,6 +2243,8 @@ public:
   int CV_d3d12_RTLightShadowsMax = 4;       //!< the lamps a pixel traces rays towards
   float CV_d3d12_RTLightShadowGap = 0.1f;   //!< how far short of a lamp its rays end (m): not its own fitting
   float CV_d3d12_RTProjectorShadowGap = 0.5f; //!< how far short of a projector its rays end, at least the gap above (m): its picture draws its shade
+  int CV_d3d12_RTFaceNormal = 1;            //!< the side the main view's rays start from by 1 / w's plane (RayFace.hlsli; nRaySun.z bit 20),
+                                            //!< and towards a lamp by the vertices' normal where the face is turned from it (bit 21; 2: not)
   float CV_d3d12_RTSunAngle = 0.53f;        //!< the sun's disc, degrees across (the soft edges of its shadow)
   int CV_d3d12_RTSunDenoise = 1;            //!< the sun's shadow by rays blended over the frames and its soft edges filtered
   int CV_d3d12_RTGI = 0;                    //!< the ambient light by rays, a bounce (RayAO.cpp): 1 a ray for each 2 x 2 pixels, 2 a pixel
