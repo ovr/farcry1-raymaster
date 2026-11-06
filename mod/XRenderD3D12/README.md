@@ -544,8 +544,11 @@ reference of its features and console variables.
 - A texture tool (a local one, not in this repository) makes, for the game's textures, a material
   map `<texture>_pbr_m.dds` (BC3: red the roughness, green the metalness, blue the occlusion,
   alpha the height: 0 a hollow, 1 a bump, 0.5 flat; with its mips) and, where the material has no
-  normal map of its own, a normal map `<texture>_pbr_n.dds` (BC1, the game's green). They go into
-  the game's folder `RayMaster`, at the texture's path in the paks:
+  normal map of its own, a normal map `<texture>_pbr_n.dds` (BC1, the game's green), and the
+  roughness alone `<texture>_pbr_r.dds` (BC4: in the material map's BC3 the red shares each block's
+  two colours with the metalness and the occlusion, 5 bits and 4 levels, its error as large as the
+  roughness's own detail). They go into the game's folder `RayMaster`, at the texture's path in the
+  paks:
   `RayMaster/textures/terrain/stone_01_pbr_m.dds` for `textures/terrain/stone_01.dds`
   (`PbrCompanion.h`'s `Path`: the path the texture loaded from, lower case, its extension off).
   Without the folder nothing changes.
@@ -584,10 +587,29 @@ reference of its features and console variables.
   The textures are still read at the pixel's footprint. 0 reads the height at the pixel, as
   before; 1 to 64. Filtering by the march's step alone (its gradient stretched along the march)
   changed nothing there: the spikes are the map's noise, not the steps missing it.
-- Both look the maps up when a scene first draws a material (`Scene.cpp`'s `WantsPbrMaps`,
+- `r_PbrRoughness` (1) gives the highlights of the specular materials lit per pixel (the specular
+  templates' `DF_SPECULAR`: the sun's, the lamps', the light map's lamps') the lobe of their
+  texture's roughness, the roughness map's red (else the material map's) where the view meets the
+  texture, in place of the templates' `saturate(R.V)^32` for all (`Shaders/PbrSpecular.hlsli`):
+  the power `n = (2 / alpha^2 - 2) / 4` of `alpha = r^2` (Blinn-Phong's power of N.H for that
+  roughness; R.V's lobe as wide at a quarter of it), 1 to 512, its height `(n + 1) / 33` times the
+  templates' (the lobe's integral about R the templates': as much light reflected, a rough lobe
+  broad and faint, a smooth one narrow and bright; the templates' lobe is that of r = 0.35). Where
+  the normal changes across the pixel the lobe widens (alpha^2 plus at most 0.18 of the normal's
+  change, Tokuyoshi and Kaplanyan 2019): no sparkle of the narrow lobes over bumps far off. A
+  character's too (no tangent frames needed), not the scene for rays (the paths' highlights are
+  their own). The texture tool's roughness of a specular material without gloss in its alpha (the
+  renderer's highlight `2 * spec` all over) has the mean a gloss alpha of 1 would give
+  (`lerp(0.85, 0.35, min(1, 2 * spec))`) and the network's detail about it: the highlight the
+  artists gave the material kept, the network's wear and dirt in it (311 of the 2286 textures).
+  Treehouse's lab floor plates (`textures/ww2style/floor78378`, metal by their physics, the
+  highlight 0.90) had 0.56 from the network alone, a dull broad sheen in place of the plates'
+  shine; now 0.35 on average (0.31-0.39), the raised treads smoother than the rusty pits.
+- The maps are looked up when a scene first draws a material (`Scene.cpp`'s `WantsPbrMaps`,
   `CTextureManager::FindPbrCompanions`), once for each texture (a miss is remembered), and only
-  while either of them is 1: with both 0 from the start no map loads and the frames are the build
-  before's. A height map flat all over (each texel within 1 of 128) takes no parallax. A map
+  while one of `r_Parallax`, `r_PbrNormals` and `r_PbrRoughness` is 1 (a character's for the
+  roughness alone; the roughness map only while that is 1): with all three 0 from the start no map
+  loads and the frames are the build before's. A height map flat all over (each texel within 1 of 128) takes no parallax. A map
   without its mips (to 4 texels), of another aspect than its texture, or of another format, is
   left out with a warning in the log. `r_TexResolution` and `r_TexBumpResolution` drop their top
   levels as they do the textures'.
@@ -601,14 +623,18 @@ reference of its features and console variables.
   offset texture and normal (its G-buffer is the raster's pass), its later hits the geometry's uv.
   A large `r_ParallaxDepth` stretches the steep edges of a height map (grout lines at 0.05).
 - With a frame dump an item with the maps gets the line `RayMaster maps: material '...' normals
-  '...' depth share S`, a draw ` parallax (r_Parallax) depth D filter N` or ` normals
-  (r_PbrNormals)`.
+  '...' depth share S`, a draw ` parallax (r_Parallax) depth D filter N`, ` normals
+  (r_PbrNormals)` or ` roughness (r_PbrRoughness) map|material map specular (r g b) gloss alpha|1`.
+- The renderer reads BC4 files too (`ATI1`, `BC4U`; none of the game's own): the one channel in red,
+  green and blue 0, alpha 1, as the GPU reads them.
 - Cost (RX 7900 XTX, 3840 x 2160, the raster without the upscaler, `Parallax_river.ini`'s views): in
   River's temple the opaque list 0.65-0.72 to 0.77-0.84 ms, the frame 2.79-2.95 to 2.91-3.05 ms;
   from outside, 37 m off, the same (the depth under a pixel: no march). `r_ParallaxMaterials` and
   `r_ParallaxFilter` add 0.04-0.12 ms to the temple's opaque list (0.74-0.81 to 0.81-0.92 ms, the
   frame 2.83-3.03 to 2.92-3.11 ms), the filter: over the smoother height the ray goes more steps
-  before it meets it.
+  before it meets it. `r_PbrRoughness` in Treehouse's corridor end (`Parallax_treehouse_pan.ini`,
+  its metal floor plates under the lamps): the opaque list 0.89-0.92 to 0.90-0.93 ms, the frame the
+  same (2.68-2.71 ms; with the player's settings 3.53 ms).
 - Tests: `render_tests` suite `parallax` (`Parallax_river.ini`, River's temple by day at 1080p, the
   exposure fixed). Both on change 0.17-0.26 of each view in the temple and 0.0004 of the view from
   outside, with no more black pixels than both off (the grout's dark bottoms seen deeper: at most
@@ -634,6 +660,18 @@ reference of its features and console variables.
   Research's pump hall 0.028. The unit tests `Pbr_DepthTable` (the table's rows, comments, Windows line ends, numbers
   left out or clamped, the last row counting) and `Parallax_MarchGrad` (the gradients at least the
   texels and the step, their directions kept).
+- Tests of the roughness: `render_tests` suite `roughness` (`Parallax_treehouse_pan.ini` at 1080p,
+  the exposure fixed). The light on the ceiling above the lamp there is not the same from run to
+  run (two runs of one build 4-10 % of the frame apart): the checks take the pixels 16 px or more
+  from any that two runs of one build have apart. The frame dump has 19 draws with the roughness
+  map and none with the material map's red; on against off 0.06 of the steady pixels change, their
+  mean luma 0.2 levels apart (as much light reflected), 0.00001 of a frame gone black; `r_PbrRoughness 0` gives
+  the build before's frames (0 px of the 0.71 of a frame steady in both builds; the PerfSweep
+  frames of Pier, River and Swamp 0 px in the nearest of 2 x 2 runs at Pier's frame 181, River's 1
+  and 181 and Swamp's 661, the others as far apart as the build before's own runs). The unit tests
+  `Pbr_SpecTemplate` (r = 0.35 the templates' lobe), `Pbr_SpecMonotonic`, `Pbr_SpecBounds`,
+  `Pbr_SpecEnergy` (the lobe's integral about R the templates' wherever its power is not clamped) and
+  `Pbr_SpecNormalChange` (the lobe widened where the normal changes, by at most 0.18).
 
 ## Depth prepass
 

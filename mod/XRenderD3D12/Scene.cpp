@@ -257,11 +257,13 @@ namespace
 
   //! With bump mapping on and r_Parallax or r_PbrNormals, whether the diffuse texture of a lit element's material has the
   //! RayMaster maps those draw (Draw3D.cpp's DrawLeafItem): looked for here, once a texture (CTextureManager::FindPbrCompanions),
-  //! before the frame's draws. Not a character's (its tangents are the bind pose's without EF_NEEDTANGENTS).
+  //! before the frame's draws (with r_PbrRoughness too, its highlights' roughness). Not a character's (its tangents are the
+  //! bind pose's without EF_NEEDTANGENTS): its maps looked for with r_PbrRoughness alone.
   bool WantsPbrMaps(const SRenderItem &it)
   {
-    if (!g_pRenderer || g_pRenderer->CV_r_Quality_BumpMapping <= 0 || (!g_pRenderer->CV_r_Parallax && !g_pRenderer->CV_r_PbrNormals) ||
-        !it.pRes || it.pObj->m_pCharInstance || !g_pRenderer->m_pTextures)
+    if (!g_pRenderer || g_pRenderer->CV_r_Quality_BumpMapping <= 0 ||
+        (!g_pRenderer->CV_r_Parallax && !g_pRenderer->CV_r_PbrNormals && !g_pRenderer->CV_r_PbrRoughness) || !it.pRes ||
+        (it.pObj->m_pCharInstance && !g_pRenderer->CV_r_PbrRoughness) || !g_pRenderer->m_pTextures)
       return false;
     if (it.eDrawClass != eDC_Opaque && it.eDrawClass != eDC_AlphaTest && it.eDrawClass != eDC_AlphaBlend)
       return false;
@@ -269,6 +271,9 @@ namespace
     if (!pTex)
       return false;
     g_pRenderer->m_pTextures->FindPbrCompanions(pTex);
+    // A character's maps for its highlights' roughness alone (r_PbrRoughness: no tangent stream).
+    if (it.pObj->m_pCharInstance)
+      return false;
     return (g_pRenderer->ParallaxDepthOf(*pTex) > 0 && pTex->m_pPbrM && !pTex->m_pPbrM->m_bFlatHeight) ||
            (g_pRenderer->CV_r_PbrNormals && pTex->m_pPbrN);
   }

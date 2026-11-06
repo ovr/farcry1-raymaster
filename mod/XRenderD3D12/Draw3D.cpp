@@ -979,6 +979,16 @@ void CD3D12Renderer::DrawLeafItem(const SRenderItem &it)
     // of its pixels a step nearer than with them (fish under Steam's water).
     if (m_bDepthPrepass)
       return;
+    // r_PbrRoughness: a specular material's highlights by the roughness of its texture's RayMaster roughness map (BC4),
+    // else of its material map (their red where the view meets the texture; General.hlsl's Specular, PbrSpecular.hlsli),
+    // a character's too (no tangent frames needed). Not the scene for rays (the paths' highlights are their own).
+    CTexture *pRough = !pDiffuse ? nullptr : pDiffuse->m_pPbrR && pDiffuse->m_pPbrR->IsTextureLoaded() ? pDiffuse->m_pPbrR : pDiffuse->m_pPbrM;
+    if (CV_r_PbrRoughness && pRough && (dc.nFlags & DF_SPECULAR) && pRough->IsTextureLoaded() && !m_bRayCaptureWalk &&
+        !(dc.nFlags & (DF_CUBE0 | DF_TEX0_ARRAY)))
+    {
+      dc.nPbr[0] = (uint32)pRough->GetSRV();
+      dc.nPbr[1] = (uint32)pDiffuse->GetSampler();
+    }
     // The sun hidden by the shadow maps of the object's casters; by the sun's cascades where they
     // reach (a light map by the live casters only: it has the shadows of the rest). The scene for
     // rays takes their flags: which casters hide the sun at its hits (RayShade.hlsli). A lit object
@@ -1883,6 +1893,10 @@ void CD3D12Renderer::DumpDraw(const SDrawConstants &dc, const SPipelineKey &Key,
     fprintf(f, " parallax (r_Parallax) depth %.4f filter %u", dc.vParallax[0], dc.nParallax[3]);
   if ((dc.nFlags & DF_BUMP) && pTex && pTex->m_pPbrN && dc.nTex3 == (uint32)pTex->m_pPbrN->GetSRV())
     fprintf(f, " normals (r_PbrNormals)");
+  if (dc.nPbr[0] && (dc.nFlags & DF_SPECULAR))
+    fprintf(f, " roughness (r_PbrRoughness) %s specular (%.2f %.2f %.2f) gloss %s",
+            pTex && pTex->m_pPbrR && dc.nPbr[0] == (uint32)pTex->m_pPbrR->GetSRV() ? "map" : "material map", dc.vSpecular[0], dc.vSpecular[1],
+            dc.vSpecular[2], dc.vSpecular[3] > 0 ? "alpha" : "1");
   for (uint32 i = 0; i < dc.nLights; i++)
     fprintf(f, " {(%.1f %.1f %.1f %.0f) col (%.2f %.2f %.2f) att (%.3f %.3f %.1f) 1/r %.4f}", dc.vLightPos[i][0], dc.vLightPos[i][1], dc.vLightPos[i][2],
             dc.vLightPos[i][3], dc.vLightColor[i][0], dc.vLightColor[i][1], dc.vLightColor[i][2], dc.vLightAtten[i][0], dc.vLightAtten[i][1], dc.vLightAtten[i][2],

@@ -124,7 +124,11 @@
 //	    DF_SPECULAR (with DF_PIXEL_LIGHTING): rgb += 2 * vSpecular.rgb * gloss
 //	      (texture alpha if vSpecular.w, else 1) * the sum over the sun (times
 //	      v) and the lights of their specular colour (clamped to 1) * falloff
-//	      * saturate(R.V)^32, R the light reflected about the normal
+//	      * saturate(R.V)^32, R the light reflected about the normal; with
+//	      nPbr.x non-zero (r_PbrRoughness) the lobe by the roughness of
+//	      g_Textures[nPbr.x].r at uv0 (sampler nPbr.y; PbrSpecular.hlsli):
+//	      saturate(R.V)^n * (n + 1) / 33, widened by the normal's change
+//	      across the pixel
 //	    DF2_ADD_TEX4: rgb += tex4 at uv0 + (vTexMat0.w, vTexMat1.w) * vAddColor.rgb
 //	      + vAddColor.w (a glow map or a texture added, unlit); with DF2_GLASS
 //	      also a *= tex4 a
@@ -258,6 +262,7 @@
 // r_Parallax's height: the RayMaster material map's alpha (Draw3D.cpp's nParallax).
 #define PARALLAX_HEIGHT(uv, dx, dy) SampleTextureGrad(g_Draw.nParallax.x, g_Draw.nParallax.y, uv, dx, dy).a
 #include "Parallax.hlsli"
+#include "PbrSpecular.hlsli"
 #if defined(XR_RAY_REFL) || defined(XR_RAY_LIGHT)
 #include "RayShade.hlsli"
 #endif
@@ -331,11 +336,18 @@ float LightVisible(float3 vPos, float3 vToLight, float fDistance, float fMinGap,
 //! is clamped to 1; per pixel with DF2_VERTEX_LIGHTS as per vertex, with DF2_SMOOTH_FALLOFF by
 //! 2 (1 - smoothstep(0, 0.9, d / radius)), the falloff the per vertex attenuation of a static
 //! object is fitted to.
-//! The specular power of a light: saturate(R.V)^32, R = L reflected about N, 0 where N.L <= 0.
+//! r_PbrRoughness (nPbr.x): the highlights' lobe by the RayMaster roughness, x its power of saturate(R.V), y its height
+//! (PbrSpecular.hlsli's PbrSpecLobe); x 0: the templates' lobe.
+static float2 s_vSpecLobe = 0;
+
+//! The specular power of a light: saturate(R.V)^32, R = L reflected about N, 0 where N.L <= 0 (s_vSpecLobe's where it
+//! has one).
 float Specular(float3 vN, float3 vToLight, float3 vToEye)
 {
   float fNL = dot(vN, vToLight);
   float fRV = saturate(dot(2 * fNL * vN - vToLight, vToEye));
+  if (s_vSpecLobe.x > 0)
+    return fNL > 0 ? pow(fRV, s_vSpecLobe.x) * s_vSpecLobe.y : 0;
   float f2 = fRV * fRV, f4 = f2 * f2, f8 = f4 * f4, f16 = f8 * f8;
   return fNL > 0 ? f16 * f16 : 0;
 }
@@ -1164,6 +1176,15 @@ float4 ShadePixel(SVertexOutput In)
 #ifdef XR_PT
     s_vPTNormal = vBumpN;
 #endif
+  }
+  // r_PbrRoughness: the highlights' lobe by the RayMaster roughness map's red (else the material map's) where the view
+  // meets it, wider where the normal changes across the pixel (PbrSpecular.hlsli).
+  [branch]
+  if (g_Draw.nPbr.x != 0 && HasFlag(DF_SPECULAR))
+  {
+    const float3 vN = HasFlag(DF_BUMP) ? vBumpN : SafeNormalize(In.vNormal);
+    const float3 vDx = ddx(vN), vDy = ddy(vN);
+    s_vSpecLobe = PbrSpecLobe(PbrSpecAlpha2(SampleUV0(g_Draw.nPbr.x, g_Draw.nPbr.y, vUVf).r, dot(vDx, vDx) + dot(vDy, vDy)));
   }
 
   float4 vTex = float4(1, 1, 1, 1);

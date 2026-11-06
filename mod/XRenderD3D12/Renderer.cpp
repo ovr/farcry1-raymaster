@@ -386,6 +386,10 @@ void CD3D12Renderer::RegisterVariables()
   iConsole->Register("r_PbrNormals", &CV_r_PbrNormals, 1, 0,
                      "1: a lit surface whose material has no normal map gets the normals made from its texture in the game's folder "
                      "RayMaster (raymaster/<texture>_pbr_n.dds) with bump mapping on (r_Quality_BumpMapping); 0: none (the frames before)");
+  iConsole->Register("r_PbrRoughness", &CV_r_PbrRoughness, 1, 0,
+                     "1: the highlights of the specular materials lit per pixel by the roughness of their texture's map in the game's "
+                     "folder RayMaster (raymaster/<texture>_pbr_m.dds, its red): a rough stone's broad and faint, a smooth metal's narrow "
+                     "and bright, as much light reflected; 0: the same lobe for all (the templates', the frames before)");
   iConsole->Register("d3d12_FadeBlend", &CV_d3d12_FadeBlend, 1, 0,
                      "1: the objects the engine fades in or out by their distance (their alpha below 1: the crates, the gas "
                      "cylinders and the crane on Carrier's deck) drawn blended by that alpha among the blended surfaces, as the original draws them "

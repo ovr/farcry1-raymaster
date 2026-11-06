@@ -1014,6 +1014,9 @@ void CTextureManager::FindPbrCompanions(CTexture *pTex)
     return;
   pTex->m_pPbrM = LoadPbrMap(pTex, PbrCompanion::Path(pTex->m_File, "_pbr_m"), true);
   pTex->m_pPbrN = LoadPbrMap(pTex, PbrCompanion::Path(pTex->m_File, "_pbr_n"), false);
+  // The roughness of its own (BC4: finer than the material map's red), only while r_PbrRoughness takes it.
+  if (GetCVarInt("r_PbrRoughness", 1) > 0)
+    pTex->m_pPbrR = LoadPbrMap(pTex, PbrCompanion::Path(pTex->m_File, "_pbr_r"), false);
   if (pTex->m_pPbrM)
   {
     ReadDepthTable();
@@ -1081,8 +1084,8 @@ CTexture *CTextureManager::LoadPbrMap(CTexture *pTex, const std::string &Path, b
 
 void CTextureManager::ReleasePbrCompanions(CTexture *pTex)
 {
-  CTexture *pMaps[2] = { pTex->m_pPbrM, pTex->m_pPbrN };
-  pTex->m_pPbrM = pTex->m_pPbrN = nullptr;
+  CTexture *pMaps[3] = { pTex->m_pPbrM, pTex->m_pPbrN, pTex->m_pPbrR };
+  pTex->m_pPbrM = pTex->m_pPbrN = pTex->m_pPbrR = nullptr;
   pTex->m_bPbrLooked = false;
   pTex->m_fParallaxShare = 1.0f;
   pTex->m_File.clear();

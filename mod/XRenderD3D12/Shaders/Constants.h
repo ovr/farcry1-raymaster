@@ -280,6 +280,9 @@ struct SDrawConstants
                                   //!< w the march's height over this many texels at least and its step (r_ParallaxFilter, ParallaxMarchGrad; 0 none)
   XR_FLOAT4(vParallax);           //!< x the depth from the hollows to the bumps in uv0 (r_ParallaxDepth times the material's share), y the
                                   //!< depth in pixels from which it fades, z the pixels at which it is gone, w the reference height (none to offset)
+  XR_UINT4(nPbr);                 //!< r_PbrRoughness (DF_SPECULAR; General.hlsl's Specular, PbrSpecular.hlsli): x the RayMaster roughness map's
+                                  //!< (else the material map's) texture table index (its red the roughness; 0 none: the templates' lobe), y its
+                                  //!< sampler (the texture's), zw 0
 };
 
 //! b0 of the ambient occlusion's resolve (AoResolve.hlsl, AmbientOcclusion.cpp).

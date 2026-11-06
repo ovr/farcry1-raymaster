@@ -144,9 +144,11 @@ public:
   //! made otherwise (in memory, of two files, the cubes of six). The RayMaster maps beside it are found by it.
   std::string m_File;
   //! The RayMaster maps beside the file (CTextureManager::FindPbrCompanions, PbrCompanion.h), each held by this texture:
-  //! the material map (its alpha the height: r_Parallax) and the normals (r_PbrNormals); nullptr for none.
+  //! the material map (its alpha the height: r_Parallax), the normals (r_PbrNormals) and the roughness (its red, BC4:
+  //! r_PbrRoughness, looked for while it is 1); nullptr for none.
   CTexture *m_pPbrM = nullptr;
   CTexture *m_pPbrN = nullptr;
+  CTexture *m_pPbrR = nullptr;
   bool m_bPbrLooked = false;          //!< looked for (found or not: not looked for again)
   bool m_bFlatHeight = false;         //!< a RayMaster material map whose height is flat (PbrCompanion::IsFlatHeight): nothing to offset
   //! Its share of r_ParallaxDepth by its physical material (r_ParallaxMaterials): its row of RayMaster/pbr_depth.tsv, 1
@@ -196,8 +198,8 @@ public:
   //! EF_LoadTexture semantics (flags FT_*, FT2_*, eTT ETexType); never NULL (a placeholder for a
   //! missing file). The texture gets one reference for the caller.
   CTexture *LoadTexture(const char *szName, uint nFlags, uint nFlags2, byte eTT, float fAmount1, float fAmount2, int nID, int nBindID);
-  //! The RayMaster maps beside a texture read from a file (PbrCompanion.h: raymaster/<its file>_pbr_m.dds and _pbr_n.dds),
-  //! into its m_pPbrM and m_pPbrN, looked for once (a miss remembered); each loaded once for every texture of its file. Not
+  //! The RayMaster maps beside a texture read from a file (PbrCompanion.h: raymaster/<its file>_pbr_m.dds and _pbr_n.dds,
+  //! with r_PbrRoughness _pbr_r.dds), into its m_pPbrM, m_pPbrN and m_pPbrR, looked for once (a miss remembered); each loaded once for every texture of its file. Not
   //! for cubes, arrays, the white texture and the placeholder, nor the textures without a file. A map of one face, with its
   //! levels and the texture's aspect (PbrCompanion::IsUsable), else none; r_TexResolution drops its levels as the texture's.
   //! With the material map its m_fParallaxShare from the depth table (ReadDepthTable).
