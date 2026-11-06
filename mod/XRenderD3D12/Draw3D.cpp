@@ -1932,6 +1932,8 @@ void CD3D12Renderer::DumpDraw(const SDrawConstants &dc, const SPipelineKey &Key,
             pTex->m_pPbrM ? pTex->m_pPbrM->m_vPbrMean[1] : 0.0f,
             !bLight && CV_d3d12_RTPbrScreen && m_nReflCopyFrame == m_nFrames - 1 ? " screen (d3d12_RTPbrScreen)" : "",
             !bLight && CV_d3d12_RTPbrQuad ? " quad (d3d12_RTPbrQuad)" : "");
+    if (!bLight && CV_r_PbrAO)
+      fprintf(f, " occlusion (r_PbrAO) %.2f", pTex->m_pPbrM ? pTex->m_pPbrM->m_vPbrMean[2] : 1.0f);
   }
   for (uint32 i = 0; i < dc.nLights; i++)
     fprintf(f, " {(%.1f %.1f %.1f %.0f) col (%.2f %.2f %.2f) att (%.3f %.3f %.1f) 1/r %.4f}", dc.vLightPos[i][0], dc.vLightPos[i][1], dc.vLightPos[i][2],

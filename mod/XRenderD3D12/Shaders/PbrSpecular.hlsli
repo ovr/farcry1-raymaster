@@ -22,7 +22,8 @@
 //	The reflections by rays of the metals and smooth materials
 //	(d3d12_RTPbrReflections): their ray's direction by GGX's visible
 //	normals (PbrReflectDir), the share they reflect (PbrEnvBrdf), less
-//	towards the rough (PbrReflectWeight); where the last frame's
+//	towards the rough (PbrReflectWeight), less where the texture's ambient
+//	occlusion hides the lobe (r_PbrAO: PbrSpecOcclusion); where the last frame's
 //	picture saw what a ray hits (d3d12_RTPbrScreen: PbrPrevUV,
 //	PbrViewDistance, PbrPrevShare); one ray for each 2 x 2 pixels where
 //	their reflections go the same way (d3d12_RTPbrQuad: PbrQuadStart,
@@ -131,6 +132,16 @@ float2 PbrEnvBrdf(float fRough, float fNV)
   const float a004 = min(r.x * r.x, exp2(-9.28 * saturate(fNV))) * r.x + r.y;
   // (The fit's bias a little under 0 for the roughest: none.)
   return max(float2(-1.04, 1.04) * a004 + r.zw, 0);
+}
+
+//! r_PbrAO: the share of the light over the lobe a surface lets through where its texture's ambient occlusion is fAO
+//! (the share of the hemisphere open), at N.V fNV and alpha fAlpha (Lagarde and de Rousiers 2014, "Moving Frostbite to
+//! PBR": the lobe's share in the open cone; 1 where nothing occludes, about fAO for a rough lobe, more than it for a
+//! narrow one seen from above, less towards the grazing view).
+float PbrSpecOcclusion(float fNV, float fAO, float fAlpha)
+{
+  const float a = saturate(fAO);
+  return saturate(pow(saturate(fNV) + a, exp2(-16 * saturate(fAlpha) - 1)) - 1 + a);
 }
 
 //! d3d12_RTPbrScreen (General.hlsl's PrevFrameAt): a world point's place in the last frame's picture from its clip
