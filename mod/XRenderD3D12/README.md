@@ -692,6 +692,30 @@ reference of its features and console variables.
   `Pbr_ReflectMirror`, `Pbr_ReflectAbove`, `Pbr_ReflectSpread`, `Pbr_EnvBrdf`, `Pbr_ReflectWeight`,
   `Pbr_PrevReproject`, `Pbr_PrevShare`, `Pbr_QuadLane`, `Pbr_QuadStart`, `Pbr_QuadShares`. The debug
   layer no new messages (with TAA and with MSAA).
+- `r_PbrAO` (1 by default, read every frame; not saved) takes the reflections by rays
+  (`d3d12_RTPbrReflections`) away where the texture's ambient occlusion (the material map's blue)
+  hides them: the share of the lobe in the open cone (`PbrSpecOcclusion`, Lagarde and de Rousiers
+  2014: `saturate((N.V + ao) ^ (2 ^ (-16 alpha - 1)) - 1 + ao)`; 1 where nothing occludes, about the
+  occlusion for a rough lobe, more than it for a narrow one seen from above, less towards the grazing
+  view), a miss's ambient light as much: the pits between the lab floor plates' treads and the holes
+  of the wall panels' mesh no longer reflect the corridor as their treads do. The frame dump's `
+  occlusion (r_PbrAO) A` (the map's mean). Not the ambient light, the light maps' and the rays' GI:
+  the game's textures have their hollows painted dark already (the map's occlusion made from them),
+  they would darken twice. 0 the frames before. At 3840 x 2160 (RX 7900 XTX,
+  `Parallax_treehouse_pan.ini`, the raster with the rays' reflections) the frame 5.04-5.08 ->
+  5.03-5.07 ms, with the player's settings 5.86-5.90 -> 5.86-5.94 ms: the same (the map's blue read
+  with its red and green). Tests: `render_tests` suite `pbrao` (`pbrrefl`'s scene and settings): the
+  frame dump at 199 has all 32 first passes reflecting by rays occluded; in the frame's lower half on
+  against each of 4 runs without (`r_PbrAO 0` twice, the build before twice) 0.057 of the pixels more
+  darker by more than 2 levels than any other of them has against it, none more brighter, the mean
+  luma there 0.8 levels apart (with the reflections the ceiling's lamp light, different from run to
+  run, is in them all over the floor and the walls); `r_PbrAO 0` gives the build before's frames (0 px
+  of the pixels steady in both builds, 0.30 of a frame; the PerfSweep frames 0 px in the nearest of 2
+  x 2 runs at River's three, Pier's 181 and Swamp's 1, Pier's and Swamp's 661 64 and 1 px of 1 level,
+  Swamp's 181 4803 px of at most 7 levels scattered (the rays' GI; the build before's own runs 219486
+  px apart), Pier's 1 12186 px, one of the level's first frame's states). The unit test
+  `Pbr_SpecOcclusion` (the reference, bounds, 1 with nothing occluded, the occlusion for a rough lobe,
+  more open more light).
 
 ## Depth prepass
 
@@ -1088,7 +1112,9 @@ reference of its features and console variables.
   part of the colour they make, scaled as the light map, the projector and the detail texture scale
   it; at first they were less as well, the plates' lamp glints at 0.69-0.76 of their brightness). The frame
   dump's line ` reflection (d3d12_RTPbrReflections)[ light pass] roughness R metal M[ screen
-  (d3d12_RTPbrScreen)][ quad (d3d12_RTPbrQuad)]` (the material map's means).
+  (d3d12_RTPbrScreen)][ quad (d3d12_RTPbrQuad)][ occlusion (r_PbrAO) A]` (the material map's means). With
+  `r_PbrAO` less where the texture's ambient occlusion hides the lobe (Parallax and generated normals
+  (RayMaster)).
   `d3d12_RTPbrScreen` (1 by default) lights what such a ray hits as the last frame's picture shows
   it where that frame saw it: the main view's picture and depth are copied once a frame with such
   reflections (before the engine clears the depth for the weapon in the hands, with MSAA its depth

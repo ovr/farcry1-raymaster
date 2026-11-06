@@ -1166,17 +1166,20 @@ float2 ParallaxFetch(SVertexOutput In)
 }
 
 //! d3d12_RTPbrReflections (nPbr.z; in a branch the same for the draw: the derivatives): the shading normal, the
-//! roughness, alpha^2 and the metalness a reflection by rays takes at uv vUVf: the highlights' roughness (r_PbrRoughness,
-//! nPbr.x) where the draw has them, else the material map's red, alpha^2 widened by the normal's change across the pixel
-//! as the highlights' (PbrSpecAlpha2), the material map's green the metalness.
-void PbrReflectMaterial(float2 vUVf, float3 vBumpN, float3 vNormal, out float3 vN, out float fRough, out float fAlpha2, out float fMetal)
+//! roughness, alpha^2, the metalness and the ambient occlusion a reflection by rays takes at uv vUVf: the highlights'
+//! roughness (r_PbrRoughness, nPbr.x) where the draw has them, else the material map's red, alpha^2 widened by the
+//! normal's change across the pixel as the highlights' (PbrSpecAlpha2), the material map's green the metalness, its
+//! blue the occlusion.
+void PbrReflectMaterial(float2 vUVf, float3 vBumpN, float3 vNormal, out float3 vN, out float fRough, out float fAlpha2, out float fMetal,
+                        out float fAO)
 {
-  const float2 vMat = SampleUV0(g_Draw.nPbr.z, g_Draw.nPbr.y, vUVf).rg;
+  const float3 vMat = SampleUV0(g_Draw.nPbr.z, g_Draw.nPbr.y, vUVf).rgb;
   vN = HasFlag(DF_BUMP) ? vBumpN : SafeNormalize(vNormal);
   const float3 vDx = ddx(vN), vDy = ddy(vN);
   fRough = g_Draw.nPbr.x != 0 && HasFlag(DF_SPECULAR) ? SampleUV0(g_Draw.nPbr.x, g_Draw.nPbr.y, vUVf).r : vMat.r;
   fAlpha2 = PbrSpecAlpha2(fRough, dot(vDx, vDx) + dot(vDy, vDy));
   fMetal = vMat.g;
+  fAO = vMat.b;
 }
 
 //! The share of its diffuse light a surface of fRough and fMetal keeps beside its reflection by rays (nPbr.w's share).
@@ -1531,8 +1534,8 @@ float4 ShadePixel(SVertexOutput In)
   if (g_Draw.nPbr.z != 0 && (g_Draw.nPbr.w & XR_PBR_LIGHT_PASS) && ((g_Frame.nRaySun.z >> 16) & 0xff) != 0)
   {
     float3 vN;
-    float fRough, fAlpha2, fMetal;
-    PbrReflectMaterial(vUVf, vBumpN, In.vNormal, vN, fRough, fAlpha2, fMetal);
+    float fRough, fAlpha2, fMetal, fAO;
+    PbrReflectMaterial(vUVf, vBumpN, In.vNormal, vN, fRough, fAlpha2, fMetal, fAO);
     const float fDiffuse = PbrReflectDiffuse(fRough, fMetal);
     vColor.rgb = max(vColor.rgb - vHigh, 0) * fDiffuse + vHigh;
 #ifdef XR_AMBIENT
@@ -1547,13 +1550,15 @@ float4 ShadePixel(SVertexOutput In)
   // metalness times 1 - asfloat(nPbr.w). What a ray hits lit as the last frame's picture shows it where it does
   // (d3d12_RTPbrScreen, PrevFrameAt). The roughness the highlights' (r_PbrRoughness's, its map's) where the draw has
   // them. A miss (the sky, beyond the rays' length, what is out of the view and so not in the scene for rays) the
-  // draw's ambient light: the light about it the game gives it, as much as a rough surface's lobe would gather.
+  // draw's ambient light: the light about it the game gives it, as much as a rough surface's lobe would gather. With
+  // r_PbrAO (nRaySun.z's bit 27) less where the material map's ambient occlusion (its blue) hides the lobe
+  // (PbrSpecOcclusion): the pits between a metal's treads, the holes of its mesh dark, not the scene's light.
   [branch]
   if (g_Draw.nPbr.z != 0 && !(g_Draw.nPbr.w & XR_PBR_LIGHT_PASS) && ((g_Frame.nRaySun.z >> 16) & 0xff) != 0)
   {
     float3 vN;
-    float fRough, fAlpha2, fMetal;
-    PbrReflectMaterial(vUVf, vBumpN, In.vNormal, vN, fRough, fAlpha2, fMetal);
+    float fRough, fAlpha2, fMetal, fAO;
+    PbrReflectMaterial(vUVf, vBumpN, In.vNormal, vN, fRough, fAlpha2, fMetal, fAO);
     const float fWeight = PbrReflectWeight(fRough, fMetal);
     const float3 vToEye = -vRayDir;
     const float fAlpha = sqrt(fAlpha2);
@@ -1595,8 +1600,11 @@ float4 ShadePixel(SVertexOutput In)
     }
     if (fWeight > 0)
     {
-      const float2 vAB = PbrEnvBrdf(fRough, saturate(dot(vN, vToEye)));
-      const float3 vShare = (lerp(PBR_REFL_DIELECTRIC, saturate(vTex.rgb * g_Draw.vColor.rgb), fMetal) * vAB.x + vAB.y) * fWeight;
+      const float fNV = saturate(dot(vN, vToEye));
+      const float2 vAB = PbrEnvBrdf(fRough, fNV);
+      float3 vShare = (lerp(PBR_REFL_DIELECTRIC, saturate(vTex.rgb * g_Draw.vColor.rgb), fMetal) * vAB.x + vAB.y) * fWeight;
+      if (g_Frame.nRaySun.z & (1u << 27))
+        vShare *= PbrSpecOcclusion(fNV, fAO, fAlpha);
       const float fDiffuse = PbrReflectDiffuse(fRough, fMetal);
       // The highlights (vHigh) kept: the lamps' and the sun's own lobe, not the diffuse light.
       vColor.rgb = max(vColor.rgb - vHigh, 0) * fDiffuse + vHigh + vFound * vShare;

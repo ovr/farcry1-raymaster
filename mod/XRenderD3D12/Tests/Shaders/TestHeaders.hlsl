@@ -93,6 +93,16 @@ void CSPbrQuad(uint i : SV_DispatchThreadID)
   TestOut(2 * i + 1, float4(PbrQuadStart(q, 3), PbrQuadStart(q, 4), 0, 0));
 }
 
+//! r_PbrAO's PbrSpecOcclusion (PbrSpecular.hlsli) of N.V g_TestIn[i].x, the ambient occlusion .y and alpha .z: out[i].x.
+[numthreads(64, 1, 1)]
+void CSPbrSpecOcclusion(uint i : SV_DispatchThreadID)
+{
+  if (i >= g_Test.nTest.x)
+    return;
+  const float4 a = TestIn(i);
+  TestOut(i, float4(PbrSpecOcclusion(a.x, a.y, a.z), 0, 0, 0));
+}
+
 //! PbrQuadShares (PbrSpecular.hlsli) of the mirror direction g_TestIn[2i].xyz, alpha .w and the lane's direction
 //! g_TestIn[2i + 1].xyz: out[i].x 1 where the pixel takes the lane's ray.
 [numthreads(64, 1, 1)]

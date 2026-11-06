@@ -27,7 +27,9 @@
 #include "Test_PbrPrev.h"
 #include "Test_PbrQuad.h"
 #include "Test_PbrQuadShares.h"
+#include "Test_PbrSpecOcclusion.h"
 
+#include <algorithm>
 #include <array>
 #include <cmath>
 #include <vector>
@@ -544,4 +546,59 @@ XR_TEST(Pbr_QuadShares)
   const std::vector<uint32> Out = Gpu().Run(d);
   for (size_t i = 0; i < n; i++)
     CHECK_MSG((At(Out, i, 0) != 0) == Cases[i].bShares, std::to_string(Cases[i].fDegrees) + " degrees, alpha " + std::to_string(Cases[i].fAlpha));
+}
+
+namespace
+{
+  //! PbrSpecOcclusion of (N.V, the ambient occlusion, alpha) triples on the GPU.
+  std::vector<float> SpecOcclusion(const std::vector<std::array<float, 3>> &In)
+  {
+    SDispatch d;
+    d.Shader = XR_BYTECODE(Test_PbrSpecOcclusion);
+    d.Test.nTest[0] = (uint32)In.size();
+    d.nGroups[0] = Groups64(In.size());
+    for (const auto &c : In)
+      Push(d.In, c[0], c[1], c[2], 0.0f);
+    d.nOut = In.size();
+    const std::vector<uint32> Out = Gpu().Run(d);
+    std::vector<float> r;
+    for (size_t i = 0; i < In.size(); i++)
+      r.push_back(At(Out, i, 0));
+    return r;
+  }
+
+  //! Lagarde and de Rousiers 2014's specular occlusion in double precision.
+  double SpecOcclusionRef(double fNV, double fAO, double fAlpha)
+  {
+    return std::clamp(std::pow(fNV + fAO, std::exp2(-16 * fAlpha - 1)) - 1 + fAO, 0.0, 1.0);
+  }
+}
+
+XR_TEST(Pbr_SpecOcclusion)
+{
+  // The reference, nothing occluded (1), a closed texel (0 from the side), a rough lobe about the occlusion, a narrow
+  // one seen from above more than it, bounded and more with more of the hemisphere open.
+  std::vector<std::array<float, 3>> In;
+  for (float fNV : { 0.05f, 0.3f, 0.7f, 1.0f })
+    for (float fAO : { 0.0f, 0.25f, 0.5f, 0.75f, 1.0f })
+      for (float fAlpha : { 0.0f, 0.12f, 0.36f, 1.0f })
+        In.push_back({ fNV, fAO, fAlpha });
+  const std::vector<float> Out = SpecOcclusion(In);
+  for (size_t i = 0; i < In.size(); i++)
+  {
+    const auto &c = In[i];
+    const std::string Case = "N.V " + std::to_string(c[0]) + " ao " + std::to_string(c[1]) + " alpha " + std::to_string(c[2]);
+    CHECK_MSG(std::abs(Out[i] - SpecOcclusionRef(c[0], c[1], c[2])) < 2e-4, Case);
+    CHECK_MSG(Out[i] >= 0 && Out[i] <= 1, Case);
+    if (c[1] == 1.0f)
+      CHECK_MSG(Out[i] > 0.9999f, Case);
+    if (c[2] == 1.0f)
+      CHECK_MSG(std::abs(Out[i] - c[1]) < 2e-4, Case + ": a rough lobe about the occlusion");
+    if (c[0] == 1.0f && c[2] == 0.0f && c[1] > 0 && c[1] < 1)
+      CHECK_MSG(Out[i] > c[1] + 0.05f, Case + ": a narrow lobe from above more than the occlusion");
+    if (i % 20 >= 4)   // the ambient occlusion one step less at the same N.V and alpha
+      CHECK_MSG(Out[i] >= Out[i - 4] - 1e-6f, Case + ": more with more of the hemisphere open");
+  }
+  // Closed from the side: none.
+  CHECK(SpecOcclusion({ { 0.05f, 0.0f, 0.12f } })[0] < 1e-6f);
 }
