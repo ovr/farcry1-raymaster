@@ -158,6 +158,8 @@ public:
   //! r_TexUpscaled: its picture is the upscaled file (RayMaster/<its file>.dds, CTextureManager::TakeUpscaled);
   //! m_nOrigWidth and m_nOrigHeight are then its own file's sides.
   bool m_bUpscaled = false;
+  //! r_Skin: a character's face or head (PbrCompanion::IsSkin of its file), lit as skin (Skin.hlsli).
+  bool m_bSkin = false;
   size_t m_nBytes = 0;                //!< its GPU picture's bytes, every face and level (Upload)
   int m_nID;
   int m_nRefs = 1;

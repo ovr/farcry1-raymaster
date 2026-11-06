@@ -5,7 +5,7 @@
 //	File: TestHeaders.hlsl
 //	Description: The unit tests' kernels over the renderer's shader
 //	headers that stand alone (Shader Model 6.0): PathGBuffer.hlsli,
-//	HdrLight.hlsli, HdrToneMap.hlsli, HdrExposure.hlsli, HdrFrameAverage.hlsli, PathCache.hlsli, LightmapLight.hlsli, RenderMode.hlsli, ArrayCoords.hlsli, WaterLight.hlsli, WaterFoam.hlsli, WaterCaustics.hlsli, WaterVolume.hlsli, Underwater.hlsli, AlphaCoverage.hlsli, PbrSpecular.hlsli and Fxaa.hlsli, included as the renderer's
+//	HdrLight.hlsli, HdrToneMap.hlsli, HdrExposure.hlsli, HdrFrameAverage.hlsli, PathCache.hlsli, LightmapLight.hlsli, RenderMode.hlsli, ArrayCoords.hlsli, WaterLight.hlsli, WaterFoam.hlsli, WaterCaustics.hlsli, WaterVolume.hlsli, Underwater.hlsli, AlphaCoverage.hlsli, PbrSpecular.hlsli, Skin.hlsli and Fxaa.hlsli, included as the renderer's
 //	programs include them. Each kernel runs the tested functions on the
 //	items of g_TestIn and writes what they give to g_TestOut; ShaderTests.cpp
 //	checks it. One compile per kernel (Tests/CMakeLists.txt).
@@ -36,6 +36,33 @@
 #include "OceanGrid.hlsli"
 #include "AlphaCoverage.hlsli"
 #include "PbrSpecular.hlsli"
+#include "Skin.hlsli"
+
+//! r_Skin's SkinSpecular (Skin.hlsli) of g_TestIn[3i] the normal (xyz) and alpha^2 (w), [3i + 1] the direction towards the
+//! light and [3i + 2] towards the eye (xyz, normalised here): out[i].x.
+[numthreads(64, 1, 1)]
+void CSSkinSpecular(uint i : SV_DispatchThreadID)
+{
+  if (i >= g_Test.nTest.x)
+    return;
+  const float4 a = TestIn(3 * i), b = TestIn(3 * i + 1), c = TestIn(3 * i + 2);
+  TestOut(i, float4(SkinSpecular(normalize(a.xyz), normalize(b.xyz), normalize(c.xyz), a.w), 0, 0, 0));
+}
+
+//! r_Skin's parts (Skin.hlsli, PathGBuffer.hlsli) of g_TestIn[i] = (the gloss, the matte and the oily roughness, N.L) and the
+//! scatter g_Test.vTest.x: out[2i] SkinRoughness, SkinSpecularShare of the gloss, PathGBufferSkin of the gloss taken as a
+//! roughness, PathGBufferSkinRough of that as the light map target's RGBA8 stores it; out[2i + 1] SkinWrap (rgb),
+//! PathGBufferSkinRough of N.L taken as a stored alpha (w).
+[numthreads(64, 1, 1)]
+void CSSkinParts(uint i : SV_DispatchThreadID)
+{
+  if (i >= g_Test.nTest.x)
+    return;
+  const float4 a = TestIn(i);
+  const float fStored = PathGBufferSkin(a.x);
+  TestOut(2 * i, float4(SkinRoughness(a.x, a.y, a.z), SkinSpecularShare(a.x), fStored, PathGBufferSkinRough(round(fStored * 255) / 255)));
+  TestOut(2 * i + 1, float4(SkinWrap(a.w, g_Test.vTest.x), PathGBufferSkinRough(a.w)));
+}
 
 //! r_PbrRoughness's lobe (PbrSpecular.hlsli) of the roughness g_TestIn[i].x and the normal's change across the pixel .y
 //! (|dN/dx|^2 + |dN/dy|^2): out[i].x alpha^2, .y the power, .z the height.

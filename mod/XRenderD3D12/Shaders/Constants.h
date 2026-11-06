@@ -290,6 +290,9 @@ struct SDrawConstants
                                   //!< material map's index (its red the roughness where x has none, its green the metalness; 0 no reflection
                                   //!< by rays), w asuint the share of the diffuse light a metal keeps; with XR_PBR_LIGHT_PASS a light pass's
                                   //!< or a projector's of such a draw: its metal's light as much less, no ray
+  XR_FLOAT4(vSkin);               //!< r_Skin (DF_PIXEL_LIGHTING; Skin.hlsli): x 1 a character's skin (0 none), y the matte skin's
+                                  //!< perceptual roughness, z the oily skin's (the texture's alpha the gloss between them), w the
+                                  //!< scatter (SkinWrap); with DF_SPECULAR its highlights SkinSpecular in place of the templates'
 };
 
 //! nPbr.w's sign bit: a light pass of a draw that reflects by rays (d3d12_RTPbrReflections).

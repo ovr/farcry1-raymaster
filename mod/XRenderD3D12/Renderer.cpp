@@ -395,6 +395,20 @@ void CD3D12Renderer::RegisterVariables()
                      "1: the reflections by rays of the materials of the RayMaster maps (d3d12_RTPbrReflections) less where their "
                      "texture's ambient occlusion (raymaster/<texture>_pbr_m.dds, its blue) hides them: the pits between a metal's "
                      "treads and the holes of its mesh dark, not the scene's light; 0: none (the frames before)");
+  iConsole->Register("r_Skin", &CV_r_Skin, 1, 0,
+                     "1: the characters' faces and heads (their textures under objects/characters named face or head) lit as skin, "
+                     "with the raster and the path tracer: a broad highlight that reflects little head on and more towards grazing "
+                     "views (smoother where the texture's alpha, the gloss, is high), and the light under the skin reaching a little "
+                     "past the shadow's line, red the farthest (r_SkinRoughness, r_SkinRoughnessOily, r_SkinScatter); 0: as the "
+                     "templates light every material, a glossy plastic's highlight (the frames before)");
+  iConsole->Register("r_SkinRoughness", &CV_r_SkinRoughness, 0.55f, 0,
+                     "r_Skin: the perceptual roughness of the matte skin (no gloss in the texture's alpha; 0 a mirror to 1)");
+  iConsole->Register("r_SkinRoughnessOily", &CV_r_SkinRoughnessOily, 0.35f, 0,
+                     "r_Skin: the perceptual roughness of the oily skin (the texture's alpha 0.3: the lips, the nose; smoother on to "
+                     "the alpha 1, the eyes' wet rims, 0.25 at the least)");
+  iConsole->Register("r_SkinScatter", &CV_r_SkinScatter, 1, 0,
+                     "r_Skin: how far the light under the skin reaches past the line where the light passes the face, times red 0.12, "
+                     "green 0.04, blue 0.02 of N.L, w: ((N.L + w) / (1 + w))^(1 + w) (0: lambert's, the light ends at that line)");
   iConsole->Register("r_TexUpscaled", &CV_r_TexUpscaled, 1, 0,
                      "1: the textures of the game's paks take their upscaled pictures where the game's folder RayMaster has them "
                      "(raymaster/<texture>.dds beside the maps: twice the side, made by networks from the game's own, the compression's "

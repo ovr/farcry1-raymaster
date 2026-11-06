@@ -538,6 +538,25 @@ reference of its features and console variables.
   Training's bunker's lamp (1.81 2.22 1.31) on its concrete (0.59 0.65 0.65) gives 0.74 1 0.59;
   each channel of the light clamped to 1 first, as before, gave 0.59 0.65 0.65, the lamp's green
   lost. The highlight's colour likewise. 0: clamped as before.
+- `r_Skin` (1, read every frame; not saved) lights the characters' faces and heads as skin
+  (`Shaders/Skin.hlsli`; the textures under `objects/characters/` whose name says face or head, not
+  their `_ddn`, `_ddp` or `_bump` maps: `PbrCompanion::IsSkin`, 28 in the paks; the physical
+  materials do not tell it, most faces are `mat_default`). The model templates give a face the
+  highlight of every material, saturate(R.V)^32 times the texture's alpha (a glossy plastic's),
+  and `r_PbrRoughness` took that alpha for smoothness (a broad faint lobe all over: matte); under
+  the paths' soft light a doll's face. Skin's highlight instead: GGX with Smith's visibility and
+  Schlick's Fresnel of F0 0.028 (2.8 % head on, more towards grazing views), the roughness by the
+  alpha, the artists' gloss: `r_SkinRoughness` (0.55) with none, `r_SkinRoughnessOily` (0.35) at
+  0.3 (the lips, the nose's tip, the hair's strands), on to 0.25 at 1 (the eyes' wet rims), wider
+  where the normal changes across the pixel; its share whole from the bare skin's gloss (0.08) up,
+  less below (the stubble, the brows); times the light's scale and the material's specular colour.
+  Its light wrapped a little round the line where the light passes it, ((N.L + w) / (1 + w))^(1 +
+  w) with w red 0.12, green 0.04, blue 0.02 times `r_SkinScatter` (1; 0 lambert's): the light under
+  the skin, red the farthest (3 times as far made Jack's face orange under Training's cave lamps).
+  Neither `r_PbrRoughness` nor the reflections by rays on skin. The path tracer the same: the
+  G-buffer's light map target's alpha has the skin's roughness (`PathGBufferSkin`, 1 elsewhere),
+  `CSSpecular` its lobe, the composite the sun's wrap. The frame dump's ` skin (r_Skin) roughness
+  M to O scatter S` and the item line `skin (r_Skin 1)`. 0: the frames before.
 
 ## Parallax and generated normals (RayMaster)
 

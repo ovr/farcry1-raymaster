@@ -14,7 +14,10 @@
 //	terrain's SPathShade::vBakeLight or 1, times CSFilter's share), the sun its
 //	light (vParams0.rgb) times N.L and the visibility the raster found
 //	(the G-buffer's), the paths' light that of PathTrace.hlsl's CSFilter.
-//	The leaves let half of the sun through from behind them. The
+//	The leaves let half of the sun through from behind them; the skin
+//	(r_Skin: the light map target's alpha, tex5) takes N.L wrapped round
+//	the line where the sun passes it (Skin.hlsli's SkinWrap, vSkin.w the
+//	scatter), as the raster does. The
 //	highlights (PathTrace.hlsl's CSSpecular) are the game's colour, added
 //	to it as the raster adds them.
 //	tex0 the albedo, tex1 the normal (PathGBuffer.hlsli), tex2 the sun's
@@ -26,6 +29,7 @@
 #include "Common.hlsli"
 #include "RayConstants.h"
 #include "PathGBuffer.hlsli"
+#include "Skin.hlsli"
 
 struct SCompositeOutput
 {
@@ -51,7 +55,10 @@ float4 PSMain(SCompositeOutput In) : SV_Target
   const float4 vPaths = g_Textures[g_Draw.nTex3].Load(vAt);
   const float fNL = dot(PathOctDecode(vGBuffer.rg), g_Frame.vSunDir.xyz);
   const float fSun = nMaterial == XR_PT_MAT_VEGETATION + 1 ? saturate(fNL) + 0.5 * saturate(-fNL) : saturate(fNL);
-  const float3 vLight = g_Draw.vParams0.rgb * (fSun * fVisible) + vPaths.rgb;
+  float3 vLight = g_Draw.vParams0.rgb * (fSun * fVisible) + vPaths.rgb;
+  [branch]
+  if (PathGBufferSkinRough(g_Textures[g_Draw.nTex5].Load(vAt).a) > 0)
+    vLight = g_Draw.vParams0.rgb * (SkinWrap(fNL, g_Draw.vSkin.w) * fVisible) + vPaths.rgb;
   const float3 vBaked = nMaterial == XR_PT_MAT_TERRAIN + 1 ? g_Draw.vParams1.rgb * vPaths.w : vPaths.w;
   const float3 vLit = saturate(pow(saturate(vAlbedo), HDR_GAMMA) / max(vBaked, 0.01)) * vLight;
   const float3 vHighlights = g_Textures[g_Draw.nTex4].Load(vAt).rgb;
