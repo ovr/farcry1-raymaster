@@ -22,6 +22,7 @@
 #include "Shader.h"
 #include "Scene.h"
 #include "CpuSampler.h"
+#include "CommandLine.h"
 
 CD3D12Renderer *g_pRenderer = nullptr;
 
@@ -394,6 +395,14 @@ void CD3D12Renderer::RegisterVariables()
                      "1: the reflections by rays of the materials of the RayMaster maps (d3d12_RTPbrReflections) less where their "
                      "texture's ambient occlusion (raymaster/<texture>_pbr_m.dds, its blue) hides them: the pits between a metal's "
                      "treads and the holes of its mesh dark, not the scene's light; 0: none (the frames before)");
+  iConsole->Register("r_TexUpscaled", &CV_r_TexUpscaled, 1, 0,
+                     "1: the textures of the game's paks take their upscaled pictures where the game's folder RayMaster has them "
+                     "(raymaster/<texture>.dds beside the maps: twice the side, made by networks from the game's own, the compression's "
+                     "blocks cleaned first): finer detail up close; read as a texture is loaded, so it takes effect from the next "
+                     "level's load; 0: the paks' own pictures (the frames before)");
+  // The engine sets the command line's variables after its start has loaded the menu's and the shaders' textures; this
+  // one decides how they load, so its value there ("r_TexUpscaled 0") is taken now.
+  CV_r_TexUpscaled = CommandLine::IntValue(GetCommandLineA(), "r_TexUpscaled", CV_r_TexUpscaled);
   iConsole->Register("d3d12_FadeBlend", &CV_d3d12_FadeBlend, 1, 0,
                      "1: the objects the engine fades in or out by their distance (their alpha below 1: the crates, the gas "
                      "cylinders and the crane on Carrier's deck) drawn blended by that alpha among the blended surfaces, as the original draws them "
@@ -1246,6 +1255,14 @@ void CD3D12Renderer::BeginFrame (void)
         const SFogVolume *pFV = m_pScene->GetFogVolume(i);
         fprintf(m_pFrameDump.get(), "fog volume %d: max distance %g, layer z %g, colour (%.3f %.3f %.3f), caustics %d\n", i, pFV->fMaxFogDist,
                 pFV->fFogLayerZ, pFV->Color.r, pFV->Color.g, pFV->Color.b, (int)pFV->bCaustics);
+      }
+      if (m_pTextures)
+      {
+        int nUpscaled, nTextures;
+        uint64 nUpscaledBytes, nBytes;
+        m_pTextures->UpscaledStats(nUpscaled, nTextures, nUpscaledBytes, nBytes);
+        fprintf(m_pFrameDump.get(), "upscaled textures (r_TexUpscaled): %d of %d textures, %.1f MB of %.1f MB\n", nUpscaled, nTextures,
+                nUpscaledBytes / 1048576.0, nBytes / 1048576.0);
       }
     }
   }

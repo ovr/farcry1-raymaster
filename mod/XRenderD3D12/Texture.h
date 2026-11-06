@@ -155,6 +155,10 @@ public:
   //! Its share of r_ParallaxDepth by its physical material (r_ParallaxMaterials): its row of RayMaster/pbr_depth.tsv, 1
   //! for none (no table, a texture not in it); set with the maps (FindPbrCompanions).
   float m_fParallaxShare = 1.0f;
+  //! r_TexUpscaled: its picture is the upscaled file (RayMaster/<its file>.dds, CTextureManager::TakeUpscaled);
+  //! m_nOrigWidth and m_nOrigHeight are then its own file's sides.
+  bool m_bUpscaled = false;
+  size_t m_nBytes = 0;                //!< its GPU picture's bytes, every face and level (Upload)
   int m_nID;
   int m_nRefs = 1;
   int m_nWidth = 0, m_nHeight = 0;
@@ -205,6 +209,10 @@ public:
   //! levels and the texture's aspect (PbrCompanion::IsUsable), else none; r_TexResolution drops its levels as the texture's.
   //! With the material map its m_fParallaxShare from the depth table (ReadDepthTable).
   void FindPbrCompanions(CTexture *pTex);
+
+  //! r_TexUpscaled's frame dump line and panel line: the textures with the upscaled pictures (CTexture::m_bUpscaled) of all
+  //! those with a GPU picture, and their bytes (CTexture::m_nBytes).
+  void UpscaledStats(int &nUpscaled, int &nTextures, uint64 &nUpscaledBytes, uint64 &nBytes) const;
 
   //! A material texture (SInputShaderResources::m_Textures): searched as LoadTexture does, then
   //! as szTexturePath (the folder of the object, may be NULL or "") + the whole name and as
@@ -267,6 +275,11 @@ private:
   //! Reads RayMaster/pbr_depth.tsv (PbrCompanion::DEPTH_TABLE, ParseDepthTable) into m_DepthShares, once (a missing table:
   //! none, every share 1).
   void ReadDepthTable();
+  //! r_TexUpscaled: the picture of the upscaled file of the texture read from Base (PbrCompanion::UpscaledPath) in place
+  //! of Image, when RayMaster has the set's manifest (looked for once) and the file is fit to take its place
+  //! (PbrCompanion::IsUpscaledUsable; else a warning, once); nTexWidth and nTexHeight get Image's own sides. False:
+  //! Image as it was.
+  bool TakeUpscaled(const std::string &Base, SImage &Image, int &nTexWidth, int &nTexHeight);
   //! Makes the GPU texture of pTex from Image (replacing one it has) and sets its sizes.
   bool Upload(CTexture *pTex, const SImage &Image);
   void AddKey(CTexture *pTex, const std::string &Key);
@@ -307,6 +320,7 @@ private:
   std::unordered_set<int> m_WarnedFormats;            //!< unsupported ETEX_Formats already logged
   std::unordered_map<std::string, float> m_DepthShares;  //!< the depth table's shares by file (ReadDepthTable)
   bool m_bDepthRead = false;                          //!< the depth table read (or found missing)
+  int m_nUpscaledFolder = -1;                         //!< RayMaster/upscaled_manifest.tsv: -1 not looked for, 0 missing, 1 there
   CTexture *m_pWhite = nullptr;
   CTexture *m_pPlaceholder = nullptr;
   bool m_bInit = false;

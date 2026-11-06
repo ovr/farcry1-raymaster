@@ -15,7 +15,8 @@
 //	size, with their mips. r_Parallax takes the height (parallax
 //	occlusion mapping), r_PbrNormals the normals; RayMaster/pbr_depth.tsv
 //	(AssetViewer's --pbr-depth) each texture's share of r_ParallaxDepth by
-//	its physical material (r_ParallaxMaterials).
+//	its physical material (r_ParallaxMaterials); <texture>.dds there the
+//	texture itself made twice as large (r_TexUpscaled).
 //
 //////////////////////////////////////////////////////////////////////
 
@@ -144,6 +145,52 @@ namespace PbrCompanion
     if (nTexWidth > 0 && nTexHeight > 0 && (int64_t)nWidth * nTexHeight != (int64_t)nHeight * nTexWidth)
       return false;
     return true;
+  }
+
+  //! The upscaled textures (r_TexUpscaled): the game's textures made larger by a network (AssetViewer's --upscale-batch: a
+  //! cleanup network for the compression's blocks, then an upscaling one, twice the side, compressed as the texture was,
+  //! with its levels), in the game's folder RayMaster beside the maps, at the paks' paths, as .dds (a .tga's and a
+  //! .jpg's too); their manifest beside the depth table says the set is there.
+  constexpr std::string_view UPSCALED_MANIFEST = "raymaster/upscaled_manifest.tsv";
+
+  //! The upscaled file of a texture read from Base (as Path's: lower case, '/' separated, without the extension):
+  //! raymaster/<Base>.dds, the maps' names without their suffix.
+  inline std::string UpscaledPath(std::string_view Base)
+  {
+    return Path(Base, "");
+  }
+
+  //! An upscaled picture fit to take the place of a texture's: one face, as the texture, wider than it, of its aspect, no
+  //! more levels than its chain has; where the texture has levels (nTexLevels: its own, or those Texture.cpp makes for an
+  //! uncompressed picture without them) the upscaled one's go down as small as the texture's do (or to 4 x 4, BC's last
+  //! full blocks): a compressed picture gets no levels made, and one level alone would shimmer far off. nLevels: the
+  //! upscaled picture's levels, counted as nTexLevels are.
+  inline bool IsUpscaledUsable(int nWidth, int nHeight, int nLevels, int nFaces, int nTexWidth, int nTexHeight, int nTexLevels, int nTexFaces)
+  {
+    if (nWidth < 1 || nHeight < 1 || nLevels < 1 || nFaces != 1 || nTexWidth < 1 || nTexHeight < 1 || nTexLevels < 1 || nTexFaces != 1)
+      return false;
+    if (nWidth <= nTexWidth || nHeight < nTexHeight || (int64_t)nWidth * nTexHeight != (int64_t)nHeight * nTexWidth)
+      return false;
+    if (nLevels > FullMips(nWidth, nHeight))
+      return false;
+    if (nTexLevels > 1)
+    {
+      const int nTexLast = std::max(nTexWidth, nTexHeight) >> (std::min(nTexLevels, FullMips(nTexWidth, nTexHeight)) - 1);
+      const int nLast = std::max(nWidth, nHeight) >> (nLevels - 1);
+      if (nLast > std::max(4, 2 * nTexLast))
+        return false;
+    }
+    return true;
+  }
+
+  //! The side the engine is told is an upscaled texture's original one (ITexPic::GetOriginalWidth: the interface maps its
+  //! texel rectangles by it): the texture's own side nTexSide, as much smaller as the upscaled side nUpSide became nSide
+  //! (r_TexResolution's levels dropped); at least 1.
+  inline int UpscaledOriginalSide(int nTexSide, int nUpSide, int nSide)
+  {
+    if (nUpSide < 1)
+      return nTexSide;
+    return std::max(1, (int)((int64_t)nTexSide * nSide / nUpSide));
   }
 }
 

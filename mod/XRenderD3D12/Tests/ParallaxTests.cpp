@@ -14,7 +14,8 @@
 //	by the depth's size in pixels, the texture matrix's turn without its
 //	scale, the steps by the view's angle; the depth table's rows
 //	(r_ParallaxMaterials) and the march's gradients stretched to its step
-//	(r_ParallaxFilter).
+//	(r_ParallaxFilter); the upscaled textures' file, fitness and original
+//	sides (r_TexUpscaled).
 //
 //////////////////////////////////////////////////////////////////////
 
@@ -23,6 +24,7 @@
 #include "TestMath.h"
 
 #include "PbrCompanion.h"
+#include "CommandLine.h"
 
 #include "Test_ParallaxUV.h"
 #include "Test_ParallaxParts.h"
@@ -261,6 +263,75 @@ XR_TEST(Pbr_Usable)
   CHECK(!PbrCompanion::IsUsable(8, 8, 1, 1, 8, 8));
   CHECK(!PbrCompanion::IsUsable(0, 512, 10, 1, 512, 512));
   CHECK(PbrCompanion::IsUsable(256, 64, 7, 1, 0, 0));          // a texture of no known size: its aspect not checked
+}
+
+// Why: r_TexUpscaled takes RayMaster/<the found file's base>.dds (beside its maps, no suffix) in place of the texture's
+// picture; a path off by its folder or extension finds none (or another texture's, or a map).
+XR_TEST(Pbr_UpscaledPath)
+{
+  CHECK(PbrCompanion::UpscaledPath("objects/vehicles/hemtt/front") == "raymaster/objects/vehicles/hemtt/front.dds");
+  CHECK(PbrCompanion::UpscaledPath("textures/glm/m5_steamregulator/stedoubledoor1_d") ==
+        "raymaster/textures/glm/m5_steamregulator/stedoubledoor1_d.dds");
+  CHECK(PbrCompanion::UpscaledPath("objects/x/foo_ddn") == "raymaster/objects/x/foo_ddn.dds");
+  CHECK(PbrCompanion::UpscaledPath("objects/x/foo") != PbrCompanion::Path("objects/x/foo", "_pbr_m"));
+}
+
+// Why: the upscaled picture replaces the texture's for every draw of it: a cube's face, another aspect (the uv would
+// land elsewhere on it), a smaller picture or one compressed with too few levels (none are made for BC: it would shimmer
+// far off) must not; an uncompressed one without levels gets them made, as the texture's would.
+XR_TEST(Pbr_UpscaledUsable)
+{
+  CHECK(PbrCompanion::IsUpscaledUsable(1024, 1024, 11, 1, 512, 512, 10, 1));    // twice the side, a full chain
+  CHECK(PbrCompanion::IsUpscaledUsable(1024, 512, 11, 1, 512, 256, 10, 1));     // its aspect
+  CHECK(PbrCompanion::IsUpscaledUsable(2048, 2048, 12, 1, 512, 512, 10, 1));    // four times
+  CHECK(!PbrCompanion::IsUpscaledUsable(1024, 1024, 11, 1, 1024, 1024, 11, 1)); // no larger
+  CHECK(!PbrCompanion::IsUpscaledUsable(512, 512, 10, 1, 1024, 1024, 11, 1));   // smaller
+  CHECK(!PbrCompanion::IsUpscaledUsable(1024, 512, 11, 1, 512, 512, 10, 1));    // another aspect
+  CHECK(!PbrCompanion::IsUpscaledUsable(1024, 1024, 11, 6, 512, 512, 10, 6));   // cubes
+  CHECK(!PbrCompanion::IsUpscaledUsable(1024, 1024, 11, 1, 512, 512, 10, 6));
+  CHECK(!PbrCompanion::IsUpscaledUsable(1024, 1024, 12, 1, 512, 512, 10, 1));   // more levels than a chain has
+  // The texture's levels to 4 x 4 (8 of 512): the upscaled one's to 4 or 8 will do, to 16 not; one level alone not.
+  CHECK(PbrCompanion::IsUpscaledUsable(1024, 1024, 9, 1, 512, 512, 8, 1));
+  CHECK(PbrCompanion::IsUpscaledUsable(1024, 1024, 8, 1, 512, 512, 8, 1));
+  CHECK(!PbrCompanion::IsUpscaledUsable(1024, 1024, 7, 1, 512, 512, 8, 1));
+  CHECK(!PbrCompanion::IsUpscaledUsable(1024, 1024, 1, 1, 512, 512, 10, 1));
+  // A full chain's last levels: to 4 x 4 is enough (BC's last full blocks).
+  CHECK(PbrCompanion::IsUpscaledUsable(1024, 1024, 9, 1, 512, 512, 10, 1));
+  CHECK(!PbrCompanion::IsUpscaledUsable(1024, 1024, 8, 1, 512, 512, 10, 1));
+  // A texture without levels (FT_NOMIPS's, a compressed one without): any levels.
+  CHECK(PbrCompanion::IsUpscaledUsable(1024, 1024, 1, 1, 512, 512, 1, 1));
+  CHECK(PbrCompanion::IsUpscaledUsable(1024, 1024, 11, 1, 512, 512, 1, 1));
+  CHECK(!PbrCompanion::IsUpscaledUsable(0, 1024, 11, 1, 512, 512, 10, 1));
+  CHECK(!PbrCompanion::IsUpscaledUsable(1024, 1024, 11, 1, 0, 0, 10, 1));
+}
+
+// Why: the interface maps its texel rectangles by GetOriginalWidth (UISystem.cpp): an upscaled texture tells the file's
+// own sides, as much smaller as r_TexResolution dropped its levels.
+XR_TEST(Pbr_UpscaledOriginalSide)
+{
+  CHECK(PbrCompanion::UpscaledOriginalSide(512, 1024, 1024) == 512);
+  CHECK(PbrCompanion::UpscaledOriginalSide(512, 1024, 512) == 256);    // r_TexResolution 1
+  CHECK(PbrCompanion::UpscaledOriginalSide(256, 1024, 256) == 64);
+  CHECK(PbrCompanion::UpscaledOriginalSide(300, 600, 600) == 300);
+  CHECK(PbrCompanion::UpscaledOriginalSide(4, 8, 1) == 1);             // at least 1
+  CHECK(PbrCompanion::UpscaledOriginalSide(512, 0, 1024) == 512);
+}
+
+// Why: the engine sets the command line's console variables after its start has loaded the menu's and the shaders'
+// textures (34 of them upscaled with "r_TexUpscaled 0" there); r_TexUpscaled is taken from the line when registered.
+// A longer name that starts with it, or a value missing, must not count; the last one does.
+XR_TEST(Pbr_UpscaledCommandLine)
+{
+  CHECK(CommandLine::IntValue("FarCry.exe -DEVMODE \"r_TexUpscaled 0\"", "r_TexUpscaled", 1) == 0);
+  CHECK(CommandLine::IntValue("FarCry.exe -DEVMODE", "r_TexUpscaled", 1) == 1);
+  CHECK(CommandLine::IntValue("FarCry.exe r_texupscaled=0", "r_TexUpscaled", 1) == 0);
+  CHECK(CommandLine::IntValue("FarCry.exe +R_TEXUPSCALED 0", "r_TexUpscaled", 1) == 0);
+  CHECK(CommandLine::IntValue("FarCry.exe \"r_TexUpscaled 0\" \"r_TexUpscaled 1\"", "r_TexUpscaled", 7) == 1);
+  CHECK(CommandLine::IntValue("FarCry.exe \"r_TexUpscaledMore 0\"", "r_TexUpscaled", 1) == 1);  // another name
+  CHECK(CommandLine::IntValue("FarCry.exe \"xr_TexUpscaled 0\"", "r_TexUpscaled", 1) == 1);
+  CHECK(CommandLine::IntValue("FarCry.exe \"r_TexUpscaled\"", "r_TexUpscaled", 1) == 1);           // no value
+  CHECK(CommandLine::IntValue("FarCry.exe \"r_TexUpscaled x\"", "r_TexUpscaled", 1) == 1);
+  CHECK(CommandLine::IntValue("r_TexUpscaled 2", "r_TexUpscaled", 1) == 2);
 }
 
 // Why: r_ParallaxMaterials takes each texture's depth from RayMaster/pbr_depth.tsv (AssetViewer's --pbr-depth) by the
