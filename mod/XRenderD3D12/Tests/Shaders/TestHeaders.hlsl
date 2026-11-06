@@ -5,7 +5,7 @@
 //	File: TestHeaders.hlsl
 //	Description: The unit tests' kernels over the renderer's shader
 //	headers that stand alone (Shader Model 6.0): PathGBuffer.hlsli,
-//	HdrLight.hlsli, HdrToneMap.hlsli, HdrExposure.hlsli, HdrFrameAverage.hlsli, PathCache.hlsli, LightmapLight.hlsli, RenderMode.hlsli, ArrayCoords.hlsli, WaterLight.hlsli, WaterFoam.hlsli, WaterCaustics.hlsli, WaterVolume.hlsli, Underwater.hlsli, AlphaCoverage.hlsli and Fxaa.hlsli, included as the renderer's
+//	HdrLight.hlsli, HdrToneMap.hlsli, HdrExposure.hlsli, HdrFrameAverage.hlsli, PathCache.hlsli, LightmapLight.hlsli, RenderMode.hlsli, ArrayCoords.hlsli, WaterLight.hlsli, WaterFoam.hlsli, WaterCaustics.hlsli, WaterVolume.hlsli, Underwater.hlsli, AlphaCoverage.hlsli, PbrSpecular.hlsli and Fxaa.hlsli, included as the renderer's
 //	programs include them. Each kernel runs the tested functions on the
 //	items of g_TestIn and writes what they give to g_TestOut; ShaderTests.cpp
 //	checks it. One compile per kernel (Tests/CMakeLists.txt).
@@ -35,6 +35,19 @@
 #define GRID_DISC_WORD(i) asfloat(g_TestIn[(i) >> 2][(i) & 3])
 #include "OceanGrid.hlsli"
 #include "AlphaCoverage.hlsli"
+#include "PbrSpecular.hlsli"
+
+//! r_PbrRoughness's lobe (PbrSpecular.hlsli) of the roughness g_TestIn[i].x and the normal's change across the pixel .y
+//! (|dN/dx|^2 + |dN/dy|^2): out[i].x alpha^2, .y the power, .z the height.
+[numthreads(64, 1, 1)]
+void CSPbrSpecLobe(uint i : SV_DispatchThreadID)
+{
+  if (i >= g_Test.nTest.x)
+    return;
+  const float4 a = TestIn(i);
+  const float fAlpha2 = PbrSpecAlpha2(a.x, a.y);
+  TestOut(i, float4(fAlpha2, PbrSpecLobe(fAlpha2), 0));
+}
 
 //! CoverageAlpha (AlphaCoverage.hlsli) of the alpha g_TestIn[i].x, the reference .y and the alpha's change across the
 //! pixel .z: out[i].x.

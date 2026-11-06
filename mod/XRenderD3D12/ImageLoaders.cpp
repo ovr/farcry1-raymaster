@@ -16,6 +16,7 @@
 
 #include "StdAfx.h"
 #include "Texture.h"
+#include "PbrCompanion.h"
 
 #include <bit>
 #include <wincodec.h>
@@ -63,7 +64,7 @@ namespace
 
   uint32 BlockBytes(DXGI_FORMAT Format)
   {
-    return Format == DXGI_FORMAT_BC1_UNORM ? 8 : 16;
+    return Format == DXGI_FORMAT_BC1_UNORM || Format == DXGI_FORMAT_BC4_UNORM ? 8 : 16;
   }
 
   inline uint16 Read16(const byte *p)
@@ -232,7 +233,8 @@ namespace
 
 bool Img::IsBC(DXGI_FORMAT Format)
 {
-  return Format == DXGI_FORMAT_BC1_UNORM || Format == DXGI_FORMAT_BC2_UNORM || Format == DXGI_FORMAT_BC3_UNORM;
+  return Format == DXGI_FORMAT_BC1_UNORM || Format == DXGI_FORMAT_BC2_UNORM || Format == DXGI_FORMAT_BC3_UNORM ||
+         Format == DXGI_FORMAT_BC4_UNORM;
 }
 
 uint32 Img::RowPitch(DXGI_FORMAT Format, int nWidth)
@@ -299,6 +301,9 @@ bool Img::LoadDDS(std::span<const byte> File, SImage &Out)
     case MakeFourCC('D', 'X', 'T', '3'): BC = DXGI_FORMAT_BC2_UNORM; nSrcFlags = FT_DXT3; break;
     case MakeFourCC('D', 'X', 'T', '4'):
     case MakeFourCC('D', 'X', 'T', '5'): BC = DXGI_FORMAT_BC3_UNORM; nSrcFlags = FT_DXT5; break;
+    // One channel (the RayMaster roughness maps; none of the game's own): red, the alpha block of BC3.
+    case MakeFourCC('A', 'T', 'I', '1'):
+    case MakeFourCC('B', 'C', '4', 'U'): BC = DXGI_FORMAT_BC4_UNORM; break;
     default:
       if (!MaskFromFormatCode(PF.dwFourCC, M))
         return false;
@@ -628,6 +633,18 @@ bool Img::DecodeBC(const byte *pSrc, DXGI_FORMAT Format, int nWidth, int nHeight
       byte Texels[16][4];
       if (Format == DXGI_FORMAT_BC1_UNORM)
         DecodeColourBlock(p, true, Texels);
+      else if (Format == DXGI_FORMAT_BC4_UNORM)
+      {
+        // Red alone (green and blue 0, alpha 1, as the GPU reads it).
+        uint8_t vRed[16];
+        PbrCompanion::DecodeAlphaBlock(p, vRed);
+        for (int i = 0; i < 16; i++)
+        {
+          Texels[i][0] = Texels[i][1] = 0;
+          Texels[i][2] = vRed[i];
+          Texels[i][3] = 255;
+        }
+      }
       else if (Format == DXGI_FORMAT_BC2_UNORM)
       {
         // 4 bits of alpha per texel, texel 0 in the low bits.

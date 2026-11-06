@@ -2107,6 +2107,7 @@ public:
   int CV_r_ParallaxMaterials = 1;     //!< 1: the depth times the texture's share by its material (RayMaster/pbr_depth.tsv; 0: the same for all)
   int CV_r_ParallaxFilter = 4;        //!< the march reads the height over this many texels at least and its step (no grazing spikes; 0: at the pixel's)
   int CV_r_PbrNormals = 1;            //!< 1: the RayMaster maps' normals (raymaster/<texture>_pbr_n.dds) where a material has no normal map (0: none)
+  int CV_r_PbrRoughness = 1;          //!< 1: the specular materials' highlights by the RayMaster maps' roughness (raymaster/<texture>_pbr_m.dds; 0: the templates')
   float CV_r_DetailDistance = 4;      //!< the terrain's detail layers fade out from here to twice this far
   int CV_d3d12_debug = 0;             //!< debug layer, 1 with GPU based validation, 2 without (also XRENDERD3D12_DEBUG); only read at Init
   int CV_d3d12_DRED = 1;              //!< DRED, 1 the page faults and our markers, 2 and every command (XRENDERD3D12_DRED before it); only read at Init
