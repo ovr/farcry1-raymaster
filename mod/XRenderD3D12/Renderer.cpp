@@ -438,6 +438,23 @@ void CD3D12Renderer::RegisterVariables()
                      "With d3d12_RTReflections, the surfaces that reflect a cube map (chrome, glass, screens, env cubes) trace rays "
                      "in its place, the cube where they hit nothing: 0 the cube alone, 1 rays, 2 rays with the hits tinted red and "
                      "the misses blue");
+  iConsole->Register("d3d12_RTPbrReflections", &CV_d3d12_RTPbrReflections, 1, 0,
+                     "With d3d12_RTReflections and d3d12_RTReflectionSurfaces, the specular materials whose RayMaster maps make them "
+                     "a metal or smooth (raymaster/<texture>_pbr_m.dds green, _pbr_r.dds) reflect the scene by rays: one ray a pixel "
+                     "by the roughness's lobe, weighted by the share the surface reflects (4 % head on for a dielectric, the "
+                     "texture's colour for a metal), none on the rough; 0 off (the frames before)");
+  iConsole->Register("d3d12_RTPbrMetalDiffuse", &CV_d3d12_RTPbrMetalDiffuse, 0.5f, 0,
+                     "With d3d12_RTPbrReflections, the share of its diffuse light (the game's lighting of its texture) a metal keeps "
+                     "beside its reflection: 1 all of it, 0 none (a metal's colour its reflection's alone)");
+  iConsole->Register("d3d12_RTPbrScreen", &CV_d3d12_RTPbrScreen, 1, 0,
+                     "With d3d12_RTPbrReflections, what their rays hit takes its light from the last frame's picture where that frame "
+                     "saw it (its lamps, its fog, its own highlights; a copy of the picture and its depth at the end of a frame with such "
+                     "reflections), else the rays' own (the light maps, the sun); 0 the rays' own alone");
+  iConsole->Register("d3d12_RTPbrQuad", &CV_d3d12_RTPbrQuad, 0, 0,
+                     "With d3d12_RTPbrReflections, one ray for each 2 x 2 pixels, its light shared by those of them that reflect "
+                     "about the same way (each weighting it by its own share), the pixel that traces it another each frame: faster, "
+                     "but the temporal anti-aliasing leaves a coarse pattern and sparkles on fine relief (the rays' noise the same "
+                     "in a quad's pixels); 0 (the default) a ray a pixel");
   iConsole->Register("d3d12_RTSunShadows", &CV_d3d12_RTSunShadows, 0, VF_DUMPTODISK,
                      "The sun's shadow by rays (a device with DXR 1.1, d3d12_DepthPrepass and d3d12_ShadowCascades), towards the "
                      "sun's disc from the surfaces of the depth prepass up to the end of the cascades, in place of the cascades' "
@@ -784,6 +801,12 @@ WIN_HWND CD3D12Renderer::Init(int x,int y,int width,int height,unsigned int cbpp
     CV_d3d12_RTReflections = 0;
     iConsole->UnregisterVariable("d3d12_RTReflectionSurfaces", true);
     CV_d3d12_RTReflectionSurfaces = 0;
+    iConsole->UnregisterVariable("d3d12_RTPbrReflections", true);
+    CV_d3d12_RTPbrReflections = 0;
+    iConsole->UnregisterVariable("d3d12_RTPbrMetalDiffuse", true);
+    iConsole->UnregisterVariable("d3d12_RTPbrScreen", true);
+    CV_d3d12_RTPbrScreen = 0;
+    iConsole->UnregisterVariable("d3d12_RTPbrQuad", true);
     iConsole->UnregisterVariable("d3d12_RTSunShadows", true);
     CV_d3d12_RTSunShadows = 0;
     iConsole->UnregisterVariable("d3d12_RTLightShadows", true);
@@ -1079,6 +1102,8 @@ void CD3D12Renderer::Release()
   ReleaseWakes();
   ReleaseOceanGrid();
   ReleaseUnderwater();
+  FreeSceneCopy(m_ReflCopy);
+  m_nReflCopyFrame = -2;
   ReleaseMirror();
   ReleaseEnvCubes();
   ReleaseSprites();
@@ -1685,6 +1710,13 @@ void CD3D12Renderer::SetClearColor(const Vec3 & vColor)
 
 void CD3D12Renderer::ClearDepthBuffer()
 {
+  // d3d12_RTPbrScreen: the picture before the engine clears the depth for what it draws near (the weapon in the hands),
+  // not an offscreen target's; with MSAA its depth resolved first (the colour CopyTargets resolves).
+  if (m_pDevice && !m_pDevice->IsOffscreen() && WantsSceneCopyForReflections())
+  {
+    ResolveMsaaDepth();
+    CopySceneForReflections();
+  }
   if (EnsureFrame())
     m_pDevice->ClearDepth(1.0f, 0, true, true);
   m_bMsaaDepthDirty |= m_pDevice && m_pDevice->IsInMsaa();

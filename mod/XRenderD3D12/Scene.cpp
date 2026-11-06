@@ -278,6 +278,16 @@ namespace
            (g_pRenderer->CV_r_PbrNormals && pTex->m_pPbrN);
   }
 
+  //! d3d12_RTPbrReflections: whether a lit element's diffuse texture has the RayMaster maps of a metal or a smooth
+  //! material (CD3D12Renderer::PbrReflects; looked for by WantsPbrMaps before): the scene for rays is built for them.
+  bool ReflectsByRays(const SRenderItem &it)
+  {
+    if (!g_pRenderer || !it.pRes || (it.eDrawClass != eDC_Opaque && it.eDrawClass != eDC_AlphaTest))
+      return false;
+    const CTexture *pTex = GetDiffuseTexture(it.pRes);
+    return pTex && pTex->m_bPbrLooked && g_pRenderer->PbrReflects(*pTex);
+  }
+
   //! The CheckUpdate flags of an element: characters get nCheckUpdate_Character; with bump mapping
   //! on, a material lit per pixel that has a normal map asks for the tangent stream too
   //! (VSM_TANGENTS; a character's tangents are skinned when the material reports EF_NEEDTANGENTS),
@@ -681,15 +691,17 @@ void CScene::EndEf3D(int nFlags)
         g_pRenderer->BeginAOTarget(s.Items.data(), nItems);
         if (m_nDrawing == 1)
         {
-          // Traced in the lists: the water, and the reflections of cube maps by rays (WantsRaySurfaces);
-          // the lamps' shadows by rays where the scene has a light besides the sun (WantsRayLights).
+          // Traced in the lists: the water, and the reflections of cube maps by rays (WantsRaySurfaces) and
+          // of the metals and smooth materials of the RayMaster maps (PbrReflects); the lamps' shadows by
+          // rays where the scene has a light besides the sun (WantsRayLights).
           const bool bSurfaces = g_pRenderer->WantsRaySurfaces();
           const bool bLamps = g_pRenderer->WantsRayLights() &&
                               std::any_of(s.Lights.begin(), s.Lights.end(), [](const CDLight *pLight) { return !(pLight->m_Flags & DLF_SUN); });
           const std::vector<SRenderItem> &Blended = s.Lists[eRL_Blended];
           g_pRenderer->BuildRayScene({ list.data(), list.size() }, { Blended.data(), Blended.size() }, bLamps || std::any_of(s.Lists.begin(), s.Lists.end(), [&](const std::vector<SRenderItem> &Items)
             { return std::any_of(Items.begin(), Items.end(), [&](const SRenderItem &it)
-              { return it.eDrawClass == eDC_Water || (bSurfaces && it.pShader && it.pShader->GetProps().eEnvMap != EEnvMap::None); }); }));
+              { return it.eDrawClass == eDC_Water || (bSurfaces && it.pShader && it.pShader->GetProps().eEnvMap != EEnvMap::None) ||
+                       (bSurfaces && ReflectsByRays(it)); }); }));
           // The path tracer's lights of the frame.
           g_pRenderer->UpdatePathLights(s.Lights);
         }

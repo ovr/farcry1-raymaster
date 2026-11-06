@@ -217,6 +217,10 @@ struct SFrameConstants
                                   //!< y 1: a bump template's light per pixel (DF_PIXEL_LIGHTING) times the material's colour scaled down by its
                                   //!< largest channel above 1, the light's hue kept, its term not clamped (d3d12_LightColorScale; 0: each
                                   //!< channel of the light's colour clamped to 1)
+  XR_FLOAT4X4(mPrevViewProj);     //!< d3d12_RTPbrScreen: world to the clip space of the last frame's picture copied for the reflections by
+                                  //!< rays (m_ReflCopy), without its jitter
+  XR_FLOAT4(vPrevParams);         //!< its jitter in clip space (xy: xy += vPrevParams.xy * w), its projection's m22 (z) and m32 (w)
+  XR_UINT4(nPrevScene);           //!< x its colour's texture table index (0: no copy), y its depth's, z w its size (pixels)
 };
 
 //! b1: per draw.
@@ -282,8 +286,14 @@ struct SDrawConstants
                                   //!< depth in pixels from which it fades, z the pixels at which it is gone, w the reference height (none to offset)
   XR_UINT4(nPbr);                 //!< r_PbrRoughness (DF_SPECULAR; General.hlsl's Specular, PbrSpecular.hlsli): x the RayMaster roughness map's
                                   //!< (else the material map's) texture table index (its red the roughness; 0 none: the templates' lobe), y its
-                                  //!< sampler (the texture's), zw 0
+                                  //!< sampler (the texture's; z's too); d3d12_RTPbrReflections (XR_RAY_REFL, the object's first pass): z the
+                                  //!< material map's index (its red the roughness where x has none, its green the metalness; 0 no reflection
+                                  //!< by rays), w asuint the share of the diffuse light a metal keeps; with XR_PBR_LIGHT_PASS a light pass's
+                                  //!< or a projector's of such a draw: its metal's light as much less, no ray
 };
+
+//! nPbr.w's sign bit: a light pass of a draw that reflects by rays (d3d12_RTPbrReflections).
+#define XR_PBR_LIGHT_PASS 0x80000000u
 
 //! b0 of the ambient occlusion's resolve (AoResolve.hlsl, AmbientOcclusion.cpp).
 struct SAoResolveConstants

@@ -465,6 +465,19 @@ float CD3D12Renderer::ParallaxDepthOf(const CTexture &Diffuse) const
   return CV_r_ParallaxDepth * (CV_r_ParallaxMaterials ? Diffuse.m_fParallaxShare : 1.0f);
 }
 
+float CD3D12Renderer::PbrMeanRoughness(const CTexture &Diffuse)
+{
+  if (Diffuse.m_pPbrR && Diffuse.m_pPbrR->IsTextureLoaded())
+    return Diffuse.m_pPbrR->m_vPbrMean[0];
+  return Diffuse.m_pPbrM ? Diffuse.m_pPbrM->m_vPbrMean[0] : 1.0f;
+}
+
+bool CD3D12Renderer::PbrReflects(const CTexture &Diffuse) const
+{
+  return CV_d3d12_RTPbrReflections > 0 && WantsRaySurfaces() && Diffuse.m_pPbrM && Diffuse.m_pPbrM->IsTextureLoaded() &&
+         PbrMeanRoughness(Diffuse) <= (Diffuse.m_pPbrM->m_vPbrMean[1] >= PBR_REFLECT_METAL ? PBR_REFLECT_METAL_ROUGH : PBR_REFLECT_ROUGH);
+}
+
 void CD3D12Renderer::DrawLeafItem(const SRenderItem &it)
 {
   // A light mapped surface's copy for a light its light map has (CScene::BuildLists).
@@ -988,6 +1001,18 @@ void CD3D12Renderer::DrawLeafItem(const SRenderItem &it)
     {
       dc.nPbr[0] = (uint32)pRough->GetSRV();
       dc.nPbr[1] = (uint32)pDiffuse->GetSampler();
+    }
+    // d3d12_RTPbrReflections: a lit metal or smooth one (by its maps' means) reflects the scene by rays in the object's
+    // first pass (General.hlsl, XR_RAY_REFL; Draw.cpp takes it into the surfaces with rays); its roughness and
+    // metalness the material map's red and green where the view meets it (a light mapped surface's first pass has no
+    // highlight: its lamps' are in their passes). Its light passes (XR_PBR_LIGHT_PASS) trace none: their light on a
+    // metal as much less as the first pass's diffuse.
+    if (pDiffuse && PbrReflects(*pDiffuse) && (eDC == eDC_Opaque || eDC == eDC_AlphaTest) && !m_bRayCaptureWalk &&
+        (dc.nFlags & (DF_LIGHTING | DF_TEX1_LIGHTMAP)) && !(dc.nFlags & (DF_CUBE0 | DF_TEX0_ARRAY)) && !(dc.nFlags2 & DF2_SHADER_FX))
+    {
+      dc.nPbr[1] = (uint32)pDiffuse->GetSampler();
+      dc.nPbr[2] = (uint32)pDiffuse->m_pPbrM->GetSRV();
+      dc.nPbr[3] = std::bit_cast<uint32>(std::clamp(CV_d3d12_RTPbrMetalDiffuse, 0.0f, 1.0f)) | (bLightPass ? XR_PBR_LIGHT_PASS : 0u);
     }
     // The sun hidden by the shadow maps of the object's casters; by the sun's cascades where they
     // reach (a light map by the live casters only: it has the shadows of the rest). The scene for
@@ -1621,6 +1646,9 @@ void CD3D12Renderer::DrawLeafItem(const SRenderItem &it)
       continue;
     dc.nFlags = nFlags;
     dc.nFlags2 = DF2_NO_SUN | DF2_PROJECTOR | DF2_FOG_BLACK | (bTerrain ? DF2_TERRAIN_LIGHT : 0) | nFlags2;
+    // The first pass has the reflection by rays (d3d12_RTPbrReflections): this one its metal's light as much less.
+    if (dc.nPbr[2])
+      dc.nPbr[3] |= XR_PBR_LIGHT_PASS;
     // d3d12_ProjectorSpecular: over a light map a specular bump template's pass of the projector has its highlight, as
     // the original's light-map shaders of those templates add it (Training's bunker's rusty plates under its lamp), with
     // the material's specular colour (times the texture's alpha for the gloss alpha ones).
@@ -1897,6 +1925,14 @@ void CD3D12Renderer::DumpDraw(const SDrawConstants &dc, const SPipelineKey &Key,
     fprintf(f, " roughness (r_PbrRoughness) %s specular (%.2f %.2f %.2f) gloss %s",
             pTex && pTex->m_pPbrR && dc.nPbr[0] == (uint32)pTex->m_pPbrR->GetSRV() ? "map" : "material map", dc.vSpecular[0], dc.vSpecular[1],
             dc.vSpecular[2], dc.vSpecular[3] > 0 ? "alpha" : "1");
+  if (dc.nPbr[2] && pTex)
+  {
+    const bool bLight = (dc.nPbr[3] & XR_PBR_LIGHT_PASS) != 0;
+    fprintf(f, " reflection (d3d12_RTPbrReflections)%s roughness %.2f metal %.2f%s%s", bLight ? " light pass" : "", PbrMeanRoughness(*pTex),
+            pTex->m_pPbrM ? pTex->m_pPbrM->m_vPbrMean[1] : 0.0f,
+            !bLight && CV_d3d12_RTPbrScreen && m_nReflCopyFrame == m_nFrames - 1 ? " screen (d3d12_RTPbrScreen)" : "",
+            !bLight && CV_d3d12_RTPbrQuad ? " quad (d3d12_RTPbrQuad)" : "");
+  }
   for (uint32 i = 0; i < dc.nLights; i++)
     fprintf(f, " {(%.1f %.1f %.1f %.0f) col (%.2f %.2f %.2f) att (%.3f %.3f %.1f) 1/r %.4f}", dc.vLightPos[i][0], dc.vLightPos[i][1], dc.vLightPos[i][2],
             dc.vLightPos[i][3], dc.vLightColor[i][0], dc.vLightColor[i][1], dc.vLightColor[i][2], dc.vLightAtten[i][0], dc.vLightAtten[i][1], dc.vLightAtten[i][2],
