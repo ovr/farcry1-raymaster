@@ -115,6 +115,18 @@ public:
   //! r_Parallax's depth for a surface of this diffuse texture: r_ParallaxDepth times, with r_ParallaxMaterials, its share
   //! by its physical material (CTexture::m_fParallaxShare); 0 with r_Parallax 0 (Draw3D.cpp).
   float ParallaxDepthOf(const CTexture &Diffuse) const;
+  //! The mean roughness of a diffuse texture's RayMaster maps (its roughness map's, else its material map's red; 1 without).
+  static float PbrMeanRoughness(const CTexture &Diffuse);
+  //! The means within which a texture's lit draws reflect by rays (d3d12_RTPbrReflections): a metal (the material map's
+  //! green, PBR_REFLECT_METAL or more) not rough (its mean roughness PBR_REFLECT_METAL_ROUGH or less: a metal's rays fade
+  //! out from 0.45 to 0.65, PbrSpecular.hlsli's PbrReflectWeight), else a glossy one (PBR_REFLECT_ROUGH or less: a
+  //! dielectric's from 0.2 to 0.35).
+  static constexpr float PBR_REFLECT_METAL = 0.25f;
+  static constexpr float PBR_REFLECT_METAL_ROUGH = 0.6f;
+  static constexpr float PBR_REFLECT_ROUGH = 0.3f;
+  //! d3d12_RTPbrReflections with surfaces' rays on (WantsRaySurfaces): whether the specular draws of a diffuse texture
+  //! reflect the scene by rays: its material map loaded and its means a metal's or a smooth one's (Draw3D.cpp).
+  bool PbrReflects(const CTexture &Diffuse) const;
   //! r_HDRRendering (one of them) not 0: the main view is drawn through the HDR pipeline (Hdr.cpp).
   bool IsHdrOn() const;
 
@@ -1300,6 +1312,25 @@ public:
   float m_fUnderDepth = 0;        //!< with m_bUnderwater the camera's depth under the ocean's level (m)
   bool m_bUnderDrawn = false;     //!< the blended list being drawn has drawn the light in the water (DrawItems resets it)
   SSceneCopy m_UnderCopy;
+  //! d3d12_RTPbrScreen: the main view's picture and depth at the end of a frame with reflections by rays of the RayMaster
+  //! maps (m_nPbrReflFrame; once a frame, before the engine first clears the depth for what it draws near, else at the
+  //! scene's end), for the next frame's (General.hlsl's PrevFrameAt: the light of what a ray hits where this
+  //! frame saw it, its lamps, its fog and all, in place of RayShade's light maps and sun); its world to clip, jitter and
+  //! projection, its size, and the frame (m_nFrames) it was made in.
+  void CopySceneForReflections();
+  bool WantsSceneCopyForReflections() const;   //!< a frame with such reflections whose picture is not copied yet
+  SSceneCopy m_ReflCopy;
+  Matrix44 m_ReflCopyViewProj;
+  float m_ReflCopyParams[4] = { 0, 0, 0, 0 };
+  int m_ReflCopySize[2] = { 0, 0 };
+  int m_nReflCopyFrame = -2;
+  int m_nPbrReflFrame = -2;       //!< the last frame (m_nFrames) a draw reflected by rays with the RayMaster maps (nPbr.z)
+  //! The first such draw of a frame in the main view (Draw.cpp's surfaces with rays): m_nPbrReflFrame and its view (world to
+  //! clip, jitter, projection, size; m_ReflCopy's).
+  void NotePbrReflView();
+  Matrix44 m_PbrReflViewProj;
+  float m_PbrReflParams[4] = { 0, 0, 0, 0 };
+  int m_PbrReflSize[2] = { 0, 0 };
   CD3D12Texture *m_pUnderTaps = nullptr;  //!< d3d12_WaterUnderShare: each pixel's sun at one segment of its ray (Underwater.hlsl's PSTaps)
 
   //////////////////////////////////////////////////////////////////////////
@@ -2193,6 +2224,10 @@ public:
   int CV_d3d12_RTOffscreen = 1;             //!< what is out of the main view in the scene for rays: 1 for the effects that need it, 2 always
   int CV_d3d12_RTReflections = 0;           //!< the water's reflection by rays: 1 in place of the screen space one, 2 where it misses
   int CV_d3d12_RTReflectionSurfaces = 1;    //!< with d3d12_RTReflections, the cube maps' reflections by rays (XR_RAY_REFL); 2 tinted
+  int CV_d3d12_RTPbrReflections = 1;        //!< with them, the metals' and smooth materials' reflections by rays (the RayMaster maps)
+  float CV_d3d12_RTPbrMetalDiffuse = 0.5f;  //!< the share of its diffuse light a metal keeps beside its reflection by rays
+  int CV_d3d12_RTPbrScreen = 1;             //!< their hits' light from the last frame's picture where it saw them (m_ReflCopy)
+  int CV_d3d12_RTPbrQuad = 0;               //!< their rays one for each 2 x 2 pixels (nRaySun.z bit 26)
   int CV_d3d12_RTSunShadows = 0;            //!< the sun's shadow by rays in place of the cascades' (RaySun.cpp)
   int CV_d3d12_RTLightShadows = 0;          //!< the lamps' shadows by rays (XR_RAY_LIGHT); 2 the light they take away red
   int CV_d3d12_RTLightShadowsMax = 4;       //!< the lamps a pixel traces rays towards

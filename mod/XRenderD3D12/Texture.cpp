@@ -1068,6 +1068,23 @@ CTexture *CTextureManager::LoadPbrMap(CTexture *pTex, const std::string &Path, b
     return nullptr;
   }
   const bool bFlat = bHeight && PbrCompanion::IsFlatHeight(Image.Bits(0, 0), Image.MipSize(0) / 16);
+  // Its mean, the texels of its smallest level: the roughness and the metalness that decide a draw's reflection by rays
+  // (d3d12_RTPbrReflections, Draw3D.cpp).
+  float vMean[4] = { 0, 0, 0, 0 };
+  {
+    const int nLast = Image.nMips - 1, w = Image.MipWidth(nLast), h = Image.MipHeight(nLast);
+    std::vector<byte> Texels((size_t)w * h * 4);
+    if (Img::IsBC(Image.Format) && Img::DecodeBC(Image.Bits(0, nLast), Image.Format, w, h, Texels.data(), w * 4, 4))
+    {
+      double vSum[4] = { 0, 0, 0, 0 };
+      for (size_t i = 0; i < (size_t)w * h; i++)
+        for (int c = 0; c < 4; c++)
+          vSum[c] += Texels[i * 4 + c];
+      // The texels B G R A.
+      const double k = 1.0 / (255.0 * w * h);
+      vMean[0] = (float)(vSum[2] * k), vMean[1] = (float)(vSum[1] * k), vMean[2] = (float)(vSum[0] * k), vMean[3] = (float)(vSum[3] * k);
+    }
+  }
   DropLevels(Image, GetCVarInt(bHeight ? "r_TexResolution" : "r_TexBumpResolution", 0));
   CTexture *pMap = NewTexture(Path.c_str());
   if (!pMap)
@@ -1076,6 +1093,7 @@ CTexture *CTextureManager::LoadPbrMap(CTexture *pTex, const std::string &Path, b
   pMap->m_nFlags = Image.nSrcFlags | (Image.nMips > 1 ? FT_HASMIPS : 0);
   pMap->m_nFlags2 = FT2_WASLOADED;
   pMap->m_bFlatHeight = bFlat;
+  std::copy(vMean, vMean + 4, pMap->m_vPbrMean);
   pMap->m_bClamp = pTex->m_bClamp;
   pMap->m_bLoaded = (pMap->m_pGPU != nullptr);
   AddKey(pMap, Key);

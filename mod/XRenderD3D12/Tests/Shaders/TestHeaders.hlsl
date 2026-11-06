@@ -49,6 +49,61 @@ void CSPbrSpecLobe(uint i : SV_DispatchThreadID)
   TestOut(i, float4(fAlpha2, PbrSpecLobe(fAlpha2), 0));
 }
 
+//! d3d12_RTPbrReflections' functions (PbrSpecular.hlsli) of three inputs an item: g_TestIn[3 i] the view towards the eye
+//! (xyz) and alpha (w), [3 i + 1] the shading normal (xyz) and the roughness (w), [3 i + 2] the two numbers (xy) and N.V
+//! (z) and the metalness (w): out[2 i] the ray's direction PbrReflectDir (xyz) and PbrReflectWeight of the roughness and the
+//! metalness (w), out[2 i + 1]
+//! PbrEnvBrdf's scale and bias (xy).
+[numthreads(64, 1, 1)]
+void CSPbrReflect(uint i : SV_DispatchThreadID)
+{
+  if (i >= g_Test.nTest.x)
+    return;
+  const float4 a = TestIn(3 * i), b = TestIn(3 * i + 1), c = TestIn(3 * i + 2);
+  TestOut(2 * i, float4(PbrReflectDir(normalize(a.xyz), normalize(b.xyz), a.w, c.xy), PbrReflectWeight(b.w, c.w)));
+  TestOut(2 * i + 1, float4(PbrEnvBrdf(b.w, c.z), 0, 0));
+}
+
+//! d3d12_RTPbrScreen (PbrSpecular.hlsli): g_TestIn[3i] a point's clip position in the last frame's view, [3i + 1].xy that
+//! frame's jitter, .z a depth buffer's value, .w the projection's m22, [3i + 2].x its m32, .y the distance the picture saw
+//! there, .z the cone's width: out[2i] PbrPrevUV (xyz) and PbrViewDistance of the depth (w), out[2i + 1].x PbrPrevShare
+//! at that uv and distance.
+[numthreads(64, 1, 1)]
+void CSPbrPrev(uint i : SV_DispatchThreadID)
+{
+  if (i >= g_Test.nTest.x)
+    return;
+  const float4 a = TestIn(3 * i), b = TestIn(3 * i + 1), c = TestIn(3 * i + 2);
+  const float3 p = PbrPrevUV(a, b.xy);
+  TestOut(2 * i, float4(p, PbrViewDistance(b.z, b.w, c.x)));
+  TestOut(2 * i + 1, float4(PbrPrevShare(p.xy, p.z, c.y, c.z), 0, 0, 0));
+}
+
+//! d3d12_RTPbrQuad's lane (PbrSpecular.hlsli): g_TestIn[i].x the quad's lanes that reflect (bits), .y the lane to begin
+//! with, .zw the quad's place: out[i].x PbrQuadLane of them, .y-.w and the next out's .x PbrQuadStart of the quad at the
+//! frames 0 to 3.
+[numthreads(64, 1, 1)]
+void CSPbrQuad(uint i : SV_DispatchThreadID)
+{
+  if (i >= g_Test.nTest.x)
+    return;
+  const float4 a = TestIn(i);
+  const uint2 q = (uint2)a.zw;
+  TestOut(2 * i, float4(PbrQuadLane((uint)a.x, (uint)a.y), PbrQuadStart(q, 0), PbrQuadStart(q, 1), PbrQuadStart(q, 2)));
+  TestOut(2 * i + 1, float4(PbrQuadStart(q, 3), PbrQuadStart(q, 4), 0, 0));
+}
+
+//! PbrQuadShares (PbrSpecular.hlsli) of the mirror direction g_TestIn[2i].xyz, alpha .w and the lane's direction
+//! g_TestIn[2i + 1].xyz: out[i].x 1 where the pixel takes the lane's ray.
+[numthreads(64, 1, 1)]
+void CSPbrQuadShares(uint i : SV_DispatchThreadID)
+{
+  if (i >= g_Test.nTest.x)
+    return;
+  const float4 a = TestIn(2 * i), b = TestIn(2 * i + 1);
+  TestOut(i, float4(PbrQuadShares(a.xyz, b.xyz, a.w) ? 1 : 0, 0, 0, 0));
+}
+
 //! CoverageAlpha (AlphaCoverage.hlsli) of the alpha g_TestIn[i].x, the reference .y and the alpha's change across the
 //! pixel .z: out[i].x.
 [numthreads(64, 1, 1)]

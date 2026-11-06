@@ -173,6 +173,44 @@ void CD3D12Renderer::BeginMainScene()
   BeginMsaa();
 }
 
+void CD3D12Renderer::NotePbrReflView()
+{
+  if (m_nPbrReflFrame == m_nFrames || !m_pDevice)
+    return;
+  m_nPbrReflFrame = m_nFrames;
+  // As MakeFrameConstants' main view.
+  const bool bScene = m_pDevice->IsSceneBound();
+  float sx = 1, sy = 1;
+  if (bScene)
+    GetSceneScale(sx, sy);
+  const float w = (float)std::max(m_Viewport[2], 1) * sx, h = (float)std::max(m_Viewport[3], 1) * sy;
+  m_PbrReflViewProj = m_CameraView * m_ProjMatrix;
+  Set4(m_PbrReflParams, bScene ? 2 * m_UpscaleJitter[0] / w : 0.0f, bScene ? -2 * m_UpscaleJitter[1] / h : 0.0f, m_ProjMatrix.data[10],
+       m_ProjMatrix.data[14]);
+  m_PbrReflSize[0] = (int)w;
+  m_PbrReflSize[1] = (int)h;
+}
+
+bool CD3D12Renderer::WantsSceneCopyForReflections() const
+{
+  return CV_d3d12_RTPbrScreen && m_nPbrReflFrame == m_nFrames && m_nReflCopyFrame != m_nFrames && m_pDevice && m_pDevice->IsInFrame();
+}
+
+void CD3D12Renderer::CopySceneForReflections()
+{
+  if (!WantsSceneCopyForReflections() || !EnsureSceneCopy(m_ReflCopy))
+    return;
+  m_pDevice->CopyTargets(m_ReflCopy.pColor.Get(), m_ReflCopy.pDepth.Get());
+  // The view as the reflecting draws had it (NotePbrReflView: the projection here may be another's, the weapon's).
+  m_ReflCopyViewProj = m_PbrReflViewProj;
+  memcpy(m_ReflCopyParams, m_PbrReflParams, sizeof(m_ReflCopyParams));
+  m_ReflCopySize[0] = m_PbrReflSize[0];
+  m_ReflCopySize[1] = m_PbrReflSize[1];
+  m_nReflCopyFrame = m_nFrames;
+  // A draw after it this frame: not this frame's own picture.
+  InvalidateFrameConstants();
+}
+
 void CD3D12Renderer::EndMainScene()
 {
   FUNCTION_PROFILER(iSystem, PROFILE_RENDERER);
@@ -180,6 +218,8 @@ void CD3D12Renderer::EndMainScene()
   EndPathTargets();
   // MSAA's samples into the main view's targets (Msaa.cpp).
   EndMsaa();
+  // d3d12_RTPbrScreen: the picture for the next frame's reflections by rays.
+  CopySceneForReflections();
   if (m_bUpscaling)
     UpscaleScene();
   else if (m_pDevice && m_pDevice->IsInHdr())

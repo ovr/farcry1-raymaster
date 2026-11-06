@@ -132,6 +132,17 @@ void CD3D12Renderer::MakeFrameConstants(SFrameConstants &fc, bool bScene) const
   Set4(fc.vDepthParams, m_ProjMatrix.data[10], m_ProjMatrix.data[14], 0, 0);
   Set4(fc.vHdr, HdrSkyGlow(), HdrSkyGlowPower(), 0, 0);
   Set4(fc.vLightmap, CV_d3d12_LightmapDot3 ? 1.0f : 0.0f, CV_d3d12_LightColorScale ? 1.0f : 0.0f, 0, 0);
+  // d3d12_RTPbrScreen: the picture of the frame before, of the main view's size (General.hlsl's PrevFrameAt).
+  if (CV_d3d12_RTPbrScreen && m_nReflCopyFrame == m_nFrames - 1 && m_ReflCopy.nColorSRV > 0 &&
+      m_ReflCopySize[0] == (int)w && m_ReflCopySize[1] == (int)h)
+  {
+    memcpy(fc.mPrevViewProj, m_ReflCopyViewProj.data, sizeof(fc.mPrevViewProj));
+    memcpy(fc.vPrevParams, m_ReflCopyParams, sizeof(fc.vPrevParams));
+    fc.nPrevScene[0] = (uint32)m_ReflCopy.nColorSRV;
+    fc.nPrevScene[1] = (uint32)m_ReflCopy.nDepthSRV;
+    fc.nPrevScene[2] = (uint32)m_ReflCopySize[0];
+    fc.nPrevScene[3] = (uint32)m_ReflCopySize[1];
+  }
   SetCascadeConstants(fc);
   const float fFoliageEnd = std::max(CV_d3d12_FoliageTranslucencyDistance, 1.0f);
   Set4(fc.vFoliage, std::max(CV_d3d12_FoliageTranslucency, 0.0f), std::max(CV_d3d12_FoliageTranslucencyPower, 0.1f), fFoliageEnd, 2 / fFoliageEnd);
@@ -139,7 +150,7 @@ void CD3D12Renderer::MakeFrameConstants(SFrameConstants &fc, bool bScene) const
     fc.nRaySun[0] = (uint32)m_RaySun.pMask->m_nSRV;
   // The general program's rays (General.hlsl's XR_RAY_REFL and XR_RAY_LIGHT): their length, the mask with
   // the cube maps' mode (bits 16-23), the lamps' (24-25), how many lamps a pixel (28-31) and how far short of a
-  // lamp its rays end (9-15, 2 cm steps), the ocean's level.
+  // lamp its rays end (9-15, 2 cm steps), the RayMaster reflections' ray a quad (26, d3d12_RTPbrQuad), the ocean's level.
   const bool bSurfaceRays = WantsRaySurfaces(), bLightRays = WantsRayLights();
   if (bSurfaceRays || bLightRays)
   {
@@ -147,7 +158,8 @@ void CD3D12Renderer::MakeFrameConstants(SFrameConstants &fc, bool bScene) const
     I3DEngine *p3D = iSystem ? iSystem->GetI3DEngine() : nullptr;
     const float fWater = p3D ? p3D->GetWaterLevel() : -FLT_MAX;
     memcpy(&fc.nRaySun[1], &fLength, sizeof(fLength));
-    fc.nRaySun[2] = RayMask() | (bSurfaceRays ? (uint32)std::clamp(CV_d3d12_RTReflectionSurfaces, 0, 255) << 16 : 0);
+    fc.nRaySun[2] = RayMask() | (bSurfaceRays ? (uint32)std::clamp(CV_d3d12_RTReflectionSurfaces, 0, 255) << 16 : 0) |
+                    (bSurfaceRays && CV_d3d12_RTPbrQuad ? 1u << 26 : 0u);
     if (bLightRays)
       fc.nRaySun[2] |= ((uint32)std::clamp((int)(CV_d3d12_RTLightShadowGap * 50 + 0.5f), 0, 127) << 9) |
                        ((uint32)std::clamp(CV_d3d12_RTLightShadows, 0, 3) << 24) | ((uint32)std::clamp(CV_d3d12_RTLightShadowsMax, 1, 15) << 28);
@@ -180,11 +192,19 @@ void CD3D12Renderer::DrawGeometry(const SPipelineKey &Key, const SDrawConstants 
   if (m_pRayScene && !m_bDepthPrepass && m_pRayScene->IsCapturingReflection())
     m_pRayScene->CaptureDraw(Key, dc, eTopology, VB, pIB, nCount, nFirst, nBaseVertex, pTexCoord1);
   // The main view's draws that reflect a cube map, with rays in its place (d3d12_RTReflectionSurfaces;
-  // not the leaves letting the sun through).
-  const bool bSurfaceRays = Key.nProgram == eD3D12P_General && (dc.nFlags & DF_CUBE0) && !(dc.nFlags2 & DF2_FOLIAGE) && Key.nTarget == 0 &&
-                            !bOffscreen && !m_bDepthPrepass && !m_bEnvCubePass && !m_bReflectionPass && !m_bSpritePass && WantsRaySurfaces();
+  // not the leaves letting the sun through), and the metals and smooth materials of the RayMaster maps
+  // (d3d12_RTPbrReflections, nPbr.z).
+  // A light pass of such a draw (XR_PBR_LIGHT_PASS) traces none: its metal's light as much less as the first pass's
+  // diffuse where that pass has the rays (this view's), else nothing (nPbr.z 0 below).
+  const bool bPbrLightPass = dc.nPbr[2] && (dc.nPbr[3] & XR_PBR_LIGHT_PASS);
+  const bool bRayView = Key.nProgram == eD3D12P_General && !(dc.nFlags2 & DF2_FOLIAGE) && Key.nTarget == 0 && !bOffscreen && !m_bEnvCubePass &&
+                        !m_bReflectionPass && !m_bSpritePass && WantsRaySurfaces();
+  const bool bSurfaceRays = bRayView && ((dc.nFlags & DF_CUBE0) || (dc.nPbr[2] && !bPbrLightPass)) && !m_bDepthPrepass;
   if (bSurfaceRays)
     m_nRaySurfaceFrame = m_nFrames;
+  // d3d12_RTPbrScreen: the main view a draw reflects by rays of the RayMaster maps in (the picture copied at its end).
+  if (bSurfaceRays && dc.nPbr[2])
+    NotePbrReflView();
   // The main view's draws lit by point lights (lamps), with rays towards them (d3d12_RTLightShadows): the
   // lights of the draw's list per pixel, a light pass's, a projector's.
   bool bLightRays = false;
@@ -285,6 +305,16 @@ void CD3D12Renderer::DrawGeometry(const SPipelineKey &Key, const SDrawConstants 
       pDC = &LocalDC;
     }
     memcpy(LocalDC.mPrevWorldViewProj, LocalDC.mWorldViewProj, sizeof(LocalDC.mPrevWorldViewProj));
+  }
+  // A light pass of a draw reflecting by rays where its first pass has none: its light as it was.
+  if (bPbrLightPass && !bRayView)
+  {
+    if (pDC != &LocalDC)
+    {
+      LocalDC = dc;
+      pDC = &LocalDC;
+    }
+    LocalDC.nPbr[2] = LocalDC.nPbr[3] = 0;
   }
   // Alpha to coverage: the reference negated (the scene for rays took the draw's own above).
   if (FullKey.bAlphaToCoverage)

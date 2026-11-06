@@ -672,6 +672,26 @@ reference of its features and console variables.
   `Pbr_SpecTemplate` (r = 0.35 the templates' lobe), `Pbr_SpecMonotonic`, `Pbr_SpecBounds`,
   `Pbr_SpecEnergy` (the lobe's integral about R the templates' wherever its power is not clamped) and
   `Pbr_SpecNormalChange` (the lobe widened where the normal changes, by at most 0.18).
+- `d3d12_RTPbrReflections` (Ray tracing) reflects the scene by rays on the materials their material
+  map makes a metal or smooth: the roughness the highlights' (`r_PbrRoughness`'s map) or the
+  material map's red, the metalness its green. The texture tool gives a metal's specular template
+  without gloss in its alpha the metalness `min(1, 2 spec)` all over, as a gloss alpha of 1 would
+  (214 of the 2286 textures, 324 by their gloss alpha; before 0: Treehouse's lab floor plates).
+- Tests of the reflections: `render_tests` suite `pbrrefl` (`Parallax_treehouse_pan.ini` at 1080p, the
+  exposure fixed, no anti-aliasing): the frame dump at 199 has 32 first passes reflecting by rays, all
+  with the last frame's picture, none with the quads' rays (all 32 with `d3d12_RTPbrQuad 1`), and 14
+  light passes; on against off 0.46 of the steady pixels change, their mean luma 3.5 levels apart,
+  none gone black; where off has a highlight (16 levels over its 15 x 15 mean) on keeps 0.89 of its
+  luma; the hits tinted green 0.24 of a frame (0.31 with TAA, 0.24 with MSAA), red without the picture
+  0.13; with TAA the quads' rays keep 0.95 of a ray a pixel's detail in the frame's lower half, their
+  luma 1.3 levels apart; `d3d12_RTPbrReflections 0` gives the build before's frames (0 px of the
+  steady pixels; the PerfSweep frames 0 px in the nearest of 6 x 2 runs at River's three, Pier's 181
+  and Swamp's 1 and 661, Pier's 1 and Swamp's 181 6 and 9 px of 1 level, Pier's 661 1.34 million px of
+  1 level, the sky and the far sea in a state none of the build before's 6 runs fell into, one of 4
+  runs of this step's first build did, theirs in 3 states up to 3.1 million px apart). The unit tests
+  `Pbr_ReflectMirror`, `Pbr_ReflectAbove`, `Pbr_ReflectSpread`, `Pbr_EnvBrdf`, `Pbr_ReflectWeight`,
+  `Pbr_PrevReproject`, `Pbr_PrevShare`, `Pbr_QuadLane`, `Pbr_QuadStart`, `Pbr_QuadShares`. The debug
+  layer no new messages (with TAA and with MSAA).
 
 ## Depth prepass
 
@@ -1046,6 +1066,62 @@ reference of its features and console variables.
   orbiting, 3.96 -> 4.83: the frame's list now waits for the build of the scene for rays at the
   opaque list in place of the water, up to 3 ms in the frames where new objects come in. The sweeps
   over Pier, River and Swamp, with next to no such surfaces, stay within their noise.
+  `d3d12_RTPbrReflections` (1 by default, read every frame; not registered without rays) with
+  `d3d12_RTReflections` 1 or 2 and `d3d12_RTReflectionSurfaces` gives the metals and the smooth
+  materials of the RayMaster maps (Parallax and generated normals (RayMaster)) a reflection of the
+  scene by rays: a lit opaque or alpha tested draw (`DF_LIGHTING` or a light map; not the cube map
+  surfaces above, the array textures, the shader effects) whose texture's material map has a mean
+  metalness of 0.25 or more and a mean roughness of 0.6 or less, or a mean roughness of 0.3 or less
+  (`PbrReflects`, by the map's smallest mip), takes the same programs (`XR_RAY_REFL`) in its first
+  pass: a ray whose direction is the view reflected about a normal of GGX's visible normals for the
+  roughness where the view meets the texture (`Shaders/PbrSpecular.hlsli`'s `PbrReflectDir`, Heitz
+  2018; the highlights' roughness with `r_PbrRoughness`, else the material map's red), another each
+  frame (the temporal anti-aliasing gathers them), its cone wider by the lobe; what it finds
+  weighted by the share the surface reflects over the lobe (Karis's fit of the split sum, F0 4 %
+  for a dielectric, the texture's colour for a metal), less towards the rough (a dielectric's from
+  0.2 to 0.35, a metal's from 0.45 to 0.65, between them by the metalness: `PbrReflectWeight`). A
+  miss (the sky, beyond the rays' length, what is out of the view) takes the draw's ambient light. A
+  metal keeps `d3d12_RTPbrMetalDiffuse` (0.5) of its diffuse light beside its reflection, its light
+  passes and the projectors' over it as much (`XR_PBR_LIGHT_PASS`, no ray), and its ambient part
+  for the ambient occlusion as much (else the occlusion took all a dark metal's colour); its
+  highlights (the sun's, the lamps', the light map's lamps') stay whole (`General.hlsl`'s `vHigh`: the
+  part of the colour they make, scaled as the light map, the projector and the detail texture scale
+  it; at first they were less as well, the plates' lamp glints at 0.69-0.76 of their brightness). The frame
+  dump's line ` reflection (d3d12_RTPbrReflections)[ light pass] roughness R metal M[ screen
+  (d3d12_RTPbrScreen)][ quad (d3d12_RTPbrQuad)]` (the material map's means).
+  `d3d12_RTPbrScreen` (1 by default) lights what such a ray hits as the last frame's picture shows
+  it where that frame saw it: the main view's picture and depth are copied once a frame with such
+  reflections (before the engine clears the depth for the weapon in the hands, with MSAA its depth
+  resolved first, else at the scene's end; `m_ReflCopy`), and the next frame's hits are projected
+  into it by that frame's view and jitter (`PbrPrevUV`), taken where its depth there is as far as
+  the hit give or take 3 % (5 cm at least, and the cone's width), fading over the picture's sides
+  (`PbrPrevShare`); elsewhere the rays' own light (`RayShade`: the light maps and the sun, no lamps),
+  not looked up where the picture has all of it (the hit's texture, light map and ray to the sun
+  left out). The lab's metal floor plates under Treehouse's lamps reflect the lamp-lit corridor in
+  place of a dark one. 2 for `d3d12_RTReflectionSurfaces` tints those hits green. 0 the rays' own
+  light alone.
+  `d3d12_RTPbrQuad` (0 by default) traces one ray for the 2 x 2 pixels of a quad (the pixel shader's
+  `QuadReadLaneAt`): one of its pixels that reflect (not a helper lane, `SV_Coverage` 0, its point off
+  the triangle) traces it, another each frame and quad (`PbrQuadStart`, `PbrQuadLane`), its cone as
+  wide as the 2 pixels, and those whose view reflects about the same way (their mirror directions at
+  most 0.03 rad and half the lobe's alpha apart: `PbrQuadShares`) take its light, each weighting it by
+  its own share; the others trace their own. One ray for all of a quad made the plates' treads milky
+  (each pixel's bump its own reflection: with TAA 0.86-0.92 of the detail of a ray a pixel left, the
+  light up to 4 levels apart); so 0.94-0.97, within a level. But the rays' noise is then the same in a
+  quad's 4 pixels, and the temporal anti-aliasing (its history held to the colours about a pixel)
+  leaves it as a coarse pattern and sparkles on fine relief (the lab's wall panels' mesh, as well with
+  the mirror directions at most 0.03 rad apart), their light 1-2 levels darker: so a ray a pixel by
+  default, 1 where speed counts more (at 3840 x 2160 below the opaque list 2.46-2.50 ms, the frame
+  4.68-4.71 ms; with the player's settings 5.57-5.62 ms).
+  At 3840 x 2160 (RX 7900 XTX, `Parallax_treehouse_pan.ini`, the raster with the rays' reflections, no
+  anti-aliasing): the opaque list 0.90-0.93 -> 2.79-2.82 ms, the frame 2.69-2.73 -> 5.03-5.07 ms, the
+  scene for rays built for it 0.22 ms (0.25 more on the compute queue); `d3d12_RTPbrScreen 0`
+  4.72-4.82 ms (the copy of the picture 0.2 ms); with every hit shaded it was 5.43 ms. Of the opaque
+  list's time more the programs with rays take 0.3 ms without a ray, the rest the rays: in a pixel
+  shader a wave runs as long as its longest ray (a quarter of its lanes tracing, `d3d12_RTPbrQuad 1`,
+  took a third less). With the player's settings (TAA, the rays' sun): the frame 3.53-3.57 ->
+  5.89-5.93 ms.
+  `d3d12_RTPbrReflections 0` gives the build before's frames.
   `d3d12_RTLightShadows` (0 by default, read every frame; not registered without rays) gives the lamps
   hard shadows: the main view's draws lit per pixel by point lights (the draw's lights of
   `DF_PIXEL_LIGHTING` and `DF2_MATERIAL_LIGHT`, the dynamic lights over a light map,

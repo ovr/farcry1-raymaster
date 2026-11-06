@@ -218,7 +218,15 @@
 //	the scene for rays: from above the ocean's level, nRaySun.w, a ray down
 //	ends there) and takes over again over the last quarter of its length.
 //	nRaySun.z >> 16 & 0xff 2 tints the hits red, the misses blue, 0 traces
-//	none (the cube alone: a draw here for its lamps).
+//	none (the cube alone: a draw here for its lamps). The metals and smooth
+//	materials of the RayMaster maps (nPbr.z, d3d12_RTPbrReflections) trace
+//	a ray a pixel by their roughness's lobe (PbrSpecular.hlsli), or one for
+//	the 2 x 2 pixels of a quad where their reflections go the same way
+//	(nRaySun.z's bit 26, d3d12_RTPbrQuad; SV_Coverage: no helper lane),
+//	their hits lit as the last frame's picture saw them where it did
+//	(d3d12_RTPbrScreen, nPrevScene; tinted green in the debug mode); their
+//	light passes (nPbr.w's XR_PBR_LIGHT_PASS, in any program) none, a
+//	metal's light as much less as the first pass's diffuse.
 //	Compiled with XR_RAY_LIGHT too (the same programs, the main view's draws
 //	lit by lamps while d3d12_RTLightShadows is on) DrawLighting and
 //	MaterialLighting in the pixel shader trace a ray from the pixel's point
@@ -339,6 +347,16 @@ float LightVisible(float3 vPos, float3 vToLight, float fDistance, float fMinGap,
 //! r_PbrRoughness (nPbr.x): the highlights' lobe by the RayMaster roughness, x its power of saturate(R.V), y its height
 //! (PbrSpecular.hlsli's PbrSpecLobe); x 0: the templates' lobe.
 static float2 s_vSpecLobe = 0;
+#ifdef XR_RAY_REFL
+//! The pixel's coverage (SV_Coverage, PSMain): 0 a helper lane (the quad's lanes outside the triangle, for the
+//! derivatives), not to trace the quad's ray of d3d12_RTPbrQuad (its point off the surface).
+static uint s_nCoverage = 1;
+#define XR_PS_INPUT SVertexOutput In, uint nCoverage : SV_Coverage
+#define XR_PS_COVERAGE s_nCoverage = nCoverage;
+#else
+#define XR_PS_INPUT SVertexOutput In
+#define XR_PS_COVERAGE
+#endif
 
 //! The specular power of a light: saturate(R.V)^32, R = L reflected about N, 0 where N.L <= 0 (s_vSpecLobe's where it
 //! has one).
@@ -941,8 +959,27 @@ float2 RaySunMask(float4 vPos, out float fWeight)
 //! direction R sees, over vCube, the cube's colour that way: where it hits the scene for rays, that
 //! shaded and fogged by the path from the camera, fading back to vCube over the last quarter of the
 //! rays' length; vCube where it hits nothing or the ocean first. The cone: fPixelAngle wide at the
-//! camera, spreading by it.
-float3 SurfaceRay(float3 vCube, float3 P, float3 vFace, float3 R, float fDistance, float fPixelAngle)
+//! camera (the ray's origin that much off the face), spreading by fSpread from the surface on (the
+//! detail of what it finds: a rough surface's lobe).
+//! d3d12_RTPbrScreen: the last frame's picture at the world point H (nPrevScene's copy, before the exposure; its fog by
+//! that frame's view), w its share (PbrSpecular.hlsli's PbrPrevShare: 1 where that frame saw H, the depth there as far
+//! as H give or take its tolerance and fWidth; less over the picture's sides; 0 off it, hidden there or without a copy).
+float4 PrevFrameAt(float3 H, float fWidth)
+{
+  if (g_Frame.nPrevScene.x == 0)
+    return 0;
+  const float3 p = PbrPrevUV(mul(float4(H, 1), g_Frame.mPrevViewProj), g_Frame.vPrevParams.xy);
+  if (p.z <= 0 || any(p.xy <= 0) || any(p.xy >= 1))
+    return 0;
+  const float2 vSize = float2(g_Frame.nPrevScene.zw);
+  const float fDepth = g_Textures[g_Frame.nPrevScene.y].Load(int3(int2(min(p.xy * vSize, vSize - 1)), 0)).r;
+  const float fShare = PbrPrevShare(p.xy, p.z, PbrViewDistance(fDepth, g_Frame.vPrevParams.z, g_Frame.vPrevParams.w), fWidth);
+  if (fShare <= 0)
+    return 0;
+  return float4(g_Textures[g_Frame.nPrevScene.x].SampleLevel(g_SamplerLinearClamp, p.xy, 0).rgb, fShare);
+}
+
+float3 SurfaceRayCone(float3 vCube, float3 P, float3 vFace, float3 R, float fDistance, float fPixelAngle, float fSpread, bool bPrev = false)
 {
   const float fWidth = fDistance * fPixelAngle;
   RayDesc Ray;
@@ -956,19 +993,36 @@ float3 SurfaceRay(float3 vCube, float3 P, float3 vFace, float3 R, float fDistanc
   if (R.z < 0 && Ray.Origin.z > fWater)
     Ray.TMax = min(Ray.TMax, (fWater - Ray.Origin.z) / R.z);
   const uint nMask = g_Frame.nRaySun.z;
-  const SRayHit Hit = TraceScene(Ray, nMask & 0xff, fWidth, fPixelAngle);
+  const SRayHit Hit = TraceScene(Ray, nMask & 0xff, fWidth, fSpread);
   const bool bDebug = ((nMask >> 16) & 0xff) == 2;
   if (!Hit.bHit)
     return bDebug ? vCube * float3(0.25, 0.25, 1) : vCube;
-  bool bFog;
-  float3 vColor = RayShade(Hit, Ray.Direction, fWidth + Hit.fT * fPixelAngle, (nMask & 0x100) != 0, nMask & 0xff, bFog).rgb;
-  if (bFog && g_Frame.vFogParams.w != 0)
+  // The last frame's light of the hit where it saw it (d3d12_RTPbrScreen; the hits tinted green in the debug mode):
+  // where it is all of it, the hit not shaded (its texture, light map and the ray to the sun not looked up).
+  const float4 vPrev = bPrev ? PrevFrameAt(Ray.Origin + R * Hit.fT, fWidth + Hit.fT * fSpread) : 0;
+  float3 vColor = vPrev.rgb;
+  [branch]
+  if (vPrev.w < 1)
   {
-    const float fDepth = ViewDepth(P) * (fDistance + Hit.fT) / max(fDistance, 1e-3);
-    vColor = lerp(g_Frame.vFogColor.rgb, vColor, saturate((g_Frame.vFogParams.y - fDepth) * g_Frame.vFogParams.z));
+    bool bFog;
+    vColor = RayShade(Hit, Ray.Direction, fWidth + Hit.fT * fSpread, (nMask & 0x100) != 0, nMask & 0xff, bFog).rgb;
+    if (bFog && g_Frame.vFogParams.w != 0)
+    {
+      const float fDepth = ViewDepth(P) * (fDistance + Hit.fT) / max(fDistance, 1e-3);
+      vColor = lerp(g_Frame.vFogColor.rgb, vColor, saturate((g_Frame.vFogParams.y - fDepth) * g_Frame.vFogParams.z));
+    }
+    if (bPrev)
+      vColor = lerp(vColor, vPrev.rgb, vPrev.w);
   }
+  const float fPrev = vPrev.w;
   vColor = lerp(vColor, vCube, smoothstep(fFadeStart, asfloat(g_Frame.nRaySun.y), Hit.fT));
-  return bDebug ? vColor * float3(1, 0.25, 0.25) : vColor;
+  return bDebug ? vColor * lerp(float3(1, 0.25, 0.25), float3(0.25, 1, 0.25), fPrev) : vColor;
+}
+
+//! SurfaceRayCone of a mirror: the cone spreading by fPixelAngle.
+float3 SurfaceRay(float3 vCube, float3 P, float3 vFace, float3 R, float fDistance, float fPixelAngle)
+{
+  return SurfaceRayCone(vCube, P, vFace, R, fDistance, fPixelAngle, fPixelAngle);
 }
 #endif
 
@@ -1109,6 +1163,26 @@ float2 ParallaxFetch(SVertexOutput In)
     ParallaxMarchGrad(vShift, nSteps, g_Draw.nParallax.w / (float)max(max(nWidth, nHeight), 1u), vMarchDx, vMarchDy);
   }
   return ParallaxUV(In.vTex0, vMarchDx, vMarchDy, vShift, g_Draw.vParallax.w, nSteps);
+}
+
+//! d3d12_RTPbrReflections (nPbr.z; in a branch the same for the draw: the derivatives): the shading normal, the
+//! roughness, alpha^2 and the metalness a reflection by rays takes at uv vUVf: the highlights' roughness (r_PbrRoughness,
+//! nPbr.x) where the draw has them, else the material map's red, alpha^2 widened by the normal's change across the pixel
+//! as the highlights' (PbrSpecAlpha2), the material map's green the metalness.
+void PbrReflectMaterial(float2 vUVf, float3 vBumpN, float3 vNormal, out float3 vN, out float fRough, out float fAlpha2, out float fMetal)
+{
+  const float2 vMat = SampleUV0(g_Draw.nPbr.z, g_Draw.nPbr.y, vUVf).rg;
+  vN = HasFlag(DF_BUMP) ? vBumpN : SafeNormalize(vNormal);
+  const float3 vDx = ddx(vN), vDy = ddy(vN);
+  fRough = g_Draw.nPbr.x != 0 && HasFlag(DF_SPECULAR) ? SampleUV0(g_Draw.nPbr.x, g_Draw.nPbr.y, vUVf).r : vMat.r;
+  fAlpha2 = PbrSpecAlpha2(fRough, dot(vDx, vDx) + dot(vDy, vDy));
+  fMetal = vMat.g;
+}
+
+//! The share of its diffuse light a surface of fRough and fMetal keeps beside its reflection by rays (nPbr.w's share).
+float PbrReflectDiffuse(float fRough, float fMetal)
+{
+  return 1 - fMetal * PbrReflectWeight(fRough, fMetal) * (1 - asfloat(g_Draw.nPbr.w & ~XR_PBR_LIGHT_PASS));
 }
 
 float4 ShadePixel(SVertexOutput In)
@@ -1259,6 +1333,9 @@ float4 ShadePixel(SVertexOutput In)
 #endif
   float4 vVertexColor = In.vColor;
   float3 vSpecular = 0;
+  // d3d12_RTPbrReflections: the highlights' part of vColor (DF_SPECULAR's, the light map's lamps'), as the light map,
+  // the projector and the detail texture scale it: a metal's diffuse light less beside its reflection, not them.
+  float3 vHigh = 0;
 #ifdef XR_AMBIENT
   // A: the ambient light's part of vVertexColor.rgb, then of vColor.rgb.
   float3 vAmb = 0;
@@ -1326,6 +1403,7 @@ float4 ShadePixel(SVertexOutput In)
     vAmb *= vTex.rgb;
 #endif
   vColor.rgb += vSpecular;
+  vHigh = vSpecular;
 #ifdef XR_FOLIAGE
   // The sun through the leaves and the grass seen against it.
   if (HasFlag2(DF2_FOLIAGE))
@@ -1342,9 +1420,16 @@ float4 ShadePixel(SVertexOutput In)
       vColor.a *= vTex4.a;
   }
   if (HasFlag2(DF2_PROJECTOR))
-    vColor *= SampleCube(g_Draw.nTex5, XR_SAMPLER_LINEAR_CLAMP, mul(float4(In.vWorldPos, 1), g_Draw.mParams0).xyz);
+  {
+    const float4 vProjected = SampleCube(g_Draw.nTex5, XR_SAMPLER_LINEAR_CLAMP, mul(float4(In.vWorldPos, 1), g_Draw.mParams0).xyz);
+    vColor *= vProjected;
+    vHigh *= vProjected.rgb;
+  }
   if (HasFlag2(DF2_MODULATE))
+  {
     vColor = float4(saturate(vColor.rgb + g_Draw.vAddColor.w), 1);
+    vHigh = 0;
+  }
   if (HasFlag(DF_SHADOW_PASS))
     vColor.a = 1 - fSun;
   if (HasFlag(DF_ALPHA_FROM_TEX))
@@ -1379,18 +1464,34 @@ float4 ShadePixel(SVertexOutput In)
 #ifdef XR_AMBIENT
         vAmb = vColor.rgb * s_vAmbientNoSun;
 #endif
-        vColor.rgb *= 4 * fSun * vLight + vNoSunLight;
+        const float3 vMapLight = 4 * fSun * vLight + vNoSunLight;
+        vColor.rgb *= vMapLight;
+        vHigh *= vMapLight;
         // The highlights of the light map's lamps (DF_SPECULAR, d3d12_LightmapSpecular), added after it as the original's.
         if (HasFlag(DF_SPECULAR))
-          vColor.rgb += 2 * g_Draw.vSpecular.rgb * (g_Draw.vSpecular.w > 0 ? vTex.a : 1) * vOtherSpec;
+        {
+          const float3 vMapSpec = 2 * g_Draw.vSpecular.rgb * (g_Draw.vSpecular.w > 0 ? vTex.a : 1) * vOtherSpec;
+          vColor.rgb += vMapSpec;
+          vHigh += vMapSpec;
+        }
       }
       else
-        vColor.rgb *= 4 * fSun * vLight + g_Draw.vAmbient.rgb;
+      {
+        const float3 vMapLight = 4 * fSun * vLight + g_Draw.vAmbient.rgb;
+        vColor.rgb *= vMapLight;
+        vHigh *= vMapLight;
+      }
     }
     else if (HasFlag(DF_TEX1_DETAIL))
+    {
       vColor.rgb = 2 * vColor.rgb + vTex1.rgb - 0.5;
+      vHigh *= 2;
+    }
     else
+    {
       vColor *= vTex1;
+      vHigh *= vTex1.rgb;
+    }
 #ifdef XR_PT
     if (!HasFlag(DF_TEX1_LIGHTMAP | DF_TEX1_DETAIL))
       s_vPTEmission *= vTex1.rgb;
@@ -1422,6 +1523,91 @@ float4 ShadePixel(SVertexOutput In)
 #endif
       vColor.rgb -= 0.25 * vTex.rgb * g_Draw.vColor.rgb * g_Draw.vAmbient.rgb;
   }
+  // d3d12_RTPbrReflections: a light pass or a projector's of a draw whose first pass reflects by rays (nPbr.w's
+  // XR_PBR_LIGHT_PASS; Draw.cpp leaves nPbr.z 0 where the first pass has no rays): its diffuse light on a metal as much
+  // less as that pass's, its highlights kept (vHigh), no ray (the reflection has the lamp's light where the last frame's
+  // picture shows it).
+  [branch]
+  if (g_Draw.nPbr.z != 0 && (g_Draw.nPbr.w & XR_PBR_LIGHT_PASS) && ((g_Frame.nRaySun.z >> 16) & 0xff) != 0)
+  {
+    float3 vN;
+    float fRough, fAlpha2, fMetal;
+    PbrReflectMaterial(vUVf, vBumpN, In.vNormal, vN, fRough, fAlpha2, fMetal);
+    const float fDiffuse = PbrReflectDiffuse(fRough, fMetal);
+    vColor.rgb = max(vColor.rgb - vHigh, 0) * fDiffuse + vHigh;
+#ifdef XR_AMBIENT
+    vAmb *= fDiffuse;
+#endif
+  }
+#ifdef XR_RAY_REFL
+  // d3d12_RTPbrReflections (nPbr.z the RayMaster material map, its red the roughness, its green the metalness; in the
+  // object's first pass): what a ray finds, its direction by the roughness's lobe (PbrReflectDir, another each
+  // frame), weighted by the share the surface reflects over the lobe (PbrEnvBrdf: F0 4 % for a dielectric, the
+  // texture's colour for a metal), less towards the rough (PbrReflectWeight); a metal's diffuse light less by the
+  // metalness times 1 - asfloat(nPbr.w). What a ray hits lit as the last frame's picture shows it where it does
+  // (d3d12_RTPbrScreen, PrevFrameAt). The roughness the highlights' (r_PbrRoughness's, its map's) where the draw has
+  // them. A miss (the sky, beyond the rays' length, what is out of the view and so not in the scene for rays) the
+  // draw's ambient light: the light about it the game gives it, as much as a rough surface's lobe would gather.
+  [branch]
+  if (g_Draw.nPbr.z != 0 && !(g_Draw.nPbr.w & XR_PBR_LIGHT_PASS) && ((g_Frame.nRaySun.z >> 16) & 0xff) != 0)
+  {
+    float3 vN;
+    float fRough, fAlpha2, fMetal;
+    PbrReflectMaterial(vUVf, vBumpN, In.vNormal, vN, fRough, fAlpha2, fMetal);
+    const float fWeight = PbrReflectWeight(fRough, fMetal);
+    const float3 vToEye = -vRayDir;
+    const float fAlpha = sqrt(fAlpha2);
+    // d3d12_RTPbrQuad (bit 26, the same for the draw): one ray for the 2 x 2 pixels of the quad, traced by one of its
+    // lanes that reflect (not a helper: its point off the triangle), another each frame and quad (PbrQuadStart), its
+    // light shared by the others whose views reflect about the same way (PbrQuadShares; each weighting it by its own
+    // share), the rest tracing their own; the shared ray's cone as wide as the 2 pixels.
+    const bool bQuad = (g_Frame.nRaySun.z & (1u << 26)) != 0;
+    const uint nOwn = ((uint)In.vPos.x & 1) + 2 * ((uint)In.vPos.y & 1);
+    uint nLane = nOwn;
+    bool bOwn = true;
+    if (bQuad)
+    {
+      const uint nBit = fWeight > 0 && s_nCoverage != 0 ? 1u << nOwn : 0u;
+      const uint nMask = nBit | QuadReadAcrossX(nBit) | QuadReadAcrossY(nBit) | QuadReadAcrossDiagonal(nBit);
+      nLane = PbrQuadLane(nMask, PbrQuadStart((uint2)In.vPos.xy >> 1, (uint)g_Frame.vTime.y));
+      const float3 vMirror = reflect(vRayDir, vN);
+      const float3 m0 = QuadReadLaneAt(vMirror, 0), m1 = QuadReadLaneAt(vMirror, 1), m2 = QuadReadLaneAt(vMirror, 2),
+                   m3 = QuadReadLaneAt(vMirror, 3);
+      const float3 vLane = nLane == 0 ? m0 : nLane == 1 ? m1 : nLane == 2 ? m2 : nLane == 3 ? m3 : vMirror;
+      bOwn = nLane == nOwn || !PbrQuadShares(vMirror, vLane, fAlpha);
+    }
+    const float fConeAngle = bQuad && nLane == nOwn ? 2 * fPixelAngle : fPixelAngle;
+    float3 vFound = 0;
+    [branch]
+    if (fWeight > 0 && bOwn)
+    {
+      const float2 u = float2(PictureNoise(In.vPos.xy, g_Frame.vTime.y), PictureNoise(In.vPos.yx + float2(113, 71), g_Frame.vTime.y + 29));
+      const float3 vR = PbrReflectDir(vToEye, vN, fAlpha, u);
+      vFound = SurfaceRayCone(g_Draw.vAmbient.rgb, In.vWorldPos, vRayFace, vR, fRayDistance, fConeAngle,
+                              fConeAngle + PBR_REFL_SPREAD * fAlpha, true);
+    }
+    if (bQuad)
+    {
+      const float3 v0 = QuadReadLaneAt(vFound, 0), v1 = QuadReadLaneAt(vFound, 1), v2 = QuadReadLaneAt(vFound, 2),
+                   v3 = QuadReadLaneAt(vFound, 3);
+      if (!bOwn)
+        vFound = nLane == 0 ? v0 : nLane == 1 ? v1 : nLane == 2 ? v2 : v3;
+    }
+    if (fWeight > 0)
+    {
+      const float2 vAB = PbrEnvBrdf(fRough, saturate(dot(vN, vToEye)));
+      const float3 vShare = (lerp(PBR_REFL_DIELECTRIC, saturate(vTex.rgb * g_Draw.vColor.rgb), fMetal) * vAB.x + vAB.y) * fWeight;
+      const float fDiffuse = PbrReflectDiffuse(fRough, fMetal);
+      // The highlights (vHigh) kept: the lamps' and the sun's own lobe, not the diffuse light.
+      vColor.rgb = max(vColor.rgb - vHigh, 0) * fDiffuse + vHigh + vFound * vShare;
+#ifdef XR_AMBIENT
+      // The ambient light's part as much less (else at most the colour: the ambient occlusion would take all a dark
+      // metal's colour where its light is mostly the ambient's); the reflection not the ambient's.
+      vAmb *= fDiffuse;
+#endif
+    }
+  }
+#endif
 
   if (HasFlag(DF_TERRAIN_CLIFF))
   {
@@ -1655,8 +1841,9 @@ struct SPixelOutput
   float4 vLightmap : SV_Target7;  //!< the light map's light / 4 (rgb; 0 without one)
 };
 
-SPixelOutput PSMain(SVertexOutput In)
+SPixelOutput PSMain(XR_PS_INPUT)
 {
+  XR_PS_COVERAGE
   SPixelOutput Out;
   Out.vColor = SceneOutput(ShadePixel(In));
 #ifdef XR_VELOCITY
@@ -1706,8 +1893,9 @@ struct SPixelOutput
 #endif
 };
 
-SPixelOutput PSMain(SVertexOutput In)
+SPixelOutput PSMain(XR_PS_INPUT)
 {
+  XR_PS_COVERAGE
   SPixelOutput Out;
   Out.vColor = SceneOutput(ShadePixel(In));
   Out.vMotion = MotionVector(In.vCurClip, In.vPrevClip);
@@ -1724,16 +1912,18 @@ struct SPixelOutput
   float4 vAmbient : SV_Target3;
 };
 
-SPixelOutput PSMain(SVertexOutput In)
+SPixelOutput PSMain(XR_PS_INPUT)
 {
+  XR_PS_COVERAGE
   SPixelOutput Out;
   Out.vColor = SceneOutput(ShadePixel(In));
   Out.vAmbient = float4(s_vAmbient, Out.vColor.a);
   return Out;
 }
 #else
-float4 PSMain(SVertexOutput In) : SV_Target
+float4 PSMain(XR_PS_INPUT) : SV_Target
 {
+  XR_PS_COVERAGE
   return SceneOutput(ShadePixel(In));
 }
 #endif

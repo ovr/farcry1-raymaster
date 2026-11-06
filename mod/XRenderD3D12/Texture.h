@@ -151,6 +151,7 @@ public:
   CTexture *m_pPbrR = nullptr;
   bool m_bPbrLooked = false;          //!< looked for (found or not: not looked for again)
   bool m_bFlatHeight = false;         //!< a RayMaster material map whose height is flat (PbrCompanion::IsFlatHeight): nothing to offset
+  float m_vPbrMean[4] = { 0, 0, 0, 0 }; //!< a RayMaster map's mean r g b a (0 to 1, its smallest level): the roughness, the metalness
   //! Its share of r_ParallaxDepth by its physical material (r_ParallaxMaterials): its row of RayMaster/pbr_depth.tsv, 1
   //! for none (no table, a texture not in it); set with the maps (FindPbrCompanions).
   float m_fParallaxShare = 1.0f;
