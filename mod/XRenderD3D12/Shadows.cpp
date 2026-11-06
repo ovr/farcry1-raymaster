@@ -53,6 +53,8 @@ namespace
 
 //! A static object's map not used for this many frames is freed.
 constexpr int SHADOW_MAP_KEEP_FRAMES = 600;
+//! The levels of detail of a static caster whose leaf buffers are noted (IStatObj::GetLodObject: NULL where it has none).
+constexpr int STATIC_CASTER_LODS = 3;
 //! Maps kept for reuse (SpareShadowMap).
 constexpr size_t SHADOW_MAP_SPARES = 8;
 //! The sizes d3d12_ShadowMapSize may give.
@@ -149,7 +151,26 @@ ShadowMapFrustum * CD3D12Renderer::MakeShadowMapFrustum(ShadowMapFrustum * lof, 
   SRawList2 *pModels = At<SRawList2 *>(lof, nBin64Offset_ShadowMapFrustum_Models);
   for (int i = 0; pModels && pObjects && i < pObjects->nCount && pModels->nCount < pModels->nAllocatedCount; i++)
     reinterpret_cast<IStatObj **>(pModels->pElements)[pModels->nCount++] = reinterpret_cast<IStatObj *const *>(pObjects->pElements)[i];
+  // Their leaf buffers, of each level of detail: the static casters (IsStaticCaster, d3d12_StaticCasters).
+  for (int i = 0; pObjects && i < pObjects->nCount; i++)
+  {
+    IStatObj *pObj = reinterpret_cast<IStatObj *const *>(pObjects->pElements)[i];
+    for (int nLod = 0; pObj && nLod < STATIC_CASTER_LODS; nLod++)
+    {
+      IStatObj *pLod = nLod ? pObj->GetLodObject(nLod) : pObj;
+      if (CLeafBuffer *pLB = pLod ? pLod->GetLeafBuffer() : nullptr)
+        m_StaticCasterBuffers.insert(pLB);
+    }
+  }
   return lof;
+}
+
+bool CD3D12Renderer::IsStaticCaster(const SRenderItem &it) const
+{
+  if (!it.pRE || it.pRE->m_Type != eDATA_OcLeaf || m_StaticCasterBuffers.empty())
+    return false;
+  const CLeafBuffer *pLB = static_cast<const CREOcLeaf *>(it.pRE)->m_pBuffer;
+  return pLB && m_StaticCasterBuffers.count(pLB) != 0;
 }
 
 void CD3D12Renderer::NoteShadowCasters(const CCObject *pObj)

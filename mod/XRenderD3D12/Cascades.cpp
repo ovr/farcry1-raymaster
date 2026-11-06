@@ -24,7 +24,11 @@
 //	the main view's own items (the terrain, what is indoors) and the live
 //	casters, each part once. The live set holds the casters the engine
 //	names for its own shadows in the frame (characters, vehicles, the
-//	vegetation that casts: AddLiveCasters), each only where nothing in the
+//	vegetation that casts: AddLiveCasters) and, with d3d12_StaticCasters,
+//	the full set's static casters (the parts of the objects the engine
+//	makes shadow maps for: IsStaticCaster; it names one for the receivers
+//	near the camera only, so that a palm's shadow on the terrain came and
+//	went as one walked up to it), each only where nothing in the
 //	full set is nearer to the sun (DF2_CASCADE_CASTER). A part of either
 //	set goes into a slice only where its shadow falls on the slice's
 //	receivers (the view's points that take their shadow from it): the
@@ -351,6 +355,9 @@ void CD3D12Renderer::UpdateSunCascades(std::span<const SRenderItem> MainItems)
   m_bCascadePass = true;
   m_nCascadeSet = 0;
   m_CascadeDrawn.clear();
+  m_StaticCasterItems.clear();
+  m_nStaticCasterParts = 0;
+  m_bNoteStaticCasters = CV_d3d12_StaticCasters != 0;
   ClearSet(m_CascadeMaps[0]);
   const int w = std::max(GetWidth(), 1), h = std::max(GetHeight(), 1);
   CCamera SunCam = Camera;
@@ -369,6 +376,7 @@ void CD3D12Renderer::UpdateSunCascades(std::span<const SRenderItem> MainItems)
   m_Camera = Camera;
   const size_t nFromCamera = m_CascadeDrawn.size();
   DrawCascadeItems(MainItems, &m_CascadeDrawn);
+  m_bNoteStaticCasters = false;
 
   // The live set: the casters the engine named in the frame, as its shadow maps draw them.
   m_nCascadeSet = 1;
@@ -376,6 +384,15 @@ void CD3D12Renderer::UpdateSunCascades(std::span<const SRenderItem> MainItems)
   EF_StartEf();
   const int nLive = AddLiveCasters();
   EF_EndEf3D(0);
+  // d3d12_StaticCasters: the full set's static casters too. The engine names one for the receivers near the camera
+  // only (a palm for a character beside it, as well as for the terrain), so that its shadow on the terrain was there
+  // while they were near and gone a few metres farther off; the terrain's own light has a blurred one of it.
+  if (!m_StaticCasterItems.empty())
+  {
+    DrawCascadeItems(m_StaticCasterItems, nullptr);
+    m_nStaticCasterParts = (int)m_StaticCasterItems.size();
+    NoteRayLiveParts(m_StaticCasterItems);
+  }
   m_bCascadePass = false;
   m_pDevice->SetBackBufferTargets();
 
@@ -404,6 +421,8 @@ void CD3D12Renderer::UpdateSunCascades(std::span<const SRenderItem> MainItems)
     fprintf(m_pFrameDump.get(), "sun cascades: %d of %d x %d, towards the sun (%.3f %.3f %.3f), x (%.3f %.3f %.3f), y (%.3f %.3f %.3f); %d parts from the camera towards the sun, %d in all; "
             "%d live casters; shadow tint (%.2f %.2f %.2f) of %d\n", m_nCascades, m_nCascadeSize, m_nCascadeSize, Z.x, Z.y, Z.z, X.x, X.y, X.z, Y.x, Y.y, Y.z, (int)nFromCamera,
             (int)m_CascadeDrawn.size(), nLive, m_ShadowTint[0], m_ShadowTint[1], m_ShadowTint[2], nTint);
+    fprintf(m_pFrameDump.get(), "  static casters (d3d12_StaticCasters): %d parts of the full set in the live set too, of %d leaf buffers\n",
+            m_nStaticCasterParts, (int)m_StaticCasterBuffers.size());
     for (int i = 0; i < m_nCascades; i++)
     {
       const SCascade &Cas = m_Cascades[i];
@@ -446,6 +465,8 @@ void CD3D12Renderer::DrawCascadeItems(std::span<const SRenderItem> Items, std::u
     }
     if (pDrawn && !pDrawn->insert(PartKey(it)).second)
       continue;
+    if (m_bNoteStaticCasters && m_nCascadeSet == 0 && IsStaticCaster(it))
+      m_StaticCasterItems.push_back(it);
     SPart p = { &it, Vec3(0, 0, 0), -1 };
     PartSphere(it, p.c, p.r);
     p.bDiscards = it.eDrawClass == eDC_AlphaTest || it.eDrawClass == eDC_AlphaTestVColor || GetAlphaRef(it.pShader, it.pRes) > 0;

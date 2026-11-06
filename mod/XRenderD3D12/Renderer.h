@@ -807,6 +807,9 @@ public:
   //! view's (those it has too left out); with d3d12_RTSunShadows the live casters' are XR_RAY_LIVE
   //! there.
   void NoteRayOffscreenItems(std::span<const SRenderItem> Items);
+  //! With d3d12_RTSunShadows: Items' parts XR_RAY_LIVE in the scene for rays (the static casters of
+  //! the full set, d3d12_StaticCasters).
+  void NoteRayLiveParts(std::span<const SRenderItem> Items);
   //! A leaf item of a class that BuildRayScene walks (not the weapon in the hands, not a light pass).
   static bool IsRayWalked(const SRenderItem &it);
   //! This frame's TLAS for a draw or pass that traces rays, the frame's list from here on after its
@@ -1417,6 +1420,11 @@ public:
   std::vector<SShadowMap> m_SpareShadowMaps;
   std::vector<const void *> m_ShadowCasterLists;      //!< NoteShadowCasters: the list2<ShadowMapLightSourceInstance> of the frame
   std::vector<const void *> m_FrameCasterLists;       //!< the same, taken by UpdateShadowMaps for the rest of the frame
+  //! MakeShadowMapFrustum: the leaf buffers of the static objects the engine makes shadow maps for (the vegetation that
+  //! casts), of each of their levels of detail (IsStaticCaster, d3d12_StaticCasters).
+  std::unordered_set<const void *> m_StaticCasterBuffers;
+  //! Whether an item is a part of one of those (its leaf buffer one of m_StaticCasterBuffers).
+  bool IsStaticCaster(const SRenderItem &it) const;
   int m_nNextShadowMapID = 0x40000000;                //!< the maps' IDs, apart from the texture IDs
   bool m_bShadowMapPass = false;                      //!< a shadow map is being drawn
 
@@ -1497,6 +1505,9 @@ public:
   int m_nCascadeInstances = 0;                        //!< how many (0: one slice, m_nCascadeSlice)
   int m_nCascadeFrame = -1;                           //!< m_nFrames of the cascades (m_nCascades), when drawn
   std::unordered_set<uint64> m_CascadeDrawn;          //!< the parts drawn into the full set (DrawCascadeItems)
+  std::vector<SRenderItem> m_StaticCasterItems;       //!< d3d12_StaticCasters: the full set's parts of static casters, for the live set
+  bool m_bNoteStaticCasters = false;                  //!< DrawCascadeItems notes them (while the full set is drawn)
+  int m_nStaticCasterParts = 0;                       //!< the parts of them the live set got in the frame
   ICVar *m_pShadowMapsVar = nullptr;                  //!< e_shadow_maps, looked up on first use
 
   //////////////////////////////////////////////////////////////////////////
@@ -2151,6 +2162,7 @@ public:
   float CV_d3d12_ShadowDistance = 120;      //!< how far they reach from the camera (m)
   int CV_d3d12_ShadowCascadeSize = 2048;    //!< the size of their maps
   int CV_d3d12_CascadeInstancing = 1;       //!< 1: a caster of the full set drawn once into all the slices it reaches (DrawCascadeItems)
+  int CV_d3d12_StaticCasters = 1;           //!< 1: the static casters of the full set (the vegetation that casts) in the live set too (the terrain's shadows)
   int CV_d3d12_DepthPrepass = 1;            //!< 1: the main view's opaque surfaces into the depth buffer before the opaque list (DrawItems)
   float CV_d3d12_ShadowSoftness = 0.05f;    //!< the radius of their filter (m)
   int CV_d3d12_UpscaleMode = 0;             //!< EUpscaleMode of the upscaler (d3d12_Upscaler, a string)
