@@ -44,6 +44,7 @@
 #include "D3D12Upload.h"
 #include "D3D12Pipeline.h"
 #include "RayTracing.h"
+#include "Texture.h"
 #include "CpuSampler.h"
 #include "HdrStatsMath.h"
 #include <CryVersion.h>
@@ -267,6 +268,8 @@ void CD3D12Renderer::CollectStats()
     m_pDevice->GetVideoMemory(Stats.nVideoUsage, Stats.nVideoBudget);
     Stats.nResourceBytes = m_pUpload ? m_pUpload->GetVideoMemory() : 0;
     Stats.nRayBytes = m_pRayScene ? m_pRayScene->GetStaticBytes() : 0;
+    if (m_pTextures)
+      m_pTextures->UpscaledStats(Stats.nUpscaled, Stats.nTextures, Stats.nUpscaledBytes, Stats.nTextureBytes);
     Stats.nPSOs = m_pPipeline ? m_pPipeline->GetPSOCount() : 0;
   };
   if (!m_fStatsStart)
@@ -397,6 +400,8 @@ void CD3D12Renderer::DrawStats()
         if (S.nVideoBudget)
           Add(Format("Video memory %s of %s MB", Thousands((uint64)(S.nVideoUsage / MB)).c_str(), Thousands((uint64)(S.nVideoBudget / MB)).c_str()));
         Add(Format("Textures and buffers %s MB, rays %s MB", Thousands((uint64)(S.nResourceBytes / MB)).c_str(), Thousands((uint64)(S.nRayBytes / MB)).c_str()));
+        Add(Format("Textures %s (%s MB), upscaled %s (%s MB)", Thousands((uint64)S.nTextures).c_str(), Thousands((uint64)(S.nTextureBytes / MB)).c_str(),
+                   Thousands((uint64)S.nUpscaled).c_str(), Thousands((uint64)(S.nUpscaledBytes / MB)).c_str()));
         Add(Format("Frame memory %s KB, PSOs %s", Thousands((uint64)(S.fFrameMemory / fFrames / 1024.0)).c_str(), Thousands(S.nPSOs).c_str()));
       }
       SStatsLine &Heading = Add("GPU per pass", true);

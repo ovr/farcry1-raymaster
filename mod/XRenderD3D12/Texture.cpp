@@ -13,6 +13,9 @@
 //	"textures/<name>", then as "<name>"; a name in another folder as
 //	"<name>", then as "textures/<name>"; a name in "textures/" only as it
 //	is. Every file is read through ICryPak within the call that names it.
+//	With r_TexUpscaled a texture's picture (not a cube's, not a height
+//	map's) is the upscaled file of the found file's base in the game's
+//	folder RayMaster, where that is there and fit (TakeUpscaled).
 //
 //////////////////////////////////////////////////////////////////////
 
@@ -702,6 +705,7 @@ bool CTextureManager::Upload(CTexture *pTex, const SImage &Image)
   if (pTex->m_pGPU)
     pUpload->ReleaseTexture(pTex->m_pGPU);
   pTex->m_pGPU = pGPU;
+  pTex->m_nBytes = Image.Data.size();
   return true;
 }
 
@@ -881,6 +885,11 @@ CTexture *CTextureManager::Load(const char *szName, const char *szTexturePath, u
   }
   else
   {
+    // r_TexUpscaled: the upscaled picture in place of the file's own (not a cube's, not a height map's: those are made
+    // into other pictures here; not a normal map with a height map, LoadNormalWithHeight: their sizes must match).
+    int nTexWidth = 0, nTexHeight = 0;
+    const bool bUpscaled = !bCube && !bHeightBump && TakeUpscaled(Res.Base, Image, nTexWidth, nTexHeight);
+    const int nUpWidth = Image.nWidth, nUpHeight = Image.nHeight;
     if (bHeightBump)
       HeightToNormalMap(Image);
     if (nFlags & FT_NOMIPS)
@@ -902,6 +911,13 @@ CTexture *CTextureManager::Load(const char *szName, const char *szTexturePath, u
     pTex->m_bPoint = (nFlags2 & FT2_FILTER_NEAREST) != 0;
     pTex->m_bLoaded = (pTex->m_pGPU != nullptr);
     pTex->m_File = Res.Base;
+    if (bUpscaled)
+    {
+      // The engine is told the file's own sides (the interface's texel rectangles), as much smaller as r_TexResolution made it.
+      pTex->m_bUpscaled = true;
+      pTex->m_nOrigWidth = PbrCompanion::UpscaledOriginalSide(nTexWidth, nUpWidth, pTex->m_nWidth);
+      pTex->m_nOrigHeight = PbrCompanion::UpscaledOriginalSide(nTexHeight, nUpHeight, pTex->m_nHeight);
+    }
     AddKey(pTex, FoundKey);
   }
   if (!Res.bViaDir)
@@ -1040,6 +1056,62 @@ void CTextureManager::ReadDepthTable()
               (int)m_DepthShares.size());
 }
 
+bool CTextureManager::TakeUpscaled(const std::string &Base, SImage &Image, int &nTexWidth, int &nTexHeight)
+{
+  if (Base.empty() || GetCVarInt("r_TexUpscaled", 1) <= 0)
+    return false;
+  if (m_nUpscaledFolder < 0)
+  {
+    // Once: without the folder no texture looks for a file in it.
+    ICryPak *pPak = iSystem ? iSystem->GetIPak() : nullptr;
+    FILE *f = pPak ? pPak->FOpen(std::string(PbrCompanion::UPSCALED_MANIFEST).c_str(), "rb") : nullptr;
+    m_nUpscaledFolder = f ? 1 : 0;
+    if (f)
+      pPak->FClose(f);
+    if (iLog)
+      iLog->Log("RayMaster upscaled textures '%s': %s", std::string(PbrCompanion::UPSCALED_MANIFEST).c_str(),
+                m_nUpscaledFolder ? "there" : "no manifest, none taken");
+  }
+  if (!m_nUpscaledFolder)
+    return false;
+  const std::string Path = PbrCompanion::UpscaledPath(Base);
+  std::vector<byte> File;
+  if (!ReadFile(Path.c_str(), File))
+    return false;
+  // The levels each picture will have: an uncompressed one without levels gets them made (Load).
+  auto Levels = [](const SImage &I) { return !Img::IsBC(I.Format) && I.nMips == 1 ? Img::FullMipCount(I.nWidth, I.nHeight) : I.nMips; };
+  SImage Up;
+  if (!Img::LoadDDS(File, Up) || Up.bArray ||
+      !PbrCompanion::IsUpscaledUsable(Up.nWidth, Up.nHeight, Levels(Up), Up.nFaces, Image.nWidth, Image.nHeight, Levels(Image), Image.nFaces))
+  {
+    if (iLog && m_Warned.insert("#upscaled#" + Path).second)
+      iLog->LogWarning("Upscaled texture '%s': not used (not a DDS of one face wider than the texture's %d x %d, of its aspect, with its "
+                       "levels)", Path.c_str(), Image.nWidth, Image.nHeight);
+    return false;
+  }
+  nTexWidth = Image.nWidth;
+  nTexHeight = Image.nHeight;
+  Image = std::move(Up);
+  return true;
+}
+
+void CTextureManager::UpscaledStats(int &nUpscaled, int &nTextures, uint64 &nUpscaledBytes, uint64 &nBytes) const
+{
+  nUpscaled = nTextures = 0;
+  nUpscaledBytes = nBytes = 0;
+  for (const std::unique_ptr<CTexture> &p : m_ByID)
+    if (p && p->m_pGPU && !p->m_bRemoved)
+    {
+      nTextures++;
+      nBytes += p->m_nBytes;
+      if (p->m_bUpscaled)
+      {
+        nUpscaled++;
+        nUpscaledBytes += p->m_nBytes;
+      }
+    }
+}
+
 CTexture *CTextureManager::LoadPbrMap(CTexture *pTex, const std::string &Path, bool bHeight)
 {
   // Loaded once for all the textures of the file (the engine's flags make one of each).
@@ -1107,6 +1179,7 @@ void CTextureManager::ReleasePbrCompanions(CTexture *pTex)
   pTex->m_bPbrLooked = false;
   pTex->m_fParallaxShare = 1.0f;
   pTex->m_File.clear();
+  pTex->m_bUpscaled = false;
   for (CTexture *pMap : pMaps)
     ReleaseTexture(pMap, false);
 }

@@ -627,6 +627,25 @@ reference of its features and console variables.
   (r_PbrNormals)` or ` roughness (r_PbrRoughness) map|material map specular (r g b) gloss alpha|1`.
 - The renderer reads BC4 files too (`ATI1`, `BC4U`; none of the game's own): the one channel in red,
   green and blue 0, alpha 1, as the GPU reads them.
+- `r_TexUpscaled` (1) gives a texture of the paks its upscaled picture where the folder `RayMaster`
+  has it: `RayMaster/<texture>.dds` beside the maps (the texture's path as the maps have it; `.dds`
+  for a `.tga` and a `.jpg` too), made by the texture tool from the game's own (a cleanup network
+  for the compression's blocks, 1xDeJPG, then 4x-UltraSharpV2 Lite, to twice the side, at most 4096,
+  compressed as the texture was, with all its levels). Only while `RayMaster/upscaled_manifest.tsv`
+  is there (looked for once); not the cube maps, the height maps made into normal maps, nor a normal
+  map with its height map (their sizes must match). A file that is not one face wider than the
+  texture, of its aspect, with levels down as small as the texture's (or to 4 x 4), is left out
+  with a warning in the log (`PbrCompanion.h`'s `IsUpscaledUsable`). The engine is told the
+  texture's own sides (`GetOriginalWidth`, `GetOriginalHeight`: the interface maps its texel
+  rectangles by them), smaller by the levels `r_TexResolution` drops. Read as a texture loads: a
+  change takes effect from the next level's load; on the game's command line (`"r_TexUpscaled 0"`)
+  it counts from the start (`CommandLine.h`: the engine sets the line's variables only after the
+  menu's and the shaders' textures have loaded). The tool leaves out the light maps and the levels'
+  files, the interface, the `_bump` height maps and the textures of 32 px or less: of the game's
+  8829 textures 5725, 2.42 GB. The frame dump's line `upscaled textures (r_TexUpscaled): N of M
+  textures, A MB of B MB`, an item's `upscaled (r_TexUpscaled): W x H, its file's own w x h`; the
+  statistics' line `Textures N (A MB), upscaled N (B MB)`. 0: the paks' own pictures (the frames
+  before).
 - Cost (RX 7900 XTX, 3840 x 2160, the raster without the upscaler, `Parallax_river.ini`'s views): in
   River's temple the opaque list 0.65-0.72 to 0.77-0.84 ms, the frame 2.79-2.95 to 2.91-3.05 ms;
   from outside, 37 m off, the same (the depth under a pixel: no march). `r_ParallaxMaterials` and

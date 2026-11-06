@@ -1716,6 +1716,9 @@ void CD3D12Renderer::DumpItem(int nIndex, const SRenderItem &it, int eList)
     fprintf(m_pFrameDump.get(), "    RayMaster maps: material '%s'%s normals '%s' depth share %.2f\n",
             pTex->m_pPbrM ? pTex->m_pPbrM->m_Name.c_str() : "", pTex->m_pPbrM && pTex->m_pPbrM->m_bFlatHeight ? " (its height flat)" : "",
             pTex->m_pPbrN ? pTex->m_pPbrN->m_Name.c_str() : "", pTex->m_fParallaxShare);
+  if (pTex && pTex->m_bUpscaled)
+    fprintf(m_pFrameDump.get(), "    upscaled (r_TexUpscaled): %d x %d, its file's own %d x %d\n", pTex->m_nWidth, pTex->m_nHeight,
+            pTex->m_nOrigWidth, pTex->m_nOrigHeight);
   // The rotation and scale of the object's matrix, when it has one.
   const float *m = pObj->m_Matrix.data;
   if (m[0] != 1 || m[1] != 0 || m[2] != 0 || m[4] != 0 || m[5] != 1 || m[6] != 0 || m[8] != 0 || m[9] != 0 || m[10] != 1)
