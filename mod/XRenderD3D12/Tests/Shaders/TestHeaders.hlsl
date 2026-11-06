@@ -5,7 +5,7 @@
 //	File: TestHeaders.hlsl
 //	Description: The unit tests' kernels over the renderer's shader
 //	headers that stand alone (Shader Model 6.0): PathGBuffer.hlsli,
-//	HdrLight.hlsli, HdrToneMap.hlsli, HdrExposure.hlsli, HdrFrameAverage.hlsli, PathCache.hlsli, LightmapLight.hlsli, RenderMode.hlsli, ArrayCoords.hlsli, WaterLight.hlsli, WaterFoam.hlsli, WaterCaustics.hlsli, WaterVolume.hlsli, Underwater.hlsli, AlphaCoverage.hlsli, PbrSpecular.hlsli, Skin.hlsli and Fxaa.hlsli, included as the renderer's
+//	HdrLight.hlsli, HdrToneMap.hlsli, HdrExposure.hlsli, HdrFrameAverage.hlsli, PathCache.hlsli, LightmapLight.hlsli, RenderMode.hlsli, ArrayCoords.hlsli, WaterLight.hlsli, WaterFoam.hlsli, WaterCaustics.hlsli, WaterVolume.hlsli, Underwater.hlsli, AlphaCoverage.hlsli, PbrSpecular.hlsli, Skin.hlsli, RayFace.hlsli and Fxaa.hlsli, included as the renderer's
 //	programs include them. Each kernel runs the tested functions on the
 //	items of g_TestIn and writes what they give to g_TestOut; ShaderTests.cpp
 //	checks it. One compile per kernel (Tests/CMakeLists.txt).
@@ -37,6 +37,20 @@
 #include "AlphaCoverage.hlsli"
 #include "PbrSpecular.hlsli"
 #include "Skin.hlsli"
+#include "RayFace.hlsli"
+
+//! d3d12_RTFaceNormal's FaceFromRhw (RayFace.hlsli) of g_TestIn[6i] = (1 / w at the pixel, its change a pixel right, a
+//! pixel down, 0), [6i + 1] = (the pixel's NDC without the jitter, the NDC a pixel spans) and [6i + 2 .. 6i + 5] the
+//! world to clip matrix's rows: out[i].xyz.
+[numthreads(64, 1, 1)]
+void CSRayFace(uint i : SV_DispatchThreadID)
+{
+  if (i >= g_Test.nTest.x)
+    return;
+  const float4 a = TestIn(6 * i), b = TestIn(6 * i + 1);
+  const float4x4 m = float4x4(TestIn(6 * i + 2), TestIn(6 * i + 3), TestIn(6 * i + 4), TestIn(6 * i + 5));
+  TestOut(i, float4(FaceFromRhw(a.x, a.y, a.z, b.xy, b.zw, m), 0));
+}
 
 //! r_Skin's SkinSpecular (Skin.hlsli) of g_TestIn[3i] the normal (xyz) and alpha^2 (w), [3i + 1] the direction towards the
 //! light and [3i + 2] towards the eye (xyz, normalised here): out[i].x.

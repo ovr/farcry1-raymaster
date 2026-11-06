@@ -224,7 +224,7 @@
 //	stays where it hits nothing (the sky, the far) or the ocean first (not in
 //	the scene for rays: from above the ocean's level, nRaySun.w, a ray down
 //	ends there) and takes over again over the last quarter of its length.
-//	nRaySun.z >> 16 & 0xff 2 tints the hits red, the misses blue, 0 traces
+//	nRaySun.z >> 16 & 0xf 2 tints the hits red, the misses blue, 0 traces
 //	none (the cube alone: a draw here for its lamps). The metals and smooth
 //	materials of the RayMaster maps (nPbr.z, d3d12_RTPbrReflections) trace
 //	a ray a pixel by their roughness's lobe (PbrSpecular.hlsli), or one for
@@ -283,6 +283,7 @@
 #include "Skin.hlsli"
 #if defined(XR_RAY_REFL) || defined(XR_RAY_LIGHT)
 #include "RayShade.hlsli"
+#include "RayFace.hlsli"
 #endif
 #ifdef XR_PT
 #include "PathGBuffer.hlsli"
@@ -327,7 +328,7 @@ static float s_fPTFog, s_fPTSun, s_fPTSkin;
 //! The pixel shader's rays towards the lamps (the vertex shader's lighting has none): their origin's
 //! face, their cone's width there, how many more there may be.
 static bool s_bRayLights = false;
-static float3 s_vRayFace;
+static float3 s_vRayFace, s_vRayNormal;
 static float s_fRayWidth;
 static uint s_nRayLightsLeft;
 
@@ -341,7 +342,15 @@ float LightVisible(float3 vPos, float3 vToLight, float fDistance, float fMinGap,
     return 1;
   s_nRayLightsLeft--;
   const float fGap = max(((g_Frame.nRaySun.z >> 9) & 127) * 0.02, fMinGap);
-  return TraceLight(vPos, s_vRayFace, vToLight, fDistance, fGap, g_Frame.nRaySun.z & 0xff, s_fRayWidth, fHit, 4);
+  // d3d12_RTFaceNormal 1 (nRaySun.z's bit 21): where the face is turned from the lamp and the vertices' normal is not (a
+  // coarse mesh's triangle by the line where the light passes it, a head's), from off the surface along that normal: a
+  // ray from behind the face met the head itself, a hard shadow cut by the triangles (a thin surface lit from behind,
+  // its normal turned from the lamp too, as before). Skin's light reaches past that line (SkinWrap, and by its normal
+  // map's normal): all of its rays (skin is on closed heads; 2 cm along the normal a ray towards the lamp passes the
+  // head's curve there).
+  const bool bSmooth = (g_Frame.nRaySun.z & (1u << 21)) && dot(s_vRayFace, vToLight) < 0 &&
+                       (g_Draw.vSkin.x > 0 || dot(s_vRayNormal, vToLight) > 0);
+  return TraceLight(vPos, bSmooth ? s_vRayNormal : s_vRayFace, vToLight, fDistance, fGap, g_Frame.nRaySun.z & 0xff, s_fRayWidth, fHit, 4);
 }
 #endif
 
@@ -1025,7 +1034,7 @@ float3 SurfaceRayCone(float3 vCube, float3 P, float3 vFace, float3 R, float fDis
     Ray.TMax = min(Ray.TMax, (fWater - Ray.Origin.z) / R.z);
   const uint nMask = g_Frame.nRaySun.z;
   const SRayHit Hit = TraceScene(Ray, nMask & 0xff, fWidth, fSpread);
-  const bool bDebug = ((nMask >> 16) & 0xff) == 2;
+  const bool bDebug = ((nMask >> 16) & 0xf) == 2;
   if (!Hit.bHit)
     return bDebug ? vCube * float3(0.25, 0.25, 1) : vCube;
   // The last frame's light of the hit where it saw it (d3d12_RTPbrScreen; the hits tinted green in the debug mode):
@@ -1249,6 +1258,15 @@ float4 ShadePixel(SVertexOutput In)
   const float3 vRayDir = vRayView / max(fRayDistance, 1e-4);
   const float fPixelAngle = max(length(ddx(vRayDir)), length(ddy(vRayDir)));
   float3 vRayFace = cross(ddx(In.vWorldPos), ddy(In.vWorldPos));
+  // d3d12_RTFaceNormal (nRaySun.z's bit 20): the face from the plane 1 / w makes over the screen, precise in close ups
+  // where the world position's differences round (RayFace.hlsli), where it has one.
+  {
+    const float fRhw = 1 / In.vPos.w;
+    const float4 vRayClip = mul(float4(In.vWorldPos, 1), g_Frame.mViewProj);
+    const float3 vFace = FaceFromRhw(fRhw, ddx(fRhw), ddy(fRhw), vRayClip.xy / vRayClip.w, float2(2, -2) * g_Frame.vScreen.zw, g_Frame.mViewProj);
+    if ((g_Frame.nRaySun.z & (1u << 20)) && !HasFlag(DF_SCREEN_POS) && vRayClip.w > 0 && dot(vFace, vFace) > 1e-20)
+      vRayFace = vFace;
+  }
   vRayFace = dot(vRayFace, vRayFace) > 1e-20 ? normalize(vRayFace) : SafeNormalize(In.vNormal);
   if (dot(vRayFace, vRayDir) > 0)
     vRayFace = -vRayFace;
@@ -1256,6 +1274,10 @@ float4 ShadePixel(SVertexOutput In)
 #ifdef XR_RAY_LIGHT
   s_bRayLights = ((g_Frame.nRaySun.z >> 24) & 3) != 0;
   s_vRayFace = vRayFace;
+  // The vertices' normal on the face's side the camera sees (the face where it has none).
+  s_vRayNormal = dot(In.vNormal, In.vNormal) > 1e-12 ? normalize(In.vNormal) : vRayFace;
+  if (dot(s_vRayNormal, vRayFace) < 0)
+    s_vRayNormal = -s_vRayNormal;
   s_fRayWidth = fRayDistance * fPixelAngle;
   s_nRayLightsLeft = g_Frame.nRaySun.z >> 28;
 #endif
@@ -1307,7 +1329,7 @@ float4 ShadePixel(SVertexOutput In)
     {
       vTex = SampleCube(g_Draw.nTex0, nSampler0, reflect(vView, vN));
 #ifdef XR_RAY_REFL
-      if (((g_Frame.nRaySun.z >> 16) & 0xff) != 0)
+      if (((g_Frame.nRaySun.z >> 16) & 0xf) != 0)
         vTex.rgb = SurfaceRay(vTex.rgb, In.vWorldPos, vRayFace, reflect(vView, vN), fRayDistance, fPixelAngle);
 #endif
     }
@@ -1315,7 +1337,7 @@ float4 ShadePixel(SVertexOutput In)
     {
       float4 vThrough = SampleCube(g_Draw.nTex0, nSampler0, refract(vView, vN, g_Draw.vParams2.w));
 #ifdef XR_RAY_REFL
-      if (((g_Frame.nRaySun.z >> 16) & 0xff) != 0)
+      if (((g_Frame.nRaySun.z >> 16) & 0xf) != 0)
         vThrough.rgb = SurfaceRay(vThrough.rgb, In.vWorldPos, vRayFace, refract(vView, vN, g_Draw.vParams2.w), fRayDistance, fPixelAngle);
 #endif
       float fFresnel = saturate(g_Draw.vParams2.z + g_Draw.vParams2.x * pow(1 - saturate(-dot(vView, vN)), g_Draw.vParams2.y));
@@ -1582,7 +1604,7 @@ float4 ShadePixel(SVertexOutput In)
   // less as that pass's, its highlights kept (vHigh), no ray (the reflection has the lamp's light where the last frame's
   // picture shows it).
   [branch]
-  if (g_Draw.nPbr.z != 0 && (g_Draw.nPbr.w & XR_PBR_LIGHT_PASS) && ((g_Frame.nRaySun.z >> 16) & 0xff) != 0)
+  if (g_Draw.nPbr.z != 0 && (g_Draw.nPbr.w & XR_PBR_LIGHT_PASS) && ((g_Frame.nRaySun.z >> 16) & 0xf) != 0)
   {
     float3 vN;
     float fRough, fAlpha2, fMetal, fAO;
@@ -1605,7 +1627,7 @@ float4 ShadePixel(SVertexOutput In)
   // r_PbrAO (nRaySun.z's bit 27) less where the material map's ambient occlusion (its blue) hides the lobe
   // (PbrSpecOcclusion): the pits between a metal's treads, the holes of its mesh dark, not the scene's light.
   [branch]
-  if (g_Draw.nPbr.z != 0 && !(g_Draw.nPbr.w & XR_PBR_LIGHT_PASS) && ((g_Frame.nRaySun.z >> 16) & 0xff) != 0)
+  if (g_Draw.nPbr.z != 0 && !(g_Draw.nPbr.w & XR_PBR_LIGHT_PASS) && ((g_Frame.nRaySun.z >> 16) & 0xf) != 0)
   {
     float3 vN;
     float fRough, fAlpha2, fMetal, fAO;

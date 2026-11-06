@@ -501,6 +501,13 @@ void CD3D12Renderer::RegisterVariables()
                      "How far short of a projected light (a lamp with a picture) the rays towards it end, of the lamps' shadows "
                      "(d3d12_RTLightShadows) and of the path tracer (m, at least d3d12_RTLightShadowGap): its picture draws the "
                      "shade of its fitting, which casts no shadow of its own within it; 0: as the other lamps");
+  iConsole->Register("d3d12_RTFaceNormal", &CV_d3d12_RTFaceNormal, 1, 0,
+                     "The side of their surface the main view's rays start from (the lamps' shadows, d3d12_RTLightShadows, and the "
+                     "reflections, d3d12_RTReflectionSurfaces): 1 by the face of the triangle from the plane 1 / w makes over the "
+                     "screen, precise where the camera is close, and towards a lamp the face is turned from where the vertices' "
+                     "normal is not (by the line where the light passes a coarse mesh: a head's) along that normal; 2 that face "
+                     "alone; 0 by the world position's differences from pixel to pixel (the frames before: they round in close "
+                     "ups, and a lamp that grazes the surface stipples it with its shadow)");
   iConsole->Register("d3d12_RTSunAngle", &CV_d3d12_RTSunAngle, 0.53f, VF_DUMPTODISK,
                      "With d3d12_RTSunShadows, the sun's disc in degrees across (0.53 as the sun's; 0: hard shadows): the soft edges "
                      "of the shadow widen with the distance to what casts it");
@@ -841,6 +848,7 @@ WIN_HWND CD3D12Renderer::Init(int x,int y,int width,int height,unsigned int cbpp
     iConsole->UnregisterVariable("d3d12_RTLightShadowsMax", true);
     iConsole->UnregisterVariable("d3d12_RTLightShadowGap", true);
     iConsole->UnregisterVariable("d3d12_RTProjectorShadowGap", true);
+    iConsole->UnregisterVariable("d3d12_RTFaceNormal", true);
     iConsole->UnregisterVariable("d3d12_RTGI", true);
     CV_d3d12_RTGI = 0;
     iConsole->UnregisterVariable("d3d12_PathTracing", true);
