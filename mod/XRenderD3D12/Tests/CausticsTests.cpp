@@ -465,3 +465,26 @@ XR_TEST(Caustics_Wave)
     }
   }
 }
+
+// Why: with the caustics' kernel after the waves' (the waves' mips read, then written again the next frame) the
+// barriers given in batches (D3D12Barriers.h) leave the caustics and the waves as the barriers one by one do, bit for
+// bit, in fewer calls.
+XR_TEST(Caustics_BarrierBatches)
+{
+  SSea Sea;
+  MakeSea(10, Sea);
+  std::vector<float> H0;
+  for (const SCascade &k : Sea.Cascades)
+    H0.insert(H0.end(), k.H0.begin(), k.H0.end());
+  double L[3];
+  Sun(55, 70, L);
+  const std::vector<SOceanConstants> Frames = { Constants(0.3, L, 1), Constants(0.35, L, 1) };
+  SOceanOutput a, b;
+  const Barriers::SStats Immediate = InBarrierMode(Barriers::MODE_IMMEDIATE, [&] { a = Gpu().RunOceanFrames(H0, Frames, Kernels()); });
+  const Barriers::SStats Batched = InBarrierMode(Barriers::MODE_BATCHED, [&] { b = Gpu().RunOceanFrames(H0, Frames, Kernels()); });
+  for (int m = 0; m < XR_CAUSTICS_MIPS; m++)
+    CHECK_MSG(!a.Caustics[m].empty() && SameBits(a.Caustics[m], b.Caustics[m]), "the caustics' mip " + std::to_string(m));
+  for (int m = 0; m < XR_OCEAN_MIPS; m++)
+    CHECK_MSG(SameBits(a.Waves[m], b.Waves[m]), "the waves' mip " + std::to_string(m));
+  CheckBatchedStats("caustics", Immediate, Batched);
+}

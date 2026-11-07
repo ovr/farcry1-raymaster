@@ -76,6 +76,20 @@ bool XrTest::GpuReady()
   return GpuPtr() != nullptr;
 }
 
+void XrTest::CheckBatchedStats(const char *szWhat, const Barriers::SStats &Immediate, const Barriers::SStats &Batched)
+{
+  auto Print = [&](const char *szMode, const Barriers::SStats &s) {
+    std::printf("  %s %-9s %5u requests, %5u calls (%5u after work), %5u transitions, %4u UAV, %4u UAV of all\n", szWhat, szMode,
+                s.nRequests, s.nCalls, s.nDrains, s.nTransitions, s.nUav, s.nUavAll);
+  };
+  Print("immediate", Immediate);
+  Print("batched", Batched);
+  CHECK(Batched.nRequests == Immediate.nRequests);
+  CHECK(Batched.nCalls < Immediate.nCalls);
+  CHECK(Batched.nDrains <= Immediate.nDrains);
+  CHECK(Batched.nTransitions <= Immediate.nTransitions);
+}
+
 XrTest::CGpu::CGpu()
 {
   if (GpuOptions().bDebug)
@@ -136,6 +150,8 @@ XrTest::CGpu::CGpu()
     m_pList.As(&m_pList4);
   Ok(m_pDevice->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&m_pFence)), "CreateFence");
   m_hEvent = CreateEventW(nullptr, FALSE, FALSE, nullptr);
+  // Each list's transitions checked against each other (forgotten at its end: its resources go with the run).
+  m_Barriers.SetCensus(true);
 
   // The descriptor heap: 0 g_Buffers[0] (a scene's corners, null without one), 1-4 null textures (2D, cube, 2D array, 3D),
   // TEXTURE_SLOT.. g_Textures (a run's textures, null ones).
@@ -447,9 +463,11 @@ ID3D12PipelineState *XrTest::CGpu::Pipeline(const SBytecode &Shader)
 
 void XrTest::CGpu::Execute()
 {
+  FlushBarriers(false);
   Ok(m_pList->Close(), "Close");
   ID3D12CommandList *pLists[] = { m_pList.Get() };
   m_pQueue->ExecuteCommandLists(1, pLists);
+  m_Barriers.OnListExecuted();
   Ok(m_pQueue->Signal(m_pFence.Get(), ++m_nFence), "Signal");
   if (m_pFence->GetCompletedValue() < m_nFence)
   {
@@ -458,6 +476,33 @@ void XrTest::CGpu::Execute()
   }
   Ok(m_pDevice->GetDeviceRemovedReason(), "the device (removed)");
   CheckDebugMessages();
+  // The harness's own transitions name the states their resources have (the census of each list).
+  for (const Barriers::SProblem &p : m_Barriers.TakeProblems())
+  {
+    char sz[160];
+    snprintf(sz, sizeof(sz), "barrier problem %d: subresource %u, expected state 0x%X, got 0x%X", (int)p.eKind, p.nSub,
+             (unsigned)p.Expected, (unsigned)p.Got);
+    Fail(__FILE__, __LINE__, sz);
+  }
+}
+
+void XrTest::CGpu::Move(ID3D12Resource *pRes, D3D12_RESOURCE_STATES eFrom, D3D12_RESOURCE_STATES eTo)
+{
+  m_Barriers.Transition(pRes, eFrom, eTo);
+  if (m_Barriers.GetMode() == Barriers::MODE_IMMEDIATE)
+    FlushBarriers(false);
+}
+
+void XrTest::CGpu::UavAll()
+{
+  m_Barriers.UavAll();
+  if (m_Barriers.GetMode() == Barriers::MODE_IMMEDIATE)
+    FlushBarriers(false);
+}
+
+void XrTest::CGpu::FlushBarriers(bool bWork)
+{
+  m_Barriers.Flush([&](UINT n, const D3D12_RESOURCE_BARRIER *p) { m_pList->ResourceBarrier(n, p); }, bWork);
 }
 
 void XrTest::CGpu::CheckDebugMessages()
@@ -547,6 +592,76 @@ std::vector<uint32> XrTest::CGpu::Run(const SDispatch &d)
   D3D12_RANGE Range = { 0, nOutBytes };
   Ok(pReadback->Map(0, &Range, &p), "Map");
   memcpy(Out.data(), p, nOutBytes);
+  D3D12_RANGE None = { 0, 0 };
+  pReadback->Unmap(0, &None);
+  return Out;
+}
+
+std::vector<uint32> XrTest::CGpu::RunBarrierSteps(const SBytecode &Step, uint32 nItems, const std::vector<uint32> &Adds, size_t nSplit)
+{
+  const size_t nBytes = (size_t)nItems * 16;
+  constexpr size_t STRIDE = D3D12_CONSTANT_BUFFER_DATA_PLACEMENT_ALIGNMENT;
+  std::vector<uint8_t> Steps(std::max<size_t>(Adds.size(), 1) * STRIDE);
+  for (size_t s = 0; s < Adds.size(); s++)
+  {
+    STestConstants c;
+    c.nTest[0] = nItems;
+    c.nTest[1] = Adds[s];
+    memcpy(&Steps[s * STRIDE], &c, sizeof(c));
+  }
+  ComPtr<ID3D12Resource> pSteps = Upload(Steps.data(), Steps.size());
+  SPathTraceConstants Zero = {};
+  ComPtr<ID3D12Resource> pPT = Upload(&Zero, sizeof(Zero));
+  SFrameConstants ZeroFrame = {};
+  ComPtr<ID3D12Resource> pFrame = Upload(&ZeroFrame, sizeof(ZeroFrame));
+  ComPtr<ID3D12Resource> pNone = Upload(nullptr, 256);
+  // A buffer (zeroed as it is made) whose state the tracker keeps: it decays to COMMON when a list has run.
+  ComPtr<ID3D12Resource> pOut = Buffer(D3D12_HEAP_TYPE_DEFAULT, nBytes, D3D12_RESOURCE_STATE_COMMON, true);
+  ComPtr<ID3D12Resource> pReadback = Buffer(D3D12_HEAP_TYPE_READBACK, nBytes, D3D12_RESOURCE_STATE_COPY_DEST, false);
+  m_Barriers.Register(pOut.Get(), D3D12_RESOURCE_STATE_COMMON, 1, true);
+
+  auto Open = [&]() {
+    Ok(m_pAllocator->Reset(), "Reset");
+    Ok(m_pList->Reset(m_pAllocator.Get(), Pipeline(Step)), "Reset");
+    m_Barriers.OnListOpened();
+    // Run's bindings (the kernel reads b0 space9 and writes u0 space9 only).
+    m_pList->SetComputeRootSignature(m_pRootSignature.Get());
+    m_pList->SetComputeRootConstantBufferView(1, pPT->GetGPUVirtualAddress());
+    for (UINT n : { 2u, 3u, 4u, 8u, 9u, 10u })
+      m_pList->SetComputeRootShaderResourceView(n, pNone->GetGPUVirtualAddress());
+    m_pList->SetComputeRootUnorderedAccessView(5, pOut->GetGPUVirtualAddress());
+    m_pList->SetComputeRootUnorderedAccessView(6, pOut->GetGPUVirtualAddress());
+    m_pList->SetComputeRootConstantBufferView(7, pFrame->GetGPUVirtualAddress());
+    ID3D12DescriptorHeap *pHeaps[] = { m_pHeap.Get() };
+    m_pList->SetDescriptorHeaps(1, pHeaps);
+    for (UINT i = 0; i < 5; i++)
+      m_pList->SetComputeRootDescriptorTable(11 + i, GpuHandle(i == 1 ? TEXTURE_SLOT : i));
+  };
+  Open();
+  for (size_t s = 0; s < Adds.size(); s++)
+  {
+    if (s == nSplit && s > 0)
+    {
+      Execute();
+      Open();
+    }
+    m_Barriers.Require(pOut.Get(), D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+    m_Barriers.Uav(pOut.Get());
+    m_pList->SetComputeRootConstantBufferView(0, pSteps->GetGPUVirtualAddress() + s * STRIDE);
+    FlushBarriers();
+    m_pList->Dispatch((nItems + 63) / 64, 1, 1);
+  }
+  m_Barriers.Require(pOut.Get(), D3D12_RESOURCE_STATE_COPY_SOURCE);
+  FlushBarriers();
+  m_pList->CopyBufferRegion(pReadback.Get(), 0, pOut.Get(), 0, nBytes);
+  Execute();
+  m_Barriers.Forget(pOut.Get());
+
+  std::vector<uint32> Out(nBytes / 4);
+  void *p = nullptr;
+  D3D12_RANGE Range = { 0, nBytes };
+  Ok(pReadback->Map(0, &Range, &p), "Map");
+  memcpy(Out.data(), p, nBytes);
   D3D12_RANGE None = { 0, 0 };
   pReadback->Unmap(0, &None);
   return Out;
@@ -705,21 +820,15 @@ std::vector<uint8_t> XrTest::CGpu::RunCmaa2(const STestTexture &Picture, const S
   Ok(m_pList->Reset(m_pAllocator.Get(), nullptr), "Reset");
   std::vector<ComPtr<ID3D12Resource>> Keep;
   CopyRows(pSource.Get(), Picture, nRow, Keep);
-  auto Move = [&](ID3D12Resource *p, D3D12_RESOURCE_STATES eFrom, D3D12_RESOURCE_STATES eTo) {
-    const D3D12_RESOURCE_BARRIER t = Transition(p, eFrom, eTo);
-    m_pList->ResourceBarrier(1, &t);
-  };
-  auto UavBarrier = [&]() {
-    D3D12_RESOURCE_BARRIER u = {};
-    u.Type = D3D12_RESOURCE_BARRIER_TYPE_UAV;
-    m_pList->ResourceBarrier(1, &u);
-  };
+  auto UavBarrier = [&]() { UavAll(); };
   auto Dispatch = [&](const SBytecode &k, UINT x, UINT y) {
     m_pList->SetPipelineState(WidePipeline(k));
+    FlushBarriers();
     m_pList->Dispatch(x, y, 1);
   };
   auto Indirect = [&](const SBytecode &k) {
     m_pList->SetPipelineState(WidePipeline(k));
+    FlushBarriers();
     m_pList->ExecuteIndirect(m_pDispatchSignature.Get(), 1, pArgs, 0, nullptr, 0);
   };
   Move(pSource.Get(), D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_COPY_SOURCE);
@@ -738,6 +847,7 @@ std::vector<uint8_t> XrTest::CGpu::RunCmaa2(const STestTexture &Picture, const S
       Move(pColor.Get(), UAV_STATE, D3D12_RESOURCE_STATE_COPY_DEST);
       UavBarrier();
     }
+    FlushBarriers();
     m_pList->CopyResource(pColor.Get(), pSource.Get());
     Move(pColor.Get(), D3D12_RESOURCE_STATE_COPY_DEST, READ);
     Move(pArgs, D3D12_RESOURCE_STATE_COMMON, UAV_STATE);
@@ -768,6 +878,7 @@ std::vector<uint8_t> XrTest::CGpu::RunCmaa2(const STestTexture &Picture, const S
   Dst.PlacedFootprint = Layout;
   Src.pResource = pColor.Get();
   Src.Type = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
+  FlushBarriers();
   m_pList->CopyTextureRegion(&Dst, 0, 0, 0, &Src, nullptr);
   Execute();
 
@@ -990,10 +1101,6 @@ XrTest::SWakeOutput XrTest::CGpu::RunWake(const std::vector<float> &Start, const
     m_pList->CopyTextureRegion(&Dst, 0, 0, 0, &Src, nullptr);
     Keep.push_back(pStaging);
   }
-  auto Move = [&](ID3D12Resource *p, D3D12_RESOURCE_STATES eFrom, D3D12_RESOURCE_STATES eTo) {
-    const D3D12_RESOURCE_BARRIER t = Transition(p, eFrom, eTo);
-    m_pList->ResourceBarrier(1, &t);
-  };
   Move(pState.Get(), D3D12_RESOURCE_STATE_COPY_DEST, UAV_STATE);
   // The foam's textures at rest where the view's kernel reads the one before.
   for (ComPtr<ID3D12Resource> &p : pFoam)
@@ -1006,6 +1113,7 @@ XrTest::SWakeOutput XrTest::CGpu::RunWake(const std::vector<float> &Start, const
     m_pList->SetPipelineState(ComputePipeline(k));
     m_pList->SetComputeRootDescriptorTable(1, Gpu(nTable * TABLE));
     m_pList->SetComputeRootDescriptorTable(2, Gpu(nTable * TABLE + SRVS));
+    FlushBarriers();
     m_pList->Dispatch(x, y, 1);
   };
   // UpdateWakes' order and barriers, a frame after another.
@@ -1028,11 +1136,7 @@ XrTest::SWakeOutput XrTest::CGpu::RunWake(const std::vector<float> &Start, const
     m_pList->SetComputeRootConstantBufferView(0, pCB->GetGPUVirtualAddress() + nCB++ * CB_STRIDE);
     f = i > 0 ? 1 - f : 0;
     if (i > 0)
-    {
-      // The view of the frame before written before this frame's.
-      const D3D12_RESOURCE_BARRIER Uav = { D3D12_RESOURCE_BARRIER_TYPE_UAV };
-      m_pList->ResourceBarrier(1, &Uav);
-    }
+      UavAll();  // the view of the frame before written before this frame's
     Move(pState.Get(), UAV_STATE, READ);
     Move(pFoam[f].Get(), READ, UAV_STATE);
     Dispatch(Kernels.View, 3 + f, N / 16, N / 16);
@@ -1054,6 +1158,7 @@ XrTest::SWakeOutput XrTest::CGpu::RunWake(const std::vector<float> &Start, const
     Src.pResource = pSrc;
     Src.Type = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
     Src.SubresourceIndex = nSub;
+    FlushBarriers();
     m_pList->CopyTextureRegion(&Dst, 0, 0, 0, &Src, nullptr);
   };
   Copy(pState.Get(), 0, pStateBack.Get(), StateLayout);
@@ -1310,10 +1415,6 @@ XrTest::SOceanOutput XrTest::CGpu::RunOceanFrames(const std::vector<float> &H0, 
     }
     Keep.push_back(pStaging);
   }
-  auto Move = [&](ID3D12Resource *p, D3D12_RESOURCE_STATES eFrom, D3D12_RESOURCE_STATES eTo) {
-    const D3D12_RESOURCE_BARRIER t = Transition(p, eFrom, eTo);
-    m_pList->ResourceBarrier(1, &t);
-  };
   Move(pH0.Get(), D3D12_RESOURCE_STATE_COPY_DEST, READ);
   ID3D12DescriptorHeap *pHeaps[] = { pHeap.Get() };
   m_pList->SetDescriptorHeaps(1, pHeaps);
@@ -1322,6 +1423,7 @@ XrTest::SOceanOutput XrTest::CGpu::RunOceanFrames(const std::vector<float> &H0, 
     m_pList->SetPipelineState(Pso(k));
     m_pList->SetComputeRootDescriptorTable(1, Gpu(nTable * TABLE));
     m_pList->SetComputeRootDescriptorTable(2, Gpu(nTable * TABLE + SRVS));
+    FlushBarriers();
     m_pList->Dispatch(x, y, z);
   };
   // At rest where the foam kernel reads the target of the frame before.
@@ -1336,8 +1438,7 @@ XrTest::SOceanOutput XrTest::CGpu::RunOceanFrames(const std::vector<float> &H0, 
     if (f > 0)
     {
       // The frame before's writes to the waves and their level 4 done before this frame's.
-      const D3D12_RESOURCE_BARRIER Uav = { D3D12_RESOURCE_BARRIER_TYPE_UAV };
-      m_pList->ResourceBarrier(1, &Uav);
+      UavAll();
       Move(pFields.Get(), READ, UAV_STATE);
     }
     Dispatch(Kernels.Rows, 0, 1, N, C);
@@ -1386,6 +1487,7 @@ XrTest::SOceanOutput XrTest::CGpu::RunOceanFrames(const std::vector<float> &H0, 
       Src.pResource = pSrc;
       Src.Type = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
       Src.SubresourceIndex = i;
+      FlushBarriers();
       m_pList->CopyTextureRegion(&Dst, 0, 0, 0, &Src, nullptr);
     }
   };
