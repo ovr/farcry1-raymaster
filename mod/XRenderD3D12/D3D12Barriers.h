@@ -228,10 +228,11 @@ namespace Barriers
     //! checked against its state (PROBLEM_BEFORE) and the transition made from its state; Before == After is left out.
     void Transition(ID3D12Resource *pRes, D3D12_RESOURCE_STATES Before, D3D12_RESOURCE_STATES After, UINT nSub = ALL)
     {
-      m_Stats.nRequests++;
+      if (!m_bAgain)
+        m_Stats.nRequests++;
       if (!pRes)
         return;
-      if (IsMixedWrite(After))
+      if (IsMixedWrite(After) && !m_bAgain)
         Problem(PROBLEM_MIXED_WRITE, pRes, nSub, Before, After);
       SRecord *pRec = Find(pRes);
       if (m_eMode == MODE_IMMEDIATE && !pRec)
@@ -665,11 +666,13 @@ namespace Barriers
         s.bTrip = true;
       s.Want = After;
     }
+    //! The queue sealed and the transition queued again after it: counted, checked and seen by the census once.
     void SealAndTransition(ID3D12Resource *pRes, D3D12_RESOURCE_STATES Before, D3D12_RESOURCE_STATES After, UINT nSub)
     {
       Seal();
+      m_bAgain = true;
       Transition(pRes, Before, After, nSub);
-      m_Stats.nRequests--;
+      m_bAgain = false;
     }
 
     //! The batch queued so far closed into a call of its own (sealed): its barriers made, the registered states kept.
@@ -755,7 +758,7 @@ namespace Barriers
     //! The census of a transition of a resource not registered.
     void Census(ID3D12Resource *pRes, UINT nSub, D3D12_RESOURCE_STATES Before, D3D12_RESOURCE_STATES After)
     {
-      if (!m_bCensus)
+      if (!m_bCensus || m_bAgain)
         return;
       CensusIdentity(pRes);
       const auto Key = std::make_pair(pRes, nSub);
@@ -814,6 +817,7 @@ namespace Barriers
     std::vector<SProblem> m_Problems;
     const char *m_szContext = nullptr;
     bool m_bCensus = false;
+    bool m_bAgain = false;  //!< in SealAndTransition: the transition given again, checked once already
     FIsBuffer m_pIsBuffer = nullptr;
     struct SCensus
     {

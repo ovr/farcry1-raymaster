@@ -576,6 +576,49 @@ XR_TEST(Barrier_Census)
   }
 }
 
+// Why: a transition that one call cannot hold with what is queued (the whole resource and then one of its subresources,
+// a round trip through a write state with no work in it) seals the queue and is queued again after it; the census
+// checked it the second time too, against the after it had just kept, and step 318's census in the game logged the
+// water reflection's mips (SetOffscreenTargets) and a shadow map with no draws (DEPTH_WRITE and back) as wrong. Each
+// transition is counted and checked once; a wrong before is still found, once.
+XR_TEST(Barrier_CensusSealedOnce)
+{
+  constexpr D3D12_RESOURCE_STATES DW = D3D12_RESOURCE_STATE_DEPTH_WRITE;
+  CBarrierTracker t = Batched();
+  t.SetCensus(true);
+  // The reflection: drawn as a whole, then each mip from the one before.
+  t.Transition(Res(1), PSR, RT);
+  Flush(t);
+  t.Transition(Res(1), RT, PSR);
+  t.Transition(Res(1), PSR, RT, 1);
+  Flush(t);
+  for (UINT i = 2; i < 5; i++)
+  {
+    t.Transition(Res(1), RT, PSR, i - 1);
+    t.Transition(Res(1), PSR, RT, i);
+    Flush(t);
+  }
+  t.Transition(Res(1), RT, PSR, 4);
+  Flush(t, false);
+  // A shadow map drawn, then left and set again with no draws between.
+  t.Transition(Res(2), PSR, DW);
+  Flush(t);
+  const auto nRequests = t.Stats().nRequests;
+  t.Transition(Res(2), DW, PSR);
+  t.Transition(Res(2), PSR, DW);
+  const std::vector<SCall> c = Flush(t);
+  CHECK(c.size() == 2);  // a round trip through a write state: not merged
+  CHECK(t.Stats().nRequests == nRequests + 2);
+  CHECK(t.TakeProblems().empty());
+  // A wrong before of a subresource after the whole: found once.
+  t.Transition(Res(3), PSR, RT);
+  Flush(t);
+  t.Transition(Res(3), RT, PSR);
+  t.Transition(Res(3), NPSR, RT, 1);
+  Flush(t);
+  CHECK(CountKind(t.TakeProblems(), PROBLEM_BEFORE) == 1);
+}
+
 // Why: the renderer releases resources by more ways than DeferredRelease (the scene targets made again for another
 // size, NRD's pool), so a new resource at a released one's address was taken for it: step 317's census in the game
 // logged the scene targets' first transitions from SCENE_READ (the state they are made in) as wrong, the state kept
