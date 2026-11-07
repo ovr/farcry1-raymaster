@@ -392,9 +392,9 @@ bool CD3D12Renderer::UpdatePathTargets()
     ReleasePathTargets();
     return false;
   }
-  // Made in PIXEL_SHADER_RESOURCE (in a frame).
+  // Made in PIXEL_SHADER_RESOURCE; their states kept by the device (Begin/EndPathTargets ask for theirs).
   for (CD3D12Texture *pTex : { m_PathTrace.pAlbedo, m_PathTrace.pNormal, m_PathTrace.pSun, m_PathTrace.pSpecular, m_PathTrace.pLightmap })
-    m_pDevice->Transition(pTex->m_pResource, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, PATH_READ);
+    m_pDevice->TrackState(pTex->m_pResource, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
   iLog->Log("XRenderD3D12: the path tracer's G-buffer, %d x %d", w, h);
   return true;
 }
@@ -424,7 +424,7 @@ void CD3D12Renderer::BeginPathTargets()
   static const float Zero[4] = {};
   CD3D12Texture *const Targets[] = { m_PathTrace.pAlbedo, m_PathTrace.pNormal, m_PathTrace.pSun, m_PathTrace.pSpecular, m_PathTrace.pLightmap };
   for (CD3D12Texture *pTex : Targets)
-    m_pDevice->Transition(pTex->m_pResource, PATH_READ, D3D12_RESOURCE_STATE_RENDER_TARGET);
+    m_pDevice->Require(pTex->m_pResource, D3D12_RESOURCE_STATE_RENDER_TARGET);
   for (CD3D12Texture *pTex : Targets)
     m_pDevice->ClearRenderTargetView(pTex->m_RTV, Zero);
   m_pDevice->BindPathTargets(m_PathTrace.pAlbedo->m_RTV, m_PathTrace.pNormal->m_RTV, m_PathTrace.pSun->m_RTV, m_PathTrace.pSpecular->m_RTV,
@@ -438,8 +438,9 @@ void CD3D12Renderer::EndPathTargets()
     return;
   m_PathTrace.bBound = false;
   m_pDevice->BindPathTargets({}, {}, {}, {}, {});
+  // Read by the kernels and the composite's pixels.
   for (CD3D12Texture *pTex : { m_PathTrace.pAlbedo, m_PathTrace.pNormal, m_PathTrace.pSun, m_PathTrace.pSpecular, m_PathTrace.pLightmap })
-    m_pDevice->Transition(pTex->m_pResource, D3D12_RESOURCE_STATE_RENDER_TARGET, PATH_READ);
+    m_pDevice->Require(pTex->m_pResource, PATH_READ);
   m_PathTrace.nGBufferFrame = m_nFrames;
   m_PathTrace.bTraceDue = true;
   if (m_pFrameDump)
@@ -500,6 +501,10 @@ bool CD3D12Renderer::UpdatePathKernels(int w, int h)
     ReleasePathKernels();
     return false;
   }
+  // Made in UNORDERED_ACCESS; their states kept by the device (each kernel and the composite ask for theirs, none moved
+  // back after: the history read by the next frame stays readable).
+  for (CD3D12Texture *pTex : { s.pRays, s.pHistory[0], s.pHistory[1], s.pFrames[0], s.pFrames[1], s.pLight, s.pHighlights })
+    m_pDevice->TrackState(pTex->m_pResource, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
   s.nHistoryFrame = -1;
   return true;
 }
@@ -548,7 +553,9 @@ bool CD3D12Renderer::UpdatePathNrd(int w, int h)
     s.bNrdFailed = true;
     return false;
   }
-  // CSTrace's hit distance: u2 of its table (a null view before).
+  // The hit distance's state kept by the device (made in UNORDERED_ACCESS); NRD's own textures and its inputs and output
+  // keep theirs in NRD's host. CSTrace's hit distance: u2 of its table (a null view before).
+  m_pDevice->TrackState(s.pHitDistance->m_pResource, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
   D3D12_UNORDERED_ACCESS_VIEW_DESC View = {};
   View.ViewDimension = D3D12_UAV_DIMENSION_TEXTURE2D;
   View.Format = PATH_HIT_FORMAT;
@@ -825,7 +832,14 @@ void CD3D12Renderer::DrawPathTrace()
   const D3D12_GPU_VIRTUAL_ADDRESS nInstances = m_pRayScene->GetInstances();
   const D3D12_GPU_VIRTUAL_ADDRESS nLights = s.nLightsFrame == m_nFrames ? s.nLights : 0;
   const UINT gx = (UINT)(w + XR_PT_GROUP - 1) / XR_PT_GROUP, gy = (UINT)(h + XR_PT_GROUP - 1) / XR_PT_GROUP;
+  constexpr D3D12_RESOURCE_STATES UAV = D3D12_RESOURCE_STATE_UNORDERED_ACCESS;
   m_pDevice->Transition(pDepth, D3D12_RESOURCE_STATE_DEPTH_WRITE, PATH_DEPTH_READ);
+  // The targets' states kept by the device (UpdatePathKernels): each kernel asks for its outputs and inputs, nothing moved
+  // back after (the frame before's history, read by this one, stays readable). The table of the cache's kernels and
+  // CSTrace has the paths and the hit distance.
+  m_pDevice->Require(s.pRays->m_pResource, UAV);
+  if (s.pHitDistance)
+    m_pDevice->Require(s.pHitDistance->m_pResource, UAV);
   if (bCache)
   {
     // The cache's samples from a path for each PATH_CACHE_TILE x PATH_CACHE_TILE pixels, blended into its light, which
@@ -844,20 +858,19 @@ void CD3D12Renderer::DrawPathTrace()
   GpuSection("pt paths");
   const UINT tx = bCheckerboard ? (UINT)((w + 1) / 2 + XR_PT_GROUP - 1) / XR_PT_GROUP : gx;
   m_pCompute->DispatchRays(pList, eD3D12K_PathTrace, FrameCB.nGPU, PassCB.nGPU, nTlas, nInstances, s.nTables[PATH_TABLE_TRACE], tx, gy, nLights);
-  m_pDevice->Transition(s.pRays->m_pResource, D3D12_RESOURCE_STATE_UNORDERED_ACCESS, PATH_KERNEL_READ);
+  m_pDevice->Require(s.pRays->m_pResource, PATH_KERNEL_READ);
   bool bNrdDone = false;
   int nNrdPasses = 0;
   if (bNrd)
   {
     // NRD's inputs from the paths (the motion vectors readable meanwhile), NRD, its light as this frame's history.
     GpuSection("pt nrd");
-    m_pDevice->Transition(s.pHitDistance->m_pResource, D3D12_RESOURCE_STATE_UNORDERED_ACCESS, PATH_KERNEL_READ);
+    m_pDevice->Require(s.pHitDistance->m_pResource, PATH_KERNEL_READ);
     if (s.nVelocitySRV >= 0)
       m_pDevice->Transition(pVelocity, D3D12_RESOURCE_STATE_RENDER_TARGET, PATH_KERNEL_READ);
     m_pCompute->DispatchRays(pList, eD3D12K_PathNrdPack, FrameCB.nGPU, PassCB.nGPU, nTlas, nInstances, s.nNrdTable, gx, gy, nLights);
     if (s.nVelocitySRV >= 0)
       m_pDevice->Transition(pVelocity, PATH_KERNEL_READ, D3D12_RESOURCE_STATE_RENDER_TARGET);
-    m_pDevice->Transition(s.pHitDistance->m_pResource, PATH_KERNEL_READ, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
     SNrdView View = {};
     memcpy(View.mWorldToView, m_CameraView.data, sizeof(View.mWorldToView));
     memcpy(View.mViewToClip, m_ProjMatrix.data, sizeof(View.mViewToClip));
@@ -878,33 +891,35 @@ void CD3D12Renderer::DrawPathTrace()
     m_pNrd->GetStats(nNrdPasses, nTables, nTextures);
     m_pDevice->ForgetDrawState();
     s.nNrdFrame = bNrdDone ? m_nFrames : -1;
-    m_pDevice->Transition(s.pNrdOut->m_pResource, D3D12_RESOURCE_STATE_UNORDERED_ACCESS, PATH_KERNEL_READ);
+    // NRD's output is NRD's host's (its state as the host leaves it).
+    m_pDevice->Transition(s.pNrdOut->m_pResource, UAV, PATH_KERNEL_READ);
+    m_pDevice->Require(pHistory->m_pResource, UAV);
+    m_pDevice->Require(pFrames->m_pResource, UAV);
     m_pCompute->DispatchRays(pList, eD3D12K_PathNrdResolve, FrameCB.nGPU, PassCB.nGPU, nTlas, nInstances,
                              s.nTables[PATH_TABLE_TEMPORAL0 + nCur], gx, gy, nLights);
-    m_pDevice->Transition(s.pNrdOut->m_pResource, PATH_KERNEL_READ, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+    m_pDevice->Transition(s.pNrdOut->m_pResource, PATH_KERNEL_READ, UAV);
   }
   else
   {
-    m_pDevice->Transition(pPrevHistory->m_pResource, D3D12_RESOURCE_STATE_UNORDERED_ACCESS, PATH_KERNEL_READ);
-    m_pDevice->Transition(pPrevFrames->m_pResource, D3D12_RESOURCE_STATE_UNORDERED_ACCESS, PATH_KERNEL_READ);
+    m_pDevice->Require(pPrevHistory->m_pResource, PATH_KERNEL_READ);
+    m_pDevice->Require(pPrevFrames->m_pResource, PATH_KERNEL_READ);
+    m_pDevice->Require(pHistory->m_pResource, UAV);
+    m_pDevice->Require(pFrames->m_pResource, UAV);
     GpuSection("pt history");
     m_pCompute->DispatchRays(pList, eD3D12K_PathTemporal, FrameCB.nGPU, PassCB.nGPU, nTlas, nInstances, s.nTables[PATH_TABLE_TEMPORAL0 + nCur],
                              gx, gy, nLights);
   }
-  m_pDevice->Transition(pHistory->m_pResource, D3D12_RESOURCE_STATE_UNORDERED_ACCESS, PATH_KERNEL_READ);
-  m_pDevice->Transition(pFrames->m_pResource, D3D12_RESOURCE_STATE_UNORDERED_ACCESS, PATH_KERNEL_READ);
+  m_pDevice->Require(pHistory->m_pResource, PATH_KERNEL_READ);
+  m_pDevice->Require(pFrames->m_pResource, PATH_KERNEL_READ);
+  m_pDevice->Require(s.pLight->m_pResource, UAV);
+  m_pDevice->Require(s.pHighlights->m_pResource, UAV);
   GpuSection("pt filter");
   m_pCompute->DispatchRays(pList, eD3D12K_PathFilter, FrameCB.nGPU, PassCB.nGPU, nTlas, nInstances, s.nTables[PATH_TABLE_FILTER], gx, gy, nLights);
   GpuSection("pt highlights");
   m_pCompute->DispatchRays(pList, eD3D12K_PathSpecular, FrameCB.nGPU, PassCB.nGPU, nTlas, nInstances, s.nTables[PATH_TABLE_SPECULAR], gx, gy,
                            nLights);
-  m_pDevice->Transition(s.pLight->m_pResource, D3D12_RESOURCE_STATE_UNORDERED_ACCESS, PATH_READ);
-  m_pDevice->Transition(s.pHighlights->m_pResource, D3D12_RESOURCE_STATE_UNORDERED_ACCESS, PATH_READ);
-  for (CD3D12Texture *pTex : { s.pRays, pHistory, pFrames })
-    m_pDevice->Transition(pTex->m_pResource, PATH_KERNEL_READ, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
-  if (!bNrd)
-    for (CD3D12Texture *pTex : { pPrevHistory, pPrevFrames })
-      m_pDevice->Transition(pTex->m_pResource, PATH_KERNEL_READ, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+  m_pDevice->Require(s.pLight->m_pResource, PATH_READ);
+  m_pDevice->Require(s.pHighlights->m_pResource, PATH_READ);
   m_pDevice->Transition(pDepth, PATH_DEPTH_READ, D3D12_RESOURCE_STATE_DEPTH_WRITE);
   m_pDevice->BindRootSignature();
   InvalidateFrameConstants();
@@ -942,8 +957,6 @@ void CD3D12Renderer::DrawPathTrace()
   memcpy(m_Viewport, Viewport, sizeof(Viewport));
   m_bScissor = bScissor;
   m_bItemScissor = bItemScissor;
-  m_pDevice->Transition(s.pLight->m_pResource, PATH_READ, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
-  m_pDevice->Transition(s.pHighlights->m_pResource, PATH_READ, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
 
   // This frame for the next one's history.
   memcpy(s.PrevViewProj, ViewProj.data, sizeof(s.PrevViewProj));
@@ -993,8 +1006,9 @@ void CD3D12Renderer::DrawPathDebug()
   const bool bKernel = CV_d3d12_PTDebug == 5 || CV_d3d12_PTDebug == 6 || CV_d3d12_PTDebug == 10 || CV_d3d12_PTDebug == 11 || CV_d3d12_PTDebug == 12;
   if (bKernel && (!pLight || m_PathTrace.nLightFrame != m_nFrames))
     return;
+  // (its state the device's: readable, left so)
   if (pLight)
-    m_pDevice->Transition(pLight->m_pResource, D3D12_RESOURCE_STATE_UNORDERED_ACCESS, PATH_READ);
+    m_pDevice->Require(pLight->m_pResource, PATH_READ);
   // Over the whole back buffer (the ray debug program, which reads the G-buffer for these views).
   const int w = m_pDevice->GetWidth(), h = m_pDevice->GetHeight();
   int Viewport[4];
@@ -1019,6 +1033,4 @@ void CD3D12Renderer::DrawPathDebug()
   memcpy(m_Viewport, Viewport, sizeof(Viewport));
   m_bScissor = bScissor;
   m_bItemScissor = bItemScissor;
-  if (pLight)
-    m_pDevice->Transition(pLight->m_pResource, PATH_READ, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
 }
