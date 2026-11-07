@@ -420,12 +420,13 @@ void CD3D12Renderer::BeginPathTargets()
   if (m_PathTrace.bBound || !IsPathView() || !UpdatePathTargets())
     return;
   // Cleared to no surface (material 0) and no albedo: the sky and the far stay as the colour has them.
+  // The transitions first, the clears after them: the queue is given once (d3d12_BarrierBatch), not before each clear.
   static const float Zero[4] = {};
-  for (CD3D12Texture *pTex : { m_PathTrace.pAlbedo, m_PathTrace.pNormal, m_PathTrace.pSun, m_PathTrace.pSpecular, m_PathTrace.pLightmap })
-  {
+  CD3D12Texture *const Targets[] = { m_PathTrace.pAlbedo, m_PathTrace.pNormal, m_PathTrace.pSun, m_PathTrace.pSpecular, m_PathTrace.pLightmap };
+  for (CD3D12Texture *pTex : Targets)
     m_pDevice->Transition(pTex->m_pResource, PATH_READ, D3D12_RESOURCE_STATE_RENDER_TARGET);
+  for (CD3D12Texture *pTex : Targets)
     m_pDevice->ClearRenderTargetView(pTex->m_RTV, Zero);
-  }
   m_pDevice->BindPathTargets(m_PathTrace.pAlbedo->m_RTV, m_PathTrace.pNormal->m_RTV, m_PathTrace.pSun->m_RTV, m_PathTrace.pSpecular->m_RTV,
                              m_PathTrace.pLightmap->m_RTV);
   m_PathTrace.bBound = true;

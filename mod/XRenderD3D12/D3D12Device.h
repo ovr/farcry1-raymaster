@@ -206,7 +206,8 @@ public:
   void UavBarrier(ID3D12Resource *pRes);
   //! A UAV barrier of all resources.
   void UavBarrierAll();
-  //! Barriers given as they are, after what is queued, in a call of their own (a pass's own array, a library's).
+  //! A pass's own barrier array: queued as Transition, UavBarrier and UavBarrierAll are (in the immediate mode given as
+  //! it is, in a call of its own). Outside a frame given at once.
   void ResourceBarriers(UINT n, const D3D12_RESOURCE_BARRIER *pBarriers);
   //! ResourceBarriers when pList is the frame's list, else given on pList at once (that list's own).
   void ResourceBarriersOn(ID3D12GraphicsCommandList *pList, UINT n, const D3D12_RESOURCE_BARRIER *pBarriers);

@@ -833,6 +833,52 @@ XR_TEST(Barrier_Verbatim)
   CHECK(CountKind(t.TakeProblems(), PROBLEM_BEFORE) == 1);
 }
 
+// Why: the passes' own arrays (the device's RawBarrier and CopyTargets, XeGTAO, RayAO, CACAO, PostAA's UAV barrier,
+// the ray scene's) were given in calls of their own before step 318, each a drain of its own. Queued as the device's
+// ResourceBarriers queues them in the batched mode, they share the call with the transitions around them, and a chain
+// through an array is one transition.
+XR_TEST(Barrier_ArrayQueued)
+{
+  CBarrierTracker t = Batched();
+  t.SetCensus(true);
+  t.Transition(Res(1), PSR, RT);
+  D3D12_RESOURCE_BARRIER Own[2] = {};
+  Own[0].Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+  Own[0].Transition = { Res(2), ALL, UAV, NPSR };
+  Own[1].Type = D3D12_RESOURCE_BARRIER_TYPE_UAV;
+  t.Barriers(Own, 2);
+  t.Transition(Res(3), NPSR, UAV);
+  std::vector<SCall> c = Flush(t);
+  CHECK(c.size() == 1);
+  if (c.size() == 1)
+  {
+    CHECK(c[0].size() == 4);
+    int nFound = 0;
+    for (const D3D12_RESOURCE_BARRIER &b : c[0])
+      nFound += IsTransition(b, Res(1), PSR, RT) || IsTransition(b, Res(2), UAV, NPSR) || IsTransition(b, Res(3), NPSR, UAV) ||
+                IsUav(b, nullptr);
+    CHECK(nFound == 4);
+  }
+  // A copy's way out and the next pass's transition: one transition, COPY_SOURCE to the pass's state.
+  D3D12_RESOURCE_BARRIER Back = {};
+  Back.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+  Back.Transition = { Res(1), ALL, RT, SRC };
+  t.Barriers(&Back, 1);
+  Flush(t);  // the copy
+  std::swap(Back.Transition.StateBefore, Back.Transition.StateAfter);
+  t.Barriers(&Back, 1);
+  t.Transition(Res(1), RT, PSR);
+  c = Flush(t);
+  CHECK(c.size() == 1 && c[0].size() == 1 && IsTransition(c[0][0], Res(1), SRC, PSR));
+  CHECK(t.TakeProblems().empty());
+  // The immediate mode: the array as it is, in a call of its own.
+  CBarrierTracker u;
+  u.Transition(Res(1), PSR, RT);
+  u.Barriers(Own, 2);
+  c = Flush(u);
+  CHECK(c.size() == 2 && c[1].size() == 2);
+}
+
 // Why: a buffer whose state the tracker keeps decays to COMMON when its list has run, and the next list gives the state
 // back by an explicit transition (an implicit promotion past the tracker would leave its state wrong). Each step reads
 // what the step before wrote, a UAV barrier between them (left out where a transition into UNORDERED_ACCESS waits
