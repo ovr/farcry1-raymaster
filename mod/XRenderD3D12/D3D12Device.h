@@ -151,9 +151,6 @@ public:
   void WaitAsyncCompute();
   //! 0 .. D3D12_FRAMES-1: the slot of the current frame (per frame resources, the upload ring).
   int GetFrameSlot() const { return m_nFrameSlot; }
-  //! How many times the frame's list was executed (EndFrame; in a frame FlushFrame, a readback's, and WaitAsyncCompute): where
-  //! it changed, the buffers the list used are COMMON again (a buffer's state decays to it when its list is done).
-  uint64 GetListSerial() const { return m_nListSerial; }
 
   int GetWidth() const { return m_nWidth; }
   int GetHeight() const { return m_nHeight; }
@@ -221,6 +218,20 @@ public:
     if (m_bInFrame && pRes)
       m_Barriers.Assume(pRes, State);
   }
+  //! A resource whose state the device keeps from here on (the tracker's Register; nSubresources of them, all in
+  //! Initial): Require asks for a state without naming the one before, a Transition's before is checked against it. A
+  //! buffer's state decays to COMMON when the frame's list has run and is given back by a transition at the next list's
+  //! start. It is released by DeferredRelease or the upload pools (which forget it); the upload list never writes it
+  //! (d3d12_BarrierCheck tells, CheckUntracked).
+  void TrackState(ID3D12Resource *pRes, D3D12_RESOURCE_STATES Initial, UINT nSubresources = 1);
+  //! A resource TrackState keeps wanted in After (all of it or one subresource): nothing where a read state it is in
+  //! holds After, two shader reads combine. Outside a frame nothing.
+  void Require(ID3D12Resource *pRes, D3D12_RESOURCE_STATES After, UINT nSubresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES);
+  bool IsTracked(ID3D12Resource *pRes) const { return m_Barriers.IsRegistered(pRes); }
+  //! A released resource forgotten by the barriers' tracker and check (DeferredRelease, the upload pools' ranges).
+  void ForgetState(ID3D12Resource *pRes) { m_Barriers.Forget(pRes); }
+  //! d3d12_BarrierCheck: the upload list's szWhat writes pRes, which must not be a resource TrackState keeps.
+  void CheckUntracked(ID3D12Resource *pRes, const char *szWhat);
   //! What is queued given to the frame's list: before work recorded on it (bWork: a draw, a dispatch, a copy, a
   //! clear, a library's passes; the next UAV barriers wait for it) or before barriers given on it directly (false).
   //! Every place that records work on the frame's list calls it first (the test Barrier_SourceLint).
@@ -610,7 +621,6 @@ private:
 
   int m_nWidth = 0, m_nHeight = 0;
   int m_nFrameSlot = 0;
-  uint64 m_nListSerial = 0;                         //!< GetListSerial
   bool m_bInFrame = false;
 
   Barriers::CBarrierTracker m_Barriers;             //!< the frame list's barriers (Transition, UavBarrier)
