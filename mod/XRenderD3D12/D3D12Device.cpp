@@ -883,8 +883,10 @@ void CD3D12Device::ResourceBarriers(UINT n, const D3D12_RESOURCE_BARRIER *pBarri
     m_pCmdList->ResourceBarrier(n, pBarriers);  // barriers flushed
     return;
   }
-  m_Barriers.Verbatim(pBarriers, n);
-  FlushBarriers(false);
+  // Queued with the rest (d3d12_BarrierBatch): merged with the transitions around them, given before the next work.
+  m_Barriers.Barriers(pBarriers, n);
+  if (m_Barriers.GetMode() == Barriers::MODE_IMMEDIATE)
+    FlushBarriers(false);
 }
 
 void CD3D12Device::ResourceBarriersOn(ID3D12GraphicsCommandList *pList, UINT n, const D3D12_RESOURCE_BARRIER *pBarriers)

@@ -1451,8 +1451,9 @@ given one by one, on the GPU with the debug layer).
   UAV barrier. A UAV barrier is left out next to a transition of the resource into or out of
   `UNORDERED_ACCESS`, under a UAV barrier of all resources, or when no work came since the one
   before. Two transitions that one call cannot hold (a round trip through a write state, a
-  subresource after the whole resource) go in two calls. Barriers given as an array (a pass's
-  own, NRD's, the temporal upscaler's) come after what is queued, in a call of their own. A
+  subresource after the whole resource) go in two calls. Barriers given as an array (the
+  device's own, XeGTAO's, the ray-traced AO's, CACAO's, CMAA2's, the rays' structures') are
+  queued the same way since step 318; NRD and the temporal upscaler queue theirs one by one. A
   barrier is never added: a pass that writes several mips without one between them stays so.
   `0` gives each barrier at once in a call of its own, as before step 317. `2` batches too, but
   also gives what is queued at each `d3d12_GpuTimes` section; with `1` the barriers queued at the
