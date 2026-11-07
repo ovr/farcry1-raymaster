@@ -622,20 +622,25 @@ XR_TEST(Barrier_BloomChain)
 }
 
 // Why: the path tracer's targets (PathTrace.cpp) were moved back to UNORDERED_ACCESS at each frame's end, the history the
-// next frame reads too (simple: READ -> UAV -> READ for nothing). Kept by the tracker, each kernel asking for its own:
-// every before is the state on the GPU and each kernel finds its states over frames of NRD, of simple and of a switch
-// between them (NRD failed), in both modes; a frame of simple has 10 transitions instead of 14, of NRD 12 as before.
+// next frame reads too (simple: READ -> UAV -> READ for nothing); NRD's host kept its textures' states and its inputs'
+// and output's by itself (UNORDERED_ACCESS before and after it), and lost them when it gave a pass up half way (fixed at
+// step 318). Kept by the tracker, each kernel and NRD's passes asking for theirs: every before is the state on the GPU
+// and each kernel finds its states over frames of NRD, NRD giving up half way, simple and a switch back, in both modes; a
+// frame of simple has 10 transitions instead of 14, of NRD 26 as before.
 XR_TEST(Barrier_PathTraceStates)
 {
   constexpr D3D12_RESOURCE_STATES KREAD = NPSR, READ = PSR | NPSR;
   ID3D12Resource *const pRays = Res(20), *pHit = Res(21), *pLight = Res(22), *pHighlights = Res(23);
   ID3D12Resource *const pHistory[2] = { Res(24), Res(25) }, *pFrames[2] = { Res(26), Res(27) };
+  // NRD's inputs and output (PathTrace's), two of its own textures (NRD's host's pool).
+  ID3D12Resource *const pNrdIn[4] = { Res(28), Res(29), Res(30), Res(31) }, *pNrdOut = Res(32), *pPool[2] = { Res(33), Res(34) };
   for (EMode eMode : { MODE_IMMEDIATE, MODE_BATCHED })
   {
     CBarrierTracker t;
     t.SetMode(eMode);
     std::map<ID3D12Resource *, D3D12_RESOURCE_STATES> Gpu;
-    for (ID3D12Resource *p : { pRays, pHit, pLight, pHighlights, pHistory[0], pHistory[1], pFrames[0], pFrames[1] })
+    for (ID3D12Resource *p : { pRays, pHit, pLight, pHighlights, pHistory[0], pHistory[1], pFrames[0], pFrames[1], pNrdIn[0], pNrdIn[1],
+                               pNrdIn[2], pNrdIn[3], pNrdOut, pPool[0], pPool[1] })
     {
       t.Register(p, UAV, 1, false);
       Gpu[p] = UAV;
@@ -653,8 +658,10 @@ XR_TEST(Barrier_PathTraceStates)
       for (const auto &n : Needs)
         nMissing += n.second == UAV ? Gpu[n.first] != UAV : (Gpu[n.first] & n.second) != n.second;
     };
-    // Frames: NRD, NRD, NRD (the steady one counted), simple (NRD failed), simple, simple (counted), NRD again.
-    const bool Nrd[] = { true, true, true, false, false, false, true };
+    // Frames: NRD, NRD, NRD (the steady one counted), NRD giving up at its second pass, simple, simple, simple (counted),
+    // NRD again.
+    enum { NRD, NRD_FAILS, SIMPLE };
+    const int Nrd[] = { NRD, NRD, NRD, NRD_FAILS, SIMPLE, SIMPLE, SIMPLE, NRD };
     int nCur = 0;
     for (size_t f = 0; f < std::size(Nrd); f++)
     {
@@ -666,13 +673,31 @@ XR_TEST(Barrier_PathTraceStates)
       Work({ { pRays, UAV }, { pHit, UAV } });  // the cache's kernels
       Work({ { pRays, UAV }, { pHit, UAV } });  // CSTrace
       t.Require(pRays, KREAD);
-      if (Nrd[f])
+      if (Nrd[f] != SIMPLE)
       {
         t.Require(pHit, KREAD);
-        Work({ { pRays, KREAD }, { pHit, KREAD } });  // NRD's inputs (NRD itself on its own textures)
+        for (ID3D12Resource *p : pNrdIn)
+          t.Require(p, UAV);
+        Work({ { pRays, KREAD }, { pHit, KREAD }, { pNrdIn[0], UAV }, { pNrdIn[3], UAV } });  // NRD's inputs
+        // NRD's passes: the inputs read into its first texture, that one read into its second and the output.
+        for (ID3D12Resource *p : pNrdIn)
+          t.Require(p, KREAD);
+        t.Require(pPool[0], UAV);
+        Work({ { pNrdIn[0], KREAD }, { pNrdIn[3], KREAD }, { pPool[0], UAV } });
+        t.UavAll();
+        t.Require(pPool[0], KREAD);
+        t.Require(pPool[1], UAV);
+        t.Require(pNrdOut, UAV);
+        if (Nrd[f] == NRD)
+        {
+          Work({ { pPool[0], KREAD }, { pPool[1], UAV }, { pNrdOut, UAV } });
+          t.Require(pPool[1], KREAD);
+          Work({ { pPool[1], KREAD } });
+        }
+        t.Require(pNrdOut, KREAD);
         t.Require(pH, UAV);
         t.Require(pF, UAV);
-        Work({ { pH, UAV }, { pF, UAV } });  // NRD's light into the history
+        Work({ { pNrdOut, KREAD }, { pH, UAV }, { pF, UAV } });  // NRD's light into the history
       }
       else
       {
@@ -694,8 +719,8 @@ XR_TEST(Barrier_PathTraceStates)
       t.OnListExecuted();
       t.OnListOpened();
       if (f == 2)
-        CHECK_MSG(nTransitions == 12, std::to_string(nTransitions) + " transitions in a frame of NRD (12 before)");
-      if (f == 5)
+        CHECK_MSG(nTransitions == 26, std::to_string(nTransitions) + " transitions in a frame of NRD (26 before)");
+      if (f == 6)
         CHECK_MSG(nTransitions == 10, std::to_string(nTransitions) + " transitions in a frame of simple (14 before)");
     }
     CHECK_MSG(nWrong == 0, std::to_string(nWrong) + (eMode == MODE_BATCHED ? " befores wrong, batched" : " befores wrong, immediate"));
