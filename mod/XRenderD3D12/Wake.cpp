@@ -203,12 +203,15 @@ bool CD3D12Renderer::EnsureWakeTargets()
       m_pDescriptors->WriteUAV(nTable + CD3D12Compute::COMPUTE_SRVS + i, i < XR_WAKE_MIPS ? w.pHeights->m_pResource : nullptr, &UAV);
     }
   }
-  // Made in UNORDERED_ACCESS: the window, the rows and the columns rest there; the foam's textures where the view's
-  // kernel reads them, the view where the water's program does, the heights where its vertex program does.
+  // Made in UNORDERED_ACCESS, their states kept by the device from here on (each kernel asks for its inputs' and outputs'
+  // as it comes, UpdateWakes); the foam's textures where the view's kernel reads them, the view where the water's program
+  // does, the heights where its vertex program does.
+  for (CD3D12Texture *pTex : { w.pState, w.pRows, w.pColumns, w.pFoam[0], w.pFoam[1], w.pView, w.pHeights })
+    m_pDevice->TrackState(pTex->m_pResource, UAV_STATE);
   for (CD3D12Texture *pTex : { w.pFoam[0], w.pFoam[1] })
-    m_pDevice->Transition(pTex->m_pResource, UAV_STATE, SRV_STATE);
-  m_pDevice->Transition(w.pView->m_pResource, UAV_STATE, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
-  m_pDevice->Transition(w.pHeights->m_pResource, UAV_STATE, SRV_STATE);
+    m_pDevice->Require(pTex->m_pResource, SRV_STATE);
+  m_pDevice->Require(w.pView->m_pResource, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+  m_pDevice->Require(w.pHeights->m_pResource, SRV_STATE);
   w.nHeightsFrame = -1;
   w.nFrame = -1;
   w.Seen.clear();
@@ -368,15 +371,16 @@ void CD3D12Renderer::UpdateWakes(std::span<const SRenderItem> Items)
     StepConstants(wc, vCell, pBefore, s == 0 && bMoved, fStep, false, Step.data(), (int)Step.size());
     const SD3D12FrameAlloc CB = m_pUpload->AllocFrame(sizeof(wc), 256);
     memcpy(CB.pCPU, &wc, sizeof(wc));
-    m_pDevice->Transition(pState, UAV_STATE, SRV_STATE);
+    // Each kernel's input readable and output writable (the device's states, no transitions back after a kernel).
+    m_pDevice->Require(pState, SRV_STATE);
+    m_pDevice->Require(pRows, UAV_STATE);
     m_pCompute->Dispatch(pList, eD3D12K_WakeRows, CB.nGPU, Table(0, false), Table(0, true), 1, N, 1);
-    m_pDevice->Transition(pState, SRV_STATE, UAV_STATE);
-    m_pDevice->Transition(pRows, UAV_STATE, SRV_STATE);
+    m_pDevice->Require(pRows, SRV_STATE);
+    m_pDevice->Require(pColumns, UAV_STATE);
     m_pCompute->Dispatch(pList, eD3D12K_WakeColumns, CB.nGPU, Table(1, false), Table(1, true), 1, N, 1);
-    m_pDevice->Transition(pRows, SRV_STATE, UAV_STATE);
-    m_pDevice->Transition(pColumns, UAV_STATE, SRV_STATE);
+    m_pDevice->Require(pColumns, SRV_STATE);
+    m_pDevice->Require(pState, UAV_STATE);
     m_pCompute->Dispatch(pList, eD3D12K_WakeRowsInverse, CB.nGPU, Table(2, false), Table(2, true), 1, N, 1);
-    m_pDevice->Transition(pColumns, SRV_STATE, UAV_STATE);
   }
 
   // The view: the slopes and the foam at the frame's end (the bodies where they are now), the foam into the other texture
@@ -388,22 +392,23 @@ void CD3D12Renderer::UpdateWakes(std::span<const SRenderItem> Items)
     const SD3D12FrameAlloc CB = m_pUpload->AllocFrame(sizeof(wc), 256);
     memcpy(CB.pCPU, &wc, sizeof(wc));
     ID3D12Resource *pFoam = w.pFoam[f]->m_pResource, *pView = w.pView->m_pResource;
-    m_pDevice->Transition(pState, UAV_STATE, SRV_STATE);
-    m_pDevice->Transition(pFoam, SRV_STATE, UAV_STATE);
-    m_pDevice->Transition(pView, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, UAV_STATE);
+    m_pDevice->Require(pState, SRV_STATE);
+    m_pDevice->Require(w.pFoam[1 - f]->m_pResource, SRV_STATE);
+    m_pDevice->Require(pFoam, UAV_STATE);
+    m_pDevice->Require(pView, UAV_STATE);
     m_pCompute->Dispatch(pList, eD3D12K_WakeView, CB.nGPU, Table(VIEW_TABLE + f, false), Table(VIEW_TABLE + f, true), N / 16, N / 16, 1);
     // The heights for the ocean's grid (d3d12_WaterGeometry; OceanGrid.cpp), of the window as the view sees it.
     if (CV_d3d12_WaterGeometry > 0)
     {
       ID3D12Resource *pHeights = w.pHeights->m_pResource;
-      m_pDevice->Transition(pHeights, SRV_STATE, UAV_STATE);
+      m_pDevice->Require(pHeights, UAV_STATE);
       m_pCompute->Dispatch(pList, eD3D12K_WakeHeight, CB.nGPU, Table(HEIGHT_TABLE, false), Table(HEIGHT_TABLE, true), N / 16, N / 16, 1);
-      m_pDevice->Transition(pHeights, UAV_STATE, SRV_STATE);
+      m_pDevice->Require(pHeights, SRV_STATE);
       w.nHeightsFrame = m_nFrames;
     }
-    m_pDevice->Transition(pState, SRV_STATE, UAV_STATE);
-    m_pDevice->Transition(pFoam, UAV_STATE, SRV_STATE);
-    m_pDevice->Transition(pView, UAV_STATE, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+    // The window stays readable for the next frame's first step.
+    m_pDevice->Require(pFoam, SRV_STATE);
+    m_pDevice->Require(pView, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
     w.nFoam = f;
   }
   w.nCell[0] = vCell[0];
