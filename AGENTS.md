@@ -260,7 +260,8 @@ instructions and is not committed (git-ignored). The references of the modules a
   `Shaders/Underwater.hlsl`); the
   templates with shaders of their own
   (`TemplateFx.cpp`, Volcano's lava `LavaVolume`) and the fog of what is added; the far vegetation
-  sprites (their pictures blended, `d3d12_SpriteBlend`, `FarSpriteAngles.h`) and the terrain's detail layers; the video options' render modes over the scene
+  sprites (their pictures blended, `d3d12_SpriteBlend`, `FarSpriteAngles.h`) and the terrain's detail layers; the levels' view
+  distances, the terrain's full detail and the vegetation's models farther (`r_DrawDistance`, `DrawDistance.cpp`, `DrawDistance.h`); the video options' render modes over the scene
   (`r_RenderMode` with `r_Glare`: Improved, Paradise, Cold, Cartoon; `d3d12_RenderMode`,
   `Shaders/RenderMode.hlsli`); the projected lights' images on all faces and their sequences'
   frames (`d3d12_LightImages`, `LightImage.h`). The game's menu gets the renderer's options from the patches in

@@ -141,6 +141,7 @@ set(XRENDERD3D12_TESTS_SOURCES
     PbrSpecularTests.cpp
     SkinTests.cpp
     RayFaceTests.cpp
+    DrawDistanceTests.cpp
 )
 file(GLOB XRENDERD3D12_TESTS_HLSL "${CMAKE_CURRENT_SOURCE_DIR}/Shaders/*.hlsl" "${CMAKE_CURRENT_SOURCE_DIR}/Shaders/*.hlsli")
 set_source_files_properties(${XRENDERD3D12_TESTS_HLSL} PROPERTIES HEADER_FILE_ONLY ON)
