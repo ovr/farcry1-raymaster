@@ -221,6 +221,9 @@ namespace XrTest
     //! The tracker's barriers: a transition, the UAV barrier of all resources, what is queued given before work (a
     //! dispatch, a copy; bWork false: before the list closes). Immediate: each request given at once.
     void Move(ID3D12Resource *pRes, D3D12_RESOURCE_STATES eFrom, D3D12_RESOURCE_STATES eTo);
+    //! A resource whose state the tracker keeps (Register) asked for in eTo (Require), as the renderer's TrackState and
+    //! Require (the ocean's and the wakes' targets).
+    void Want(ID3D12Resource *pRes, D3D12_RESOURCE_STATES eTo);
     void UavAll();
     void FlushBarriers(bool bWork = true);
     ComPtr<ID3D12Resource> Buffer(D3D12_HEAP_TYPE eHeap, size_t nBytes, D3D12_RESOURCE_STATES eState, bool bUav);
