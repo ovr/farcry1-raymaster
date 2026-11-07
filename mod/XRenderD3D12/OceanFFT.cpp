@@ -220,12 +220,15 @@ bool CD3D12Renderer::EnsureOceanTargets()
       m_pDescriptors->WriteUAV(nTable + CD3D12Compute::COMPUTE_SRVS + i, pOut, &UAV);
     }
   }
-  // Made in UNORDERED_ACCESS; the waves and the foam's view at rest where the water's program reads them, the foam's
-  // states where the kernels read them, the kernels' inputs where the next kernel reads them.
+  // Made in UNORDERED_ACCESS, their states kept by the device from here on (each kernel asks for its inputs' and outputs'
+  // as it comes, UpdateOcean); the waves, the foam's view and the caustics where the water's program reads them, the
+  // foam's states where the kernels read them.
+  for (CD3D12Texture *pTex : { o.pRows, o.pFields, o.pWaves, o.pLevel4, o.pFoam[0], o.pFoam[1], o.pFoamView, o.pFoamLevel4, o.pCaustics })
+    m_pDevice->TrackState(pTex->m_pResource, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
   for (CD3D12Texture *pTex : { o.pWaves, o.pFoamView, o.pCaustics })
-    m_pDevice->Transition(pTex->m_pResource, D3D12_RESOURCE_STATE_UNORDERED_ACCESS, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+    m_pDevice->Require(pTex->m_pResource, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
   for (CD3D12Texture *pTex : { o.pFoam[0], o.pFoam[1] })
-    m_pDevice->Transition(pTex->m_pResource, D3D12_RESOURCE_STATE_UNORDERED_ACCESS, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+    m_pDevice->Require(pTex->m_pResource, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
   o.nFrame = -1;
   o.nFoamFrame = -1;
   o.nCausticsFrame = -1;
@@ -248,6 +251,8 @@ bool CD3D12Renderer::MakeOcean(float fWind)
   o.pH0 = m_pUpload->CreateTexture(XR_OCEAN_SIZE, XR_OCEAN_SIZE, 1, FIELDS_FORMAT, false, Sub, XR_OCEAN_CASCADES);
   if (!o.pH0)
     return false;
+  // As the upload leaves it; read by the rows from here on (UpdateOcean: once, the state kept by the device).
+  m_pDevice->TrackState(o.pH0->m_pResource, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
   m_pDescriptors->WriteSRV(o.nTables, o.pH0->m_pResource, nullptr);
   o.fWind = fWind;
   o.fSlopeRMS = (float)Sea.SlopeRMS();
@@ -334,19 +339,22 @@ void CD3D12Renderer::UpdateOcean(std::span<const SRenderItem> Items)
   const auto Table = [&](int k, bool bUAVs) { return o.nTables + k * TABLE + (bUAVs ? CD3D12Compute::COMPUTE_SRVS : 0); };
   constexpr UINT N = XR_OCEAN_SIZE, C = XR_OCEAN_CASCADES;
   m_pDevice->EndOffscreen();
-  m_pDevice->Transition(pH0, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, READ);
+  // Each kernel's inputs readable and outputs writable, the device's states kept from frame to frame: no transitions back
+  // to UNORDERED_ACCESS after a kernel (the next frame's asks for them), h0 a shader resource of both kinds once.
+  constexpr D3D12_RESOURCE_STATES UAV = D3D12_RESOURCE_STATE_UNORDERED_ACCESS, KERNEL_IN = D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE;
+  m_pDevice->Require(pH0, KERNEL_IN);
+  m_pDevice->Require(pRows, UAV);
   m_pCompute->Dispatch(pList, eD3D12K_OceanRows, CB.nGPU, Table(0, false), Table(0, true), 1, N, C);
-  m_pDevice->Transition(pH0, READ, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
-  m_pDevice->Transition(pRows, D3D12_RESOURCE_STATE_UNORDERED_ACCESS, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+  m_pDevice->Require(pRows, KERNEL_IN);
+  m_pDevice->Require(pFields, UAV);
   m_pCompute->Dispatch(pList, eD3D12K_OceanColumns, CB.nGPU, Table(1, false), Table(1, true), 1, N, C);
-  m_pDevice->Transition(pRows, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
-  m_pDevice->Transition(pFields, D3D12_RESOURCE_STATE_UNORDERED_ACCESS, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
-  m_pDevice->Transition(pWaves, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+  m_pDevice->Require(pFields, KERNEL_IN);
+  m_pDevice->Require(pWaves, UAV);
+  m_pDevice->Require(pLevel4, UAV);
   m_pCompute->Dispatch(pList, eD3D12K_OceanWaves, CB.nGPU, Table(2, false), Table(2, true), N / 16, N / 16, C);
-  m_pDevice->Transition(pFields, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
-  m_pDevice->Transition(pLevel4, D3D12_RESOURCE_STATE_UNORDERED_ACCESS, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+  // The waves' last levels written beside the ones the kernel before wrote: no barrier between them.
+  m_pDevice->Require(pLevel4, KERNEL_IN);
   m_pCompute->Dispatch(pList, eD3D12K_OceanMips, CB.nGPU, Table(3, false), Table(3, true), 1, 1, C);
-  m_pDevice->Transition(pLevel4, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
   // The caustics (d3d12_WaterCaustics) when the frame draws them or a view from under the water (the light in it,
   // Underwater.cpp), in daylight: from the waves' level 0 at the frame's time, their mip levels as the waves'.
   const bool bCaustics = CV_d3d12_WaterCaustics > 0 && CV_d3d12_Caustics && m_SunDir[2] > 0 &&
@@ -356,34 +364,33 @@ void CD3D12Renderer::UpdateOcean(std::span<const SRenderItem> Items)
   {
     ID3D12Resource *pCaustics = o.pCaustics->m_pResource;
     constexpr UINT CC = XR_CAUSTICS_CASCADES;
-    m_pDevice->Transition(pWaves, D3D12_RESOURCE_STATE_UNORDERED_ACCESS, READ);
-    m_pDevice->Transition(pCaustics, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+    // The waves read by the kernel and by the water's program (one transition).
+    m_pDevice->Require(pWaves, READ);
+    m_pDevice->Require(pCaustics, UAV);
     m_pCompute->Dispatch(pList, eD3D12K_OceanCaustics, CB.nGPU, Table(CAUSTICS_TABLE, false), Table(CAUSTICS_TABLE, true), N / XR_CAUSTICS_TILE,
                          N / XR_CAUSTICS_TILE, CC);
-    m_pDevice->Transition(pWaves, READ, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
-    m_pDevice->Transition(pCaustics, D3D12_RESOURCE_STATE_UNORDERED_ACCESS, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+    m_pDevice->Require(pCaustics, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
     o.nCausticsFrame = m_nFrames;
   }
-  else
-    m_pDevice->Transition(pWaves, D3D12_RESOURCE_STATE_UNORDERED_ACCESS, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+  m_pDevice->Require(pWaves, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
   if (bFoam && (fSince < 0 || fSince >= OceanSpectrum::FOAM_STEP))
   {
     // The foam's state into the other target than the frame before's, from it; then its view and the view's mip levels
     // (at most once a FOAM_STEP: between, the water reads the last).
     const int t = o.nFoamFrame >= 0 ? 1 - o.nFoam : 0;
     ID3D12Resource *pState = o.pFoam[t]->m_pResource, *pView = o.pFoamView->m_pResource, *pFoamLevel4 = o.pFoamLevel4->m_pResource;
-    m_pDevice->Transition(pFields, D3D12_RESOURCE_STATE_UNORDERED_ACCESS, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
-    m_pDevice->Transition(pState, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+    m_pDevice->Require(pFields, KERNEL_IN);
+    m_pDevice->Require(o.pFoam[1 - t]->m_pResource, KERNEL_IN);
+    m_pDevice->Require(pState, UAV);
     m_pCompute->Dispatch(pList, eD3D12K_OceanFoam, CB.nGPU, Table(FOAM_TABLE + t, false), Table(FOAM_TABLE + t, true), N / 16, N / 16, C);
-    m_pDevice->Transition(pFields, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
-    m_pDevice->Transition(pState, D3D12_RESOURCE_STATE_UNORDERED_ACCESS, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
-    m_pDevice->Transition(pView, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+    m_pDevice->Require(pState, KERNEL_IN);
+    m_pDevice->Require(pView, UAV);
+    m_pDevice->Require(pFoamLevel4, UAV);
     m_pCompute->Dispatch(pList, eD3D12K_OceanFoamView, CB.nGPU, Table(FOAM_VIEW_TABLE + t, false), Table(FOAM_VIEW_TABLE + t, true), N / 16,
                          N / 16, C);
-    m_pDevice->Transition(pFoamLevel4, D3D12_RESOURCE_STATE_UNORDERED_ACCESS, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+    m_pDevice->Require(pFoamLevel4, KERNEL_IN);
     m_pCompute->Dispatch(pList, eD3D12K_OceanMips, CB.nGPU, Table(FOAM_MIPS_TABLE, false), Table(FOAM_MIPS_TABLE, true), 1, 1, C);
-    m_pDevice->Transition(pFoamLevel4, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
-    m_pDevice->Transition(pView, D3D12_RESOURCE_STATE_UNORDERED_ACCESS, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+    m_pDevice->Require(pView, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
     o.nFoam = t;
     o.nFoamFrame = m_nFrames;
     o.fFoamTime = fTime;

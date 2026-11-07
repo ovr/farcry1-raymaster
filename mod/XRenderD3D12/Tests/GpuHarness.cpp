@@ -496,6 +496,13 @@ void XrTest::CGpu::Move(ID3D12Resource *pRes, D3D12_RESOURCE_STATES eFrom, D3D12
     FlushBarriers(false);
 }
 
+void XrTest::CGpu::Want(ID3D12Resource *pRes, D3D12_RESOURCE_STATES eTo)
+{
+  m_Barriers.Require(pRes, eTo);
+  if (m_Barriers.GetMode() == Barriers::MODE_IMMEDIATE)
+    FlushBarriers(false);
+}
+
 void XrTest::CGpu::UavAll()
 {
   m_Barriers.UavAll();
@@ -1418,7 +1425,6 @@ XrTest::SOceanOutput XrTest::CGpu::RunOceanFrames(const std::vector<float> &H0, 
     }
     Keep.push_back(pStaging);
   }
-  Move(pH0.Get(), D3D12_RESOURCE_STATE_COPY_DEST, READ);
   ID3D12DescriptorHeap *pHeaps[] = { pHeap.Get() };
   m_pList->SetDescriptorHeaps(1, pHeaps);
   m_pList->SetComputeRootSignature(m_pComputeRootSignature.Get());
@@ -1429,57 +1435,85 @@ XrTest::SOceanOutput XrTest::CGpu::RunOceanFrames(const std::vector<float> &H0, 
     FlushBarriers();
     m_pList->Dispatch(x, y, z);
   };
-  // At rest where the foam kernel reads the target of the frame before.
+  // The states kept by the tracker, as the renderer's (TrackState): h0 as its copy left it, the targets made in
+  // UNORDERED_ACCESS; forgotten at the end (their addresses come again).
+  std::vector<ID3D12Resource *> Kept = { pH0.Get(), pRows.Get(), pFields.Get(), pWaves.Get(), pLevel4.Get() };
+  if (bFoam)
+    Kept.insert(Kept.end(), { pFoam[0].Get(), pFoam[1].Get(), pFoamView.Get(), pFoamLevel4.Get() });
+  if (bCaustics)
+    Kept.push_back(pCaustics.Get());
+  struct SForget
+  {
+    Barriers::CBarrierTracker &t;
+    std::vector<ID3D12Resource *> &v;
+    ~SForget()
+    {
+      for (ID3D12Resource *p : v)
+        t.Forget(p);
+    }
+  } Forget{ m_Barriers, Kept };
+  for (ID3D12Resource *p : Kept)
+    m_Barriers.Register(p, p == pH0.Get() ? D3D12_RESOURCE_STATE_COPY_DEST : UAV_STATE, 1, false);
+  // Where the renderer has the water read them (PIXEL_SHADER_RESOURCE): a compute list has no such state.
+  constexpr D3D12_RESOURCE_STATES PSR = READ;
+  // EnsureOceanTargets' states: the waves, the foam's view and the caustics where the water reads them, the foam's
+  // states where the foam kernel does.
+  for (ID3D12Resource *p : { pWaves.Get(), pFoamView.Get(), pCaustics.Get() })
+    if (p)
+      Want(p, PSR);
   if (bFoam)
     for (ComPtr<ID3D12Resource> &p : pFoam)
-      Move(p.Get(), UAV_STATE, READ);
-  // UpdateOcean's order and barriers, a frame after another.
+      Want(p.Get(), READ);
+  // UpdateOcean's order and requests, a frame after another.
   UINT t = 0;
   for (size_t f = 0; f < Frames.size(); f++)
   {
     m_pList->SetComputeRootConstantBufferView(0, pCB->GetGPUVirtualAddress() + f * CB_STRIDE);
-    if (f > 0)
-    {
-      // The frame before's writes to the waves and their level 4 done before this frame's.
-      UavAll();
-      Move(pFields.Get(), READ, UAV_STATE);
-    }
+    Want(pH0.Get(), READ);
+    Want(pRows.Get(), UAV_STATE);
     Dispatch(Kernels.Rows, 0, 1, N, C);
-    Move(pRows.Get(), UAV_STATE, READ);
+    Want(pRows.Get(), READ);
+    Want(pFields.Get(), UAV_STATE);
     Dispatch(Kernels.Columns, 1, 1, N, C);
-    Move(pRows.Get(), READ, UAV_STATE);
-    Move(pFields.Get(), UAV_STATE, READ);
+    Want(pFields.Get(), READ);
+    Want(pWaves.Get(), UAV_STATE);
+    Want(pLevel4.Get(), UAV_STATE);
     Dispatch(Kernels.Waves, 2, N / 16, N / 16, C);
-    Move(pLevel4.Get(), UAV_STATE, READ);
+    Want(pLevel4.Get(), READ);
     Dispatch(Kernels.Mips, 3, 1, 1, C);
-    Move(pLevel4.Get(), READ, UAV_STATE);
     if (bCaustics)
     {
-      Move(pWaves.Get(), UAV_STATE, READ);
+      Want(pWaves.Get(), READ);
+      Want(pCaustics.Get(), UAV_STATE);
       Dispatch(Kernels.Caustics, 9, N / XR_CAUSTICS_TILE, N / XR_CAUSTICS_TILE, CC);
-      Move(pWaves.Get(), READ, UAV_STATE);
+      Want(pCaustics.Get(), PSR);
     }
+    Want(pWaves.Get(), PSR);
     if (bFoam)
     {
       t = f > 0 ? 1 - t : 0;
-      Move(pFoam[t].Get(), READ, UAV_STATE);
+      Want(pFields.Get(), READ);
+      Want(pFoam[1 - t].Get(), READ);
+      Want(pFoam[t].Get(), UAV_STATE);
       Dispatch(Kernels.Foam, 4 + t, N / 16, N / 16, C);
-      Move(pFoam[t].Get(), UAV_STATE, READ);
+      Want(pFoam[t].Get(), READ);
+      Want(pFoamView.Get(), UAV_STATE);
+      Want(pFoamLevel4.Get(), UAV_STATE);
       Dispatch(Kernels.FoamView, 6 + t, N / 16, N / 16, C);
-      Move(pFoamLevel4.Get(), UAV_STATE, READ);
+      Want(pFoamLevel4.Get(), READ);
       Dispatch(Kernels.Mips, 8, 1, 1, C);
-      Move(pFoamLevel4.Get(), READ, UAV_STATE);
+      Want(pFoamView.Get(), PSR);
     }
   }
-  Move(pFields.Get(), READ, D3D12_RESOURCE_STATE_COPY_SOURCE);
-  Move(pWaves.Get(), UAV_STATE, D3D12_RESOURCE_STATE_COPY_SOURCE);
+  Want(pFields.Get(), D3D12_RESOURCE_STATE_COPY_SOURCE);
+  Want(pWaves.Get(), D3D12_RESOURCE_STATE_COPY_SOURCE);
   if (bFoam)
   {
-    Move(pFoam[t].Get(), READ, D3D12_RESOURCE_STATE_COPY_SOURCE);
-    Move(pFoamView.Get(), UAV_STATE, D3D12_RESOURCE_STATE_COPY_SOURCE);
+    Want(pFoam[t].Get(), D3D12_RESOURCE_STATE_COPY_SOURCE);
+    Want(pFoamView.Get(), D3D12_RESOURCE_STATE_COPY_SOURCE);
   }
   if (bCaustics)
-    Move(pCaustics.Get(), UAV_STATE, D3D12_RESOURCE_STATE_COPY_SOURCE);
+    Want(pCaustics.Get(), D3D12_RESOURCE_STATE_COPY_SOURCE);
   auto Copy = [&](ID3D12Resource *pSrc, ID3D12Resource *pDst, const std::vector<D3D12_PLACED_SUBRESOURCE_FOOTPRINT> &Layout) {
     for (UINT i = 0; i < (UINT)Layout.size(); i++)
     {
