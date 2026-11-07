@@ -225,7 +225,9 @@ bool CD3D12Renderer::EnsureOceanTargets()
   // foam's states where the kernels read them.
   for (CD3D12Texture *pTex : { o.pRows, o.pFields, o.pWaves, o.pLevel4, o.pFoam[0], o.pFoam[1], o.pFoamView, o.pFoamLevel4, o.pCaustics })
     m_pDevice->TrackState(pTex->m_pResource, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
-  for (CD3D12Texture *pTex : { o.pWaves, o.pFoamView, o.pCaustics })
+  // (the waves by the ocean grid's vertex program too, Water.hlsl's OceanGridVertex)
+  m_pDevice->Require(o.pWaves->m_pResource, READ);
+  for (CD3D12Texture *pTex : { o.pFoamView, o.pCaustics })
     m_pDevice->Require(pTex->m_pResource, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
   for (CD3D12Texture *pTex : { o.pFoam[0], o.pFoam[1] })
     m_pDevice->Require(pTex->m_pResource, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
@@ -372,7 +374,9 @@ void CD3D12Renderer::UpdateOcean(std::span<const SRenderItem> Items)
     m_pDevice->Require(pCaustics, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
     o.nCausticsFrame = m_nFrames;
   }
-  m_pDevice->Require(pWaves, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+  // Read by the water's pixel program and by the ocean grid's vertex program (its heights, OceanGridVertex): with the
+  // caustics or without them (only the pixel shaders' state, the grid's reads were not in a state for them).
+  m_pDevice->Require(pWaves, READ);
   if (bFoam && (fSince < 0 || fSince >= OceanSpectrum::FOAM_STEP))
   {
     // The foam's state into the other target than the frame before's, from it; then its view and the view's mip levels

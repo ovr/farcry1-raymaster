@@ -1497,7 +1497,8 @@ XrTest::SOceanOutput XrTest::CGpu::RunOceanFrames(const std::vector<float> &H0, 
   constexpr D3D12_RESOURCE_STATES PSR = READ;
   // EnsureOceanTargets' states: the waves, the foam's view and the caustics where the water reads them, the foam's
   // states where the foam kernel does.
-  for (ID3D12Resource *p : { pWaves.Get(), pFoamView.Get(), pCaustics.Get() })
+  Want(pWaves.Get(), READ);  // by the ocean grid's vertex program too
+  for (ID3D12Resource *p : { pFoamView.Get(), pCaustics.Get() })
     if (p)
       Want(p, PSR);
   if (bFoam)
@@ -1527,7 +1528,7 @@ XrTest::SOceanOutput XrTest::CGpu::RunOceanFrames(const std::vector<float> &H0, 
       Dispatch(Kernels.Caustics, 9, N / XR_CAUSTICS_TILE, N / XR_CAUSTICS_TILE, CC);
       Want(pCaustics.Get(), PSR);
     }
-    Want(pWaves.Get(), PSR);
+    Want(pWaves.Get(), READ);
     if (bFoam)
     {
       t = f > 0 ? 1 - t : 0;
