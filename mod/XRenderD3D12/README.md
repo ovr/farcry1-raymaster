@@ -1459,6 +1459,17 @@ given one by one, on the GPU with the debug layer).
   also gives what is queued at each `d3d12_GpuTimes` section; with `1` the barriers queued at the
   end of a section count in the next one's time. The mode is taken at the frame's start. The
   pictures are the same in the three.
+- Some resources have their state kept by the device (`TrackState`, since step 319): a pass asks
+  for the state it needs (`Require`) without naming the one before, and nothing is given where the
+  resource is in it already (a read state that holds the wanted one, two shader reads combined).
+  So the passes leave them where their last kernel needed them instead of moving them back to a
+  resting state, and the next frame's first kernel asks again: the HDR statistics' words, the FFT
+  ocean's targets and h0, the wakes' targets. A buffer's state decays to `COMMON` when the frame's
+  list has run (a readback's flush, the wait for the rays' compute list, the frame's end) and is
+  given back by a transition at the next list's start, so that no implicit promotion goes past the
+  tracker. A tracked resource is released through `DeferredRelease` or the upload pools, which
+  forget it (its address may come again); the upload list never writes one (`d3d12_BarrierCheck`
+  says so if it does).
 - Every command recorded on a command list directly (not through the device's or
   `CD3D12Compute`'s wrappers, which give the queue first) says `barriers flushed` in its
   statement. The test `Barrier_SourceLint` fails on one that does not, except in
@@ -1477,10 +1488,12 @@ given one by one, on the GPU with the debug layer).
   them), and the barriers. `d3d12_FrameLog`'s last field has them by kind
   (`barrier_calls=..;barrier_drains=..;barrier_transitions=..;barrier_uav=..;barrier_uav_all=..`).
   In the 4K sweeps of ten levels (raster, the rays' effects as `system.cfg` has them) a frame
-  makes 92-152 calls with `0` and 69-109 with `1`, with the path tracer 163-167 and 110-114; the
-  calls after work are as many either way (39-65, 70-73), and the frame and section times are
-  the same within the runs' spread: barriers in a row with no work between them were one wait
-  before too. What the GPU waits for less is the tracked states' work (resting states left out).
+  made 92-152 calls with `0` and 69-109 with `1` at step 317, with the path tracer 163-167 and
+  110-114; with the passes' arrays queued (step 318) `1` makes 40-68 and 69-72, nearly all of
+  them after work (39-65, 66-69). The frame and section times are the same
+  within the runs' spread: barriers in a row with no work between them were one wait before too,
+  and the waits left are where a pass reads what the one before wrote. The tracked states (step
+  319) leave out 1-7 transitions a frame (resting states), no wait.
 
 ## Statistics and profiling
 

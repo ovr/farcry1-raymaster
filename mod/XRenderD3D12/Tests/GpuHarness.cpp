@@ -1111,10 +1111,32 @@ XrTest::SWakeOutput XrTest::CGpu::RunWake(const std::vector<float> &Start, const
     m_pList->CopyTextureRegion(&Dst, 0, 0, 0, &Src, nullptr);
     Keep.push_back(pStaging);
   }
-  Move(pState.Get(), D3D12_RESOURCE_STATE_COPY_DEST, UAV_STATE);
-  // The foam's textures at rest where the view's kernel reads the one before.
+  // The states kept by the tracker, as the renderer's (TrackState): the window as its copy left it, the other targets made
+  // in UNORDERED_ACCESS; forgotten at the end (their addresses come again).
+  std::vector<ID3D12Resource *> Kept = { pState.Get(), pRows.Get(), pColumns.Get(), pFoam[0].Get(), pFoam[1].Get(), pView.Get() };
+  if (bHeight)
+    Kept.push_back(pHeights.Get());
+  struct SForget
+  {
+    Barriers::CBarrierTracker &t;
+    std::vector<ID3D12Resource *> &v;
+    ~SForget()
+    {
+      for (ID3D12Resource *p : v)
+        t.Forget(p);
+    }
+  } Forget{ m_Barriers, Kept };
+  for (ID3D12Resource *p : Kept)
+    m_Barriers.Register(p, p == pState.Get() ? D3D12_RESOURCE_STATE_COPY_DEST : UAV_STATE, 1, false);
+  // Where the renderer has the water read them (PIXEL_SHADER_RESOURCE): a compute list has no such state.
+  constexpr D3D12_RESOURCE_STATES PSR = READ;
+  // EnsureWakeTargets' states: the foam's textures where the view's kernel reads the one before, the view where the water
+  // reads it, the heights where its vertex program does.
   for (ComPtr<ID3D12Resource> &p : pFoam)
-    Move(p.Get(), UAV_STATE, READ);
+    Want(p.Get(), READ);
+  Want(pView.Get(), PSR);
+  if (bHeight)
+    Want(pHeights.Get(), READ);
   ID3D12DescriptorHeap *pHeaps[] = { pHeap.Get() };
   m_pList->SetDescriptorHeaps(1, pHeaps);
   m_pList->SetComputeRootSignature(m_pComputeRootSignature.Get());
@@ -1126,40 +1148,44 @@ XrTest::SWakeOutput XrTest::CGpu::RunWake(const std::vector<float> &Start, const
     FlushBarriers();
     m_pList->Dispatch(x, y, 1);
   };
-  // UpdateWakes' order and barriers, a frame after another.
+  // UpdateWakes' order and requests, a frame after another.
   UINT f = 0;
   for (size_t i = 0; i < Frames.size(); i++)
   {
     for (size_t s = 0; s < Frames[i].Steps.size(); s++)
     {
       m_pList->SetComputeRootConstantBufferView(0, pCB->GetGPUVirtualAddress() + nCB++ * CB_STRIDE);
-      Move(pState.Get(), UAV_STATE, READ);
+      Want(pState.Get(), READ);
+      Want(pRows.Get(), UAV_STATE);
       Dispatch(Kernels.Rows, 0, 1, N);
-      Move(pState.Get(), READ, UAV_STATE);
-      Move(pRows.Get(), UAV_STATE, READ);
+      Want(pRows.Get(), READ);
+      Want(pColumns.Get(), UAV_STATE);
       Dispatch(Kernels.Columns, 1, 1, N);
-      Move(pRows.Get(), READ, UAV_STATE);
-      Move(pColumns.Get(), UAV_STATE, READ);
+      Want(pColumns.Get(), READ);
+      Want(pState.Get(), UAV_STATE);
       Dispatch(Kernels.RowsInverse, 2, 1, N);
-      Move(pColumns.Get(), READ, UAV_STATE);
     }
     m_pList->SetComputeRootConstantBufferView(0, pCB->GetGPUVirtualAddress() + nCB++ * CB_STRIDE);
     f = i > 0 ? 1 - f : 0;
-    if (i > 0)
-      UavAll();  // the view of the frame before written before this frame's
-    Move(pState.Get(), UAV_STATE, READ);
-    Move(pFoam[f].Get(), READ, UAV_STATE);
+    Want(pState.Get(), READ);
+    Want(pFoam[1 - f].Get(), READ);
+    Want(pFoam[f].Get(), UAV_STATE);
+    Want(pView.Get(), UAV_STATE);
     Dispatch(Kernels.View, 3 + f, N / 16, N / 16);
     if (bHeight)
+    {
+      Want(pHeights.Get(), UAV_STATE);
       Dispatch(Kernels.Height, HEIGHT_TABLE, N / 16, N / 16);
-    Move(pState.Get(), READ, UAV_STATE);
-    Move(pFoam[f].Get(), UAV_STATE, READ);
+      Want(pHeights.Get(), READ);
+    }
+    Want(pFoam[f].Get(), READ);
+    Want(pView.Get(), PSR);
   }
-  Move(pState.Get(), UAV_STATE, D3D12_RESOURCE_STATE_COPY_SOURCE);
-  Move(pFoam[f].Get(), READ, D3D12_RESOURCE_STATE_COPY_SOURCE);
-  Move(pView.Get(), UAV_STATE, D3D12_RESOURCE_STATE_COPY_SOURCE);
+  Want(pState.Get(), D3D12_RESOURCE_STATE_COPY_SOURCE);
+  Want(pFoam[f].Get(), D3D12_RESOURCE_STATE_COPY_SOURCE);
+  Want(pView.Get(), D3D12_RESOURCE_STATE_COPY_SOURCE);
   if (bHeight)
-    Move(pHeights.Get(), UAV_STATE, D3D12_RESOURCE_STATE_COPY_SOURCE);
+    Want(pHeights.Get(), D3D12_RESOURCE_STATE_COPY_SOURCE);
   auto Copy = [&](ID3D12Resource *pSrc, UINT nSub, ID3D12Resource *pDst, const D3D12_PLACED_SUBRESOURCE_FOOTPRINT &Layout) {
     D3D12_TEXTURE_COPY_LOCATION Dst = {}, Src = {};
     Dst.pResource = pDst;
