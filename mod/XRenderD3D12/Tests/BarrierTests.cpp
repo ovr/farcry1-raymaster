@@ -1374,6 +1374,46 @@ XR_TEST(Barrier_BoundTargets)
   CHECK(Bound.Count() == CBoundTargets::MAX);
 }
 
+// Why: since step 321 the renderer names a transition's before only of a resource the tracker does not keep; with the
+// check on (d3d12_BarrierCheck) one that names it of a kept resource is found, once a request, whether its before is
+// right or not (a wrong one is PROBLEM_BEFORE too), in a transition, an array and a verbatim one; the barriers are
+// made from the state kept either way. Off, nothing.
+XR_TEST(Barrier_TrackedBefore)
+{
+  for (const bool bOn : { false, true })
+  {
+    CBarrierTracker t = Batched();
+    t.SetTrackedBefores(bOn);
+    t.Register(Res(1), PSR, 1);
+    t.Transition(Res(1), PSR, UAV);  // named right
+    t.Transition(Res(2), PSR, UAV);  // not kept: its own business
+    std::vector<SCall> c = Flush(t);
+    CHECK(c.size() == 1 && c[0].size() == 2);
+    D3D12_RESOURCE_BARRIER b = {};
+    b.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+    b.Transition = { Res(1), ALL, UAV, NPSR };
+    t.Barriers(&b, 1);
+    c = Flush(t);
+    CHECK(c.size() == 1 && c[0].size() == 1 && IsTransition(c[0][0], Res(1), UAV, NPSR));
+    b.Transition = { Res(1), ALL, NPSR, PSR };
+    t.Verbatim(&b, 1);
+    c = Flush(t);
+    CHECK(c.size() == 1 && c[0].size() == 1 && IsTransition(c[0][0], Res(1), NPSR, PSR));
+    CHECK(t.GetState(Res(1)) == PSR);
+    // Named wrong: from the state kept.
+    t.Transition(Res(1), RT, SRC);
+    c = Flush(t);
+    CHECK(c.size() == 1 && c[0].size() == 1 && IsTransition(c[0][0], Res(1), PSR, SRC));
+    const std::vector<SProblem> p = t.TakeProblems();
+    CHECK(CountKind(p, PROBLEM_TRACKED_BEFORE) == (bOn ? 4u : 0u));
+    CHECK(CountKind(p, PROBLEM_BEFORE) == 1);
+    // A Require names nothing.
+    t.Require(Res(1), PSR);
+    Flush(t);
+    CHECK(t.TakeProblems().empty());
+  }
+}
+
 // Why: a buffer whose state the tracker keeps decays to COMMON when its list has run, and the next list gives the state
 // back by an explicit transition (an implicit promotion past the tracker would leave its state wrong). Each step reads
 // what the step before wrote, a UAV barrier between them (left out where a transition into UNORDERED_ACCESS waits

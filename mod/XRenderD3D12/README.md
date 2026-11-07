@@ -1494,7 +1494,9 @@ given one by one, on the GPU with the debug layer).
   before given; a line says when the check was turned on) and to the console. The engine's log
   file drops the renderer's lines once the game runs, so the check has a file of its own. The
   debug layer checks befores within one list only: a buffer's before in the next list goes past
-  it.
+  it. Since step 321 a transition names its before only for a resource the tracker does not keep
+  (the exposure's words, the post AA's indirect arguments, another list's own barriers); one that
+  names it for a kept resource is a line too (`Require` it), whether its before is right or not.
 - `r_Stats` shows `Barrier calls N (M after work), barriers K` per frame: the `ResourceBarrier`
   calls, those that come after work recorded since the call before (the GPU drains for each of
   them), and the barriers. `d3d12_FrameLog`'s last field has them by kind

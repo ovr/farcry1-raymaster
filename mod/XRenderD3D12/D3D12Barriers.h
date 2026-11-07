@@ -96,6 +96,7 @@ namespace Barriers
     PROBLEM_MIXED_WRITE,       //!< a write state with another state
     PROBLEM_PENDING_AT_EXECUTE,//!< barriers queued when the list was executed (OnListExecuted)
     PROBLEM_ASSUME_PENDING,    //!< Assume of a resource with a queued transition (dropped)
+    PROBLEM_TRACKED_BEFORE,    //!< a transition naming its before of a registered resource (SetTrackedBefores: Require it)
   };
   struct SProblem
   {
@@ -255,6 +256,8 @@ namespace Barriers
       }
       if (pRec)
       {
+        if (m_bTrackedBefores && !m_bAgain)
+          Problem(PROBLEM_TRACKED_BEFORE, pRes, nSub, GetState(pRes, nSub), Before);
         if (!CheckSub(pRec, pRes, nSub))
           return;
         m_nChanges++;
@@ -396,6 +399,9 @@ namespace Barriers
         if (b.Type == D3D12_RESOURCE_BARRIER_TYPE_TRANSITION)
         {
           SRecord *pRec = Find(b.Transition.pResource);
+          if (pRec && m_bTrackedBefores)
+            Problem(PROBLEM_TRACKED_BEFORE, b.Transition.pResource, b.Transition.Subresource, GetState(b.Transition.pResource, b.Transition.Subresource),
+                    b.Transition.StateBefore);
           if (pRec)
             m_nChanges++;
           if (pRec && CheckSub(pRec, b.Transition.pResource, b.Transition.Subresource))
@@ -565,6 +571,10 @@ namespace Barriers
         m_CensusIds.clear();
       }
     }
+    //! On: a transition that names its before of a registered resource (Transition, Barriers, Verbatim) is
+    //! PROBLEM_TRACKED_BEFORE, still made from the state kept. The renderer names befores only of the resources it does
+    //! not register (d3d12_BarrierCheck finds the others).
+    void SetTrackedBefores(bool bOn) { m_bTrackedBefores = bOn; }
     //! The problems found since the last TakeProblems (at most MAX_PROBLEMS of them kept).
     std::vector<SProblem> TakeProblems() { return std::exchange(m_Problems, {}); }
     static constexpr size_t MAX_PROBLEMS = 256;
@@ -829,6 +839,7 @@ namespace Barriers
     std::vector<SProblem> m_Problems;
     const char *m_szContext = nullptr;
     bool m_bCensus = false;
+    bool m_bTrackedBefores = false;  //!< SetTrackedBefores
     bool m_bAgain = false;  //!< in SealAndTransition: the transition given again, checked once already
     FIsBuffer m_pIsBuffer = nullptr;
     struct SCensus

@@ -1090,7 +1090,8 @@ void CD3D12Device::LogBarrierProblems()
   static const char *const szKinds[] = { "a transition's before is not the resource's state", "a transition to the state it names as before",
                                          "Require of a resource not registered", "a subresource beyond the resource's",
                                          "a write state with another state", "barriers queued when the list was executed",
-                                         "Assume of a resource with a queued transition" };
+                                         "Assume of a resource with a queued transition",
+                                         "a transition naming its before of a resource whose state the device keeps (Require it)" };
   // WKPDID_D3DDebugObjectNameW: the name SetName gave (with d3d12_Debug or d3d12_Dred).
   static const GUID NAME = { 0x4cca5fd8, 0x921f, 0x42c8, { 0x85, 0x66, 0x70, 0xca, 0xf2, 0xa9, 0xb7, 0x41 } };
   for (const Barriers::SProblem &p : Problems)
@@ -1754,6 +1755,8 @@ void CD3D12Device::BeginFrame()
     m_bBarrierCheck = m_bBarrierCheckWanted;
     m_Barriers.SetCensus(
       m_bBarrierCheck, [](ID3D12Resource *p) { return p->GetDesc().Dimension == D3D12_RESOURCE_DIMENSION_BUFFER; }, &BarrierCensusIdentity);
+    // A before named of a resource the device keeps found too (only the others' are named).
+    m_Barriers.SetTrackedBefores(m_bBarrierCheck);
     // The check's own file (the engine's log drops the renderer's lines once the game runs): a line when it is
     // turned on or off, then each problem.
     if (!m_pBarrierLog)
