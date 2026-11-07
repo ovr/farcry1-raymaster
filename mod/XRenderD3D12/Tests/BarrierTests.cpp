@@ -488,6 +488,68 @@ XR_TEST(Barrier_HdrStatsWords)
     }
 }
 
+// Why: SMAA's targets and precomputed textures (PostAA.cpp's DrawSmaaPasses) were moved from PIXEL_SHADER_RESOURCE to
+// what each kernel reads and back every frame. Kept by the tracker, each kernel and the pass asking for its own: every
+// before is the state on the GPU, each piece of work finds the states it needs, in both modes and three frames; after
+// the first frame the area and search textures have no transitions, and a frame has 5 transitions fewer.
+XR_TEST(Barrier_SmaaStates)
+{
+  ID3D12Resource *const pCopy = Res(1), *pEdges = Res(2), *pWeights = Res(3), *pArea = Res(4), *pSearch = Res(5);
+  constexpr D3D12_RESOURCE_STATES READ = PSR | NPSR;
+  for (EMode eMode : { MODE_IMMEDIATE, MODE_BATCHED })
+  {
+    CBarrierTracker t;
+    t.SetMode(eMode);
+    for (ID3D12Resource *p : { pEdges, pWeights, pArea, pSearch })
+      t.Register(p, PSR, 1, false);
+    std::map<ID3D12Resource *, D3D12_RESOURCE_STATES> Gpu = { { pCopy, PSR }, { pEdges, PSR }, { pWeights, PSR }, { pArea, PSR }, { pSearch, PSR } };
+    size_t nWrong = 0, nMissing = 0, nPrecomputed = 0, nTransitions = 0;
+    // The queue given before a piece of work, which then needs each of Needs (a read state holding it, or it).
+    const auto Work = [&](std::initializer_list<std::pair<ID3D12Resource *, D3D12_RESOURCE_STATES>> Needs) {
+      for (const SCall &c : Flush(t, true))
+        for (const D3D12_RESOURCE_BARRIER &b : c)
+          if (b.Type == D3D12_RESOURCE_BARRIER_TYPE_TRANSITION)
+          {
+            ID3D12Resource *p = b.Transition.pResource;
+            nWrong += b.Transition.StateBefore != Gpu[p];
+            Gpu[p] = b.Transition.StateAfter;
+            nPrecomputed += p == pArea || p == pSearch;
+            nTransitions++;
+          }
+      for (const auto &n : Needs)
+        nMissing += n.second == UAV ? Gpu[n.first] != UAV : (Gpu[n.first] & n.second) != n.second;
+    };
+    size_t nFirst = 0;
+    for (int nFrame = 0; nFrame < 3; nFrame++)
+    {
+      nPrecomputed = nTransitions = 0;
+      t.Transition(pCopy, PSR, READ);
+      t.Require(pEdges, UAV);
+      Work({ { pCopy, NPSR }, { pEdges, UAV } });  // the edges
+      t.Require(pEdges, READ);
+      t.Require(pArea, READ);
+      t.Require(pSearch, READ);
+      t.Require(pWeights, UAV);
+      Work({ { pEdges, NPSR }, { pArea, NPSR }, { pSearch, NPSR }, { pWeights, UAV } });  // the weights
+      t.Require(pWeights, PSR);
+      t.Transition(pCopy, READ, PSR);
+      Work({ { pCopy, PSR }, { pEdges, PSR }, { pWeights, PSR } });  // the pass
+      t.OnListExecuted();
+      t.OnListOpened();
+      if (nFrame == 0)
+        nFirst = nTransitions;
+      else
+        CHECK_MSG(nPrecomputed == 0, std::to_string(nPrecomputed) + " transitions of the area and search textures, frame " + std::to_string(nFrame));
+    }
+    // Before: the copy 2, the edges 3 (to UAV, READ, PS), the area and search 2 each, the weights 2.
+    CHECK_MSG(nTransitions == 6, std::to_string(nTransitions) + " transitions in a frame after the first (11 before)");
+    CHECK_MSG(nFirst == 8, std::to_string(nFirst) + " transitions in the first frame");
+    CHECK_MSG(nWrong == 0, std::to_string(nWrong) + (eMode == MODE_BATCHED ? " befores wrong, batched" : " befores wrong, immediate"));
+    CHECK_MSG(nMissing == 0, std::to_string(nMissing) + (eMode == MODE_BATCHED ? " states missing, batched" : " states missing, immediate"));
+    CHECK(t.TakeProblems().empty());
+  }
+}
+
 // Read states: one that holds the wanted one already does, two shader reads combine, the others as asked.
 XR_TEST(Barrier_ReadStates)
 {

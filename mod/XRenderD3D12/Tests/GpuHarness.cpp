@@ -56,6 +56,30 @@ namespace
     static std::unique_ptr<XrTest::CGpu> s_pGpu;
     return s_pGpu;
   }
+
+  //! Resources whose states the tracker keeps for one run, as the renderer's TrackState: forgotten at its end (their
+  //! addresses come again).
+  class CKept
+  {
+  public:
+    explicit CKept(Barriers::CBarrierTracker &Tracker) : m_Tracker(Tracker) {}
+    CKept(const CKept &) = delete;
+    CKept &operator=(const CKept &) = delete;
+    ~CKept()
+    {
+      for (ID3D12Resource *p : m_Resources)
+        m_Tracker.Forget(p);
+    }
+    void Add(ID3D12Resource *pRes, D3D12_RESOURCE_STATES Initial)
+    {
+      m_Tracker.Register(pRes, Initial, 1, false);
+      m_Resources.push_back(pRes);
+    }
+
+  private:
+    Barriers::CBarrierTracker &m_Tracker;
+    std::vector<ID3D12Resource *> m_Resources;
+  };
 }
 
 XrTest::SGpuOptions &XrTest::GpuOptions()
@@ -848,18 +872,22 @@ std::vector<uint8_t> XrTest::CGpu::RunCmaa2(const STestTexture &Picture, const S
   m_pList->SetComputeRootDescriptorTable(0, m_pWideHeap->GetGPUDescriptorHandleForHeapStart());
   constexpr D3D12_RESOURCE_STATES UAV_STATE = D3D12_RESOURCE_STATE_UNORDERED_ACCESS, ARGS = D3D12_RESOURCE_STATE_INDIRECT_ARGUMENT;
   constexpr D3D12_RESOURCE_STATES READ = D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE;
+  // The picture's and the edges' states kept by the tracker (the renderer's TrackState); where the renderer's pass reads
+  // them (PIXEL_SHADER_RESOURCE) a compute list has READ.
+  CKept Kept(m_Barriers);
+  Kept.Add(pColor.Get(), D3D12_RESOURCE_STATE_COPY_DEST);
+  Kept.Add(pEdges.Get(), UAV_STATE);
   for (int f = 0; f < nFrames; f++)
   {
     // As DrawCmaa2Passes: the picture copied in, the counters cleared once, the edges, the shapes and the colours by the
     // arguments of their counts (a barrier between frames: the renderer's are separate submissions).
+    Want(pColor.Get(), D3D12_RESOURCE_STATE_COPY_DEST);
     if (f > 0)
-    {
-      Move(pColor.Get(), UAV_STATE, D3D12_RESOURCE_STATE_COPY_DEST);
       UavBarrier();
-    }
     FlushBarriers();
     m_pList->CopyResource(pColor.Get(), pSource.Get());
-    Move(pColor.Get(), D3D12_RESOURCE_STATE_COPY_DEST, READ);
+    Want(pColor.Get(), READ);
+    Want(pEdges.Get(), UAV_STATE);
     Move(pArgs, D3D12_RESOURCE_STATE_COMMON, UAV_STATE);
     if (f == 0)
     {
@@ -877,11 +905,13 @@ std::vector<uint8_t> XrTest::CGpu::RunCmaa2(const STestTexture &Picture, const S
     Dispatch(Kernels.DispatchArgs, 1, 2);
     Move(pArgs, UAV_STATE, ARGS);
     UavBarrier();
-    Move(pColor.Get(), READ, UAV_STATE);
+    Want(pColor.Get(), UAV_STATE);
     Indirect(Kernels.Apply);
     Move(pArgs, ARGS, D3D12_RESOURCE_STATE_COMMON);
+    Want(pColor.Get(), READ);
+    Want(pEdges.Get(), READ);
   }
-  Move(pColor.Get(), UAV_STATE, D3D12_RESOURCE_STATE_COPY_SOURCE);
+  Want(pColor.Get(), D3D12_RESOURCE_STATE_COPY_SOURCE);
   D3D12_TEXTURE_COPY_LOCATION Dst = {}, Src = {};
   Dst.pResource = pReadback.Get();
   Dst.Type = D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT;
@@ -1112,22 +1142,13 @@ XrTest::SWakeOutput XrTest::CGpu::RunWake(const std::vector<float> &Start, const
     Keep.push_back(pStaging);
   }
   // The states kept by the tracker, as the renderer's (TrackState): the window as its copy left it, the other targets made
-  // in UNORDERED_ACCESS; forgotten at the end (their addresses come again).
-  std::vector<ID3D12Resource *> Kept = { pState.Get(), pRows.Get(), pColumns.Get(), pFoam[0].Get(), pFoam[1].Get(), pView.Get() };
+  // in UNORDERED_ACCESS.
+  CKept Kept(m_Barriers);
+  Kept.Add(pState.Get(), D3D12_RESOURCE_STATE_COPY_DEST);
+  for (ID3D12Resource *p : { pRows.Get(), pColumns.Get(), pFoam[0].Get(), pFoam[1].Get(), pView.Get() })
+    Kept.Add(p, UAV_STATE);
   if (bHeight)
-    Kept.push_back(pHeights.Get());
-  struct SForget
-  {
-    Barriers::CBarrierTracker &t;
-    std::vector<ID3D12Resource *> &v;
-    ~SForget()
-    {
-      for (ID3D12Resource *p : v)
-        t.Forget(p);
-    }
-  } Forget{ m_Barriers, Kept };
-  for (ID3D12Resource *p : Kept)
-    m_Barriers.Register(p, p == pState.Get() ? D3D12_RESOURCE_STATE_COPY_DEST : UAV_STATE, 1, false);
+    Kept.Add(pHeights.Get(), UAV_STATE);
   // Where the renderer has the water read them (PIXEL_SHADER_RESOURCE): a compute list has no such state.
   constexpr D3D12_RESOURCE_STATES PSR = READ;
   // EnsureWakeTargets' states: the foam's textures where the view's kernel reads the one before, the view where the water
@@ -1462,24 +1483,16 @@ XrTest::SOceanOutput XrTest::CGpu::RunOceanFrames(const std::vector<float> &H0, 
     m_pList->Dispatch(x, y, z);
   };
   // The states kept by the tracker, as the renderer's (TrackState): h0 as its copy left it, the targets made in
-  // UNORDERED_ACCESS; forgotten at the end (their addresses come again).
-  std::vector<ID3D12Resource *> Kept = { pH0.Get(), pRows.Get(), pFields.Get(), pWaves.Get(), pLevel4.Get() };
+  // UNORDERED_ACCESS.
+  CKept Kept(m_Barriers);
+  Kept.Add(pH0.Get(), D3D12_RESOURCE_STATE_COPY_DEST);
+  for (ID3D12Resource *p : { pRows.Get(), pFields.Get(), pWaves.Get(), pLevel4.Get() })
+    Kept.Add(p, UAV_STATE);
   if (bFoam)
-    Kept.insert(Kept.end(), { pFoam[0].Get(), pFoam[1].Get(), pFoamView.Get(), pFoamLevel4.Get() });
+    for (ID3D12Resource *p : { pFoam[0].Get(), pFoam[1].Get(), pFoamView.Get(), pFoamLevel4.Get() })
+      Kept.Add(p, UAV_STATE);
   if (bCaustics)
-    Kept.push_back(pCaustics.Get());
-  struct SForget
-  {
-    Barriers::CBarrierTracker &t;
-    std::vector<ID3D12Resource *> &v;
-    ~SForget()
-    {
-      for (ID3D12Resource *p : v)
-        t.Forget(p);
-    }
-  } Forget{ m_Barriers, Kept };
-  for (ID3D12Resource *p : Kept)
-    m_Barriers.Register(p, p == pH0.Get() ? D3D12_RESOURCE_STATE_COPY_DEST : UAV_STATE, 1, false);
+    Kept.Add(pCaustics.Get(), UAV_STATE);
   // Where the renderer has the water read them (PIXEL_SHADER_RESOURCE): a compute list has no such state.
   constexpr D3D12_RESOURCE_STATES PSR = READ;
   // EnsureOceanTargets' states: the waves, the foam's view and the caustics where the water reads them, the foam's

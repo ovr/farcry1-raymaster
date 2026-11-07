@@ -1464,7 +1464,8 @@ given one by one, on the GPU with the debug layer).
   resource is in it already (a read state that holds the wanted one, two shader reads combined).
   So the passes leave them where their last kernel needed them instead of moving them back to a
   resting state, and the next frame's first kernel asks again: the HDR statistics' words, the FFT
-  ocean's targets and h0, the wakes' targets. A buffer's state decays to `COMMON` when the frame's
+  ocean's targets and h0, the wakes' targets, SMAA's targets and precomputed textures (readable by
+  both kinds of shader once), CMAA2's picture and edges. A buffer's state decays to `COMMON` when the frame's
   list has run (a readback's flush, the wait for the rays' compute list, the frame's end) and is
   given back by a transition at the next list's start, so that no implicit promotion goes past the
   tracker. A tracked resource is released through `DeferredRelease` or the upload pools, which

@@ -268,23 +268,29 @@ bool CD3D12Renderer::DrawSmaaPasses(ID3D12Resource *pCopy, int w, int h, int nQu
   const ED3D12Kernel eWeights = (ED3D12Kernel)(eD3D12K_SmaaWeightsLow + nQuality);
   if (!pCopy || !m_pCompute || !m_pUpload || !m_pDescriptors || !m_pCompute->HasKernel(eEdges) || !m_pCompute->HasKernel(eWeights))
     return false;
-  // The precomputed textures once, in the formats their headers name; the targets of the display's size.
+  // The precomputed textures once, in the formats their headers name; the targets of the display's size. Their states
+  // kept by the device: made in PIXEL_SHADER_RESOURCE (the upload leaves the precomputed ones so), each kernel asks.
+  constexpr D3D12_RESOURCE_STATES PS_READ = D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE;
   if (!m_pSmaaArea)
   {
     const SD3D12SubData Area = { areaTexBytes, AREATEX_PITCH };
     m_pSmaaArea = m_pUpload->CreateTexture(AREATEX_WIDTH, AREATEX_HEIGHT, 1, DXGI_FORMAT_R8G8_UNORM, false, &Area);
+    if (m_pSmaaArea)
+      m_pDevice->TrackState(m_pSmaaArea->m_pResource, PS_READ);
   }
   if (!m_pSmaaSearch)
   {
     const SD3D12SubData Search = { searchTexBytes, SEARCHTEX_PITCH };
     m_pSmaaSearch = m_pUpload->CreateTexture(SEARCHTEX_WIDTH, SEARCHTEX_HEIGHT, 1, DXGI_FORMAT_R8_UNORM, false, &Search);
+    if (m_pSmaaSearch)
+      m_pDevice->TrackState(m_pSmaaSearch->m_pResource, PS_READ);
   }
   if (m_pSmaaEdges && (m_pSmaaEdges->m_nWidth != w || m_pSmaaEdges->m_nHeight != h))
     ReleaseSmaa(false);
-  if (!m_pSmaaEdges)
-    m_pSmaaEdges = m_pUpload->CreateRenderTarget(w, h, DXGI_FORMAT_R8G8_UNORM, true);
-  if (!m_pSmaaWeights)
-    m_pSmaaWeights = m_pUpload->CreateRenderTarget(w, h, DXGI_FORMAT_R8G8B8A8_UNORM, true);
+  if (!m_pSmaaEdges && (m_pSmaaEdges = m_pUpload->CreateRenderTarget(w, h, DXGI_FORMAT_R8G8_UNORM, true)))
+    m_pDevice->TrackState(m_pSmaaEdges->m_pResource, PS_READ);
+  if (!m_pSmaaWeights && (m_pSmaaWeights = m_pUpload->CreateRenderTarget(w, h, DXGI_FORMAT_R8G8B8A8_UNORM, true)))
+    m_pDevice->TrackState(m_pSmaaWeights->m_pResource, PS_READ);
   if (!m_pSmaaArea || !m_pSmaaSearch || !m_pSmaaEdges || m_pSmaaEdges->m_nSRV < 0 || !m_pSmaaWeights || m_pSmaaWeights->m_nSRV < 0)
     return false;
   ID3D12Resource *pEdges = m_pSmaaEdges->m_pResource, *pWeights = m_pSmaaWeights->m_pResource;
@@ -330,23 +336,22 @@ bool CD3D12Renderer::DrawSmaaPasses(ID3D12Resource *pCopy, int w, int h, int nQu
   const float vMetrics[4] = { 1.0f / w, 1.0f / h, (float)w, (float)h };
   const SD3D12FrameAlloc CB = m_pUpload->AllocFrame(sizeof(vMetrics), 256);
   memcpy(CB.pCPU, vMetrics, sizeof(vMetrics));
-  constexpr D3D12_RESOURCE_STATES PS_READ = D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE;
   constexpr D3D12_RESOURCE_STATES READ = D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE | D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE;
+  constexpr D3D12_RESOURCE_STATES UAV = D3D12_RESOURCE_STATE_UNORDERED_ACCESS;
   ID3D12GraphicsCommandList *pList = m_pDevice->GetCmdList();
   const UINT nGroupsX = (UINT)(w + 7) / 8, nGroupsY = (UINT)(h + 7) / 8;
+  // The copy is not tracked (the scene's, step 321): readable by the kernel and back. The edges read by the weights' kernel
+  // and the pass (one transition), the weights by the pass; the precomputed textures readable by both kinds once.
   m_pDevice->Transition(pCopy, PS_READ, READ);
-  m_pDevice->Transition(pEdges, PS_READ, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+  m_pDevice->Require(pEdges, UAV);
   m_pCompute->Dispatch(pList, eEdges, CB.nGPU, m_nSmaaTables, m_nSmaaTables + CD3D12Compute::COMPUTE_SRVS, nGroupsX, nGroupsY);
-  m_pDevice->Transition(pEdges, D3D12_RESOURCE_STATE_UNORDERED_ACCESS, READ);
-  m_pDevice->Transition(pArea, PS_READ, READ);
-  m_pDevice->Transition(pSearch, PS_READ, READ);
-  m_pDevice->Transition(pWeights, PS_READ, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+  m_pDevice->Require(pEdges, READ);
+  m_pDevice->Require(pArea, READ);
+  m_pDevice->Require(pSearch, READ);
+  m_pDevice->Require(pWeights, UAV);
   m_pCompute->Dispatch(pList, eWeights, CB.nGPU, m_nSmaaTables + TABLE, m_nSmaaTables + TABLE + CD3D12Compute::COMPUTE_SRVS, nGroupsX,
                        nGroupsY);
-  m_pDevice->Transition(pWeights, D3D12_RESOURCE_STATE_UNORDERED_ACCESS, PS_READ);
-  m_pDevice->Transition(pSearch, READ, PS_READ);
-  m_pDevice->Transition(pArea, READ, PS_READ);
-  m_pDevice->Transition(pEdges, READ, PS_READ);
+  m_pDevice->Require(pWeights, PS_READ);
   m_pDevice->Transition(pCopy, READ, PS_READ);
   return true;
 }
@@ -507,9 +512,10 @@ bool CD3D12Renderer::DrawCmaa2Passes(ID3D12Resource *pCopy, int w, int h, int nQ
     m_pDescriptors->WriteUAV(u + 6, m_pCmaa2Buffers[CMAA2_COUNTERS].Get(), &UAV);
     UAV.Buffer.NumElements = 4;
     m_pDescriptors->WriteUAV(u + 7, m_pCmaa2Buffers[CMAA2_ARGUMENTS].Get(), &UAV);
-    // The picture and the edges rest in PIXEL_SHADER_RESOURCE between frames, the heads in UNORDERED_ACCESS.
-    m_pDevice->Transition(m_pCmaa2Color->m_pResource, D3D12_RESOURCE_STATE_UNORDERED_ACCESS, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
-    m_pDevice->Transition(m_pCmaa2Edges->m_pResource, D3D12_RESOURCE_STATE_UNORDERED_ACCESS, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+    // The picture's and the edges' states kept by the device (made in UNORDERED_ACCESS; each frame asks for its own), the
+    // heads always in UNORDERED_ACCESS.
+    m_pDevice->TrackState(m_pCmaa2Color->m_pResource, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+    m_pDevice->TrackState(m_pCmaa2Edges->m_pResource, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
     m_bCmaa2Cleared = false;
   }
 
@@ -519,13 +525,14 @@ bool CD3D12Renderer::DrawCmaa2Passes(ID3D12Resource *pCopy, int w, int h, int nQ
   ID3D12GraphicsCommandList *pList = m_pDevice->GetCmdList();
   ID3D12Resource *pColor = m_pCmaa2Color->m_pResource, *pEdges = m_pCmaa2Edges->m_pResource;
   ID3D12Resource *pArgs = m_pCmaa2Buffers[CMAA2_ARGUMENTS].Get();
-  // The copy into CMAA2's picture, which its kernels read until the last one writes it.
+  // The copy into CMAA2's picture, which its kernels read until the last one writes it (the copy is the scene's, not
+  // tracked: step 321).
   m_pDevice->Transition(pCopy, PS_READ, D3D12_RESOURCE_STATE_COPY_SOURCE);
-  m_pDevice->Transition(pColor, PS_READ, D3D12_RESOURCE_STATE_COPY_DEST);
+  m_pDevice->Require(pColor, D3D12_RESOURCE_STATE_COPY_DEST);
   m_pDevice->CopyResource(pColor, pCopy);
-  m_pDevice->Transition(pColor, D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+  m_pDevice->Require(pColor, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
   m_pDevice->Transition(pCopy, D3D12_RESOURCE_STATE_COPY_SOURCE, PS_READ);
-  m_pDevice->Transition(pEdges, PS_READ, UAV);
+  m_pDevice->Require(pEdges, UAV);
   m_pDevice->Transition(pArgs, D3D12_RESOURCE_STATE_COMMON, UAV);
   // Its counters zero once (the kernel of the second arguments clears them, as after each frame).
   if (!m_bCmaa2Cleared)
@@ -549,11 +556,13 @@ bool CD3D12Renderer::DrawCmaa2Passes(ID3D12Resource *pCopy, int w, int h, int nQ
   m_pCompute->DispatchWide(pList, eD3D12K_Cmaa2DispatchArgs, m_nCmaa2Table, 1, 2);
   m_pDevice->Transition(pArgs, UAV, ARGS);
   UavBarrierAll(pList);
-  m_pDevice->Transition(pColor, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE, UAV);
+  m_pDevice->Require(pColor, UAV);
   m_pCompute->DispatchWideIndirect(pList, eD3D12K_Cmaa2Apply, m_nCmaa2Table, pArgs);
+  // The arguments as a buffer is after its list (not tracked: the kernels promote the other buffers from COMMON); the
+  // picture and the edges read by the pass.
   m_pDevice->Transition(pArgs, ARGS, D3D12_RESOURCE_STATE_COMMON);
-  m_pDevice->Transition(pColor, UAV, PS_READ);
-  m_pDevice->Transition(pEdges, UAV, PS_READ);
+  m_pDevice->Require(pColor, PS_READ);
+  m_pDevice->Require(pEdges, PS_READ);
   return true;
 }
 
