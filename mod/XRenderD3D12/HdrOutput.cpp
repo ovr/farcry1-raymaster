@@ -321,8 +321,10 @@ bool CD3D12Renderer::LimitFrameAverage(const char *szSection)
   constexpr D3D12_RESOURCE_STATES READ = D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE | D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE;
   ID3D12GraphicsCommandList *pList = m_pDevice->GetCmdList();
   GpuSection("hdr frame average");
-  m_pDevice->Transition(pFrame, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, READ);
-  m_pDevice->Transition(pHighlight, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, READ);
+  // The frame and the highlights read by the kernel, then by the output's pixels as they are (the device keeps their
+  // states).
+  m_pDevice->Require(pFrame, READ);
+  m_pDevice->Require(pHighlight, READ);
   m_pDevice->Transition(o.pFall->m_pResource, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
   // 16 x 16 samples a group, then one thread.
   const UINT nGroupPixels = 16 * nStride;
@@ -332,8 +334,6 @@ bool CD3D12Renderer::LimitFrameAverage(const char *szSection)
   m_pCompute->Dispatch(pList, eD3D12K_FrameAverageLimit, CB.nGPU, nTable, nTable + CD3D12Compute::COMPUTE_SRVS, 1, 1);
   m_pDevice->UavBarrier(o.pFallWords.Get());
   m_pDevice->Transition(o.pFall->m_pResource, D3D12_RESOURCE_STATE_UNORDERED_ACCESS, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
-  m_pDevice->Transition(pHighlight, READ, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
-  m_pDevice->Transition(pFrame, READ, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
   GpuSection(szSection);
   o.nFallFrame = m_nFrames;
   return true;
@@ -473,12 +473,14 @@ bool CD3D12Renderer::ReadFrameHdr10(void *pDst, int nPitch, int *pWidth, int *pH
     m_HdrOut.pCapture = m_pUpload->CreateRenderTarget(w, h, D3D12_HDR10_FORMAT);
   if (!m_HdrOut.pCapture)
     return false;
-  m_pDevice->SetFrameReadable(true);
+  // The frame and the highlights read (the capture bound instead of them; drawn on again after: the bound targets'
+  // states, the device's).
+  m_pDevice->Require(m_pDevice->GetFrameTarget(), D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+  m_pDevice->Require(m_pDevice->GetHighlight(), D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
   LimitFrameAverage("hdr capture");
   if (WantHdrStats())
     DispatchHdrOutputStats(true);
   DrawHdrPass(m_HdrOut.pCapture, HdrOutputConstants(EDisplayOutput::Hdr10));
-  m_pDevice->SetFrameReadable(false);
   m_pDevice->SetBackBufferTargets();
   m_HdrOut.Pixels.resize((size_t)w * h * 4);
   if (!m_pDevice->ReadBackTexture(m_HdrOut.pCapture->m_pResource, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, m_HdrOut.Pixels.data(), w, h))

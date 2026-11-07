@@ -447,12 +447,12 @@ void CD3D12Renderer::DrawGeometry(const SPipelineKey &Key, const SDrawConstants 
       pList->IASetIndexBuffer(pIB);
       Set.IB = *pIB;
     }
-    m_pDevice->FlushBarriers();
+    m_pDevice->FlushBarriersForDraw();
     pList->DrawIndexedInstanced(nCount, nInstances, nFirst, nBaseVertex, 0);  // barriers flushed
   }
   else
   {
-    m_pDevice->FlushBarriers();
+    m_pDevice->FlushBarriersForDraw();
     pList->DrawInstanced(nCount, nInstances, nFirst, 0);  // barriers flushed
   }
 }

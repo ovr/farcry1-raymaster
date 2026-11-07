@@ -1470,7 +1470,13 @@ given one by one, on the GPU with the debug layer).
   history, read by the next frame, stays readable), the sun's shadow's rays, history and mask and
   FidelityFX Denoiser's textures (the frame before's depth stays readable), NRD's textures and its
   inputs and output (its host asks for each pass's states; a pass given up on leaves the device's
-  states right). A buffer's state decays to `COMMON` when the frame's
+  states right). Since step 321 the device's own targets too: the swap chain's buffers, the depth
+  buffer, the scene's, HDR and MSAA targets, the frame target and the highlight layer, the
+  offscreen, cube and shadow maps (each level, face or slice), the copies of the targets, and
+  every render target the upload makes. A pass that reads one asks for a read state and leaves it
+  there; the device asks again for each render target and depth buffer it has bound before a draw
+  or a clear, when a state it keeps changed since its last look (a depth buffer bound read only
+  stays where its state holds `DEPTH_READ`). A buffer's state decays to `COMMON` when the frame's
   list has run (a readback's flush, the wait for the rays' compute list, the frame's end) and is
   given back by a transition at the next list's start, so that no implicit promotion goes past the
   tracker. A tracked resource is released through `DeferredRelease` or the upload pools, which

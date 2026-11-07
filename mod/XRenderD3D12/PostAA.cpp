@@ -253,12 +253,12 @@ bool CD3D12Renderer::EnsureLayerCopy(CD3D12Texture *&pCopy)
 
 void CD3D12Renderer::CopyLayer(CD3D12Texture *pCopy)
 {
+  // Both kept by the device: the layer drawn on next (BindHighlight asks for its state), the copy read.
   ID3D12Resource *pLayer = m_pDevice->GetHighlight();
-  m_pDevice->Transition(pLayer, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, D3D12_RESOURCE_STATE_COPY_SOURCE);
-  m_pDevice->Transition(pCopy->m_pResource, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, D3D12_RESOURCE_STATE_COPY_DEST);
+  m_pDevice->Require(pLayer, D3D12_RESOURCE_STATE_COPY_SOURCE);
+  m_pDevice->Require(pCopy->m_pResource, D3D12_RESOURCE_STATE_COPY_DEST);
   m_pDevice->CopyResource(pCopy->m_pResource, pLayer);
-  m_pDevice->Transition(pCopy->m_pResource, D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
-  m_pDevice->Transition(pLayer, D3D12_RESOURCE_STATE_COPY_SOURCE, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+  m_pDevice->Require(pCopy->m_pResource, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
 }
 
 bool CD3D12Renderer::DrawSmaaPasses(ID3D12Resource *pCopy, int w, int h, int nQuality)
@@ -340,9 +340,10 @@ bool CD3D12Renderer::DrawSmaaPasses(ID3D12Resource *pCopy, int w, int h, int nQu
   constexpr D3D12_RESOURCE_STATES UAV = D3D12_RESOURCE_STATE_UNORDERED_ACCESS;
   ID3D12GraphicsCommandList *pList = m_pDevice->GetCmdList();
   const UINT nGroupsX = (UINT)(w + 7) / 8, nGroupsY = (UINT)(h + 7) / 8;
-  // The copy is not tracked (the scene's, step 321): readable by the kernel and back. The edges read by the weights' kernel
-  // and the pass (one transition), the weights by the pass; the precomputed textures readable by both kinds once.
-  m_pDevice->Transition(pCopy, PS_READ, READ);
+  // The copy readable by the kernel and the pass (the device keeps its state: CreateTargetCopies). The edges read by the
+  // weights' kernel and the pass (one transition), the weights by the pass; the precomputed textures readable by both
+  // kinds once.
+  m_pDevice->Require(pCopy, READ);
   m_pDevice->Require(pEdges, UAV);
   m_pCompute->Dispatch(pList, eEdges, CB.nGPU, m_nSmaaTables, m_nSmaaTables + CD3D12Compute::COMPUTE_SRVS, nGroupsX, nGroupsY);
   m_pDevice->Require(pEdges, READ);
@@ -352,7 +353,6 @@ bool CD3D12Renderer::DrawSmaaPasses(ID3D12Resource *pCopy, int w, int h, int nQu
   m_pCompute->Dispatch(pList, eWeights, CB.nGPU, m_nSmaaTables + TABLE, m_nSmaaTables + TABLE + CD3D12Compute::COMPUTE_SRVS, nGroupsX,
                        nGroupsY);
   m_pDevice->Require(pWeights, PS_READ);
-  m_pDevice->Transition(pCopy, READ, PS_READ);
   return true;
 }
 
@@ -525,13 +525,12 @@ bool CD3D12Renderer::DrawCmaa2Passes(ID3D12Resource *pCopy, int w, int h, int nQ
   ID3D12GraphicsCommandList *pList = m_pDevice->GetCmdList();
   ID3D12Resource *pColor = m_pCmaa2Color->m_pResource, *pEdges = m_pCmaa2Edges->m_pResource;
   ID3D12Resource *pArgs = m_pCmaa2Buffers[CMAA2_ARGUMENTS].Get();
-  // The copy into CMAA2's picture, which its kernels read until the last one writes it (the copy is the scene's, not
-  // tracked: step 321).
-  m_pDevice->Transition(pCopy, PS_READ, D3D12_RESOURCE_STATE_COPY_SOURCE);
+  // The copy into CMAA2's picture, which its kernels read until the last one writes it; the copy then read by the pass.
+  m_pDevice->Require(pCopy, D3D12_RESOURCE_STATE_COPY_SOURCE);
   m_pDevice->Require(pColor, D3D12_RESOURCE_STATE_COPY_DEST);
   m_pDevice->CopyResource(pColor, pCopy);
   m_pDevice->Require(pColor, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
-  m_pDevice->Transition(pCopy, D3D12_RESOURCE_STATE_COPY_SOURCE, PS_READ);
+  m_pDevice->Require(pCopy, PS_READ);
   m_pDevice->Require(pEdges, UAV);
   m_pDevice->Transition(pArgs, D3D12_RESOURCE_STATE_COMMON, UAV);
   // Its counters zero once (the kernel of the second arguments clears them, as after each frame).

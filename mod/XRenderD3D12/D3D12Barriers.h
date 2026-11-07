@@ -121,6 +121,7 @@ namespace Barriers
     {
       if (!pRes)
         return;
+      m_nChanges++;
       SRecord &r = m_Records[pRes];
       r.State.assign(nSubresources ? nSubresources : 1, Initial);
       r.bBuffer = bBuffer;
@@ -139,6 +140,7 @@ namespace Barriers
       auto it = m_Records.find(pRes);
       if (it == m_Records.end())
         return;
+      m_nChanges++;
       for (SEntry &e : m_Entries)
         if (e.pRec == &it->second)
           Detach(e);
@@ -188,6 +190,7 @@ namespace Barriers
       }
       if (!bAny)
         return;
+      m_nChanges++;
       if (!bFits)
         Seal();  // a round trip back to a write state: what is queued first, then this
       SEntry &e = Entry(pRes, pRec);
@@ -218,6 +221,7 @@ namespace Barriers
         Problem(PROBLEM_ASSUME_PENDING, pRes, ALL, D3D12_RESOURCE_STATE_COMMON, State);
         Seal();
       }
+      m_nChanges++;
       pRec->State.assign(pRec->State.size(), State);
       pRec->nSyncEpoch = m_nEpoch;
     }
@@ -253,6 +257,7 @@ namespace Barriers
       {
         if (!CheckSub(pRec, pRes, nSub))
           return;
+        m_nChanges++;
         SEntry *pE = &Entry(pRes, pRec);
         const UINT n0 = nSub == ALL ? 0 : nSub, n1 = nSub == ALL ? (UINT)pE->Subs.size() : nSub + 1;
         bool bFits = true;
@@ -391,6 +396,8 @@ namespace Barriers
         if (b.Type == D3D12_RESOURCE_BARRIER_TYPE_TRANSITION)
         {
           SRecord *pRec = Find(b.Transition.pResource);
+          if (pRec)
+            m_nChanges++;
           if (pRec && CheckSub(pRec, b.Transition.pResource, b.Transition.Subresource))
             for (UINT s = 0; s < pRec->State.size(); s++)
               if (b.Transition.Subresource == ALL || b.Transition.Subresource == s)
@@ -500,6 +507,7 @@ namespace Barriers
     {
       if (HasPending())
         Problem(PROBLEM_PENDING_AT_EXECUTE, nullptr, ALL, D3D12_RESOURCE_STATE_COMMON, D3D12_RESOURCE_STATE_COMMON);
+      m_nChanges++;
       m_Entries.clear();
       m_bUavAll = false;
       m_Sealed.clear();
@@ -534,6 +542,9 @@ namespace Barriers
 
     const SStats &Stats() const { return m_Stats; }
     void ResetStats() { m_Stats = {}; }
+    //! Counts the changes of the registered states (each request that queued one, Register, Forget, Assume, the list's
+    //! end): the same count, the same states (CBoundTargets asks again only when it moved).
+    uint64_t GetChanges() const { return m_nChanges; }
     //! The census of the states the renderer's own transitions name (not registered resources): a before that is not
     //! the state the last transition of the resource gave is PROBLEM_BEFORE (on: d3d12_BarrierCheck).
     //! pIsBuffer tells a buffer (whose state decays when its list has run) from a texture; without it the census forgets
@@ -813,6 +824,7 @@ namespace Barriers
     uint64_t m_nCallEpoch = 1;                     //!< m_nEpoch at the last call
     uint64_t m_nUavAllEpoch = 0;                   //!< m_nEpoch at the last UAV barrier of all resources
     bool m_bUavAllSeen = false;
+    uint64_t m_nChanges = 0;                       //!< GetChanges
     SStats m_Stats;
     std::vector<SProblem> m_Problems;
     const char *m_szContext = nullptr;
@@ -827,6 +839,75 @@ namespace Barriers
     std::unordered_map<std::pair<ID3D12Resource *, UINT>, SCensus, SKeyHash> m_Census;
     FIdentity m_pIdentity = nullptr;
     std::unordered_map<ID3D12Resource *, uint64_t> m_CensusIds;  //!< the identity the census saw at each address
+  };
+
+  //! The render targets and the depth target bound to a list (OMSetRenderTargets) whose states a tracker keeps: Require
+  //! gives each the state it is drawn in before a draw or a clear, so that a pass that made a bound target readable (a
+  //! kernel read the depth buffer) and drew on gets it back as a target; nothing where the tracker's states did not
+  //! change since (GetChanges). A depth target bound read only (DEPTH_READ) stays in DEPTH_WRITE or in a read state
+  //! that holds DEPTH_READ (a read only view of a writable depth buffer draws as well).
+  class CBoundTargets
+  {
+  public:
+    static constexpr int MAX = 10;  //!< 8 colour targets, a second's room, a depth target
+
+    //! Nothing bound (OMSetRenderTargets of other targets follows: Add them).
+    void Clear()
+    {
+      m_n = 0;
+      m_bChecked = false;
+    }
+    //! pRes (one subresource or all) bound, drawn in State: RENDER_TARGET, DEPTH_WRITE or DEPTH_READ (read only).
+    void Add(ID3D12Resource *pRes, D3D12_RESOURCE_STATES State, UINT nSub = ALL)
+    {
+      if (!pRes || m_n >= MAX)
+        return;
+      m_Bound[m_n++] = { pRes, nSub, State };
+      m_bChecked = false;
+    }
+    //! A released resource no longer looked at (its address may come again).
+    void Remove(ID3D12Resource *pRes)
+    {
+      for (int i = 0; i < m_n;)
+        if (m_Bound[i].pRes == pRes)
+          m_Bound[i] = m_Bound[--m_n];
+        else
+          i++;
+    }
+    int Count() const { return m_n; }
+    //! Before a draw or a clear: the bound targets the tracker keeps wanted in their states (queued).
+    void Require(CBarrierTracker &Tracker)
+    {
+      if (m_bChecked && m_nChecked == Tracker.GetChanges())
+        return;
+      for (int i = 0; i < m_n; i++)
+      {
+        const SBound &b = m_Bound[i];
+        if (!Tracker.IsRegistered(b.pRes))
+          continue;
+        if (b.State == D3D12_RESOURCE_STATE_DEPTH_READ)
+        {
+          const D3D12_RESOURCE_STATES s = Tracker.GetState(b.pRes, b.nSub);
+          if (s == D3D12_RESOURCE_STATE_DEPTH_WRITE || (s & D3D12_RESOURCE_STATE_DEPTH_READ))
+            continue;
+        }
+        Tracker.Require(b.pRes, b.State, b.nSub);
+      }
+      m_bChecked = true;
+      m_nChecked = Tracker.GetChanges();
+    }
+
+  private:
+    struct SBound
+    {
+      ID3D12Resource *pRes;
+      UINT nSub;
+      D3D12_RESOURCE_STATES State;
+    };
+    SBound m_Bound[MAX] = {};
+    int m_n = 0;
+    bool m_bChecked = false;
+    uint64_t m_nChecked = 0;
   };
 }
 

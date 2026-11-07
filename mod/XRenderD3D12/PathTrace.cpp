@@ -427,8 +427,10 @@ void CD3D12Renderer::BeginPathTargets()
     m_pDevice->Require(pTex->m_pResource, D3D12_RESOURCE_STATE_RENDER_TARGET);
   for (CD3D12Texture *pTex : Targets)
     m_pDevice->ClearRenderTargetView(pTex->m_RTV, Zero);
+  ID3D12Resource *const Resources[] = { m_PathTrace.pAlbedo->m_pResource, m_PathTrace.pNormal->m_pResource, m_PathTrace.pSun->m_pResource,
+                                        m_PathTrace.pSpecular->m_pResource, m_PathTrace.pLightmap->m_pResource };
   m_pDevice->BindPathTargets(m_PathTrace.pAlbedo->m_RTV, m_PathTrace.pNormal->m_RTV, m_PathTrace.pSun->m_RTV, m_PathTrace.pSpecular->m_RTV,
-                             m_PathTrace.pLightmap->m_RTV);
+                             m_PathTrace.pLightmap->m_RTV, Resources);
   m_PathTrace.bBound = true;
 }
 

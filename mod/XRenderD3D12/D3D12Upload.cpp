@@ -945,6 +945,9 @@ CD3D12Texture *CD3D12Upload::CreateRenderTarget(int nWidth, int nHeight, DXGI_FO
   const D3D12_SHADER_RESOURCE_VIEW_DESC SRV = TextureSRVDesc(Format, 1, false);
   pTex->m_nSRV = g_pRenderer->m_pDescriptors->AllocSRV(pTex->m_pResource, &SRV);
   AddVideoMemory(pTex->m_pResource);
+  // Its state kept by the device (SetOffscreenTargets, the bound targets' and the passes' Require; ReleaseTexture
+  // forgets it).
+  g_pRenderer->m_pDevice->TrackState(pTex->m_pResource, TEXTURE_STATE);
   return pTex;
 }
 

@@ -217,16 +217,16 @@ void CD3D12Renderer::DispatchHdrOutputStats(bool bCapture)
   const SD3D12FrameAlloc CB = m_pUpload->AllocFrame(sizeof(hc), 256);
   memcpy(CB.pCPU, &hc, sizeof(hc));
 
+  // The frame and the highlights read by the kernel, then by the output's pixels as they are (the device keeps their
+  // states: drawn on again in the next frame).
   constexpr D3D12_RESOURCE_STATES READ = D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE | D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE;
-  m_pDevice->Transition(pFrame, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, READ);
-  m_pDevice->Transition(pHighlight, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, READ);
+  m_pDevice->Require(pFrame, READ);
+  m_pDevice->Require(pHighlight, READ);
   // After the histogram's adds (none this frame: the barrier left out).
   m_pDevice->Require(s.pWords.Get(), D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
   m_pDevice->UavBarrier(s.pWords.Get());
   m_pCompute->Dispatch(m_pDevice->GetCmdList(), eD3D12K_HdrOutputStats, CB.nGPU, nTable, nTable + CD3D12Compute::COMPUTE_SRVS,
                        (UINT)(w + GROUP_PIXELS - 1) / GROUP_PIXELS, (UINT)(h + GROUP_PIXELS - 1) / GROUP_PIXELS);
-  m_pDevice->Transition(pHighlight, READ, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
-  m_pDevice->Transition(pFrame, READ, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
 
   SHdrStatsFrame &f = s.Cur;
   f.bOutput = true;

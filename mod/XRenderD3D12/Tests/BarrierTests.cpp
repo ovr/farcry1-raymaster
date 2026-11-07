@@ -1295,6 +1295,85 @@ XR_TEST(Barrier_ArrayQueued)
   CHECK(c.size() == 2 && c[1].size() == 2);
 }
 
+// Why: the device's bound render targets and depth buffer are asked for again before each draw and clear (a pass may have
+// read or copied one meanwhile), and only when a state the tracker keeps changed since the last time: nothing where
+// they are as bound, a target read since back to RENDER_TARGET, one subresource of it alone, a depth buffer bound read
+// only left where its state holds DEPTH_READ (or is DEPTH_WRITE), the resources not kept left to their owners.
+XR_TEST(Barrier_BoundTargets)
+{
+  CBarrierTracker t = Batched();
+  constexpr D3D12_RESOURCE_STATES DEPTH_WRITE = D3D12_RESOURCE_STATE_DEPTH_WRITE;
+  // Changes counted where a state or a record changes, not by a request the state holds.
+  const uint64_t n0 = t.GetChanges();
+  t.Register(Res(1), RT, 1);
+  t.Register(Res(2), DEPTH_WRITE, 1);
+  t.Register(Res(3), PSR, 4);
+  CHECK(t.GetChanges() == n0 + 3);
+  t.Require(Res(1), RT);
+  CHECK(t.GetChanges() == n0 + 3);
+
+  CBoundTargets Bound;
+  Bound.Add(Res(1), RT);
+  Bound.Add(Res(2), DEPTH_WRITE);
+  Bound.Add(Res(9), RT);  // not kept: its owner's
+  Bound.Add(nullptr, RT);  // a null view: no resource
+  CHECK(Bound.Count() == 3);
+  Bound.Require(t);
+  CHECK(Flush(t).empty());
+  // A pass read the target: back to RENDER_TARGET before the next draw, then nothing more while nothing changes.
+  t.Require(Res(1), PSR);
+  Flush(t);
+  Bound.Require(t);
+  std::vector<SCall> c = Flush(t);
+  CHECK(c.size() == 1 && c[0].size() == 1 && IsTransition(c[0][0], Res(1), PSR, RT));
+  const uint64_t n1 = t.GetChanges();
+  Bound.Require(t);
+  CHECK(Flush(t).empty());
+  CHECK(t.GetChanges() == n1);
+
+  // A depth buffer bound read only: DEPTH_WRITE and a read state with DEPTH_READ kept, another read state gets it.
+  Bound.Clear();
+  CHECK(Bound.Count() == 0);
+  Bound.Add(Res(2), DEPTH_READ);
+  Bound.Require(t);
+  CHECK(Flush(t).empty());
+  t.Require(Res(2), DEPTH_READ | NPSR);
+  Flush(t);
+  Bound.Require(t);
+  CHECK(Flush(t).empty());
+  CHECK(t.GetState(Res(2)) == (DEPTH_READ | NPSR));
+  t.Require(Res(2), D3D12_RESOURCE_STATE_COPY_SOURCE);
+  Flush(t);
+  Bound.Require(t);
+  c = Flush(t);
+  CHECK(c.size() == 1 && c[0].size() == 1 && IsTransition(c[0][0], Res(2), D3D12_RESOURCE_STATE_COPY_SOURCE, DEPTH_READ));
+
+  // One subresource bound (a level of the water's reflection): that one alone.
+  Bound.Clear();
+  Bound.Add(Res(3), RT, 2);
+  Bound.Require(t);
+  c = Flush(t);
+  CHECK(c.size() == 1 && c[0].size() == 1 && IsTransition(c[0][0], Res(3), PSR, RT, 2));
+  CHECK(t.GetState(Res(3), 1) == PSR && t.GetState(Res(3), 2) == RT);
+
+  // Removed (released while bound) and forgotten: nothing asked for.
+  Bound.Add(Res(1), RT);
+  Bound.Remove(Res(3));
+  CHECK(Bound.Count() == 1);
+  t.Require(Res(1), PSR);
+  Flush(t);
+  t.Forget(Res(1));
+  Bound.Require(t);
+  CHECK(Flush(t).empty());
+  CHECK(t.TakeProblems().empty());
+
+  // At most MAX bound (the device binds 8 targets and a depth buffer).
+  Bound.Clear();
+  for (int i = 0; i < CBoundTargets::MAX + 2; i++)
+    Bound.Add(Res(20 + i), RT);
+  CHECK(Bound.Count() == CBoundTargets::MAX);
+}
+
 // Why: a buffer whose state the tracker keeps decays to COMMON when its list has run, and the next list gives the state
 // back by an explicit transition (an implicit promotion past the tracker would leave its state wrong). Each step reads
 // what the step before wrote, a UAV barrier between them (left out where a transition into UNORDERED_ACCESS waits

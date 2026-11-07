@@ -704,16 +704,12 @@ void CD3D12Renderer::DrawHdrPass(CD3D12Texture *pTarget, const SDrawConstants &d
                      pTarget->m_Format == D3D12_HDR10_FORMAT ? PIPELINE_COLOR_HDR10 : PIPELINE_COLOR_DEFAULT;
   if (pRatio)
   {
-    // Both targets; the device knows of the first one only.
-    m_pDevice->Transition(pRatio->m_pResource, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, D3D12_RESOURCE_STATE_RENDER_TARGET);
-    const D3D12_CPU_DESCRIPTOR_HANDLE hRTV[2] = { pTarget->m_RTV, pRatio->m_RTV };
-    m_pDevice->GetCmdList()->OMSetRenderTargets(2, hRTV, FALSE, nullptr);
+    // Both targets (readable again when the device unbinds them, EndOffscreen).
+    m_pDevice->BindSecondTarget(pRatio->m_pResource, pRatio->m_RTV);
     Key.nTarget = 4;
     Key.nColorFormat = pTarget->m_Format == DXGI_FORMAT_R8G8B8A8_UNORM ? PIPELINE_COLOR_RGBA8 : PIPELINE_COLOR_DEFAULT;
   }
   DrawImmediate(Key, dc, D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST, VERTEX_FORMAT_P3F, s_FullScreen, 3);
-  if (pRatio)
-    m_pDevice->Transition(pRatio->m_pResource, D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
 }
 
 bool CD3D12Renderer::EnsureMeterTargets(int nWidth, int nHeight)

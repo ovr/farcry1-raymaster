@@ -342,6 +342,8 @@ bool CD3D12Device::CreateSwapChainBuffers()
   {
     if (Failed(m_pSwapChain->GetBuffer(i, IID_PPV_ARGS(&m_pBackBuffers[i])), "IDXGISwapChain::GetBuffer"))
       return false;
+    // The swap chain's buffers, the depth buffer, the frame target and the highlight layer: their states kept (TrackState).
+    TrackState(m_pBackBuffers[i].Get(), D3D12_RESOURCE_STATE_PRESENT);
     m_pDevice->CreateRenderTargetView(m_pBackBuffers[i].Get(), nullptr, hRTV);
     hRTV.ptr += m_nRTVSize;
   }
@@ -365,6 +367,7 @@ bool CD3D12Device::CreateSwapChainBuffers()
     "CreateCommittedResource (depth)"))
     return false;
   m_pDepth->SetName(L"XRenderD3D12 depth");
+  TrackState(m_pDepth.Get(), D3D12_RESOURCE_STATE_DEPTH_WRITE);
   D3D12_DEPTH_STENCIL_VIEW_DESC View = {};
   View.Format = D3D12_DEPTH_FORMAT;
   View.ViewDimension = D3D12_DSV_DIMENSION_TEXTURE2D;
@@ -377,11 +380,17 @@ bool CD3D12Device::CreateSwapChainBuffers()
 
 void CD3D12Device::ReleaseSwapChainBuffers()
 {
-  for (auto &p : m_pBackBuffers)
+  // Released once the GPU is done (the caller waited): forgotten by the tracker, their addresses may come again.
+  const auto Release = [this](ComPtr<ID3D12Resource> &p)
+  {
+    ForgetState(p.Get());
     p.Reset();
-  m_pDepth.Reset();
-  m_pFrame.Reset();
-  m_pHighlight.Reset();
+  };
+  for (auto &p : m_pBackBuffers)
+    Release(p);
+  Release(m_pDepth);
+  Release(m_pFrame);
+  Release(m_pHighlight);
   m_bHighlightBound = false;
 }
 
@@ -586,6 +595,9 @@ bool CD3D12Device::CreateOffscreenTargets(int nWidth, int nHeight, ComPtr<ID3D12
     m_pDevice->CreateRenderTargetView(pColor.Get(), &View, phMipRTV[i - 1]);
   }
   m_pDevice->CreateDepthStencilView(pDepth.Get(), nullptr, hDSV);
+  // Their states kept, each level's (SetOffscreenTargets makes one a target while the one above is read).
+  TrackState(pColor.Get(), D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, (UINT)nMips);
+  TrackState(pDepth.Get(), D3D12_RESOURCE_STATE_DEPTH_WRITE);
   return true;
 }
 
@@ -632,6 +644,9 @@ bool CD3D12Device::CreateCubeTargets(int nSize, ComPtr<ID3D12Resource> &pColor, 
     m_pDevice->CreateRenderTargetView(pColor.Get(), &View, hRTV[i]);
   }
   m_pDevice->CreateDepthStencilView(pDepth.Get(), nullptr, hDSV);
+  // Their states kept, each face's.
+  TrackState(pColor.Get(), D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, 6);
+  TrackState(pDepth.Get(), D3D12_RESOURCE_STATE_DEPTH_WRITE);
   return true;
 }
 
@@ -642,12 +657,11 @@ void CD3D12Device::SetOffscreenTargets(ID3D12Resource *pColor, D3D12_CPU_DESCRIP
     return;
   m_nStateEpoch++;
   EndOffscreen();
-  // A target whose state the device keeps (TrackState: the bloom's levels) from where it is, the others from
-  // PIXEL_SHADER_RESOURCE, where every offscreen target rests.
-  if (m_Barriers.IsRegistered(pColor))
-    Require(pColor, D3D12_RESOURCE_STATE_RENDER_TARGET, nSubresource);
-  else
-    RawBarrier(pColor, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, D3D12_RESOURCE_STATE_RENDER_TARGET, nSubresource);
+  // From the state the device keeps (the device's and the upload's targets: TrackState; one level of the water's
+  // reflection while the one above is read), another from PIXEL_SHADER_RESOURCE, where every offscreen target rests.
+  RequireOr(pColor, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, D3D12_RESOURCE_STATE_RENDER_TARGET, nSubresource);
+  m_Bound.Clear();
+  m_Bound.Add(pColor, D3D12_RESOURCE_STATE_RENDER_TARGET, nSubresource);
   m_pOffscreen = pColor;
   m_nOffscreenSubresource = nSubresource;
   m_hOffscreenRTV = hRTV;
@@ -684,6 +698,7 @@ bool CD3D12Device::CreateShadowMap(int nSize, ComPtr<ID3D12Resource> &pDepth, SD
   View.Format = D3D12_SHADOW_MAP_FORMAT;
   View.ViewDimension = D3D12_DSV_DIMENSION_TEXTURE2D;
   m_pDevice->CreateDepthStencilView(pDepth.Get(), &View, hDSV);
+  TrackState(pDepth.Get(), D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
   return true;
 }
 
@@ -726,6 +741,7 @@ bool CD3D12Device::CreateShadowMapArray(int nSize, int nSlices, ComPtr<ID3D12Res
   View.ViewDimension = D3D12_DSV_DIMENSION_TEXTURE2DARRAY;
   View.Texture2DArray.ArraySize = nSlices;
   m_pDevice->CreateDepthStencilView(pDepth.Get(), &View, phDSV[nSlices]);
+  TrackState(pDepth.Get(), D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, nSlices);
   return true;
 }
 
@@ -737,8 +753,10 @@ void CD3D12Device::SetShadowMapTarget(ID3D12Resource *pDepth, D3D12_CPU_DESCRIPT
   if (m_pOffscreen != pDepth || !m_bOffscreenShadowMap)
   {
     EndOffscreen();
-    RawBarrier(pDepth, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, D3D12_RESOURCE_STATE_DEPTH_WRITE);
+    RequireOr(pDepth, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, D3D12_RESOURCE_STATE_DEPTH_WRITE);
   }
+  m_Bound.Clear();
+  m_Bound.Add(pDepth, D3D12_RESOURCE_STATE_DEPTH_WRITE);
   m_pOffscreen = pDepth;
   m_nOffscreenSubresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
   m_bOffscreenShadowMap = true;
@@ -754,23 +772,61 @@ void CD3D12Device::SetShadowMapTarget(ID3D12Resource *pDepth, D3D12_CPU_DESCRIPT
   m_pCmdList->RSSetScissorRects(1, &rc);
 }
 
+void CD3D12Device::BindSecondTarget(ID3D12Resource *pSecond, D3D12_CPU_DESCRIPTOR_HANDLE hRTV)
+{
+  if (!m_bInFrame || !pSecond || !hRTV.ptr || !m_pOffscreen || m_bOffscreenShadowMap || m_hOffscreenDSV.ptr || m_pOffscreenSecond)
+    return;
+  m_nStateEpoch++;
+  RequireOr(pSecond, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, D3D12_RESOURCE_STATE_RENDER_TARGET);
+  m_Bound.Add(pSecond, D3D12_RESOURCE_STATE_RENDER_TARGET);
+  m_pOffscreenSecond = pSecond;
+  m_hOffscreenSecondRTV = hRTV;
+  const D3D12_CPU_DESCRIPTOR_HANDLE hRTVs[2] = { m_hOffscreenRTV, hRTV };
+  m_pCmdList->OMSetRenderTargets(2, hRTVs, FALSE, nullptr);
+}
+
 void CD3D12Device::EndOffscreen()
 {
   if (!m_pOffscreen)
     return;
-  if (!m_bOffscreenShadowMap && m_Barriers.IsRegistered(m_pOffscreen))
-    Require(m_pOffscreen, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, m_nOffscreenSubresource);
-  else
-    RawBarrier(m_pOffscreen, m_bOffscreenShadowMap ? D3D12_RESOURCE_STATE_DEPTH_WRITE : D3D12_RESOURCE_STATE_RENDER_TARGET,
-      D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, m_nOffscreenSubresource);
-  m_pOffscreen = nullptr;
+  RequireOr(m_pOffscreen, m_bOffscreenShadowMap ? D3D12_RESOURCE_STATE_DEPTH_WRITE : D3D12_RESOURCE_STATE_RENDER_TARGET,
+            D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, m_nOffscreenSubresource);
+  if (m_pOffscreenSecond)
+    RequireOr(m_pOffscreenSecond, D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+  // Nothing is drawn until targets are bound again (no target kept as one for draws that should not come).
+  m_Bound.Clear();
+  m_pOffscreen = m_pOffscreenSecond = nullptr;
+  m_hOffscreenSecondRTV = {};
   m_bOffscreenShadowMap = false;
+}
+
+void CD3D12Device::RequireOr(ID3D12Resource *pRes, D3D12_RESOURCE_STATES Untracked, D3D12_RESOURCE_STATES After, UINT nSubresource)
+{
+  if (m_Barriers.IsRegistered(pRes))
+    Require(pRes, After, nSubresource);
+  else if (Untracked != After)
+    RawBarrier(pRes, Untracked, After, nSubresource);
+}
+
+D3D12_RESOURCE_STATES CD3D12Device::StateOr(ID3D12Resource *pRes, D3D12_RESOURCE_STATES Untracked) const
+{
+  return m_Barriers.IsRegistered(pRes) ? m_Barriers.GetState(pRes) : Untracked;
 }
 
 void CD3D12Device::SetBackBufferTargets()
 {
   m_nStateEpoch++;
   EndOffscreen();
+  // The targets bound, in the states they are drawn in (FlushBarriersForDraw; the null views have no resource).
+  constexpr D3D12_RESOURCE_STATES RT = D3D12_RESOURCE_STATE_RENDER_TARGET;
+  const D3D12_RESOURCE_STATES DepthState = m_bDepthReadOnly ? D3D12_RESOURCE_STATE_DEPTH_READ : D3D12_RESOURCE_STATE_DEPTH_WRITE;
+  m_Bound.Clear();
+  if (m_bInScene)
+  {
+    for (ID3D12Resource *p : { m_pSceneColor.Get(), m_pSceneVelocity.Get(), m_pUpscaleDepth.Get() })
+      m_Bound.Add(p, RT);
+    m_Bound.Add(m_pSceneDepth.Get(), DepthState);
+  }
   if (m_bInScene && m_hPathRTV[0].ptr)
   {
     // The path tracer's G-buffer in the places of the ambient light and after it.
@@ -778,12 +834,16 @@ void CD3D12Device::SetBackBufferTargets()
                                                   m_hPathRTV[1], m_hPathRTV[2], m_hPathRTV[3], m_hPathRTV[4] };
     const D3D12_CPU_DESCRIPTOR_HANDLE hDSV = m_bDepthReadOnly ? ReadOnlyDSV(true) : SceneDSV();
     m_pCmdList->OMSetRenderTargets(8, hRTV, FALSE, &hDSV);
+    for (ID3D12Resource *p : m_pPathResources)
+      m_Bound.Add(p, RT);
   }
   else if (m_bInScene)
   {
     const D3D12_CPU_DESCRIPTOR_HANDLE hRTV[4] = { SceneRTV(0), SceneRTV(1), SceneRTV(2), m_hAmbientRTV };
     const D3D12_CPU_DESCRIPTOR_HANDLE hDSV = m_bDepthReadOnly ? ReadOnlyDSV(true) : SceneDSV();
     m_pCmdList->OMSetRenderTargets(m_hAmbientRTV.ptr ? 4 : 3, hRTV, FALSE, &hDSV);
+    if (m_hAmbientRTV.ptr)
+      m_Bound.Add(m_pAmbientResource, RT);
   }
   else if (m_bInMsaa)
   {
@@ -791,12 +851,20 @@ void CD3D12Device::SetBackBufferTargets()
     const D3D12_CPU_DESCRIPTOR_HANDLE hRTV[4] = { SceneRTV(8), SceneRTV(10), SceneRTV(11), SceneRTV(9) };
     const D3D12_CPU_DESCRIPTOR_HANDLE hDSV = MsaaDSV(m_bDepthReadOnly);
     m_pCmdList->OMSetRenderTargets(m_hAmbientRTV.ptr ? 4 : 1, hRTV, FALSE, &hDSV);
+    m_Bound.Add(m_pMsaaColor.Get(), RT);
+    if (m_hAmbientRTV.ptr)
+      m_Bound.Add(m_pMsaaAmbient.Get(), RT);
+    m_Bound.Add(m_pMsaaDepth.Get(), DepthState);
   }
   else
   {
     const D3D12_CPU_DESCRIPTOR_HANDLE hRTV[4] = { m_bInHdr ? SceneRTV(3) : GetBackBufferRTV(), SceneRTV(6), SceneRTV(7), m_hAmbientRTV };
     const D3D12_CPU_DESCRIPTOR_HANDLE hDSV = m_bDepthReadOnly ? ReadOnlyDSV(false) : GetDSV();
     m_pCmdList->OMSetRenderTargets(m_hAmbientRTV.ptr ? 4 : 1, hRTV, FALSE, &hDSV);
+    m_Bound.Add(m_bInHdr ? m_pHdrColor.Get() : GetBackBuffer(), RT);
+    if (m_hAmbientRTV.ptr)
+      m_Bound.Add(m_pAmbientResource, RT);
+    m_Bound.Add(m_pDepth.Get(), DepthState);
   }
   const int w = GetMainWidth(), h = GetMainHeight();
   const D3D12_VIEWPORT vp = { 0, 0, (float)w, (float)h, 0, 1 };
@@ -813,7 +881,10 @@ void CD3D12Device::BindAmbient(D3D12_CPU_DESCRIPTOR_HANDLE hRTV, ID3D12Resource 
   {
     static const float Zero[4] = {};
     if (hRTV.ptr && !m_hAmbientRTV.ptr)
+    {
+      Require(m_pMsaaAmbient.Get(), D3D12_RESOURCE_STATE_RENDER_TARGET);
       ClearRenderTargetView(SceneRTV(9), Zero);
+    }
     else if (!hRTV.ptr && m_hAmbientRTV.ptr && m_pAmbientResource)
       ResolveInto(m_pAmbientResource, D3D12_RESOURCE_STATE_RENDER_TARGET, m_pMsaaAmbient.Get(), D3D12_RESOURCE_STATE_RENDER_TARGET,
                   D3D12_AMBIENT_FORMAT);
@@ -825,13 +896,15 @@ void CD3D12Device::BindAmbient(D3D12_CPU_DESCRIPTOR_HANDLE hRTV, ID3D12Resource 
 }
 
 void CD3D12Device::BindPathTargets(D3D12_CPU_DESCRIPTOR_HANDLE hAlbedo, D3D12_CPU_DESCRIPTOR_HANDLE hNormal, D3D12_CPU_DESCRIPTOR_HANDLE hSun,
-                                   D3D12_CPU_DESCRIPTOR_HANDLE hSpecular, D3D12_CPU_DESCRIPTOR_HANDLE hLightmap)
+                                   D3D12_CPU_DESCRIPTOR_HANDLE hSpecular, D3D12_CPU_DESCRIPTOR_HANDLE hLightmap, ID3D12Resource *const *ppResources)
 {
   m_hPathRTV[0] = hAlbedo;
   m_hPathRTV[1] = hNormal;
   m_hPathRTV[2] = hSun;
   m_hPathRTV[3] = hSpecular;
   m_hPathRTV[4] = hLightmap;
+  for (int i = 0; i < 5; i++)
+    m_pPathResources[i] = ppResources && m_hPathRTV[i].ptr ? ppResources[i] : nullptr;
   if (m_bInFrame && !m_pOffscreen)
     SetBackBufferTargets();
 }
@@ -994,7 +1067,8 @@ void CD3D12Device::ClearRenderTargetView(D3D12_CPU_DESCRIPTOR_HANDLE hRTV, const
 {
   if (!m_bInFrame || !hRTV.ptr)
     return;
-  FlushBarriers();
+  // A bound target in its state (one not bound: the caller asked for RENDER_TARGET).
+  FlushBarriersForDraw();
   m_nStateEpoch++;
   m_pCmdList->ClearRenderTargetView(hRTV, Color, 0, nullptr);  // barriers flushed
 }
@@ -1125,6 +1199,9 @@ bool CD3D12Device::SetSceneSize(int nWidth, int nHeight, DXGI_FORMAT ColorFormat
   m_pUpscaleDepth->SetName(L"XRenderD3D12 upscaler depth");
   m_pSceneDepth->SetName(L"XRenderD3D12 scene depth");
   m_pSceneOutput->SetName(L"XRenderD3D12 upscaler output");
+  for (ID3D12Resource *p : { m_pSceneColor.Get(), m_pSceneVelocity.Get(), m_pUpscaleDepth.Get(), m_pSceneDepth.Get() })
+    TrackState(p, SCENE_READ);
+  TrackState(m_pSceneOutput.Get(), D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
   m_pDevice->CreateRenderTargetView(m_pSceneColor.Get(), nullptr, SceneRTV(0));
   m_pDevice->CreateRenderTargetView(m_pSceneVelocity.Get(), nullptr, SceneRTV(1));
   m_pDevice->CreateRenderTargetView(m_pUpscaleDepth.Get(), nullptr, SceneRTV(2));
@@ -1160,10 +1237,9 @@ void CD3D12Device::BeginScene()
   if (!m_bInFrame || m_bInScene || !m_pSceneColor)
     return;
   EndOffscreen();
-  RawBarrier(m_pSceneColor.Get(), SCENE_READ, D3D12_RESOURCE_STATE_RENDER_TARGET);
-  RawBarrier(m_pSceneVelocity.Get(), SCENE_READ, D3D12_RESOURCE_STATE_RENDER_TARGET);
-  RawBarrier(m_pUpscaleDepth.Get(), SCENE_READ, D3D12_RESOURCE_STATE_RENDER_TARGET);
-  RawBarrier(m_pSceneDepth.Get(), SCENE_READ, D3D12_RESOURCE_STATE_DEPTH_WRITE);
+  for (ID3D12Resource *p : { m_pSceneColor.Get(), m_pSceneVelocity.Get(), m_pUpscaleDepth.Get() })
+    Require(p, D3D12_RESOURCE_STATE_RENDER_TARGET);
+  Require(m_pSceneDepth.Get(), D3D12_RESOURCE_STATE_DEPTH_WRITE);
   m_bInScene = true;
   SetBackBufferTargets();
 }
@@ -1176,10 +1252,9 @@ void CD3D12Device::EndScene()
   if (!m_bInFrame)
     return;
   EndOffscreen();
-  RawBarrier(m_pSceneColor.Get(), D3D12_RESOURCE_STATE_RENDER_TARGET, SCENE_READ);
-  RawBarrier(m_pSceneVelocity.Get(), D3D12_RESOURCE_STATE_RENDER_TARGET, SCENE_READ);
-  RawBarrier(m_pUpscaleDepth.Get(), D3D12_RESOURCE_STATE_RENDER_TARGET, SCENE_READ);
-  RawBarrier(m_pSceneDepth.Get(), D3D12_RESOURCE_STATE_DEPTH_WRITE, SCENE_READ);
+  // Shader resources for the upscaler (from where the scene's passes left them).
+  for (ID3D12Resource *p : { m_pSceneColor.Get(), m_pSceneVelocity.Get(), m_pUpscaleDepth.Get(), m_pSceneDepth.Get() })
+    Require(p, SCENE_READ);
   SetBackBufferTargets();
 }
 
@@ -1218,6 +1293,7 @@ bool CD3D12Device::SetHdrTarget(bool bOn)
     "CreateCommittedResource (HDR colour)"))
     return false;
   m_pHdrColor->SetName(L"XRenderD3D12 HDR colour");
+  TrackState(m_pHdrColor.Get(), SCENE_READ);
   m_pDevice->CreateRenderTargetView(m_pHdrColor.Get(), nullptr, SceneRTV(3));
   return true;
 }
@@ -1227,7 +1303,7 @@ void CD3D12Device::BeginHdr()
   if (!m_bInFrame || m_bInHdr || m_bInScene || !m_pHdrColor)
     return;
   EndOffscreen();
-  RawBarrier(m_pHdrColor.Get(), SCENE_READ, D3D12_RESOURCE_STATE_RENDER_TARGET);
+  Require(m_pHdrColor.Get(), D3D12_RESOURCE_STATE_RENDER_TARGET);
   m_bInHdr = true;
   SetBackBufferTargets();
 }
@@ -1240,7 +1316,7 @@ void CD3D12Device::EndHdr()
   if (!m_bInFrame)
     return;
   EndOffscreen();
-  RawBarrier(m_pHdrColor.Get(), D3D12_RESOURCE_STATE_RENDER_TARGET, SCENE_READ);
+  Require(m_pHdrColor.Get(), SCENE_READ);
   SetBackBufferTargets();
 }
 
@@ -1314,6 +1390,9 @@ bool CD3D12Device::SetMsaaTargets(int nSamples, DXGI_FORMAT ColorFormat)
   m_pMsaaColor->SetName(L"XRenderD3D12 MSAA colour");
   m_pMsaaAmbient->SetName(L"XRenderD3D12 MSAA ambient light");
   m_pMsaaDepth->SetName(L"XRenderD3D12 MSAA depth");
+  TrackState(m_pMsaaColor.Get(), D3D12_RESOURCE_STATE_RENDER_TARGET);
+  TrackState(m_pMsaaAmbient.Get(), D3D12_RESOURCE_STATE_RENDER_TARGET);
+  TrackState(m_pMsaaDepth.Get(), D3D12_RESOURCE_STATE_DEPTH_WRITE);
   m_pDevice->CreateRenderTargetView(m_pMsaaColor.Get(), nullptr, SceneRTV(8));
   m_pDevice->CreateRenderTargetView(m_pMsaaAmbient.Get(), nullptr, SceneRTV(9));
   D3D12_DEPTH_STENCIL_VIEW_DESC View = {};
@@ -1337,6 +1416,7 @@ void CD3D12Device::BeginMsaa()
   if (m_hAmbientRTV.ptr)
   {
     static const float Zero[4] = {};
+    Require(m_pMsaaAmbient.Get(), D3D12_RESOURCE_STATE_RENDER_TARGET);
     ClearRenderTargetView(SceneRTV(9), Zero);
   }
   SetBackBufferTargets();
@@ -1361,12 +1441,12 @@ void CD3D12Device::ResolveInto(ID3D12Resource *pDst, D3D12_RESOURCE_STATES DstSt
 {
   if (!m_bInFrame || !pDst || !pSrc)
     return;
-  RawBarrier(pDst, DstState, D3D12_RESOURCE_STATE_RESOLVE_DEST);
-  RawBarrier(pSrc, SrcState, D3D12_RESOURCE_STATE_RESOLVE_SOURCE);
+  RequireOr(pDst, DstState, D3D12_RESOURCE_STATE_RESOLVE_DEST);
+  RequireOr(pSrc, SrcState, D3D12_RESOURCE_STATE_RESOLVE_SOURCE);
   FlushBarriers();
   m_pCmdList->ResolveSubresource(pDst, 0, pSrc, 0, Format);  // barriers flushed
-  RawBarrier(pSrc, D3D12_RESOURCE_STATE_RESOLVE_SOURCE, SrcState);
-  RawBarrier(pDst, D3D12_RESOURCE_STATE_RESOLVE_DEST, DstState);
+  RequireOr(pSrc, D3D12_RESOURCE_STATE_RESOLVE_SOURCE, SrcState);
+  RequireOr(pDst, D3D12_RESOURCE_STATE_RESOLVE_DEST, DstState);
 }
 
 void CD3D12Device::BindMsaaResolveTarget(bool bColor)
@@ -1375,15 +1455,18 @@ void CD3D12Device::BindMsaaResolveTarget(bool bColor)
     return;
   m_nStateEpoch++;
   EndOffscreen();
+  m_Bound.Clear();
   if (bColor)
   {
     const D3D12_CPU_DESCRIPTOR_HANDLE hRTV = m_bInHdr ? SceneRTV(3) : GetBackBufferRTV();
     m_pCmdList->OMSetRenderTargets(1, &hRTV, FALSE, nullptr);
+    m_Bound.Add(m_bInHdr ? m_pHdrColor.Get() : GetBackBuffer(), D3D12_RESOURCE_STATE_RENDER_TARGET);
   }
   else
   {
     const D3D12_CPU_DESCRIPTOR_HANDLE hDSV = GetDSV();
     m_pCmdList->OMSetRenderTargets(0, nullptr, FALSE, &hDSV);
+    m_Bound.Add(m_pDepth.Get(), D3D12_RESOURCE_STATE_DEPTH_WRITE);
   }
   const D3D12_VIEWPORT vp = { 0, 0, (float)m_nWidth, (float)m_nHeight, 0, 1 };
   const D3D12_RECT rc = { 0, 0, m_nWidth, m_nHeight };
@@ -1423,16 +1506,9 @@ bool CD3D12Device::CreateLayer()
   m_pHighlight->SetName(L"XRenderD3D12 highlight layer");
   m_pDevice->CreateRenderTargetView(m_pFrame.Get(), nullptr, SceneRTV(4));
   m_pDevice->CreateRenderTargetView(m_pHighlight.Get(), nullptr, SceneRTV(5));
-  m_FrameState = D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE;
+  TrackState(m_pFrame.Get(), D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+  TrackState(m_pHighlight.Get(), D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
   return true;
-}
-
-void CD3D12Device::SetFrameState(D3D12_RESOURCE_STATES State)
-{
-  if (!m_pFrame || State == m_FrameState)
-    return;
-  RawBarrier(m_pFrame.Get(), m_FrameState, State);
-  m_FrameState = State;
 }
 
 void CD3D12Device::BindHighlight(bool bOn)
@@ -1443,24 +1519,21 @@ void CD3D12Device::BindHighlight(bool bOn)
   m_bHighlightBound = bOn;
   if (!bOn)
   {
-    RawBarrier(m_pHighlight.Get(), D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+    Require(m_pHighlight.Get(), D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
     SetBackBufferTargets();
     return;
   }
   EndOffscreen();
-  RawBarrier(m_pHighlight.Get(), D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, D3D12_RESOURCE_STATE_RENDER_TARGET);
+  Require(m_pHighlight.Get(), D3D12_RESOURCE_STATE_RENDER_TARGET);
   const D3D12_CPU_DESCRIPTOR_HANDLE hRTV[2] = { GetBackBufferRTV(), SceneRTV(5) };
   m_pCmdList->OMSetRenderTargets(2, hRTV, FALSE, nullptr);
+  m_Bound.Clear();
+  m_Bound.Add(GetBackBuffer(), D3D12_RESOURCE_STATE_RENDER_TARGET);
+  m_Bound.Add(m_pHighlight.Get(), D3D12_RESOURCE_STATE_RENDER_TARGET);
   const D3D12_VIEWPORT vp = { 0, 0, (float)m_nWidth, (float)m_nHeight, 0, 1 };
   const D3D12_RECT rc = { 0, 0, m_nWidth, m_nHeight };
   m_pCmdList->RSSetViewports(1, &vp);
   m_pCmdList->RSSetScissorRects(1, &rc);
-}
-
-void CD3D12Device::SetFrameReadable(bool bReadable)
-{
-  if (m_bInFrame && m_pFrame && !m_bOutput)
-    SetFrameState(bReadable ? D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE : D3D12_RESOURCE_STATE_RENDER_TARGET);
 }
 
 void CD3D12Device::BeginOutput()
@@ -1472,11 +1545,15 @@ void CD3D12Device::BeginOutput()
   EndHdr();
   EndOffscreen();
   BindHighlight(false);
-  SetFrameState(D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
-  RawBarrier(m_pBackBuffers[m_nBackBuffer].Get(), D3D12_RESOURCE_STATE_PRESENT, D3D12_RESOURCE_STATE_RENDER_TARGET);
+  // The output pass reads the frame and the highlights and writes the swap chain's buffer.
+  Require(m_pFrame.Get(), D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+  Require(m_pHighlight.Get(), D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+  Require(m_pBackBuffers[m_nBackBuffer].Get(), D3D12_RESOURCE_STATE_RENDER_TARGET);
   m_bOutput = true;
   const D3D12_CPU_DESCRIPTOR_HANDLE hRTV = SwapChainRTV();
   m_pCmdList->OMSetRenderTargets(1, &hRTV, FALSE, nullptr);
+  m_Bound.Clear();
+  m_Bound.Add(m_pBackBuffers[m_nBackBuffer].Get(), D3D12_RESOURCE_STATE_RENDER_TARGET);
   const D3D12_VIEWPORT vp = { 0, 0, (float)m_nWidth, (float)m_nHeight, 0, 1 };
   const D3D12_RECT rc = { 0, 0, m_nWidth, m_nHeight };
   m_pCmdList->RSSetViewports(1, &vp);
@@ -1646,6 +1723,8 @@ void CD3D12Device::OpenCmdList()
   m_pCmdList->Reset(m_pAllocators[m_nFrameSlot].Get(), nullptr);
   m_nStateEpoch++;
   m_szDredSection = nullptr;
+  // A new list has no targets bound.
+  m_Bound.Clear();
   if (m_bInFrame)
     m_Barriers.OnListOpened();
 }
@@ -1697,13 +1776,13 @@ void CD3D12Device::BeginFrame()
     // The swap chain's buffer is written only at the end (EndFrame). No highlights of the scene
     // yet.
     static const float NoHighlight[4] = { 1, 1, 1, -1 };
-    SetFrameState(D3D12_RESOURCE_STATE_RENDER_TARGET);
-    RawBarrier(m_pHighlight.Get(), D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, D3D12_RESOURCE_STATE_RENDER_TARGET);
+    Require(m_pFrame.Get(), D3D12_RESOURCE_STATE_RENDER_TARGET);
+    Require(m_pHighlight.Get(), D3D12_RESOURCE_STATE_RENDER_TARGET);
     ClearRenderTargetView(SceneRTV(5), NoHighlight);
-    RawBarrier(m_pHighlight.Get(), D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+    Require(m_pHighlight.Get(), D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
   }
   else
-    RawBarrier(GetBackBuffer(), D3D12_RESOURCE_STATE_PRESENT, D3D12_RESOURCE_STATE_RENDER_TARGET);
+    Require(GetBackBuffer(), D3D12_RESOURCE_STATE_RENDER_TARGET);
   BindRootSignature();
   SetBackBufferTargets();
 }
@@ -1739,17 +1818,18 @@ void CD3D12Device::EndFrame(bool bPresent, bool bVSync)
   }
   ID3D12Resource *pSwapBuffer = m_pBackBuffers[m_nBackBuffer].Get();
   if (!m_pFrame || m_bOutput)
-    RawBarrier(pSwapBuffer, D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_PRESENT);
+    Require(pSwapBuffer, D3D12_RESOURCE_STATE_PRESENT);
   else if (bPresent && m_SwapChainFormat == D3D12_BACKBUFFER_FORMAT)
   {
     // No output pass in SDR: the frame target as it is.
-    SetFrameState(D3D12_RESOURCE_STATE_COPY_SOURCE);
-    RawBarrier(pSwapBuffer, D3D12_RESOURCE_STATE_PRESENT, D3D12_RESOURCE_STATE_COPY_DEST);
+    Require(m_pFrame.Get(), D3D12_RESOURCE_STATE_COPY_SOURCE);
+    Require(pSwapBuffer, D3D12_RESOURCE_STATE_COPY_DEST);
     CopyResource(pSwapBuffer, m_pFrame.Get());
-    RawBarrier(pSwapBuffer, D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_PRESENT);
+    Require(pSwapBuffer, D3D12_RESOURCE_STATE_PRESENT);
   }
+  // The frame target read between frames (ReadBackBuffer).
   if (m_pFrame)
-    SetFrameState(D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+    Require(m_pFrame.Get(), D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
   m_bOutput = false;
   FlushBarriers(false);
   m_LastBarrierStats = m_Barriers.Stats();
@@ -1873,8 +1953,10 @@ void CD3D12Device::ContinueCmdList()
     SetBackBufferTargets();
     return;
   }
-  // The off screen target as SetOffscreenTargets or SetShadowMapTarget bound it.
-  m_pCmdList->OMSetRenderTargets(m_hOffscreenRTV.ptr ? 1 : 0, m_hOffscreenRTV.ptr ? &m_hOffscreenRTV : nullptr, FALSE,
+  // The off screen target as SetOffscreenTargets or SetShadowMapTarget bound it (and BindSecondTarget's; the bound
+  // ones the same).
+  const D3D12_CPU_DESCRIPTOR_HANDLE hRTVs[2] = { m_hOffscreenRTV, m_hOffscreenSecondRTV };
+  m_pCmdList->OMSetRenderTargets(m_hOffscreenSecondRTV.ptr ? 2 : m_hOffscreenRTV.ptr ? 1 : 0, m_hOffscreenRTV.ptr ? hRTVs : nullptr, FALSE,
                                  m_hOffscreenDSV.ptr ? &m_hOffscreenDSV : nullptr);
   const D3D12_VIEWPORT vp = { 0, 0, (float)m_nOffscreenWidth, (float)m_nOffscreenHeight, 0, 1 };
   const D3D12_RECT rc = { 0, 0, m_nOffscreenWidth, m_nOffscreenHeight };
@@ -2030,7 +2112,12 @@ void CD3D12Device::ClearDepth(float fDepth, uint8 nStencil, bool bDepth, bool bS
   const auto Flags = (D3D12_CLEAR_FLAGS)((bDepth ? D3D12_CLEAR_FLAG_DEPTH : 0) | (bStencil && !bScene ? D3D12_CLEAR_FLAG_STENCIL : 0));
   if (m_bInFrame && Flags)
   {
-    FlushBarriers();
+    // Cleared through its writable view: DEPTH_WRITE whatever it is bound as.
+    ID3D12Resource *pDepth = m_pOffscreen ? (m_bOffscreenShadowMap ? m_pOffscreen : nullptr) : bScene ? m_pSceneDepth.Get() : m_bInMsaa ? m_pMsaaDepth.Get()
+                                                                                                                      : m_pDepth.Get();
+    if (pDepth && m_Barriers.IsRegistered(pDepth))
+      Require(pDepth, D3D12_RESOURCE_STATE_DEPTH_WRITE);
+    FlushBarriersForDraw();
     m_pCmdList->ClearDepthStencilView(m_pOffscreen ? m_hOffscreenDSV : bScene ? SceneDSV() : m_bInMsaa ? MsaaDSV(false) : GetDSV(), Flags, fDepth,
                                       nStencil, 0, nullptr);  // barriers flushed
   }
@@ -2058,6 +2145,7 @@ bool CD3D12Device::CreateTargetCopies(ComPtr<ID3D12Resource> &pColor, ComPtr<ID3
   if (Failed(m_pDevice->CreateCommittedResource(&Heap, D3D12_HEAP_FLAG_NONE, &Desc, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, nullptr,
     IID_PPV_ARGS(&pColor)), "CreateCommittedResource (colour copy)"))
     return false;
+  TrackState(pColor.Get(), D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
   if (!pDepth)
     return true;
   // The depth copy: the same format family and layout as the depth buffer, read through an SRV.
@@ -2066,9 +2154,11 @@ bool CD3D12Device::CreateTargetCopies(ComPtr<ID3D12Resource> &pColor, ComPtr<ID3
   if (Failed(m_pDevice->CreateCommittedResource(&Heap, D3D12_HEAP_FLAG_NONE, &Desc, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, nullptr,
     IID_PPV_ARGS(&*pDepth)), "CreateCommittedResource (depth copy)"))
   {
+    ForgetState(pColor.Get());
     pColor.Reset();
     return false;
   }
+  TrackState(pDepth->Get(), D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
   return true;
 }
 
@@ -2089,21 +2179,18 @@ void CD3D12Device::CopyTargets(ID3D12Resource *pColor, ID3D12Resource *pDepth, c
   if (!Matches(pColor, pMainColor, GetMainColorFormat()) ||
       (pDepth && !Matches(pDepth, pMainDepth, m_bInScene ? DXGI_FORMAT_R32_TYPELESS : DXGI_FORMAT_R24G8_TYPELESS)))
     return;
-  D3D12_RESOURCE_BARRIER b[4] = {};
-  const auto Set = [](D3D12_RESOURCE_BARRIER &r, ID3D12Resource *pRes, D3D12_RESOURCE_STATES Before, D3D12_RESOURCE_STATES After)
+  // The main targets back in the states they had (drawn on, a depth also read), the copies read.
+  const D3D12_RESOURCE_STATES SrcState = bResolve ? D3D12_RESOURCE_STATE_RESOLVE_SOURCE : D3D12_RESOURCE_STATE_COPY_SOURCE;
+  const D3D12_RESOURCE_STATES DstState = bResolve ? D3D12_RESOURCE_STATE_RESOLVE_DEST : D3D12_RESOURCE_STATE_COPY_DEST;
+  const D3D12_RESOURCE_STATES ColorHad = StateOr(pMainColor, D3D12_RESOURCE_STATE_RENDER_TARGET);
+  const D3D12_RESOURCE_STATES DepthHad = StateOr(pMainDepth, D3D12_RESOURCE_STATE_DEPTH_WRITE);
+  RequireOr(pMainColor, ColorHad, SrcState);
+  RequireOr(pColor, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, DstState);
+  if (pDepth)
   {
-    r.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
-    r.Transition.pResource = pRes;
-    r.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
-    r.Transition.StateBefore = Before;
-    r.Transition.StateAfter = After;
-  };
-  Set(b[0], pMainColor, D3D12_RESOURCE_STATE_RENDER_TARGET, bResolve ? D3D12_RESOURCE_STATE_RESOLVE_SOURCE : D3D12_RESOURCE_STATE_COPY_SOURCE);
-  Set(b[1], pColor, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, bResolve ? D3D12_RESOURCE_STATE_RESOLVE_DEST : D3D12_RESOURCE_STATE_COPY_DEST);
-  Set(b[2], pMainDepth, D3D12_RESOURCE_STATE_DEPTH_WRITE, D3D12_RESOURCE_STATE_COPY_SOURCE);
-  Set(b[3], pDepth, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, D3D12_RESOURCE_STATE_COPY_DEST);
-  const UINT nBarriers = pDepth ? 4 : 2;
-  ResourceBarriers(nBarriers, b);
+    RequireOr(pMainDepth, DepthHad, D3D12_RESOURCE_STATE_COPY_SOURCE);
+    RequireOr(pDepth, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, D3D12_RESOURCE_STATE_COPY_DEST);
+  }
   FlushBarriers();
   if (bResolve)
     m_pCmdList->ResolveSubresource(pColor, 0, pMainColor, 0, m_MsaaColorFormat);  // barriers flushed
@@ -2120,9 +2207,13 @@ void CD3D12Device::CopyTargets(ID3D12Resource *pColor, ID3D12Resource *pDepth, c
     m_pCmdList->CopyResource(pColor, pMainColor);  // barriers flushed
   if (pDepth)
     m_pCmdList->CopyResource(pDepth, pMainDepth);  // barriers flushed
-  for (auto &r : b)
-    std::swap(r.Transition.StateBefore, r.Transition.StateAfter);
-  ResourceBarriers(nBarriers, b);
+  RequireOr(pMainColor, SrcState, ColorHad);
+  RequireOr(pColor, DstState, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+  if (pDepth)
+  {
+    RequireOr(pMainDepth, D3D12_RESOURCE_STATE_COPY_SOURCE, DepthHad);
+    RequireOr(pDepth, D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+  }
 }
 
 bool CD3D12Device::ReadBackBuffer(uint8 *pDst, int nWidth, int nHeight)
@@ -2131,7 +2222,7 @@ bool CD3D12Device::ReadBackBuffer(uint8 *pDst, int nWidth, int nHeight)
     return false;
   // With the highlight layer the frame target (between frames: the frame before's).
   if (m_pFrame)
-    return ReadBackTexture(m_pFrame.Get(), m_FrameState, pDst, nWidth, nHeight);
+    return ReadBackTexture(m_pFrame.Get(), D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, pDst, nWidth, nHeight);
   // Between frames the buffer drawn last (and presented) is the one before the current one.
   ID3D12Resource *pBack = m_bInFrame ? GetBackBuffer() : m_pBackBuffers[(m_pSwapChain->GetCurrentBackBufferIndex() + D3D12_BACKBUFFERS - 1) % D3D12_BACKBUFFERS].Get();
   return ReadBackTexture(pBack, m_bInFrame ? D3D12_RESOURCE_STATE_RENDER_TARGET : D3D12_RESOURCE_STATE_PRESENT, pDst, nWidth, nHeight);
@@ -2167,7 +2258,15 @@ bool CD3D12Device::ReadBackTexture(ID3D12Resource *pTexture, D3D12_RESOURCE_STAT
     WaitForGPU();
     OpenCmdList();
   }
-  RawBarrier(pTexture, State, D3D12_RESOURCE_STATE_COPY_SOURCE);
+  // A texture the tracker keeps from the state it is in, back to it after the copy (between frames the tracker is not
+  // told: the barriers are raw).
+  const bool bTracked = m_Barriers.IsRegistered(pTexture);
+  if (bTracked)
+    State = m_Barriers.GetState(pTexture);
+  if (bTracked && bInFrame)
+    Require(pTexture, D3D12_RESOURCE_STATE_COPY_SOURCE);
+  else
+    RawBarrier(pTexture, State, D3D12_RESOURCE_STATE_COPY_SOURCE);
   D3D12_TEXTURE_COPY_LOCATION Src = {}, Dst = {};
   Src.pResource = pTexture;
   Src.Type = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
@@ -2176,7 +2275,10 @@ bool CD3D12Device::ReadBackTexture(ID3D12Resource *pTexture, D3D12_RESOURCE_STAT
   Dst.PlacedFootprint = Footprint;
   FlushBarriers();
   m_pCmdList->CopyTextureRegion(&Dst, 0, 0, 0, &Src, nullptr);  // barriers flushed
-  RawBarrier(pTexture, D3D12_RESOURCE_STATE_COPY_SOURCE, State);
+  if (bTracked && bInFrame)
+    Require(pTexture, State);
+  else
+    RawBarrier(pTexture, D3D12_RESOURCE_STATE_COPY_SOURCE, State);
   if (bInFrame)
     FlushFrame();
   else

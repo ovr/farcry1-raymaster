@@ -170,18 +170,19 @@ public:
   bool SetOutput(EDisplayOutput Output, bool bLayer, float fPeakNits, float fFrameAverageNits);
   EDisplayOutput GetOutput() const { return m_Output; }
   //! With the highlight layer the back buffer is the frame target (D3D12_BACKBUFFER_FORMAT, the
-  //! swap chain's size): in RENDER_TARGET state in a frame, else PIXEL_SHADER_RESOURCE. At the end
-  //! of the frame the output pass draws it into the swap chain's buffer, or in SDR it is copied there.
+  //! swap chain's size). At the end of the frame the output pass draws it into the swap chain's
+  //! buffer, or in SDR it is copied there. Its state is kept by the device (TrackState): a render
+  //! target where it is drawn into (the bound targets', FlushBarriersForDraw), else where a pass
+  //! asks for it (Require: HdrOutput's and HdrStats' kernels read it).
   bool HasLayer() const { return m_pFrame != nullptr; }
   ID3D12Resource *GetFrameTarget() const { return m_pFrame.Get(); }
   //! The highlight layer (D3D12_HIGHLIGHT_FORMAT, the swap chain's size): cleared to (1, 1, 1, -1)
-  //! when a frame begins, in PIXEL_SHADER_RESOURCE state outside BindHighlight.
+  //! when a frame begins, in PIXEL_SHADER_RESOURCE state outside BindHighlight (kept by the device:
+  //! a pass that reads it otherwise asks, Require).
   ID3D12Resource *GetHighlight() const { return m_pHighlight.Get(); }
   //! true: the back buffer and the highlight layer bound (no depth buffer, the full viewport) for a
   //! pass that writes both; false: the back buffer alone again.
   void BindHighlight(bool bOn);
-  //! The frame target as a shader resource while the frame goes on (true), a render target again (false).
-  void SetFrameReadable(bool bReadable);
   //! The output pass: the frame target a shader resource, the swap chain's buffer bound (full
   //! viewport, no depth). EndFrame then presents it.
   void BeginOutput();
@@ -229,7 +230,11 @@ public:
   void Require(ID3D12Resource *pRes, D3D12_RESOURCE_STATES After, UINT nSubresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES);
   bool IsTracked(ID3D12Resource *pRes) const { return m_Barriers.IsRegistered(pRes); }
   //! A released resource forgotten by the barriers' tracker and check (DeferredRelease, the upload pools' ranges).
-  void ForgetState(ID3D12Resource *pRes) { m_Barriers.Forget(pRes); }
+  void ForgetState(ID3D12Resource *pRes)
+  {
+    m_Barriers.Forget(pRes);
+    m_Bound.Remove(pRes);
+  }
   //! d3d12_BarrierCheck: the upload list's szWhat writes pRes, which must not be a resource TrackState keeps.
   void CheckUntracked(ID3D12Resource *pRes, const char *szWhat);
   //! What is queued given to the frame's list: before work recorded on it (bWork: a draw, a dispatch, a copy, a
@@ -245,6 +250,16 @@ public:
   {
     if (pList == m_pCmdList.Get())
       FlushBarriers();
+  }
+  //! FlushBarriers before a draw or a clear: first the bound render targets and depth target whose states the device
+  //! keeps wanted in the states they are drawn in (a pass that made one readable and draws on gets it back as a target;
+  //! nothing where no state changed since the last draw).
+  void FlushBarriersForDraw()
+  {
+    if (!m_bInFrame)
+      return;
+    m_Bound.Require(m_Barriers);
+    FlushBarriers();
   }
   //! Copies and clears on the frame's list after what is queued.
   void CopyResource(ID3D12Resource *pDst, ID3D12Resource *pSrc);
@@ -268,7 +283,8 @@ public:
   //! (OutputFormat: D3D12_UPSCALE_FORMAT, or D3D12_UPSCALE_HDR_FORMAT for the HDR scene's light).
   //! Made again when the size (or the back buffer's) or a format changed; 0 x 0 releases them.
   //! Outside BeginScene .. EndScene the four are in the state PIXEL_SHADER_RESOURCE |
-  //! NON_PIXEL_SHADER_RESOURCE and the output in UNORDERED_ACCESS.
+  //! NON_PIXEL_SHADER_RESOURCE and the output in UNORDERED_ACCESS; their states are kept by the
+  //! device (TrackState: a pass asks for another, Require).
   bool SetSceneSize(int nWidth, int nHeight, DXGI_FORMAT ColorFormat, DXGI_FORMAT OutputFormat = D3D12_UPSCALE_FORMAT);
   int GetSceneWidth() const { return m_nSceneWidth; }
   int GetSceneHeight() const { return m_nSceneHeight; }
@@ -312,9 +328,9 @@ public:
   //! the main view's size in D3D12_AMBIENT_FORMAT: from here (in a frame) SetBackBufferTargets binds
   //! hRTV as the fourth colour target of the main view (SV_Target3, SPipelineKey::bAmbient), after the
   //! scene's motion vectors and the upscaler's depth or, without an upscaler, two null targets of their
-  //! formats; an empty handle unbinds it. The caller makes its transitions. With MSAA (BeginMsaa) the draws
-  //! write a multisampled ambient light in its place, cleared when bound and resolved into pResource (its
-  //! resource, in D3D12_RESOURCE_STATE_RENDER_TARGET) when unbound.
+  //! formats; an empty handle unbinds it. pResource (its resource) is drawn in RENDER_TARGET (the bound targets',
+  //! FlushBarriersForDraw); the caller asks for the states it reads it in. With MSAA (BeginMsaa) the draws
+  //! write a multisampled ambient light in its place, cleared when bound and resolved into pResource when unbound.
   void BindAmbient(D3D12_CPU_DESCRIPTOR_HANDLE hRTV, ID3D12Resource *pResource = nullptr);
   //! The main view's draws write the ambient light too (bound, not off screen).
   bool IsAmbientBound() const { return m_hAmbientRTV.ptr && !m_pOffscreen; }
@@ -347,21 +363,23 @@ public:
   //! (in a frame, in the scene) SetBackBufferTargets binds hAlbedo (D3D12_PT_ALBEDO_FORMAT), hNormal
   //! (D3D12_PT_NORMAL_FORMAT), hSun (D3D12_PT_SUN_FORMAT), hSpecular (D3D12_PT_SPECULAR_FORMAT) and hLightmap
   //! (D3D12_PT_LIGHTMAP_FORMAT) as the scene's fourth to eighth colour targets (SV_Target3 to 7, SPipelineKey::bPathTrace)
-  //! in place of the ambient light's; empty handles unbind them. The caller makes its transitions.
+  //! in place of the ambient light's; empty handles unbind them. ppResources (5, in that order): their resources, drawn
+  //! in RENDER_TARGET (the bound targets', FlushBarriersForDraw); the caller asks for the states it reads them in.
   void BindPathTargets(D3D12_CPU_DESCRIPTOR_HANDLE hAlbedo, D3D12_CPU_DESCRIPTOR_HANDLE hNormal, D3D12_CPU_DESCRIPTOR_HANDLE hSun,
-                       D3D12_CPU_DESCRIPTOR_HANDLE hSpecular, D3D12_CPU_DESCRIPTOR_HANDLE hLightmap);
+                       D3D12_CPU_DESCRIPTOR_HANDLE hSpecular, D3D12_CPU_DESCRIPTOR_HANDLE hLightmap, ID3D12Resource *const *ppResources = nullptr);
   //! The main view's draws write the path tracer's G-buffer too (bound, in the scene, not off screen).
   bool IsPathBound() const { return m_hPathRTV[0].ptr && m_bInScene && !m_pOffscreen; }
   //! true: from here (in a frame) SetBackBufferTargets binds the main view's depth buffer read only
-  //! (GetMainDepth in DEPTH_READ, which a pixel shader can then read too); false: writable again. The
-  //! caller makes its transitions.
+  //! (GetMainDepth in a read state with DEPTH_READ, which a pixel shader can then read too, or still
+  //! in DEPTH_WRITE); false: writable again (DEPTH_WRITE at the next draw, FlushBarriersForDraw). The
+  //! caller asks for the states it reads it in (Require).
   void SetDepthReadOnly(bool bReadOnly);
 
   //! An off screen target of nWidth x nHeight: pColor in Format (the back buffer's, or
-  //! D3D12_HDR_FORMAT; in the state PIXEL_SHADER_RESOURCE while it is not drawn into) and pDepth
-  //! (D24S8, DEPTH_WRITE), their views written to hRTV and hDSV. pColor gets nMips mip levels: hRTV
-  //! is the view of level 0, phMipRTV[i - 1] gets that of level i (the depth buffer has level 0
-  //! only).
+  //! D3D12_HDR_FORMAT; in the state PIXEL_SHADER_RESOURCE while it is not drawn into, its levels'
+  //! states kept by the device each: TrackState) and pDepth (D24S8, DEPTH_WRITE), their views written
+  //! to hRTV and hDSV. pColor gets nMips mip levels: hRTV is the view of level 0, phMipRTV[i - 1] gets
+  //! that of level i (the depth buffer has level 0 only).
   bool CreateOffscreenTargets(int nWidth, int nHeight, ComPtr<ID3D12Resource> &pColor, ComPtr<ID3D12Resource> &pDepth,
                               D3D12_CPU_DESCRIPTOR_HANDLE hRTV, D3D12_CPU_DESCRIPTOR_HANDLE hDSV, DXGI_FORMAT Format = D3D12_BACKBUFFER_FORMAT,
                               int nMips = 1, const D3D12_CPU_DESCRIPTOR_HANDLE *phMipRTV = nullptr);
@@ -377,6 +395,9 @@ public:
   //! others stay shader resources (the level above, read while this one is made from it).
   void SetOffscreenTargets(ID3D12Resource *pColor, D3D12_CPU_DESCRIPTOR_HANDLE hRTV, D3D12_CPU_DESCRIPTOR_HANDLE hDSV, int nWidth, int nHeight,
                            UINT nSubresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES);
+  //! After SetOffscreenTargets of a colour target alone: pSecond (a render target of the same size) bound after it
+  //! as the second colour target, for a pass that writes both; EndOffscreen ends it with the first.
+  void BindSecondTarget(ID3D12Resource *pSecond, D3D12_CPU_DESCRIPTOR_HANDLE hRTV);
   //! The off screen colour target (or shadow map) back to PIXEL_SHADER_RESOURCE; nothing off screen
   //! any more (a compute pass reads it next).
   void EndOffscreen();
@@ -424,10 +445,10 @@ public:
   //! between frames) to pDst: nWidth x nHeight pixels of B, G, R, A, rows from the top.
   //! Waits for the GPU.
   bool ReadBackBuffer(uint8 *pDst, int nWidth, int nHeight);
-  //! Copies level 0 of pTexture (2D, 4 bytes a pixel, or 8 for the R16G16B16A16 formats; in State
-  //! and not drawn into) to pDst: nWidth x nHeight pixels, rows from the top. Waits for the GPU; in
-  //! a frame the frame recorded so far is executed (FlushFrame), and the draws go to the back
-  //! buffer again.
+  //! Copies level 0 of pTexture (2D, 4 bytes a pixel, or 8 for the R16G16B16A16 formats; not drawn
+  //! into; in State unless the device keeps its state, then in its own, and back in it after) to pDst:
+  //! nWidth x nHeight pixels, rows from the top. Waits for the GPU; in a frame the frame recorded so
+  //! far is executed (FlushFrame), and the draws go to the back buffer again.
   bool ReadBackTexture(ID3D12Resource *pTexture, D3D12_RESOURCE_STATES State, uint8 *pDst, int nWidth, int nHeight);
 
   //! The debug layer's messages to the engine's log and to XRenderD3D12_debug.txt (the engine's
@@ -505,8 +526,11 @@ private:
   void ReleaseSceneTargets();
   //! The frame target and the highlight layer of the swap chain's size (with m_bLayer).
   bool CreateLayer();
-  //! The frame target from its state to State.
-  void SetFrameState(D3D12_RESOURCE_STATES State);
+  //! Require of a resource whose state the device keeps, else a transition from Untracked (the state it is in).
+  void RequireOr(ID3D12Resource *pRes, D3D12_RESOURCE_STATES Untracked, D3D12_RESOURCE_STATES After,
+                 UINT nSubresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES);
+  //! The state the tracker keeps of a resource (with queued requests; its first subresource), else Untracked.
+  D3D12_RESOURCE_STATES StateOr(ID3D12Resource *pRes, D3D12_RESOURCE_STATES Untracked) const;
   //! A transition given on the frame's list as it is, after what is queued (the device's own; between frames on the
   //! list ReadBackTexture opened).
   void RawBarrier(ID3D12Resource *pRes, D3D12_RESOURCE_STATES Before, D3D12_RESOURCE_STATES After,
@@ -560,8 +584,7 @@ private:
   DXGI_FORMAT m_SwapChainFormat = D3D12_BACKBUFFER_FORMAT;
   float m_fMetadataPeak = 0, m_fMetadataFrameAverage = 0;   //!< HDR10's metadata as set
   bool m_bLayer = false;                            //!< the frame target and the highlight layer are wanted
-  ComPtr<ID3D12Resource> m_pFrame, m_pHighlight;    //!< CreateLayer
-  D3D12_RESOURCE_STATES m_FrameState = D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE;
+  ComPtr<ID3D12Resource> m_pFrame, m_pHighlight;    //!< CreateLayer (their states kept by the tracker)
   bool m_bHighlightBound = false;                   //!< BindHighlight
   bool m_bOutput = false;                           //!< BeginOutput .. EndFrame
   SDisplayInfo m_Display;
@@ -596,6 +619,8 @@ private:
   ComPtr<ID3D12Resource> m_pDepth;
   int m_nBackBuffer = 0;
   ID3D12Resource *m_pOffscreen = nullptr;           //!< SetOffscreenTargets: the colour target drawn into (SetShadowMapTarget: the shadow map)
+  ID3D12Resource *m_pOffscreenSecond = nullptr;     //!< BindSecondTarget
+  D3D12_CPU_DESCRIPTOR_HANDLE m_hOffscreenSecondRTV = {};
   bool m_bOffscreenShadowMap = false;               //!< m_pOffscreen is a shadow map
   UINT m_nOffscreenSubresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;   //!< the sub resource of m_pOffscreen drawn into
   D3D12_CPU_DESCRIPTOR_HANDLE m_hOffscreenRTV = {}, m_hOffscreenDSV = {};
@@ -617,6 +642,7 @@ private:
   uint32 m_nMsaaGeneration = 0;                     //!< GetMsaaGeneration
   bool m_bInMsaa = false;                           //!< BeginMsaa .. EndMsaa
   D3D12_CPU_DESCRIPTOR_HANDLE m_hPathRTV[5] = {};   //!< BindPathTargets
+  ID3D12Resource *m_pPathResources[5] = {};
   bool m_bDepthReadOnly = false;                    //!< SetDepthReadOnly
 
   int m_nWidth = 0, m_nHeight = 0;
@@ -624,6 +650,7 @@ private:
   bool m_bInFrame = false;
 
   Barriers::CBarrierTracker m_Barriers;             //!< the frame list's barriers (Transition, UavBarrier)
+  Barriers::CBoundTargets m_Bound;                  //!< the targets bound to the frame's list (FlushBarriersForDraw)
   int m_nBarrierBatchWanted = 0;                    //!< SetBarrierMode, taken at BeginFrame
   bool m_bBarrierCheckWanted = false;
   bool m_bBarrierSections = false;                  //!< d3d12_BarrierBatch 2: GpuSection gives what is queued

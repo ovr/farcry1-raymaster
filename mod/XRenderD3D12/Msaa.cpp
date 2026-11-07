@@ -199,7 +199,7 @@ void CD3D12Renderer::DrawMsaaResolve(bool bDepth)
   pList->SetGraphicsRootDescriptorTable(2, m_pDescriptors->GetGPU(bAuto ? m_Hdr.pExposure[m_Hdr.nExposure]->m_nSRV : D3D12_SRV_WHITE));
   pList->SetPipelineState(bDepth ? m_pMsaaDepthPSO.Get() : m_pMsaaColorPSO[bHdr ? 1 : 0].Get());
   pList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
-  m_pDevice->FlushBarriers();
+  m_pDevice->FlushBarriersForDraw();
   pList->DrawInstanced(3, 1, 0, 0);  // barriers flushed
   m_pDevice->Transition(pSource, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, State);
   // The renderer's root signature and the multisampled targets again.
