@@ -642,7 +642,12 @@ void CD3D12Device::SetOffscreenTargets(ID3D12Resource *pColor, D3D12_CPU_DESCRIP
     return;
   m_nStateEpoch++;
   EndOffscreen();
-  RawBarrier(pColor, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, D3D12_RESOURCE_STATE_RENDER_TARGET, nSubresource);
+  // A target whose state the device keeps (TrackState: the bloom's levels) from where it is, the others from
+  // PIXEL_SHADER_RESOURCE, where every offscreen target rests.
+  if (m_Barriers.IsRegistered(pColor))
+    Require(pColor, D3D12_RESOURCE_STATE_RENDER_TARGET, nSubresource);
+  else
+    RawBarrier(pColor, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, D3D12_RESOURCE_STATE_RENDER_TARGET, nSubresource);
   m_pOffscreen = pColor;
   m_nOffscreenSubresource = nSubresource;
   m_hOffscreenRTV = hRTV;
@@ -753,8 +758,11 @@ void CD3D12Device::EndOffscreen()
 {
   if (!m_pOffscreen)
     return;
-  RawBarrier(m_pOffscreen, m_bOffscreenShadowMap ? D3D12_RESOURCE_STATE_DEPTH_WRITE : D3D12_RESOURCE_STATE_RENDER_TARGET,
-    D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, m_nOffscreenSubresource);
+  if (!m_bOffscreenShadowMap && m_Barriers.IsRegistered(m_pOffscreen))
+    Require(m_pOffscreen, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, m_nOffscreenSubresource);
+  else
+    RawBarrier(m_pOffscreen, m_bOffscreenShadowMap ? D3D12_RESOURCE_STATE_DEPTH_WRITE : D3D12_RESOURCE_STATE_RENDER_TARGET,
+      D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, m_nOffscreenSubresource);
   m_pOffscreen = nullptr;
   m_bOffscreenShadowMap = false;
 }

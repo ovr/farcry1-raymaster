@@ -640,13 +640,20 @@ bool CD3D12Renderer::DispatchBloomLevel(size_t nLevel, ID3D12Resource *pSource, 
   // The pass before drew into the EV or the level before.
   m_pDevice->EndOffscreen();
   constexpr D3D12_RESOURCE_STATES READ = D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE | D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE;
-  ID3D12Resource *pRead = bScene ? pExposure : pSource;
-  m_pDevice->Transition(pRead, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, READ);
-  m_pDevice->Transition(pLevel->m_pResource, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+  // The levels' states kept by the device (EnsureHdrTargets): the level before readable by this kernel and by the pass
+  // that adds this one to it (one transition, not back to PIXEL_SHADER_RESOURCE after), this one written, then readable
+  // by the passes; the device's offscreen targets ask for theirs too. The EV is not tracked (its readback names its state).
+  ID3D12Resource *pLevelRes = pLevel->m_pResource;
+  if (bScene)
+    m_pDevice->Transition(pExposure, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, READ);
+  else
+    m_pDevice->Require(pSource, READ);
+  m_pDevice->Require(pLevelRes, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
   m_pCompute->Dispatch(m_pDevice->GetCmdList(), eD3D12K_Bloom, CB.nGPU, nFirst, nFirst + CD3D12Compute::COMPUTE_SRVS,
                        (UINT)(pLevel->m_nWidth + 7) / 8, (UINT)(pLevel->m_nHeight + 7) / 8);
-  m_pDevice->Transition(pLevel->m_pResource, D3D12_RESOURCE_STATE_UNORDERED_ACCESS, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
-  m_pDevice->Transition(pRead, READ, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+  m_pDevice->Require(pLevelRes, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+  if (bScene)
+    m_pDevice->Transition(pExposure, READ, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
   return true;
 }
 
@@ -785,6 +792,9 @@ bool CD3D12Renderer::EnsureHdrTargets(int nWidth, int nHeight, bool bLdr)
       w = std::max((w + 1) / 2, 1);
       h = (h + 1) / 2;
       m_Hdr.Bloom.push_back(m_pUpload->CreateRenderTarget(w, h, D3D12_HDR_FORMAT, true));
+      // Made in PIXEL_SHADER_RESOURCE; their states kept by the device (the kernel's and the passes' ask).
+      if (m_Hdr.Bloom.back())
+        m_pDevice->TrackState(m_Hdr.Bloom.back()->m_pResource, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
     }
     // The kernel's tables, D3D12_FRAMES a level.
     m_Hdr.KernelTables.assign(m_Hdr.Bloom.size() * D3D12_FRAMES, -1);
