@@ -2177,6 +2177,47 @@ and lists theirs (`NamesObjects`).
   marks cliffs; without them (shader "terrainwithdefaultdetailtexture") the detail texture
   everywhere.
 
+## View distances (r_DrawDistance)
+
+- `r_DrawDistance` (1, read every frame; not saved) sets the engine's distances for the level it
+  has (`DrawDistance.cpp`, the table and the values in `DrawDistance.h`): on the game's levels but
+  Control and Cooler the terrain is drawn at its full detail as far as it is seen
+  (`e_terrain_lod_ratio` 0, the level's own is 3: the far cliffs keep their faces, the rocks in the
+  sea their shape, the far islands their ridges) and the vegetation stays a model farther before it
+  turns into its sprite: `e_vegetation_sprites_distance_ratio` the player's own (the menu's 0.9 or 1)
+  times the level's factor, 3 on Training, Pier, Fort, River, Steam and Carrier, 4 on Research and
+  Dam, 5 on Catacombs, 10 on the others (Volcano 1: its terrain alone). The factors are each level's
+  limit, found level by level by a draw distance fix of the game's players (for the 32-bit game,
+  through the levels' Lua scripts and `-DEVMODE`). In the game's dev mode (`-DEVMODE`) also on every
+  level the objects are seen farther (`e_obj_view_dist_ratio` 75, the game's 55: the palms on the far
+  islets, the characters farther away) and the characters keep their detailed models farther
+  (`ca_LodBias` 0.015, the game's 0.125); both are cheat variables (`VF_CHEAT`), which the engine lets
+  change only in its dev mode, not even from a Lua script or the console's `ExecuteString` that
+  ignores it, so without `-DEVMODE` they stay as the game has them (the log says so for each level).
+- The game's own value of each variable is kept and given back with 0 (the frames before, render
+  test `drawdist`), at a level that is not in the table and at the end (`Release`): once a frame,
+  from the loading screen's frames on, a value the game set since r_DrawDistance's (a level's load
+  sets the terrain's ratio, the menu the vegetation's) becomes the variable's own and r_DrawDistance
+  sets its own again (`DrawDistance::CHeldValue`). The vegetation's ratio is one the game saves into
+  `system.cfg` (`VF_DUMPTODISK`) when it quits, also from a level: while it is held the flag is off,
+  so that the game saves none of r_DrawDistance's values (the next start, another renderer and
+  r_DrawDistance 0 get the player's own; the engine's default, 1, when the game saved while it was
+  held). The log has a line for each value set or given back
+  (`XRenderD3D12: r_DrawDistance, level Training: e_terrain_lod_ratio 0 (the game's 3.000000)`).
+- Not taken from that fix: the water's reflection without the far sprites. It took the flicker of
+  the original's sprites out of the water; here the reflection keeps them (the far forests on the
+  mountains in the water), with the same flicker as without them (`flicker.py` on Training's sea
+  3 m above the water, the camera moving: 4.81 and 4.81).
+- Its cost (RX 7900 XTX, 3840x2160, the raster with the rays of system.cfg; the PerfSweep flights
+  without the dev mode): 1 to 14 % of the FPS (River 219 to 188, Pier 211 to 194, Treehouse 282 to
+  279), the draws 1.05 to 3.6 times as many and the triangles 1.2 to 3 times; mostly the CPU's (our
+  `EF_EndEf3D` up to 1.5 ms more), the GPU's frame 0.04 to 0.28 ms longer.
+- Tests: unit tests `DrawDistance_*` (the table, the vegetation's ratio from the player's own, the
+  game's value kept, followed and given back), `render_tests` suite `drawdist` (the variables and
+  their flags in the game without the dev mode and in it, on, 0 and on again; Training's mountain
+  spot and Swamp changed on against 0, the same as the variables set by the console before the
+  level loads, 0 the build before's).
+
 ## Objects fading with the distance
 
 - An object the engine fades in or out by its distance (its render parameters' alpha below 1: the

@@ -409,6 +409,14 @@ void CD3D12Renderer::RegisterVariables()
   iConsole->Register("r_SkinScatter", &CV_r_SkinScatter, 1, 0,
                      "r_Skin: how far the light under the skin reaches past the line where the light passes the face, times red 0.12, "
                      "green 0.04, blue 0.02 of N.L, w: ((N.L + w) / (1 + w))^(1 + w) (0: lambert's, the light ends at that line)");
+  // The engine's distances, set for the level it has (DrawDistance.cpp): not this renderer's alone.
+  iConsole->Register("r_DrawDistance", &CV_r_DrawDistance, 1, 0,
+                     "1: the levels' view distances farther: the terrain drawn at its full detail as far as it is seen "
+                     "(e_terrain_lod_ratio 0: the far cliffs and rocks keep their shape) and the vegetation a model up to 3 to 10 times "
+                     "farther before it turns into its sprite (e_vegetation_sprites_distance_ratio, each level's own factor), on the "
+                     "game's levels (not Control and Cooler); in the game's dev mode (-DEVMODE) also the objects seen farther "
+                     "(e_obj_view_dist_ratio 75) and the characters' detailed models (ca_LodBias 0.015). The game's own values are "
+                     "given back with 0 (the frames before) and are the ones system.cfg keeps");
   iConsole->Register("r_TexUpscaled", &CV_r_TexUpscaled, 1, 0,
                      "1: the textures of the game's paks take their upscaled pictures where the game's folder RayMaster has them "
                      "(raymaster/<texture>.dds beside the maps: twice the side, made by networks from the game's own, the compression's "
@@ -1119,6 +1127,7 @@ LRESULT CALLBACK CD3D12Renderer::WindowProc(HWND hWnd, UINT nMsg, WPARAM wParam,
 void CD3D12Renderer::Release()
 {
   CpuSampler::Update(0, 0, "XRenderD3D12_samples.txt");
+  ReleaseDrawDistance();
   if (m_DisplayInfo.pVar && iConsole)
     iConsole->RemoveConsoleVarSink(&m_DisplayInfo);
   m_DisplayInfo.pVar = nullptr;
@@ -1252,6 +1261,7 @@ void CD3D12Renderer::BeginFrame (void)
 {
   FUNCTION_PROFILER(iSystem, PROFILE_RENDERER);
   EnsureFrame();
+  UpdateDrawDistance();
   if (m_pScene)
     m_pScene->BeginFrame();
   m_b2DMode = false;

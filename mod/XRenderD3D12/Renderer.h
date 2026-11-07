@@ -30,6 +30,7 @@
 #include "AmbientOcclusion.h"
 #include "Shaders/Constants.h"
 #include "WakeBodies.h"
+#include "DrawDistance.h"
 #include <optional>
 
 struct SRaySunConstants;
@@ -1284,6 +1285,25 @@ public:
   SOceanGridState m_OceanGrid;
 
   //////////////////////////////////////////////////////////////////////////
+  // DrawDistance.cpp: the levels' view distances made farther (r_DrawDistance, DrawDistance.h)
+
+  //! Once a frame (BeginFrame): with r_DrawDistance, the engine's variables of the level's distances set (the terrain's
+  //! full detail and the vegetation's sprites farther on the levels of DrawDistance::LEVELS; in the game's dev mode the
+  //! objects' view distance and the characters' detail on every level), the game's own values given back without.
+  void UpdateDrawDistance();
+  //! Every variable it holds given back its own value (Release).
+  void ReleaseDrawDistance();
+  static constexpr int DRAW_DISTANCE_VARS = 4;
+  struct SDrawDistanceVar
+  {
+    ICVar *pVar = nullptr;                  //!< looked up on first use (ca_LodBias: once CryAnimation has it)
+    DrawDistance::CHeldValue Held;          //!< its value and the game's own
+    bool bDumpCleared = false;              //!< its VF_DUMPTODISK taken off while held (the game saves none of ours)
+  };
+  SDrawDistanceVar m_DrawDistanceVars[DRAW_DISTANCE_VARS];  //!< e_terrain_lod_ratio, e_vegetation_sprites_distance_ratio, e_obj_view_dist_ratio, ca_LodBias
+  std::string m_DrawDistanceLevel;          //!< the level of the last frame (its folder's name)
+
+  //////////////////////////////////////////////////////////////////////////
   // Underwater.cpp: the view from under the ocean's surface (d3d12_WaterUnder)
 
   //! Once a frame before the main view's scenes: m_bUnderwater, the camera under the ocean's surface with the ocean in its
@@ -2149,6 +2169,7 @@ public:
   float CV_r_SkinRoughness = 0.55f;   //!< the matte skin's perceptual roughness (no gloss in the texture's alpha)
   float CV_r_SkinRoughnessOily = 0.35f; //!< the oily skin's (the gloss at SKIN_GLOSS_OILY: the lips, the nose; the wet rims smoother)
   float CV_r_SkinScatter = 1;         //!< how far the light under the skin reaches past the shadow's line (times SKIN_WRAP; 0: lambert's)
+  int CV_r_DrawDistance = 1;          //!< 1: the levels' view distances farther (DrawDistance.h; 0: the game's own, the frames before)
   float CV_r_DetailDistance = 4;      //!< the terrain's detail layers fade out from here to twice this far
   int CV_d3d12_debug = 0;             //!< debug layer, 1 with GPU based validation, 2 without (also XRENDERD3D12_DEBUG); only read at Init
   int CV_d3d12_DRED = 1;              //!< DRED, 1 the page faults and our markers, 2 and every command (XRENDERD3D12_DRED before it); only read at Init

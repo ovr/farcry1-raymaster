@@ -46,6 +46,8 @@ set(XRENDERD3D12_SOURCES
     Mirrors.cpp
     TemplateFx.cpp
     FarSprites.cpp
+    DrawDistance.cpp
+    DrawDistance.h
     Shadows.cpp
     Cascades.cpp
     PostAA.cpp
