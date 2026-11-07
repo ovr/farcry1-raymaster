@@ -550,6 +550,77 @@ XR_TEST(Barrier_SmaaStates)
   }
 }
 
+// Why: the bloom's levels (Hdr.cpp) went PIXEL_SHADER_RESOURCE -> UNORDERED_ACCESS -> PIXEL_SHADER_RESOURCE for their
+// kernel, PIXEL_SHADER_RESOURCE -> READ -> PIXEL_SHADER_RESOURCE for the next level's, and through the device's
+// offscreen target (PIXEL_SHADER_RESOURCE <-> RENDER_TARGET) for the pass that adds the level below. Kept by the tracker,
+// the kernels and the offscreen target asking for theirs (SetOffscreenTargets, EndOffscreen): every before is the state on
+// the GPU, each piece of work finds its states, in both modes and three frames; a frame of N levels has 4N - 2
+// transitions in batches (5N - 3 before).
+XR_TEST(Barrier_BloomChain)
+{
+  constexpr int N = 6;
+  constexpr D3D12_RESOURCE_STATES READ = PSR | NPSR;
+  std::vector<ID3D12Resource *> Levels;
+  for (int i = 0; i < N; i++)
+    Levels.push_back(Res(10 + i));
+  for (EMode eMode : { MODE_IMMEDIATE, MODE_BATCHED })
+  {
+    CBarrierTracker t;
+    t.SetMode(eMode);
+    std::map<ID3D12Resource *, D3D12_RESOURCE_STATES> Gpu;
+    for (ID3D12Resource *p : Levels)
+    {
+      t.Register(p, PSR, 1, false);
+      Gpu[p] = PSR;
+    }
+    size_t nWrong = 0, nMissing = 0, nTransitions = 0;
+    const auto Work = [&](std::initializer_list<std::pair<ID3D12Resource *, D3D12_RESOURCE_STATES>> Needs) {
+      for (const SCall &c : Flush(t, true))
+        for (const D3D12_RESOURCE_BARRIER &b : c)
+          if (b.Type == D3D12_RESOURCE_BARRIER_TYPE_TRANSITION)
+          {
+            nWrong += b.Transition.StateBefore != Gpu[b.Transition.pResource];
+            Gpu[b.Transition.pResource] = b.Transition.StateAfter;
+            nTransitions++;
+          }
+      for (const auto &n : Needs)
+        nMissing += n.second == UAV || n.second == RT ? Gpu[n.first] != n.second : (Gpu[n.first] & n.second) != n.second;
+    };
+    for (int nFrame = 0; nFrame < 3; nFrame++)
+    {
+      nTransitions = 0;
+      // Down: each level's kernel from the one before (the first from the EV, not tracked).
+      for (int i = 0; i < N; i++)
+      {
+        if (i > 0)
+          t.Require(Levels[i - 1], READ);
+        t.Require(Levels[i], UAV);
+        if (i > 0)
+          Work({ { Levels[i - 1], NPSR }, { Levels[i], UAV } });
+        else
+          Work({ { Levels[i], UAV } });
+        t.Require(Levels[i], PSR);
+      }
+      // Up: each level drawn into, the one below added (SetOffscreenTargets, the draw, EndOffscreen).
+      for (int i = N - 1; i-- > 0;)
+      {
+        t.Require(Levels[i], RT);
+        Work({ { Levels[i], RT }, { Levels[i + 1], PSR } });
+        t.Require(Levels[i], PSR);
+      }
+      Work({ { Levels[0], PSR } });  // the resolve
+      t.OnListExecuted();
+      t.OnListOpened();
+      // The immediate mode gives each request as it came: the level's PIXEL_SHADER_RESOURCE after its kernel, then READ.
+      const size_t nWant = eMode == MODE_BATCHED ? 4 * N - 2 : 5 * N - 3;
+      CHECK_MSG(nTransitions == nWant, std::to_string(nTransitions) + " transitions, frame " + std::to_string(nFrame));
+    }
+    CHECK_MSG(nWrong == 0, std::to_string(nWrong) + (eMode == MODE_BATCHED ? " befores wrong, batched" : " befores wrong, immediate"));
+    CHECK_MSG(nMissing == 0, std::to_string(nMissing) + (eMode == MODE_BATCHED ? " states missing, batched" : " states missing, immediate"));
+    CHECK(t.TakeProblems().empty());
+  }
+}
+
 // Read states: one that holds the wanted one already does, two shader reads combine, the others as asked.
 XR_TEST(Barrier_ReadStates)
 {
