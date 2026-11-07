@@ -895,6 +895,23 @@ void CD3D12Device::ResourceBarriersOn(ID3D12GraphicsCommandList *pList, UINT n, 
     pList->ResourceBarrier(n, pBarriers);  // barriers flushed: another list's own
 }
 
+void CD3D12Device::TransitionOn(ID3D12GraphicsCommandList *pList, ID3D12Resource *pRes, D3D12_RESOURCE_STATES Before,
+                                D3D12_RESOURCE_STATES After)
+{
+  if (pList == m_pCmdList.Get())
+    Transition(pRes, Before, After);
+  else if (pList && pRes)
+  {
+    D3D12_RESOURCE_BARRIER b = {};
+    b.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+    b.Transition.pResource = pRes;
+    b.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
+    b.Transition.StateBefore = Before;
+    b.Transition.StateAfter = After;
+    pList->ResourceBarrier(1, &b);  // barriers flushed: another list's own
+  }
+}
+
 void CD3D12Device::RawBarrier(ID3D12Resource *pRes, D3D12_RESOURCE_STATES Before, D3D12_RESOURCE_STATES After, UINT nSubresource)
 {
   D3D12_RESOURCE_BARRIER b = {};

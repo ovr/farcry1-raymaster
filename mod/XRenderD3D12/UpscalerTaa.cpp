@@ -106,34 +106,6 @@ DXGI_FORMAT ViewFormat(ID3D12Resource *pResource)
   }
 }
 
-//! Up to four transitions as one ResourceBarrier.
-class CBarriers
-{
-public:
-  void Add(ID3D12Resource *pResource, D3D12_RESOURCE_STATES Before, D3D12_RESOURCE_STATES After)
-  {
-    if (Before == After || m_n == 4)
-      return;
-    D3D12_RESOURCE_BARRIER &b = m_Barriers[m_n++];
-    b = {};
-    b.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
-    b.Transition.pResource = pResource;
-    b.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
-    b.Transition.StateBefore = Before;
-    b.Transition.StateAfter = After;
-  }
-  void Flush(ID3D12GraphicsCommandList *pList)
-  {
-    if (m_n)
-      g_pRenderer->m_pDevice->ResourceBarriersOn(pList, m_n, m_Barriers);
-    m_n = 0;
-  }
-
-private:
-  D3D12_RESOURCE_BARRIER m_Barriers[4] = {};
-  UINT m_n = 0;
-};
-
 class CUpscalerTaa final : public IUpscaler
 {
 public:
@@ -224,23 +196,26 @@ public:
     const int nRead = m_nRead, nWrite = nRead ^ 1;
     ID3D12Resource *pMotion = m_pMotion->m_pResource, *pRead = m_pHistory[nRead]->m_pResource, *pWrite = m_pHistory[nWrite]->m_pResource;
     const UINT gx = (UINT)(m_nWidth + XR_TAA_GROUP - 1) / XR_TAA_GROUP, gy = (UINT)(m_nHeight + XR_TAA_GROUP - 1) / XR_TAA_GROUP;
-    CBarriers Barriers;
+    // The device's queue (D3D12Barriers.h): given in one call before the next dispatch, as many as there are.
+    CD3D12Device *pDevice = g_pRenderer->m_pDevice.get();
+    const auto Move = [&](ID3D12Resource *pRes, D3D12_RESOURCE_STATES Before, D3D12_RESOURCE_STATES After)
+    {
+      if (Before != After)
+        pDevice->TransitionOn(pList, pRes, Before, After);
+    };
     // The history to read as a texture, the other to write.
-    Barriers.Add(pRead, m_eHistoryState[nRead], READ);
-    Barriers.Add(pWrite, m_eHistoryState[nWrite], UAV);
-    Barriers.Flush(pList);
+    Move(pRead, m_eHistoryState[nRead], READ);
+    Move(pWrite, m_eHistoryState[nWrite], UAV);
     m_eHistoryState[nRead] = READ;
     m_eHistoryState[nWrite] = UAV;
 
     pCompute->Dispatch(pList, eD3D12K_TaaDilate, CB.nGPU, Table(eT_Dilate), Table(eT_Dilate) + SRVS, gx, gy);
-    Barriers.Add(pMotion, UAV, READ);
-    Barriers.Flush(pList);
+    Move(pMotion, UAV, READ);
     const int nResolve = eT_Resolve0 + nRead;
     pCompute->Dispatch(pList, eD3D12K_TaaResolve, CB.nGPU, Table(nResolve), Table(nResolve) + SRVS, gx, gy);
     // The motion written again next frame; the new history read by the sharpening and next frame.
-    Barriers.Add(pMotion, READ, UAV);
-    Barriers.Add(pWrite, UAV, READ);
-    Barriers.Flush(pList);
+    Move(pMotion, READ, UAV);
+    Move(pWrite, UAV, READ);
     m_eHistoryState[nWrite] = READ;
     if (bSharpen)
     {
