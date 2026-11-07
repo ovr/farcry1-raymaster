@@ -210,8 +210,10 @@ public:
   void ResourceBarriers(UINT n, const D3D12_RESOURCE_BARRIER *pBarriers);
   //! ResourceBarriers when pList is the frame's list, else given on pList at once (that list's own).
   void ResourceBarriersOn(ID3D12GraphicsCommandList *pList, UINT n, const D3D12_RESOURCE_BARRIER *pBarriers);
-  //! Transition for a pass that records on pList: queued when it is the frame's list, else given on pList at once.
+  //! Transition and UavBarrierAll for a pass that records on pList: queued when it is the frame's list, else given on
+  //! pList at once.
   void TransitionOn(ID3D12GraphicsCommandList *pList, ID3D12Resource *pRes, D3D12_RESOURCE_STATES Before, D3D12_RESOURCE_STATES After);
+  void UavBarrierAllOn(ID3D12GraphicsCommandList *pList);
   //! A library left pRes in State by barriers of its own (d3d12_BarrierCheck's census learns it).
   void Assume(ID3D12Resource *pRes, D3D12_RESOURCE_STATES State)
   {

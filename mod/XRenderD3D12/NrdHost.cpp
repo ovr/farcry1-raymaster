@@ -82,17 +82,6 @@ DXGI_FORMAT DxgiFormat(nrd::Format f)
   }
 }
 
-D3D12_RESOURCE_BARRIER Transition(ID3D12Resource *pResource, D3D12_RESOURCE_STATES eBefore, D3D12_RESOURCE_STATES eAfter)
-{
-  D3D12_RESOURCE_BARRIER b = {};
-  b.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
-  b.Transition.pResource = pResource;
-  b.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
-  b.Transition.StateBefore = eBefore;
-  b.Transition.StateAfter = eAfter;
-  return b;
-}
-
 //! A texture NRD reads (SRV), as the kernels read theirs between dispatches.
 constexpr D3D12_RESOURCE_STATES NRD_READ = D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE;
 
@@ -456,7 +445,7 @@ bool CD3D12Nrd::Denoise(ID3D12GraphicsCommandList *pList, const SNrdView &View, 
   bool bOk = true;
   D3D12_GPU_VIRTUAL_ADDRESS nConstants = 0;
   std::vector<CD3D12Texture *> Bound;
-  std::vector<D3D12_RESOURCE_BARRIER> Barriers;
+  CD3D12Device *pDevice = g_pRenderer->m_pDevice.get();
   for (uint32_t n = 0; n < nDispatches && bOk; n++)
   {
     const nrd::DispatchDesc &d = pDispatches[n];
@@ -465,12 +454,10 @@ bool CD3D12Nrd::Denoise(ID3D12GraphicsCommandList *pList, const SNrdView &View, 
       bOk = false;
       break;
     }
-    // Its textures with the states they want.
+    // Its textures with the states they want: each transition queued as its state is noted (a pass given up on half way
+    // leaves the states as the barriers made them, not as they were to be).
     Bound.assign(d.resourcesNum, nullptr);
-    Barriers.clear();
-    D3D12_RESOURCE_BARRIER Uav = {};
-    Uav.Type = D3D12_RESOURCE_BARRIER_TYPE_UAV;
-    Barriers.push_back(Uav);
+    pDevice->UavBarrierAllOn(pList);
     for (uint32_t i = 0; i < d.resourcesNum && bOk; i++)
     {
       const nrd::ResourceDesc &rd = d.resources[i];
@@ -499,7 +486,7 @@ bool CD3D12Nrd::Denoise(ID3D12GraphicsCommandList *pList, const SNrdView &View, 
       const D3D12_RESOURCE_STATES eWant = rd.descriptorType == nrd::DescriptorType::TEXTURE ? NRD_READ : D3D12_RESOURCE_STATE_UNORDERED_ACCESS;
       if (*pState != eWant)
       {
-        Barriers.push_back(Transition(Bound[i]->m_pResource, *pState, eWant));
+        pDevice->TransitionOn(pList, Bound[i]->m_pResource, *pState, eWant);
         *pState = eWant;
       }
     }
@@ -525,8 +512,6 @@ bool CD3D12Nrd::Denoise(ID3D12GraphicsCommandList *pList, const SNrdView &View, 
         memcpy(Mem.pCPU, d.constantBufferData, d.constantBufferDataSize);
       nConstants = Mem.nGPU;
     }
-    CD3D12Device *pDevice = g_pRenderer->m_pDevice.get();
-    pDevice->ResourceBarriersOn(pList, (UINT)Barriers.size(), Barriers.data());
     const SImpl::SPipeline &P = s.Pipelines[d.pipelineIndex];
     pList->SetComputeRootSignature(P.pRoot.Get());
     pList->SetPipelineState(P.pPSO.Get());
@@ -538,14 +523,10 @@ bool CD3D12Nrd::Denoise(ID3D12GraphicsCommandList *pList, const SNrdView &View, 
   }
 
   // The caller's textures back in UNORDERED_ACCESS, NRD's writes done.
-  Barriers.clear();
-  D3D12_RESOURCE_BARRIER Uav = {};
-  Uav.Type = D3D12_RESOURCE_BARRIER_TYPE_UAV;
-  Barriers.push_back(Uav);
+  pDevice->UavBarrierAllOn(pList);
   for (SUser &u : Users)
     if (u.eState != D3D12_RESOURCE_STATE_UNORDERED_ACCESS)
-      Barriers.push_back(Transition(u.pTex->m_pResource, u.eState, D3D12_RESOURCE_STATE_UNORDERED_ACCESS));
-  g_pRenderer->m_pDevice->ResourceBarriersOn(pList, (UINT)Barriers.size(), Barriers.data());
+      pDevice->TransitionOn(pList, u.pTex->m_pResource, u.eState, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
 
   s.Prev = View;
   s.bPrev = bOk;
