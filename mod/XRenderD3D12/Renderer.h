@@ -1726,10 +1726,8 @@ public:
   //! The words on the GPU and their copies to read back.
   struct SHdrStatsState
   {
-    ComPtr<ID3D12Resource> pWords;          //!< XR_HDR_STAT_WORDS (a raw UAV); COMMON between frames (a buffer's state decays to
-                                            //!< it when its list is done), the frame's clearing copy promotes it
-    uint64 nWordsList = 0;                  //!< the device's list (GetListSerial) the words were made UNORDERED_ACCESS in
-    ComPtr<ID3D12Resource> pReadback;       //!< D3D12_FRAMES copies of them, a frame slot each
+    ComPtr<ID3D12Resource> pWords;          //!< XR_HDR_STAT_WORDS (a raw UAV), its state kept by the device (TrackState)
+    ComPtr<ID3D12Resource> pReadback;      //!< D3D12_FRAMES copies of them, a frame slot each
     std::vector<int> Tables;                //!< the kernels' tables, D3D12_FRAMES each: the histogram's, the output's
     int nFrame = -1;                        //!< m_nFrames of the frame whose words are being added up (cleared then)
     SHdrStatsFrame Cur;                     //!< its settings and what was added up
@@ -1752,9 +1750,6 @@ public:
   //! The output's nits (once a frame) from the frame target and the highlight layer, both in
   //! PIXEL_SHADER_RESOURCE (the output pass, ReadFrameHdr10's).
   void DispatchHdrOutputStats(bool bCapture);
-  //! Before a kernel adds to the words: UNORDERED_ACCESS again where the frame's list was executed since
-  //! they were made so (a readback's FlushFrame, WaitAsyncCompute), which left them COMMON.
-  void HdrStatsWordsUav();
   //! Before EndFrame: this frame's words to its slot's copy; without statistics this frame, the frame
   //! D3D12_FRAMES back read all the same (none left for when they are on again).
   void EndHdrStats();

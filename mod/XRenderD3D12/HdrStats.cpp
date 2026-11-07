@@ -81,8 +81,8 @@ bool CD3D12Renderer::BeginHdrStats()
     const D3D12_RESOURCE_DESC Words = BufferDesc(WORDS_BYTES, D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS);
     const D3D12_RESOURCE_DESC Copies = BufferDesc((UINT64)WORDS_BYTES * D3D12_FRAMES, D3D12_RESOURCE_FLAG_NONE);
     s.Tables.assign(2 * D3D12_FRAMES, -1);
-    // The words common (a buffer is created so and is so again after each list: each frame's clearing copy promotes them), the
-    // read back copy destination.
+    // The words common (a buffer is created so; the device keeps their state from here on, TrackState), the read back copy
+    // destination.
     bool bOk = SUCCEEDED(pDevice->CreateCommittedResource(&Default, D3D12_HEAP_FLAG_NONE, &Words, D3D12_RESOURCE_STATE_COMMON, nullptr,
                                                           IID_PPV_ARGS(&s.pWords))) &&
                SUCCEEDED(pDevice->CreateCommittedResource(&Readback, D3D12_HEAP_FLAG_NONE, &Copies, D3D12_RESOURCE_STATE_COPY_DEST, nullptr,
@@ -123,6 +123,7 @@ bool CD3D12Renderer::BeginHdrStats()
     }
     s.pWords->SetName(L"XRenderD3D12 HDR statistics");
     s.pReadback->SetName(L"XRenderD3D12 HDR statistics (read back)");
+    m_pDevice->TrackState(s.pWords.Get(), D3D12_RESOURCE_STATE_COMMON);
     for (SHdrStatsFrame &f : s.Slots)
       f = {};
   }
@@ -134,9 +135,8 @@ bool CD3D12Renderer::BeginHdrStats()
     return false;
   memset(Zeros.pCPU, 0, WORDS_BYTES);
   m_pDevice->EndOffscreen();
+  m_pDevice->Require(s.pWords.Get(), D3D12_RESOURCE_STATE_COPY_DEST);
   m_pDevice->CopyBufferRegion(s.pWords.Get(), 0, Zeros.pResource, Zeros.nOffset, WORDS_BYTES);
-  m_pDevice->Transition(s.pWords.Get(), D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
-  s.nWordsList = m_pDevice->GetListSerial();
   s.nFrame = m_nFrames;
   s.Cur = {};
   s.Cur.nFrame = m_nFrameID;
@@ -172,7 +172,7 @@ void CD3D12Renderer::DispatchHdrHistogram(ID3D12Resource *pScene, int nWidth, in
   constexpr D3D12_RESOURCE_STATES READ = D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE | D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE;
   m_pDevice->Transition(pExposure, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, READ);
   m_pDevice->Transition(pMeter, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, READ);
-  HdrStatsWordsUav();
+  m_pDevice->Require(s.pWords.Get(), D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
   m_pCompute->Dispatch(m_pDevice->GetCmdList(), eD3D12K_HdrHistogram, CB.nGPU, nTable, nTable + CD3D12Compute::COMPUTE_SRVS,
                        (UINT)(nWidth + GROUP_PIXELS - 1) / GROUP_PIXELS, (UINT)(nHeight + GROUP_PIXELS - 1) / GROUP_PIXELS);
   m_pDevice->Transition(pMeter, READ, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
@@ -220,8 +220,8 @@ void CD3D12Renderer::DispatchHdrOutputStats(bool bCapture)
   constexpr D3D12_RESOURCE_STATES READ = D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE | D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE;
   m_pDevice->Transition(pFrame, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, READ);
   m_pDevice->Transition(pHighlight, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, READ);
-  // After the histogram's adds.
-  HdrStatsWordsUav();
+  // After the histogram's adds (none this frame: the barrier left out).
+  m_pDevice->Require(s.pWords.Get(), D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
   m_pDevice->UavBarrier(s.pWords.Get());
   m_pCompute->Dispatch(m_pDevice->GetCmdList(), eD3D12K_HdrOutputStats, CB.nGPU, nTable, nTable + CD3D12Compute::COMPUTE_SRVS,
                        (UINT)(w + GROUP_PIXELS - 1) / GROUP_PIXELS, (UINT)(h + GROUP_PIXELS - 1) / GROUP_PIXELS);
@@ -233,15 +233,6 @@ void CD3D12Renderer::DispatchHdrOutputStats(bool bCapture)
   f.bCapture = bCapture;
   f.fPaperWhite = m_HdrOut.fPaperWhite;
   f.fPeak = m_HdrOut.fPeak;
-}
-
-void CD3D12Renderer::HdrStatsWordsUav()
-{
-  SHdrStatsState &s = m_HdrStats;
-  if (s.nWordsList == m_pDevice->GetListSerial())
-    return;
-  m_pDevice->Transition(s.pWords.Get(), D3D12_RESOURCE_STATE_COMMON, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
-  s.nWordsList = m_pDevice->GetListSerial();
 }
 
 void CD3D12Renderer::EndHdrStats()
@@ -259,12 +250,9 @@ void CD3D12Renderer::EndHdrStats()
   }
   const int nSlot = m_pDevice->GetFrameSlot();
   m_pDevice->EndOffscreen();
-  // UNORDERED_ACCESS, or COMMON where the frame's list was executed after the last kernel (a readback's FlushFrame).
-  const D3D12_RESOURCE_STATES Before = s.nWordsList == m_pDevice->GetListSerial() ? D3D12_RESOURCE_STATE_UNORDERED_ACCESS : D3D12_RESOURCE_STATE_COMMON;
-  m_pDevice->Transition(s.pWords.Get(), Before, D3D12_RESOURCE_STATE_COPY_SOURCE);
+  // From the state the kernels left (the device keeps it, also where the frame's list ran between: a readback's FlushFrame).
+  m_pDevice->Require(s.pWords.Get(), D3D12_RESOURCE_STATE_COPY_SOURCE);
   m_pDevice->CopyBufferRegion(s.pReadback.Get(), (UINT64)WORDS_BYTES * nSlot, s.pWords.Get(), 0, WORDS_BYTES);
-  // Ready for a copy of zeros (COMMON once the list is done).
-  m_pDevice->Transition(s.pWords.Get(), D3D12_RESOURCE_STATE_COPY_SOURCE, D3D12_RESOURCE_STATE_COPY_DEST);
   s.Cur.Output = m_pDevice->GetOutput();
   // The camera of this frame, not of the frame the words are read in (D3D12_FRAMES later).
   s.Cur.vCamera = iSystem->GetViewCamera().GetPos();

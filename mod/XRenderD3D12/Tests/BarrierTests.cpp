@@ -430,6 +430,64 @@ XR_TEST(Barrier_BufferDecay)
   CHECK(!t.HasPending());
 }
 
+// Why: the HDR statistics' words (HdrStats.cpp) named the state before each transition by the device's list count:
+// COMMON where the frame's list had run since their last kernel (a readback's FlushFrame, WaitAsyncCompute), else the
+// state left. Kept by the tracker instead, each frame's clearing copy, the two kernels and the copy out name no state
+// before: every transition's before is the state the buffer has on the GPU (COMMON at a list's start) in both modes, the
+// list split between the kernels or not, two frames in a row; the UAV barrier between the kernels is given where they
+// share a list, left out in batches where the list ran between them.
+XR_TEST(Barrier_HdrStatsWords)
+{
+  ID3D12Resource *w = Res(1);
+  for (EMode eMode : { MODE_IMMEDIATE, MODE_BATCHED })
+    for (bool bSplit : { false, true })
+    {
+      CBarrierTracker t;
+      t.SetMode(eMode);
+      t.Register(w, COMMON, 1, true);
+      D3D12_RESOURCE_STATES Gpu = COMMON;
+      size_t nWrong = 0, nUav = 0;
+      const auto Give = [&](bool bWork) {
+        for (const SCall &c : Flush(t, bWork))
+          for (const D3D12_RESOURCE_BARRIER &b : c)
+            if (b.Type == D3D12_RESOURCE_BARRIER_TYPE_UAV)
+              nUav++;
+            else if (b.Transition.pResource == w)
+            {
+              nWrong += b.Transition.StateBefore != Gpu;
+              Gpu = b.Transition.StateAfter;
+            }
+      };
+      const auto Execute = [&] {
+        Give(false);
+        t.OnListExecuted();
+        Gpu = COMMON;
+        t.OnListOpened();
+      };
+      for (int nFrame = 0; nFrame < 2; nFrame++)
+      {
+        nUav = 0;
+        t.Require(w, DST);
+        Give(true);  // the copy of zeros
+        t.Require(w, UAV);
+        Give(true);  // the histogram
+        if (bSplit)
+          Execute();
+        t.Require(w, UAV);
+        t.Uav(w);
+        Give(true);  // the output's statistics
+        t.Require(w, SRC);
+        Give(true);  // the copy out
+        Execute();   // the frame's end
+        // The immediate mode gives it as it came.
+        CHECK_MSG(nUav == (bSplit && eMode == MODE_BATCHED ? 0u : 1u), std::to_string(nUav) + " UAV barriers, frame " + std::to_string(nFrame));
+      }
+      CHECK_MSG(nWrong == 0, std::to_string(nWrong) + (eMode == MODE_BATCHED ? " befores wrong, batched" : " befores wrong, immediate") +
+                               (bSplit ? ", split" : ""));
+      CHECK(t.TakeProblems().empty());
+    }
+}
+
 // Read states: one that holds the wanted one already does, two shader reads combine, the others as asked.
 XR_TEST(Barrier_ReadStates)
 {

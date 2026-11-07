@@ -464,7 +464,10 @@ ID3D12PipelineState *XrTest::CGpu::Pipeline(const SBytecode &Shader)
 void XrTest::CGpu::Execute()
 {
   FlushBarriers(false);
-  Ok(m_pList->Close(), "Close");
+  const HRESULT hrClose = m_pList->Close();
+  if (FAILED(hrClose))
+    CheckDebugMessages();  // why (with the debug layer)
+  Ok(hrClose, "Close");
   ID3D12CommandList *pLists[] = { m_pList.Get() };
   m_pQueue->ExecuteCommandLists(1, pLists);
   m_Barriers.OnListExecuted();

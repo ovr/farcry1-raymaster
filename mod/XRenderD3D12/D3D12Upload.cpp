@@ -593,6 +593,8 @@ void CD3D12Upload::ReleasePooled(int nPool, ID3D12Resource *pResource, int nHeap
     g_pRenderer->m_pDevice->DeferredRelease(pResource);
     return;
   }
+  // Its range comes again, and with it maybe its address: the barriers' tracker and check forget it (DeferredRelease's way).
+  g_pRenderer->m_pDevice->ForgetState(pResource);
   SPendingRange r = { nPool, nHeap, nHeapOffset, nHeapBytes, g_pRenderer->m_pDevice->GetFrameFence() };
   r.pResource.Attach(pResource);
   m_PendingRanges.push_back(std::move(r));
@@ -694,6 +696,7 @@ void CD3D12Upload::UpdateBuffer(CD3D12Buffer *pBuf, uint32 nOffset, const void *
   if (!AllocStaging(nSize, 16, Staging))
     return;
   memcpy(Staging.pCPU, pData, nSize);
+  g_pRenderer->m_pDevice->CheckUntracked(pBuf->m_pResource, "UpdateBuffer");
   Barrier(pBuf->m_pResource, D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES, BUFFER_STATE, D3D12_RESOURCE_STATE_COPY_DEST);
   m_pCmdList->CopyBufferRegion(pBuf->m_pResource, nOffset, Staging.pResource, Staging.nOffset, nSize);
   Barrier(pBuf->m_pResource, D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES, D3D12_RESOURCE_STATE_COPY_DEST, BUFFER_STATE);
@@ -1052,6 +1055,7 @@ void CD3D12Upload::UpdateTexture(CD3D12Texture *pTex, int nFace, int nMip, int x
   From.PlacedFootprint = Layout;
   From.PlacedFootprint.Offset += Staging.nOffset;
 
+  g_pRenderer->m_pDevice->CheckUntracked(pTex->m_pResource, "UpdateTexture");
   Barrier(pTex->m_pResource, nSubresource, TEXTURE_STATE, D3D12_RESOURCE_STATE_COPY_DEST);
   m_pCmdList->CopyTextureRegion(&Dst, (UINT)x, (UINT)y, 0, &From, nullptr);
   Barrier(pTex->m_pResource, nSubresource, D3D12_RESOURCE_STATE_COPY_DEST, TEXTURE_STATE);

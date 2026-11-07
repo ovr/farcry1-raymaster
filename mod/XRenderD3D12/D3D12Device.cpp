@@ -508,7 +508,7 @@ void CD3D12Device::DeferredRelease(IUnknown *p)
   if (!p)
     return;
   // A resource's address may come again (the barriers' tracker and check forget it; a key alone, never called).
-  m_Barriers.Forget(reinterpret_cast<ID3D12Resource *>(p));
+  ForgetState(reinterpret_cast<ID3D12Resource *>(p));
   SDeferred d;
   d.pObject.Attach(p);
   d.nFence = m_nNextFence;
@@ -853,6 +853,33 @@ void CD3D12Device::Transition(ID3D12Resource *pRes, D3D12_RESOURCE_STATES Before
   m_Barriers.Transition(pRes, Before, After, nSubresource);
   if (m_Barriers.GetMode() == Barriers::MODE_IMMEDIATE)
     FlushBarriers(false);
+}
+
+void CD3D12Device::TrackState(ID3D12Resource *pRes, D3D12_RESOURCE_STATES Initial, UINT nSubresources)
+{
+  if (pRes)
+    m_Barriers.Register(pRes, Initial, nSubresources, pRes->GetDesc().Dimension == D3D12_RESOURCE_DIMENSION_BUFFER);
+}
+
+void CD3D12Device::Require(ID3D12Resource *pRes, D3D12_RESOURCE_STATES After, UINT nSubresource)
+{
+  if (!m_bInFrame || !pRes)
+    return;
+  m_Barriers.Require(pRes, After, nSubresource);
+  if (m_Barriers.GetMode() == Barriers::MODE_IMMEDIATE)
+    FlushBarriers(false);
+}
+
+void CD3D12Device::CheckUntracked(ID3D12Resource *pRes, const char *szWhat)
+{
+  if (!m_bBarrierCheck || !pRes || !m_Barriers.IsRegistered(pRes))
+    return;
+  iLog->LogWarning("XRenderD3D12: barrier check (%s of %p, a resource whose state the device keeps)", szWhat, (void *)pRes);
+  if (m_pBarrierLog)
+  {
+    fprintf(m_pBarrierLog.get(), "frame %d, %s of %p, a resource whose state the device keeps\n", (int)g_pRenderer->m_nFrames, szWhat, (void *)pRes);
+    fflush(m_pBarrierLog.get());
+  }
 }
 
 void CD3D12Device::UavBarrier(ID3D12Resource *pRes)
@@ -1723,7 +1750,6 @@ void CD3D12Device::EndFrame(bool bPresent, bool bVSync)
     g_pRenderer->m_pUpload->Flush();
   ID3D12CommandList *pList = m_pCmdList.Get();
   m_pQueue->ExecuteCommandLists(1, &pList);
-  m_nListSerial++;
   OnFrameListExecuted();
   HRESULT hr = S_OK;
   m_fPresentMs = 0;
@@ -1812,7 +1838,6 @@ void CD3D12Device::WaitAsyncCompute()
     g_pRenderer->m_pUpload->Flush();
   ID3D12CommandList *pList = m_pCmdList.Get();
   m_pQueue->ExecuteCommandLists(1, &pList);
-  m_nListSerial++;
   OnFrameListExecuted();
   QueueWaitAsyncCompute();
   ContinueCmdList();
@@ -1867,7 +1892,6 @@ void CD3D12Device::FlushFrame()
     g_pRenderer->m_pUpload->Flush();
   ID3D12CommandList *pList = m_pCmdList.Get();
   m_pQueue->ExecuteCommandLists(1, &pList);
-  m_nListSerial++;
   OnFrameListExecuted();
   QueueWaitAsyncCompute();
   WaitForFence(Signal());
@@ -2152,7 +2176,6 @@ bool CD3D12Device::ReadBackTexture(ID3D12Resource *pTexture, D3D12_RESOURCE_STAT
     m_pCmdList->Close();
     ID3D12CommandList *pList = m_pCmdList.Get();
     m_pQueue->ExecuteCommandLists(1, &pList);
-    m_nListSerial++;
     WaitForFence(Signal());
   }
 
