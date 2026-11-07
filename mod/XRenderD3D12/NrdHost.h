@@ -43,7 +43,8 @@ struct SNrdView
   bool bRestart;              //!< the history is gone (a new instance, a cut, the frames before were not denoised)
 };
 
-//! The caller's textures (their size Init's, UNORDERED_ACCESS before and after Denoise).
+//! The caller's textures (their size Init's; their states kept by the device, TrackState, left as NRD's last passes
+//! want them).
 struct SNrdTextures
 {
   CD3D12Texture *pMotion;             //!< IN_MV: the uv where each pixel was, less its own (RG16F)
@@ -82,8 +83,9 @@ public:
   int GetWidth() const;
   int GetHeight() const;
 
-  //! Records the passes of a frame into pList (the descriptor heap of CD3D12Descriptors bound; the compute root signature
-  //! and pipeline state are NRD's after it); false when it could not (the next frame starts NRD's history again).
+  //! Records the passes of a frame into pList, the device's frame list (the descriptor heap of CD3D12Descriptors bound;
+  //! the compute root signature and pipeline state are NRD's after it); false when it could not (the next frame starts
+  //! NRD's history again).
   bool Denoise(ID3D12GraphicsCommandList *pList, const SNrdView &View, const SNrdSettings &Settings, const SNrdTextures &Textures);
   //! The passes of the last Denoise, the tables kept, the textures NRD has (for the frame dump).
   void GetStats(int &nPasses, int &nTables, int &nTextures) const;

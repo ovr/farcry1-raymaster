@@ -553,9 +553,10 @@ bool CD3D12Renderer::UpdatePathNrd(int w, int h)
     s.bNrdFailed = true;
     return false;
   }
-  // The hit distance's state kept by the device (made in UNORDERED_ACCESS); NRD's own textures and its inputs and output
-  // keep theirs in NRD's host. CSTrace's hit distance: u2 of its table (a null view before).
-  m_pDevice->TrackState(s.pHitDistance->m_pResource, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+  // Their states kept by the device (made in UNORDERED_ACCESS): the inputs' and output's asked for by the kernels and
+  // NRD's passes (NRD's host keeps its own textures so too). CSTrace's hit distance: u2 of its table (a null view before).
+  for (CD3D12Texture *pTex : { s.pHitDistance, s.pNrdIn[0], s.pNrdIn[1], s.pNrdIn[2], s.pNrdIn[3], s.pNrdOut })
+    m_pDevice->TrackState(pTex->m_pResource, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
   D3D12_UNORDERED_ACCESS_VIEW_DESC View = {};
   View.ViewDimension = D3D12_UAV_DIMENSION_TEXTURE2D;
   View.Format = PATH_HIT_FORMAT;
@@ -866,6 +867,8 @@ void CD3D12Renderer::DrawPathTrace()
     // NRD's inputs from the paths (the motion vectors readable meanwhile), NRD, its light as this frame's history.
     GpuSection("pt nrd");
     m_pDevice->Require(s.pHitDistance->m_pResource, PATH_KERNEL_READ);
+    for (CD3D12Texture *pTex : s.pNrdIn)
+      m_pDevice->Require(pTex->m_pResource, UAV);
     if (s.nVelocitySRV >= 0)
       m_pDevice->Transition(pVelocity, D3D12_RESOURCE_STATE_RENDER_TARGET, PATH_KERNEL_READ);
     m_pCompute->DispatchRays(pList, eD3D12K_PathNrdPack, FrameCB.nGPU, PassCB.nGPU, nTlas, nInstances, s.nNrdTable, gx, gy, nLights);
@@ -891,13 +894,11 @@ void CD3D12Renderer::DrawPathTrace()
     m_pNrd->GetStats(nNrdPasses, nTables, nTextures);
     m_pDevice->ForgetDrawState();
     s.nNrdFrame = bNrdDone ? m_nFrames : -1;
-    // NRD's output is NRD's host's (its state as the host leaves it).
-    m_pDevice->Transition(s.pNrdOut->m_pResource, UAV, PATH_KERNEL_READ);
+    m_pDevice->Require(s.pNrdOut->m_pResource, PATH_KERNEL_READ);
     m_pDevice->Require(pHistory->m_pResource, UAV);
     m_pDevice->Require(pFrames->m_pResource, UAV);
     m_pCompute->DispatchRays(pList, eD3D12K_PathNrdResolve, FrameCB.nGPU, PassCB.nGPU, nTlas, nInstances,
                              s.nTables[PATH_TABLE_TEMPORAL0 + nCur], gx, gy, nLights);
-    m_pDevice->Transition(s.pNrdOut->m_pResource, PATH_KERNEL_READ, UAV);
   }
   else
   {

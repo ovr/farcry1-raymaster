@@ -1468,7 +1468,9 @@ given one by one, on the GPU with the debug layer).
   both kinds of shader once), CMAA2's picture and edges, the bloom's levels (the device's
   offscreen target asks for a tracked one's state too), the path tracer's G-buffer and targets (its
   history, read by the next frame, stays readable), the sun's shadow's rays, history and mask and
-  FidelityFX Denoiser's textures (the frame before's depth stays readable). A buffer's state decays to `COMMON` when the frame's
+  FidelityFX Denoiser's textures (the frame before's depth stays readable), NRD's textures and its
+  inputs and output (its host asks for each pass's states; a pass given up on leaves the device's
+  states right). A buffer's state decays to `COMMON` when the frame's
   list has run (a readback's flush, the wait for the rays' compute list, the frame's end) and is
   given back by a transition at the next list's start, so that no implicit promotion goes past the
   tracker. A tracked resource is released through `DeferredRelease` or the upload pools, which

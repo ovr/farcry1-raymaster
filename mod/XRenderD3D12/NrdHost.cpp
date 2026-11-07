@@ -103,11 +103,10 @@ struct CD3D12Nrd::SImpl
   };
   std::vector<SPipeline> Pipelines;
 
-  //! NRD's own textures: its permanent pool, then its transient one.
+  //! NRD's own textures: its permanent pool, then its transient one (their states kept by the device: TrackState).
   struct STexture
   {
     CD3D12Texture *pTex = nullptr;
-    D3D12_RESOURCE_STATES eState = D3D12_RESOURCE_STATE_UNORDERED_ACCESS;
   };
   std::vector<STexture> Pool;
   uint32_t nPermanent = 0;
@@ -231,6 +230,8 @@ bool CD3D12Nrd::SImpl::CreatePool(const nrd::InstanceDesc &Desc)
       iLog->LogError("XRenderD3D12: NRD's texture %u (format %u, 1/%d) is not available", i, (unsigned)t.format, f);
       return false;
     }
+    // Made in UNORDERED_ACCESS; each pass asks for the state it wants (Denoise).
+    g_pRenderer->m_pDevice->TrackState(Pool[i].pTex->m_pResource, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
   }
   return true;
 }
@@ -382,7 +383,10 @@ bool CD3D12Nrd::Denoise(ID3D12GraphicsCommandList *pList, const SNrdView &View, 
 {
   SImpl &s = *m_p;
   s.nPasses = 0;
-  if (!pList || !s.pInstance || !Textures.pMotion || !Textures.pNormalRoughness || !Textures.pViewZ || !Textures.pDiffuse || !Textures.pOut)
+  // (the device keeps the textures' states on the frame's list only)
+  CD3D12Device *pDevice = g_pRenderer->m_pDevice.get();
+  if (!pList || pList != pDevice->GetCmdList() || !s.pInstance || !Textures.pMotion || !Textures.pNormalRoughness || !Textures.pViewZ ||
+      !Textures.pDiffuse || !Textures.pOut)
     return false;
 
   nrd::CommonSettings c = {};
@@ -420,24 +424,16 @@ bool CD3D12Nrd::Denoise(ID3D12GraphicsCommandList *pList, const SNrdView &View, 
   if (nrd::GetComputeDispatches(*s.pInstance, &Id, 1, pDispatches, nDispatches) != nrd::Result::SUCCESS)
     return false;
 
-  // The caller's textures: in UNORDERED_ACCESS now and after.
-  struct SUser
-  {
-    CD3D12Texture *pTex;
-    D3D12_RESOURCE_STATES eState;
-  };
-  SUser Users[] = { { Textures.pMotion, D3D12_RESOURCE_STATE_UNORDERED_ACCESS }, { Textures.pNormalRoughness, D3D12_RESOURCE_STATE_UNORDERED_ACCESS },
-                    { Textures.pViewZ, D3D12_RESOURCE_STATE_UNORDERED_ACCESS }, { Textures.pDiffuse, D3D12_RESOURCE_STATE_UNORDERED_ACCESS },
-                    { Textures.pOut, D3D12_RESOURCE_STATE_UNORDERED_ACCESS } };
-  const auto UserOf = [&](nrd::ResourceType Type) -> SUser *
+  // The caller's textures (their states kept by the device too).
+  const auto UserOf = [&](nrd::ResourceType Type) -> CD3D12Texture *
   {
     switch (Type)
     {
-    case nrd::ResourceType::IN_MV: return &Users[0];
-    case nrd::ResourceType::IN_NORMAL_ROUGHNESS: return &Users[1];
-    case nrd::ResourceType::IN_VIEWZ: return &Users[2];
-    case nrd::ResourceType::IN_DIFF_RADIANCE_HITDIST: return &Users[3];
-    case nrd::ResourceType::OUT_DIFF_RADIANCE_HITDIST: return &Users[4];
+    case nrd::ResourceType::IN_MV: return Textures.pMotion;
+    case nrd::ResourceType::IN_NORMAL_ROUGHNESS: return Textures.pNormalRoughness;
+    case nrd::ResourceType::IN_VIEWZ: return Textures.pViewZ;
+    case nrd::ResourceType::IN_DIFF_RADIANCE_HITDIST: return Textures.pDiffuse;
+    case nrd::ResourceType::OUT_DIFF_RADIANCE_HITDIST: return Textures.pOut;
     default: return nullptr;
     }
   };
@@ -445,7 +441,6 @@ bool CD3D12Nrd::Denoise(ID3D12GraphicsCommandList *pList, const SNrdView &View, 
   bool bOk = true;
   D3D12_GPU_VIRTUAL_ADDRESS nConstants = 0;
   std::vector<CD3D12Texture *> Bound;
-  CD3D12Device *pDevice = g_pRenderer->m_pDevice.get();
   for (uint32_t n = 0; n < nDispatches && bOk; n++)
   {
     const nrd::DispatchDesc &d = pDispatches[n];
@@ -454,41 +449,30 @@ bool CD3D12Nrd::Denoise(ID3D12GraphicsCommandList *pList, const SNrdView &View, 
       bOk = false;
       break;
     }
-    // Its textures with the states they want: each transition queued as its state is noted (a pass given up on half way
-    // leaves the states as the barriers made them, not as they were to be).
+    // Its textures with the states they want, asked of the device (a pass given up on half way leaves the states as the
+    // barriers queued so far make them, which the device knows).
     Bound.assign(d.resourcesNum, nullptr);
     pDevice->UavBarrierAllOn(pList);
     for (uint32_t i = 0; i < d.resourcesNum && bOk; i++)
     {
       const nrd::ResourceDesc &rd = d.resources[i];
-      D3D12_RESOURCE_STATES *pState = nullptr;
       if (rd.type == nrd::ResourceType::PERMANENT_POOL || rd.type == nrd::ResourceType::TRANSIENT_POOL)
       {
         const uint32_t nIndex = rd.indexInPool + (rd.type == nrd::ResourceType::TRANSIENT_POOL ? s.nPermanent : 0);
         if (nIndex < s.Pool.size())
-        {
           Bound[i] = s.Pool[nIndex].pTex;
-          pState = &s.Pool[nIndex].eState;
-        }
       }
-      else if (SUser *pUser = UserOf(rd.type))
-      {
-        Bound[i] = pUser->pTex;
-        pState = &pUser->eState;
-      }
-      if (!Bound[i] || !pState)
+      else
+        Bound[i] = UserOf(rd.type);
+      if (!Bound[i])
       {
         iLog->LogError("XRenderD3D12: NRD's pass \"%s\" wants %s, which the renderer does not have", d.name ? d.name : "?",
                        nrd::GetResourceTypeString(rd.type));
         bOk = false;
         break;
       }
-      const D3D12_RESOURCE_STATES eWant = rd.descriptorType == nrd::DescriptorType::TEXTURE ? NRD_READ : D3D12_RESOURCE_STATE_UNORDERED_ACCESS;
-      if (*pState != eWant)
-      {
-        pDevice->TransitionOn(pList, Bound[i]->m_pResource, *pState, eWant);
-        *pState = eWant;
-      }
+      pDevice->Require(Bound[i]->m_pResource,
+                       rd.descriptorType == nrd::DescriptorType::TEXTURE ? NRD_READ : D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
     }
     if (!bOk)
       break;
@@ -522,11 +506,8 @@ bool CD3D12Nrd::Denoise(ID3D12GraphicsCommandList *pList, const SNrdView &View, 
     s.nPasses++;
   }
 
-  // The caller's textures back in UNORDERED_ACCESS, NRD's writes done.
+  // NRD's writes done (the caller's textures left as its last passes wanted them: the next kernel asks for its own).
   pDevice->UavBarrierAllOn(pList);
-  for (SUser &u : Users)
-    if (u.eState != D3D12_RESOURCE_STATE_UNORDERED_ACCESS)
-      pDevice->TransitionOn(pList, u.pTex->m_pResource, u.eState, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
 
   s.Prev = View;
   s.bPrev = bOk;
