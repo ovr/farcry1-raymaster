@@ -704,6 +704,123 @@ XR_TEST(Barrier_PathTraceStates)
   }
 }
 
+// Why: the sun's shadow by rays (RaySun.cpp) moved its rays back to UNORDERED_ACCESS at each frame's end, and with
+// FidelityFX Denoiser every texture its kernels read, the frame before's depth too (read by this frame: UAV -> READ ->
+// UAV for nothing). Kept by the tracker, each kernel asking for its own: every before is the state on the GPU and each
+// kernel finds its states over frames of FidelityFX with two sets of casters and one, of the renderer's own denoise
+// (FidelityFX's textures released) and FidelityFX again (made anew), in both modes; a frame of FidelityFX with two sets
+// has 28 transitions instead of 34, of the renderer's own 6 as before.
+XR_TEST(Barrier_RaySunStates)
+{
+  constexpr D3D12_RESOURCE_STATES READ = NPSR;
+  ID3D12Resource *const pRays = Res(40), *pMask = Res(41), *pHist[2] = { Res(42), Res(43) };
+  // FidelityFX's: normals, depth of each frame, reprojected, filtered, moments of each set and frame, history and
+  // denoised of each set.
+  ID3D12Resource *const pNormals = Res(50), *pDepth[2] = { Res(51), Res(52) }, *pRepro = Res(53), *pFiltered = Res(54);
+  ID3D12Resource *const pMoments[2][2] = { { Res(55), Res(56) }, { Res(57), Res(58) } }, *pFHist[2] = { Res(59), Res(60) },
+                        *pDenoised[2] = { Res(61), Res(62) };
+  const std::vector<ID3D12Resource *> Ffx = { pNormals, pDepth[0], pDepth[1], pRepro, pFiltered, pMoments[0][0], pMoments[0][1],
+                                              pMoments[1][0], pMoments[1][1], pFHist[0], pFHist[1], pDenoised[0], pDenoised[1] };
+  for (EMode eMode : { MODE_IMMEDIATE, MODE_BATCHED })
+  {
+    CBarrierTracker t;
+    t.SetMode(eMode);
+    std::map<ID3D12Resource *, D3D12_RESOURCE_STATES> Gpu;
+    const auto Make = [&](ID3D12Resource *p) {
+      t.Register(p, UAV, 1, false);
+      Gpu[p] = UAV;
+    };
+    for (ID3D12Resource *p : { pRays, pMask, pHist[0], pHist[1] })
+      Make(p);
+    for (ID3D12Resource *p : Ffx)
+      Make(p);
+    size_t nWrong = 0, nMissing = 0, nTransitions = 0;
+    const auto Work = [&](std::initializer_list<std::pair<ID3D12Resource *, D3D12_RESOURCE_STATES>> Needs) {
+      for (const SCall &c : Flush(t, true))
+        for (const D3D12_RESOURCE_BARRIER &b : c)
+          if (b.Type == D3D12_RESOURCE_BARRIER_TYPE_TRANSITION)
+          {
+            nWrong += b.Transition.StateBefore != Gpu[b.Transition.pResource];
+            Gpu[b.Transition.pResource] = b.Transition.StateAfter;
+            nTransitions++;
+          }
+      for (const auto &n : Needs)
+        nMissing += n.second == UAV ? Gpu[n.first] != UAV : (Gpu[n.first] & n.second) != n.second;
+    };
+    // Frames: the number of FidelityFX's sets (0: the renderer's own denoise).
+    const int Sets[] = { 2, 2, 2, 1, 0, 0, 0, 2, 2 };
+    int nCur = 0, nFfxCur = 0;
+    for (size_t f = 0; f < std::size(Sets); f++)
+    {
+      nTransitions = 0;
+      if (f == 7)
+        for (ID3D12Resource *p : Ffx)
+          Make(p);  // made anew (Forget at the frame of the renderer's own)
+      t.Require(pRays, UAV);
+      Work({ { pRays, UAV } });  // CSTrace
+      t.Require(pRays, READ);
+      if (Sets[f])
+      {
+        const int c = nFfxCur ^= 1, p = c ^ 1;
+        t.Require(pNormals, UAV);
+        t.Require(pDepth[c], UAV);
+        Work({ { pRays, READ }, { pNormals, UAV }, { pDepth[c], UAV } });  // CSInputs
+        t.Require(pNormals, READ);
+        t.Require(pDepth[c], READ);
+        t.Require(pDepth[p], READ);
+        for (int s = 0; s < Sets[f]; s++)
+        {
+          Work({ { pNormals, READ }, { pDepth[c], READ } });  // CSPrepare (its masks: UAVs only)
+          t.Require(pFHist[s], READ);
+          t.Require(pMoments[s][p], READ);
+          t.Require(pRepro, UAV);
+          t.Require(pMoments[s][c], UAV);
+          Work({ { pDepth[c], READ }, { pDepth[p], READ }, { pFHist[s], READ }, { pMoments[s][p], READ }, { pRepro, UAV }, { pMoments[s][c], UAV } });
+          t.Require(pRepro, READ);
+          t.Require(pFiltered, UAV);
+          Work({ { pRepro, READ }, { pFiltered, UAV } });  // the filter's first pass
+          t.Require(pFiltered, READ);
+          t.Require(pFHist[s], UAV);
+          Work({ { pFiltered, READ }, { pFHist[s], UAV } });  // its second, into the next frame's history
+          t.Require(pFHist[s], READ);
+          t.Require(pDenoised[s], UAV);
+          Work({ { pFHist[s], READ }, { pDenoised[s], UAV } });  // its third
+          t.Require(pDenoised[s], READ);
+        }
+        t.Require(pMask, UAV);
+        Work({ { pDenoised[0], READ }, { pMask, UAV } });  // CSPack
+      }
+      else
+      {
+        if (f == 4)
+          for (ID3D12Resource *p : Ffx)
+          {
+            t.Forget(p);  // FidelityFX's textures released (ReleaseRaySunFfx)
+            Gpu.erase(p);
+          }
+        nCur ^= 1;
+        t.Require(pHist[nCur ^ 1], READ);
+        t.Require(pHist[nCur], UAV);
+        Work({ { pRays, READ }, { pHist[nCur ^ 1], READ }, { pHist[nCur], UAV } });  // CSTemporal
+        t.Require(pHist[nCur], READ);
+        t.Require(pMask, UAV);
+        Work({ { pHist[nCur], READ }, { pMask, UAV } });  // CSFilter
+      }
+      t.Require(pMask, PSR);
+      Work({ { pMask, PSR } });  // the opaque list
+      t.OnListExecuted();
+      t.OnListOpened();
+      if (f == 2)
+        CHECK_MSG(nTransitions == 28, std::to_string(nTransitions) + " transitions in a frame of FidelityFX, two sets (34 before)");
+      if (f == 6)
+        CHECK_MSG(nTransitions == 6, std::to_string(nTransitions) + " transitions in a frame of the renderer's own (6 before)");
+    }
+    CHECK_MSG(nWrong == 0, std::to_string(nWrong) + (eMode == MODE_BATCHED ? " befores wrong, batched" : " befores wrong, immediate"));
+    CHECK_MSG(nMissing == 0, std::to_string(nMissing) + (eMode == MODE_BATCHED ? " states missing, batched" : " states missing, immediate"));
+    CHECK(t.TakeProblems().empty());
+  }
+}
+
 // Read states: one that holds the wanted one already does, two shader reads combine, the others as asked.
 XR_TEST(Barrier_ReadStates)
 {

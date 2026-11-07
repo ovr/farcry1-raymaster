@@ -97,14 +97,8 @@ bool CD3D12Renderer::EnsureRaySunTargets(int nWidth, int nHeight)
   ID3D12GraphicsCommandList *pList = m_pDevice->GetCmdList();
   m_RaySun.pRays = m_pUpload->CreateComputeTarget(nWidth, nHeight, 1, RAYS_FORMAT, L"XRenderD3D12 sun's shadow rays");
   for (CD3D12Texture *&pTex : m_RaySun.pHistory)
-  {
     pTex = m_pUpload->CreateComputeTarget(nWidth, nHeight, 1, HISTORY_FORMAT, L"XRenderD3D12 sun's shadow history");
-    if (pTex && pList)
-      m_pDevice->Transition(pTex->m_pResource, D3D12_RESOURCE_STATE_UNORDERED_ACCESS, SHADER_READ);
-  }
   m_RaySun.pMask = m_pUpload->CreateComputeTarget(nWidth, nHeight, 1, MASK_FORMAT, L"XRenderD3D12 sun's shadow mask");
-  if (m_RaySun.pMask && pList)
-    m_pDevice->Transition(m_RaySun.pMask->m_pResource, D3D12_RESOURCE_STATE_UNORDERED_ACCESS, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
   m_RaySun.nWidth = nWidth;
   m_RaySun.nHeight = nHeight;
   m_RaySun.nFrame = -1;
@@ -114,6 +108,9 @@ bool CD3D12Renderer::EnsureRaySunTargets(int nWidth, int nHeight)
     ReleaseRaySun();
     return false;
   }
+  // Made in UNORDERED_ACCESS; their states kept by the device (each kernel asks for its own, nothing moved back after).
+  for (CD3D12Texture *pTex : { m_RaySun.pRays, m_RaySun.pHistory[0], m_RaySun.pHistory[1], m_RaySun.pMask })
+    m_pDevice->TrackState(pTex->m_pResource, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
   // The views in the texture table, the kernels' UAV tables (the slots they do not use null).
   D3D12_SHADER_RESOURCE_VIEW_DESC SRV = TextureSRV(RAYS_FORMAT);
   m_RaySun.pRays->m_nSRV = m_pDescriptors->AllocSRV(m_RaySun.pRays->m_pResource, &SRV);
@@ -219,6 +216,11 @@ bool CD3D12Renderer::EnsureRaySunFfx()
     ReleaseRaySunFfx();
     return false;
   }
+  // Made in UNORDERED_ACCESS; the states of those a kernel reads kept by the device (DenoiseRaySunFfx's kernels ask for
+  // theirs; the masks and tiles are written and read as UAVs only).
+  for (CD3D12Texture *pTex : All)
+    if (pTex != f.pTiles && pTex != f.pMeta)
+      m_pDevice->TrackState(pTex->m_pResource, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
   f.bFailed = false;
   f.nFrame = -1;
   iLog->Log("XRenderD3D12: the sun's shadow by rays denoised by AMD FidelityFX Denoiser 1.2 (shadows) at %d x %d", w, h);
@@ -378,26 +380,30 @@ void CD3D12Renderer::DrawRaySunMask()
   const D3D12_GPU_VIRTUAL_ADDRESS nInstances = m_pRayScene->GetInstances();
   const UINT nGroupsX = (UINT)(w + XR_RAY_SUN_GROUP - 1) / XR_RAY_SUN_GROUP, nGroupsY = (UINT)(h + XR_RAY_SUN_GROUP - 1) / XR_RAY_SUN_GROUP;
   const int nCellsX = (w + nStep - 1) / nStep, nCellsY = (h + nStep - 1) / nStep;
+  constexpr D3D12_RESOURCE_STATES UAV = D3D12_RESOURCE_STATE_UNORDERED_ACCESS;
   m_pDevice->Transition(pDepth, D3D12_RESOURCE_STATE_DEPTH_WRITE, DEPTH_READ);
+  // The targets' states kept by the device (EnsureRaySunTargets): each kernel asks for its own, nothing moved back after.
+  m_pDevice->Require(m_RaySun.pRays->m_pResource, UAV);
   m_pCompute->DispatchRays(pList, eD3D12K_RaySunTrace, FrameCB.nGPU, PassCB.nGPU, nTlas, nInstances, m_RaySun.nTables[TABLE_TRACE],
                            (UINT)(nCellsX + XR_RAY_SUN_GROUP - 1) / XR_RAY_SUN_GROUP, (UINT)(nCellsY + XR_RAY_SUN_GROUP - 1) / XR_RAY_SUN_GROUP);
-  m_pDevice->Transition(m_RaySun.pRays->m_pResource, D3D12_RESOURCE_STATE_UNORDERED_ACCESS, SHADER_READ);
+  m_pDevice->Require(m_RaySun.pRays->m_pResource, SHADER_READ);
   if (bFfx)
     DenoiseRaySunFfx(FrameCB.nGPU, rc, w, h);
   else
   {
     // Each pixel's ray (and with the denoise its history), then the mask.
     GpuSection("rt sun shadows history");
-    m_pDevice->Transition(pHistory->m_pResource, SHADER_READ, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+    m_pDevice->Require(pPrevHistory->m_pResource, SHADER_READ);
+    m_pDevice->Require(pHistory->m_pResource, UAV);
     m_pCompute->DispatchRays(pList, eD3D12K_RaySunTemporal, FrameCB.nGPU, PassCB.nGPU, 0, 0, m_RaySun.nTables[TABLE_TEMPORAL0 + nCur], nGroupsX,
                              nGroupsY);
-    m_pDevice->Transition(pHistory->m_pResource, D3D12_RESOURCE_STATE_UNORDERED_ACCESS, SHADER_READ);
+    m_pDevice->Require(pHistory->m_pResource, SHADER_READ);
     GpuSection("rt sun shadows filter");
-    m_pDevice->Transition(m_RaySun.pMask->m_pResource, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+    m_pDevice->Require(m_RaySun.pMask->m_pResource, UAV);
     m_pCompute->DispatchRays(pList, eD3D12K_RaySunFilter, FrameCB.nGPU, PassCB.nGPU, 0, 0, m_RaySun.nTables[TABLE_FILTER], nGroupsX, nGroupsY);
-    m_pDevice->Transition(m_RaySun.pMask->m_pResource, D3D12_RESOURCE_STATE_UNORDERED_ACCESS, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+    // Read by the opaque list's pixels.
+    m_pDevice->Require(m_RaySun.pMask->m_pResource, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
   }
-  m_pDevice->Transition(m_RaySun.pRays->m_pResource, SHADER_READ, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
   m_pDevice->Transition(pDepth, DEPTH_READ, D3D12_RESOURCE_STATE_DEPTH_WRITE);
 
   // The camera of this frame for the next one's history.
@@ -447,12 +453,16 @@ void CD3D12Renderer::DenoiseRaySunFfx(D3D12_GPU_VIRTUAL_ADDRESS FrameCB, const S
     memcpy(CB.pCPU, &xc, sizeof(xc));
     return CB.nGPU;
   };
-  const auto Read = [&](CD3D12Texture *pTex) { m_pDevice->Transition(pTex->m_pResource, D3D12_RESOURCE_STATE_UNORDERED_ACCESS, SHADER_READ); };
-  const auto Write = [&](CD3D12Texture *pTex) { m_pDevice->Transition(pTex->m_pResource, SHADER_READ, D3D12_RESOURCE_STATE_UNORDERED_ACCESS); };
+  // The textures' states kept by the device (EnsureRaySunFfx): each kernel asks for what it reads and writes, nothing moved
+  // back after (the frame before's depth, read by this one, stays readable).
+  const auto Read = [&](CD3D12Texture *pTex) { m_pDevice->Require(pTex->m_pResource, SHADER_READ); };
+  const auto Write = [&](CD3D12Texture *pTex) { m_pDevice->Require(pTex->m_pResource, D3D12_RESOURCE_STATE_UNORDERED_ACCESS); };
   const UINT gx = (UINT)(w + 7) / 8, gy = (UINT)(h + 7) / 8;
   const UINT nPrepareX = (UINT)((w + 7) / 8 + 3) / 4, nPrepareY = (UINT)((h + 3) / 4 + 3) / 4;
 
   GpuSection("rt sun shadows FidelityFX Denoiser");
+  Write(f.pNormals);
+  Write(f.pDepth[c]);
   m_pCompute->DispatchRays(pList, eD3D12K_RaySunFfxInputs, FrameCB, Constants(), 0, 0, f.nTables[FFX_INPUTS + c], gx, gy);
   Read(f.pNormals);
   Read(f.pDepth[c]);
@@ -474,43 +484,38 @@ void CD3D12Renderer::DenoiseRaySunFfx(D3D12_GPU_VIRTUAL_ADDRESS FrameCB, const S
     m_pDevice->UavBarrier(f.pTiles->m_pResource);
     Read(f.pHistory[s]);
     Read(f.pMoments[s][p]);
+    Write(f.pReprojected);
+    Write(f.pMoments[s][c]);
     m_pCompute->DispatchRays(pList, eD3D12K_RaySunFfxClassify, FrameCB, Constants(), 0, 0, f.nTables[FFX_CLASSIFY + 2 * s + c], gx, gy);
-    Write(f.pMoments[s][p]);
-    Write(f.pHistory[s]);
     Read(f.pReprojected);
     m_pDevice->UavBarrier(f.pMeta->m_pResource);
     // The filter's passes: steps 1, 2 (into the next frame's history), 4.
     xc.nSet[2] = 0;
     xc.nSet[3] = 1;
     xc.nInputs2[1] = (uint32)f.pReprojected->m_nSRV;
+    Write(f.pFiltered);
     m_pCompute->DispatchRays(pList, eD3D12K_RaySunFfxFilter, FrameCB, Constants(), 0, 0, f.nTables[FFX_FILTER0], gx, gy);
-    Write(f.pReprojected);
     Read(f.pFiltered);
     xc.nSet[2] = 1;
     xc.nSet[3] = 2;
     xc.nInputs2[1] = (uint32)f.pFiltered->m_nSRV;
+    Write(f.pHistory[s]);
     m_pCompute->DispatchRays(pList, eD3D12K_RaySunFfxFilter, FrameCB, Constants(), 0, 0, f.nTables[FFX_FILTER1 + s], gx, gy);
-    Write(f.pFiltered);
     Read(f.pHistory[s]);
     xc.nSet[2] = 2;
     xc.nSet[3] = 4;
     xc.nInputs2[1] = (uint32)f.pHistory[s]->m_nSRV;
+    Write(f.pDenoised[s]);
     m_pCompute->DispatchRays(pList, eD3D12K_RaySunFfxFilter, FrameCB, Constants(), 0, 0, f.nTables[FFX_FILTER2 + s], gx, gy);
-    Write(f.pHistory[s]);
     Read(f.pDenoised[s]);
   }
   // Both sets into the mask.
   xc.nInputs2[2] = (uint32)f.pDenoised[0]->m_nSRV;
   xc.nInputs2[3] = nSets > 1 ? (uint32)f.pDenoised[1]->m_nSRV : XR_RAY_NONE;
-  m_pDevice->Transition(m_RaySun.pMask->m_pResource, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+  Write(m_RaySun.pMask);
   m_pCompute->DispatchRays(pList, eD3D12K_RaySunFfxPack, FrameCB, Constants(), 0, 0, m_RaySun.nTables[TABLE_FILTER], gx, gy);
-  m_pDevice->Transition(m_RaySun.pMask->m_pResource, D3D12_RESOURCE_STATE_UNORDERED_ACCESS, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
-  for (int s = 0; s < nSets; s++)
-    Write(f.pDenoised[s]);
+  m_pDevice->Require(m_RaySun.pMask->m_pResource, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
   f.nSets = nSets;
-  Write(f.pNormals);
-  Write(f.pDepth[c]);
-  Write(f.pDepth[p]);
 }
 
 void CD3D12Renderer::EndRaySunMask()
