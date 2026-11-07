@@ -769,3 +769,16 @@ XR_TEST(Cmaa2_AlphaOfItsPixels)
   }
   CHECK(nChanged > 0);
 }
+
+//! CMAA2's barriers given in batches (D3D12Barriers.h) leave the picture as the barriers given one by one do, bit for
+//! bit, in fewer calls. Why: its arguments' buffer goes between UNORDERED_ACCESS and INDIRECT_ARGUMENT around each
+//! indirect kernel, its UAV barriers of all resources sit next to transitions (three frames on the same buffers).
+XR_TEST(Cmaa2_BarrierBatches)
+{
+  const SEdge e = ShallowEdge(64, 24, 8.3, 8);
+  SPicture a, b;
+  const Barriers::SStats Immediate = InBarrierMode(Barriers::MODE_IMMEDIATE, [&] { a = Cmaa2(e.Aliased, 2, 3); });
+  const Barriers::SStats Batched = InBarrierMode(Barriers::MODE_BATCHED, [&] { b = Cmaa2(e.Aliased, 2, 3); });
+  CHECK(!a.Px.empty() && SameBits(a.Px, b.Px));
+  CheckBatchedStats("CMAA2", Immediate, Batched);
+}

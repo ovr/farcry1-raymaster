@@ -24,6 +24,7 @@
 #include "Test_WakeColumns.h"
 #include "Test_WakeRowsInverse.h"
 #include "Test_WakeView.h"
+#include "Test_WakeHeight.h"
 #include "Test_WakeShape.h"
 
 #include <algorithm>
@@ -595,4 +596,26 @@ XR_TEST(Wake_Calm)
   CHECK(!Stirred({}));
   CHECK(!Stirred({ Moored, Moored }));
   CHECK(Stirred({ Moored, Swimmer }));
+}
+
+// Why: the wakes' barriers given in batches (D3D12Barriers.h) leave the window's state, the foam, the view and the
+// heights as the barriers given one by one do, bit for bit, in fewer calls: UpdateWakes' steps and frames on the same
+// textures (the state's read round trip between a frame's view and the next step's rows dropped).
+XR_TEST(Wake_BarrierBatches)
+{
+  const SBody Body = Ellipse(3, 1.2f, 0.8f, 0.4f);
+  const std::vector<SWakeFrame> Frames = Moving(Body, 2, -1, 0, 0, 0.05f, 12);
+  SWakeKernels k = Kernels();
+  k.Height = XR_BYTECODE(Test_WakeHeight);
+  SWakeOutput a, b;
+  const Barriers::SStats Immediate = InBarrierMode(Barriers::MODE_IMMEDIATE, [&] { a = Gpu().RunWake({}, Frames, k); });
+  const Barriers::SStats Batched = InBarrierMode(Barriers::MODE_BATCHED, [&] { b = Gpu().RunWake({}, Frames, k); });
+  CHECK(!a.State.empty() && SameBits(a.State, b.State));
+  CHECK(!a.Foam.empty() && SameBits(a.Foam, b.Foam));
+  for (int m = 0; m < XR_WAKE_MIPS; m++)
+  {
+    CHECK_MSG(SameBits(a.View[m], b.View[m]), "the view's mip " + std::to_string(m));
+    CHECK_MSG(!a.Heights[m].empty() && SameBits(a.Heights[m], b.Heights[m]), "the heights' mip " + std::to_string(m));
+  }
+  CheckBatchedStats("wakes", Immediate, Batched);
 }

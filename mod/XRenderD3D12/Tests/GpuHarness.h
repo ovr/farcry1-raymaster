@@ -38,10 +38,13 @@
 
 #include "TestTypes.h"
 
+#include "D3D12Barriers.h"
+
 #include <d3d12.h>
 #include <dxgi1_6.h>
 #include <wrl/client.h>
 
+#include <cstring>
 #include <map>
 #include <memory>
 #include <string>
@@ -203,7 +206,23 @@ namespace XrTest
     //! The radiance cache emptied (every word 0).
     void ClearCache();
 
+    //! How RunCmaa2, RunOcean(Frames) and RunWake give their barriers (D3D12Barriers.h as the renderer's device): each
+    //! as it comes (immediate, the default) or in batches before each dispatch and copy. The counts since the last reset.
+    void SetBarrierMode(Barriers::EMode eMode) { m_Barriers.SetMode(eMode); }
+    const Barriers::SStats &BarrierStats() const { return m_Barriers.Stats(); }
+    void ResetBarrierStats() { m_Barriers.ResetStats(); }
+    //! Kernel Step (TestHeaders.hlsl's CSBarrierStep: each item of the output times 3 plus nTest.y) run once for each
+    //! of Adds on one buffer registered with the tracker, Require(UNORDERED_ACCESS) and a UAV barrier before each; the
+    //! command list executed and a new one opened before step nSplit (the buffer's state decays to COMMON, the tracker
+    //! gives it back). The buffer's nItems uint4 items at the end.
+    std::vector<uint32> RunBarrierSteps(const SBytecode &Step, uint32 nItems, const std::vector<uint32> &Adds, size_t nSplit);
+
   private:
+    //! The tracker's barriers: a transition, the UAV barrier of all resources, what is queued given before work (a
+    //! dispatch, a copy; bWork false: before the list closes). Immediate: each request given at once.
+    void Move(ID3D12Resource *pRes, D3D12_RESOURCE_STATES eFrom, D3D12_RESOURCE_STATES eTo);
+    void UavAll();
+    void FlushBarriers(bool bWork = true);
     ComPtr<ID3D12Resource> Buffer(D3D12_HEAP_TYPE eHeap, size_t nBytes, D3D12_RESOURCE_STATES eState, bool bUav);
     ComPtr<ID3D12Resource> Upload(const void *pData, size_t nBytes);
     ID3D12PipelineState *Pipeline(const SBytecode &Shader);
@@ -255,6 +274,7 @@ namespace XrTest
     std::map<const void *, ComPtr<ID3D12PipelineState>> m_WidePipelines;
     ComPtr<ID3D12RootSignature> m_pComputeRootSignature;  //!< D3D12Compute.h's standard one (RunOcean), made at the first
     std::map<const void *, ComPtr<ID3D12PipelineState>> m_ComputePipelines;
+    Barriers::CBarrierTracker m_Barriers;
   };
 
   //! n half floats (IEEE 754 binary16) as floats.
@@ -264,6 +284,26 @@ namespace XrTest
   CGpu &Gpu();
   //! Whether Gpu() was made.
   bool GpuReady();
+
+  //! Run() made with the harness's barriers in a mode (D3D12Barriers.h): their counts; immediate again after.
+  template <class F> Barriers::SStats InBarrierMode(Barriers::EMode eMode, F &&Run)
+  {
+    struct SBack
+    {
+      ~SBack() { Gpu().SetBarrierMode(Barriers::MODE_IMMEDIATE); }
+    } Back;
+    Gpu().SetBarrierMode(eMode);
+    Gpu().ResetBarrierStats();
+    Run();
+    return Gpu().BarrierStats();
+  }
+  //! The same values bit for bit (a NaN as itself, -0 not 0).
+  template <class T> bool SameBits(const std::vector<T> &a, const std::vector<T> &b)
+  {
+    return a.size() == b.size() && (a.empty() || std::memcmp(a.data(), b.data(), a.size() * sizeof(T)) == 0);
+  }
+  //! The counts of the two modes' runs printed; the batches' fewer calls and as many drains at most.
+  void CheckBatchedStats(const char *szWhat, const Barriers::SStats &Immediate, const Barriers::SStats &Batched);
 }
 
 #endif

@@ -46,7 +46,7 @@ foreach(k Oct GBufferNormal Hdr HdrStats ToneMap HdrOutput SkyGlow FrameAverage 
           LightmapLight RenderMode Fxaa ArrayCoords BlendPictures PictureNoise WaterGlint WaterCap WaterCrest Foam FoamMix FoamLight FoamContact FoamSurf FoamClumps FoamShade CausticsRay CausticsDepth CausticsFar
           VolumeAttenuation VolumeInscatter VolumeSegments VolumeRay WakeShape Grid GridDisc UnderPath UnderPhase UnderSegments
           UnderInscatter UnderInscatterClosed UnderWindow UnderSurface UnderFog UnderClear CoverageAlpha FadeAlpha PbrSpecLobe PbrReflect PbrPrev PbrQuad PbrQuadShares PbrSpecOcclusion
-          SkinSpecular SkinParts RayFace)
+          SkinSpecular SkinParts RayFace BarrierStep)
     xrender_d3d12_test_shader(${k} "${headers}" cs_6_0 CS${k})
 endforeach()
 # SMAA 1x (Smaa.hlsli with third_party/smaa's SMAA.hlsl, SmaaBlend.hlsli): its edges and its blending at the high
@@ -142,6 +142,7 @@ set(XRENDERD3D12_TESTS_SOURCES
     SkinTests.cpp
     RayFaceTests.cpp
     DrawDistanceTests.cpp
+    BarrierTests.cpp
 )
 file(GLOB XRENDERD3D12_TESTS_HLSL "${CMAKE_CURRENT_SOURCE_DIR}/Shaders/*.hlsl" "${CMAKE_CURRENT_SOURCE_DIR}/Shaders/*.hlsli")
 set_source_files_properties(${XRENDERD3D12_TESTS_HLSL} PROPERTIES HEADER_FILE_ONLY ON)
@@ -159,3 +160,6 @@ target_link_libraries(XRenderD3D12Tests PRIVATE d3d12 dxgi)
 add_test(NAME XRenderD3D12Tests COMMAND XRenderD3D12Tests)
 # The same on WARP: the results do not depend on the adapter (nor on a GPU being there at all).
 add_test(NAME XRenderD3D12Tests.Warp COMMAND XRenderD3D12Tests --warp)
+# The barriers' tests and the runs whose barriers the tracker gives (D3D12Barriers.h) under the debug layer: any of its
+# warnings fails them (a transition's wrong before, a subresource twice in a call).
+add_test(NAME XRenderD3D12Tests.Debug COMMAND XRenderD3D12Tests --debug Barrier Ocean_ Caustics_ Wake_ Cmaa2)

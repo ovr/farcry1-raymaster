@@ -902,3 +902,25 @@ XR_TEST(Ocean_WhitecapCoverage)
     fBefore = fShare;
   }
 }
+
+// Why: the ocean's barriers given in batches (D3D12Barriers.h) leave the spectra, the waves and their mips, the foam and
+// its state as the barriers given one by one do, bit for bit, in fewer calls: frames in UpdateOcean's order on the same
+// textures (the transitions before each kernel in one call, a read state's round trip with no work in it dropped).
+XR_TEST(Ocean_BarrierBatches)
+{
+  SSea Sea;
+  MakeSea(5, Sea);
+  const std::vector<float> H0 = H0Of(Sea);
+  const std::vector<SOceanConstants> Frames = FoamFrames(Sea, 2.5, 5.0, 0.2, 30);
+  SOceanOutput a, b;
+  const Barriers::SStats Immediate = InBarrierMode(Barriers::MODE_IMMEDIATE, [&] { a = Gpu().RunOceanFrames(H0, Frames, FoamKernels()); });
+  const Barriers::SStats Batched = InBarrierMode(Barriers::MODE_BATCHED, [&] { b = Gpu().RunOceanFrames(H0, Frames, FoamKernels()); });
+  CHECK(!a.Fields.empty() && SameBits(a.Fields, b.Fields));
+  CHECK(!a.FoamState.empty() && SameBits(a.FoamState, b.FoamState));
+  for (int m = 0; m < XR_OCEAN_MIPS; m++)
+  {
+    CHECK_MSG(SameBits(a.Waves[m], b.Waves[m]), "the waves' mip " + std::to_string(m));
+    CHECK_MSG(SameBits(a.Foam[m], b.Foam[m]), "the foam's mip " + std::to_string(m));
+  }
+  CheckBatchedStats("ocean", Immediate, Batched);
+}

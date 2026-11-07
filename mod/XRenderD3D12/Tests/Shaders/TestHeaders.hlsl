@@ -39,6 +39,15 @@
 #include "Skin.hlsli"
 #include "RayFace.hlsli"
 
+//! A step of BarrierTests' runs (GpuHarness.h's RunBarrierSteps): each word of the output's first g_Test.nTest.x items
+//! times 3 plus g_Test.nTest.y (a step that read the output before the step before wrote it gives another value).
+[numthreads(64, 1, 1)]
+void CSBarrierStep(uint i : SV_DispatchThreadID)
+{
+  if (i < g_Test.nTest.x)
+    g_TestOut[i] = g_TestOut[i] * 3 + g_Test.nTest.y;
+}
+
 //! d3d12_RTFaceNormal's FaceFromRhw (RayFace.hlsli) of g_TestIn[6i] = (1 / w at the pixel, its change a pixel right, a
 //! pixel down, 0), [6i + 1] = (the pixel's NDC without the jitter, the NDC a pixel spans) and [6i + 2 .. 6i + 5] the
 //! world to clip matrix's rows: out[i].xyz.
