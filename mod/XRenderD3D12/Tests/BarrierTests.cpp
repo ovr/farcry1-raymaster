@@ -360,6 +360,46 @@ XR_TEST(Barrier_LeftPass)
   CHECK(t.TakeProblems().empty());
 }
 
+// Why: NRD's host (NrdHost.cpp, before step 318) noted the state a pass wanted for each texture and gave the pass's
+// barriers only when the pass got its descriptors and constants; a pass given up on half way (no table, no frame
+// memory) dropped them, and the next frame's transitions named states the textures never had. Queued as they are
+// noted (the device's TransitionOn), the barriers are given at the list's end all the same: the census sees the next
+// frame's befores right. The old way is shown failing under the census too.
+XR_TEST(Barrier_LeftPassExplicit)
+{
+  for (int nMode = 0; nMode < 2; nMode++)
+  {
+    // The barriers queued as the states are noted; the pass given up on.
+    CBarrierTracker t;
+    t.SetMode((EMode)nMode);
+    t.SetCensus(true);
+    D3D12_RESOURCE_STATES State[2] = { UAV, NPSR };
+    const D3D12_RESOURCE_STATES Want[2] = { NPSR, UAV };
+    t.UavAll();
+    for (int i = 0; i < 2; i++)
+    {
+      t.Transition(Res(i + 1), State[i], Want[i]);
+      State[i] = Want[i];
+    }
+    Flush(t, false);  // the list's end
+    // The next frame (the same list here: the census keeps textures' states over lists).
+    for (int i = 0; i < 2; i++)
+      t.Transition(Res(i + 1), State[i], D3D12_RESOURCE_STATE_COPY_SOURCE);
+    Flush(t);
+    CHECK(t.TakeProblems().empty());
+
+    // The old way: the states noted, the pass's array never given.
+    CBarrierTracker u;
+    u.SetMode((EMode)nMode);
+    u.SetCensus(true);
+    u.Transition(Res(1), PSR, UAV);
+    Flush(u);
+    u.Transition(Res(1), NPSR, SRC);  // NPSR noted for the pass, its barrier (UAV to NPSR) dropped with it
+    Flush(u);
+    CHECK(CountKind(u.TakeProblems(), PROBLEM_BEFORE) == 1);
+  }
+}
+
 // A registered buffer's state decays to COMMON when its list has run and comes back by an explicit transition when
 // the next one opens; a texture's does not decay.
 XR_TEST(Barrier_BufferDecay)

@@ -912,6 +912,18 @@ void CD3D12Device::TransitionOn(ID3D12GraphicsCommandList *pList, ID3D12Resource
   }
 }
 
+void CD3D12Device::UavBarrierAllOn(ID3D12GraphicsCommandList *pList)
+{
+  if (pList == m_pCmdList.Get())
+    UavBarrierAll();
+  else if (pList)
+  {
+    D3D12_RESOURCE_BARRIER b = {};
+    b.Type = D3D12_RESOURCE_BARRIER_TYPE_UAV;
+    pList->ResourceBarrier(1, &b);  // barriers flushed: another list's own
+  }
+}
+
 void CD3D12Device::RawBarrier(ID3D12Resource *pRes, D3D12_RESOURCE_STATES Before, D3D12_RESOURCE_STATES After, UINT nSubresource)
 {
   D3D12_RESOURCE_BARRIER b = {};
