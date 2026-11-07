@@ -621,6 +621,89 @@ XR_TEST(Barrier_BloomChain)
   }
 }
 
+// Why: the path tracer's targets (PathTrace.cpp) were moved back to UNORDERED_ACCESS at each frame's end, the history the
+// next frame reads too (simple: READ -> UAV -> READ for nothing). Kept by the tracker, each kernel asking for its own:
+// every before is the state on the GPU and each kernel finds its states over frames of NRD, of simple and of a switch
+// between them (NRD failed), in both modes; a frame of simple has 10 transitions instead of 14, of NRD 12 as before.
+XR_TEST(Barrier_PathTraceStates)
+{
+  constexpr D3D12_RESOURCE_STATES KREAD = NPSR, READ = PSR | NPSR;
+  ID3D12Resource *const pRays = Res(20), *pHit = Res(21), *pLight = Res(22), *pHighlights = Res(23);
+  ID3D12Resource *const pHistory[2] = { Res(24), Res(25) }, *pFrames[2] = { Res(26), Res(27) };
+  for (EMode eMode : { MODE_IMMEDIATE, MODE_BATCHED })
+  {
+    CBarrierTracker t;
+    t.SetMode(eMode);
+    std::map<ID3D12Resource *, D3D12_RESOURCE_STATES> Gpu;
+    for (ID3D12Resource *p : { pRays, pHit, pLight, pHighlights, pHistory[0], pHistory[1], pFrames[0], pFrames[1] })
+    {
+      t.Register(p, UAV, 1, false);
+      Gpu[p] = UAV;
+    }
+    size_t nWrong = 0, nMissing = 0, nTransitions = 0;
+    const auto Work = [&](std::initializer_list<std::pair<ID3D12Resource *, D3D12_RESOURCE_STATES>> Needs) {
+      for (const SCall &c : Flush(t, true))
+        for (const D3D12_RESOURCE_BARRIER &b : c)
+          if (b.Type == D3D12_RESOURCE_BARRIER_TYPE_TRANSITION)
+          {
+            nWrong += b.Transition.StateBefore != Gpu[b.Transition.pResource];
+            Gpu[b.Transition.pResource] = b.Transition.StateAfter;
+            nTransitions++;
+          }
+      for (const auto &n : Needs)
+        nMissing += n.second == UAV ? Gpu[n.first] != UAV : (Gpu[n.first] & n.second) != n.second;
+    };
+    // Frames: NRD, NRD, NRD (the steady one counted), simple (NRD failed), simple, simple (counted), NRD again.
+    const bool Nrd[] = { true, true, true, false, false, false, true };
+    int nCur = 0;
+    for (size_t f = 0; f < std::size(Nrd); f++)
+    {
+      nTransitions = 0;
+      nCur ^= 1;
+      ID3D12Resource *pH = pHistory[nCur], *pPrevH = pHistory[nCur ^ 1], *pF = pFrames[nCur], *pPrevF = pFrames[nCur ^ 1];
+      t.Require(pRays, UAV);
+      t.Require(pHit, UAV);
+      Work({ { pRays, UAV }, { pHit, UAV } });  // the cache's kernels
+      Work({ { pRays, UAV }, { pHit, UAV } });  // CSTrace
+      t.Require(pRays, KREAD);
+      if (Nrd[f])
+      {
+        t.Require(pHit, KREAD);
+        Work({ { pRays, KREAD }, { pHit, KREAD } });  // NRD's inputs (NRD itself on its own textures)
+        t.Require(pH, UAV);
+        t.Require(pF, UAV);
+        Work({ { pH, UAV }, { pF, UAV } });  // NRD's light into the history
+      }
+      else
+      {
+        t.Require(pPrevH, KREAD);
+        t.Require(pPrevF, KREAD);
+        t.Require(pH, UAV);
+        t.Require(pF, UAV);
+        Work({ { pRays, KREAD }, { pPrevH, KREAD }, { pPrevF, KREAD }, { pH, UAV }, { pF, UAV } });  // CSTemporal
+      }
+      t.Require(pH, KREAD);
+      t.Require(pF, KREAD);
+      t.Require(pLight, UAV);
+      t.Require(pHighlights, UAV);
+      Work({ { pRays, KREAD }, { pH, KREAD }, { pF, KREAD }, { pLight, UAV } });  // CSFilter
+      Work({ { pHighlights, UAV } });                                              // the highlights
+      t.Require(pLight, READ);
+      t.Require(pHighlights, READ);
+      Work({ { pLight, PSR }, { pHighlights, PSR } });  // the composite
+      t.OnListExecuted();
+      t.OnListOpened();
+      if (f == 2)
+        CHECK_MSG(nTransitions == 12, std::to_string(nTransitions) + " transitions in a frame of NRD (12 before)");
+      if (f == 5)
+        CHECK_MSG(nTransitions == 10, std::to_string(nTransitions) + " transitions in a frame of simple (14 before)");
+    }
+    CHECK_MSG(nWrong == 0, std::to_string(nWrong) + (eMode == MODE_BATCHED ? " befores wrong, batched" : " befores wrong, immediate"));
+    CHECK_MSG(nMissing == 0, std::to_string(nMissing) + (eMode == MODE_BATCHED ? " states missing, batched" : " states missing, immediate"));
+    CHECK(t.TakeProblems().empty());
+  }
+}
+
 // Read states: one that holds the wanted one already does, two shader reads combine, the others as asked.
 XR_TEST(Barrier_ReadStates)
 {
