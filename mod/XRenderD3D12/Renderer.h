@@ -88,6 +88,9 @@ struct SFrameStats
   double fDraws = 0;              //!< DrawGeometry's draws
   double fPSOChanges = 0;         //!< of them, those with another pipeline state than the draw before
   double fTriangles = 0;
+  double fBarrierCalls = 0;       //!< the frame's ResourceBarrier calls (CD3D12Device::GetBarrierStats), those after work, the barriers
+  double fBarrierDrains = 0;
+  double fBarriers = 0;
   double fFrameMemory = 0;        //!< bytes of per frame memory (CD3D12Upload::AllocFrame)
   uint64 nVideoUsage = 0;         //!< the process' video memory (DXGI) and how much it may use
   uint64 nVideoBudget = 0;
@@ -2202,6 +2205,8 @@ public:
   int CV_d3d12_WaterUnderClear = 1;   //!< under the ocean's surface the light its water scatters from the scene's sun and sky, its scattering the attenuation less pure water's absorption; the surface beyond Snell's window the water below's light (Underwater.hlsli's UnderClearSource; 0: twice the fog volume's colour, the frames before)
   int CV_d3d12_GpuTimes = 0;          //!< N: the GPU time of the frame's sections to the log every N frames
   int CV_d3d12_FrameLog = 0;          //!< 1: a line per frame to XRenderD3D12_frames.txt (LogFrame), 2 with the engine's profilers
+  int CV_d3d12_BarrierBatch = 1;      //!< CD3D12Device::SetBarrierMode: 1 the frame's barriers in batches, 2 also at each GPU section, 0 each at once
+  int CV_d3d12_BarrierCheck = 0;      //!< 1: the transitions' befores checked, the problems logged
   int CV_d3d12_CpuSamples = 0;        //!< N: the render thread's stack every N microseconds, to XRenderD3D12_samples.txt at 0 (CpuSampler)
   int CV_r_Stats = 0;                 //!< the statistics on the screen: 1 the GPU time of the passes, 2 also the memory
   float CV_d3d12_WaterReflectionScale = 0.5f;   //!< size of the water reflection, a fraction of the screen's

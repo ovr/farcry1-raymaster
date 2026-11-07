@@ -224,7 +224,7 @@ void CD3D12Renderer::BeginAOTarget(const SRenderItem *pItems, int nItems)
 
   static const float Zero[4] = {};
   m_pDevice->Transition(m_pAOAmbient->m_pResource, AMBIENT_READ, D3D12_RESOURCE_STATE_RENDER_TARGET);
-  m_pDevice->GetCmdList()->ClearRenderTargetView(m_pAOAmbient->m_RTV, Zero, 0, nullptr);
+  m_pDevice->ClearRenderTargetView(m_pAOAmbient->m_RTV, Zero);
   m_pDevice->BindAmbient(m_pAOAmbient->m_RTV, m_pAOAmbient->m_pResource);
   m_bAOAmbientBound = true;
 }

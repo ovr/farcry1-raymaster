@@ -525,13 +525,15 @@ bool CD3D12Nrd::Denoise(ID3D12GraphicsCommandList *pList, const SNrdView &View, 
         memcpy(Mem.pCPU, d.constantBufferData, d.constantBufferDataSize);
       nConstants = Mem.nGPU;
     }
-    pList->ResourceBarrier((UINT)Barriers.size(), Barriers.data());
+    CD3D12Device *pDevice = g_pRenderer->m_pDevice.get();
+    pDevice->ResourceBarriersOn(pList, (UINT)Barriers.size(), Barriers.data());
     const SImpl::SPipeline &P = s.Pipelines[d.pipelineIndex];
     pList->SetComputeRootSignature(P.pRoot.Get());
     pList->SetPipelineState(P.pPSO.Get());
     pList->SetComputeRootDescriptorTable(0, s.pDescriptors->GetGPU(nTable));
     pList->SetComputeRootConstantBufferView(1, nConstants);
-    pList->Dispatch(d.gridWidth, d.gridHeight, 1);
+    pDevice->FlushBarriersFor(pList);
+    pList->Dispatch(d.gridWidth, d.gridHeight, 1);  // barriers flushed
     s.nPasses++;
   }
 
@@ -543,7 +545,7 @@ bool CD3D12Nrd::Denoise(ID3D12GraphicsCommandList *pList, const SNrdView &View, 
   for (SUser &u : Users)
     if (u.eState != D3D12_RESOURCE_STATE_UNORDERED_ACCESS)
       Barriers.push_back(Transition(u.pTex->m_pResource, u.eState, D3D12_RESOURCE_STATE_UNORDERED_ACCESS));
-  pList->ResourceBarrier((UINT)Barriers.size(), Barriers.data());
+  g_pRenderer->m_pDevice->ResourceBarriersOn(pList, (UINT)Barriers.size(), Barriers.data());
 
   s.Prev = View;
   s.bPrev = bOk;

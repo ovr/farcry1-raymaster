@@ -75,7 +75,8 @@ void Barrier(ID3D12GraphicsCommandList *pList, ID3D12Resource *pRes, D3D12_RESOU
   b.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
   b.Transition.StateBefore = Before;
   b.Transition.StateAfter = After;
-  pList->ResourceBarrier(1, &b);
+  // On the frame's list after what the device queued.
+  g_pRenderer->m_pDevice->ResourceBarriersOn(pList, 1, &b);
 }
 
 constexpr D3D12_RESOURCE_STATES UAV = D3D12_RESOURCE_STATE_UNORDERED_ACCESS;

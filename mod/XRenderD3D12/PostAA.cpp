@@ -256,7 +256,7 @@ void CD3D12Renderer::CopyLayer(CD3D12Texture *pCopy)
   ID3D12Resource *pLayer = m_pDevice->GetHighlight();
   m_pDevice->Transition(pLayer, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, D3D12_RESOURCE_STATE_COPY_SOURCE);
   m_pDevice->Transition(pCopy->m_pResource, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, D3D12_RESOURCE_STATE_COPY_DEST);
-  m_pDevice->GetCmdList()->CopyResource(pCopy->m_pResource, pLayer);
+  m_pDevice->CopyResource(pCopy->m_pResource, pLayer);
   m_pDevice->Transition(pCopy->m_pResource, D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
   m_pDevice->Transition(pLayer, D3D12_RESOURCE_STATE_COPY_SOURCE, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
 }
@@ -374,7 +374,7 @@ void UavBarrierAll(ID3D12GraphicsCommandList *pList)
 {
   D3D12_RESOURCE_BARRIER b = {};
   b.Type = D3D12_RESOURCE_BARRIER_TYPE_UAV;
-  pList->ResourceBarrier(1, &b);
+  g_pRenderer->m_pDevice->ResourceBarriersOn(pList, 1, &b);
 }
 
 //! CMAA2's working buffers (m_pCmaa2Buffers), the UAVs u2, u3, u4, u6, u7 of its table.
@@ -522,7 +522,7 @@ bool CD3D12Renderer::DrawCmaa2Passes(ID3D12Resource *pCopy, int w, int h, int nQ
   // The copy into CMAA2's picture, which its kernels read until the last one writes it.
   m_pDevice->Transition(pCopy, PS_READ, D3D12_RESOURCE_STATE_COPY_SOURCE);
   m_pDevice->Transition(pColor, PS_READ, D3D12_RESOURCE_STATE_COPY_DEST);
-  pList->CopyResource(pColor, pCopy);
+  m_pDevice->CopyResource(pColor, pCopy);
   m_pDevice->Transition(pColor, D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
   m_pDevice->Transition(pCopy, D3D12_RESOURCE_STATE_COPY_SOURCE, PS_READ);
   m_pDevice->Transition(pEdges, PS_READ, UAV);

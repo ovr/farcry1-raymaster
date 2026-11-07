@@ -588,7 +588,7 @@ bool CD3D12Renderer::EnsureExposureTargets()
   m_Hdr.pExposureWords->SetName(L"XRenderD3D12 exposure histogram");
   memset(Zeros.pCPU, 0, EXPOSURE_WORDS_BYTES);
   m_pDevice->EndOffscreen();
-  m_pDevice->GetCmdList()->CopyBufferRegion(m_Hdr.pExposureWords.Get(), 0, Zeros.pResource, Zeros.nOffset, EXPOSURE_WORDS_BYTES);
+  m_pDevice->CopyBufferRegion(m_Hdr.pExposureWords.Get(), 0, Zeros.pResource, Zeros.nOffset, EXPOSURE_WORDS_BYTES);
   m_pDevice->Transition(m_Hdr.pExposureWords.Get(), D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
   return true;
 }

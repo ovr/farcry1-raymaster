@@ -17,6 +17,8 @@
 
 #pragma once
 
+#include "D3D12Barriers.h"
+
 #include <span>
 
 //! Where CD3D12Upload::CreateDepthTarget put a resource.
@@ -193,10 +195,54 @@ public:
   //! Binds the descriptor heap, the root signature and the texture table (after a pass that set
   //! its own, as an upscaler's).
   void BindRootSignature();
-  //! A transition barrier of all of pRes.
-  void Transition(ID3D12Resource *pRes, D3D12_RESOURCE_STATES Before, D3D12_RESOURCE_STATES After);
-  //! A UAV barrier of pRes: the unordered access writes before it are done for the accesses after it.
+  //! The frame's barriers (D3D12Barriers.h). With d3d12_BarrierBatch they queue up and are given before the next
+  //! work on the frame's list in one call (a chain of transitions of a resource merged, a round trip with no work in
+  //! it left out), else each at once. Outside a frame nothing.
+  //! A transition barrier of pRes, of all of it or of one subresource.
+  void Transition(ID3D12Resource *pRes, D3D12_RESOURCE_STATES Before, D3D12_RESOURCE_STATES After,
+                  UINT nSubresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES);
+  //! A UAV barrier of pRes: the unordered access writes before it are done for the accesses after it (queued: left out
+  //! next to a transition of all of pRes into or out of UNORDERED_ACCESS, or under UavBarrierAll).
   void UavBarrier(ID3D12Resource *pRes);
+  //! A UAV barrier of all resources.
+  void UavBarrierAll();
+  //! Barriers given as they are, after what is queued, in a call of their own (a pass's own array, a library's).
+  void ResourceBarriers(UINT n, const D3D12_RESOURCE_BARRIER *pBarriers);
+  //! ResourceBarriers when pList is the frame's list, else given on pList at once (that list's own).
+  void ResourceBarriersOn(ID3D12GraphicsCommandList *pList, UINT n, const D3D12_RESOURCE_BARRIER *pBarriers);
+  //! A library left pRes in State by barriers of its own (d3d12_BarrierCheck's census learns it).
+  void Assume(ID3D12Resource *pRes, D3D12_RESOURCE_STATES State)
+  {
+    if (m_bInFrame && pRes)
+      m_Barriers.Assume(pRes, State);
+  }
+  //! What is queued given to the frame's list: before work recorded on it (bWork: a draw, a dispatch, a copy, a
+  //! clear, a library's passes; the next UAV barriers wait for it) or before barriers given on it directly (false).
+  //! Every place that records work on the frame's list calls it first (the test Barrier_SourceLint).
+  void FlushBarriers(bool bWork = true)
+  {
+    if (m_bInFrame)
+      m_Barriers.Flush([this](UINT n, const D3D12_RESOURCE_BARRIER *p) { m_pCmdList->ResourceBarrier(n, p); }, bWork);
+  }
+  //! FlushBarriers before work on pList when it is the frame's list (another list's work has its own barriers).
+  void FlushBarriersFor(ID3D12GraphicsCommandList *pList)
+  {
+    if (pList == m_pCmdList.Get())
+      FlushBarriers();
+  }
+  //! Copies and clears on the frame's list after what is queued.
+  void CopyResource(ID3D12Resource *pDst, ID3D12Resource *pSrc);
+  void CopyBufferRegion(ID3D12Resource *pDst, UINT64 nDstOffset, ID3D12Resource *pSrc, UINT64 nSrcOffset, UINT64 nBytes);
+  void ClearRenderTargetView(D3D12_CPU_DESCRIPTOR_HANDLE hRTV, const float Color[4]);
+  //! d3d12_BarrierBatch (0 each barrier at once, 1 batches, 2 batches that GpuSection gives too) and
+  //! d3d12_BarrierCheck (the transitions' befores checked, the problems logged), taken at the next BeginFrame.
+  void SetBarrierMode(int nBatch, bool bCheck)
+  {
+    m_nBarrierBatchWanted = nBatch;
+    m_bBarrierCheckWanted = bCheck;
+  }
+  //! The barriers the last frame gave (its ResourceBarrier calls, those after work, the barriers by kind).
+  const Barriers::SStats &GetBarrierStats() const { return m_LastBarrierStats; }
 
   //! The scene targets of an upscaler: the main view drawn at nWidth x nHeight into a colour target
   //! (ColorFormat: D3D12_BACKBUFFER_FORMAT, or D3D12_HDR_FORMAT), the motion vectors
@@ -445,6 +491,13 @@ private:
   bool CreateLayer();
   //! The frame target from its state to State.
   void SetFrameState(D3D12_RESOURCE_STATES State);
+  //! A transition given on the frame's list as it is, after what is queued (the device's own; between frames on the
+  //! list ReadBackTexture opened).
+  void RawBarrier(ID3D12Resource *pRes, D3D12_RESOURCE_STATES Before, D3D12_RESOURCE_STATES After,
+                  UINT nSubresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES);
+  //! The frame list was executed / a list opened for the frame: the tracker told (and the check's problems logged).
+  void OnFrameListExecuted();
+  void LogBarrierProblems();
   //! The views after the back buffers': n 0 the scene's colour, 1 its motion vectors, 2 the
   //! upscaler's depth; 3 the HDR target; 4 the frame target, 5 the highlight layer; 6 and 7 null
   //! views of the motion vectors' and the upscaler depth's formats (BindAmbient); 8 MSAA's colour,
@@ -479,6 +532,7 @@ private:
   ComPtr<IDXGISwapChain3> m_pSwapChain;
   ComPtr<ID3D12InfoQueue> m_pInfoQueue;
   std::unique_ptr<FILE, int (*)(FILE *)> m_pDebugLog{ nullptr, &fclose };  //!< XRenderD3D12_debug.txt, with the debug layer
+  std::unique_ptr<FILE, int (*)(FILE *)> m_pBarrierLog{ nullptr, &fclose };  //!< XRenderD3D12_barriers.txt, with d3d12_BarrierCheck
   int m_nDred = 0;                                  //!< GetDred
   bool m_bRemovedReported = false;                  //!< ReportDeviceRemoved done
   const char *m_szDredSection = nullptr;            //!< the frame list's last marker (DredMarker)
@@ -553,6 +607,13 @@ private:
   int m_nFrameSlot = 0;
   uint64 m_nListSerial = 0;                         //!< GetListSerial
   bool m_bInFrame = false;
+
+  Barriers::CBarrierTracker m_Barriers;             //!< the frame list's barriers (Transition, UavBarrier)
+  int m_nBarrierBatchWanted = 0;                    //!< SetBarrierMode, taken at BeginFrame
+  bool m_bBarrierCheckWanted = false;
+  bool m_bBarrierSections = false;                  //!< d3d12_BarrierBatch 2: GpuSection gives what is queued
+  bool m_bBarrierCheck = false;                     //!< d3d12_BarrierCheck in this frame
+  Barriers::SStats m_LastBarrierStats;              //!< GetBarrierStats
 
   ComPtr<ID3D12QueryHeap> m_pTimestamps;            //!< GPU_MARKS per frame slot; NULL: no GPU timing
   ComPtr<ID3D12Resource> m_pTimestampReadback;      //!< the resolved timestamps, in the same places
