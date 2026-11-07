@@ -1436,6 +1436,51 @@ while it plays. The file is a header (magic,
 keys the device refuses and the repeats are dropped and the file written again. Deleting it gives
 the first run's behaviour back; the pictures are the same either way.
 
+## Resource states and barriers
+
+The frame's barriers go through the device (`CD3D12Device::Transition`, `UavBarrier`,
+`UavBarrierAll`, `ResourceBarriers`) into a tracker (`D3D12Barriers.h`: a header without the
+renderer's types, tested in `Tests/BarrierTests.cpp` on made-up resources and, against barriers
+given one by one, on the GPU with the debug layer).
+
+- `d3d12_BarrierBatch 1` (the default) queues them and gives them in one `ResourceBarrier` call
+  before the next work on the frame's list: a draw, a dispatch, a copy, a clear, a resolve, a
+  build of the rays' structures, a library's passes (`FlushBarriers`). In the queue a chain of
+  transitions of a subresource becomes one (A to B to C is A to C), a round trip through read
+  states with no work in it is left out, and a round trip out of `UNORDERED_ACCESS` and back is a
+  UAV barrier. A UAV barrier is left out next to a transition of the resource into or out of
+  `UNORDERED_ACCESS`, under a UAV barrier of all resources, or when no work came since the one
+  before. Two transitions that one call cannot hold (a round trip through a write state, a
+  subresource after the whole resource) go in two calls. Barriers given as an array (a pass's
+  own, NRD's, the temporal upscaler's) come after what is queued, in a call of their own. A
+  barrier is never added: a pass that writes several mips without one between them stays so.
+  `0` gives each barrier at once in a call of its own, as before step 317. `2` batches too, but
+  also gives what is queued at each `d3d12_GpuTimes` section; with `1` the barriers queued at the
+  end of a section count in the next one's time. The mode is taken at the frame's start. The
+  pictures are the same in the three.
+- Every command recorded on a command list directly (not through the device's or
+  `CD3D12Compute`'s wrappers, which give the queue first) says `barriers flushed` in its
+  statement. The test `Barrier_SourceLint` fails on one that does not, except in
+  `D3D12Upload.cpp` (the uploads' own list) and `D3D12Dred.cpp`.
+- `d3d12_BarrierCheck 1` makes the tracker keep the state each explicit transition leaves, by
+  resource and subresource. A buffer forgets it when the list is executed (it decays to `COMMON`).
+  A transition whose before is not that state is written once to
+  `farcry1_testing1/XRenderD3D12_barriers.txt` (never committed; the GPU section, the problem,
+  the resource's name with the debug layer or DRED, the subresource, the state kept and the
+  before given; a line says when the check was turned on) and to the console. The engine's log
+  file drops the renderer's lines once the game runs, so the check has a file of its own. The
+  debug layer checks befores within one list only: a buffer's before in the next list goes past
+  it.
+- `r_Stats` shows `Barrier calls N (M after work), barriers K` per frame: the `ResourceBarrier`
+  calls, those that come after work recorded since the call before (the GPU drains for each of
+  them), and the barriers. `d3d12_FrameLog`'s last field has them by kind
+  (`barrier_calls=..;barrier_drains=..;barrier_transitions=..;barrier_uav=..;barrier_uav_all=..`).
+  In the 4K sweeps of ten levels (raster, the rays' effects as `system.cfg` has them) a frame
+  makes 92-152 calls with `0` and 69-109 with `1`, with the path tracer 163-167 and 110-114; the
+  calls after work are as many either way (39-65, 70-73), and the frame and section times are
+  the same within the runs' spread: barriers in a row with no work between them were one wait
+  before too. What the GPU waits for less is the tracked states' work (resting states left out).
+
 ## Statistics and profiling
 
 - The engine's statistics: `GetPolyCount` gives the triangles drawn in the frame the last `Update`

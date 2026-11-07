@@ -125,7 +125,7 @@ public:
   void Flush(ID3D12GraphicsCommandList *pList)
   {
     if (m_n)
-      pList->ResourceBarrier(m_n, m_Barriers);
+      g_pRenderer->m_pDevice->ResourceBarriersOn(pList, m_n, m_Barriers);
     m_n = 0;
   }
 

@@ -121,6 +121,8 @@ bool CAOCacao::Dispatch(const SAOFrame &Frame)
       Proj.elements[r][c] = Frame.Proj[r * 4 + c];
   for (int i = 0; i < 4; i++)
     Identity.elements[i][i] = 1;
+  // Its passes after what the device queued.
+  g_pRenderer->m_pDevice->FlushBarriers();
   const FFX_CACAO_Status Status = FFX_CACAO_D3D12Draw(Context(), Frame.pCmdList, &Proj, &Identity);
   if (Status != FFX_CACAO_STATUS_OK)
   {
@@ -130,13 +132,14 @@ bool CAOCacao::Dispatch(const SAOFrame &Frame)
     return false;
   }
   // It leaves the output in GENERIC_READ.
+  g_pRenderer->m_pDevice->Assume(m_pOutput, D3D12_RESOURCE_STATE_GENERIC_READ);
   D3D12_RESOURCE_BARRIER b = {};
   b.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
   b.Transition.pResource = m_pOutput;
   b.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
   b.Transition.StateBefore = D3D12_RESOURCE_STATE_GENERIC_READ;
   b.Transition.StateAfter = D3D12_RESOURCE_STATE_UNORDERED_ACCESS;
-  Frame.pCmdList->ResourceBarrier(1, &b);
+  g_pRenderer->m_pDevice->ResourceBarriers(1, &b);
   return true;
 }
 

@@ -134,8 +134,7 @@ bool CD3D12Renderer::BeginHdrStats()
     return false;
   memset(Zeros.pCPU, 0, WORDS_BYTES);
   m_pDevice->EndOffscreen();
-  ID3D12GraphicsCommandList *pList = m_pDevice->GetCmdList();
-  pList->CopyBufferRegion(s.pWords.Get(), 0, Zeros.pResource, Zeros.nOffset, WORDS_BYTES);
+  m_pDevice->CopyBufferRegion(s.pWords.Get(), 0, Zeros.pResource, Zeros.nOffset, WORDS_BYTES);
   m_pDevice->Transition(s.pWords.Get(), D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
   s.nWordsList = m_pDevice->GetListSerial();
   s.nFrame = m_nFrames;
@@ -263,7 +262,7 @@ void CD3D12Renderer::EndHdrStats()
   // UNORDERED_ACCESS, or COMMON where the frame's list was executed after the last kernel (a readback's FlushFrame).
   const D3D12_RESOURCE_STATES Before = s.nWordsList == m_pDevice->GetListSerial() ? D3D12_RESOURCE_STATE_UNORDERED_ACCESS : D3D12_RESOURCE_STATE_COMMON;
   m_pDevice->Transition(s.pWords.Get(), Before, D3D12_RESOURCE_STATE_COPY_SOURCE);
-  m_pDevice->GetCmdList()->CopyBufferRegion(s.pReadback.Get(), (UINT64)WORDS_BYTES * nSlot, s.pWords.Get(), 0, WORDS_BYTES);
+  m_pDevice->CopyBufferRegion(s.pReadback.Get(), (UINT64)WORDS_BYTES * nSlot, s.pWords.Get(), 0, WORDS_BYTES);
   // Ready for a copy of zeros (COMMON once the list is done).
   m_pDevice->Transition(s.pWords.Get(), D3D12_RESOURCE_STATE_COPY_SOURCE, D3D12_RESOURCE_STATE_COPY_DEST);
   s.Cur.Output = m_pDevice->GetOutput();

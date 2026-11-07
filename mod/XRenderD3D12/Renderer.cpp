@@ -258,6 +258,14 @@ void CD3D12Renderer::RegisterVariables()
                      "1: a line per frame to XRenderD3D12_frames.txt: the time between frames, the CPU's waits and its time in the main "
                      "view, the GPU time of each section, the draws, the triangles and the camera; 2 also the engine's frame profiler (collected "
                      "without its overlay): the self time of each subsystem and of the profilers that took the most; 0 off");
+  iConsole->Register("d3d12_BarrierBatch", &CV_d3d12_BarrierBatch, 1, 0,
+                     "1: the frame's resource barriers queued and given before the next draw, dispatch or copy in one call (a resource's "
+                     "chain of transitions merged, a round trip with nothing between left out, a UAV barrier next to a transition "
+                     "left out); 2 the same, the queue given at each GPU section too (d3d12_GpuTimes as with 0); 0 each barrier at "
+                     "once (read at the frame's start)");
+  iConsole->Register("d3d12_BarrierCheck", &CV_d3d12_BarrierCheck, 0, 0,
+                     "1: each transition's before checked against the state the resource's last transition gave, and the queue's "
+                     "problems, to the log once each (with d3d12_Debug or d3d12_DRED the resources by name); 0 off");
   iConsole->Register("d3d12_CpuSamples", &CV_d3d12_CpuSamples, 0, 0,
                      "N: samples the stack of the thread that draws every N microseconds (a profiler of the wall clock: the engine's "
                      "code, ours, the driver's); back to 0 writes the samples to XRenderD3D12_samples.txt (module and offset)");
@@ -1249,6 +1257,7 @@ bool CD3D12Renderer::EnsureFrame()
   if (!m_pDevice->IsInFrame())
   {
     m_pDevice->SetGpuTiming(CV_d3d12_GpuTimes > 0 || CV_r_Stats > 0 || CV_d3d12_FrameLog > 0);
+    m_pDevice->SetBarrierMode(std::clamp(CV_d3d12_BarrierBatch, 0, 2), CV_d3d12_BarrierCheck > 0);
     m_pDevice->BeginFrame();
     m_pLastPSO = nullptr;         // a new command list
     InvalidateFrameConstants();   // the frame memory of the slot starts again

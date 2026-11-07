@@ -463,7 +463,8 @@ void CD3D12Compute::Dispatch(ID3D12GraphicsCommandList *pList, ED3D12Kernel eKer
     pList->SetComputeRootDescriptorTable(1, pDescriptors->GetGPU(nSRVs));
   if (nUAVs >= 0)
     pList->SetComputeRootDescriptorTable(2, pDescriptors->GetGPU(nUAVs));
-  pList->Dispatch(nGroupsX, nGroupsY, nGroupsZ);
+  g_pRenderer->m_pDevice->FlushBarriersFor(pList);
+  pList->Dispatch(nGroupsX, nGroupsY, nGroupsZ);  // barriers flushed
 }
 
 bool CD3D12Compute::BindWide(ID3D12GraphicsCommandList *pList, ED3D12Kernel eKernel, int nTable)
@@ -482,13 +483,19 @@ bool CD3D12Compute::BindWide(ID3D12GraphicsCommandList *pList, ED3D12Kernel eKer
 void CD3D12Compute::DispatchWide(ID3D12GraphicsCommandList *pList, ED3D12Kernel eKernel, int nTable, UINT nGroupsX, UINT nGroupsY, UINT nGroupsZ)
 {
   if (nGroupsX && nGroupsY && nGroupsZ && BindWide(pList, eKernel, nTable))
-    pList->Dispatch(nGroupsX, nGroupsY, nGroupsZ);
+  {
+    g_pRenderer->m_pDevice->FlushBarriersFor(pList);
+    pList->Dispatch(nGroupsX, nGroupsY, nGroupsZ);  // barriers flushed
+  }
 }
 
 void CD3D12Compute::DispatchWideIndirect(ID3D12GraphicsCommandList *pList, ED3D12Kernel eKernel, int nTable, ID3D12Resource *pArgs, UINT64 nOffset)
 {
   if (pArgs && m_pDispatchSignature && BindWide(pList, eKernel, nTable))
-    pList->ExecuteIndirect(m_pDispatchSignature.Get(), 1, pArgs, nOffset, nullptr, 0);
+  {
+    g_pRenderer->m_pDevice->FlushBarriersFor(pList);
+    pList->ExecuteIndirect(m_pDispatchSignature.Get(), 1, pArgs, nOffset, nullptr, 0);  // barriers flushed
+  }
 }
 
 void CD3D12Compute::DispatchRays(ID3D12GraphicsCommandList *pList, ED3D12Kernel eKernel, D3D12_GPU_VIRTUAL_ADDRESS FrameCB, D3D12_GPU_VIRTUAL_ADDRESS PassCB,
@@ -515,5 +522,6 @@ void CD3D12Compute::DispatchRays(ID3D12GraphicsCommandList *pList, ED3D12Kernel 
     pList->SetComputeRootDescriptorTable(5, pDescriptors->GetGPU(nUAVs));
   if (nLights)
     pList->SetComputeRootShaderResourceView(ROOT_RAY_LIGHTS, nLights);
-  pList->Dispatch(nGroupsX, nGroupsY, 1);
+  g_pRenderer->m_pDevice->FlushBarriersFor(pList);
+  pList->Dispatch(nGroupsX, nGroupsY, 1);  // barriers flushed
 }

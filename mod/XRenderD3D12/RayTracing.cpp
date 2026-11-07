@@ -863,6 +863,16 @@ void CD3D12RayScene::Build(FILE *pDump, bool bTop)
   ID3D12GraphicsCommandList4 *pAsync = bWork && g_pRenderer->CV_d3d12_RTAsync ? Device.BeginAsyncCompute("ray scene (compute queue)") : nullptr;
   if (pAsync)
     pList = pAsync;
+  // On the frame's list after what the device queued (the compute list's barriers are its own).
+  const auto Barrier1 = [&](const D3D12_RESOURCE_BARRIER &b)
+  {
+    if (pAsync)
+      pList->ResourceBarrier(1, &b);  // barriers flushed: the compute list's
+    else
+      Device.ResourceBarriers(1, &b);
+  };
+  if (!pAsync && !Builds.empty())
+    Device.FlushBarriers();
   for (const SBuild &b : Builds)
   {
     if (!b.pStatic)
@@ -875,13 +885,13 @@ void CD3D12RayScene::Build(FILE *pDump, bool bTop)
     Desc.Inputs.NumDescs = 1;
     Desc.Inputs.pGeometryDescs = &b.pDraw->Geom;
     Desc.ScratchAccelerationStructureData = nScratchGPU + b.nScratch;
-    pList->BuildRaytracingAccelerationStructure(&Desc, 0, nullptr);
+    pList->BuildRaytracingAccelerationStructure(&Desc, 0, nullptr);  // barriers flushed
   }
   D3D12_RESOURCE_BARRIER Barrier = {};
   Barrier.Type = D3D12_RESOURCE_BARRIER_TYPE_UAV;
   Barrier.UAV.pResource = nullptr;
   if (!Builds.empty())
-    pList->ResourceBarrier(1, &Barrier);
+    Barrier1(Barrier);
 
   // The TLAS, in a frame that traces rays.
   UINT nInstance = 0, nLive = 0;
@@ -913,8 +923,10 @@ void CD3D12RayScene::Build(FILE *pDump, bool bTop)
     TopDesc.DestAccelerationStructureData = Slot.Tlas.pBuffer->GetGPUVirtualAddress();
     TopDesc.Inputs = TopInputs;
     TopDesc.ScratchAccelerationStructureData = nScratchGPU;
-    pList->BuildRaytracingAccelerationStructure(&TopDesc, 0, nullptr);
-    pList->ResourceBarrier(1, &Barrier);
+    if (!pAsync)
+      Device.FlushBarriers();
+    pList->BuildRaytracingAccelerationStructure(&TopDesc, 0, nullptr);  // barriers flushed
+    Barrier1(Barrier);
     m_nBuiltFrame = g_pRenderer->m_nFrames;
     m_nBuiltSlot = nSlot;
     m_nInstances = RayInstanceMem.nGPU;

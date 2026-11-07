@@ -26,6 +26,10 @@
 
 #include <algorithm>
 #include <cstdint>
+#include <cstdio>
+#include <filesystem>
+#include <fstream>
+#include <regex>
 #include <map>
 #include <set>
 #include <string>
@@ -532,6 +536,53 @@ XR_TEST(Barrier_Census)
   }
 }
 
+// Why: the renderer releases resources by more ways than DeferredRelease (the scene targets made again for another
+// size, NRD's pool), so a new resource at a released one's address was taken for it: step 317's census in the game
+// logged the scene targets' first transitions from SCENE_READ (the state they are made in) as wrong, the state kept
+// that of a texture released before. The census tells them apart by an identity the device gives (its private data).
+namespace
+{
+std::map<ID3D12Resource *, uint64_t> s_CensusIds;
+uint64_t CensusId(ID3D12Resource *p) { return s_CensusIds[p]; }
+}
+
+XR_TEST(Barrier_CensusIdentity)
+{
+  for (int nMode = 0; nMode < 2; nMode++)
+  {
+    s_CensusIds.clear();
+    const D3D12_RESOURCE_STATES SCENE = PSR | NPSR;  // the scene targets' state when they are made
+    CBarrierTracker t;
+    t.SetMode((EMode)nMode);
+    t.SetCensus(true, nullptr, &CensusId);
+    t.Transition(Res(1), RT, PSR);
+    t.Transition(Res(2), COMMON, UAV, 1);
+    Flush(t);
+    // Released without Forget, another resource made there: its first transition from the state it was made in.
+    s_CensusIds[Res(1)] = 7;
+    s_CensusIds[Res(2)] = 7;
+    t.Transition(Res(1), SCENE, RT);
+    t.Transition(Res(2), DST, UAV);
+    Flush(t);
+    CHECK(t.TakeProblems().empty());
+    // The new one's states are kept and checked.
+    t.Transition(Res(1), SCENE, PSR);
+    Flush(t);
+    CHECK(CountKind(t.TakeProblems(), PROBLEM_BEFORE) == 1);
+    // A library's state of a new resource at an address (Assume).
+    s_CensusIds[Res(1)] = 8;
+    t.Assume(Res(1), UAV);
+    s_CensusIds[Res(1)] = 9;
+    t.Transition(Res(1), RT, PSR);
+    Flush(t);
+    CHECK(t.TakeProblems().empty());
+    // The same identity: a wrong before is still one.
+    t.Transition(Res(1), UAV, NPSR);
+    Flush(t);
+    CHECK(CountKind(t.TakeProblems(), PROBLEM_BEFORE) == 1);
+  }
+}
+
 // The counts: calls, the calls after work (each a wait for it), barriers by kind.
 XR_TEST(Barrier_Stats)
 {
@@ -665,6 +716,40 @@ XR_TEST(Barrier_RandomAgainstModel)
   CHECK_MSG(nVariantCalls[3] * 2 < nVariantCalls[2], std::to_string(nVariantCalls[3]) + " calls batched, " + std::to_string(nVariantCalls[2]) + " immediate");
 }
 
+// A pass's own array given as it is (Verbatim) after what is queued, in a call of its own, in the batched mode too; the
+// census checks its befores and learns its afters; a third party's state (Assume) of a resource not registered goes to
+// the census; the problems carry the context they were found in.
+XR_TEST(Barrier_Verbatim)
+{
+  CBarrierTracker t = Batched();
+  t.SetCensus(true);
+  t.SetContext("pass");
+  t.Transition(Res(1), PSR, RT);
+  D3D12_RESOURCE_BARRIER Own[2] = {};
+  Own[0].Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+  Own[0].Transition = { Res(2), ALL, COMMON, UAV };
+  Own[1].Type = D3D12_RESOURCE_BARRIER_TYPE_UAV;
+  t.Verbatim(Own, 2);
+  std::vector<SCall> c = Flush(t);
+  CHECK(c.size() == 2 && c[0].size() == 1 && IsTransition(c[0][0], Res(1), PSR, RT));
+  CHECK(c.size() == 2 && c[1].size() == 2 && IsTransition(c[1][0], Res(2), COMMON, UAV) && IsUav(c[1][1], nullptr));
+  // The census learnt Res(2)'s UNORDERED_ACCESS: a transition from another state is a problem (given as asked).
+  t.Transition(Res(2), NPSR, SRC);
+  c = Flush(t);
+  CHECK(c.size() == 1 && IsTransition(c[0][0], Res(2), NPSR, SRC));
+  std::vector<SProblem> p = t.TakeProblems();
+  CHECK(p.size() == 1 && p[0].eKind == PROBLEM_BEFORE && p[0].Expected == UAV && p[0].Got == NPSR && p[0].szContext && std::string(p[0].szContext) == "pass");
+  // A third party left Res(3) in GENERIC_READ: the next transition from there is no problem, one from elsewhere is.
+  t.Assume(Res(3), D3D12_RESOURCE_STATE_GENERIC_READ);
+  t.Transition(Res(3), D3D12_RESOURCE_STATE_GENERIC_READ, UAV);
+  Flush(t);
+  CHECK(t.TakeProblems().empty());
+  t.Assume(Res(3), D3D12_RESOURCE_STATE_GENERIC_READ);
+  t.Transition(Res(3), PSR, UAV);
+  Flush(t);
+  CHECK(CountKind(t.TakeProblems(), PROBLEM_BEFORE) == 1);
+}
+
 // Why: a buffer whose state the tracker keeps decays to COMMON when its list has run, and the next list gives the state
 // back by an explicit transition (an implicit promotion past the tracker would leave its state wrong). Each step reads
 // what the step before wrote, a UAV barrier between them (left out where a transition into UNORDERED_ACCESS waits
@@ -693,4 +778,60 @@ XR_TEST(Barrier_GpuBufferDecay)
     if (nSplit == 3)
       XrTest::CheckBatchedStats("buffer", Stats[0], Stats[1]);
   }
+}
+
+// Why: with d3d12_BarrierBatch the frame's barriers queue up until the next work on its list (CD3D12Device::FlushBarriers):
+// work recorded on a command list past the device (a draw, a dispatch, a copy, a clear, a resolve, a build of the rays'
+// structures, or barriers of its own) would run before the barriers it needs. Each such call in the renderer's sources
+// says in its statement that what is queued was given first ("barriers flushed"); D3D12Upload.cpp (the uploads' own
+// list) and D3D12Dred.cpp (DRED's markers, no resource states) aside.
+XR_TEST(Barrier_SourceLint)
+{
+  namespace fs = std::filesystem;
+  const fs::path Dir = XR_RENDERER_SOURCE_DIR;
+  if (!fs::is_directory(Dir))
+    XR_SKIP("the renderer's sources are not where the tests were built from");
+  static const char *const szMethods[] = { "ResourceBarrier", "Dispatch", "DrawInstanced", "DrawIndexedInstanced", "ExecuteIndirect", "CopyResource",
+                                           "CopyBufferRegion", "CopyTextureRegion", "CopyTiles", "ClearRenderTargetView", "ClearDepthStencilView",
+                                           "ClearUnorderedAccessView", "ResolveSubresource", "BuildRaytracingAccelerationStructure",
+                                           "CopyRaytracingAccelerationStructure", "DiscardResource" };
+  // A command list's own call (the device's wrappers and CD3D12Compute's take a list, they are not one).
+  const std::regex Command(R"((\w*List\w*|GetCmdList\(\)|GetDrawCmdList\(\))\s*->\s*(ResourceBarrier|Dispatch|DispatchRays|DrawInstanced|)"
+                           R"(DrawIndexedInstanced|ExecuteIndirect|CopyResource|CopyBufferRegion|CopyTextureRegion|CopyTiles|ClearRenderTargetView|)"
+                           R"(ClearDepthStencilView|ClearUnorderedAccessViewFloat|ClearUnorderedAccessViewUint|ResolveSubresource|)"
+                           R"(ResolveSubresourceRegion|BuildRaytracingAccelerationStructure|CopyRaytracingAccelerationStructure|DiscardResource)\s*\()");
+  int nFiles = 0, nCalls = 0;
+  for (const fs::directory_entry &e : fs::directory_iterator(Dir))
+  {
+    const std::string Name = e.path().filename().string();
+    if (e.path().extension() != ".cpp" || Name == "D3D12Upload.cpp" || Name == "D3D12Dred.cpp")
+      continue;
+    std::ifstream f(e.path());
+    std::vector<std::string> Lines;
+    for (std::string s; std::getline(f, s);)
+      Lines.push_back(s);
+    nFiles++;
+    const auto Code = [&](size_t i) { return Lines[i].substr(0, Lines[i].find("//")); };
+    for (size_t i = 0; i < Lines.size(); i++)
+    {
+      const std::string c = Code(i);
+      bool bAny = false;
+      for (const char *sz : szMethods)
+        bAny |= c.find(sz) != std::string::npos;
+      if (!bAny || !std::regex_search(c, Command))
+        continue;
+      nCalls++;
+      // The statement's lines, to its semicolon.
+      bool bMarked = false;
+      for (size_t j = i; j < Lines.size() && j < i + 8; j++)
+      {
+        bMarked |= Lines[j].find("barriers flushed") != std::string::npos;
+        if (Code(j).find(';') != std::string::npos)
+          break;
+      }
+      CHECK_MSG(bMarked, Name + ":" + std::to_string(i + 1) + ":" + Lines[i]);
+    }
+  }
+  std::printf("  %d sources, %d calls of a command list's own\n", nFiles, nCalls);
+  CHECK(nFiles > 20 && nCalls > 10);
 }

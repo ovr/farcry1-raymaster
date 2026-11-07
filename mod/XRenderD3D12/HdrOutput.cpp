@@ -285,7 +285,7 @@ bool CD3D12Renderer::EnsureFrameAverage()
   }
   o.pFallWords->SetName(L"XRenderD3D12 frame average limit");
   memset(Zeros.pCPU, 0, FALL_WORDS_BYTES);
-  m_pDevice->GetCmdList()->CopyBufferRegion(o.pFallWords.Get(), 0, Zeros.pResource, Zeros.nOffset, FALL_WORDS_BYTES);
+  m_pDevice->CopyBufferRegion(o.pFallWords.Get(), 0, Zeros.pResource, Zeros.nOffset, FALL_WORDS_BYTES);
   m_pDevice->Transition(o.pFallWords.Get(), D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
   return true;
 }

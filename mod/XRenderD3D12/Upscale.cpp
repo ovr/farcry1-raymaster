@@ -374,6 +374,8 @@ void CD3D12Renderer::UpscaleScene()
   In.bReset = m_bUpscaleHistoryReset;
   // TAA's debug view is the anti-aliasing's (d3d12_AADebug).
   In.bDebugView = m_pUpscaler->IsAntiAliasing() ? CV_d3d12_AADebug != 0 : CV_d3d12_UpscaleDebug == 1;
+  // A library's passes (FSR) after what the device queued.
+  m_pDevice->FlushBarriers();
   const bool bUpscaled = m_pUpscaler->Dispatch(In);
   m_pDevice->BindRootSignature();
   if (pLight)

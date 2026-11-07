@@ -178,7 +178,8 @@ void CD3D12Renderer::LogFrame()
                 "# frame, ms since the last frame, the CPU's wait for the GPU, Present, the main view's EF_EndEf3D, of it the engine's "
                 "DrawLowDetail for the water's reflection, the sun's cascades, the environment cubes; the GPU's ms (of the frame %d "
                 "earlier), draws, PSO changes, triangles, dynamic lights, camera x y z, angles x y z, the GPU's sections; with 2 the self ms of the "
-                "engine's last frame by subsystem, and its profilers that took the most\n",
+                "engine's last frame by subsystem, and its profilers that took the most; last the frame's barriers (d3d12_BarrierBatch): "
+                "ResourceBarrier calls, of them after work, transitions, UAV barriers, UAV barriers of all\n",
                 D3D12_FRAMES);
     }
     if (m_pFrameLog && m_fFrameLogLast > 0)
@@ -224,14 +225,17 @@ void CD3D12Renderer::LogFrame()
           Profiles += Format("%s%s=%.3f", i ? ";" : ",", Name.c_str(), Self[i].first);
         }
       }
+      const Barriers::SStats &BarrierStats = m_pDevice->GetBarrierStats();
+      const std::string BarrierCounts = Format(",barrier_calls=%u;barrier_drains=%u;barrier_transitions=%u;barrier_uav=%u;barrier_uav_all=%u",
+                                               BarrierStats.nCalls, BarrierStats.nDrains, BarrierStats.nTransitions, BarrierStats.nUav, BarrierStats.nUavAll);
       const CCamera &Camera = iSystem->GetViewCamera();
       const Vec3 &vPos = Camera.GetPos();
       const Ang3 vAngles = Camera.GetAngles();
-      fprintf(m_pFrameLog.get(), "%d,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%d,%d,%d,%d,%.1f,%.1f,%.1f,%.0f,%.0f,%.0f,%s%s\n", m_nFrameID,
+      fprintf(m_pFrameLog.get(), "%d,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%d,%d,%d,%d,%.1f,%.1f,%.1f,%.0f,%.0f,%.0f,%s%s%s\n", m_nFrameID,
               fNow - m_fFrameLogLast, m_pDevice->GetWaitMs(), m_pDevice->GetPresentMs(), m_fFrameEndEf3DMs, m_fFrameLowDetailMs[LD_WATER],
               m_fFrameLowDetailMs[LD_CASCADES], m_fFrameLowDetailMs[LD_ENVCUBES], nGpuFrames ? fGpuMs / nGpuFrames : -1.0, m_nFrameDraws,
               m_nFramePSOChanges, m_nPolygons, m_nFrameDynLights, vPos.x, vPos.y, vPos.z, vAngles.x, vAngles.y, vAngles.z, Sections.c_str(),
-              Profiles.c_str());
+              Profiles.c_str(), BarrierCounts.c_str());
     }
     m_fFrameLogLast = fNow;
   }
@@ -290,6 +294,10 @@ void CD3D12Renderer::CollectStats()
   Sum.fDraws += nDraws;
   Sum.fPSOChanges += nPSOChanges;
   Sum.fTriangles += m_nPolygons;
+  const Barriers::SStats &BarrierStats = m_pDevice->GetBarrierStats();
+  Sum.fBarrierCalls += BarrierStats.nCalls;
+  Sum.fBarrierDrains += BarrierStats.nDrains;
+  Sum.fBarriers += BarrierStats.nTransitions + BarrierStats.nUav + BarrierStats.nUavAll + BarrierStats.nOther;
   Sum.fFrameMemory += m_pUpload ? (double)m_pUpload->GetFrameMemory() : 0.0;
   m_fStatsLastFrame = fNow;
   if (fNow - m_fStatsStart < STATS_WINDOW_MS)
@@ -394,6 +402,9 @@ void CD3D12Renderer::DrawStats()
       Add(Format("CPU waits for the GPU %.2f ms, in Present %.2f ms", S.fWaitMs / fFrames, S.fPresentMs / fFrames));
       Add(Format("Draws %s, PSO changes %s, triangles %s", Thousands((uint64)(S.fDraws / fFrames + 0.5)).c_str(),
                  Thousands((uint64)(S.fPSOChanges / fFrames + 0.5)).c_str(), Thousands((uint64)(S.fTriangles / fFrames + 0.5)).c_str()));
+      Add(Format("Barrier calls %s (%s after work), barriers %s%s", Thousands((uint64)(S.fBarrierCalls / fFrames + 0.5)).c_str(),
+                 Thousands((uint64)(S.fBarrierDrains / fFrames + 0.5)).c_str(), Thousands((uint64)(S.fBarriers / fFrames + 0.5)).c_str(),
+                 CV_d3d12_BarrierBatch > 0 ? "" : ", each at once"));
       if (CV_r_Stats >= 2)
       {
         constexpr double MB = 1024.0 * 1024.0;

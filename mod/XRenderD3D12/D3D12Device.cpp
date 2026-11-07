@@ -15,23 +15,29 @@
 #include "D3D12Descriptors.h"
 #include "D3D12Pipeline.h"
 
+#include <set>
+#include <tuple>
+
 namespace
 {
 
-void Barrier(ID3D12GraphicsCommandList *pList, ID3D12Resource *pRes, D3D12_RESOURCE_STATES Before, D3D12_RESOURCE_STATES After,
-             UINT nSubresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES)
-{
-  D3D12_RESOURCE_BARRIER b = {};
-  b.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
-  b.Transition.pResource = pRes;
-  b.Transition.Subresource = nSubresource;
-  b.Transition.StateBefore = Before;
-  b.Transition.StateAfter = After;
-  pList->ResourceBarrier(1, &b);
-}
-
 //! The scene targets outside BeginScene .. EndScene: read by an upscaler's compute or pixel shaders.
 constexpr D3D12_RESOURCE_STATES SCENE_READ = D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE | D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE;
+
+//! d3d12_BarrierCheck's census: a number of a resource's own (its private data, given the first time the census sees
+//! it), so a resource made at the address of one released before is not taken for it.
+uint64 BarrierCensusIdentity(ID3D12Resource *pRes)
+{
+  static const GUID ID = { 0x20199cee, 0xbe1e, 0x4988, { 0x92, 0x4d, 0x1e, 0x1e, 0x43, 0xbe, 0x84, 0xc6 } };
+  static uint64 s_nNext = 1;
+  uint64 n = 0;
+  UINT nSize = sizeof(n);
+  if (SUCCEEDED(pRes->GetPrivateData(ID, &nSize, &n)) && nSize == sizeof(n))
+    return n;
+  n = s_nNext++;
+  pRes->SetPrivateData(ID, sizeof(n), &n);
+  return n;
+}
 
 //! The CPU's clock in milliseconds.
 double NowMs()
@@ -501,6 +507,8 @@ void CD3D12Device::DeferredRelease(IUnknown *p)
 {
   if (!p)
     return;
+  // A resource's address may come again (the barriers' tracker and check forget it; a key alone, never called).
+  m_Barriers.Forget(reinterpret_cast<ID3D12Resource *>(p));
   SDeferred d;
   d.pObject.Attach(p);
   d.nFence = m_nNextFence;
@@ -634,7 +642,7 @@ void CD3D12Device::SetOffscreenTargets(ID3D12Resource *pColor, D3D12_CPU_DESCRIP
     return;
   m_nStateEpoch++;
   EndOffscreen();
-  Barrier(m_pCmdList.Get(), pColor, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, D3D12_RESOURCE_STATE_RENDER_TARGET, nSubresource);
+  RawBarrier(pColor, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, D3D12_RESOURCE_STATE_RENDER_TARGET, nSubresource);
   m_pOffscreen = pColor;
   m_nOffscreenSubresource = nSubresource;
   m_hOffscreenRTV = hRTV;
@@ -724,7 +732,7 @@ void CD3D12Device::SetShadowMapTarget(ID3D12Resource *pDepth, D3D12_CPU_DESCRIPT
   if (m_pOffscreen != pDepth || !m_bOffscreenShadowMap)
   {
     EndOffscreen();
-    Barrier(m_pCmdList.Get(), pDepth, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, D3D12_RESOURCE_STATE_DEPTH_WRITE);
+    RawBarrier(pDepth, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, D3D12_RESOURCE_STATE_DEPTH_WRITE);
   }
   m_pOffscreen = pDepth;
   m_nOffscreenSubresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
@@ -745,7 +753,7 @@ void CD3D12Device::EndOffscreen()
 {
   if (!m_pOffscreen)
     return;
-  Barrier(m_pCmdList.Get(), m_pOffscreen, m_bOffscreenShadowMap ? D3D12_RESOURCE_STATE_DEPTH_WRITE : D3D12_RESOURCE_STATE_RENDER_TARGET,
+  RawBarrier(m_pOffscreen, m_bOffscreenShadowMap ? D3D12_RESOURCE_STATE_DEPTH_WRITE : D3D12_RESOURCE_STATE_RENDER_TARGET,
     D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, m_nOffscreenSubresource);
   m_pOffscreen = nullptr;
   m_bOffscreenShadowMap = false;
@@ -797,7 +805,7 @@ void CD3D12Device::BindAmbient(D3D12_CPU_DESCRIPTOR_HANDLE hRTV, ID3D12Resource 
   {
     static const float Zero[4] = {};
     if (hRTV.ptr && !m_hAmbientRTV.ptr)
-      m_pCmdList->ClearRenderTargetView(SceneRTV(9), Zero, 0, nullptr);
+      ClearRenderTargetView(SceneRTV(9), Zero);
     else if (!hRTV.ptr && m_hAmbientRTV.ptr && m_pAmbientResource)
       ResolveInto(m_pAmbientResource, D3D12_RESOURCE_STATE_RENDER_TARGET, m_pMsaaAmbient.Get(), D3D12_RESOURCE_STATE_RENDER_TARGET,
                   D3D12_AMBIENT_FORMAT);
@@ -838,20 +846,132 @@ void CD3D12Device::BindRootSignature()
   m_pCmdList->SetGraphicsRootDescriptorTable(2, g_pRenderer->m_pDescriptors->GetTableStart());
 }
 
-void CD3D12Device::Transition(ID3D12Resource *pRes, D3D12_RESOURCE_STATES Before, D3D12_RESOURCE_STATES After)
+void CD3D12Device::Transition(ID3D12Resource *pRes, D3D12_RESOURCE_STATES Before, D3D12_RESOURCE_STATES After, UINT nSubresource)
 {
-  if (m_bInFrame && pRes)
-    Barrier(m_pCmdList.Get(), pRes, Before, After);
+  if (!m_bInFrame || !pRes)
+    return;
+  m_Barriers.Transition(pRes, Before, After, nSubresource);
+  if (m_Barriers.GetMode() == Barriers::MODE_IMMEDIATE)
+    FlushBarriers(false);
 }
 
 void CD3D12Device::UavBarrier(ID3D12Resource *pRes)
 {
   if (!m_bInFrame || !pRes)
     return;
+  m_Barriers.Uav(pRes);
+  if (m_Barriers.GetMode() == Barriers::MODE_IMMEDIATE)
+    FlushBarriers(false);
+}
+
+void CD3D12Device::UavBarrierAll()
+{
+  if (!m_bInFrame)
+    return;
+  m_Barriers.UavAll();
+  if (m_Barriers.GetMode() == Barriers::MODE_IMMEDIATE)
+    FlushBarriers(false);
+}
+
+void CD3D12Device::ResourceBarriers(UINT n, const D3D12_RESOURCE_BARRIER *pBarriers)
+{
+  if (!n || !pBarriers)
+    return;
+  if (!m_bInFrame)
+  {
+    // ReadBackTexture's list between frames: nothing is queued.
+    m_pCmdList->ResourceBarrier(n, pBarriers);  // barriers flushed
+    return;
+  }
+  m_Barriers.Verbatim(pBarriers, n);
+  FlushBarriers(false);
+}
+
+void CD3D12Device::ResourceBarriersOn(ID3D12GraphicsCommandList *pList, UINT n, const D3D12_RESOURCE_BARRIER *pBarriers)
+{
+  if (pList == m_pCmdList.Get())
+    ResourceBarriers(n, pBarriers);
+  else if (pList && n && pBarriers)
+    pList->ResourceBarrier(n, pBarriers);  // barriers flushed: another list's own
+}
+
+void CD3D12Device::RawBarrier(ID3D12Resource *pRes, D3D12_RESOURCE_STATES Before, D3D12_RESOURCE_STATES After, UINT nSubresource)
+{
   D3D12_RESOURCE_BARRIER b = {};
-  b.Type = D3D12_RESOURCE_BARRIER_TYPE_UAV;
-  b.UAV.pResource = pRes;
-  m_pCmdList->ResourceBarrier(1, &b);
+  b.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+  b.Transition.pResource = pRes;
+  b.Transition.Subresource = nSubresource;
+  b.Transition.StateBefore = Before;
+  b.Transition.StateAfter = After;
+  ResourceBarriers(1, &b);
+}
+
+void CD3D12Device::CopyResource(ID3D12Resource *pDst, ID3D12Resource *pSrc)
+{
+  if (!m_bInFrame || !pDst || !pSrc)
+    return;
+  FlushBarriers();
+  m_nStateEpoch++;  // as GetCmdList
+  m_pCmdList->CopyResource(pDst, pSrc);  // barriers flushed
+}
+
+void CD3D12Device::CopyBufferRegion(ID3D12Resource *pDst, UINT64 nDstOffset, ID3D12Resource *pSrc, UINT64 nSrcOffset, UINT64 nBytes)
+{
+  if (!m_bInFrame || !pDst || !pSrc)
+    return;
+  FlushBarriers();
+  m_nStateEpoch++;
+  m_pCmdList->CopyBufferRegion(pDst, nDstOffset, pSrc, nSrcOffset, nBytes);  // barriers flushed
+}
+
+void CD3D12Device::ClearRenderTargetView(D3D12_CPU_DESCRIPTOR_HANDLE hRTV, const float Color[4])
+{
+  if (!m_bInFrame || !hRTV.ptr)
+    return;
+  FlushBarriers();
+  m_nStateEpoch++;
+  m_pCmdList->ClearRenderTargetView(hRTV, Color, 0, nullptr);  // barriers flushed
+}
+
+void CD3D12Device::OnFrameListExecuted()
+{
+  m_Barriers.OnListExecuted();
+  LogBarrierProblems();
+}
+
+void CD3D12Device::LogBarrierProblems()
+{
+  const std::vector<Barriers::SProblem> Problems = m_Barriers.TakeProblems();
+  if (!m_bBarrierCheck || Problems.empty())
+    return;
+  // Each problem once (by its resource, subresource, states and section), at most MAX_LOGGED of them.
+  constexpr size_t MAX_LOGGED = 256;
+  static std::set<std::tuple<int, ID3D12Resource *, UINT, UINT, UINT, const char *>> s_Logged;
+  static const char *const szKinds[] = { "a transition's before is not the resource's state", "a transition to the state it names as before",
+                                         "Require of a resource not registered", "a subresource beyond the resource's",
+                                         "a write state with another state", "barriers queued when the list was executed",
+                                         "Assume of a resource with a queued transition" };
+  // WKPDID_D3DDebugObjectNameW: the name SetName gave (with d3d12_Debug or d3d12_Dred).
+  static const GUID NAME = { 0x4cca5fd8, 0x921f, 0x42c8, { 0x85, 0x66, 0x70, 0xca, 0xf2, 0xa9, 0xb7, 0x41 } };
+  for (const Barriers::SProblem &p : Problems)
+  {
+    if (s_Logged.size() >= MAX_LOGGED || !s_Logged.insert({ (int)p.eKind, p.pRes, p.nSub, (UINT)p.Expected, (UINT)p.Got, p.szContext }).second)
+      continue;
+    char szName[96] = "unnamed";
+    wchar_t wszName[96] = {};
+    UINT nBytes = sizeof(wszName) - sizeof(wchar_t);
+    if (p.pRes && SUCCEEDED(p.pRes->GetPrivateData(NAME, &nBytes, wszName)))
+      WideCharToMultiByte(CP_UTF8, 0, wszName, -1, szName, sizeof(szName), nullptr, nullptr);
+    char szLine[512];
+    snprintf(szLine, sizeof(szLine), "%s: %s: %s %p, subresource %d, tracked 0x%X, named 0x%X", p.szContext ? p.szContext : "?",
+             p.eKind < std::size(szKinds) ? szKinds[p.eKind] : "?", szName, (void *)p.pRes, p.nSub == Barriers::ALL ? -1 : (int)p.nSub,
+             (unsigned)p.Expected, (unsigned)p.Got);
+    iLog->LogWarning("XRenderD3D12: barrier check (%s)", szLine);
+    if (m_pBarrierLog)
+      fprintf(m_pBarrierLog.get(), "frame %d, %s\n", (int)g_pRenderer->m_nFrames, szLine);
+  }
+  if (m_pBarrierLog)
+    fflush(m_pBarrierLog.get());
 }
 
 D3D12_CPU_DESCRIPTOR_HANDLE CD3D12Device::SceneRTV(int n) const
@@ -974,10 +1094,10 @@ void CD3D12Device::BeginScene()
   if (!m_bInFrame || m_bInScene || !m_pSceneColor)
     return;
   EndOffscreen();
-  Barrier(m_pCmdList.Get(), m_pSceneColor.Get(), SCENE_READ, D3D12_RESOURCE_STATE_RENDER_TARGET);
-  Barrier(m_pCmdList.Get(), m_pSceneVelocity.Get(), SCENE_READ, D3D12_RESOURCE_STATE_RENDER_TARGET);
-  Barrier(m_pCmdList.Get(), m_pUpscaleDepth.Get(), SCENE_READ, D3D12_RESOURCE_STATE_RENDER_TARGET);
-  Barrier(m_pCmdList.Get(), m_pSceneDepth.Get(), SCENE_READ, D3D12_RESOURCE_STATE_DEPTH_WRITE);
+  RawBarrier(m_pSceneColor.Get(), SCENE_READ, D3D12_RESOURCE_STATE_RENDER_TARGET);
+  RawBarrier(m_pSceneVelocity.Get(), SCENE_READ, D3D12_RESOURCE_STATE_RENDER_TARGET);
+  RawBarrier(m_pUpscaleDepth.Get(), SCENE_READ, D3D12_RESOURCE_STATE_RENDER_TARGET);
+  RawBarrier(m_pSceneDepth.Get(), SCENE_READ, D3D12_RESOURCE_STATE_DEPTH_WRITE);
   m_bInScene = true;
   SetBackBufferTargets();
 }
@@ -990,10 +1110,10 @@ void CD3D12Device::EndScene()
   if (!m_bInFrame)
     return;
   EndOffscreen();
-  Barrier(m_pCmdList.Get(), m_pSceneColor.Get(), D3D12_RESOURCE_STATE_RENDER_TARGET, SCENE_READ);
-  Barrier(m_pCmdList.Get(), m_pSceneVelocity.Get(), D3D12_RESOURCE_STATE_RENDER_TARGET, SCENE_READ);
-  Barrier(m_pCmdList.Get(), m_pUpscaleDepth.Get(), D3D12_RESOURCE_STATE_RENDER_TARGET, SCENE_READ);
-  Barrier(m_pCmdList.Get(), m_pSceneDepth.Get(), D3D12_RESOURCE_STATE_DEPTH_WRITE, SCENE_READ);
+  RawBarrier(m_pSceneColor.Get(), D3D12_RESOURCE_STATE_RENDER_TARGET, SCENE_READ);
+  RawBarrier(m_pSceneVelocity.Get(), D3D12_RESOURCE_STATE_RENDER_TARGET, SCENE_READ);
+  RawBarrier(m_pUpscaleDepth.Get(), D3D12_RESOURCE_STATE_RENDER_TARGET, SCENE_READ);
+  RawBarrier(m_pSceneDepth.Get(), D3D12_RESOURCE_STATE_DEPTH_WRITE, SCENE_READ);
   SetBackBufferTargets();
 }
 
@@ -1001,7 +1121,7 @@ void CD3D12Device::ClearVelocity()
 {
   static const float Zero[4] = {};
   if (m_bInFrame && m_bInScene)
-    m_pCmdList->ClearRenderTargetView(SceneRTV(1), Zero, 0, nullptr);
+    ClearRenderTargetView(SceneRTV(1), Zero);
 }
 
 bool CD3D12Device::SetHdrTarget(bool bOn)
@@ -1041,7 +1161,7 @@ void CD3D12Device::BeginHdr()
   if (!m_bInFrame || m_bInHdr || m_bInScene || !m_pHdrColor)
     return;
   EndOffscreen();
-  Barrier(m_pCmdList.Get(), m_pHdrColor.Get(), SCENE_READ, D3D12_RESOURCE_STATE_RENDER_TARGET);
+  RawBarrier(m_pHdrColor.Get(), SCENE_READ, D3D12_RESOURCE_STATE_RENDER_TARGET);
   m_bInHdr = true;
   SetBackBufferTargets();
 }
@@ -1054,7 +1174,7 @@ void CD3D12Device::EndHdr()
   if (!m_bInFrame)
     return;
   EndOffscreen();
-  Barrier(m_pCmdList.Get(), m_pHdrColor.Get(), D3D12_RESOURCE_STATE_RENDER_TARGET, SCENE_READ);
+  RawBarrier(m_pHdrColor.Get(), D3D12_RESOURCE_STATE_RENDER_TARGET, SCENE_READ);
   SetBackBufferTargets();
 }
 
@@ -1151,7 +1271,7 @@ void CD3D12Device::BeginMsaa()
   if (m_hAmbientRTV.ptr)
   {
     static const float Zero[4] = {};
-    m_pCmdList->ClearRenderTargetView(SceneRTV(9), Zero, 0, nullptr);
+    ClearRenderTargetView(SceneRTV(9), Zero);
   }
   SetBackBufferTargets();
 }
@@ -1175,11 +1295,12 @@ void CD3D12Device::ResolveInto(ID3D12Resource *pDst, D3D12_RESOURCE_STATES DstSt
 {
   if (!m_bInFrame || !pDst || !pSrc)
     return;
-  Barrier(m_pCmdList.Get(), pDst, DstState, D3D12_RESOURCE_STATE_RESOLVE_DEST);
-  Barrier(m_pCmdList.Get(), pSrc, SrcState, D3D12_RESOURCE_STATE_RESOLVE_SOURCE);
-  m_pCmdList->ResolveSubresource(pDst, 0, pSrc, 0, Format);
-  Barrier(m_pCmdList.Get(), pSrc, D3D12_RESOURCE_STATE_RESOLVE_SOURCE, SrcState);
-  Barrier(m_pCmdList.Get(), pDst, D3D12_RESOURCE_STATE_RESOLVE_DEST, DstState);
+  RawBarrier(pDst, DstState, D3D12_RESOURCE_STATE_RESOLVE_DEST);
+  RawBarrier(pSrc, SrcState, D3D12_RESOURCE_STATE_RESOLVE_SOURCE);
+  FlushBarriers();
+  m_pCmdList->ResolveSubresource(pDst, 0, pSrc, 0, Format);  // barriers flushed
+  RawBarrier(pSrc, D3D12_RESOURCE_STATE_RESOLVE_SOURCE, SrcState);
+  RawBarrier(pDst, D3D12_RESOURCE_STATE_RESOLVE_DEST, DstState);
 }
 
 void CD3D12Device::BindMsaaResolveTarget(bool bColor)
@@ -1244,7 +1365,7 @@ void CD3D12Device::SetFrameState(D3D12_RESOURCE_STATES State)
 {
   if (!m_pFrame || State == m_FrameState)
     return;
-  Barrier(m_pCmdList.Get(), m_pFrame.Get(), m_FrameState, State);
+  RawBarrier(m_pFrame.Get(), m_FrameState, State);
   m_FrameState = State;
 }
 
@@ -1256,12 +1377,12 @@ void CD3D12Device::BindHighlight(bool bOn)
   m_bHighlightBound = bOn;
   if (!bOn)
   {
-    Barrier(m_pCmdList.Get(), m_pHighlight.Get(), D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+    RawBarrier(m_pHighlight.Get(), D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
     SetBackBufferTargets();
     return;
   }
   EndOffscreen();
-  Barrier(m_pCmdList.Get(), m_pHighlight.Get(), D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, D3D12_RESOURCE_STATE_RENDER_TARGET);
+  RawBarrier(m_pHighlight.Get(), D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, D3D12_RESOURCE_STATE_RENDER_TARGET);
   const D3D12_CPU_DESCRIPTOR_HANDLE hRTV[2] = { GetBackBufferRTV(), SceneRTV(5) };
   m_pCmdList->OMSetRenderTargets(2, hRTV, FALSE, nullptr);
   const D3D12_VIEWPORT vp = { 0, 0, (float)m_nWidth, (float)m_nHeight, 0, 1 };
@@ -1286,7 +1407,7 @@ void CD3D12Device::BeginOutput()
   EndOffscreen();
   BindHighlight(false);
   SetFrameState(D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
-  Barrier(m_pCmdList.Get(), m_pBackBuffers[m_nBackBuffer].Get(), D3D12_RESOURCE_STATE_PRESENT, D3D12_RESOURCE_STATE_RENDER_TARGET);
+  RawBarrier(m_pBackBuffers[m_nBackBuffer].Get(), D3D12_RESOURCE_STATE_PRESENT, D3D12_RESOURCE_STATE_RENDER_TARGET);
   m_bOutput = true;
   const D3D12_CPU_DESCRIPTOR_HANDLE hRTV = SwapChainRTV();
   m_pCmdList->OMSetRenderTargets(1, &hRTV, FALSE, nullptr);
@@ -1459,6 +1580,8 @@ void CD3D12Device::OpenCmdList()
   m_pCmdList->Reset(m_pAllocators[m_nFrameSlot].Get(), nullptr);
   m_nStateEpoch++;
   m_szDredSection = nullptr;
+  if (m_bInFrame)
+    m_Barriers.OnListOpened();
 }
 
 void CD3D12Device::BeginFrame()
@@ -1478,6 +1601,27 @@ void CD3D12Device::BeginFrame()
   if (g_pRenderer->m_pUpload)
     g_pRenderer->m_pUpload->BeginFrame(m_nFrameSlot);
   m_nBackBuffer = m_pSwapChain->GetCurrentBackBufferIndex();
+  // The barriers' mode for the whole frame (nothing is queued between frames).
+  m_Barriers.SetMode(m_nBarrierBatchWanted > 0 ? Barriers::MODE_BATCHED : Barriers::MODE_IMMEDIATE);
+  m_bBarrierSections = m_nBarrierBatchWanted >= 2;
+  if (m_bBarrierCheck != m_bBarrierCheckWanted)
+  {
+    m_bBarrierCheck = m_bBarrierCheckWanted;
+    m_Barriers.SetCensus(
+      m_bBarrierCheck, [](ID3D12Resource *p) { return p->GetDesc().Dimension == D3D12_RESOURCE_DIMENSION_BUFFER; }, &BarrierCensusIdentity);
+    // The check's own file (the engine's log drops the renderer's lines once the game runs): a line when it is
+    // turned on or off, then each problem.
+    if (!m_pBarrierLog)
+      m_pBarrierLog.reset(fopen("XRenderD3D12_barriers.txt", "w"));
+    if (m_pBarrierLog)
+    {
+      fprintf(m_pBarrierLog.get(), "# d3d12_BarrierCheck %s at frame %d%s\n", m_bBarrierCheck ? "on" : "off", (int)g_pRenderer->m_nFrames,
+              m_bBarrierCheck ? ": the transitions whose before is not the state the one before left (section, problem, resource, "
+                                "subresource, the state kept, the before given)" : "");
+      fflush(m_pBarrierLog.get());
+    }
+  }
+  m_Barriers.ResetStats();
   m_bInFrame = true;
   m_bComputeAllocatorReset = false;
   OpenCmdList();
@@ -1488,12 +1632,12 @@ void CD3D12Device::BeginFrame()
     // yet.
     static const float NoHighlight[4] = { 1, 1, 1, -1 };
     SetFrameState(D3D12_RESOURCE_STATE_RENDER_TARGET);
-    Barrier(m_pCmdList.Get(), m_pHighlight.Get(), D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, D3D12_RESOURCE_STATE_RENDER_TARGET);
-    m_pCmdList->ClearRenderTargetView(SceneRTV(5), NoHighlight, 0, nullptr);
-    Barrier(m_pCmdList.Get(), m_pHighlight.Get(), D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+    RawBarrier(m_pHighlight.Get(), D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, D3D12_RESOURCE_STATE_RENDER_TARGET);
+    ClearRenderTargetView(SceneRTV(5), NoHighlight);
+    RawBarrier(m_pHighlight.Get(), D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
   }
   else
-    Barrier(m_pCmdList.Get(), GetBackBuffer(), D3D12_RESOURCE_STATE_PRESENT, D3D12_RESOURCE_STATE_RENDER_TARGET);
+    RawBarrier(GetBackBuffer(), D3D12_RESOURCE_STATE_PRESENT, D3D12_RESOURCE_STATE_RENDER_TARGET);
   BindRootSignature();
   SetBackBufferTargets();
 }
@@ -1510,6 +1654,8 @@ void CD3D12Device::EndFrame(bool bPresent, bool bVSync)
   BindHighlight(false);
   m_hAmbientRTV = {};
   m_pAmbientResource = nullptr;
+  // What is queued before the last timestamp (its time the frame's last section's).
+  FlushBarriers(false);
   // The timestamp that ends the frame's last section; all of them to the readback buffer.
   if (const int n = m_nGpuMarks[m_nFrameSlot]; n > 0)
   {
@@ -1527,24 +1673,27 @@ void CD3D12Device::EndFrame(bool bPresent, bool bVSync)
   }
   ID3D12Resource *pSwapBuffer = m_pBackBuffers[m_nBackBuffer].Get();
   if (!m_pFrame || m_bOutput)
-    Barrier(m_pCmdList.Get(), pSwapBuffer, D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_PRESENT);
+    RawBarrier(pSwapBuffer, D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_PRESENT);
   else if (bPresent && m_SwapChainFormat == D3D12_BACKBUFFER_FORMAT)
   {
     // No output pass in SDR: the frame target as it is.
     SetFrameState(D3D12_RESOURCE_STATE_COPY_SOURCE);
-    Barrier(m_pCmdList.Get(), pSwapBuffer, D3D12_RESOURCE_STATE_PRESENT, D3D12_RESOURCE_STATE_COPY_DEST);
-    m_pCmdList->CopyResource(pSwapBuffer, m_pFrame.Get());
-    Barrier(m_pCmdList.Get(), pSwapBuffer, D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_PRESENT);
+    RawBarrier(pSwapBuffer, D3D12_RESOURCE_STATE_PRESENT, D3D12_RESOURCE_STATE_COPY_DEST);
+    CopyResource(pSwapBuffer, m_pFrame.Get());
+    RawBarrier(pSwapBuffer, D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_PRESENT);
   }
   if (m_pFrame)
     SetFrameState(D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
   m_bOutput = false;
+  FlushBarriers(false);
+  m_LastBarrierStats = m_Barriers.Stats();
   m_pCmdList->Close();
   if (g_pRenderer->m_pUpload)
     g_pRenderer->m_pUpload->Flush();
   ID3D12CommandList *pList = m_pCmdList.Get();
   m_pQueue->ExecuteCommandLists(1, &pList);
   m_nListSerial++;
+  OnFrameListExecuted();
   HRESULT hr = S_OK;
   m_fPresentMs = 0;
   if (bPresent)
@@ -1625,6 +1774,7 @@ void CD3D12Device::WaitAsyncCompute()
   // The wait is a section of its own, then the one before goes on.
   const int nMarks = m_nGpuMarks[m_nFrameSlot];
   const char *szSection = nMarks > 0 ? m_GpuSections[m_nFrameSlot][nMarks - 1] : nullptr;
+  FlushBarriers(false);
   GpuSection("ray scene");
   m_pCmdList->Close();
   if (g_pRenderer->m_pUpload)
@@ -1632,6 +1782,7 @@ void CD3D12Device::WaitAsyncCompute()
   ID3D12CommandList *pList = m_pCmdList.Get();
   m_pQueue->ExecuteCommandLists(1, &pList);
   m_nListSerial++;
+  OnFrameListExecuted();
   QueueWaitAsyncCompute();
   ContinueCmdList();
   if (szSection)
@@ -1651,6 +1802,7 @@ void CD3D12Device::ContinueCmdList()
   m_pCmdList->Reset(m_pAllocators[m_nFrameSlot].Get(), nullptr);
   m_nStateEpoch++;
   m_szDredSection = nullptr;
+  m_Barriers.OnListOpened();
   BindRootSignature();
   if (!m_pOffscreen)
   {
@@ -1676,6 +1828,7 @@ void CD3D12Device::FlushFrame()
   // goes on.
   const int nMarks = m_nGpuMarks[m_nFrameSlot];
   const char *szSection = nMarks > 0 ? m_GpuSections[m_nFrameSlot][nMarks - 1] : nullptr;
+  FlushBarriers(false);
   GpuSection("flush");
   // The back buffer stays a render target across the two lists.
   m_pCmdList->Close();
@@ -1684,6 +1837,7 @@ void CD3D12Device::FlushFrame()
   ID3D12CommandList *pList = m_pCmdList.Get();
   m_pQueue->ExecuteCommandLists(1, &pList);
   m_nListSerial++;
+  OnFrameListExecuted();
   QueueWaitAsyncCompute();
   WaitForFence(Signal());
   OpenCmdList();
@@ -1695,6 +1849,10 @@ void CD3D12Device::FlushFrame()
 
 void CD3D12Device::GpuSection(const char *szSection)
 {
+  // d3d12_BarrierBatch 2: what is queued in the section before, as the barriers given at once were.
+  if (m_bBarrierSections && m_bInFrame)
+    FlushBarriers(false);
+  m_Barriers.SetContext(szSection);
   if (m_nDred && m_bInFrame && szSection != m_szDredSection)
   {
     DredMarker(m_pCmdList.Get(), szSection);
@@ -1799,8 +1957,7 @@ void CD3D12Device::ReadOcclusionResults()
 void CD3D12Device::ClearColor(const float rgba[4])
 {
   if (m_bInFrame && !m_bOffscreenShadowMap)
-    m_pCmdList->ClearRenderTargetView(m_pOffscreen ? m_hOffscreenRTV : m_bInScene ? SceneRTV(0) : m_bInMsaa ? SceneRTV(8) : m_bInHdr ? SceneRTV(3) : GetBackBufferRTV(),
-                                      rgba, 0, nullptr);
+    ClearRenderTargetView(m_pOffscreen ? m_hOffscreenRTV : m_bInScene ? SceneRTV(0) : m_bInMsaa ? SceneRTV(8) : m_bInHdr ? SceneRTV(3) : GetBackBufferRTV(), rgba);
 }
 
 void CD3D12Device::ClearDepth(float fDepth, uint8 nStencil, bool bDepth, bool bStencil)
@@ -1809,12 +1966,15 @@ void CD3D12Device::ClearDepth(float fDepth, uint8 nStencil, bool bDepth, bool bS
   const bool bScene = IsSceneBound();
   const auto Flags = (D3D12_CLEAR_FLAGS)((bDepth ? D3D12_CLEAR_FLAG_DEPTH : 0) | (bStencil && !bScene ? D3D12_CLEAR_FLAG_STENCIL : 0));
   if (m_bInFrame && Flags)
+  {
+    FlushBarriers();
     m_pCmdList->ClearDepthStencilView(m_pOffscreen ? m_hOffscreenDSV : bScene ? SceneDSV() : m_bInMsaa ? MsaaDSV(false) : GetDSV(), Flags, fDepth,
-                                      nStencil, 0, nullptr);
+                                      nStencil, 0, nullptr);  // barriers flushed
+  }
   if (m_bInFrame && bScene && bDepth)
   {
     const float Depth[4] = { fDepth, 0, 0, 0 };
-    m_pCmdList->ClearRenderTargetView(SceneRTV(2), Depth, 0, nullptr);
+    ClearRenderTargetView(SceneRTV(2), Depth);
   }
 }
 
@@ -1880,9 +2040,10 @@ void CD3D12Device::CopyTargets(ID3D12Resource *pColor, ID3D12Resource *pDepth, c
   Set(b[2], pMainDepth, D3D12_RESOURCE_STATE_DEPTH_WRITE, D3D12_RESOURCE_STATE_COPY_SOURCE);
   Set(b[3], pDepth, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, D3D12_RESOURCE_STATE_COPY_DEST);
   const UINT nBarriers = pDepth ? 4 : 2;
-  m_pCmdList->ResourceBarrier(nBarriers, b);
+  ResourceBarriers(nBarriers, b);
+  FlushBarriers();
   if (bResolve)
-    m_pCmdList->ResolveSubresource(pColor, 0, pMainColor, 0, m_MsaaColorFormat);
+    m_pCmdList->ResolveSubresource(pColor, 0, pMainColor, 0, m_MsaaColorFormat);  // barriers flushed
   else if (pBox)
   {
     D3D12_TEXTURE_COPY_LOCATION Dst = {}, Src = {};
@@ -1890,15 +2051,15 @@ void CD3D12Device::CopyTargets(ID3D12Resource *pColor, ID3D12Resource *pDepth, c
     Dst.Type = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
     Src.pResource = pMainColor;
     Src.Type = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
-    m_pCmdList->CopyTextureRegion(&Dst, pBox->left, pBox->top, 0, &Src, pBox);
+    m_pCmdList->CopyTextureRegion(&Dst, pBox->left, pBox->top, 0, &Src, pBox);  // barriers flushed
   }
   else
-    m_pCmdList->CopyResource(pColor, pMainColor);
+    m_pCmdList->CopyResource(pColor, pMainColor);  // barriers flushed
   if (pDepth)
-    m_pCmdList->CopyResource(pDepth, pMainDepth);
+    m_pCmdList->CopyResource(pDepth, pMainDepth);  // barriers flushed
   for (auto &r : b)
     std::swap(r.Transition.StateBefore, r.Transition.StateAfter);
-  m_pCmdList->ResourceBarrier(nBarriers, b);
+  ResourceBarriers(nBarriers, b);
 }
 
 bool CD3D12Device::ReadBackBuffer(uint8 *pDst, int nWidth, int nHeight)
@@ -1943,15 +2104,16 @@ bool CD3D12Device::ReadBackTexture(ID3D12Resource *pTexture, D3D12_RESOURCE_STAT
     WaitForGPU();
     OpenCmdList();
   }
-  Barrier(m_pCmdList.Get(), pTexture, State, D3D12_RESOURCE_STATE_COPY_SOURCE);
+  RawBarrier(pTexture, State, D3D12_RESOURCE_STATE_COPY_SOURCE);
   D3D12_TEXTURE_COPY_LOCATION Src = {}, Dst = {};
   Src.pResource = pTexture;
   Src.Type = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
   Dst.pResource = pReadback.Get();
   Dst.Type = D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT;
   Dst.PlacedFootprint = Footprint;
-  m_pCmdList->CopyTextureRegion(&Dst, 0, 0, 0, &Src, nullptr);
-  Barrier(m_pCmdList.Get(), pTexture, D3D12_RESOURCE_STATE_COPY_SOURCE, State);
+  FlushBarriers();
+  m_pCmdList->CopyTextureRegion(&Dst, 0, 0, 0, &Src, nullptr);  // barriers flushed
+  RawBarrier(pTexture, D3D12_RESOURCE_STATE_COPY_SOURCE, State);
   if (bInFrame)
     FlushFrame();
   else

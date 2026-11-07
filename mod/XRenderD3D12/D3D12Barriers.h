@@ -91,7 +91,7 @@ namespace Barriers
   {
     PROBLEM_BEFORE,            //!< a transition's before is not the state the resource has (or is queued to have)
     PROBLEM_SAME_STATE,        //!< a transition to the state it names as before (left out)
-    PROBLEM_NOT_REGISTERED,    //!< Require or Assume of a resource that was not registered (left out)
+    PROBLEM_NOT_REGISTERED,    //!< Require of a resource that was not registered (left out)
     PROBLEM_SUBRESOURCE,       //!< a subresource beyond a registered resource's (left out)
     PROBLEM_MIXED_WRITE,       //!< a write state with another state
     PROBLEM_PENDING_AT_EXECUTE,//!< barriers queued when the list was executed (OnListExecuted)
@@ -104,6 +104,7 @@ namespace Barriers
     UINT nSub;
     D3D12_RESOURCE_STATES Expected;  //!< the tracked state (PROBLEM_BEFORE)
     D3D12_RESOURCE_STATES Got;       //!< what the request named
+    const char *szContext;           //!< SetContext's at the request (the renderer: its GPU section)
   };
 
   class CBarrierTracker
@@ -134,6 +135,7 @@ namespace Barriers
     {
       for (auto jt = m_Census.begin(); jt != m_Census.end();)
         jt = jt->first.first == pRes ? m_Census.erase(jt) : std::next(jt);
+      m_CensusIds.erase(pRes);
       auto it = m_Records.find(pRes);
       if (it == m_Records.end())
         return;
@@ -195,13 +197,19 @@ namespace Barriers
         Seal();
     }
 
-    //! A third party left a registered resource in State: no barrier.
+    //! A third party left a resource in State: no barrier (one not registered: what the census knows of it).
     void Assume(ID3D12Resource *pRes, D3D12_RESOURCE_STATES State)
     {
       SRecord *pRec = Find(pRes);
       if (!pRec)
       {
-        Problem(PROBLEM_NOT_REGISTERED, pRes, ALL, D3D12_RESOURCE_STATE_COMMON, State);
+        if (m_bCensus)
+        {
+          CensusIdentity(pRes);
+          for (auto jt = m_Census.begin(); jt != m_Census.end();)
+            jt = jt->first.first == pRes ? m_Census.erase(jt) : std::next(jt);
+          m_Census[std::make_pair(pRes, ALL)] = { State, !m_pIsBuffer || m_pIsBuffer(pRes) };
+        }
         return;
       }
       if (FindEntry(pRes))
@@ -370,30 +378,42 @@ namespace Barriers
       m_bUavAll = true;
     }
 
+    //! Barriers given as they are in a call of their own, after what is queued, in either mode (a library's or a
+    //! pass's own array): the registered states follow them, the census checks their befores.
+    void Verbatim(const D3D12_RESOURCE_BARRIER *pBarriers, UINT n)
+    {
+      Seal();
+      for (UINT i = 0; i < n; i++)
+      {
+        m_Stats.nRequests++;
+        const D3D12_RESOURCE_BARRIER &b = pBarriers[i];
+        if (b.Type == D3D12_RESOURCE_BARRIER_TYPE_TRANSITION)
+        {
+          SRecord *pRec = Find(b.Transition.pResource);
+          if (pRec && CheckSub(pRec, b.Transition.pResource, b.Transition.Subresource))
+            for (UINT s = 0; s < pRec->State.size(); s++)
+              if (b.Transition.Subresource == ALL || b.Transition.Subresource == s)
+                pRec->State[s] = b.Transition.StateAfter;
+          if (!pRec)
+            Census(b.Transition.pResource, b.Transition.Subresource, b.Transition.StateBefore, b.Transition.StateAfter);
+        }
+        else if (b.Type == D3D12_RESOURCE_BARRIER_TYPE_UAV && !b.UAV.pResource)
+        {
+          m_nUavAllEpoch = m_nEpoch;
+          m_bUavAllSeen = true;
+        }
+        m_Sealed.push_back(b);
+      }
+      if (n)
+        m_SealedSizes.push_back(n);
+    }
+
     //! Barriers given as an array (the immediate mode: as they are, in one call).
     void Barriers(const D3D12_RESOURCE_BARRIER *pBarriers, UINT n)
     {
       if (m_eMode == MODE_IMMEDIATE)
       {
-        Seal();
-        for (UINT i = 0; i < n; i++)
-        {
-          m_Stats.nRequests++;
-          const D3D12_RESOURCE_BARRIER &b = pBarriers[i];
-          if (b.Type == D3D12_RESOURCE_BARRIER_TYPE_TRANSITION)
-          {
-            SRecord *pRec = Find(b.Transition.pResource);
-            if (pRec && CheckSub(pRec, b.Transition.pResource, b.Transition.Subresource))
-              for (UINT s = 0; s < pRec->State.size(); s++)
-                if (b.Transition.Subresource == ALL || b.Transition.Subresource == s)
-                  pRec->State[s] = b.Transition.StateAfter;
-            if (!pRec)
-              Census(b.Transition.pResource, b.Transition.Subresource, b.Transition.StateBefore, b.Transition.StateAfter);
-          }
-          m_Sealed.push_back(b);
-        }
-        if (n)
-          m_SealedSizes.push_back(n);
+        Verbatim(pBarriers, n);
         return;
       }
       for (UINT i = 0; i < n; i++)
@@ -439,6 +459,13 @@ namespace Barriers
     //! after it (a draw, a dispatch, a copy), which the next UAV barriers wait for.
     template <class F> void Flush(F &&Emit, bool bWork)
     {
+      if (m_Entries.empty() && !m_bUavAll && m_SealedSizes.empty())
+      {
+        // Nothing queued (the draws' and dispatches' usual case).
+        if (bWork)
+          m_nEpoch++;
+        return;
+      }
       Seal();
       size_t nAt = 0;
       for (size_t nSize : m_SealedSizes)
@@ -510,17 +537,27 @@ namespace Barriers
     //! the state the last transition of the resource gave is PROBLEM_BEFORE (on: d3d12_BarrierCheck).
     //! pIsBuffer tells a buffer (whose state decays when its list has run) from a texture; without it the census forgets
     //! everything at the end of a list.
+    //! pIdentity tells one resource from another made at the same address after it was released (one released without
+    //! Forget): a resource whose identity is not the one the census saw at its address is new, what was kept of the one
+    //! before is dropped.
     using FIsBuffer = bool (*)(ID3D12Resource *);
-    void SetCensus(bool bOn, FIsBuffer pIsBuffer = nullptr)
+    using FIdentity = uint64_t (*)(ID3D12Resource *);
+    void SetCensus(bool bOn, FIsBuffer pIsBuffer = nullptr, FIdentity pIdentity = nullptr)
     {
       m_bCensus = bOn;
       m_pIsBuffer = pIsBuffer;
+      m_pIdentity = pIdentity;
       if (!bOn)
+      {
         m_Census.clear();
+        m_CensusIds.clear();
+      }
     }
     //! The problems found since the last TakeProblems (at most MAX_PROBLEMS of them kept).
     std::vector<SProblem> TakeProblems() { return std::exchange(m_Problems, {}); }
     static constexpr size_t MAX_PROBLEMS = 256;
+    //! Where the requests from here on come from (a string with static storage, kept in the problems).
+    void SetContext(const char *szContext) { m_szContext = szContext; }
 
   private:
     struct SRecord
@@ -713,13 +750,14 @@ namespace Barriers
     void Problem(EProblem eKind, ID3D12Resource *pRes, UINT nSub, D3D12_RESOURCE_STATES Expected, D3D12_RESOURCE_STATES Got)
     {
       if (m_Problems.size() < MAX_PROBLEMS)
-        m_Problems.push_back({ eKind, pRes, nSub, Expected, Got });
+        m_Problems.push_back({ eKind, pRes, nSub, Expected, Got, m_szContext });
     }
     //! The census of a transition of a resource not registered.
     void Census(ID3D12Resource *pRes, UINT nSub, D3D12_RESOURCE_STATES Before, D3D12_RESOURCE_STATES After)
     {
       if (!m_bCensus)
         return;
+      CensusIdentity(pRes);
       const auto Key = std::make_pair(pRes, nSub);
       auto it = m_Census.find(Key);
       if (nSub == ALL)
@@ -743,6 +781,20 @@ namespace Barriers
       m_Census[Key] = { After, !m_pIsBuffer || m_pIsBuffer(pRes) };
     }
 
+    //! Another resource at pRes' address than the census saw there: what it kept of that one dropped.
+    void CensusIdentity(ID3D12Resource *pRes)
+    {
+      if (!m_pIdentity)
+        return;
+      const uint64_t nId = m_pIdentity(pRes);
+      const auto [it, bNew] = m_CensusIds.try_emplace(pRes, nId);
+      if (bNew || it->second == nId)
+        return;
+      it->second = nId;
+      for (auto jt = m_Census.begin(); jt != m_Census.end();)
+        jt = jt->first.first == pRes ? m_Census.erase(jt) : std::next(jt);
+    }
+
     struct SKeyHash
     {
       size_t operator()(const std::pair<ID3D12Resource *, UINT> &k) const { return std::hash<const void *>()(k.first) ^ ((size_t)k.second * 0x9e3779b97f4a7c15ull); }
@@ -760,6 +812,7 @@ namespace Barriers
     bool m_bUavAllSeen = false;
     SStats m_Stats;
     std::vector<SProblem> m_Problems;
+    const char *m_szContext = nullptr;
     bool m_bCensus = false;
     FIsBuffer m_pIsBuffer = nullptr;
     struct SCensus
@@ -768,6 +821,8 @@ namespace Barriers
       bool bBuffer;  //!< forgotten when the list has run (without m_pIsBuffer: everything)
     };
     std::unordered_map<std::pair<ID3D12Resource *, UINT>, SCensus, SKeyHash> m_Census;
+    FIdentity m_pIdentity = nullptr;
+    std::unordered_map<ID3D12Resource *, uint64_t> m_CensusIds;  //!< the identity the census saw at each address
   };
 }
 

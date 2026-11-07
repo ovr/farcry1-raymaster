@@ -447,10 +447,14 @@ void CD3D12Renderer::DrawGeometry(const SPipelineKey &Key, const SDrawConstants 
       pList->IASetIndexBuffer(pIB);
       Set.IB = *pIB;
     }
-    pList->DrawIndexedInstanced(nCount, nInstances, nFirst, nBaseVertex, 0);
+    m_pDevice->FlushBarriers();
+    pList->DrawIndexedInstanced(nCount, nInstances, nFirst, nBaseVertex, 0);  // barriers flushed
   }
   else
-    pList->DrawInstanced(nCount, nInstances, nFirst, 0);
+  {
+    m_pDevice->FlushBarriers();
+    pList->DrawInstanced(nCount, nInstances, nFirst, 0);  // barriers flushed
+  }
 }
 
 void CD3D12Renderer::DrawImmediate(const SPipelineKey &Key, const SDrawConstants &dc, D3D_PRIMITIVE_TOPOLOGY eTopology, int nVertexFormat,
