@@ -381,8 +381,9 @@ void CD3D12Renderer::DrawRaySunMask()
   const UINT nGroupsX = (UINT)(w + XR_RAY_SUN_GROUP - 1) / XR_RAY_SUN_GROUP, nGroupsY = (UINT)(h + XR_RAY_SUN_GROUP - 1) / XR_RAY_SUN_GROUP;
   const int nCellsX = (w + nStep - 1) / nStep, nCellsY = (h + nStep - 1) / nStep;
   constexpr D3D12_RESOURCE_STATES UAV = D3D12_RESOURCE_STATE_UNORDERED_ACCESS;
-  m_pDevice->Transition(pDepth, D3D12_RESOURCE_STATE_DEPTH_WRITE, DEPTH_READ);
-  // The targets' states kept by the device (EnsureRaySunTargets): each kernel asks for its own, nothing moved back after.
+  // The depth read (the device gives it back for the draws: the bound depth buffer's state), the targets' states kept by
+  // the device too (EnsureRaySunTargets): each kernel asks for its own, nothing moved back after.
+  m_pDevice->Require(pDepth, DEPTH_READ);
   m_pDevice->Require(m_RaySun.pRays->m_pResource, UAV);
   m_pCompute->DispatchRays(pList, eD3D12K_RaySunTrace, FrameCB.nGPU, PassCB.nGPU, nTlas, nInstances, m_RaySun.nTables[TABLE_TRACE],
                            (UINT)(nCellsX + XR_RAY_SUN_GROUP - 1) / XR_RAY_SUN_GROUP, (UINT)(nCellsY + XR_RAY_SUN_GROUP - 1) / XR_RAY_SUN_GROUP);
@@ -404,7 +405,6 @@ void CD3D12Renderer::DrawRaySunMask()
     // Read by the opaque list's pixels.
     m_pDevice->Require(m_RaySun.pMask->m_pResource, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
   }
-  m_pDevice->Transition(pDepth, DEPTH_READ, D3D12_RESOURCE_STATE_DEPTH_WRITE);
 
   // The camera of this frame for the next one's history.
   const Matrix44 ViewProj = m_CameraView * m_ProjMatrix;

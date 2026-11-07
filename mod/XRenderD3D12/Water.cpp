@@ -641,8 +641,8 @@ bool CD3D12Renderer::BuildDepthTiles()
         m_pDescriptors->WriteUAV(nTable + CD3D12Compute::COMPUTE_SRVS + i, t == 0 || i < 3 ? pTiles : nullptr, &UAV);
       }
     }
-    // Made in UNORDERED_ACCESS (called in a frame).
-    m_pDevice->Transition(pTiles, D3D12_RESOURCE_STATE_UNORDERED_ACCESS, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+    // Made in UNORDERED_ACCESS, its state kept by the device.
+    m_pDevice->TrackState(pTiles, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
     pCopy->nTileWidth = w;
     pCopy->nTileHeight = h;
   }
@@ -657,15 +657,16 @@ bool CD3D12Renderer::BuildDepthTiles()
   constexpr D3D12_RESOURCE_STATES READ = D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE | D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE;
   ID3D12Resource *pTiles = pCopy->pTiles->m_pResource;
   ID3D12GraphicsCommandList *pList = m_pDevice->GetCmdList();
-  m_pDevice->Transition(pCopy->pDepth.Get(), D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, READ);
-  m_pDevice->Transition(pTiles, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+  // The depth copy read by the kernel and the water's pixels, the tiles written, then read by the water's pixels (the
+  // device keeps their states).
+  m_pDevice->Require(pCopy->pDepth.Get(), READ);
+  m_pDevice->Require(pTiles, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
   m_pCompute->Dispatch(pList, eD3D12K_DepthTiles, CB.nGPU, pCopy->nTileTables, pCopy->nTileTables + CD3D12Compute::COMPUTE_SRVS,
                        (UINT)w / 16, (UINT)h / 16);
   m_pDevice->UavBarrier(pTiles);
   m_pCompute->Dispatch(pList, eD3D12K_DepthTilesUp, CB.nGPU, pCopy->nTileTables + TABLE, pCopy->nTileTables + TABLE + CD3D12Compute::COMPUTE_SRVS,
                        (UINT)((w >> 5) + 15) / 16, (UINT)((h >> 5) + 15) / 16);
-  m_pDevice->Transition(pTiles, D3D12_RESOURCE_STATE_UNORDERED_ACCESS, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
-  m_pDevice->Transition(pCopy->pDepth.Get(), READ, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+  m_pDevice->Require(pTiles, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
   m_nSceneTileSRV = pCopy->pTiles->m_nSRV;
   return true;
 }

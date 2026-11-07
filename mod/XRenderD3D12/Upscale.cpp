@@ -344,13 +344,14 @@ void CD3D12Renderer::UpscaleScene()
     InvalidateFrameConstants();
   }
   GpuSection("upscale");
-  // The upscaler reads them in a compute shader.
+  // The upscaler reads its inputs in a compute shader (FSR in exactly the state it is told: both shaders' reads) and writes
+  // its output; the device keeps their states (the inputs stay readable by the pixels after).
   constexpr D3D12_RESOURCE_STATES READ = D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE | D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE;
   CD3D12Texture *pIn = pLight ? pLight : pLdr;
   if (pIn)
-    m_pDevice->Transition(pIn->m_pResource, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, READ);
+    m_pDevice->Require(pIn->m_pResource, READ);
   if (pLight)
-    m_pDevice->Transition(m_Hdr.pExposureScale->m_pResource, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, READ);
+    m_pDevice->Require(m_Hdr.pExposureScale->m_pResource, READ);
 
   SUpscaleInputs In;
   In.pCmdList = m_pDevice->GetCmdList();
@@ -359,6 +360,9 @@ void CD3D12Renderer::UpscaleScene()
   In.pDepth = m_pDevice->GetUpscaleDepth();
   In.pVelocity = m_pDevice->GetSceneVelocity();
   In.pOutput = m_pDevice->GetSceneOutput();
+  for (ID3D12Resource *pRes : { In.pColor, In.pDepth, In.pVelocity })
+    m_pDevice->Require(pRes, READ);
+  m_pDevice->Require(In.pOutput, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
   In.nRenderWidth = rw;
   In.nRenderHeight = rh;
   In.fJitterX = m_UpscaleJitter[0];
@@ -378,14 +382,10 @@ void CD3D12Renderer::UpscaleScene()
   m_pDevice->FlushBarriers();
   const bool bUpscaled = m_pUpscaler->Dispatch(In);
   m_pDevice->BindRootSignature();
-  if (pLight)
-    m_pDevice->Transition(m_Hdr.pExposureScale->m_pResource, READ, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
   // Not upscaled: the light tone mapped at the scene's size, shown stretched; still readable by the bloom's kernel
   // (DispatchBloomLevel reads its first level's source so).
   if (pLight && !bUpscaled)
     pLdr = ResolveHdr(pLight->m_nSRV, pLight->m_pResource, rw, rh, true, nullptr, DXGI_FORMAT_UNKNOWN, true);
-  if (pIn)
-    m_pDevice->Transition(pIn->m_pResource, READ, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
 
   const int w = m_pDevice->GetWidth(), h = m_pDevice->GetHeight();
   if (pLight && bUpscaled && CV_d3d12_UpscaleDebug != 2)
@@ -394,9 +394,8 @@ void CD3D12Renderer::UpscaleScene()
     // back buffer. The upscaler's debug view (d3d12_UpscaleDebug 1) too: with the light its picture is of the light, exposed and
     // tone mapped as the frame.
     GpuSection("hdr");
-    m_pDevice->Transition(In.pOutput, D3D12_RESOURCE_STATE_UNORDERED_ACCESS, READ);
+    m_pDevice->Require(In.pOutput, READ);
     ResolveHdr(m_nUpscaleOutputSRV, In.pOutput, w, h, false, nullptr, DXGI_FORMAT_UNKNOWN, true);
-    m_pDevice->Transition(In.pOutput, READ, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
   }
   else
   {
@@ -410,7 +409,7 @@ void CD3D12Renderer::UpscaleScene()
     m_Viewport[3] = h;
     m_bScissor = m_bItemScissor = false;
     if (bUpscaled)
-      m_pDevice->Transition(In.pOutput, D3D12_RESOURCE_STATE_UNORDERED_ACCESS, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+      m_pDevice->Require(In.pOutput, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
     SPipelineKey Key = {};
     Key.nProgram = eD3D12P_Post;
     Key.nState = GS_NODEPTHTEST;
@@ -439,8 +438,6 @@ void CD3D12Renderer::UpscaleScene()
     DrawImmediate(Key, dc, D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST, VERTEX_FORMAT_P3F, s_FullScreen, 3);
     if (bHighlight)
       m_pDevice->BindHighlight(false);
-    if (bUpscaled)
-      m_pDevice->Transition(In.pOutput, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
     memcpy(m_Viewport, Viewport, sizeof(Viewport));
     m_bScissor = bScissor;
   }

@@ -131,15 +131,8 @@ bool CAOCacao::Dispatch(const SAOFrame &Frame)
     m_bFailedLogged = true;
     return false;
   }
-  // It leaves the output in GENERIC_READ.
+  // It leaves the output in GENERIC_READ (its state the device's: the resolve or the draw asks for the one it reads in).
   g_pRenderer->m_pDevice->Assume(m_pOutput, D3D12_RESOURCE_STATE_GENERIC_READ);
-  D3D12_RESOURCE_BARRIER b = {};
-  b.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
-  b.Transition.pResource = m_pOutput;
-  b.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
-  b.Transition.StateBefore = D3D12_RESOURCE_STATE_GENERIC_READ;
-  b.Transition.StateAfter = D3D12_RESOURCE_STATE_UNORDERED_ACCESS;
-  g_pRenderer->m_pDevice->ResourceBarriers(1, &b);
   return true;
 }
 

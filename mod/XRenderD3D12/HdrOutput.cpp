@@ -325,7 +325,9 @@ bool CD3D12Renderer::LimitFrameAverage(const char *szSection)
   // states).
   m_pDevice->Require(pFrame, READ);
   m_pDevice->Require(pHighlight, READ);
-  m_pDevice->Transition(o.pFall->m_pResource, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+  // The target's state kept by the device too (an upload's render target): written, then read by the output's pass. The
+  // words are not tracked.
+  m_pDevice->Require(o.pFall->m_pResource, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
   // 16 x 16 samples a group, then one thread.
   const UINT nGroupPixels = 16 * nStride;
   m_pCompute->Dispatch(pList, eD3D12K_FrameAverageSum, CB.nGPU, nTable, nTable + CD3D12Compute::COMPUTE_SRVS,
@@ -333,7 +335,7 @@ bool CD3D12Renderer::LimitFrameAverage(const char *szSection)
   m_pDevice->UavBarrier(o.pFallWords.Get());
   m_pCompute->Dispatch(pList, eD3D12K_FrameAverageLimit, CB.nGPU, nTable, nTable + CD3D12Compute::COMPUTE_SRVS, 1, 1);
   m_pDevice->UavBarrier(o.pFallWords.Get());
-  m_pDevice->Transition(o.pFall->m_pResource, D3D12_RESOURCE_STATE_UNORDERED_ACCESS, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+  m_pDevice->Require(o.pFall->m_pResource, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
   GpuSection(szSection);
   o.nFallFrame = m_nFrames;
   return true;

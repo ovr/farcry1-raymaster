@@ -836,7 +836,8 @@ void CD3D12Renderer::DrawPathTrace()
   const D3D12_GPU_VIRTUAL_ADDRESS nLights = s.nLightsFrame == m_nFrames ? s.nLights : 0;
   const UINT gx = (UINT)(w + XR_PT_GROUP - 1) / XR_PT_GROUP, gy = (UINT)(h + XR_PT_GROUP - 1) / XR_PT_GROUP;
   constexpr D3D12_RESOURCE_STATES UAV = D3D12_RESOURCE_STATE_UNORDERED_ACCESS;
-  m_pDevice->Transition(pDepth, D3D12_RESOURCE_STATE_DEPTH_WRITE, PATH_DEPTH_READ);
+  // The depth buffer's state kept by the device: read here, drawn on again by the next draw bound to it.
+  m_pDevice->Require(pDepth, PATH_DEPTH_READ);
   // The targets' states kept by the device (UpdatePathKernels): each kernel asks for its outputs and inputs, nothing moved
   // back after (the frame before's history, read by this one, stays readable). The table of the cache's kernels and
   // CSTrace has the paths and the hit distance.
@@ -871,11 +872,10 @@ void CD3D12Renderer::DrawPathTrace()
     m_pDevice->Require(s.pHitDistance->m_pResource, PATH_KERNEL_READ);
     for (CD3D12Texture *pTex : s.pNrdIn)
       m_pDevice->Require(pTex->m_pResource, UAV);
+    // The scene's motion vectors (kept by the device; a render target bound again before the next draw).
     if (s.nVelocitySRV >= 0)
-      m_pDevice->Transition(pVelocity, D3D12_RESOURCE_STATE_RENDER_TARGET, PATH_KERNEL_READ);
+      m_pDevice->Require(pVelocity, PATH_KERNEL_READ);
     m_pCompute->DispatchRays(pList, eD3D12K_PathNrdPack, FrameCB.nGPU, PassCB.nGPU, nTlas, nInstances, s.nNrdTable, gx, gy, nLights);
-    if (s.nVelocitySRV >= 0)
-      m_pDevice->Transition(pVelocity, PATH_KERNEL_READ, D3D12_RESOURCE_STATE_RENDER_TARGET);
     SNrdView View = {};
     memcpy(View.mWorldToView, m_CameraView.data, sizeof(View.mWorldToView));
     memcpy(View.mViewToClip, m_ProjMatrix.data, sizeof(View.mViewToClip));
@@ -923,7 +923,6 @@ void CD3D12Renderer::DrawPathTrace()
                            nLights);
   m_pDevice->Require(s.pLight->m_pResource, PATH_READ);
   m_pDevice->Require(s.pHighlights->m_pResource, PATH_READ);
-  m_pDevice->Transition(pDepth, PATH_DEPTH_READ, D3D12_RESOURCE_STATE_DEPTH_WRITE);
   m_pDevice->BindRootSignature();
   InvalidateFrameConstants();
 

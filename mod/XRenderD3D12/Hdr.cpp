@@ -466,11 +466,12 @@ bool CD3D12Renderer::DispatchMeter(ID3D12Resource *pScene, const SDrawConstants 
   const SD3D12FrameAlloc CB = m_pUpload->AllocFrame(sizeof(mc), 256);
   memcpy(CB.pCPU, &mc, sizeof(mc));
   m_pDevice->EndOffscreen();
-  m_pDevice->Transition(pLevel->m_pResource, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+  // The level's state kept by the device (an upload's render target): written, then read by the next level's pass.
+  m_pDevice->Require(pLevel->m_pResource, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
   // 2 x 2 texels a group.
   m_pCompute->Dispatch(m_pDevice->GetCmdList(), eD3D12K_Meter, CB.nGPU, nFirst, nFirst + CD3D12Compute::COMPUTE_SRVS,
                        (UINT)(pLevel->m_nWidth + 1) / 2, (UINT)(pLevel->m_nHeight + 1) / 2);
-  m_pDevice->Transition(pLevel->m_pResource, D3D12_RESOURCE_STATE_UNORDERED_ACCESS, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+  m_pDevice->Require(pLevel->m_pResource, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
   return true;
 }
 
@@ -505,9 +506,11 @@ bool CD3D12Renderer::DispatchExposure(ID3D12Resource *pScene, int nWidth, int nH
   m_pDevice->EndOffscreen();
   ID3D12GraphicsCommandList *pList = m_pDevice->GetCmdList();
   ID3D12Resource *pTarget = m_Hdr.pExposureTarget->m_pResource;
+  // The depth buffer's and the target's states kept by the device: the depth buffer read here stays so (the next draw
+  // bound to it gets it back), the target written, then read by the adaptation's pass. The words are not tracked.
   if (pDepth && !bDepthReadable)
-    m_pDevice->Transition(pDepth, D3D12_RESOURCE_STATE_DEPTH_WRITE, DEPTH_READ_COMPUTE);
-  m_pDevice->Transition(pTarget, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+    m_pDevice->Require(pDepth, DEPTH_READ_COMPUTE);
+  m_pDevice->Require(pTarget, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
   // 16 x 16 samples a group, then one group.
   const UINT nGroupPixels = 16 * nStride;
   m_pCompute->Dispatch(pList, eD3D12K_ExposureHistogram, CB.nGPU, nTable, nTable + CD3D12Compute::COMPUTE_SRVS,
@@ -515,9 +518,7 @@ bool CD3D12Renderer::DispatchExposure(ID3D12Resource *pScene, int nWidth, int nH
   m_pDevice->UavBarrier(m_Hdr.pExposureWords.Get());
   m_pCompute->Dispatch(pList, eD3D12K_ExposureTarget, CB.nGPU, nTable, nTable + CD3D12Compute::COMPUTE_SRVS, 1, 1);
   m_pDevice->UavBarrier(m_Hdr.pExposureWords.Get());
-  m_pDevice->Transition(pTarget, D3D12_RESOURCE_STATE_UNORDERED_ACCESS, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
-  if (pDepth && !bDepthReadable)
-    m_pDevice->Transition(pDepth, DEPTH_READ_COMPUTE, D3D12_RESOURCE_STATE_DEPTH_WRITE);
+  m_pDevice->Require(pTarget, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
   return true;
 }
 
@@ -642,18 +643,17 @@ bool CD3D12Renderer::DispatchBloomLevel(size_t nLevel, ID3D12Resource *pSource, 
   constexpr D3D12_RESOURCE_STATES READ = D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE | D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE;
   // The levels' states kept by the device (EnsureHdrTargets): the level before readable by this kernel and by the pass
   // that adds this one to it (one transition, not back to PIXEL_SHADER_RESOURCE after), this one written, then readable
-  // by the passes; the device's offscreen targets ask for theirs too. The EV is not tracked (its readback names its state).
+  // by the passes; the device's offscreen targets ask for theirs too. The EV (an upload's render target) readable by this
+  // kernel and the passes after it.
   ID3D12Resource *pLevelRes = pLevel->m_pResource;
   if (bScene)
-    m_pDevice->Transition(pExposure, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, READ);
+    m_pDevice->Require(pExposure, READ);
   else
     m_pDevice->Require(pSource, READ);
   m_pDevice->Require(pLevelRes, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
   m_pCompute->Dispatch(m_pDevice->GetCmdList(), eD3D12K_Bloom, CB.nGPU, nFirst, nFirst + CD3D12Compute::COMPUTE_SRVS,
                        (UINT)(pLevel->m_nWidth + 7) / 8, (UINT)(pLevel->m_nHeight + 7) / 8);
   m_pDevice->Require(pLevelRes, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
-  if (bScene)
-    m_pDevice->Transition(pExposure, READ, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
   return true;
 }
 

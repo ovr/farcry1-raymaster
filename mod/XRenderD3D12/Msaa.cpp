@@ -181,9 +181,9 @@ void CD3D12Renderer::BeginMsaa()
 void CD3D12Renderer::DrawMsaaResolve(bool bDepth)
 {
   ID3D12Resource *pSource = bDepth ? m_pDevice->GetMsaaDepth() : m_pDevice->GetMsaaColor();
-  const D3D12_RESOURCE_STATES State = bDepth ? D3D12_RESOURCE_STATE_DEPTH_WRITE : D3D12_RESOURCE_STATE_RENDER_TARGET;
+  // The multisampled target's state kept by the device: read here, drawn on again once SetBackBufferTargets bound it.
   m_pDevice->BindMsaaResolveTarget(!bDepth);
-  m_pDevice->Transition(pSource, State, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+  m_pDevice->Require(pSource, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
   ID3D12GraphicsCommandList *pList = m_pDevice->GetCmdList();
   // The HDR target's light at the exposure its resolve will take (Hdr.cpp's ResolveHdr: the compensation, the adapted EV
   // of the frame before; none in heat vision).
@@ -201,7 +201,6 @@ void CD3D12Renderer::DrawMsaaResolve(bool bDepth)
   pList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
   m_pDevice->FlushBarriersForDraw();
   pList->DrawInstanced(3, 1, 0, 0);  // barriers flushed
-  m_pDevice->Transition(pSource, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, State);
   // The renderer's root signature and the multisampled targets again.
   m_pDevice->BindRootSignature();
   m_pDevice->SetBackBufferTargets();

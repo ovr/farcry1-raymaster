@@ -164,9 +164,12 @@ bool CD3D12Renderer::UpdateAO()
     ID3D12Resource *pUAV = i == 0 ? m_pAOFactor->m_pResource : i == 1 && m_pAOTaken ? m_pAOTaken->m_pResource : nullptr;
     m_pDescriptors->WriteUAV(m_nAOResolveTable + CD3D12Compute::COMPUTE_SRVS + i, pUAV, &UAV);
   }
-  // Made in PIXEL_SHADER_RESOURCE (called in a frame).
-  if (m_pAOAmbient)
-    m_pDevice->Transition(m_pAOAmbient->m_pResource, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, AMBIENT_READ);
+  // Made in UNORDERED_ACCESS, their states kept by the device (each pass asks for its own: the backend's output written,
+  // read by the resolve or the draw; the factor and the light taken written by the resolve, read by the draws; the ambient
+  // light an upload's render target).
+  for (CD3D12Texture *pTex : { m_pAOOutput, m_pAOFactor, m_pAOTaken })
+    if (pTex)
+      m_pDevice->TrackState(pTex->m_pResource, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
   iLog->Log("XRenderD3D12: ambient occlusion %s, %d x %d%s", m_pAO->GetName(), w, h, nApply ? ", on the ambient light" : "");
   return true;
 }
@@ -223,7 +226,7 @@ void CD3D12Renderer::BeginAOTarget(const SRenderItem *pItems, int nItems)
   InvalidateFrameConstants();
 
   static const float Zero[4] = {};
-  m_pDevice->Transition(m_pAOAmbient->m_pResource, AMBIENT_READ, D3D12_RESOURCE_STATE_RENDER_TARGET);
+  m_pDevice->Require(m_pAOAmbient->m_pResource, D3D12_RESOURCE_STATE_RENDER_TARGET);
   m_pDevice->ClearRenderTargetView(m_pAOAmbient->m_RTV, Zero);
   m_pDevice->BindAmbient(m_pAOAmbient->m_RTV, m_pAOAmbient->m_pResource);
   m_bAOAmbientBound = true;
@@ -240,7 +243,7 @@ void CD3D12Renderer::DrawAmbientOcclusion()
     m_bAOAmbientBound = false;
     pAmbient = m_pAOAmbient->m_pResource;
     m_pDevice->BindAmbient({});
-    m_pDevice->Transition(pAmbient, D3D12_RESOURCE_STATE_RENDER_TARGET, AMBIENT_READ);
+    m_pDevice->Require(pAmbient, AMBIENT_READ);
   }
   // With d3d12_AOApply 1 only over an opaque list that wrote the ambient light (made for it already).
   if (!IsAOView() || (!pAmbient && WantsPathTracing()) || (pAmbient ? !m_pAO : (!UpdateAO() || m_nAOApply)))
@@ -255,7 +258,10 @@ void CD3D12Renderer::DrawAmbientOcclusion()
   const D3D12_RESOURCE_STATES DepthRead = bTaken ? DEPTH_READ | D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE : DEPTH_READ;
   // With MSAA its depth buffer's nearest samples (Msaa.cpp).
   ResolveMsaaDepth();
-  m_pDevice->Transition(pDepth, D3D12_RESOURCE_STATE_DEPTH_WRITE, DepthRead);
+  // The depth read until the draws (bound again, the device gives it back as they have it); the backend writes the
+  // visibility.
+  m_pDevice->Require(pDepth, DepthRead);
+  m_pDevice->Require(m_pAOOutput->m_pResource, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
 
   SAOFrame Frame;
   Frame.pCmdList = pList;
@@ -293,7 +299,10 @@ void CD3D12Renderer::DrawAmbientOcclusion()
   const float fStrength = std::max(CV_d3d12_AOStrength, 0.0f);
   if (bOk && !bTaken)
   {
-    m_pDevice->Transition(m_pAOOutput->m_pResource, D3D12_RESOURCE_STATE_UNORDERED_ACCESS, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+    m_pDevice->Require(m_pAOOutput->m_pResource, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+    for (CD3D12Texture *pTex : { m_pAOFactor, m_pAOTaken })
+      if (pTex)
+        m_pDevice->Require(pTex->m_pResource, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
     SAoResolveConstants rc = {};
     Set4(rc.vSize, (float)w, (float)h, 1.0f / w, 1.0f / h);
     Set4(rc.vDepthParams, p[10], p[14], 0, 0);
@@ -305,10 +314,7 @@ void CD3D12Renderer::DrawAmbientOcclusion()
     memcpy(CB.pCPU, &rc, sizeof(rc));
     m_pCompute->Dispatch(pList, eD3D12K_AoResolve, CB.nGPU, m_nAOResolveTable, m_nAOResolveTable + CD3D12Compute::COMPUTE_SRVS,
                          (UINT)(w + 7) / 8, (UINT)(h + 7) / 8);
-    m_pDevice->Transition(m_pAOOutput->m_pResource, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
   }
-  if (!bOk || !bTaken)
-    m_pDevice->Transition(pDepth, DepthRead, D3D12_RESOURCE_STATE_DEPTH_WRITE);
   InvalidateFrameConstants();
   if (!bOk)
     return;
@@ -331,8 +337,8 @@ void CD3D12Renderer::DrawAmbientOcclusion()
   Set4(dc.vParams0, 1.0f / w, 1.0f / h, 0, 0);
   if (bTaken)
   {
-    // The resolve's views: the visibility, the depth buffer, the ambient light.
-    m_pDevice->Transition(m_pAOOutput->m_pResource, D3D12_RESOURCE_STATE_UNORDERED_ACCESS, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+    // The resolve's views: the visibility, the depth buffer (read since the backend), the ambient light.
+    m_pDevice->Require(m_pAOOutput->m_pResource, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
     m_pDevice->SetDepthReadOnly(true);
     dc.nFlags = POST_AO_TAKEN;
     dc.nTex0 = (uint32)m_nAOResolveTable;
@@ -342,7 +348,7 @@ void CD3D12Renderer::DrawAmbientOcclusion()
   }
   else
   {
-    m_pDevice->Transition(pApplied->m_pResource, D3D12_RESOURCE_STATE_UNORDERED_ACCESS, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+    m_pDevice->Require(pApplied->m_pResource, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
     dc.nFlags = POST_BLEND;
     dc.nTex0 = (uint32)pApplied->m_nSRV;
     Set4(dc.vParams1, 1, 1, 1, 1);
@@ -356,13 +362,7 @@ void CD3D12Renderer::DrawAmbientOcclusion()
     DrawImmediate(Key, dc, D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST, VERTEX_FORMAT_P3F, s_FullScreen, 3);
   }
   if (bTaken)
-  {
     m_pDevice->SetDepthReadOnly(false);
-    m_pDevice->Transition(m_pAOOutput->m_pResource, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
-    m_pDevice->Transition(pDepth, DepthRead, D3D12_RESOURCE_STATE_DEPTH_WRITE);
-  }
-  else
-    m_pDevice->Transition(pApplied->m_pResource, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
   memcpy(m_Viewport, Viewport, sizeof(Viewport));
   m_bScissor = bScissor;
   m_bItemScissor = bItemScissor;
@@ -375,7 +375,6 @@ void CD3D12Renderer::DrawAODebug()
     return;
   // The factor, the ambient light or the light taken, stretched over the whole back buffer.
   CD3D12Texture *pShow = m_nAOApply && CV_d3d12_AODebug == 2 ? m_pAOAmbient : m_nAOApply && CV_d3d12_AODebug == 3 ? m_pAOTaken : m_pAOFactor;
-  const bool bCompute = pShow != m_pAOAmbient;
   const int w = m_pDevice->GetWidth(), h = m_pDevice->GetHeight();
   int Viewport[4];
   memcpy(Viewport, m_Viewport, sizeof(Viewport));
@@ -384,8 +383,7 @@ void CD3D12Renderer::DrawAODebug()
   m_Viewport[2] = w;
   m_Viewport[3] = h;
   m_bScissor = m_bItemScissor = false;
-  if (bCompute)
-    m_pDevice->Transition(pShow->m_pResource, D3D12_RESOURCE_STATE_UNORDERED_ACCESS, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+  m_pDevice->Require(pShow->m_pResource, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
   SPipelineKey Key = {};
   Key.nProgram = eD3D12P_Post;
   Key.nState = GS_NODEPTHTEST;
@@ -396,8 +394,6 @@ void CD3D12Renderer::DrawAODebug()
   Set4(dc.vParams0, 1.0f / w, 1.0f / h, 0, 0);
   Set4(dc.vParams1, 1, 1, 1, 1);
   DrawImmediate(Key, dc, D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST, VERTEX_FORMAT_P3F, s_FullScreen, 3);
-  if (bCompute)
-    m_pDevice->Transition(pShow->m_pResource, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
   memcpy(m_Viewport, Viewport, sizeof(Viewport));
   m_bScissor = bScissor;
   m_bItemScissor = bItemScissor;

@@ -228,16 +228,18 @@ bool CD3D12Renderer::UpdateVolumetricLight(ID3D12Resource *pDepth, DXGI_FORMAT D
   const UINT nGroupsX = (UINT)(m_Volumetric.nWidth + XR_VOLUMETRIC_GROUP - 1) / XR_VOLUMETRIC_GROUP;
   const UINT nGroupsY = (UINT)(m_Volumetric.nHeight + XR_VOLUMETRIC_GROUP - 1) / XR_VOLUMETRIC_GROUP;
   m_pDevice->EndOffscreen();
-  m_pDevice->Transition(pFroxels->m_pResource, FROXELS_READ, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+  // Each kernel's inputs and outputs in the states it wants (the device keeps them): the history and the cascades read
+  // (the cascades by the opaque list's pixels too), this frame's froxels written, then read by the integration; the
+  // integrated froxels left for the resolve's pixels.
+  m_pDevice->Require(pHistory->m_pResource, FROXELS_READ);
+  m_pDevice->Require(pFroxels->m_pResource, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
   if (pMaps)
-    m_pDevice->Transition(pMaps, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, CASCADES_READ);
+    m_pDevice->Require(pMaps, CASCADES_READ);
   m_pCompute->Dispatch(pList, eD3D12K_VolumetricInject, CB.nGPU, nInject, nInject + CD3D12Compute::COMPUTE_SRVS, nGroupsX, nGroupsY, VOLUME_SLICES);
-  if (pMaps)
-    m_pDevice->Transition(pMaps, CASCADES_READ, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
-  m_pDevice->Transition(pFroxels->m_pResource, D3D12_RESOURCE_STATE_UNORDERED_ACCESS, FROXELS_READ);
-  m_pDevice->Transition(m_Volumetric.pIntegrated->m_pResource, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+  m_pDevice->Require(pFroxels->m_pResource, FROXELS_READ);
+  m_pDevice->Require(m_Volumetric.pIntegrated->m_pResource, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
   m_pCompute->Dispatch(pList, eD3D12K_VolumetricIntegrate, CB.nGPU, nIntegrate, nIntegrate + CD3D12Compute::COMPUTE_SRVS, nGroupsX, nGroupsY);
-  m_pDevice->Transition(m_Volumetric.pIntegrated->m_pResource, D3D12_RESOURCE_STATE_UNORDERED_ACCESS, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+  m_pDevice->Require(m_Volumetric.pIntegrated->m_pResource, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
 
   const Matrix44 ViewProj = m_CameraView * m_ProjMatrix;
   memcpy(m_Volumetric.PrevViewProj, ViewProj.data, sizeof(m_Volumetric.PrevViewProj));
@@ -275,16 +277,10 @@ void CD3D12Renderer::SetDepthRead(ID3D12Resource *pDepth, bool bRead)
 {
   if (!pDepth)
     return;
+  // Read with the depth buffer bound read only; bound writable again, the device gives it back for the draws.
   if (bRead)
-  {
-    m_pDevice->Transition(pDepth, D3D12_RESOURCE_STATE_DEPTH_WRITE, DEPTH_READ);
-    m_pDevice->SetDepthReadOnly(true);
-  }
-  else
-  {
-    m_pDevice->SetDepthReadOnly(false);
-    m_pDevice->Transition(pDepth, DEPTH_READ, D3D12_RESOURCE_STATE_DEPTH_WRITE);
-  }
+    m_pDevice->Require(pDepth, DEPTH_READ);
+  m_pDevice->SetDepthReadOnly(bRead);
 }
 
 bool CD3D12Renderer::EnsureVolumetricTargets(int nWidth, int nHeight)
@@ -293,16 +289,17 @@ bool CD3D12Renderer::EnsureVolumetricTargets(int nWidth, int nHeight)
     return true;
   ReleaseVolumetricLight();
   ID3D12GraphicsCommandList *pList = m_pDevice->GetCmdList();
+  // Made in UNORDERED_ACCESS, their states kept by the device (UpdateVolumetricLight's kernels ask for theirs).
   for (CD3D12Texture *&pTex : m_Volumetric.pFroxels)
   {
     pTex = m_pUpload->CreateComputeVolume(nWidth, nHeight, VOLUME_SLICES, VOLUME_FORMAT, L"XRenderD3D12 volumetric light froxels");
-    if (pTex && pList)
-      m_pDevice->Transition(pTex->m_pResource, D3D12_RESOURCE_STATE_UNORDERED_ACCESS, FROXELS_READ);
+    if (pTex)
+      m_pDevice->TrackState(pTex->m_pResource, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
   }
   m_Volumetric.pIntegrated = m_pUpload->CreateComputeVolume(nWidth, nHeight, VOLUME_SLICES, VOLUME_FORMAT, L"XRenderD3D12 volumetric light integrated");
   if (m_Volumetric.pIntegrated && pList)
   {
-    m_pDevice->Transition(m_Volumetric.pIntegrated->m_pResource, D3D12_RESOURCE_STATE_UNORDERED_ACCESS, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+    m_pDevice->TrackState(m_Volumetric.pIntegrated->m_pResource, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
     const D3D12_SHADER_RESOURCE_VIEW_DESC SRV = VolumeSRV();
     m_Volumetric.nIntegratedSRV = m_pDescriptors->AllocSRV(m_Volumetric.pIntegrated->m_pResource, &SRV);
   }

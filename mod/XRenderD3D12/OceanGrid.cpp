@@ -123,10 +123,11 @@ bool CD3D12Renderer::EnsureGridTerrain()
   g.pTerrain = m_pUpload->CreateTexture(n, n, 1, DXGI_FORMAT_R32_FLOAT, false, &Sub);
   if (!g.pTerrain)
     return false;
-  // Read by the vertex program: from the upload's state into both shader stages' (the upload batch runs before the frame).
+  // Read by the vertex program: from the upload's state into both shader stages' (the upload batch runs before the frame;
+  // its state kept by the device from here on, never written again).
+  m_pDevice->TrackState(g.pTerrain->m_pResource, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
   if (EnsureFrame())
-    m_pDevice->Transition(g.pTerrain->m_pResource, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE,
-                          D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE | D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+    m_pDevice->Require(g.pTerrain->m_pResource, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE | D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
   g.fTerrainScale = 1.0f / (float)(nUnit * n);
   g.fTerrainOffset = 0.5f / (float)n;
   if (iLog)

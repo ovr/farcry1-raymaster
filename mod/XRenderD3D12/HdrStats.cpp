@@ -167,16 +167,14 @@ void CD3D12Renderer::DispatchHdrHistogram(ID3D12Resource *pScene, int nWidth, in
   const SD3D12FrameAlloc CB = m_pUpload->AllocFrame(sizeof(hc), 256);
   memcpy(CB.pCPU, &hc, sizeof(hc));
 
-  // The EV and the meter were drawn into: readable by the kernel too.
+  // The EV and the meter were drawn into: readable by the kernel too, and so they stay (their states kept by the device).
   m_pDevice->EndOffscreen();
   constexpr D3D12_RESOURCE_STATES READ = D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE | D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE;
-  m_pDevice->Transition(pExposure, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, READ);
-  m_pDevice->Transition(pMeter, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, READ);
+  m_pDevice->Require(pExposure, READ);
+  m_pDevice->Require(pMeter, READ);
   m_pDevice->Require(s.pWords.Get(), D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
   m_pCompute->Dispatch(m_pDevice->GetCmdList(), eD3D12K_HdrHistogram, CB.nGPU, nTable, nTable + CD3D12Compute::COMPUTE_SRVS,
                        (UINT)(nWidth + GROUP_PIXELS - 1) / GROUP_PIXELS, (UINT)(nHeight + GROUP_PIXELS - 1) / GROUP_PIXELS);
-  m_pDevice->Transition(pMeter, READ, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
-  m_pDevice->Transition(pExposure, READ, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
 
   SHdrStatsFrame &f = s.Cur;
   f.bScene = true;
