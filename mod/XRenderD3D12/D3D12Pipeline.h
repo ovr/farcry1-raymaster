@@ -8,13 +8,15 @@
 //
 //	There is one root signature for every draw (Shaders/Constants.h):
 //	  0: root CBV b0 (SFrameConstants)
-//	  1: root CBV b1 (SDrawConstants)
+//	  1: root CBV b1 (SDrawHead, the draw's header)
 //	  2: descriptor table, the whole texture table (t0 space1, space2 and
 //	     space3; raw buffers in space4 for the rays; volumes in space6)
 //	  3: root SRV t0 space5, the scene for rays (ROOT_RAY_SCENE)
 //	  4: root SRV t1 space5, its instances (ROOT_RAY_INSTANCES)
 //	  5: root SRV t2 space5, the path tracer's lights (ROOT_RAY_LIGHTS,
 //	     SPTLight of Shaders/RayConstants.h)
+//	  6: root CBV b3 (SDrawExt, the rest of the draw's constants;
+//	     ROOT_DRAW_EXT: after the rays' so that 2 to 5 are as they were)
 //	  static samplers s0..s3, s4 the comparison sampler of the shadow maps
 //	Only the programs with rays (Shader Model 6.5, RayTracing.h) read 3 to
 //	5; DrawGeometry binds them for those alone (5 when the frame has the
@@ -68,6 +70,8 @@ enum ED3D12Program
 constexpr UINT ROOT_RAY_SCENE = 3;
 constexpr UINT ROOT_RAY_INSTANCES = 4;
 constexpr UINT ROOT_RAY_LIGHTS = 5;
+//! The root parameter of the rest of a draw's constants (b3, SDrawExt).
+constexpr UINT ROOT_DRAW_EXT = 6;
 
 //! SPipelineKey::nStreams: the extra vertex streams of a draw.
 constexpr uint8 PIPELINE_STREAM_TEXCOORD1 = 1;    //!< TEXCOORD1 from slot 2 (VERTEX_FORMAT_TEX2F)

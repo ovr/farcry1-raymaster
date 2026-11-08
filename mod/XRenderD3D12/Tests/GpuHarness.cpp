@@ -216,8 +216,8 @@ XrTest::CGpu::CGpu()
   }
 
   // The root signature of GpuHarness.h.
-  constexpr UINT ROOT_DESCRIPTORS = 11, ROOT_TABLES = 5;
-  D3D12_ROOT_PARAMETER Params[ROOT_DESCRIPTORS + ROOT_TABLES] = {};
+  constexpr UINT ROOT_DESCRIPTORS = 11, ROOT_TABLES = 5, ROOT_DRAW = ROOT_DESCRIPTORS + ROOT_TABLES;
+  D3D12_ROOT_PARAMETER Params[ROOT_DRAW + 2] = {};
   const struct
   {
     D3D12_ROOT_PARAMETER_TYPE eType;
@@ -249,6 +249,13 @@ XrTest::CGpu::CGpu()
     P.DescriptorTable.pDescriptorRanges = &Ranges[i];
     P.ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
   }
+  // The draw's constants of Common.hlsli: b1 the header, b3 the rest (after the tables, so the indices above are kept).
+  for (UINT i = 0; i < 2; i++)
+  {
+    Params[ROOT_DRAW + i].ParameterType = D3D12_ROOT_PARAMETER_TYPE_CBV;
+    Params[ROOT_DRAW + i].Descriptor.ShaderRegister = i ? 3 : 1;
+    Params[ROOT_DRAW + i].ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
+  }
   // The samplers of Common.hlsli: s0 anisotropic wrap, s1 linear clamp, s2 point wrap, s3 point clamp, s4 the shadow's.
   D3D12_STATIC_SAMPLER_DESC Samplers[5] = {};
   for (UINT i = 0; i < 5; i++)
@@ -267,7 +274,7 @@ XrTest::CGpu::CGpu()
     S.ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
   }
   D3D12_ROOT_SIGNATURE_DESC Rs = {};
-  Rs.NumParameters = ROOT_DESCRIPTORS + ROOT_TABLES;
+  Rs.NumParameters = (UINT)std::size(Params);
   Rs.pParameters = Params;
   Rs.NumStaticSamplers = 5;
   Rs.pStaticSamplers = Samplers;
@@ -573,6 +580,8 @@ std::vector<uint32> XrTest::CGpu::Run(const SDispatch &d)
   ComPtr<ID3D12Resource> pLights = Upload(d.pLights, d.nLightBytes);
   SFrameConstants ZeroFrame = {};
   ComPtr<ID3D12Resource> pFrame = Upload(d.pFrame ? d.pFrame : &ZeroFrame, sizeof(SFrameConstants));
+  ComPtr<ID3D12Resource> pDraw = Upload(d.pDraw, sizeof(SDrawHead));        // zeros without one
+  ComPtr<ID3D12Resource> pDrawExt = Upload(d.pDrawExt, sizeof(SDrawExt));
   ComPtr<ID3D12Resource> pRayInstances = Upload(d.pScene ? &d.pScene->Instance : nullptr, sizeof(SRayInstance));
   if (d.pScene && !HasRaytracing())
     throw std::runtime_error("a scene for rays on a device without raytracing tier 1.1");
@@ -609,6 +618,8 @@ std::vector<uint32> XrTest::CGpu::Run(const SDispatch &d)
   m_pList->SetDescriptorHeaps(1, pHeaps);
   for (UINT i = 0; i < 5; i++)
     m_pList->SetComputeRootDescriptorTable(11 + i, GpuHandle(i == 1 ? TEXTURE_SLOT : i));
+  m_pList->SetComputeRootConstantBufferView(16, pDraw->GetGPUVirtualAddress());
+  m_pList->SetComputeRootConstantBufferView(17, pDrawExt->GetGPUVirtualAddress());
   m_pList->Dispatch(d.nGroups[0], d.nGroups[1], d.nGroups[2]);
   D3D12_RESOURCE_BARRIER After[] = {
     Transition(pOut.Get(), D3D12_RESOURCE_STATE_UNORDERED_ACCESS, D3D12_RESOURCE_STATE_COPY_SOURCE),
@@ -649,6 +660,7 @@ std::vector<uint32> XrTest::CGpu::RunBarrierSteps(const SBytecode &Step, uint32 
   SFrameConstants ZeroFrame = {};
   ComPtr<ID3D12Resource> pFrame = Upload(&ZeroFrame, sizeof(ZeroFrame));
   ComPtr<ID3D12Resource> pNone = Upload(nullptr, 256);
+  ComPtr<ID3D12Resource> pNoDraw = Upload(nullptr, sizeof(SDrawExt));
   // A buffer (zeroed as it is made) whose state the tracker keeps: it decays to COMMON when a list has run.
   ComPtr<ID3D12Resource> pOut = Buffer(D3D12_HEAP_TYPE_DEFAULT, nBytes, D3D12_RESOURCE_STATE_COMMON, true);
   ComPtr<ID3D12Resource> pReadback = Buffer(D3D12_HEAP_TYPE_READBACK, nBytes, D3D12_RESOURCE_STATE_COPY_DEST, false);
@@ -670,6 +682,8 @@ std::vector<uint32> XrTest::CGpu::RunBarrierSteps(const SBytecode &Step, uint32 
     m_pList->SetDescriptorHeaps(1, pHeaps);
     for (UINT i = 0; i < 5; i++)
       m_pList->SetComputeRootDescriptorTable(11 + i, GpuHandle(i == 1 ? TEXTURE_SLOT : i));
+    m_pList->SetComputeRootConstantBufferView(16, pNoDraw->GetGPUVirtualAddress());
+    m_pList->SetComputeRootConstantBufferView(17, pNoDraw->GetGPUVirtualAddress());
   };
   Open();
   for (size_t s = 0; s < Adds.size(); s++)

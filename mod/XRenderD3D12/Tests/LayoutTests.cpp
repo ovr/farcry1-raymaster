@@ -9,6 +9,8 @@
 //	SPathTraceConstants (a constant buffer) with a different word in each
 //	place, CSLayout (TestPathTrace.hlsl) reads them member by member as
 //	HLSL lays them out and writes the words back in the members' order.
+//	The draw's constants (Shaders/Constants.h: b1 SDrawHead, b3 SDrawExt)
+//	the same way, by CSDrawLayout (TestDraw.hlsl).
 //	(AbiChecks.cpp checks the SDK classes against the engine, not these.)
 //
 //////////////////////////////////////////////////////////////////////
@@ -17,6 +19,9 @@
 #include "GpuHarness.h"
 #include "TestMath.h"
 
+#include "Shaders/Constants.h"
+
+#include "Test_DrawLayout.h"
 #include "Test_Layout.h"
 
 using namespace XrTest;
@@ -25,6 +30,8 @@ namespace
 {
   //! The vectors (16 bytes; a matrix 4) CSLayout reads of each structure: a member added to RayConstants.h shows here first.
   constexpr size_t INSTANCE_VECTORS = 14, LIGHT_VECTORS = 8, PATH_TRACE_VECTORS = 28;
+  //! The same of CSDrawLayout: the draw's header is one block of the upload ring (Draw.cpp), the rest what is left.
+  constexpr size_t DRAW_HEAD_VECTORS = 16, DRAW_EXT_VECTORS = 108;
 
   //! Word w of element k of a structure: a pattern no two places share (a normal float's bits, though they go as words).
   uint32 Pattern(uint32 nStruct, uint32 k, uint32 w) { return 0x40000000u | (nStruct << 20) | (k << 12) | w; }
@@ -47,6 +54,9 @@ XR_TEST(Layout_Sizes)
   CHECK(sizeof(SRayInstance) == INSTANCE_VECTORS * 16);
   CHECK(sizeof(SPTLight) == LIGHT_VECTORS * 16);
   CHECK(sizeof(SPathTraceConstants) == PATH_TRACE_VECTORS * 16);
+  CHECK(sizeof(SDrawHead) == DRAW_HEAD_VECTORS * 16);
+  CHECK(sizeof(SDrawExt) == DRAW_EXT_VECTORS * 16);
+  CHECK(sizeof(SDrawConstants) == sizeof(SDrawHead) + sizeof(SDrawExt));
 }
 
 //! Every word of element 1 of SRayInstance and SPTLight and of SPathTraceConstants where HLSL reads it (the matrices by rows:
@@ -79,4 +89,28 @@ XR_TEST(Layout_SharedStructures)
     CHECK_MSG(Out[o] == pLight[w], "SPTLight word " + std::to_string(w));
   for (size_t w = 0; w < PATH_TRACE_VECTORS * 4; w++, o++)
     CHECK_MSG(Out[o] == pPT[w], "SPathTraceConstants word " + std::to_string(w));
+}
+
+//! Every word of the draw's header (b1) and of the rest (b3) where the programs read them (Common.hlsli's g_Draw and
+//! g_DrawExt; the matrices by rows). Why: C++ fills one SDrawConstants and uploads its two parts on their own (Draw.cpp);
+//! a member HLSL packs elsewhere than C++ puts it is a wrong matrix, flag or light in every draw, with no error anywhere.
+XR_TEST(Layout_DrawConstants)
+{
+  SDrawConstants dc;
+  SDrawHead *pHead = &dc;
+  SDrawExt *pExt = &dc;
+  Fill(pHead, 1, 4);
+  Fill(pExt, 1, 5);
+  SDispatch d;
+  d.Shader = XR_BYTECODE(Test_DrawLayout);
+  d.pDraw = pHead;
+  d.pDrawExt = pExt;
+  d.nOut = DRAW_HEAD_VECTORS + DRAW_EXT_VECTORS;
+  const std::vector<uint32> Out = Gpu().Run(d);
+  const uint32 *pHeadWords = (const uint32 *)pHead, *pExtWords = (const uint32 *)pExt;
+  size_t o = 0;
+  for (size_t w = 0; w < DRAW_HEAD_VECTORS * 4; w++, o++)
+    CHECK_MSG(Out[o] == pHeadWords[w], "SDrawHead word " + std::to_string(w));
+  for (size_t w = 0; w < DRAW_EXT_VECTORS * 4; w++, o++)
+    CHECK_MSG(Out[o] == pExtWords[w], "SDrawExt word " + std::to_string(w));
 }

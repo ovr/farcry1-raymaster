@@ -8,7 +8,8 @@
 //
 //	Root signature (D3D12Pipeline.h):
 //	  b0  SFrameConstants, per view (camera, sun, fog, time)
-//	  b1  SDrawConstants, per draw
+//	  b1  SDrawHead, per draw: the matrices, the colour, the flags and the textures
+//	  b3  SDrawExt, per draw: the rest (lights, shadows, the other programs' parameters)
 //	  t0, space1: Texture2D   g_Textures[]  (the texture table, D3D12Descriptors.h)
 //	  t0, space2: TextureCube g_Cubes[]     (the same table)
 //	  t0, space6: Texture3D   g_Volumes[]   (the same table)
@@ -223,12 +224,31 @@ struct SFrameConstants
   XR_UINT4(nPrevScene);           //!< x its colour's texture table index (0: no copy), y its depth's, z w its size (pixels)
 };
 
-//! b1: per draw.
-struct SDrawConstants
+//! b1: per draw, the header that every draw uploads: 256 bytes, one block of the upload ring (Draw.cpp).
+struct SDrawHead
 {
   XR_FLOAT4X4(mWorld);            //!< object to world (identity for world space vertices)
   XR_FLOAT4X4(mWorldViewProj);    //!< object to clip
+  XR_FLOAT4X4(mPrevWorldViewProj);  //!< the motion vectors of an upscaler: object to clip in the frame before (all 0: as mWorldViewProj, still on the screen)
   XR_FLOAT4(vColor);              //!< multiplies the result (material / object colour)
+  XR_UINT(nFlags);                //!< DF_*
+  XR_UINT(nTex0);                 //!< texture table index
+  XR_UINT(nTex1);
+  XR_UINT(nSamplers);             //!< bits 0-3 sampler of tex0, bits 4-7 sampler of tex1 (XR_SAMPLER_*)
+  XR_FLOAT(fAlphaRef);
+  XR_UINT(nLights);               //!< the lights in vLightPos
+  XR_UINT(nTex2);                 //!< more textures for the other programs (Water.hlsl) and DF_TERRAIN_CLIFF
+  XR_UINT(nTex3);
+  XR_UINT(nTex4);
+  XR_UINT(nTex5);
+  XR_UINT(nTex6);
+  XR_UINT(nFlags2);               //!< DF2_*
+};
+
+//! b3: per draw, the rest of a draw's constants (the extension): the lights, the shadows, the parameters of the
+//! other programs and the materials' extras.
+struct SDrawExt
+{
   XR_FLOAT4(vAmbient);            //!< rgb ambient for DF_LIGHTING / DF_TEX1_LIGHTMAP; w the scale s of DF_LIGHTING (2 or 1)
   XR_FLOAT4(vTexGenU);            //!< DF_TEXGEN_WORLD
   XR_FLOAT4(vTexGenV);
@@ -241,22 +261,10 @@ struct SDrawConstants
   XR_FLOAT4_ARRAY(vLightAtten, XR_MAX_DRAW_LIGHTS); //!< a point light's attenuation 1 / (x + y d) at the distance d, 0 from z (the range) on; w 1 / its radius (DF_BUMP)
   XR_FLOAT4(vTexGen1U);           //!< DF_TEXGEN1_WORLD
   XR_FLOAT4(vTexGen1V);           //!< (DF_TERRAIN_CLIFF: xy 1 where tex2 / tex3 is set)
-  XR_UINT(nFlags);                //!< DF_*
-  XR_UINT(nTex0);                 //!< texture table index
-  XR_UINT(nTex1);
-  XR_UINT(nSamplers);             //!< bits 0-3 sampler of tex0, bits 4-7 sampler of tex1 (XR_SAMPLER_*)
-  XR_FLOAT(fAlphaRef);
-  XR_UINT(nLights);               //!< the lights in vLightPos
-  XR_UINT(nTex2);                 //!< more textures for the other programs (Water.hlsl) and DF_TERRAIN_CLIFF
-  XR_UINT(nTex3);
   XR_FLOAT4(vParams0);            //!< parameters of the other programs (Water.hlsl), DF_DETAIL_LAYER, DF_TERRAIN_CLIFF, DF2_GLASS, DF2_BUMP_OFFSET and DF2_CUBE_SHADER
   XR_FLOAT4(vParams1);
   XR_FLOAT4(vParams2);
   XR_FLOAT4(vParams3);
-  XR_UINT(nTex4);
-  XR_UINT(nTex5);
-  XR_UINT(nTex6);
-  XR_UINT(nFlags2);               //!< DF2_*
   XR_FLOAT4X4(mParams0);          //!< a matrix of the other programs (Water.hlsl) and DF2_PROJECTOR
   XR_FLOAT4X4_ARRAY(mShadow, XR_MAX_DRAW_SHADOWS);  //!< DF_SHADOWS: world to a shadow map: x, y -1..1 across its circle, z depth 0..1 (away from the sun);
                                                     //!< XR_CASCADE_INSTANCES: object to slice nShadowTex[i] of the cascades for instance i
@@ -266,7 +274,6 @@ struct SDrawConstants
   XR_FLOAT4(vSpecular);           //!< DF_SPECULAR: rgb the material's specular colour, w 1: times the texture's alpha (gloss)
   XR_FLOAT4(vAddColor);           //!< DF2_ADD_TEX4: rgb the factor of tex4, w added
   XR_FLOAT4(vHeat);               //!< DF2_HEAT: x the heat 0 (cold) to 1 (hot), y 1 for an additive draw
-  XR_FLOAT4X4(mPrevWorldViewProj);  //!< the motion vectors of an upscaler: object to clip in the frame before (all 0: as mWorldViewProj, still on the screen)
   XR_FLOAT4(vHdrCore);            //!< DF2_HDR_CORE: x the factor of the light in its core, y 1: the shape times tex0 a (a SRCALPHA blend)
   XR_FLOAT4(vEdgeFade);           //!< x 1: the colour per vertex times min((2 |N.V|)^4, 1), N the vertex normal, V the view direction: planes
                                   //!< fading out seen edge on (TemplMuzzleFlash_Auto, d3d12_MuzzleFlashAuto); y above 0: the alpha after
@@ -294,6 +301,13 @@ struct SDrawConstants
                                   //!< perceptual roughness, z the oily skin's (the texture's alpha the gloss between them), w the
                                   //!< scatter (SkinWrap); with DF_SPECULAR its highlights SkinSpecular in place of the templates'
 };
+
+#ifdef __cplusplus
+//! The two as C++ fills them, one struct with the members of both (each part uploaded on its own, Draw.cpp).
+struct SDrawConstants : SDrawHead, SDrawExt
+{
+};
+#endif
 
 //! nPbr.w's sign bit: a light pass of a draw that reflects by rays (d3d12_RTPbrReflections).
 #define XR_PBR_LIGHT_PASS 0x80000000u

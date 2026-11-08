@@ -226,8 +226,8 @@ ByteAddressBuffer g_Buffers[] : register(t0, space4);
 #endif
 // The ocean's grid's table of the game's disc and of its frame's rings (OceanGrid.hlsli's GridDiscAlpha and GridRing):
 // vLightSpec[4] x (uint) its raw buffer, y (uint) its byte offset there.
-#define GRID_DISC_WORD(i) asfloat(g_Buffers[asuint(g_Draw.vLightSpec[4].x)].Load(asuint(g_Draw.vLightSpec[4].y) + 4 * (i)))
-#define GRID_DISC_WORDS2(i) asfloat(g_Buffers[asuint(g_Draw.vLightSpec[4].x)].Load2(asuint(g_Draw.vLightSpec[4].y) + 4 * (i)))
+#define GRID_DISC_WORD(i) asfloat(g_Buffers[asuint(g_DrawExt.vLightSpec[4].x)].Load(asuint(g_DrawExt.vLightSpec[4].y) + 4 * (i)))
+#define GRID_DISC_WORDS2(i) asfloat(g_Buffers[asuint(g_DrawExt.vLightSpec[4].x)].Load2(asuint(g_DrawExt.vLightSpec[4].y) + 4 * (i)))
 #include "OceanGrid.hlsli"
 
 struct SWaterOutput
@@ -248,23 +248,23 @@ struct SWaterOutput
 //! as WaterWake's slopes.
 float WakeGridHeight(float2 P, float fSpacing)
 {
-  const float4 c0 = g_Draw.vLightPos[0], c1 = g_Draw.vLightPos[1];
+  const float4 c0 = g_DrawExt.vLightPos[0], c1 = g_DrawExt.vLightPos[1];
   const float2 d = P - c0.xy;
   const float fFade = saturate((0.5 * XR_WAKE_SIZE * XR_WAKE_CELL - max(abs(d.x), abs(d.y))) * c1.x) * c1.w;
   if (fFade <= 0)
     return 0;
   const float2 vUV = d / (XR_WAKE_SIZE * XR_WAKE_CELL) + c0.zw;
-  return g_Textures[asuint(g_Draw.vLightSpec[3].y)].SampleLevel(g_SamplerLinearWrap, vUV, GridLod(fSpacing, XR_WAKE_CELL)).x * fFade;
+  return g_Textures[asuint(g_DrawExt.vLightSpec[3].y)].SampleLevel(g_SamplerLinearWrap, vUV, GridLod(fSpacing, XR_WAKE_CELL)).x * fFade;
 }
 
 //! The depth (m) under the ocean's level (vLightSpec[0].y) at P from the terrain's heights (vLightSpec[1].z, its texture
 //! coordinates vLightSpec[3].zw): deep water off the terrain.
 float GridTerrainDepth(float2 P)
 {
-  const float2 vTerrainUV = P * g_Draw.vLightSpec[3].z + g_Draw.vLightSpec[3].w;
+  const float2 vTerrainUV = P * g_DrawExt.vLightSpec[3].z + g_DrawExt.vLightSpec[3].w;
   float fDepth = 1e4;
   if (all(vTerrainUV >= 0) && all(vTerrainUV <= 1))
-    fDepth = g_Draw.vLightSpec[0].y - g_Textures[asuint(g_Draw.vLightSpec[1].z)].SampleLevel(g_SamplerLinearClamp, vTerrainUV, 0).x;
+    fDepth = g_DrawExt.vLightSpec[0].y - g_Textures[asuint(g_DrawExt.vLightSpec[1].z)].SampleLevel(g_SamplerLinearClamp, vTerrainUV, 0).x;
   return fDepth;
 }
 
@@ -275,11 +275,11 @@ float GridTerrainDepth(float2 P)
 //! side behind a crest, its waterline drew the foam of the waves against it over the crest).
 float GridBehindZ(float z, float3 P)
 {
-  const float fHidden = GridHiddenShare(z, P.z, g_Draw.vLightSpec[0].y);
+  const float fHidden = GridHiddenShare(z, P.z, g_DrawExt.vLightSpec[0].y);
   [branch]
   if (fHidden <= 0)
     return z;
-  return lerp(z, min(g_Draw.vLightSpec[0].y - GridTerrainDepth(P.xy), P.z), fHidden);
+  return lerp(z, min(g_DrawExt.vLightSpec[0].y - GridTerrainDepth(P.xy), P.z), fHidden);
 }
 
 //! The ocean's grid (vLightSpec[0].x; OceanGrid.cpp): the vertex vIn (xy its direction across the water from the grid's
@@ -290,9 +290,9 @@ float GridBehindZ(float z, float3 P)
 //! left, z the bodies' share of the ocean's waves, w the camera's and the distance's.
 float3 OceanGridVertex(float3 vIn, out float4 vShares)
 {
-  const float4 g0 = g_Draw.vLightSpec[0], g1 = g_Draw.vLightSpec[1], g2 = g_Draw.vLightSpec[2], g3 = g_Draw.vLightSpec[3];
+  const float4 g0 = g_DrawExt.vLightSpec[0], g1 = g_DrawExt.vLightSpec[1], g2 = g_DrawExt.vLightSpec[2], g3 = g_DrawExt.vLightSpec[3];
   const uint k = (uint)vIn.z;
-  const float2 vRing = GridRing(k, (uint)g_Draw.vLightSpec[4].z * (1 + XR_GRID_DISC_SEGMENTS), (uint)g_Draw.vLightSpec[4].w);
+  const float2 vRing = GridRing(k, (uint)g_DrawExt.vLightSpec[4].z * (1 + XR_GRID_DISC_SEGMENTS), (uint)g_DrawExt.vLightSpec[4].w);
   float r = vRing.x;
   float2 vLocal = k > 0 ? normalize(vIn.xy) * r : 0;
   if (r > g0.z)
@@ -309,11 +309,11 @@ float3 OceanGridVertex(float3 vIn, out float4 vShares)
   float h = 0;
   [unroll]
   for (uint c = 0; c < XR_OCEAN_CASCADES; c++)
-    h += g_TextureArrays[g_Draw.nShadowTex.z].SampleLevel(g_SamplerLinearWrap, float3(P / Tiles[c], c),
+    h += g_TextureArrays[g_DrawExt.nShadowTex.z].SampleLevel(g_SamplerLinearWrap, float3(P / Tiles[c], c),
                                                           GridLod(fSpacing, Tiles[c] / XR_OCEAN_SIZE)).z * g2[c];
   float fBodies = 1;
   for (uint n = 0; n < (uint)g0.w; n++)
-    fBodies = min(fBodies, GridBodyShare(P, g_Draw.vLightColor[n], g_Draw.vLightAtten[n]));
+    fBodies = min(fBodies, GridBodyShare(P, g_DrawExt.vLightColor[n], g_DrawExt.vLightAtten[n]));
   h *= fBodies;
   if (g3.x != 0)
     h += WakeGridHeight(P, fSpacing);
@@ -331,10 +331,10 @@ SWaterOutput VSMain(SVertexInput In)
   float4 vPos = float4(In.vPos.xyz, 1);
   Out.vGrid = float4(0, 1, 1, 1);
   Out.vColor = DecodeVertexColor(In.vColor0);
-  if (g_Draw.vLightSpec[0].x != 0)
+  if (g_DrawExt.vLightSpec[0].x != 0)
   {
     vPos.xyz = OceanGridVertex(In.vPos.xyz, Out.vGrid);
-    Out.vColor.a = GridDiscAlpha(vPos.xy, (uint)g_Draw.vLightSpec[4].z);
+    Out.vColor.a = GridDiscAlpha(vPos.xy, (uint)g_DrawExt.vLightSpec[4].z);
   }
   Out.vPos = Jitter(mul(vPos, g_Draw.mWorldViewProj));
 #ifdef XR_VELOCITY
@@ -378,7 +378,7 @@ float3 OceanWaveNormal(float2 vPos, float fScale, out float fLostVar, out float 
   [unroll]
   for (uint c = 0; c < XR_OCEAN_CASCADES; c++)
   {
-    float4 t = g_TextureArrays[g_Draw.nShadowTex.z].Sample(g_SamplerLinearWrap, float3(vPos / Tiles[c], c));
+    float4 t = g_TextureArrays[g_DrawExt.nShadowTex.z].Sample(g_SamplerLinearWrap, float3(vPos / Tiles[c], c));
     vSlope += t.xy;
     fLostVar += max(t.w - dot(t.xy, t.xy), 0);
     fHeight += t.z;
@@ -389,7 +389,7 @@ float3 OceanWaveNormal(float2 vPos, float fScale, out float fLostVar, out float 
 
 float3 WaveNormal(float2 vPos, float fTime, float fScale, out float fLostVar, out float fHeight)
 {
-  if (g_Draw.vTexGenU.w != 0)
+  if (g_DrawExt.vTexGenU.w != 0)
     return OceanWaveNormal(vPos, fScale, fLostVar, fHeight);
   static const float4 Layers[3] =
   {
@@ -426,7 +426,7 @@ float3 WaveNormal(float2 vPos, float fTime, float fScale, out float fLostVar, ou
 //! width (m), z (as uint) the view's SRV, w the share shown (fading out as the window calms down).
 float4 WaterWake(float2 P)
 {
-  const float4 c0 = g_Draw.vLightPos[0], c1 = g_Draw.vLightPos[1];
+  const float4 c0 = g_DrawExt.vLightPos[0], c1 = g_DrawExt.vLightPos[1];
   const float2 d = P - c0.xy;
   const float fFade = saturate((0.5 * XR_WAKE_SIZE * XR_WAKE_CELL - max(abs(d.x), abs(d.y))) * c1.x) * c1.w;
   const float4 t = g_Textures[asuint(c1.z)].Sample(g_SamplerLinearWrap, d / (XR_WAKE_SIZE * XR_WAKE_CELL) + c0.zw);
@@ -440,7 +440,7 @@ static const float WAVE_SLOPE_RMS = 0.743;
 //! The RMS along one axis of WaveNormal's slopes at fScale: the wave texture's or the FFT ocean's.
 float WaveSlopeRMS(float fScale)
 {
-  return fScale * (g_Draw.vTexGenU.w != 0 ? g_Draw.vAddColor.x : WAVE_SLOPE_RMS);
+  return fScale * (g_DrawExt.vTexGenU.w != 0 ? g_DrawExt.vAddColor.x : WAVE_SLOPE_RMS);
 }
 
 float3 WaveNormal(float2 vPos, float fTime, float fScale, out float fLostVar)
@@ -478,11 +478,11 @@ float OceanFog(float fDepth, float fHeight, float fDistance, float fDensity)
 float3 SkyBoxColor(float3 vDir)
 {
   float3 vFog = g_Frame.vFogColor.rgb;
-  if (g_Draw.vParams1.y == 0)
+  if (g_DrawExt.vParams1.y == 0)
     return vFog;
   vDir.z = max(vDir.z, 0.0);
   // Into the box's axes: the box is drawn turned by (c s; -s c) (row vectors), so back by its transpose.
-  float c = g_Draw.vTexGenU.y, s = g_Draw.vTexGenU.z;
+  float c = g_DrawExt.vTexGenU.y, s = g_DrawExt.vTexGenU.z;
   vDir.xy = float2(c * vDir.x + s * vDir.y, -s * vDir.x + c * vDir.y);
   float fSide = max(abs(vDir.x), abs(vDir.y));
   float4 vTex;
@@ -495,7 +495,7 @@ float3 SkyBoxColor(float3 vDir)
   else
   {
     float3 p = vDir * (32 / fSide);
-    float fZ1 = g_Draw.vParams1.x;
+    float fZ1 = g_DrawExt.vParams1.x;
     float f = saturate((32 - p.z) / (32 - fZ1));
     float u, vTop;
     uint nTex;
@@ -516,7 +516,7 @@ float3 SkyBoxColor(float3 vDir)
     // nTex differs between neighbouring pixels at the corners of the box.
     vTex = g_Textures[NonUniformResourceIndex(nTex)].SampleLevel(g_SamplerLinearClamp, float2(u, lerp(vTop, 0.5, f)), 0);
   }
-  return lerp(vFog, vTex.rgb, g_Draw.vParams1.z);
+  return lerp(vFog, vTex.rgb, g_DrawExt.vParams1.z);
 }
 
 //! Buffer texture coordinates of a clip space position; vViewToBuffer: the viewport's size over
@@ -532,7 +532,7 @@ float2 ClipToUV(float4 vClip, float2 vViewToBuffer)
 float3 PlanarReflection(float3 P, float3 R, float fReach)
 {
   R.z = max(R.z, 0.01);
-  float4 vClip = mul(float4(P + R * fReach, 1), g_Draw.mParams0);
+  float4 vClip = mul(float4(P + R * fReach, 1), g_DrawExt.mParams0);
   return g_Textures[g_Draw.nTex6].SampleLevel(g_SamplerLinearClamp, ClipToUV(vClip, 1), 0).rgb;
 }
 
@@ -549,15 +549,15 @@ float3 BlurredPlanarReflection(float3 P, float3 R, float fReach, float fVar, flo
   static const float Weights[3] = { 0.941, 0.576, 0.216 };
   fBlur = 0;
   R.z = max(R.z, 0.01);
-  float2 vUV = ClipToUV(mul(float4(P + R * fReach, 1), g_Draw.mParams0), 1);
+  float2 vUV = ClipToUV(mul(float4(P + R * fReach, 1), g_DrawExt.mParams0), 1);
   float fUp = 2 * sqrt(fVar * 0.5), fSide = fUp * c;
   float3 Th = cross(R, float3(0, 0, 1));
   float fLength = length(Th);
   Th = fLength > 1e-4 ? Th / fLength : float3(1, 0, 0);
   float3 Tv = cross(Th, R);
-  float4 vClip = mul(float4(R, 0), g_Draw.mParams0);
-  float4 vClipUp = mul(float4(R + Tv * fUp, 0), g_Draw.mParams0);
-  float4 vClipSide = mul(float4(R + Th * fSide, 0), g_Draw.mParams0);
+  float4 vClip = mul(float4(R, 0), g_DrawExt.mParams0);
+  float4 vClipUp = mul(float4(R + Tv * fUp, 0), g_DrawExt.mParams0);
+  float4 vClipSide = mul(float4(R + Th * fSide, 0), g_DrawExt.mParams0);
   if (min(vClip.w, min(vClipUp.w, vClipSide.w)) <= 1e-3)
     return g_Textures[g_Draw.nTex6].SampleLevel(g_SamplerLinearClamp, vUV, 0).rgb;
   float2 vVanish = ClipToUV(vClip, 1);
@@ -604,10 +604,10 @@ bool MarchClear(float4 vC0, float4 vCR, float ta, float tb, float fError, float2
   // low corner and the next then cover it), whichever is lower.
   const uint2 vDiffer = t0 ^ t1, vSpan = t1 - t0;
   const uint nLevel = (uint)max(min((int)firstbithigh(max(vDiffer.x, vDiffer.y)), (int)firstbithigh(max(vSpan.x, vSpan.y)) + 1), 0);
-  if (nLevel >= g_Draw.nShadowTex.y)
+  if (nLevel >= g_DrawExt.nShadowTex.y)
     return false;
   const uint2 p0 = t0 >> nLevel, p1 = t1 >> nLevel;
-  const uint nTiles = g_Draw.nShadowTex.x;
+  const uint nTiles = g_DrawExt.nShadowTex.x;
   const float d = min(min(g_Textures[nTiles].Load(int3(p0, nLevel)).r, g_Textures[nTiles].Load(int3(p1.x, p0.y, nLevel)).r),
                       min(g_Textures[nTiles].Load(int3(p0.x, p1.y, nLevel)).r, g_Textures[nTiles].Load(int3(p1, nLevel)).r));
   // The march's test of a step: fDepth < 0.99999 (not the sky) and w > LinearDepth(fDepth).
@@ -635,7 +635,7 @@ float4 ScreenReflection(float3 P, float3 R, float2 vViewToBuffer, float2 vSize, 
   const float4 vMove = abs(g_Frame.mViewProj[3]);
   const float fTurn = 4e-6 * max(vTurn.x, max(vTurn.y, vTurn.w)), fMove = 4e-6 * max(vMove.x, max(vMove.y, vMove.w));
   const float fLargest = max(abs(P.x), max(abs(P.y), abs(P.z)));
-  const bool bTiles = g_Draw.nShadowTex.y != 0;
+  const bool bTiles = g_DrawExt.nShadowTex.y != 0;
   float tPrev = 0, t = 0.4;
   [loop]
   for (int i = 0; i < 40; i += 4)
@@ -714,8 +714,8 @@ float4 RayReflection(float3 P, float3 R, float fDistance, float fPixelAngle, flo
   Ray.Origin = P + float3(0, 0, 0.02);
   Ray.Direction = normalize(float3(R.xy, max(R.z, 0.01)));
   Ray.TMin = 0.01;
-  Ray.TMax = g_Draw.vTexGenV.y;
-  const uint nMask = asuint(g_Draw.vTexGenV.z);
+  Ray.TMax = g_DrawExt.vTexGenV.y;
+  const uint nMask = asuint(g_DrawExt.vTexGenV.z);
   const float fWidth = fDistance * fPixelAngle, fSpread = fPixelAngle + 2 * sqrt(fVar);
   const SRayHit Hit = TraceScene(Ray, nMask & 0xff, fWidth, fSpread);
   fT = Hit.fT;
@@ -739,12 +739,12 @@ float4 RayReflection(float3 P, float3 R, float fDistance, float fPixelAngle, flo
 float WaterSunShadow(float3 P, float fConeWidth)
 {
 #ifdef XR_RAYTRACE
-  if (g_Draw.vSpecular.w == 2)
-    return TraceSun(P, float3(0, 0, 1), asuint(g_Draw.vTexGenV.z) & 0xff, fConeWidth);
+  if (g_DrawExt.vSpecular.w == 2)
+    return TraceSun(P, float3(0, 0, 1), asuint(g_DrawExt.vTexGenV.z) & 0xff, fConeWidth);
 #endif
   const uint n = min((uint)g_Frame.vCascadeParams.x, XR_MAX_CASCADES);
   if (n == 0 || ViewDepth(P) >= g_Frame.vCascadeEnd[n - 1])
-    return g_Draw.vParams3.w == 1 ? 0 : 1;
+    return g_DrawExt.vParams3.w == 1 ? 0 : 1;
   return CascadeTap(P);
 }
 
@@ -769,45 +769,45 @@ bool FoamQuadAny(bool b)
 //! (WakeClumps) and added to the amount.
 float WaterFoam(float2 P, float fDepth, float fPath, float fWake, out float fWhitecaps, out float fShore, out float fShade)
 {
-  const uint t = g_Draw.nShadowTex.w;
+  const uint t = g_DrawExt.nShadowTex.w;
   fShade = 1;
   const float4 f0 = g_TextureArrays[t].Sample(g_SamplerLinearWrap, float3(P / XR_OCEAN_TILE0, 0));
   const float4 f1 = g_TextureArrays[t].Sample(g_SamplerLinearWrap, float3(P / XR_OCEAN_TILE1, 1));
-  fWhitecaps = WhitecapAmount(f0.x, f1.x, f0.w, g_Draw.vTexGen1U.y);
+  fWhitecaps = WhitecapAmount(f0.x, f1.x, f0.w, g_DrawExt.vTexGen1U.y);
   fShore = 0;
   // Out to the deepest water a wave breaks in and to the reach of the foam by what stands in it: the surf's height over
   // the least breaker index, the wind sea's highest crests (about its significant height) twice over it, 5 of it.
-  const float fNear = max(g_Draw.vTexGen1V.z / FoamBreakerIndex(0), 5 * g_Draw.vTexGen1U.z) + 0.05;
+  const float fNear = max(g_DrawExt.vTexGen1V.z / FoamBreakerIndex(0), 5 * g_DrawExt.vTexGen1U.z) + 0.05;
   if (FoamQuadAny(fDepth < fNear || fPath < fNear))
   {
-    const float2 vAhead = g_Draw.vTexGen1V.xy;
+    const float2 vAhead = g_DrawExt.vTexGen1V.xy;
     const float h1 = g_TextureArrays[t].Sample(g_SamplerLinearWrap, float3((P + vAhead * 0.7) / XR_OCEAN_TILE0, 0)).w;
     const float h2 = g_TextureArrays[t].Sample(g_SamplerLinearWrap, float3((P + vAhead * 1.4) / XR_OCEAN_TILE0, 0)).w;
-    const float fCrest = max(max(f0.w + f1.w, 0.75 * h1), 0.5 * h2) * g_Draw.vParams0.x;
+    const float fCrest = max(max(f0.w + f1.w, 0.75 * h1), 0.5 * h2) * g_DrawExt.vParams0.x;
     // The breaker index from two octaves of noise 6 and 2.6 m apart, changing slowly as they drift apart (vTexMat1.xy).
     const float2 R = float2(XR_FOAM_TURN_COS * P.x - XR_FOAM_TURN_SIN * P.y, XR_FOAM_TURN_SIN * P.x + XR_FOAM_TURN_COS * P.y);
-    const float fNoise = 0.65 * FoamValueNoise((P + g_Draw.vTexMat1.xy) / 6) + 0.35 * FoamValueNoise((R - g_Draw.vTexMat1.xy) / 2.6);
+    const float fNoise = 0.65 * FoamValueNoise((P + g_DrawExt.vTexMat1.xy) / 6) + 0.35 * FoamValueNoise((R - g_DrawExt.vTexMat1.xy) / 2.6);
     const float fIndex = FoamBreakerIndex(0.5 + 1.6 * (fNoise - 0.5));
-    fShore = max(ShoreFoam(fDepth, fCrest, g_Draw.vTexGen1U.z, fIndex), ContactFoam(fPath, fCrest, g_Draw.vTexGen1U.z));
+    fShore = max(ShoreFoam(fDepth, fCrest, g_DrawExt.vTexGen1U.z, fIndex), ContactFoam(fPath, fCrest, g_DrawExt.vTexGen1U.z));
     // The swell's surf (vTexGen1V.z its height, 0 none; w the periods gone): its fronts not quite along the depth's lines,
     // their phase from a noise 40 m across; torn into clumps.
-    if (g_Draw.vTexGen1V.z > 0)
+    if (g_DrawExt.vTexGen1V.z > 0)
     {
-      const float fBreak = g_Draw.vTexGen1V.z / fIndex, fCycle = g_Draw.vTexGen1V.w + 0.6 * FoamValueNoise(P / 40);
+      const float fBreak = g_DrawExt.vTexGen1V.z / fIndex, fCycle = g_DrawExt.vTexGen1V.w + 0.6 * FoamValueNoise(P / 40);
       const float fSurf = SurfFoam(fDepth, fBreak, fCycle);
       if (fSurf > 0)
         fShore = max(fShore, saturate(fSurf * SurfClumps(P, fDepth, fBreak, fCycle)));
     }
   }
-  const float fAmount = saturate((fWhitecaps + fShore + (fWake > 0 ? WakeClumps(P, fWake) : 0)) * g_Draw.vTexGen1U.x);
+  const float fAmount = saturate((fWhitecaps + fShore + (fWake > 0 ? WakeClumps(P, fWake) : 0)) * g_DrawExt.vTexGen1U.x);
   if (!FoamQuadAny(fAmount > 0))
     return 0;
 
   const float2 Q = P - (f0.yz + f1.yz);
-  const float2 uv0 = (Q + g_Draw.vTexMat0.xy) / XR_FOAM_TILE0;
+  const float2 uv0 = (Q + g_DrawExt.vTexMat0.xy) / XR_FOAM_TILE0;
   const float2 uv1 = (float2(XR_FOAM_TURN_COS * Q.x - XR_FOAM_TURN_SIN * Q.y, XR_FOAM_TURN_SIN * Q.x + XR_FOAM_TURN_COS * Q.y) +
-                      g_Draw.vTexMat0.zw) / XR_FOAM_TILE1;
-  const uint p = asuint(g_Draw.vTexGen1U.w);
+                      g_DrawExt.vTexMat0.zw) / XR_FOAM_TILE1;
+  const uint p = asuint(g_DrawExt.vTexGen1U.w);
   const float u = FoamUniform(g_Textures[p].Sample(g_SamplerLinearWrap, uv0).r, g_Textures[p].Sample(g_SamplerLinearWrap, uv1).r);
   const float fTexels = max(length(fwidth(uv0)), length(fwidth(uv1))) * XR_FOAM_SIZE;
   const float fBlur = saturate(log2(max(fTexels, 1)) / 3);
@@ -821,7 +821,7 @@ float WaterFoam(float2 P, float fDepth, float fPath, float fWake, out float fWhi
 float3 WaterSkyLight()
 {
   float3 vSky = g_Frame.vFogColor.rgb;
-  if (g_Draw.vParams1.y != 0)
+  if (g_DrawExt.vParams1.y != 0)
     vSky = 0.2 * (SkyBoxColor(float3(0, 0, 1)) + SkyBoxColor(float3(1, 0, 0.3)) + SkyBoxColor(float3(-1, 0, 0.3)) +
                   SkyBoxColor(float3(0, 1, 0.3)) + SkyBoxColor(float3(0, -1, 0.3)));
   return float3(HdrDecode(vSky.r), HdrDecode(vSky.g), HdrDecode(vSky.b));
@@ -856,8 +856,8 @@ float3 WaterEncode(float3 v)
 float3 OceanVolume(float3 vScene, float3 P, float3 N, float3 V, float3 vBehind, float2 vPixel, out float3 vFloor, out float3 vInscatter,
                    out float fShade)
 {
-  const float3 vDeep = WaterDecode(g_Draw.vParams3.rgb);
-  const float3 c = VolumeAttenuation(vDeep, g_Draw.vParams2.y);
+  const float3 vDeep = WaterDecode(g_DrawExt.vParams3.rgb);
+  const float3 c = VolumeAttenuation(vDeep, g_DrawExt.vParams2.y);
   const float3 T = VolumeRefract(V, N);
   const float fMu = max(-T.z, 0.1);
   const float fDepth = max(P.z - vBehind.z, 0);
@@ -865,7 +865,7 @@ float3 OceanVolume(float3 vScene, float3 P, float3 N, float3 V, float3 vBehind, 
   const float3 L = g_Frame.vSunDir.xyz;
   vFloor = exp(-c * (fPath + fDepth / VolumeRefractedCos(saturate(L.z))));
   const float3 k = c * (1 + fMu);
-  const float fShare = g_Draw.vAddColor.z;
+  const float fShare = g_DrawExt.vAddColor.z;
   fShade = 1;
   const uint n = min((uint)g_Frame.vCascadeParams.x, XR_MAX_CASCADES);
   const float fReach = VolumeReach(k, fPath);
@@ -929,7 +929,7 @@ float3 SceneAbove(float3 P, float3 D, float2 vViewToBuffer)
         return g_Textures[g_Draw.nTex0].SampleLevel(g_SamplerLinearClamp, vUV, 0).rgb;
     }
   }
-  return g_Draw.vParams1.y != 0 ? SkyBoxColor(D) * SkyGlow(D) : g_Frame.vFogColor.rgb;
+  return g_DrawExt.vParams1.y != 0 ? SkyBoxColor(D) * SkyGlow(D) : g_Frame.vFogColor.rgb;
 }
 
 float4 ShadeWater(SWaterOutput In)
@@ -939,11 +939,11 @@ float4 ShadeWater(SWaterOutput In)
   float fDistance = length(vToCamera);
   float3 V = vToCamera / max(fDistance, 1e-4);
   // From below by the level (the ocean's grid raised: as the game takes the camera to be under the water).
-  bool bBelow = vCamera.z < (g_Draw.vLightSpec[0].x != 0 ? g_Draw.vLightSpec[0].y : In.vWorldPos.z);
+  bool bBelow = vCamera.z < (g_DrawExt.vLightSpec[0].x != 0 ? g_DrawExt.vLightSpec[0].y : In.vWorldPos.z);
   // The ocean's grid's debug views (OceanGridVertex's shares), before anything else holds registers.
-  if (g_Draw.vParams0.z == 29)
+  if (g_DrawExt.vParams0.z == 29)
     return float4(saturate(0.5 + In.vGrid.x / 0.6), saturate(0.5 + In.vGrid.x / 0.06), saturate(0.5 - In.vGrid.x / 0.6), 1);
-  if (g_Draw.vParams0.z == 30)
+  if (g_DrawExt.vParams0.z == 30)
     return float4(In.vGrid.yzw, 1);
 #ifdef XR_RAYTRACE
   // The angle between neighbouring pixels' view rays (before any branch).
@@ -951,19 +951,19 @@ float4 ShadeWater(SWaterOutput In)
 #endif
 
   float fLostVar, fHeight;
-  float3 N = WaveNormal(In.vWorldPos.xy, g_Frame.vTime.x, g_Draw.vParams0.x, fLostVar, fHeight);
+  float3 N = WaveNormal(In.vWorldPos.xy, g_Frame.vTime.x, g_DrawExt.vParams0.x, fLostVar, fHeight);
   // The wakes (WaterWake): their slopes added to the waves', the variance their mip levels lost to the blur of the
   // reflection and the glint; their foam to the ocean's (its debug views here: kept on they would hold registers).
   float fWakeFoam = 0;
-  if (g_Draw.vLightPos[1].w != 0)
+  if (g_DrawExt.vLightPos[1].w != 0)
   {
     const float4 vWake = WaterWake(In.vWorldPos.xy);
     N = normalize(float3(N.xy / N.z - vWake.xy, 1));
     fLostVar += vWake.z;
     fWakeFoam = vWake.w;
-    if (g_Draw.vParams0.z == 27)
+    if (g_DrawExt.vParams0.z == 27)
       return float4(saturate(vWake.xy * 2 + 0.5), saturate(sqrt(vWake.z) * 10), 1);
-    if (g_Draw.vParams0.z == 28)
+    if (g_DrawExt.vParams0.z == 28)
       return float4(vWake.www, 1);
   }
   if (bBelow)
@@ -982,11 +982,11 @@ float4 ShadeWater(SWaterOutput In)
   // of the surface (the shore, an object) keeps the undisplaced one. The ocean from below bends the
   // world above far more, in large smooth swells: by the same waves four times as large.
   float2 vOffset;
-  if (bBelow && g_Draw.vParams3.w == 0)
-    vOffset = WaveNormal(In.vWorldPos.xy * 0.25, g_Frame.vTime.x * 0.25, g_Draw.vParams0.x).xy * 1.5 * saturate(fThick0 * 0.5) /
+  if (bBelow && g_DrawExt.vParams3.w == 0)
+    vOffset = WaveNormal(In.vWorldPos.xy * 0.25, g_Frame.vTime.x * 0.25, g_DrawExt.vParams0.x).xy * 1.5 * saturate(fThick0 * 0.5) /
               (1 + fSurface * 0.1);
   else
-    vOffset = N.xy * g_Draw.vParams2.w * saturate(fThick0 * 0.5) / (1 + fSurface * 0.05);
+    vOffset = N.xy * g_DrawExt.vParams2.w * saturate(fThick0 * 0.5) / (1 + fSurface * 0.05);
   float2 vUV = vUV0 + vOffset;
   float fBehind = LinearDepth(g_Textures[g_Draw.nTex1].SampleLevel(g_SamplerPointClamp, vUV, 0).r);
   if (fBehind < fSurface)
@@ -1005,15 +1005,15 @@ float4 ShadeWater(SWaterOutput In)
   float fDepthBelow = max(In.vWorldPos.z - vFloor.z, 0);
   float3 L = g_Frame.vSunDir.xyz;
   float fLightPath = fDepthBelow / sqrt(1 - saturate(1 - L.z * L.z) / (1.33 * 1.33));
-  float3 vExtinction = g_Draw.vParams2.rgb;
+  float3 vExtinction = g_DrawExt.vParams2.rgb;
   // The water's own colour is light scattered into it: as given (w 0), in proportion to the
   // brightness of what is behind a water volume (w 1), or light the sky scatters into it (w 2):
   // from 60 % under a black sky to all of it under a bright day sky (the sky box's brightness in
   // five directions).
-  float3 vScatter = g_Draw.vParams3.rgb;
-  if (g_Draw.vParams3.w == 1)
+  float3 vScatter = g_DrawExt.vParams3.rgb;
+  if (g_DrawExt.vParams3.w == 1)
     vScatter *= saturate(dot(vScene0, float3(0.30, 0.59, 0.11)) * 2.5);
-  else if (g_Draw.vParams3.w == 2 && g_Draw.vParams1.y != 0)
+  else if (g_DrawExt.vParams3.w == 2 && g_DrawExt.vParams1.y != 0)
   {
     float3 vSky = SkyBoxColor(float3(0, 0, 1)) + SkyBoxColor(float3(1, 0, 0.3)) + SkyBoxColor(float3(-1, 0, 0.3)) +
                   SkyBoxColor(float3(0, 1, 0.3)) + SkyBoxColor(float3(0, -1, 0.3));
@@ -1022,15 +1022,15 @@ float4 ShadeWater(SWaterOutput In)
   // The foam on the FFT ocean seen from above (d3d12_WaterFoam, vTexGen1U.x; WaterFoam): the share of the pixel white
   // (its textures' derivatives outside the branches).
   float fFoam = 0, fWhitecaps = 0, fShoreFoam = 0, fFoamShade = 1;
-  if (g_Draw.vTexGen1U.x > 0)
+  if (g_DrawExt.vTexGen1U.x > 0)
   {
     // On the ocean's grid the still water's depth over the scene behind and the view's path under the level to it (as
     // the flat disc's: the scene behind a raised crest may be above the water, a boat's side, which no wave breaks on;
     // what a crest hides the floor under it, GridBehindZ).
     float fFoamDepth = fDepthBelow, fFoamPath = fThick0 * fDistance / max(fSurface, 1e-3);
-    if (g_Draw.vLightSpec[0].x != 0)
+    if (g_DrawExt.vLightSpec[0].x != 0)
     {
-      fFoamDepth = max(g_Draw.vLightSpec[0].y - GridBehindZ(vFloor.z, In.vWorldPos), 0);
+      fFoamDepth = max(g_DrawExt.vLightSpec[0].y - GridBehindZ(vFloor.z, In.vWorldPos), 0);
       fFoamPath = fFoamDepth / max(V.z, 0.01);
     }
     fFoam = WaterFoam(In.vWorldPos.xy, fFoamDepth, fFoamPath, fWakeFoam, fWhitecaps, fShoreFoam, fFoamShade);
@@ -1041,32 +1041,32 @@ float4 ShadeWater(SWaterOutput In)
   if (!bBelow)
   {
     float3 vRefracted;
-    if (g_Draw.vParams3.w == 0)
+    if (g_DrawExt.vParams3.w == 0)
     {
       // The point of the scene behind along the displaced ray; the ocean's water over it (d3d12_WaterVolume, vAddColor.w),
       // else its fog volume's fog.
       float3 vBehind = vCamera - V * (fDistance * fBehind / max(fSurface, 1e-3));
       // On the ocean's grid what stands over the water behind a crest hidden by it (GridBehindZ).
-      if (g_Draw.vLightSpec[0].x != 0)
+      if (g_DrawExt.vLightSpec[0].x != 0)
         vBehind.z = GridBehindZ(vBehind.z, In.vWorldPos);
-      if (g_Draw.vAddColor.w > 0)
+      if (g_DrawExt.vAddColor.w > 0)
       {
         // Its terms' debug views here: kept to the end of the shader they would hold registers through all of it.
         float3 vFloorShare, vInscatter;
         float fVolumeShade;
         vRefracted = WaterEncode(OceanVolume(WaterDecode(vScene), In.vWorldPos, N, V, vBehind, In.vPos.xy, vFloorShare, vInscatter,
                                              fVolumeShade));
-        if (g_Draw.vParams0.z == 24)
+        if (g_DrawExt.vParams0.z == 24)
           return float4(WaterEncode(vInscatter), 1);
-        if (g_Draw.vParams0.z == 25)
+        if (g_DrawExt.vParams0.z == 25)
           return float4(vFloorShare, 1);
-        if (g_Draw.vParams0.z == 26)
+        if (g_DrawExt.vParams0.z == 26)
           return float4(fVolumeShade.xxx, 1);
       }
       else
       {
-        float fLayer = g_Draw.vParams2.x;
-        vRefracted = lerp(vScene, vScatter, OceanFog(fLayer - vBehind.z, vCamera.z - fLayer, fBehind, g_Draw.vParams2.y));
+        float fLayer = g_DrawExt.vParams2.x;
+        vRefracted = lerp(vScene, vScatter, OceanFog(fLayer - vBehind.z, vCamera.z - fLayer, fBehind, g_DrawExt.vParams2.y));
       }
     }
     else
@@ -1081,10 +1081,10 @@ float4 ShadeWater(SWaterOutput In)
     // Schlick's term (2 %). The ripple finer than a pixel (its slopes' variance fVar, as
     // d3d12_WaterReflectionBlur scales it) turns facets towards the camera: the cosine as the
     // RMS of theirs.
-    float fVar = fLostVar * g_Draw.vTexGenU.x;
+    float fVar = fLostVar * g_DrawExt.vTexGenU.x;
     float3 Ns = normalize(float3(N.xy * 0.5, N.z));
     float F;
-    if (g_Draw.vParams3.w != 1)
+    if (g_DrawExt.vParams3.w != 1)
     {
       float c = saturate(dot(Ns, V));
       if (fVar > 0)
@@ -1098,13 +1098,13 @@ float4 ShadeWater(SWaterOutput In)
         c = sqrt(c * c + fVar);
       F = 0.02 + 0.98 * pow(1 - c, 5);
     }
-    F *= g_Draw.vParams0.y;
+    F *= g_DrawExt.vParams0.y;
     float3 R = reflect(-V, N);
     float3 Rs = reflect(-V, Ns);
-    float3 vReflected = g_Draw.vParams1.y != 0 ? SkyBoxColor(R) * SkyGlow(R) : vScatter;
+    float3 vReflected = g_DrawExt.vParams1.y != 0 ? SkyBoxColor(R) * SkyGlow(R) : vScatter;
     float3 vPlanar = 0;
     float fBlur = 0;
-    if (g_Draw.vParams1.w != 0)
+    if (g_DrawExt.vParams1.w != 0)
     {
       if (fVar > 0)
         vPlanar = BlurredPlanarReflection(In.vWorldPos, Rs, fDistance * 0.3, fVar, saturate(dot(Ns, V)), fBlur);
@@ -1117,9 +1117,9 @@ float4 ShadeWater(SWaterOutput In)
     // would be seen (no reflection, or blurred away: open water away from the camera), but in the
     // debug views.
     const float fSharp = fBlur > 0 ? saturate(2 - fBlur * g_Frame.vScreen.y / 4) : 1;
-    const bool bSharp = (F != 0 && fSharp > 0) || g_Draw.vParams0.z != 0;
+    const bool bSharp = (F != 0 && fSharp > 0) || g_DrawExt.vParams0.z != 0;
 #ifdef XR_RAYTRACE
-    float4 vSSR = g_Draw.vTexGenV.x >= 2 && bSharp ? ScreenReflection(In.vWorldPos, Rs, g_Frame.vScreen.xy * vInvSize, float2(nW, nH), true) : 0;
+    float4 vSSR = g_DrawExt.vTexGenV.x >= 2 && bSharp ? ScreenReflection(In.vWorldPos, Rs, g_Frame.vScreen.xy * vInvSize, float2(nW, nH), true) : 0;
 #else
     float4 vSSR = bSharp ? ScreenReflection(In.vWorldPos, Rs, g_Frame.vScreen.xy * vInvSize, float2(nW, nH), false) : 0;
 #endif
@@ -1128,9 +1128,9 @@ float4 ShadeWater(SWaterOutput In)
     // The rays: in place of the screen's reflection (mode 1), or where it finds nothing (2, none where
     // it is sure); as sharp, they give way to the blurred planar reflection as it does.
     // No ray where nothing of it would be seen, but in the debug views.
-    float fRayT = g_Draw.vTexGenV.y;
+    float fRayT = g_DrawExt.vTexGenV.y;
     float4 vRay = 0;
-    if ((g_Draw.vTexGenV.x < 2 || vSSR.w < 1) && ((F > 0 && fSharp > 0) || g_Draw.vParams0.z >= 13))
+    if ((g_DrawExt.vTexGenV.x < 2 || vSSR.w < 1) && ((F > 0 && fSharp > 0) || g_DrawExt.vParams0.z >= 13))
       vRay = RayReflection(In.vWorldPos, Rs, fDistance, fPixelAngle, fVar, fRayT);
     vRay.w *= fSharp;
     vReflected = lerp(vReflected, vRay.rgb, vRay.w);
@@ -1146,17 +1146,17 @@ float4 ShadeWater(SWaterOutput In)
     // light through the thin crests (d3d12_WaterCrestLight, vParams0.w; WaterCrestLight), what the
     // surface does not reflect of it (1 - F), fading out as the glint. In the sun's shadow
     // (WaterSunShadow, looked up only where there is light to shade) neither.
-    const float fGlintVar = fLostVar + (g_Draw.vTexGenU.w != 0 ? g_Draw.vAddColor.y : g_Draw.vSpecular.y);
+    const float fGlintVar = fLostVar + (g_DrawExt.vTexGenU.w != 0 ? g_DrawExt.vAddColor.y : g_DrawExt.vSpecular.y);
     const float fSunUp = saturate(L.z * 10);
     float3 vGlint = 0, vCrest = 0;
-    if (g_Draw.vSpecular.x > 0)
+    if (g_DrawExt.vSpecular.x > 0)
     {
-      const float fGlint = WaterGlint(N, V, L, fGlintVar) * g_Draw.vSpecular.x * g_Draw.vParams0.y * fSunUp;
-      vGlint = WaterCapLight(WaterSunLight() * fGlint, g_Draw.vSpecular.z);
+      const float fGlint = WaterGlint(N, V, L, fGlintVar) * g_DrawExt.vSpecular.x * g_DrawExt.vParams0.y * fSunUp;
+      vGlint = WaterCapLight(WaterSunLight() * fGlint, g_DrawExt.vSpecular.z);
     }
-    if (g_Draw.vParams0.w > 0)
-      vCrest = WaterSunLight() * WaterCrestColor(g_Draw.vParams3.rgb) *
-               (WaterCrestLight(N, V, L, fHeight, WaveSlopeRMS(g_Draw.vParams0.x)) * g_Draw.vParams0.w * (1 - F) * fSunUp);
+    if (g_DrawExt.vParams0.w > 0)
+      vCrest = WaterSunLight() * WaterCrestColor(g_DrawExt.vParams3.rgb) *
+               (WaterCrestLight(N, V, L, fHeight, WaveSlopeRMS(g_DrawExt.vParams0.x)) * g_DrawExt.vParams0.w * (1 - F) * fSunUp);
     // The foam neither mirrors the sun nor lets its light through.
     if (fFoam > 0)
     {
@@ -1199,45 +1199,45 @@ float4 ShadeWater(SWaterOutput In)
       const float3 vFoam = FoamLight(N, L, WaterSunLight() * fSunUp, fSunShadow, WaterSkyLight()) * fFoamShade;
       vColor = lerp(vColor, float3(HdrEncode(vFoam.r), HdrEncode(vFoam.g), HdrEncode(vFoam.b)), fFoam);
     }
-    if (g_Draw.vParams0.z == 1)
+    if (g_DrawExt.vParams0.z == 1)
       return float4(vRefracted, 1);
-    if (g_Draw.vParams0.z == 2)
+    if (g_DrawExt.vParams0.z == 2)
       return float4(vReflected, 1);
-    if (g_Draw.vParams0.z == 3)
+    if (g_DrawExt.vParams0.z == 3)
       return float4(saturate(fThick0 / 2).xxx, 1);
-    if (g_Draw.vParams0.z == 4)
+    if (g_DrawExt.vParams0.z == 4)
       return float4(N * 0.5 + 0.5, 1);
-    if (g_Draw.vParams0.z == 5)
+    if (g_DrawExt.vParams0.z == 5)
       return float4(vSSR.www, 1);
-    if (g_Draw.vParams0.z == 6)
+    if (g_DrawExt.vParams0.z == 6)
       return float4(vSSR.rgb, 1);
-    if (g_Draw.vParams0.z == 7)
+    if (g_DrawExt.vParams0.z == 7)
       return float4(vPlanar, 1);
-    if (g_Draw.vParams0.z == 8)
+    if (g_DrawExt.vParams0.z == 8)
       return float4(vScene0, 1);
-    if (g_Draw.vParams0.z == 9)
+    if (g_DrawExt.vParams0.z == 9)
       return float4(saturate(fPath / 32), saturate(fDepthBelow / 16), F, 1);
-    if (g_Draw.vParams0.z == 10)
+    if (g_DrawExt.vParams0.z == 10)
       return float4(In.vColor.rgb, 1);
-    if (g_Draw.vParams0.z == 11)
+    if (g_DrawExt.vParams0.z == 11)
       return float4(In.vColor.aaa, 1);
-    if (g_Draw.vParams0.z == 12)
+    if (g_DrawExt.vParams0.z == 12)
       return float4(saturate(sqrt(fLostVar) * 10).xxx, 1);
-    if (g_Draw.vParams0.z == 16)
+    if (g_DrawExt.vParams0.z == 16)
       return float4(HdrEncode(vGlint.r), HdrEncode(vGlint.g), HdrEncode(vGlint.b), 1);
-    if (g_Draw.vParams0.z == 17)
+    if (g_DrawExt.vParams0.z == 17)
       return float4(HdrEncode(vCrest.r), HdrEncode(vCrest.g), HdrEncode(vCrest.b), 1);
-    if (g_Draw.vParams0.z == 18)
+    if (g_DrawExt.vParams0.z == 18)
       return float4(saturate(fGlintVar / 0.05).xxx, 1);
-    if (g_Draw.vParams0.z == 20)
+    if (g_DrawExt.vParams0.z == 20)
       return float4(saturate(fHeight * 0.25 + 0.5).xxx, 1);
-    if (g_Draw.vParams0.z == 21)
+    if (g_DrawExt.vParams0.z == 21)
       return float4(fFoam.xxx, 1);
-    if (g_Draw.vParams0.z == 22)
+    if (g_DrawExt.vParams0.z == 22)
       return float4(fWhitecaps.xxx, 1);
-    if (g_Draw.vParams0.z == 23)
+    if (g_DrawExt.vParams0.z == 23)
       return float4(fShoreFoam.xxx, 1);
-    if (g_Draw.vParams0.z == 19)
+    if (g_DrawExt.vParams0.z == 19)
     {
 #ifdef XR_RAYTRACE
       return float4(WaterSunShadow(In.vWorldPos, fDistance * fPixelAngle).xxx, 1);
@@ -1246,23 +1246,23 @@ float4 ShadeWater(SWaterOutput In)
 #endif
     }
 #ifdef XR_RAYTRACE
-    if (g_Draw.vParams0.z == 13)
+    if (g_DrawExt.vParams0.z == 13)
       return float4(vRay.rgb, 1);
-    if (g_Draw.vParams0.z == 14)
-      return float4(fRayT < g_Draw.vTexGenV.y ? saturate(float3(2 * fRayT / g_Draw.vTexGenV.y - 1, 1 - abs(2 * fRayT / g_Draw.vTexGenV.y - 1),
-                                                               1 - 2 * fRayT / g_Draw.vTexGenV.y)) : 0, 1);
-    if (g_Draw.vParams0.z == 15)
+    if (g_DrawExt.vParams0.z == 14)
+      return float4(fRayT < g_DrawExt.vTexGenV.y ? saturate(float3(2 * fRayT / g_DrawExt.vTexGenV.y - 1, 1 - abs(2 * fRayT / g_DrawExt.vTexGenV.y - 1),
+                                                               1 - 2 * fRayT / g_DrawExt.vTexGenV.y)) : 0, 1);
+    if (g_DrawExt.vParams0.z == 15)
       return float4(vRay.www, 1);
 #endif
   }
-  else if (g_Draw.vParams3.w == 0)
+  else if (g_DrawExt.vParams3.w == 0)
   {
     // The ocean from below: the scene above through the waves, in the fog of its volume. With d3d12_WaterVolume
     // (vAddColor.w) through Snell's window: the light from the air that passes the surface (SnellWindow at the waves'
     // normal; none beyond the critical angle, where the surface mirrors the water below), the rest the water's colour;
     // else as the game's ocean shows it, without the window, a third of it the water's colour the surface reflects
     // back down.
-    if (g_Draw.vAddColor.w > 0)
+    if (g_DrawExt.vAddColor.w > 0)
     {
       const float fWindow = SnellWindow(dot(N, V));
       float3 vAbove = vScatter;
@@ -1272,26 +1272,26 @@ float4 ShadeWater(SWaterOutput In)
       // d3d12_WaterUnderClear (w 3) beyond the window the light the water below sends up along the mirrored ray (the light
       // it scatters a metre at the surface from the scene's sun and sky vUnderColor rgb, Underwater.hlsl's; the flat
       // surface's mirror, as UnderSurface's), the same as the view's water at the horizon.
-      if (g_Draw.vAddColor.w > 2.5)
+      if (g_DrawExt.vAddColor.w > 2.5)
       {
-        const float3 vDeep = WaterDecode(vScatter), c = VolumeAttenuation(vDeep, g_Draw.vParams2.y), R = float3(-V.xy, V.z);
-        const float fShare = g_Draw.vAddColor.z;
-        const float3 vBelow = UnderClearBelow(g_Draw.vUnderColor.rgb, c, saturate(-V.z), 1 - fShare + fShare * UnderSunPhase(g_Frame.vSunDir.xyz, R));
+        const float3 vDeep = WaterDecode(vScatter), c = VolumeAttenuation(vDeep, g_DrawExt.vParams2.y), R = float3(-V.xy, V.z);
+        const float fShare = g_DrawExt.vAddColor.z;
+        const float3 vBelow = UnderClearBelow(g_DrawExt.vUnderColor.rgb, c, saturate(-V.z), 1 - fShare + fShare * UnderSunPhase(g_Frame.vSunDir.xyz, R));
         vColor = WaterEncode(lerp(vBelow, WaterDecode(vAbove), fWindow));
       }
-      else if (g_Draw.vAddColor.w > 1.5)
+      else if (g_DrawExt.vAddColor.w > 1.5)
         vColor = WaterEncode(UnderSurface(WaterDecode(vScatter), WaterDecode(vAbove), fWindow, saturate(-V.z)));
       else
         vColor = lerp(WaterEncode(lerp(WaterDecode(vScatter), WaterDecode(vAbove), fWindow)), vScatter,
-                      FogInsideVolume(fSurface, g_Draw.vParams2.y));
-      if (g_Draw.vParams0.z == 8)
+                      FogInsideVolume(fSurface, g_DrawExt.vParams2.y));
+      if (g_DrawExt.vParams0.z == 8)
         return float4(vAbove, 1);
-      if (g_Draw.vParams0.z == 25)
+      if (g_DrawExt.vParams0.z == 25)
         return float4(fWindow.xxx, 1);
     }
     else
-      vColor = lerp(vScene, vScatter, 1 - 0.65 * (1 - FogInsideVolume(fSurface, g_Draw.vParams2.y)));
-    if (g_Draw.vParams0.z == 8)
+      vColor = lerp(vScene, vScatter, 1 - 0.65 * (1 - FogInsideVolume(fSurface, g_DrawExt.vParams2.y)));
+    if (g_DrawExt.vParams0.z == 8)
       return float4(vScene, 1);
   }
   else
@@ -1305,7 +1305,7 @@ float4 ShadeWater(SWaterOutput In)
   if (HasFlag2(DF2_HEAT))
     vColor = HeatVision(vColor, 1);
   // The scene's fog, not on the ocean seen from below: that view stays in the fog of its volume.
-  if (g_Frame.vFogParams.w != 0 && !(bBelow && g_Draw.vParams3.w == 0))
+  if (g_Frame.vFogParams.w != 0 && !(bBelow && g_DrawExt.vParams3.w == 0))
     vColor = lerp(g_Frame.vFogColor.rgb, vColor, SceneFog(In.vWorldPos));
   return float4(vColor, 1);
 }
@@ -1352,7 +1352,7 @@ struct SDeferredOutput
 SDeferredOutput VSDeferred(SVertexInput In)
 {
   SDeferredOutput Out;
-  Out.vPos = float4(In.vPos.xy, g_Draw.vLightPos[3].w, 1);
+  Out.vPos = float4(In.vPos.xy, g_DrawExt.vLightPos[3].w, 1);
   Out.vNDC = In.vPos.xy;
   return Out;
 }
@@ -1360,14 +1360,14 @@ SDeferredOutput VSDeferred(SVertexInput In)
 //! The depth buffer's value at pixel p (0 off it).
 float DeferredDepth(int2 p)
 {
-  return g_Textures[asuint(g_Draw.vLightPos[2].w)].Load(int3(p, 0)).r;
+  return g_Textures[asuint(g_DrawExt.vLightPos[2].w)].Load(int3(p, 0)).r;
 }
 
 //! The world position at the view's vNDC and view depth d (the upscaler's jitter, which moved the grid's vertices, taken off).
 float3 DeferredPos(float2 vNDC, float d)
 {
   const float2 v = vNDC - g_Frame.vJitter.xy;
-  return g_Frame.vCameraPos.xyz + d * (g_Draw.vLightPos[4].xyz + v.x * g_Draw.vLightPos[2].xyz + v.y * g_Draw.vLightPos[3].xyz);
+  return g_Frame.vCameraPos.xyz + d * (g_DrawExt.vLightPos[4].xyz + v.x * g_DrawExt.vLightPos[2].xyz + v.y * g_DrawExt.vLightPos[3].xyz);
 }
 
 //! What the grid's vertex program would have given the pixel (fDepth its depth): the world position along its view ray
@@ -1383,9 +1383,9 @@ SWaterOutput DeferredWater(SDeferredOutput In, float fDepth)
   SWaterOutput Out;
   Out.vPos = float4(In.vPos.xy, fDepth, 1);
   Out.vWorldPos = P;
-  const uint nRings = (uint)g_Draw.vLightSpec[4].z, nGridRings = (uint)g_Draw.vLightSpec[4].w;
-  Out.vColor = float4(1, 1, 1, GridDiscAlphaTable(P.xy - g_Draw.vLightSpec[1].xy, nRings * (1 + XR_GRID_DISC_SEGMENTS) + nGridRings,
-                                                  g_Draw.vLightSpec[2].w));
+  const uint nRings = (uint)g_DrawExt.vLightSpec[4].z, nGridRings = (uint)g_DrawExt.vLightSpec[4].w;
+  Out.vColor = float4(1, 1, 1, GridDiscAlphaTable(P.xy - g_DrawExt.vLightSpec[1].xy, nRings * (1 + XR_GRID_DISC_SEGMENTS) + nGridRings,
+                                                  g_DrawExt.vLightSpec[2].w));
   Out.vTex0 = 0;
   Out.vGrid = float4(0, 1, 1, 1);
 #ifdef XR_VELOCITY
