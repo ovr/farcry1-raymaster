@@ -260,7 +260,7 @@ private:
   void CheckNewFrame();
   void ResetFrameObjects();
   void BumpMatrixSerial();
-  //! mfPrepare, CheckUpdate, skinning, matrices and distances of the items; returns their number.
+  //! mfPrepare, CheckUpdate, skinning and distances of the items; returns their number.
   int PrepareItems(SSceneSlot &Slot);
   void BuildLists(SSceneSlot &Slot, int nItems, bool bSort);
   void CheckCorona(CDLight *pLight);
