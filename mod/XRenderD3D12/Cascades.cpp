@@ -32,7 +32,12 @@
 //	full set is nearer to the sun (DF2_CASCADE_CASTER). A part of either
 //	set goes into a slice only where its shadow falls on the slice's
 //	receivers (the view's points that take their shadow from it): the
-//	slice is not read elsewhere.
+//	slice is not read elsewhere. Without rays (the casters' scenes are read
+//	by the slices alone), d3d12_CascadeCull leaves out a part that reaches
+//	no slice as the engine adds it (CScene::AddEf: none of its preparing;
+//	a character's part stays, its box comes with its skinning), and with 2
+//	the camera towards the sun ends where nothing can shade a receiver any
+//	more (CascadeCull.h: the level's heights).
 //
 //	The receivers (SunCascades, Common.hlsli): the lit objects take the
 //	sun's visibility from the full set; the light maps and the terrain,
@@ -49,6 +54,7 @@
 #include "D3D12Device.h"
 #include "D3D12Descriptors.h"
 #include "Scene.h"
+#include "CascadeCull.h"
 
 namespace
 {
@@ -148,6 +154,26 @@ void PartSphere(const SRenderItem &it, Vec3 &c, float &r)
   r = (pVC->m_vBoxMax - pVC->m_vBoxMin).GetLength() * 0.5f * s;
 }
 
+//! The parts that cast into the cascades (as SetupShadowCasterDraw takes them; not the weapon in the hands, not the
+//! light passes): DrawCascadeItems draws these, CascadeCullsItem leaves the others out.
+bool IsCascadeCasterClass(const SRenderItem &it)
+{
+  if (!it.pRE || it.pRE->m_Type != eDATA_OcLeaf || (it.pObj->m_ObjFlags & (FOB_NEAREST | FOB_LIGHTPASS)))
+    return false;
+  switch (it.eDrawClass)
+  {
+  case eDC_Opaque:
+  case eDC_AlphaTest:
+  case eDC_AlphaTestVColor:
+  case eDC_VColor:
+  case eDC_ShadowOnly:
+  case eDC_Terrain:
+    return true;
+  default:
+    return false;
+  }
+}
+
 }
 
 bool CD3D12Renderer::SetupCascades(int nCascades)
@@ -183,6 +209,8 @@ bool CD3D12Renderer::SetupCascades(int nCascades)
     const Vec3 vC = vPos + vDir * c;
     SCascade &Cas = m_Cascades[i];
     Cas = {};
+    Cas.vSphere = vC;
+    Cas.fSphereRadius = r;
     Cas.fEnd = fEnd;
     Cas.fHalfSize = r * nSize / (float)(nSize - 2 * CASCADE_EDGE_TEXELS);
     Cas.fTexel = 2 * Cas.fHalfSize / nSize;
@@ -291,11 +319,69 @@ bool CD3D12Renderer::EnsureCascadeMaps()
   return true;
 }
 
+bool CD3D12Renderer::PartReaches(const Vec3 &c, float r, const SCascade &Cas) const
+{
+  const Vec3 &X = m_vCascadeAxes[0], &Y = m_vCascadeAxes[1], &Z = m_vCascadeAxes[2];
+  return CascadeCull::Reaches(Cas, c.Dot(X), c.Dot(Y), c.Dot(Z), r);
+}
+
+bool CD3D12Renderer::CascadeCullsItem(const SRenderItem &it)
+{
+  bool bOut = !IsCascadeCasterClass(it);
+  // A character's part stays: its leaf buffer gets its box from ProcessSkinning (PrepareItems), after this. One not
+  // skinned yet has the zero box at the object's origin; skinned, it has none, and DrawCascadeItems draws it into
+  // every slice (Training's seagulls, peccaries, the chain and hook of the wreck).
+  if (!bOut && !it.pObj->m_pCharInstance)
+  {
+    Vec3 c(0, 0, 0);
+    float r = -1;
+    PartSphere(it, c, r);
+    bOut = true;
+    for (int i = 0; i < m_nCascades && bOut; i++)
+      bOut = !PartReaches(c, r, m_Cascades[i]);
+  }
+  m_nCascadeCulled += bOut;
+  return bOut;
+}
+
+bool CD3D12Renderer::EnsureTerrainRange()
+{
+  STerrainRange &t = m_TerrainRange;
+  if (!t.bStale)
+    return t.bHave;
+  t.bStale = false;
+  t.bHave = false;
+  I3DEngine *p3D = iSystem ? iSystem->GetI3DEngine() : nullptr;
+  const int nUnit = p3D ? p3D->GetHeightMapUnitSize() : 0, nSize = p3D ? p3D->GetTerrainSize() : 0;
+  if (nUnit <= 0 || nSize <= 0)
+    return false;
+  // The heights the engine gives at the height map's points, as EnsureGridTerrain reads them: between them it
+  // interpolates, so these hold the terrain's lowest and highest.
+  const double fStart = CpuMs();
+  float fMin = FLT_MAX, fMax = -FLT_MAX;
+  for (int y = 0; y < nSize; y += nUnit)
+    for (int x = 0; x < nSize; x += nUnit)
+    {
+      const float h = p3D->GetTerrainElevation((float)x, (float)y);
+      fMin = std::min(fMin, h);
+      fMax = std::max(fMax, h);
+    }
+  t.bHave = fMin <= fMax;
+  t.fMin = fMin;
+  t.fMax = fMax;
+  if (iLog && t.bHave)
+    iLog->Log("XRenderD3D12: the level's terrain from %.1f to %.1f m (%d x %d heights, %.1f ms)", fMin, fMax, nSize / nUnit, nSize / nUnit,
+              CpuMs() - fStart);
+  return t.bHave;
+}
+
 void CD3D12Renderer::UpdateSunCascades(std::span<const SRenderItem> MainItems)
 {
   FUNCTION_PROFILER(iSystem, PROFILE_RENDERER);
   m_RayOffscreenItems.clear();
   m_RayLiveParts.clear();
+  m_nCascadeCulled = 0;
+  m_fCascadeCasterFar = 0;
   if (m_nCascades)
   {
     m_nCascades = 0;
@@ -359,9 +445,29 @@ void CD3D12Renderer::UpdateSunCascades(std::span<const SRenderItem> MainItems)
   m_nStaticCasterParts = 0;
   m_bNoteStaticCasters = CV_d3d12_StaticCasters != 0;
   ClearSet(m_CascadeMaps[0]);
+  // d3d12_CascadeCull: without rays only the slices read the casters' scenes (NoteRayOffscreenItems keeps nothing),
+  // so CScene::AddEf leaves out the parts that reach no slice (CascadeCullsItem), and with 2 the camera towards the sun
+  // ends where no caster can still shade a receiver: the level's highest terrain and what stands on it
+  // (CascadeCull::OBJECT_RISE_M) along the sun from the receivers' spheres, no lower than the level's lowest terrain.
+  m_bCascadeCull = CV_d3d12_CascadeCull > 0 && !WantsOffscreenRays() && !WantsRaySun();
+  const bool bCull = m_bCascadeCull;
+  float fSunFar = std::max(Camera.GetZMax(), 1.0f);
+  if (m_bCascadeCull && CV_d3d12_CascadeCull >= 2 && EnsureTerrainRange())
+  {
+    const Vec3 &Z = m_vCascadeAxes[2], vPos = Camera.GetPos();
+    float fDepth = -FLT_MAX, fLow = FLT_MAX;
+    for (int i = 0; i < m_nCascades; i++)
+    {
+      const SCascade &Cas = m_Cascades[i];
+      fDepth = std::max(fDepth, (Cas.vSphere - vPos).Dot(Z) + Cas.fSphereRadius + Cas.fMargin);
+      fLow = std::min(fLow, Cas.vSphere.z - Cas.fSphereRadius - Cas.fMargin);
+    }
+    fSunFar = CascadeCull::CasterFar(fSunFar, Z.z, fDepth, std::max(fLow, m_TerrainRange.fMin), m_TerrainRange.fMax + CascadeCull::OBJECT_RISE_M);
+  }
+  m_fCascadeCasterFar = fSunFar;
   const int w = std::max(GetWidth(), 1), h = std::max(GetHeight(), 1);
   CCamera SunCam = Camera;
-  SunCam.Init(w, h, DEG2RAD(CASCADE_CAMERA_FOV_DEG) * w / h, std::max(Camera.GetZMax(), 1.0f), (float)h / w, 0.25f);
+  SunCam.Init(w, h, DEG2RAD(CASCADE_CAMERA_FOV_DEG) * w / h, fSunFar, (float)h / w, 0.25f);
   SunCam.SetPos(Camera.GetPos());
   SunCam.SetAngle(ConvertVectorToCameraAngles(m_vCascadeAxes[2]));
   SunCam.Update();
@@ -394,6 +500,7 @@ void CD3D12Renderer::UpdateSunCascades(std::span<const SRenderItem> MainItems)
     NoteRayLiveParts(m_StaticCasterItems);
   }
   m_bCascadePass = false;
+  m_bCascadeCull = false;
   m_pDevice->SetBackBufferTargets();
 
   // The frame as it was.
@@ -423,6 +530,17 @@ void CD3D12Renderer::UpdateSunCascades(std::span<const SRenderItem> MainItems)
             (int)m_CascadeDrawn.size(), nLive, m_ShadowTint[0], m_ShadowTint[1], m_ShadowTint[2], nTint);
     fprintf(m_pFrameDump.get(), "  static casters (d3d12_StaticCasters): %d parts of the full set in the live set too, of %d leaf buffers\n",
             m_nStaticCasterParts, (int)m_StaticCasterBuffers.size());
+    if (bCull)
+    {
+      fprintf(m_pFrameDump.get(), "  left out as they came (d3d12_CascadeCull %d): %d parts that reach no slice; the camera towards the sun to %.1f m "
+              "(the view's %.1f)", CV_d3d12_CascadeCull, m_nCascadeCulled, m_fCascadeCasterFar, Camera.GetZMax());
+      if (CV_d3d12_CascadeCull >= 2 && m_TerrainRange.bHave)
+        fprintf(m_pFrameDump.get(), ", the level's terrain from %.1f to %.1f m", m_TerrainRange.fMin, m_TerrainRange.fMax);
+      fprintf(m_pFrameDump.get(), "\n");
+    }
+    else
+      fprintf(m_pFrameDump.get(), "  left out as they came (d3d12_CascadeCull %d): off (%s); the camera towards the sun to %.1f m\n", CV_d3d12_CascadeCull,
+              CV_d3d12_CascadeCull > 0 ? "rays read the casters' scenes" : "the variable", m_fCascadeCasterFar);
     for (int i = 0; i < m_nCascades; i++)
     {
       const SCascade &Cas = m_Cascades[i];
@@ -449,20 +567,8 @@ void CD3D12Renderer::DrawCascadeItems(std::span<const SRenderItem> Items, std::u
   Parts.reserve(Items.size());
   for (const SRenderItem &it : Items)
   {
-    if (!it.pRE || it.pRE->m_Type != eDATA_OcLeaf || (it.pObj->m_ObjFlags & (FOB_NEAREST | FOB_LIGHTPASS)))
+    if (!IsCascadeCasterClass(it))
       continue;
-    switch (it.eDrawClass)
-    {
-    case eDC_Opaque:
-    case eDC_AlphaTest:
-    case eDC_AlphaTestVColor:
-    case eDC_VColor:
-    case eDC_ShadowOnly:
-    case eDC_Terrain:
-      break;
-    default:
-      continue;
-    }
     if (pDrawn && !pDrawn->insert(PartKey(it)).second)
       continue;
     if (m_bNoteStaticCasters && m_nCascadeSet == 0 && IsStaticCaster(it))
@@ -478,23 +584,9 @@ void CD3D12Renderer::DrawCascadeItems(std::span<const SRenderItem> Items, std::u
   // drawn already). The maps are the same in any order: the nearest depth of each texel.
   std::stable_partition(Parts.begin(), Parts.end(), [](const SPart &p) { return !p.bDiscards; });
 
-  // Into each slice that a part's sphere reaches: across the square, not all of it farther from the
-  // sun than the slice's range, and its shadow (the sphere drawn out away from the sun) over the
-  // outline of the slice's receivers: elsewhere the slice is not read.
+  // Into each slice that a part's sphere reaches (CascadeCull::Reaches): elsewhere the slice is not read.
   const SCascadeMaps &Maps = m_CascadeMaps[m_nCascadeSet];
-  const Vec3 &X = m_vCascadeAxes[0], &Y = m_vCascadeAxes[1], &Z = m_vCascadeAxes[2];
-  auto Reaches = [&](const SPart &p, const SCascade &Cas)
-  {
-    if (p.r < 0)
-      return true;
-    const float x = p.c.Dot(X), y = p.c.Dot(Y);
-    if (fabsf(x - Cas.fCenter[0]) > Cas.fHalfSize + p.r || fabsf(y - Cas.fCenter[1]) > Cas.fHalfSize + p.r || p.c.Dot(Z) + p.r < Cas.fZMin)
-      return false;
-    for (int e = 0; e < Cas.nEdges; e++)
-      if (Cas.Edges[e][0] * x + Cas.Edges[e][1] * y - Cas.Edges[e][2] > p.r + Cas.fMargin)
-        return false;
-    return true;
-  };
+  auto Reaches = [&](const SPart &p, const SCascade &Cas) { return PartReaches(p.c, p.r, Cas); };
   auto SetSlice = [&](int i, D3D12_CPU_DESCRIPTOR_HANDLE hDSV)
   {
     m_pDevice->SetShadowMapTarget(Maps.pDepth.Get(), hDSV, m_nCascadeSize);
