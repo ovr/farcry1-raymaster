@@ -1282,7 +1282,12 @@ system ones (better not to touch): [`CONFIGURATION.md`](../../CONFIGURATION.md).
   the sun from the hit as the volumetric light's rays take it (not the pieces of the sky): white
   where it reaches the sun, the distance to what hides it where not (the colours of 3, half as
   bright), so the pieces of the sky closing a room's openings show which of their points the sun
-  comes through (Training's bunker: about 92 % of the planes in its roof's openings);
+  comes through (Training's bunker: 87 % of the planes of one of its roof's two openings, none of
+  the other's, whose rays meet the concrete roof 3.4 m above, past the edge of its hole; the sun is
+  the volumetric light's, indoors the 3D engine's: the frame's there points straight up); 14 the air
+  the sun reaches along the ray to the hit (96 points to at most 40 m, each with a ray towards the
+  sun as 13's; white as the metres lit, over the surfaces at a tenth where the sun reaches them):
+  the shafts as they are in the scene for rays, without the volumetric light's froxels;
   `d3d12_RTDebugSky 0` makes its rays leave out the pieces of the sky (`XR_RAY_SKY`, the planes of
   a sky box's texture closing a room's openings) as the volumetric light's sun rays do, to see
   what those meet beyond an opening (1, the default: they see them, as the other rays);

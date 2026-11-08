@@ -477,7 +477,9 @@ void CD3D12Renderer::RegisterVariables()
                      "of the hits, 9 their emission, 10 them lit by the sun and the lamps; 11 a colour per material the rays take "
                      "of the hits' instances (the same while it is); 12 the side of the hits' triangles as the raster's culling takes it "
                      "(the front green, the back red); 13 the way to the sun from the hits as the volumetric light's rays take it "
-                     "(not the pieces of the sky): white reaching it, hidden the distance to what hides it (blue near, red far)");
+                     "(not the pieces of the sky): white reaching it, hidden the distance to what hides it (blue near, red far); "
+                     "14 the air the sun reaches along the rays to the hits (the shafts as they are in the scene for rays, white, "
+                     "without the volumetric light's froxels)");
   iConsole->Register("d3d12_RTDebugSky", &CV_d3d12_RTDebugSky, 1, 0,
                      "0: d3d12_RTDebug's rays leave out the pieces of the sky (the planes of a sky box's texture closing a room's openings) "
                      "as the volumetric light's sun rays do; 1 they see them, as the other rays");
