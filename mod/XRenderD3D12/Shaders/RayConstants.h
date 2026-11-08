@@ -60,6 +60,8 @@
                                     //!< red (a surface the raster shows from there is green: a red one only the rays see)
 #define XR_RAY_DEBUG_SUN_WAY    13  //!< the way to the sun from the hit, as the volumetric light's rays take it (not the pieces of
                                     //!< the sky): reaching it white, hidden the distance to what hides it in the distance's colours
+#define XR_RAY_DEBUG_SUN_AIR    14  //!< the air the sun reaches along the camera's ray to its hit, as the volumetric light's rays
+                                    //!< find it but without its froxels: the shafts as they are in the scene for rays, white
 // The path tracer's G-buffer (d3d12_PTDebug 1 to 4, PathTrace.cpp; Shaders/PathGBuffer.hlsli), no rays
 #define XR_RAY_DEBUG_GB_ALBEDO  16  //!< the albedo, the game's colour
 #define XR_RAY_DEBUG_GB_NORMAL  17  //!< the normal, rgb = n * 0.5 + 0.5; no surface black

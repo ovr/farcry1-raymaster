@@ -1229,6 +1229,23 @@ void CD3D12Renderer::DrawRayDebug()
     Set4(dc.vAmbient, P.vBakeLight[0], P.vBakeLight[1], P.vBakeLight[2], 0);
     dc.nTex2 = P.nLights;
   }
+  else if (CV_d3d12_RTDebug == XR_RAY_DEBUG_SUN_WAY || CV_d3d12_RTDebug == XR_RAY_DEBUG_SUN_AIR)
+  {
+    // The sun as the volumetric light's rays take it (Volumetric.cpp): the scene's, indoors (where the frame has none and
+    // its direction is straight up) the 3D engine's.
+    Vec3 vSun(m_SunDir[0], m_SunDir[1], m_SunDir[2]);
+    I3DEngine *p3D = iSystem ? iSystem->GetI3DEngine() : nullptr;
+    if (!(m_pScene && m_pScene->GetSun()) && p3D)
+    {
+      const Vec3 vTo = p3D->GetSunPosition(true) - vCamera;
+      if (vTo.GetLengthSquared() > 1e-6f)
+        vSun = vTo;
+    }
+    const float fLen = vSun.GetLength();
+    if (fLen > 0)
+      vSun = vSun / fLen;
+    Set4(dc.vParams2, vSun.x, vSun.y, vSun.z, 0);
+  }
   DrawImmediate(Key, dc, D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST, VERTEX_FORMAT_P3F, s_FullScreen, 3);
   memcpy(m_Viewport, Viewport, sizeof(Viewport));
   m_bScissor = bScissor;

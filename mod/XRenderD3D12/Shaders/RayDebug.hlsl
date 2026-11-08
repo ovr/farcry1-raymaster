@@ -19,6 +19,9 @@
 //	  vParams3  x fEmission, y fDelight, z fLightGap
 //	  vAmbient  rgb vBakeLight
 //	  nTex2     nLights (g_PTLights, root SRV t2 space5)
+//	  XR_RAY_DEBUG_SUN_WAY and XR_RAY_DEBUG_SUN_AIR's:
+//	  vParams2  xyz the direction to the sun, the volumetric light's (the
+//	            3D engine's indoors, where the frame has none)
 //	The views:
 //	  XR_RAY_DEBUG_INSTANCES  a colour per instance, of its mesh
 //	                          (SRayInstance::nPath.z) and where it is to
@@ -59,8 +62,8 @@
 //	                          sides (TRIANGLE_CULL_DISABLE), the raster
 //	                          culls the back of most draws
 //	  XR_RAY_DEBUG_SUN_WAY    from the hit (alpha tested as the paths take
-//	                          it) a ray towards the sun (the frame's
-//	                          vSunDir) among the instances but the pieces
+//	                          it) a ray towards the sun (vParams2's) among
+//	                          the instances but the pieces
 //	                          of the sky, as the volumetric light's
 //	                          (VolumetricRays.hlsl): white where it reaches
 //	                          the sun, where something hides it the
@@ -69,6 +72,18 @@
 //	                          pieces of the sky in the camera's rays
 //	                          (d3d12_RTDebugSky 1) the openings they close
 //	                          show which of their points the sun reaches
+//	  XR_RAY_DEBUG_SUN_AIR    the air the sun reaches along the camera's
+//	                          ray: SUN_AIR_STEPS points from the camera to
+//	                          its hit (the pieces of the sky end it with
+//	                          d3d12_RTDebugSky 1: the air in the room), at
+//	                          most SUN_AIR_LENGTH m, each with a ray
+//	                          towards the sun as XR_RAY_DEBUG_SUN_WAY's
+//	                          (the first hit ends it); the metres lit as
+//	                          1 - exp(-m / SUN_AIR_SCALE) white over the
+//	                          surfaces the sun reaches at a tenth and those
+//	                          it does not at a twentieth: the shafts as
+//	                          they are in the scene for rays, without the
+//	                          volumetric light's froxels and their blend
 //	  XR_RAY_DEBUG_GB_*       the path tracer's G-buffer (PathGBuffer.hlsli:
 //	                          the albedo, the normal, the fog's share, the
 //	                          material, the sun's visibility, the ambient
@@ -130,6 +145,36 @@ uint MaterialHash(SRayInstance I)
     n = (n ^ Words[i].w) * 16777619u;
   }
   return n;
+}
+
+//! XR_RAY_DEBUG_SUN_AIR: the points along the camera's ray, how far it goes (m), the metres of lit air that are white.
+static const uint SUN_AIR_STEPS = 96;
+static const float SUN_AIR_LENGTH = 40;
+static const float SUN_AIR_SCALE = 1.5;
+
+//! Whether something among the instances of nMask hides the sun along Ray (alpha tested as the volumetric light's rays,
+//! VolumetricRays.hlsl's SunHidden: fConeWidth the ray cone's width at the origin, no spread).
+bool SunHiddenAlong(RayDesc Ray, uint nMask, float fConeWidth)
+{
+  RayQuery<RAY_FLAG_SKIP_PROCEDURAL_PRIMITIVES | RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH> Query;
+  Query.TraceRayInline(g_RayScene, RAY_FLAG_NONE, nMask, Ray);
+  uint nTests = 0;
+  while (Query.Proceed())
+  {
+    if (Query.CandidateType() != CANDIDATE_NON_OPAQUE_TRIANGLE)
+      continue;
+    bool bHit = nTests >= XR_RAY_MAX_ALPHA_TESTS;
+    if (!bHit)
+    {
+      nTests++;
+      const SRaySurface S = RaySurface(Query.CandidateInstanceID(), Query.CandidatePrimitiveIndex(), Query.CandidateTriangleBarycentrics(),
+        Query.CandidateObjectToWorld3x4(), Ray.Direction, fConeWidth, true);
+      bHit = RayAlphaPasses(Query.CandidateInstanceID(), S, Ray.Direction);
+    }
+    if (bHit)
+      Query.CommitNonOpaqueTriangleHit();
+  }
+  return Query.CommittedStatus() == COMMITTED_TRIANGLE_HIT;
 }
 
 //! The direction from the camera through the point vPixel of the target.
@@ -245,13 +290,43 @@ float4 PSMain(SRayDebugOutput In) : SV_Target
     // From the hit, its own surface left behind by TMin; the sun's rays are parallel (no spread).
     RayDesc Sun;
     Sun.Origin = Ray.Origin + Ray.Direction * Hit.fT;
-    Sun.Direction = g_Frame.vSunDir.xyz;
+    Sun.Direction = g_DrawExt.vParams2.xyz;
     Sun.TMin = 0.02;
     Sun.TMax = Ray.TMax;
     const SRayHit Block = TraceScene(Sun, nMask & ~(uint)XR_RAY_SKY, Hit.fT * fSpread, 0);
     if (!Block.bHit)
       return float4(1, 1, 1, 1);
     return float4(0.5 * Ramp(saturate(log2(1 + Block.fT) / log2(1 + Ray.TMax))), 1);
+  }
+
+  if (nView == XR_RAY_DEBUG_SUN_AIR)
+  {
+    const float fSpread = length(PixelRay(In.vPos.xy + float2(1, 0)) - Ray.Direction);
+    const SRayHit Hit = TraceScene(Ray, nMask, 0, fSpread);
+    const float fEnd = Hit.bHit ? min(Hit.fT, SUN_AIR_LENGTH) : SUN_AIR_LENGTH;
+    const uint nSunMask = nMask & ~(uint)XR_RAY_SKY;
+    // The points moved along the ray by the pixel's noise (VolColumnNoise's), so the steps do not band.
+    const float fNoise = frac(52.9829189 * frac(dot(floor(In.vPos.xy), float2(0.06711056, 0.00583715))));
+    RayDesc Sun;
+    Sun.Direction = g_DrawExt.vParams2.xyz;
+    Sun.TMin = 0;
+    Sun.TMax = Ray.TMax;
+    float fLit = 0;
+    for (uint i = 0; i < SUN_AIR_STEPS; i++)
+    {
+      const float t = fEnd * (i + fNoise) / SUN_AIR_STEPS;
+      Sun.Origin = Ray.Origin + Ray.Direction * t;
+      if (!SunHiddenAlong(Sun, nSunMask, t * fSpread))
+        fLit += fEnd / SUN_AIR_STEPS;
+    }
+    float fSurface = 0;
+    if (Hit.bHit)
+    {
+      Sun.Origin = Ray.Origin + Ray.Direction * Hit.fT;
+      Sun.TMin = 0.02;
+      fSurface = SunHiddenAlong(Sun, nSunMask, Hit.fT * fSpread) ? 0.05 : 0.1;
+    }
+    return float4(saturate(fSurface + 1 - exp(-fLit / SUN_AIR_SCALE)).xxx, 1);
   }
 
   if (nView == XR_RAY_DEBUG_SHADED || nView == XR_RAY_DEBUG_SHADED_ALL || nView == XR_RAY_DEBUG_LOD || nView == XR_RAY_DEBUG_ALPHA)
