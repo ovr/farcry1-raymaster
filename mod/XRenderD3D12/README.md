@@ -1,7 +1,8 @@
 # XRenderD3D12
 
 Our renderer on Direct3D 12 (x64). How to build, load and check it: `AGENTS.md`. This is the
-reference of its features and console variables.
+reference of its features and console variables. The list of the options, for players and the
+system ones (better not to touch): [`CONFIGURATION.md`](../../CONFIGURATION.md).
 
 ## Window and full screen
 
