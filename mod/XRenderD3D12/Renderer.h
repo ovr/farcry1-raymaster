@@ -2271,6 +2271,7 @@ public:
   float CV_d3d12_AOBakedShare = 0.5f;       //!< the ambient light's share of a baked light without the terrain's shadows to take it from
   int CV_d3d12_AODebug = 0;                 //!< 1: its factor in grey; 2: the ambient light, 3: the light taken (d3d12_AOApply 1)
   int CV_d3d12_RTDebug = 0;                 //!< the scene for rays from the main camera (XR_RAY_DEBUG_*, Shaders/RayConstants.h)
+  int CV_d3d12_RTDebugSky = 1;              //!< 0: d3d12_RTDebug's rays leave out the pieces of the sky (XR_RAY_SKY)
   float CV_d3d12_RTDistance = 150;          //!< the rays' length (m)
   int CV_d3d12_RTMemory = 384;              //!< the static BLAS' memory (MB) beyond which the least recently used go
   int CV_d3d12_RTMask = 31;                 //!< the kinds of instances the rays see (XR_RAY_* bits)
