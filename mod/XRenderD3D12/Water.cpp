@@ -53,6 +53,7 @@
 #include "Scene.h"
 #include "RayTracing.h"
 #include "FoamPattern.h"
+#include "SkyFogBand.h"
 #include <atomic>
 
 namespace
@@ -1003,7 +1004,7 @@ bool CD3D12Renderer::SetupWaterDraw(SPipelineKey &Key, SDrawConstants &dc, const
   else
     SetWakeConstants(dc, bFoam && dc.vTexGen1U[0] > 0);
 
-  // The sky box the scene's sky drew (as it drew it).
+  // The sky box the scene's sky drew (as it drew it), with the fog band over its lower part when DrawSkyItem drew that.
   dc.nTex2 = dc.nTex3 = dc.nTex4 = D3D12_SRV_WHITE;
   Set4(dc.vParams1, 0, 0, 1, 0);
   if (m_nSceneSkyBox >= 0 && m_nSceneSkyBox < (int)m_SkyBoxes.size())
@@ -1015,7 +1016,7 @@ bool CD3D12Renderer::SetupWaterDraw(SPipelineKey &Key, SDrawConstants &dc, const
       dc.nTex2 = pTex[0]->GetSRV();
       dc.nTex3 = pTex[1]->GetSRV();
       dc.nTex4 = pTex[2]->GetSRV();
-      Set4(dc.vParams1, m_fSceneSkyZ1, 1, m_fSceneSkyAlpha, 0);
+      Set4(dc.vParams1, m_fSceneSkyZ1, CV_d3d12_SkyFogBand && SkyFogBand::Drawn(m_fFogEnd) ? 2.0f : 1.0f, m_fSceneSkyAlpha, 0);
     }
   }
 

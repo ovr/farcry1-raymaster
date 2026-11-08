@@ -265,6 +265,7 @@ Details: [Device removal (DRED)](mod/XRenderD3D12/README.md#device-removal-dred)
 | `d3d12_RTFaceNormal` | `1` |  | The side of a surface the rays start from by the triangle's face (2 that face alone) |
 | `d3d12_RTPbrScreen` | `1` |  | What the metals' rays hit takes its light from the last frame's picture |
 | `d3d12_RTShadows` | `1` | yes | The sun's shadow at the rays' hits |
+| `d3d12_SkyFogBand` | `1` | yes | With a near fog (Swamp, Volcano), the fog's colour over the sky box's lower part, as the original draws it |
 | `d3d12_StaticCasters` | `1` |  | The palms and the other static casters shadow the terrain everywhere |
 | `d3d12_UpscaleHdr` | `1` | yes | With HDR, the upscaler gets the scene's light before the tone map |
 | `d3d12_WaterDeferred` | `1` |  | The ocean's grid shaded once a pixel |
@@ -399,6 +400,7 @@ Details: [Parallax and generated normals (RayMaster)](mod/XRenderD3D12/README.md
 | `r_SkinScatter` | `1` |  | How far the light under the skin reaches |
 | `d3d12_SpriteBlend` | `0.2` | yes | The far vegetation sprites' blend between their pictures |
 | `r_TexUpscaledLight` | `0` |  | 1 the textures of the templates that add light (glows, flashes, the bunker's shafts) take their upscaled pictures too; 0 their own |
+| `r_TexUpscaledSky` | `0` |  | 1 the sky boxes take their upscaled pictures too (compressed: the smooth gradients in steps); 0 the game's own |
 
 ### Read only: what the renderer found
 

@@ -39,6 +39,7 @@
 #include "Skin.hlsli"
 #include "RayFace.hlsli"
 #include "Volumetric.hlsli"
+#include "SkyFogBand.hlsli"
 
 //! A step of BarrierTests' runs (GpuHarness.h's RunBarrierSteps): each word of the output's first g_Test.nTest.x items
 //! times 3 plus g_Test.nTest.y (a step that read the output before the step before wrote it gives another value).
@@ -892,4 +893,18 @@ void CSVolFroxel(uint i : SV_DispatchThreadID)
   float3 vA, vB;
   VolAcross(normalize(g_Test.vTest.xyz), vA, vB);
   TestOut(2 * i + 1, float4(VolShaftTap(i % SHAFT_TAPS, g_Test.vTest.w, c.w, vA, vB), 0));
+}
+
+//! The fog band over the sky box's lower part (SkyFogBand.hlsli): out[i] = (SkyFogBandEdge(g_TestIn[i].x the fog's end,
+//! y the camera's height), SkyFogBandAlpha with that edge in the direction that reaches the height z on the ring of radius
+//! 32, turned w radians about z from the x axis, 0, 0).
+[numthreads(64, 1, 1)]
+void CSSkyFogBand(uint i : SV_DispatchThreadID)
+{
+  if (i >= g_Test.nTest.x)
+    return;
+  const float4 v = TestIn(i);
+  const float fEdge = SkyFogBandEdge(v.x, v.y);
+  const float3 vDir = float3(32 * cos(v.w), 32 * sin(v.w), v.z);
+  TestOut(i, float4(fEdge, SkyFogBandAlpha(vDir, fEdge), 0, 0));
 }
