@@ -1436,6 +1436,36 @@ while it plays. The file is a header (magic,
 keys the device refuses and the repeats are dropped and the file written again. Deleting it gives
 the first run's behaviour back; the pictures are the same either way.
 
+## Per draw constants
+
+A draw's constants (`Shaders/Constants.h`) are two root CBVs of the root signature
+(`D3D12Pipeline.h`):
+
+- **b1 `SDrawHead`, 256 bytes:** the matrices (`mWorld`, `mWorldViewProj`, `mPrevWorldViewProj`),
+  the colour, the flags, the textures and the alpha reference. Every draw writes it into the frame's
+  memory (write-combined: written once, never read back).
+- **b3 `SDrawExt`, 1728 bytes:** the rest. That is the lights, the shadows, the other programs'
+  parameters and the materials' extras (parallax, PBR, skin, the water's and the HDR passes').
+
+C++ fills one `SDrawConstants` holding the members of both and writes each part on its own.
+
+With `d3d12_DrawExt 1` (the default, not saved) a draw uploads its rest only when it reads it
+(`DrawExt.h`). Otherwise it binds a static default block, written once at the start, which holds
+the rest of `DefaultDrawConstants` (zeros, the texture matrix the identity):
+
+- The programs other than the general one (water, underwater, post, HDR, anti-aliasing, the path
+  tracer's composite, the rays' debug views) always upload it: they read it whatever it holds.
+- A depth-only draw of the general program (no pixel shader: the depth prepass, the plain shadow
+  casters) uploads it only when its vertex shader moves the vertices by it: `DF2_SHADER_FX` (fur,
+  bubble) and the cascades' instances (`mShadow`, `nShadowTex`).
+- Any other draw uploads it when its bytes differ from the default block's. So a draw reads the
+  same bytes either way.
+- The depth prepass no longer fills in its still motion vectors: no pixel shader reads them.
+
+The default block stays bound over a run of draws. `0` uploads the rest of every draw and the
+prepass's motion as before the block, for comparisons (read at each draw). `r_Stats` and
+`d3d12_FrameLog` count the bytes and the draws by why they uploaded.
+
 ## Resource states and barriers
 
 The frame's barriers go through the device (`CD3D12Device::Transition`, `UavBarrier`,
@@ -1533,7 +1563,8 @@ given one by one, on the GPU with the debug layer).
   `1` the GPU time of each pass in the order they run (the
   sections of `d3d12_GpuTimes`, with a bar of each one's share of the GPU's frame), the time
   between frames, the CPU's wait for the GPU at the start of a frame and in `Present`, the draws,
-  how many of them changed the pipeline state, and the triangles; `2` (and more) also the memory:
+  how many of them changed the pipeline state, and the triangles, the megabytes of the draws'
+  constants and the draws that uploaded their rest (b3, `d3d12_DrawExt`); `2` (and more) also the memory:
   the process' video memory and its budget (DXGI), the textures and buffers, the static
   geometry's acceleration structures, the frame memory and the pipeline states made. A frame read
   before `Update` (a demo's frames and clips) has them too. It turns the GPU's timestamps on, as
@@ -1557,6 +1588,9 @@ given one by one, on the GPU with the debug layer).
   it, in the engine's `DrawLowDetail` for the water's reflection, the sun's cascades and the
   environment cubes, the GPU's time (of the frame `D3D12_FRAMES` earlier) and its sections, the
   draws, the pipeline changes, the triangles, the dynamic lights, the camera's position and angles.
+  The last field has the bytes of the draws' constants (`draw_bytes`) and the draws by why they
+  uploaded their rest (`ext_default` none, `ext_all` `d3d12_DrawExt 0`, `ext_program`, `ext_vertex`,
+  `ext_differs`; Per draw constants).
   `2` also turns the engine's frame profiler on (collecting, without its overlay) and adds the self
   time of each subsystem and of the 8 profilers that took the most in the engine's last frame; the
   profiler's numbers add up to about 12 times the frame's milliseconds, so only their shares mean

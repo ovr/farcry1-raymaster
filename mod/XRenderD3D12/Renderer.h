@@ -31,6 +31,7 @@
 #include "Shaders/Constants.h"
 #include "WakeBodies.h"
 #include "DrawDistance.h"
+#include "DrawExt.h"
 #include <optional>
 
 struct SRaySunConstants;
@@ -87,6 +88,8 @@ struct SFrameStats
   double fPresentMs = 0;          //!< Present
   double fDraws = 0;              //!< DrawGeometry's draws
   double fPSOChanges = 0;         //!< of them, those with another pipeline state than the draw before
+  double fDrawExt = 0;            //!< of them, those that uploaded the rest of their constants (b3; DrawExt.h)
+  double fDrawBytes = 0;          //!< the bytes of the draws' constants (b1 and b3)
   double fTriangles = 0;
   double fBarrierCalls = 0;       //!< the frame's ResourceBarrier calls (CD3D12Device::GetBarrierStats), those after work, the barriers
   double fBarrierDrains = 0;
@@ -2051,6 +2054,8 @@ public:
   int m_nFrameDraws = 0;              //!< the draws since the last Update (DrawGeometry)
   int m_nFramePSOChanges = 0;         //!< of them, those with another pipeline state than the draw before
   int m_nFrameAlphaCoverage = 0;      //!< of them, those with alpha to coverage (SPipelineKey::bAlphaToCoverage; the frame dump)
+  uint32 m_nFrameDrawBytes = 0;       //!< the bytes of their constants written (b1 and b3, Shaders/Constants.h)
+  int m_nFrameDrawExt[DrawExt::REASON_NUM] = {};  //!< the draws by why they uploaded the rest of their constants (DrawExt.h)
   int m_nFrameSunLights = 0;          //!< r_DisplayInfo: the main view's sun (DLF_SUN) and other lights in this
   int m_nFrameDynLights = 0;          //!< frame (CScene::EndEf3D), 0 again at the end of Update
   ID3D12PipelineState *m_pLastPSO = nullptr;  //!< the pipeline state of the last draw (counted only)
@@ -2062,6 +2067,7 @@ public:
     uint32 nEpoch = 0;
     ID3D12PipelineState *pPSO = nullptr;
     D3D12_GPU_VIRTUAL_ADDRESS nFrameCB = 0;
+    D3D12_GPU_VIRTUAL_ADDRESS nDrawExt = 0;   //!< b3: the default block stays bound over a run of draws
     D3D12_VERTEX_BUFFER_VIEW VB[4] = {};
     bool bDefaultStream = false;
     D3D_PRIMITIVE_TOPOLOGY eTopology = D3D_PRIMITIVE_TOPOLOGY_UNDEFINED;
@@ -2202,6 +2208,7 @@ public:
   int CV_d3d12_FrameLog = 0;          //!< 1: a line per frame to XRenderD3D12_frames.txt (LogFrame), 2 with the engine's profilers
   int CV_d3d12_BarrierBatch = 1;      //!< CD3D12Device::SetBarrierMode: 1 the frame's barriers in batches, 2 also at each GPU section, 0 each at once
   int CV_d3d12_BarrierCheck = 0;      //!< 1: the transitions' befores checked, the problems logged
+  int CV_d3d12_DrawExt = 1;           //!< 1: a draw uploads the rest of its constants (b3) only when it reads other bytes than the default block's (DrawExt.h); 0 every draw
   int CV_d3d12_CpuSamples = 0;        //!< N: the render thread's stack every N microseconds, to XRenderD3D12_samples.txt at 0 (CpuSampler)
   int CV_r_Stats = 0;                 //!< the statistics on the screen: 1 the GPU time of the passes, 2 also the memory
   float CV_d3d12_WaterReflectionScale = 0.5f;   //!< size of the water reflection, a fraction of the screen's

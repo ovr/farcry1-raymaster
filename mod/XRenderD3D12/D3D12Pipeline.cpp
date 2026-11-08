@@ -17,6 +17,7 @@
 #include "D3D12Device.h"
 #include "D3D12Pipeline.h"
 #include "Shaders/Constants.h"
+#include "DrawExt.h"
 
 // The programs, compiled by dxc at build time (Shaders/Shaders.cmake).
 #include "General_VS.h"
@@ -519,7 +520,7 @@ bool CD3D12Pipeline::Init(ID3D12Device *pDevice)
 {
   Shutdown();
   m_pDevice = pDevice;
-  if (!CreateRootSignature() || !CreateDefaultStream())
+  if (!CreateRootSignature() || !CreateDefaultStream() || !CreateDefaultDrawExt())
     return false;
   LoadKeys();
   return true;
@@ -534,6 +535,8 @@ void CD3D12Pipeline::Shutdown()
   m_PSOs.clear();
   m_pDefaultStream.Reset();
   m_DefaultStreamView = {};
+  m_pDefaultDrawExt.Reset();
+  m_nDefaultDrawExt = 0;
   m_pRootSignature.Reset();
   m_pDevice = nullptr;
 }
@@ -627,29 +630,45 @@ bool CD3D12Pipeline::CreateRootSignature()
   return true;
 }
 
-bool CD3D12Pipeline::CreateDefaultStream()
+Microsoft::WRL::ComPtr<ID3D12Resource> CD3D12Pipeline::CreateStaticUpload(const void *pData, uint32 nSize, const wchar_t *szName)
 {
-  // An upload heap buffer: tiny, written once, and every vertex reads the same bytes.
+  // An upload heap buffer: small, written once, and every draw reads the same bytes.
   D3D12_HEAP_PROPERTIES Heap = {};
   Heap.Type = D3D12_HEAP_TYPE_UPLOAD;
   D3D12_RESOURCE_DESC Desc = {};
   Desc.Dimension = D3D12_RESOURCE_DIMENSION_BUFFER;
-  Desc.Width = 256;
+  Desc.Width = (nSize + 255) & ~255u;
   Desc.Height = 1;
   Desc.DepthOrArraySize = 1;
   Desc.MipLevels = 1;
   Desc.Format = DXGI_FORMAT_UNKNOWN;
   Desc.SampleDesc.Count = 1;
   Desc.Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
+  Microsoft::WRL::ComPtr<ID3D12Resource> pBuffer;
   HRESULT hr = m_pDevice->CreateCommittedResource(&Heap, D3D12_HEAP_FLAG_NONE, &Desc, D3D12_RESOURCE_STATE_GENERIC_READ,
-    nullptr, IID_PPV_ARGS(&m_pDefaultStream));
+    nullptr, IID_PPV_ARGS(&pBuffer));
   if (FAILED(hr))
   {
-    iLog->LogError("XRenderD3D12: CreateCommittedResource (default vertex stream) failed (0x%08X)", (unsigned)hr);
-    return false;
+    iLog->LogError("XRenderD3D12: CreateCommittedResource (%ls) failed (0x%08X)", szName, (unsigned)hr);
+    return nullptr;
   }
-  m_pDefaultStream->SetName(L"XRenderD3D12 default vertex stream");
+  pBuffer->SetName(szName);
+  void *pCPU = nullptr;
+  const D3D12_RANGE NoRead = { 0, 0 };
+  hr = pBuffer->Map(0, &NoRead, &pCPU);
+  if (FAILED(hr))
+  {
+    iLog->LogError("XRenderD3D12: Map (%ls) failed (0x%08X)", szName, (unsigned)hr);
+    return nullptr;
+  }
+  memset(pCPU, 0, (size_t)Desc.Width);
+  memcpy(pCPU, pData, nSize);
+  pBuffer->Unmap(0, nullptr);
+  return pBuffer;
+}
 
+bool CD3D12Pipeline::CreateDefaultStream()
+{
   SDefaultStream Defaults = {};
   Defaults.vNormal[2] = 1.0f;
   Defaults.nColor0 = 0xffffffff;
@@ -657,20 +676,23 @@ bool CD3D12Pipeline::CreateDefaultStream()
   Defaults.vTangent[0] = 1.0f;
   Defaults.vBinormal[1] = 1.0f;
   Defaults.vTNormal[2] = 1.0f;
-  void *pCPU = nullptr;
-  const D3D12_RANGE NoRead = { 0, 0 };
-  hr = m_pDefaultStream->Map(0, &NoRead, &pCPU);
-  if (FAILED(hr))
-  {
-    iLog->LogError("XRenderD3D12: Map (default vertex stream) failed (0x%08X)", (unsigned)hr);
+  m_pDefaultStream = CreateStaticUpload(&Defaults, sizeof(Defaults), L"XRenderD3D12 default vertex stream");
+  if (!m_pDefaultStream)
     return false;
-  }
-  memcpy(pCPU, &Defaults, sizeof(Defaults));
-  m_pDefaultStream->Unmap(0, nullptr);
 
   m_DefaultStreamView.BufferLocation = m_pDefaultStream->GetGPUVirtualAddress();
   m_DefaultStreamView.SizeInBytes = sizeof(SDefaultStream);
   m_DefaultStreamView.StrideInBytes = 0;
+  return true;
+}
+
+bool CD3D12Pipeline::CreateDefaultDrawExt()
+{
+  DrawExt::SetDefault(m_DefaultDrawExt);
+  m_pDefaultDrawExt = CreateStaticUpload(&m_DefaultDrawExt, sizeof(m_DefaultDrawExt), L"XRenderD3D12 default draw constants (b3)");
+  if (!m_pDefaultDrawExt)
+    return false;
+  m_nDefaultDrawExt = m_pDefaultDrawExt->GetGPUVirtualAddress();
   return true;
 }
 

@@ -266,6 +266,10 @@ void CD3D12Renderer::RegisterVariables()
   iConsole->Register("d3d12_BarrierCheck", &CV_d3d12_BarrierCheck, 0, 0,
                      "1: each transition's before checked against the state the resource's last transition gave, and the queue's "
                      "problems, to the log once each (with d3d12_Debug or d3d12_DRED the resources by name); 0 off");
+  iConsole->Register("d3d12_DrawExt", &CV_d3d12_DrawExt, 1, 0,
+                     "1: a draw uploads the rest of its constants (b3: lights, shadows, the other programs' parameters) only when "
+                     "it reads other bytes than the default block's (DrawExt.h), else binds that block; 0 every draw uploads "
+                     "it, as before the default block (read at each draw)");
   iConsole->Register("d3d12_CpuSamples", &CV_d3d12_CpuSamples, 0, 0,
                      "N: samples the stack of the thread that draws every N microseconds (a profiler of the wall clock: the engine's "
                      "code, ours, the driver's); back to 0 writes the samples to XRenderD3D12_samples.txt (module and offset)");

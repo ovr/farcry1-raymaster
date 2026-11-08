@@ -134,6 +134,7 @@ set(XRENDERD3D12_TESTS_SOURCES
     SkinTests.cpp
     RayFaceTests.cpp
     DrawDistanceTests.cpp
+    DrawExtTests.cpp
     BarrierTests.cpp
 )
 file(GLOB XRENDERD3D12_TESTS_HLSL "${CMAKE_CURRENT_SOURCE_DIR}/Shaders/*.hlsl" "${CMAKE_CURRENT_SOURCE_DIR}/Shaders/*.hlsli")
