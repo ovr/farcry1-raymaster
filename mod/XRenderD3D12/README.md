@@ -432,11 +432,15 @@ system ones (better not to touch): [`CONFIGURATION.md`](../../CONFIGURATION.md).
     motion blur take the highlights away where they change the pixels. `d3d12_HDRPaperWhite`
     (0: Windows' SDR content brightness of the display, `DisplayConfigGetDeviceInfo`) and
     `d3d12_HDRPeak` (0: the display's, `IDXGIOutput6::GetDesc1`) in nits; without the display's,
-    203 and 1000. The display is looked at once a second (the window's monitor, a new DXGI factory
-    when Windows' displays changed): HDR switched off in Windows, `r_HDRRendering 0` or a swap
-    chain without the colour space and the output is SDR, the log says why (a warning). The
-    frame dump gives the mode, the levels, the display's and how much of the frame has the scene
-    and highlights. `d3d12_HDROutputDebug 1` shows the highlights (grey none, yellow to red at
+    203 and 1000. The display is looked up again on events only (`DisplayPoll.h`): Windows'
+    displays changed (the DXGI factory no longer current: HDR switched on or off, a display came
+    or went), the window on another monitor, `WM_DISPLAYCHANGE` and the game getting the focus
+    back (the SDR content brightness is set in Windows' Settings). In the background it is once
+    a second, so paper white follows the slider; in the foreground there is no timed lookup,
+    which until step 329 cost the main thread a lookup (0.14-0.18 ms here) about once a second.
+    HDR switched off in Windows, `r_HDRRendering 0` or a swap chain without the colour space and
+    the output is SDR, the log says why (a warning). The frame dump gives the mode, the levels,
+    the display's and how much of the frame has the scene and highlights. `d3d12_HDROutputDebug 1` shows the highlights (grey none, yellow to red at
     the peak, blue where something was drawn over the scene), `2` patches at paper white, twice
     and four times that and at the peak, to set `d3d12_HDRPeak` by eye, `3` the test of the
     menu's HDR page (since step 261, `PageTest`) in `d3d12_HDROutputTestRect` (left, top, right,
@@ -1654,7 +1658,9 @@ given one by one, on the GPU with the debug layer).
   draws, the pipeline changes, the triangles, the dynamic lights, the camera's position and angles.
   The last field has the bytes of the draws' constants (`draw_bytes`) and the draws by why they
   uploaded their rest (`ext_default` none, `ext_all` `d3d12_DrawExt 0`, `ext_program`, `ext_vertex`,
-  `ext_differs`; Per draw constants).
+  `ext_differs`; Per draw constants) and, after it, the display's lookups since the last line
+  (`display_lookups`, `display_lookup_ms`; the first line: since the start) and whether the game
+  has the focus (`display_active`).
   `2` also turns the engine's frame profiler on (collecting, without its overlay) and adds the self
   time of each subsystem and of the 8 profilers that took the most in the engine's last frame; the
   profiler's numbers add up to about 12 times the frame's milliseconds, so only their shares mean

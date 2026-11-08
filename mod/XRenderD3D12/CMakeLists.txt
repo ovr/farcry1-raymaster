@@ -43,6 +43,7 @@ set(XRENDERD3D12_SOURCES
     Underwater.cpp
     UnderwaterLight.h
     SkyFogBand.h
+    DisplayPoll.h
     EnvCubes.cpp
     Mirrors.cpp
     TemplateFx.cpp

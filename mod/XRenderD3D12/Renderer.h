@@ -556,6 +556,8 @@ public:
   std::unique_ptr<FILE, SFileClose> m_pFrameLog;  //!< XRenderD3D12_frames.txt, open while d3d12_FrameLog is on
   double m_fFrameLogLast = 0;               //!< d3d12_FrameLog: when the last frame ended (CpuMs; 0: none yet)
   bool m_bFrameLogProfiles = false;         //!< d3d12_FrameLog 2 turned the engine's frame profiler on
+  uint32 m_nFrameLogDisplayLookups = 0;     //!< d3d12_FrameLog: the device's display lookups at the last frame's line
+  double m_fFrameLogDisplayMs = 0;          //!< and their ms
   double m_fFrameEndEf3DMs = 0;             //!< d3d12_FrameLog: the CPU's time in the main view's EF_EndEf3D
   //! Of it, in the engine's DrawLowDetail: for the water's reflection, the sun's cascades, the
   //! environment cubes.

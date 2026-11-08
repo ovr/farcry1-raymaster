@@ -130,6 +130,7 @@ set(XRENDERD3D12_TESTS_SOURCES
     UnderTests.cpp
     FadeTests.cpp
     SkyTests.cpp
+    DisplayTests.cpp
     ParallaxTests.cpp
     PbrSpecularTests.cpp
     SkinTests.cpp

@@ -1142,6 +1142,14 @@ void CD3D12Renderer::OnActivateApp(bool bActive)
   if (bActive == m_bAppActive)
     return;
   m_bAppActive = bActive;
+  // The display is looked up on a timer only in the background, and again with the focus back (Windows' SDR white
+  // level is set in its Settings, out of the game).
+  if (m_pDevice)
+  {
+    m_pDevice->SetAppActive(bActive);
+    if (bActive)
+      m_pDevice->InvalidateDisplayInfo();
+  }
   if (!m_bFullScreen)
     return;
   if (bActive)
@@ -1166,6 +1174,8 @@ LRESULT CALLBACK CD3D12Renderer::WindowProc(HWND hWnd, UINT nMsg, WPARAM wParam,
     return DefWindowProcA(hWnd, nMsg, wParam, lParam);
   if (nMsg == WM_ACTIVATEAPP)
     pRenderer->OnActivateApp(wParam != 0);
+  else if (nMsg == WM_DISPLAYCHANGE && pRenderer->m_pDevice)
+    pRenderer->m_pDevice->InvalidateDisplayInfo();
   return CallWindowProcA(pRenderer->m_pfnGameWndProc, hWnd, nMsg, wParam, lParam);
 }
 

@@ -18,6 +18,7 @@
 #pragma once
 
 #include "D3D12Barriers.h"
+#include "DisplayPoll.h"
 
 #include <span>
 
@@ -159,10 +160,20 @@ public:
   ID3D12Resource *GetBackBuffer() const { return m_pFrame ? m_pFrame.Get() : m_pBackBuffers[m_nBackBuffer].Get(); }
   D3D12_CPU_DESCRIPTOR_HANDLE GetBackBufferRTV() const;
 
-  //! The display the window is on, looked up again when DXGI's factory is no longer current (a
-  //! display came or went, or its HDR mode changed), when the window went to another monitor, and
-  //! once a second (the SDR white level).
+  //! The display the window is on, looked up again (0.14-0.18 ms in step 329's tests, on the main
+  //! thread) when DXGI's factory is no longer current (a display came or went, or its HDR mode
+  //! changed), when the window went to another monitor, after InvalidateDisplayInfo, and with the
+  //! game in the background once a second (DisplayPoll.h); otherwise the last lookup's.
   const SDisplayInfo &GetDisplayInfo();
+  //! The next GetDisplayInfo looks the display up again (WM_DISPLAYCHANGE, the focus back: Windows'
+  //! SDR white level is set in its Settings, with the game in the background).
+  void InvalidateDisplayInfo() { m_DisplayLast.bStale = true; }
+  //! The game has the focus (WM_ACTIVATEAPP): GetDisplayInfo looks on a timer only without it.
+  void SetAppActive(bool bActive) { m_bDisplayAppActive = bActive; }
+  bool IsAppActive() const { return m_bDisplayAppActive; }
+  //! The display's lookups so far and their milliseconds (d3d12_FrameLog).
+  uint32 GetDisplayLookups() const { return m_nDisplayLookups; }
+  double GetDisplayLookupMs() const { return m_fDisplayLookupMs; }
   //! The swap chain's output (its format and colour space; HDR10's metadata from fPeakNits and
   //! fFrameAverageNits) and, with bLayer, the frame target and the highlight layer (HdrOutput.cpp;
   //! always with an HDR output). Outside a frame; waits for the GPU. False when the swap chain
@@ -563,6 +574,8 @@ private:
   void WaitForFence(uint64 nValue);
   //! Waits on the CPU until pFence reached nValue (10 s at most, logged).
   void WaitForValue(ID3D12Fence *pFence, uint64 nValue);
+  //! GetDisplayInfo's lookup: m_Display from the output of hMonitor (its description, Windows' SDR white level).
+  void LookUpDisplay(HMONITOR hMonitor);
 
   ComPtr<IDXGIFactory4> m_pFactory;
   UINT m_nFactoryFlags = 0;
@@ -588,9 +601,10 @@ private:
   bool m_bHighlightBound = false;                   //!< BindHighlight
   bool m_bOutput = false;                           //!< BeginOutput .. EndFrame
   SDisplayInfo m_Display;
-  bool m_bDisplayInfo = false;                      //!< m_Display was looked up
-  HMONITOR m_hDisplayMonitor = nullptr;             //!< the monitor it is of
-  uint64 m_nDisplayInfoTime = 0;                    //!< GetTickCount64 when
+  DisplayPoll::SLast m_DisplayLast;                 //!< m_Display's lookup: done, stale, its monitor, GetTickCount64 when
+  bool m_bDisplayAppActive = true;                  //!< SetAppActive
+  uint32 m_nDisplayLookups = 0;                     //!< GetDisplayLookups
+  double m_fDisplayLookupMs = 0;                    //!< GetDisplayLookupMs
 
   ComPtr<ID3D12CommandAllocator> m_pAllocators[D3D12_FRAMES];
   uint64 m_nFrameFence[D3D12_FRAMES] = {};

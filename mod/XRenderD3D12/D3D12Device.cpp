@@ -1610,11 +1610,14 @@ const SDisplayInfo &CD3D12Device::GetDisplayInfo()
 {
   if (!m_pFactory || !m_pDevice)
     return m_Display;
+  // The checks are cheap (DXGI's factory's state, the window's monitor); the lookup is not (0.14-0.18 ms: the outputs'
+  // descriptions, the display configuration's paths): only on the events of DisplayPoll.h.
   const HMONITOR hMonitor = MonitorFromWindow(m_hWnd, MONITOR_DEFAULTTONEAREST);
   const uint64 nNow = GetTickCount64();
   const bool bCurrent = m_pFactory->IsCurrent() != FALSE;
-  if (m_bDisplayInfo && bCurrent && hMonitor == m_hDisplayMonitor && nNow - m_nDisplayInfoTime < 1000)
+  if (!DisplayPoll::Needed(m_DisplayLast, bCurrent, (uintptr_t)hMonitor, m_bDisplayAppActive, nNow))
     return m_Display;
+  const double fStart = NowMs();
   // A stale factory's adapters and outputs keep the old state: a new one (the swap chain stays).
   if (!bCurrent)
   {
@@ -1622,13 +1625,22 @@ const SDisplayInfo &CD3D12Device::GetDisplayInfo()
     if (SUCCEEDED(CreateDXGIFactory2(m_nFactoryFlags, IID_PPV_ARGS(&pFactory))))
       m_pFactory = pFactory;
   }
-  m_bDisplayInfo = true;
-  m_hDisplayMonitor = hMonitor;
-  m_nDisplayInfoTime = nNow;
+  m_DisplayLast.bHave = true;
+  m_DisplayLast.bStale = false;
+  m_DisplayLast.nMonitor = (uintptr_t)hMonitor;
+  m_DisplayLast.nTimeMs = nNow;
+  LookUpDisplay(hMonitor);
+  m_nDisplayLookups++;
+  m_fDisplayLookupMs += NowMs() - fStart;
+  return m_Display;
+}
+
+void CD3D12Device::LookUpDisplay(HMONITOR hMonitor)
+{
   m_Display = SDisplayInfo();
   ComPtr<IDXGIAdapter1> pAdapter;
   if (FAILED(m_pFactory->EnumAdapterByLuid(m_pDevice->GetAdapterLuid(), IID_PPV_ARGS(&pAdapter))))
-    return m_Display;
+    return;
   ComPtr<IDXGIOutput> pOutput;
   for (UINT i = 0; SUCCEEDED(pAdapter->EnumOutputs(i, &pOutput)); i++)
   {
@@ -1644,7 +1656,6 @@ const SDisplayInfo &CD3D12Device::GetDisplayInfo()
     WideCharToMultiByte(CP_UTF8, 0, Desc.DeviceName, -1, m_Display.szName, sizeof(m_Display.szName), nullptr, nullptr);
     break;
   }
-  return m_Display;
 }
 
 bool CD3D12Device::SetOutput(EDisplayOutput Output, bool bLayer, float fPeakNits, float fFrameAverageNits)
