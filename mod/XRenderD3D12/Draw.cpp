@@ -85,8 +85,7 @@ SDrawConstants CD3D12Renderer::DefaultDrawConstants()
   SetIdentity(dc.mWorld);
   SetIdentity(dc.mWorldViewProj);
   Set4(dc.vColor, 1, 1, 1, 1);
-  Set4(dc.vTexMat0, 1, 0, 0, 0);
-  Set4(dc.vTexMat1, 0, 1, 0, 0);
+  DrawExt::SetDefault(dc);          // the texture matrix the identity; the same bytes as the default block of b3
   dc.nTex0 = dc.nTex1 = D3D12_SRV_WHITE;
   return dc;
 }
@@ -295,47 +294,8 @@ void CD3D12Renderer::DrawGeometry(const SPipelineKey &Key, const SDrawConstants 
   }
   // Heat vision: the main view's scene through HeatVision (Common.hlsli), not the passes multiplied
   // in or the fog volumes; an additive draw other than a light pass is hot (fire, muzzle flashes).
-  const SDrawConstants *pDC = &dc;
-  SDrawConstants LocalDC;
-  if (m_bHeatPass && (Key.nProgram == eD3D12P_General || Key.nProgram == eD3D12P_Water) &&
-      !(dc.nFlags & (DF_DETAIL_LAYER | DF_CAUSTICS | DF_SHADOW_PASS | DF_SCREEN_POS)) && !(dc.nFlags2 & DF2_FOG_VOLUME))
-  {
-    const bool bAdditive = (Key.nState & GS_BLDST_MASK) == GS_BLDST_ONE;
-    LocalDC = dc;
-    LocalDC.nFlags2 |= DF2_HEAT;
-    Set4(LocalDC.vHeat, bAdditive && !(dc.nFlags2 & DF2_NO_SUN) ? 1.0f : m_fDrawHeat, bAdditive ? 1.0f : 0.0f, 0, 0);
-    pDC = &LocalDC;
-  }
-  // The motion vectors of a draw that gave none: still on the screen.
-  if (bScene && std::all_of(std::begin(pDC->mPrevWorldViewProj), std::end(pDC->mPrevWorldViewProj), [](float f) { return f == 0; }))
-  {
-    if (pDC != &LocalDC)
-    {
-      LocalDC = dc;
-      pDC = &LocalDC;
-    }
-    memcpy(LocalDC.mPrevWorldViewProj, LocalDC.mWorldViewProj, sizeof(LocalDC.mPrevWorldViewProj));
-  }
-  // A light pass of a draw reflecting by rays where its first pass has none: its light as it was.
-  if (bPbrLightPass && !bRayView)
-  {
-    if (pDC != &LocalDC)
-    {
-      LocalDC = dc;
-      pDC = &LocalDC;
-    }
-    LocalDC.nPbr[2] = LocalDC.nPbr[3] = 0;
-  }
-  // Alpha to coverage: the reference negated (the scene for rays took the draw's own above).
-  if (FullKey.bAlphaToCoverage)
-  {
-    if (pDC != &LocalDC)
-    {
-      LocalDC = dc;
-      pDC = &LocalDC;
-    }
-    LocalDC.fAlphaRef = -dc.fAlphaRef;
-  }
+  const bool bHeat = m_bHeatPass && (Key.nProgram == eD3D12P_General || Key.nProgram == eD3D12P_Water) &&
+                     !(dc.nFlags & (DF_DETAIL_LAYER | DF_CAUSTICS | DF_SHADOW_PASS | DF_SCREEN_POS)) && !(dc.nFlags2 & DF2_FOG_VOLUME);
   // The state the draw before set stays while nothing else touched the command list.
   ID3D12GraphicsCommandList *pList = m_pDevice->GetDrawCmdList();
   SDrawState &Set = m_DrawState;
@@ -357,8 +317,6 @@ void CD3D12Renderer::DrawGeometry(const SPipelineKey &Key, const SDrawConstants 
     pList->SetGraphicsRootConstantBufferView(0, m_nFrameCB);
     Set.nFrameCB = m_nFrameCB;
   }
-  pList->SetGraphicsRootConstantBufferView(1, UploadConstants(*m_pUpload, static_cast<const SDrawHead &>(*pDC)));
-  pList->SetGraphicsRootConstantBufferView(ROOT_DRAW_EXT, UploadConstants(*m_pUpload, static_cast<const SDrawExt &>(*pDC)));
   if (nRayScene)
   {
     pList->SetGraphicsRootShaderResourceView(ROOT_RAY_SCENE, nRayScene);
@@ -444,6 +402,60 @@ void CD3D12Renderer::DrawGeometry(const SPipelineKey &Key, const SDrawConstants 
   {
     pList->RSSetScissorRects(1, &Scissor);
     Set.Scissor = Scissor;
+  }
+
+  // The draw's constants (Shaders/Constants.h), each part written once into the frame's memory with the renderer's
+  // changes (write-combined memory: never read back). The header (b1), every draw's, from a copy on the stack.
+  SDrawHead Head = dc;
+  if (bHeat)
+    Head.nFlags2 = dc.nFlags2 | DF2_HEAT;
+  // The motion vectors of a draw that gave none: still on the screen. Not for the depth alone (the depth prepass: no
+  // pixel shader reads them), but with d3d12_DrawExt 0, which uploads what the draws did before the default block.
+  const bool bAllExt = CV_d3d12_DrawExt <= 0;
+  if (bScene && (!FullKey.bDepthOnly || bAllExt) &&
+      std::all_of(std::begin(dc.mPrevWorldViewProj), std::end(dc.mPrevWorldViewProj), [](float f) { return f == 0; }))
+    memcpy(Head.mPrevWorldViewProj, dc.mWorldViewProj, sizeof(Head.mPrevWorldViewProj));
+  // Alpha to coverage: the reference negated (the scene for rays took the draw's own above).
+  if (FullKey.bAlphaToCoverage)
+    Head.fAlphaRef = -dc.fAlphaRef;
+  const SD3D12FrameAlloc HeadMem = m_pUpload->AllocFrame(sizeof(SDrawHead), 256);
+  memcpy(HeadMem.pCPU, &Head, sizeof(Head));
+  pList->SetGraphicsRootConstantBufferView(1, HeadMem.nGPU);
+  m_nFrameDrawBytes += sizeof(SDrawHead);
+  // The rest (b3): the draw's own where it reads it, else the default block (DrawExt.h); bound when it changes.
+  DrawExt::SDraw Ext;
+  Ext.bAll = bAllExt;
+  Ext.bGeneral = Key.nProgram == eD3D12P_General;
+  Ext.bDepthOnly = FullKey.bDepthOnly != 0;
+  Ext.bCascadeInstances = FullKey.bCascadeInstances != 0;
+  Ext.bChanged = bHeat;
+  Ext.nFlags2 = dc.nFlags2;
+  const DrawExt::EReason eExt = DrawExt::Needs(Ext, dc, m_pPipeline->GetDefaultDrawExtData());
+  m_nFrameDrawExt[eExt]++;
+  D3D12_GPU_VIRTUAL_ADDRESS nExt = m_pPipeline->GetDefaultDrawExt();
+  if (eExt != DrawExt::REASON_DEFAULT)
+  {
+    const SD3D12FrameAlloc ExtMem = m_pUpload->AllocFrame((sizeof(SDrawExt) + 255) & ~255u, 256);
+    memcpy(ExtMem.pCPU, static_cast<const SDrawExt *>(&dc), sizeof(SDrawExt));
+    SDrawExt &Copy = *reinterpret_cast<SDrawExt *>(ExtMem.pCPU);
+    if (bHeat)
+    {
+      const bool bAdditive = (Key.nState & GS_BLDST_MASK) == GS_BLDST_ONE;
+      Set4(Copy.vHeat, bAdditive && !(dc.nFlags2 & DF2_NO_SUN) ? 1.0f : m_fDrawHeat, bAdditive ? 1.0f : 0.0f, 0, 0);
+    }
+    // A light pass of a draw reflecting by rays where its first pass has none: its light as it was.
+    if (bPbrLightPass && !bRayView)
+    {
+      Copy.nPbr[2] = 0;
+      Copy.nPbr[3] = 0;
+    }
+    nExt = ExtMem.nGPU;
+    m_nFrameDrawBytes += sizeof(SDrawExt);
+  }
+  if (nExt != Set.nDrawExt)
+  {
+    pList->SetGraphicsRootConstantBufferView(ROOT_DRAW_EXT, nExt);
+    Set.nDrawExt = nExt;
   }
 
   m_nFramePolygons += CountTriangles(eTopology, nCount) * nInstances;

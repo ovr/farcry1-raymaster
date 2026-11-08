@@ -48,6 +48,7 @@ set(XRENDERD3D12_SOURCES
     FarSprites.cpp
     DrawDistance.cpp
     DrawDistance.h
+    DrawExt.h
     Shadows.cpp
     Cascades.cpp
     PostAA.cpp

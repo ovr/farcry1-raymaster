@@ -16,7 +16,8 @@
 //	  5: root SRV t2 space5, the path tracer's lights (ROOT_RAY_LIGHTS,
 //	     SPTLight of Shaders/RayConstants.h)
 //	  6: root CBV b3 (SDrawExt, the rest of the draw's constants;
-//	     ROOT_DRAW_EXT: after the rays' so that 2 to 5 are as they were)
+//	     ROOT_DRAW_EXT: after the rays' so that 2 to 5 are as they were),
+//	     the draw's own or the default block (GetDefaultDrawExt, DrawExt.h)
 //	  static samplers s0..s3, s4 the comparison sampler of the shadow maps
 //	Only the programs with rays (Shader Model 6.5, RayTracing.h) read 3 to
 //	5; DrawGeometry binds them for those alone (5 when the frame has the
@@ -47,6 +48,8 @@
 //////////////////////////////////////////////////////////////////////
 
 #pragma once
+
+#include "Shaders/Constants.h"
 
 #include <wrl/client.h>
 #include <unordered_map>
@@ -151,6 +154,10 @@ public:
   ID3D12PipelineState *GetPSO(const SPipelineKey &Key);
   //! Binds input slot 1, the default values of the attributes a vertex format lacks.
   void BindDefaultStream(ID3D12GraphicsCommandList *pList);
+  //! The default block of b3 (DrawExt.h): the rest of the draw's constants a draw binds when its own would be these
+  //! bytes or are not read (an upload heap buffer, written once), and the same bytes on the CPU.
+  D3D12_GPU_VIRTUAL_ADDRESS GetDefaultDrawExt() const { return m_nDefaultDrawExt; }
+  const SDrawExt &GetDefaultDrawExtData() const { return m_DefaultDrawExt; }
   //! The keys asked for so far (each made once).
   size_t GetPSOCount() const { return m_PSOs.size(); }
   //! After each frame: appends the keys made since the last write to the file of keys, once a frame
@@ -177,6 +184,9 @@ private:
 
   bool CreateRootSignature();
   bool CreateDefaultStream();
+  bool CreateDefaultDrawExt();
+  //! An upload heap buffer of nSize bytes holding pData, for the bindings that stay (the default stream, the default block).
+  Microsoft::WRL::ComPtr<ID3D12Resource> CreateStaticUpload(const void *pData, uint32 nSize, const wchar_t *szName);
   //! Makes the pipeline states of the file's keys, then writes it again without those the device
   //! refused and the repeats.
   void LoadKeys();
@@ -188,6 +198,9 @@ private:
   Microsoft::WRL::ComPtr<ID3D12RootSignature> m_pRootSignature;
   Microsoft::WRL::ComPtr<ID3D12Resource> m_pDefaultStream;   //!< input slot 1
   D3D12_VERTEX_BUFFER_VIEW m_DefaultStreamView = {};
+  Microsoft::WRL::ComPtr<ID3D12Resource> m_pDefaultDrawExt;  //!< b3's default block
+  D3D12_GPU_VIRTUAL_ADDRESS m_nDefaultDrawExt = 0;
+  SDrawExt m_DefaultDrawExt = {};
   //! Every key asked for, with nullptr for the keys that failed (logged once).
   std::unordered_map<SPipelineKey, Microsoft::WRL::ComPtr<ID3D12PipelineState>, SKeyHash, SKeyEqual> m_PSOs;
   std::vector<SPipelineKey> m_NewKeys;  //!< made and not yet in the file

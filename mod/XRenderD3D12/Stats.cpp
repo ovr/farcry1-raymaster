@@ -178,8 +178,10 @@ void CD3D12Renderer::LogFrame()
                 "# frame, ms since the last frame, the CPU's wait for the GPU, Present, the main view's EF_EndEf3D, of it the engine's "
                 "DrawLowDetail for the water's reflection, the sun's cascades, the environment cubes; the GPU's ms (of the frame %d "
                 "earlier), draws, PSO changes, triangles, dynamic lights, camera x y z, angles x y z, the GPU's sections; with 2 the self ms of the "
-                "engine's last frame by subsystem, and its profilers that took the most; last the frame's barriers (d3d12_BarrierBatch): "
-                "ResourceBarrier calls, of them after work, transitions, UAV barriers, UAV barriers of all\n",
+                "engine's last frame by subsystem, and its profilers that took the most; then the frame's barriers (d3d12_BarrierBatch): "
+                "ResourceBarrier calls, of them after work, transitions, UAV barriers, UAV barriers of all; last the bytes of the "
+                "draws' constants (b1 and b3) and the draws by why they uploaded the rest (b3, DrawExt.h): none (the default "
+                "block), d3d12_DrawExt 0, their program, a depth-only draw's vertices, other bytes than the default\n",
                 D3D12_FRAMES);
     }
     if (m_pFrameLog && m_fFrameLogLast > 0)
@@ -228,14 +230,18 @@ void CD3D12Renderer::LogFrame()
       const Barriers::SStats &BarrierStats = m_pDevice->GetBarrierStats();
       const std::string BarrierCounts = Format(",barrier_calls=%u;barrier_drains=%u;barrier_transitions=%u;barrier_uav=%u;barrier_uav_all=%u",
                                                BarrierStats.nCalls, BarrierStats.nDrains, BarrierStats.nTransitions, BarrierStats.nUav, BarrierStats.nUavAll);
+      const std::string DrawCounts = Format(",draw_bytes=%u;ext_default=%d;ext_all=%d;ext_program=%d;ext_vertex=%d;ext_differs=%d",
+                                            m_nFrameDrawBytes, m_nFrameDrawExt[DrawExt::REASON_DEFAULT], m_nFrameDrawExt[DrawExt::REASON_ALL],
+                                            m_nFrameDrawExt[DrawExt::REASON_PROGRAM], m_nFrameDrawExt[DrawExt::REASON_VERTEX],
+                                            m_nFrameDrawExt[DrawExt::REASON_DIFFERS]);
       const CCamera &Camera = iSystem->GetViewCamera();
       const Vec3 &vPos = Camera.GetPos();
       const Ang3 vAngles = Camera.GetAngles();
-      fprintf(m_pFrameLog.get(), "%d,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%d,%d,%d,%d,%.1f,%.1f,%.1f,%.0f,%.0f,%.0f,%s%s%s\n", m_nFrameID,
+      fprintf(m_pFrameLog.get(), "%d,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%d,%d,%d,%d,%.1f,%.1f,%.1f,%.0f,%.0f,%.0f,%s%s%s%s\n", m_nFrameID,
               fNow - m_fFrameLogLast, m_pDevice->GetWaitMs(), m_pDevice->GetPresentMs(), m_fFrameEndEf3DMs, m_fFrameLowDetailMs[LD_WATER],
               m_fFrameLowDetailMs[LD_CASCADES], m_fFrameLowDetailMs[LD_ENVCUBES], nGpuFrames ? fGpuMs / nGpuFrames : -1.0, m_nFrameDraws,
               m_nFramePSOChanges, m_nPolygons, m_nFrameDynLights, vPos.x, vPos.y, vPos.z, vAngles.x, vAngles.y, vAngles.z, Sections.c_str(),
-              Profiles.c_str(), BarrierCounts.c_str());
+              Profiles.c_str(), BarrierCounts.c_str(), DrawCounts.c_str());
     }
     m_fFrameLogLast = fNow;
   }
@@ -257,7 +263,12 @@ void CD3D12Renderer::CollectStats()
     m_pDevice->ResetGpuTimes();
   }
   const int nDraws = m_nFrameDraws, nPSOChanges = m_nFramePSOChanges;
+  const int nDrawExt = nDraws - m_nFrameDrawExt[DrawExt::REASON_DEFAULT];
+  const uint32 nDrawBytes = m_nFrameDrawBytes;
   m_nFrameDraws = m_nFramePSOChanges = m_nFrameAlphaCoverage = 0;
+  m_nFrameDrawBytes = 0;
+  for (int &n : m_nFrameDrawExt)
+    n = 0;
   if (CV_r_Stats <= 0 && m_DisplayInfo.nValue <= 0)
   {
     m_StatsSum = {};
@@ -293,6 +304,8 @@ void CD3D12Renderer::CollectStats()
   Sum.fPresentMs += m_pDevice->GetPresentMs();
   Sum.fDraws += nDraws;
   Sum.fPSOChanges += nPSOChanges;
+  Sum.fDrawExt += nDrawExt;
+  Sum.fDrawBytes += nDrawBytes;
   Sum.fTriangles += m_nPolygons;
   const Barriers::SStats &BarrierStats = m_pDevice->GetBarrierStats();
   Sum.fBarrierCalls += BarrierStats.nCalls;
@@ -402,6 +415,8 @@ void CD3D12Renderer::DrawStats()
       Add(Format("CPU waits for the GPU %.2f ms, in Present %.2f ms", S.fWaitMs / fFrames, S.fPresentMs / fFrames));
       Add(Format("Draws %s, PSO changes %s, triangles %s", Thousands((uint64)(S.fDraws / fFrames + 0.5)).c_str(),
                  Thousands((uint64)(S.fPSOChanges / fFrames + 0.5)).c_str(), Thousands((uint64)(S.fTriangles / fFrames + 0.5)).c_str()));
+      Add(Format("Draw constants %.2f MB, the rest uploaded by %s draws%s", S.fDrawBytes / fFrames / (1024.0 * 1024.0),
+                 Thousands((uint64)(S.fDrawExt / fFrames + 0.5)).c_str(), CV_d3d12_DrawExt > 0 ? "" : " (all)"));
       Add(Format("Barrier calls %s (%s after work), barriers %s%s", Thousands((uint64)(S.fBarrierCalls / fFrames + 0.5)).c_str(),
                  Thousands((uint64)(S.fBarrierDrains / fFrames + 0.5)).c_str(), Thousands((uint64)(S.fBarriers / fFrames + 0.5)).c_str(),
                  CV_d3d12_BarrierBatch > 0 ? "" : ", each at once"));
