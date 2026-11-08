@@ -57,6 +57,12 @@ reference of its features and console variables.
   - The path tracer (`d3d12_PathTracing`) needs the motion vectors: with `none` it gets the scene
     targets of the display's size, without jitter or mip bias, and the scene's picture as it is
     (`none (the path tracer's scene targets)` in the log and the frame dump).
+  - The GPU time's section is named by what runs in it (step 325): `upscale` for an upscaler
+    (FSR), `anti-aliasing` for TAA (`d3d12_AA taa` with `d3d12_Upscaler none`, an upscaler of
+    the display's size, as the other `d3d12_AA` methods' section), `scene copy` for the path
+    tracer's scene targets without either (their picture drawn over the back buffer). Before, all
+    three were `upscale`: with the upscaler turned off r_Stats still showed an `upscale` pass of
+    some 0.6 ms at 3840 x 2160, which was TAA's.
   - The build downloads the upscaler DLL (`third_party/amd-fsr-sdk/README.md`) and copies it, the
     loader and AMD's license next to `XRenderD3D12.dll`.
   - For comparisons, DemoLevel with `-DemoArgs '--exec-at 1 "d3d12_Upscaler fsr|d3d12_UpscaleMode
@@ -85,7 +91,7 @@ reference of its features and console variables.
   buffer's colour (the water's scene copy); the alpha the HUD masks by stays. The program
   `AntiAlias.hlsl` discards the pixels it keeps, so they stay bit for bit. With the HDR10
   highlight layer each pixel's ratio is blended the same way as its colour (a copy of the layer).
-  The GPU time's section is `anti-aliasing`.
+  The GPU time's section is `anti-aliasing` (TAA's too).
 - FXAA (`Shaders/Fxaa.hlsli`) is ours, written from the published description of FXAA 3.11's
   quality algorithm (T. Lottes, NVIDIA): a pixel whose 4 neighbours' luminance range is above
   max(t_min, t lmax) is on an edge; the larger second difference of the 3 x 3 luminance across
@@ -157,7 +163,8 @@ reference of its features and console variables.
   view's scene draws into the upscaler's targets, jittered (Halton 2, 3 over 8 frames), with the
   motion vectors, the textures' mip bias -1 and the history's reset of the Upscaler section, and
   with the HDR scene's light (`d3d12_UpscaleHdr`) as FSR gets it. The path tracer gets those
-  targets too. It is not drawn by `DrawPostAA`; its GPU section is the upscalers' `upscale`.
+  targets too. It is not drawn by `DrawPostAA`, but its GPU section is theirs, `anti-aliasing`
+  (until step 325 the upscalers' `upscale`).
   - Three compute kernels: the motion of each pixel as the nearest (by the depth) of its 3 x 3's;
     the resolve, the history where the pixel was (Catmull-Rom, 5 taps) clipped towards the 3 x 3's
     box (YCoCg, mean +- 1.25 standard deviations within their range) and blended with the frame,
@@ -191,7 +198,7 @@ reference of its features and console variables.
     the textures keep 0.79-0.84 of the reference's detail (at 0.75 0.83-0.88, at 1 0.90-0.94; none
     1.03-1.04; with our own sharpening 0.75-0.79) and the flicker's high part (`flicker.py` over 118
     frames) is 0.81 of none's (0.83 at 0.75, 0.86 at 1; 0.79 with our own sharpening): the sharper
-    textures flicker more. At 3840 x 2160 its GPU section `upscale` takes 0.60-0.62 ms (0.59-0.61
+    textures flicker more. At 3840 x 2160 its GPU section (`anti-aliasing`) takes 0.60-0.62 ms (0.59-0.61
     without the 3 x 3's limit in the same runs; 0.56 with the sharpening of our own and 0.49-0.51
     without the sharpening in others; FSR 4's Native AA 4.10-4.15; PerfSweep Swamp and Pier, with the
     scene's light for it in `hdr` and the motion vectors).
