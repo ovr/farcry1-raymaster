@@ -181,7 +181,9 @@ void CD3D12Renderer::LogFrame()
                 "engine's last frame by subsystem, and its profilers that took the most; then the frame's barriers (d3d12_BarrierBatch): "
                 "ResourceBarrier calls, of them after work, transitions, UAV barriers, UAV barriers of all; last the bytes of the "
                 "draws' constants (b1 and b3) and the draws by why they uploaded the rest (b3, DrawExt.h): none (the default "
-                "block), d3d12_DrawExt 0, their program, a depth-only draw's vertices, other bytes than the default\n",
+                "block), d3d12_DrawExt 0, their program, a depth-only draw's vertices, other bytes than the default; the display's "
+                "lookups since the last line (the first line: since the start), their ms (GetDisplayInfo, DisplayPoll.h) and "
+                "whether the game has the focus\n",
                 D3D12_FRAMES);
     }
     if (m_pFrameLog && m_fFrameLogLast > 0)
@@ -234,14 +236,19 @@ void CD3D12Renderer::LogFrame()
                                             m_nFrameDrawBytes, m_nFrameDrawExt[DrawExt::REASON_DEFAULT], m_nFrameDrawExt[DrawExt::REASON_ALL],
                                             m_nFrameDrawExt[DrawExt::REASON_PROGRAM], m_nFrameDrawExt[DrawExt::REASON_VERTEX],
                                             m_nFrameDrawExt[DrawExt::REASON_DIFFERS]);
+      const std::string DisplayCounts = Format(",display_lookups=%u;display_lookup_ms=%.3f;display_active=%d", m_pDevice->GetDisplayLookups() - m_nFrameLogDisplayLookups,
+                                               m_pDevice->GetDisplayLookupMs() - m_fFrameLogDisplayMs, m_pDevice->IsAppActive() ? 1 : 0);
       const CCamera &Camera = iSystem->GetViewCamera();
       const Vec3 &vPos = Camera.GetPos();
       const Ang3 vAngles = Camera.GetAngles();
-      fprintf(m_pFrameLog.get(), "%d,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%d,%d,%d,%d,%.1f,%.1f,%.1f,%.0f,%.0f,%.0f,%s%s%s%s\n", m_nFrameID,
+      fprintf(m_pFrameLog.get(), "%d,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%d,%d,%d,%d,%.1f,%.1f,%.1f,%.0f,%.0f,%.0f,%s%s%s%s%s\n", m_nFrameID,
               fNow - m_fFrameLogLast, m_pDevice->GetWaitMs(), m_pDevice->GetPresentMs(), m_fFrameEndEf3DMs, m_fFrameLowDetailMs[LD_WATER],
               m_fFrameLowDetailMs[LD_CASCADES], m_fFrameLowDetailMs[LD_ENVCUBES], nGpuFrames ? fGpuMs / nGpuFrames : -1.0, m_nFrameDraws,
               m_nFramePSOChanges, m_nPolygons, m_nFrameDynLights, vPos.x, vPos.y, vPos.z, vAngles.x, vAngles.y, vAngles.z, Sections.c_str(),
-              Profiles.c_str(), BarrierCounts.c_str(), DrawCounts.c_str());
+              Profiles.c_str(), BarrierCounts.c_str(), DrawCounts.c_str(), DisplayCounts.c_str());
+      // Since the last line: the first line has the lookups since the start (the first one, when the swap chain came).
+      m_nFrameLogDisplayLookups = m_pDevice->GetDisplayLookups();
+      m_fFrameLogDisplayMs = m_pDevice->GetDisplayLookupMs();
     }
     m_fFrameLogLast = fNow;
   }
