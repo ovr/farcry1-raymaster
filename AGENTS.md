@@ -5,7 +5,9 @@
 `AGENTS_LOCAL.md` exists in the repository root, read it as well: it holds local, machine-specific
 instructions and is not committed (git-ignored). The references of the modules are their READMEs:
 `mod/XRenderD3D9Traced/README.md` (the tracer's variables and console commands) and
-`mod/XRenderD3D12/README.md` (the renderer's features and console variables).
+`mod/XRenderD3D12/README.md` (the renderer's features and console variables). `CONFIGURATION.md`
+lists the options in two parts, for players and the system ones (better not to touch): a new
+console variable gets its row there too (the unit test `Config_Documented` checks it).
 
 ## Rules
 

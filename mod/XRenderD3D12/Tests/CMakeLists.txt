@@ -137,6 +137,7 @@ set(XRENDERD3D12_TESTS_SOURCES
     DrawExtTests.cpp
     BarrierTests.cpp
     VolumetricTests.cpp
+    ConfigTests.cpp
 )
 file(GLOB XRENDERD3D12_TESTS_HLSL "${CMAKE_CURRENT_SOURCE_DIR}/Shaders/*.hlsl" "${CMAKE_CURRENT_SOURCE_DIR}/Shaders/*.hlsli")
 set_source_files_properties(${XRENDERD3D12_TESTS_HLSL} PROPERTIES HEADER_FILE_ONLY ON)
@@ -149,7 +150,7 @@ set_target_properties(XRenderD3D12Tests PROPERTIES FOLDER "Renderer"
 target_include_directories(XRenderD3D12Tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}" "${CMAKE_CURRENT_SOURCE_DIR}/.."
     "${XRENDERD3D12_TESTS_SHADER_DIR}" "${XRENDERD3D12_SMAA_DIR}" "${XRENDERD3D12_CAS_DIR}")
 target_compile_definitions(XRenderD3D12Tests PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX
-    XR_RENDERER_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/..")  # Barrier_SourceLint (BarrierTests.cpp) reads the renderer's sources
+    XR_RENDERER_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/..")  # Barrier_SourceLint (BarrierTests.cpp) and Config_Documented (ConfigTests.cpp) read the renderer's sources
 target_compile_options(XRenderD3D12Tests PRIVATE /W4)
 target_link_libraries(XRenderD3D12Tests PRIVATE d3d12 dxgi)
 
