@@ -15,28 +15,18 @@ set(XRENDERD3D12_TESTS_SHADER_DIR "${CMAKE_CURRENT_BINARY_DIR}/Shaders")
 set(XRENDERD3D12_TESTS_SHADER_HEADERS "")
 set(XRENDERD3D12_SHADER_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../Shaders")
 
-#! xrender_d3d12_test_shader(<name> <file> <profile> <entry> [defines...]): compiles one kernel into Shaders/Test_<name>.h.
+#! xrender_d3d12_test_shader(<name> <file> <profile> <entry> [defines...]): compiles one kernel into Shaders/Test_<name>.h,
+#! with the renderer's xrender_d3d12_dxc (../CMakeLists.txt): its dependencies are the files the kernel includes.
 function(xrender_d3d12_test_shader name file profile entry)
     set(defines "")
     foreach(d ${ARGN})
         list(APPEND defines "-D" "${d}")
     endforeach()
     set(out "${XRENDERD3D12_TESTS_SHADER_DIR}/Test_${name}.h")
-    file(GLOB includes "${XRENDERD3D12_SHADER_SOURCE_DIR}/*.hlsl" "${XRENDERD3D12_SHADER_SOURCE_DIR}/*.hlsli"
-        "${XRENDERD3D12_SHADER_SOURCE_DIR}/*.h" "${CMAKE_CURRENT_SOURCE_DIR}/Shaders/*.hlsli" "${XRENDERD3D12_XEGTAO_DIR}/*.hlsli"
-        "${XRENDERD3D12_XEGTAO_DIR}/*.h" "${XRENDERD3D12_SMAA_DIR}/*.hlsl" "${XRENDERD3D12_CMAA2_DIR}/*.hlsl"
-        "${XRENDERD3D12_CAS_DIR}/*.h")
-    add_custom_command(
-        OUTPUT "${out}"
-        COMMAND "${CMAKE_COMMAND}" -E make_directory "${XRENDERD3D12_TESTS_SHADER_DIR}"
-        COMMAND "${XRENDERD3D12_DXC}" -nologo -T ${profile} -E ${entry} -Zpr -O3 -Qstrip_reflect
-                -I "${XRENDERD3D12_SHADER_SOURCE_DIR}" -I "${CMAKE_CURRENT_SOURCE_DIR}/Shaders" -I "${XRENDERD3D12_XEGTAO_DIR}"
-                -I "${XRENDERD3D12_SMAA_DIR}" -I "${XRENDERD3D12_CMAA2_DIR}" -I "${XRENDERD3D12_CAS_DIR}" ${defines} -Vn "g_Test_${name}" -Fh "${out}" "${file}"
-        MAIN_DEPENDENCY "${file}"
-        DEPENDS ${includes}
-        COMMENT "dxc (tests) ${entry} -> Test_${name}.h"
-        VERBATIM
-    )
+    xrender_d3d12_dxc("${out}" "g_Test_${name}" "${file}" "dxc (tests) ${entry} -> Test_${name}.h"
+        -nologo -T ${profile} -E ${entry} -Zpr -O3 -Qstrip_reflect
+        -I "${XRENDERD3D12_SHADER_SOURCE_DIR}" -I "${CMAKE_CURRENT_SOURCE_DIR}/Shaders" -I "${XRENDERD3D12_XEGTAO_DIR}"
+        -I "${XRENDERD3D12_SMAA_DIR}" -I "${XRENDERD3D12_CMAA2_DIR}" -I "${XRENDERD3D12_CAS_DIR}" ${defines})
     set(XRENDERD3D12_TESTS_SHADER_HEADERS ${XRENDERD3D12_TESTS_SHADER_HEADERS} "${out}" PARENT_SCOPE)
 endfunction()
 
@@ -150,7 +140,8 @@ source_group("Shaders" FILES ${XRENDERD3D12_TESTS_HLSL})
 source_group("Shaders\\Generated" FILES ${XRENDERD3D12_TESTS_SHADER_HEADERS})
 
 add_executable(XRenderD3D12Tests ${XRENDERD3D12_TESTS_SOURCES} ${XRENDERD3D12_TESTS_HLSL} ${XRENDERD3D12_TESTS_SHADER_HEADERS})
-set_target_properties(XRenderD3D12Tests PROPERTIES FOLDER "Renderer")
+set_target_properties(XRenderD3D12Tests PROPERTIES FOLDER "Renderer"
+    VS_PROJECT_IMPORT "${XRENDERD3D12_BATCH_PROPS}")  # one dxc command to a batch (../CMakeLists.txt)
 target_include_directories(XRenderD3D12Tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}" "${CMAKE_CURRENT_SOURCE_DIR}/.."
     "${XRENDERD3D12_TESTS_SHADER_DIR}" "${XRENDERD3D12_SMAA_DIR}" "${XRENDERD3D12_CAS_DIR}")
 target_compile_definitions(XRenderD3D12Tests PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX
