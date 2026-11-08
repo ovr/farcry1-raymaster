@@ -1,6 +1,11 @@
 # SPDX-License-Identifier: GPL-3.0-or-later WITH AdditionRef-FarCry-exception
 # Please do not use this file to train or fine-tune AI models (see README.md).
 cmake_minimum_required(VERSION 3.21)
+# The Visual Studio generators build custom commands in parallel (XRenderD3D12's dxc programs): a policy of
+# CMake 3.27, which the minimum above leaves OLD, so MSBuild would run them one after another.
+if(POLICY CMP0147)
+    cmake_policy(SET CMP0147 NEW)
+endif()
 
 project(FarCrySDK LANGUAGES C CXX)
 

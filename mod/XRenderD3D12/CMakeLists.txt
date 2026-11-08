@@ -178,6 +178,27 @@ else()
     set(XRENDERD3D12_NRD ON)
 endif()
 
+#! xrender_d3d12_dxc(<out.h> <array> <source> <comment> <dxc options...>): the command that compiles <source> with dxc
+#! into the header <out.h> (array <array>), also for the tests (Tests/CMakeLists.txt). It depends on the files the
+#! source really includes with these options: dxc writes them into <out.h>.d first (-MF; dxc 1.8 only preprocesses
+#! then, ~40 ms, and takes no -Vn), which DEPFILE reads (Visual Studio since CMake 3.21), so a header recompiles only
+#! the programs that include it and a new one is followed without a configure. No MAIN_DEPENDENCY: Visual Studio
+#! hangs only the first command of a source on it and the others on .rule files, which it never builds in parallel
+#! (CMP0147, ../../CMakeLists.txt).
+function(xrender_d3d12_dxc out array source comment)
+    get_filename_component(dir "${out}" DIRECTORY)
+    add_custom_command(
+        OUTPUT "${out}"
+        COMMAND "${CMAKE_COMMAND}" -E make_directory "${dir}"
+        COMMAND "${XRENDERD3D12_DXC}" ${ARGN} -MF "${out}.d" "${source}"
+        COMMAND "${XRENDERD3D12_DXC}" ${ARGN} -Vn "${array}" -Fh "${out}" "${source}"
+        DEPENDS "${source}"
+        DEPFILE "${out}.d"
+        COMMENT "${comment}"
+        VERBATIM
+    )
+endfunction()
+
 #! xrender_d3d12_shader(<name> <file.hlsl> <profile> <entry> [defines...]): compiles one program
 #! into Shaders/<name>.h (array g_<name>). Matrices are row major (-Zpr), as the engine's Matrix44.
 function(xrender_d3d12_shader name file profile entry)
@@ -186,25 +207,13 @@ function(xrender_d3d12_shader name file profile entry)
         list(APPEND defines "-D" "${d}")
     endforeach()
     set(more "")
-    set(more_globs "")
     foreach(dir ${XRENDERD3D12_SHADER_INCLUDES})
         list(APPEND more "-I" "${dir}")
-        list(APPEND more_globs "${dir}/*.hlsli" "${dir}/*.hlsl" "${dir}/*.h")
     endforeach()
     set(out "${XRENDERD3D12_SHADER_DIR}/${name}.h")
-    file(GLOB includes "${CMAKE_CURRENT_SOURCE_DIR}/Shaders/*.hlsli" "${CMAKE_CURRENT_SOURCE_DIR}/Shaders/*.h"
-        "${XRENDERD3D12_XEGTAO_DIR}/*.hlsli" "${XRENDERD3D12_XEGTAO_DIR}/*.h" ${more_globs})
-    add_custom_command(
-        OUTPUT "${out}"
-        COMMAND "${CMAKE_COMMAND}" -E make_directory "${XRENDERD3D12_SHADER_DIR}"
-        COMMAND "${XRENDERD3D12_DXC}" -nologo -T ${profile} -E ${entry} -Zpr -O3 -Qstrip_reflect
-                -I "${CMAKE_CURRENT_SOURCE_DIR}/Shaders" -I "${XRENDERD3D12_XEGTAO_DIR}" ${more} ${defines}
-                -Vn "g_${name}" -Fh "${out}" "${CMAKE_CURRENT_SOURCE_DIR}/Shaders/${file}"
-        MAIN_DEPENDENCY "${CMAKE_CURRENT_SOURCE_DIR}/Shaders/${file}"
-        DEPENDS ${includes}
-        COMMENT "dxc ${file} ${entry} -> ${name}.h"
-        VERBATIM
-    )
+    xrender_d3d12_dxc("${out}" "g_${name}" "${CMAKE_CURRENT_SOURCE_DIR}/Shaders/${file}" "dxc ${file} ${entry} -> ${name}.h"
+        -nologo -T ${profile} -E ${entry} -Zpr -O3 -Qstrip_reflect
+        -I "${CMAKE_CURRENT_SOURCE_DIR}/Shaders" -I "${XRENDERD3D12_XEGTAO_DIR}" ${more} ${defines})
     set(XRENDERD3D12_SHADER_HEADERS ${XRENDERD3D12_SHADER_HEADERS} "${out}" PARENT_SCOPE)
 endfunction()
 
@@ -269,6 +278,22 @@ set_target_properties(XRenderD3D12 PROPERTIES
     # every configuration (see XRenderD3D9Traced/CMakeLists.txt).
     MSVC_RUNTIME_LIBRARY "MultiThreaded"
 )
+
+# MSBuild runs the parallel custom commands in batches, one batch after another in a process, by default as many
+# commands to a batch as spread them evenly over the processes (MaxItemsInBatch 0): General.hlsl's heavy programs,
+# listed together, then fill a few batches that the build waits for. One command to a batch hands each free process
+# the next program (also for XRenderD3D12Tests, Tests/CMakeLists.txt).
+set(XRENDERD3D12_BATCH_PROPS "${CMAKE_CURRENT_BINARY_DIR}/CustomBuildBatch.props")
+file(CONFIGURE OUTPUT "${XRENDERD3D12_BATCH_PROPS}" CONTENT [[<?xml version="1.0" encoding="utf-8"?>
+<Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemDefinitionGroup>
+    <CustomBuild>
+      <MaxItemsInBatch>1</MaxItemsInBatch>
+    </CustomBuild>
+  </ItemDefinitionGroup>
+</Project>
+]])
+set_property(TARGET XRenderD3D12 PROPERTY VS_PROJECT_IMPORT "${XRENDERD3D12_BATCH_PROPS}")
 
 target_link_libraries(XRenderD3D12 PRIVATE CryCommon XRenderCommon d3d12 dxgi dxguid windowscodecs)
 target_include_directories(XRenderD3D12 PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}" "${XRENDERD3D12_SHADER_DIR}" "${XRENDERD3D12_XEGTAO_DIR}"
