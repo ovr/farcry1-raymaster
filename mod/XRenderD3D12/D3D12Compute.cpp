@@ -29,6 +29,8 @@
 #include "DepthTilesUp_CS.h"
 #include "VolumetricInject_CS.h"
 #include "VolumetricIntegrate_CS.h"
+#include "VolumetricInjectRays_CS.h"
+#include "VolumetricSun_CS.h"
 #include "HdrHistogram_CS.h"
 #include "HdrOutputStats_CS.h"
 #include "ExposureHistogram_CS.h"
@@ -195,6 +197,8 @@ const SKernel s_Kernels[eD3D12K_Num] =
   { "wakes (rows, inverse)", g_WakeRowsInverse_CS, sizeof(g_WakeRowsInverse_CS) },
   { "wakes (view)", g_WakeView_CS, sizeof(g_WakeView_CS) },
   { "wakes (heights)", g_WakeHeight_CS, sizeof(g_WakeHeight_CS) },
+  { "volumetric light's sun by rays", g_VolumetricSun_CS, sizeof(g_VolumetricSun_CS), true },
+  { "volumetric light (sun by rays)", g_VolumetricInjectRays_CS, sizeof(g_VolumetricInjectRays_CS) },
 };
 static_assert(sizeof(s_Kernels) / sizeof(s_Kernels[0]) == eD3D12K_Num, "a kernel for each ED3D12Kernel");
 
@@ -500,11 +504,11 @@ void CD3D12Compute::DispatchWideIndirect(ID3D12GraphicsCommandList *pList, ED3D1
 
 void CD3D12Compute::DispatchRays(ID3D12GraphicsCommandList *pList, ED3D12Kernel eKernel, D3D12_GPU_VIRTUAL_ADDRESS FrameCB, D3D12_GPU_VIRTUAL_ADDRESS PassCB,
                                  D3D12_GPU_VIRTUAL_ADDRESS nRayScene, D3D12_GPU_VIRTUAL_ADDRESS nRayInstances, int nUAVs, UINT nGroupsX, UINT nGroupsY,
-                                 D3D12_GPU_VIRTUAL_ADDRESS nLights)
+                                 D3D12_GPU_VIRTUAL_ADDRESS nLights, UINT nGroupsZ)
 {
   ID3D12PipelineState *pPSO = s_Kernels[eKernel].bRays ? GetPSO(eKernel) : nullptr;
   CD3D12Descriptors *pDescriptors = g_pRenderer->m_pDescriptors.get();
-  if (!pList || !pPSO || !pDescriptors || !nGroupsX || !nGroupsY)
+  if (!pList || !pPSO || !pDescriptors || !nGroupsX || !nGroupsY || !nGroupsZ)
     return;
   g_pRenderer->m_pDevice->ForgetDrawState();
   pList->SetComputeRootSignature(m_pRayRootSignature.Get());
@@ -523,5 +527,5 @@ void CD3D12Compute::DispatchRays(ID3D12GraphicsCommandList *pList, ED3D12Kernel 
   if (nLights)
     pList->SetComputeRootShaderResourceView(ROOT_RAY_LIGHTS, nLights);
   g_pRenderer->m_pDevice->FlushBarriersFor(pList);
-  pList->Dispatch(nGroupsX, nGroupsY, 1);  // barriers flushed
+  pList->Dispatch(nGroupsX, nGroupsY, nGroupsZ);  // barriers flushed
 }

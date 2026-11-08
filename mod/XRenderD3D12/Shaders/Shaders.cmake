@@ -217,6 +217,10 @@ xrender_d3d12_shader(WakeView_CS Wake.hlsl cs_6_0 CSMain XR_WAKE_VIEW)
 xrender_d3d12_shader(WakeHeight_CS Wake.hlsl cs_6_0 CSMain XR_WAKE_HEIGHT)
 xrender_d3d12_shader(VolumetricInject_CS Volumetric.hlsl cs_6_0 CSInject)
 xrender_d3d12_shader(VolumetricIntegrate_CS Volumetric.hlsl cs_6_0 CSIntegrate)
+# Its sun by rays (d3d12_VolumetricLightRays, Volumetric.cpp): the states at the froxels' points (Shader Model 6.5, the
+# compute root signature with rays, run only on a device with DXR 1.1) and the froxels from them.
+xrender_d3d12_shader(VolumetricSun_CS VolumetricRays.hlsl cs_6_5 CSSun)
+xrender_d3d12_shader(VolumetricInjectRays_CS Volumetric.hlsl cs_6_0 CSInject XR_VOL_RAYS)
 xrender_d3d12_shader(HdrHistogram_CS HdrStats.hlsl cs_6_0 CSHistogram)
 xrender_d3d12_shader(HdrOutputStats_CS HdrStats.hlsl cs_6_0 CSOutput)
 xrender_d3d12_shader(ExposureHistogram_CS Exposure.hlsl cs_6_0 CSHistogram)

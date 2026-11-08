@@ -560,6 +560,12 @@ struct SVolumetricConstants
   XR_FLOAT4(vCascadeParams);      //!< x the number of cascades (0: the sun reaches everywhere), w the depth bias (m)
   XR_FLOAT4(vShafts);             //!< the shafts alone (d3d12_VolumetricLightShafts): x the radius of the air around (m; 0 all the
                                   //!< air, as before), y the power of the part of it in shadow (the sun's light as much as that)
+  // The sun by rays (d3d12_VolumetricLightRays, VolumetricRays.hlsl and Volumetric.hlsl's XR_VOL_RAYS):
+  XR_FLOAT4X4(mViewProj);         //!< world to clip in this frame: the froxel a point is in (VolFroxelCoord)
+  XR_FLOAT4(vRays);               //!< x the rays' length (m, d3d12_RTDistance), y tan of half the sun's disc (d3d12_RTSunAngle),
+                                  //!< z a froxel's height over its view depth (the rays' cone at the alpha tests),
+                                  //!< w 1: the states in colours (d3d12_VolumetricLightRays 2)
+  XR_UINT4(nRays);                //!< x the instance mask (RayMask), y the frame (the points of the sun's disc)
 };
 
 // The threads a side of a group of TAA's kernels (Taa.hlsl, UpscalerTaa.cpp)

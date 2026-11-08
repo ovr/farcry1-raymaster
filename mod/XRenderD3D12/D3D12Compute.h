@@ -120,6 +120,8 @@ enum ED3D12Kernel
   eD3D12K_WakeRowsInverse,          //!< the inverse FFT along x: the window
   eD3D12K_WakeView,                 //!< the slopes and the foam into the view (the water's), its mip levels 1 to 3
   eD3D12K_WakeHeight,               //!< the heights for the ocean's grid (d3d12_WaterGeometry), their mip levels 1 to 3
+  eD3D12K_VolumetricSun,            //!< the volumetric light's sun by rays: its state at the froxels' points (Shaders/VolumetricRays.hlsl; with rays)
+  eD3D12K_VolumetricInjectRays,     //!< the froxels with those states in place of the cascades (Shaders/Volumetric.hlsl, XR_VOL_RAYS)
   eD3D12K_Num
 };
 
@@ -147,10 +149,10 @@ public:
                 UINT nGroupsX, UINT nGroupsY, UINT nGroupsZ = 1);
   //! The same for a kernel with rays: b0 at FrameCB, b2 at PassCB, the texture table, the scene for rays
   //! nRayScene and its instances nRayInstances (0: unset), the UAV table from slot nUAVs, the path tracer's lights
-  //! nLights (0: unset).
+  //! nLights (0: unset); nGroupsZ deep.
   void DispatchRays(ID3D12GraphicsCommandList *pList, ED3D12Kernel eKernel, D3D12_GPU_VIRTUAL_ADDRESS FrameCB, D3D12_GPU_VIRTUAL_ADDRESS PassCB,
                     D3D12_GPU_VIRTUAL_ADDRESS nRayScene, D3D12_GPU_VIRTUAL_ADDRESS nRayInstances, int nUAVs, UINT nGroupsX, UINT nGroupsY,
-                    D3D12_GPU_VIRTUAL_ADDRESS nLights = 0);
+                    D3D12_GPU_VIRTUAL_ADDRESS nLights = 0, UINT nGroupsZ = 1);
   //! The same for a kernel of the wide root signature: its table from slot nTable (a run of
   //! AllocRange of WIDE_SRVS + WIDE_UAVS).
   void DispatchWide(ID3D12GraphicsCommandList *pList, ED3D12Kernel eKernel, int nTable, UINT nGroupsX, UINT nGroupsY, UINT nGroupsZ = 1);

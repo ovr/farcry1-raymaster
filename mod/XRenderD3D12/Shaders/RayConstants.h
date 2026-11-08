@@ -37,6 +37,10 @@
 //! In the masks only: the terrain's sectors (the path tracer's ray towards the sun over the terrain alone, the shadows
 //! its texture has baked in: PathShade.hlsli). The rays of d3d12_RTMask never have it (RayMask).
 #define XR_RAY_TERRAIN    16
+//! In the masks: a piece of the sky (a surface of a sky box's texture, CTexture::m_bSky: the windows of Training's bunker),
+//! its instance's mask this alone (its kinds in InstanceContributionToHitGroupIndex). The rays of RayMask see it; the
+//! volumetric light's towards the sun pass it (VolumetricRays.hlsl).
+#define XR_RAY_SKY        32
 
 //! d3d12_RTDebug, the views of RayDebug.hlsl.
 #define XR_RAY_DEBUG_INSTANCES  1   //!< the instances in colours (of the mesh and where it is, to 0.25 m: not the index of the

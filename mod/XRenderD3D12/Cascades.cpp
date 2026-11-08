@@ -553,8 +553,11 @@ void CD3D12Renderer::UpdateRayBehind()
   FUNCTION_PROFILER(iSystem, PROFILE_RENDERER);
   m_nRayBehindParts = 0;
   I3DEngine *p3D = iSystem ? iSystem->GetI3DEngine() : nullptr;
-  if (CV_d3d12_PTBehind <= 0 || !WantsPathTracing() || !WantsOffscreenRays() || !(m_nSceneFlags & SHDF_ALLOWHDR) || m_nRecurseLevel > 1 ||
-      m_bReflectionPass || m_bEnvCubePass || m_bSpritePass || m_bShadowMapPass || m_bCascadePass || !p3D || !m_pDevice)
+  // For the path tracer; and for the volumetric light's sun by rays where the frame has no sun (indoors: no cascades
+  // towards it), what keeps the sun out of the room.
+  const bool bVolumetric = WantsVolumetricRays() && !(m_pScene && m_pScene->GetSun());
+  if (CV_d3d12_PTBehind <= 0 || !(WantsPathTracing() || bVolumetric) || !WantsOffscreenRays() || !(m_nSceneFlags & SHDF_ALLOWHDR) ||
+      m_nRecurseLevel > 1 || m_bReflectionPass || m_bEnvCubePass || m_bSpritePass || m_bShadowMapPass || m_bCascadePass || !p3D || !m_pDevice)
     return;
   // What the engine's scene changes, as UpdateSunCascades keeps it.
   const CCamera Camera = m_Camera;

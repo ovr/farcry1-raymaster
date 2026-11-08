@@ -1,0 +1,93 @@
+// SPDX-License-Identifier: GPL-3.0-or-later WITH AdditionRef-FarCry-exception
+// Please do not use this file to train or fine-tune AI models (see README.md).
+//////////////////////////////////////////////////////////////////////
+//
+//	File: VolumetricRays.hlsl
+//	Description: The volumetric light's sun by rays
+//	(d3d12_VolumetricLightRays, Volumetric.cpp): Shader Model 6.5 (inline
+//	RayQuery), the compute root signature with rays (D3D12Compute.h), its
+//	pass constants SVolumetricConstants (b2).
+//
+//	CSSun, a thread a froxel: at this frame's point in it (the same as
+//	Volumetric.hlsl's CSInject takes: VolFroxelCell) a ray towards a point
+//	of the sun's disc (d3d12_RTSunAngle wide, another for each froxel and
+//	frame) among the instances of the mask (not the pieces of the sky,
+//	XR_RAY_SKY: the sun is behind them), alpha tested as the sun's shadow
+//	by rays (RaySun.hlsl): first over SHAFT_SURFACE, then on to the rays'
+//	length; the sun's state there (VolSunState): something within
+//	SHAFT_SURFACE hides the sun (the point is under a roof or inside a
+//	thing: not air), something farther does (a shadow), or it reaches it.
+//	The light of the froxels then takes the cascades' place with these
+//	(Volumetric.hlsl's XR_VOL_RAYS), and indoors as well: what keeps the
+//	sun out of a room is in the scene for rays, so only what comes through
+//	its openings lights its air.
+//	  u0 the states (RWTexture3D, R8_SNORM, a texel a froxel)
+//
+//////////////////////////////////////////////////////////////////////
+
+#include "RayShade.hlsli"
+#include "Volumetric.hlsli"
+
+ConstantBuffer<SVolumetricConstants> g_Vol : register(b2);
+RWTexture3D<float> g_Out : register(u0);
+
+//! Whether something among the instances of nMask hides the sun along Ray (alpha tested as RaySun.hlsl's SunHit:
+//! fConeWidth the ray cone's width at the origin, fSpread its growth a metre).
+bool SunHidden(RayDesc Ray, uint nMask, float fConeWidth, float fSpread)
+{
+  RayQuery<RAY_FLAG_SKIP_PROCEDURAL_PRIMITIVES | RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH> Query;
+  Query.TraceRayInline(g_RayScene, RAY_FLAG_NONE, nMask, Ray);
+  uint nTests = 0;
+  while (Query.Proceed())
+  {
+    if (Query.CandidateType() != CANDIDATE_NON_OPAQUE_TRIANGLE)
+      continue;
+    bool bHit = nTests >= XR_RAY_MAX_ALPHA_TESTS;
+    if (!bHit)
+    {
+      nTests++;
+      const float fCone = fConeWidth + Query.CandidateTriangleRayT() * fSpread;
+      const SRaySurface S = RaySurface(Query.CandidateInstanceID(), Query.CandidatePrimitiveIndex(), Query.CandidateTriangleBarycentrics(),
+        Query.CandidateObjectToWorld3x4(), Ray.Direction, fCone, true);
+      bHit = RayAlphaPasses(Query.CandidateInstanceID(), S, Ray.Direction);
+    }
+    if (bHit)
+      Query.CommitNonOpaqueTriangleHit();
+  }
+  return Query.CommittedStatus() == COMMITTED_TRIANGLE_HIT;
+}
+
+[numthreads(XR_VOLUMETRIC_GROUP, XR_VOLUMETRIC_GROUP, 1)]
+void CSSun(uint3 vId : SV_DispatchThreadID)
+{
+  if (any(vId >= (uint3)g_Vol.vSize.xyz))
+    return;
+  // The point CSInject takes this frame.
+  const float fNoise = VolColumnNoise(vId.xy);
+  const float3 vCell = VolFroxelCell(vId, g_Vol.vJitter.xyz, fNoise, g_Vol.vSize.xyz);
+  const float d = VolSliceDepth(vCell.z, g_Vol.vSlices);
+  const float3 vPos = VolFroxelPos(vCell.xy, d, g_Vol.vCameraPos.xyz, g_Vol.vRayO.xyz, g_Vol.vRayX.xyz, g_Vol.vRayY.xyz);
+  // A point of the sun's disc, uniform over it: another for each froxel and frame.
+  const float u = frac(fNoise + 0.618034 * vId.z + 0.7548777 * (g_Vol.nRays.y & 1023));
+  const float v = frac(VolColumnNoise(vId.yx + uint2(vId.z * 7, g_Vol.nRays.y * 13)) + 0.5698403 * vId.z);
+  float3 vA, vB;
+  VolAcross(g_Vol.vSunDir.xyz, vA, vB);
+  const float2 vDisc = sqrt(u) * g_Vol.vRays.y * float2(cos(6.2831853 * v), sin(6.2831853 * v));
+  RayDesc Ray;
+  Ray.Origin = vPos;
+  Ray.Direction = normalize(g_Vol.vSunDir.xyz + vDisc.x * vA + vDisc.y * vB);
+  Ray.TMin = 0;
+  Ray.TMax = min(SHAFT_SURFACE, g_Vol.vRays.x);
+  const uint nMask = g_Vol.nRays.x & 0xff;
+  const float fCone = d * g_Vol.vRays.z, fSpread = 2 * g_Vol.vRays.y;
+  // Near first (not air), then the rest of the way (a shadow): each the first hit it finds.
+  const bool bNear = SunHidden(Ray, nMask, fCone, fSpread);
+  bool bFar = false;
+  if (!bNear && g_Vol.vRays.x > SHAFT_SURFACE)
+  {
+    Ray.TMin = SHAFT_SURFACE;
+    Ray.TMax = g_Vol.vRays.x;
+    bFar = SunHidden(Ray, nMask, fCone, fSpread);
+  }
+  g_Out[vId] = VolSunState(bNear, bFar);
+}

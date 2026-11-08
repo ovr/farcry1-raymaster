@@ -828,7 +828,9 @@ CTexture *CTextureManager::Load(const char *szName, const char *szTexturePath, u
   // A bump map whose name is no normal map's (*_ddn*, *.ddn*) is a height map, made a normal map;
   // a compressed one is not loaded.
   const bool bHeightBump = eTT == eTT_Bumpmap && !bCube && IsHeightMapName(Base.c_str());
-  const std::string Suffix = bCube ? std::string(g_CubeKey) + (bAllSides ? "#all" : "") : bHeightBump ? "#height" : "";
+  // r_TexUpscaledLight 0 (SetKeepOwnPictures): the file's own picture, under keys of its own.
+  const bool bOwn = m_bKeepOwn;
+  const std::string Suffix = (bCube ? std::string(g_CubeKey) + (bAllSides ? "#all" : "") : bHeightBump ? "#height" : "") + (bOwn ? "#own" : "");
   const std::string Key = Base + Suffix;
   // A name searched in a material's folder as well: its answer depends on the folder.
   const std::string DirKey = Dir.empty() ? std::string() : Dir + "|" + Key;
@@ -888,7 +890,7 @@ CTexture *CTextureManager::Load(const char *szName, const char *szTexturePath, u
     // r_TexUpscaled: the upscaled picture in place of the file's own (not a cube's, not a height map's: those are made
     // into other pictures here; not a normal map with a height map, LoadNormalWithHeight: their sizes must match).
     int nTexWidth = 0, nTexHeight = 0;
-    const bool bUpscaled = !bCube && !bHeightBump && TakeUpscaled(Res.Base, Image, nTexWidth, nTexHeight);
+    const bool bUpscaled = !bCube && !bHeightBump && !bOwn && TakeUpscaled(Res.Base, Image, nTexWidth, nTexHeight);
     const int nUpWidth = Image.nWidth, nUpHeight = Image.nHeight;
     if (bHeightBump)
       HeightToNormalMap(Image);
@@ -912,6 +914,7 @@ CTexture *CTextureManager::Load(const char *szName, const char *szTexturePath, u
     pTex->m_bLoaded = (pTex->m_pGPU != nullptr);
     pTex->m_File = Res.Base;
     pTex->m_bSkin = eTT != eTT_Bumpmap && PbrCompanion::IsSkin(Res.Base);
+    pTex->m_bSky = PbrCompanion::IsSky(Res.Base);
     if (bUpscaled)
     {
       // The engine is told the file's own sides (the interface's texel rectangles), as much smaller as r_TexResolution made it.
@@ -1182,6 +1185,7 @@ void CTextureManager::ReleasePbrCompanions(CTexture *pTex)
   pTex->m_File.clear();
   pTex->m_bUpscaled = false;
   pTex->m_bSkin = false;
+  pTex->m_bSky = false;
   for (CTexture *pMap : pMaps)
     ReleaseTexture(pMap, false);
 }

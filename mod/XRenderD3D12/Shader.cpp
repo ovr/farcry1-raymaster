@@ -36,6 +36,20 @@ constexpr int kResFlag2Sided = 0x2;
 //! loads those the material's shader draws with (LoadDrawnTextures), the rest keep their names.
 constexpr int kLoadedSlots[] = { EFTT_DIFFUSE };
 
+//! r_TexUpscaledLight 0: a template that adds its texture as light (a glow, a flash, the shafts of sunlight of Training's
+//! bunker: TemplMuzzleFlash*, TemplDecalAdd*, TemplDecalAlphaAdd), whose textures keep their own pictures: soft as they
+//! are, the detail the upscaler adds shows in them as streaks.
+bool AddsLight(const CShader *pSH)
+{
+  if (!pSH || pSH->GetDrawClass() != eDC_Additive)
+    return false;
+  const char *szName = pSH->GetTemplateName();
+  for (const char *szPrefix : { "templmuzzleflash", "templdecaladd", "templdecalalphaadd" })
+    if (!_strnicmp(szName, szPrefix, strlen(szPrefix)))
+      return true;
+  return false;
+}
+
 //! A template a material can name.
 struct STemplateEntry
 {
@@ -1339,9 +1353,15 @@ SShaderItem CShaderManager::LoadShaderItem(const char *szName, EShClass eClass, 
     // Materials that are never drawn keep their texture names only (LoadResourceTexture loads them).
     if (pSH->GetDrawClass() != eDC_NoDraw)
     {
+      CTextureManager *pTextures = g_pRenderer ? g_pRenderer->m_pTextures.get() : nullptr;
+      const bool bOwn = pTextures && g_pRenderer->CV_r_TexUpscaledLight <= 0 && AddsLight(pSH);
+      if (bOwn)
+        pTextures->SetKeepOwnPictures(true);
       for (int nSlot : kLoadedSlots)
         LoadResourceTexture(pRR, nSlot);
       LoadDrawnTextures(pSH, pRR);
+      if (bOwn)
+        pTextures->SetKeepOwnPictures(false);
     }
     AddAttenuationTextures(pRR);
     Item.m_pShaderResources = pRR;
