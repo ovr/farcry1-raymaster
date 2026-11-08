@@ -172,7 +172,8 @@ void CD3D12Renderer::RegisterVariables()
                      "bodies', blue the camera's and the distance's); under the ocean with d3d12_WaterUnder: 31 the light its "
                      "water scatters towards the camera, 32 the sun's light in it (grey its mean: black its shadow, brighter "
                      "the caustics' shafts), 33 the share of the scene behind left (the other modes there without the water's "
-                     "light)");
+                     "light); with d3d12_WaterFoam on the ocean's grid: 34 the floor behind against the level's terrain heights "
+                     "(red above, blue below, 0.5 m full; green where the foam takes the heights: d3d12_WaterFoamTerrain)");
   iConsole->Register("d3d12_Caustics", &CV_d3d12_Caustics, 1, VF_DUMPTODISK, "Caustics on the terrain under the ocean; 0 off");
   // Not saved (d3d12_WaterSunGlint before it was, at 0).
   iConsole->Register("d3d12_WaterGlint", &CV_d3d12_WaterGlint, 1.0f, 0,
@@ -202,6 +203,10 @@ void CD3D12Renderer::RegisterVariables()
                      "The FFT ocean's foam (d3d12_WaterFFT): whitecaps where its crests break (Monahan's share of the sea at the "
                      "wind: hardly any below 5 m/s) and the foam of the waves breaking on the shore, the rocks and what stands in "
                      "the water (shallower than the waves' height over 0.78): its strength; 0: none, the frames before");
+  iConsole->Register("d3d12_WaterFoamTerrain", &CV_d3d12_WaterFoamTerrain, 0.2f, 0,
+                     "With d3d12_WaterFoam on the ocean's grid: where the floor behind the water is the terrain as drawn (within "
+                     "this many m of the level's heights there), the foam takes the water's depth over those heights, not over "
+                     "the triangles of the terrain's level of detail, which change from frame to frame; 0: over what is drawn");
   iConsole->Register("d3d12_WaterSurf", &CV_d3d12_WaterSurf, 0.8f, 0,
                      "With d3d12_WaterFoam: the height (m) of the swell (9 s) breaking on the ocean's shores, where the water "
                      "gets shallower than it over 0.78; its bores run to the shore, a white roller on each front and the lace "

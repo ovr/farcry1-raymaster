@@ -2234,6 +2234,7 @@ public:
   float CV_d3d12_WaterSlope = 0.0446f;  //!< the FFT waves' slopes' RMS along an axis at the default bump amounts (the old texture's; 0: the wind sea's own)
   float CV_d3d12_WaterChop = 2.5f;    //!< the FFT waves' horizontal displacement, Tessendorf's lambda (sharp crests; 0: none)
   float CV_d3d12_WaterFoam = 1;       //!< the FFT ocean's foam: whitecaps, waves breaking on the shore (0: none, the frames before)
+  float CV_d3d12_WaterFoamTerrain = 0.2f; //!< m: the foam's floor within this of the level's terrain heights takes them (0: the floor as drawn)
   float CV_d3d12_WaterSurf = 0.8f;    //!< m: the height of the swell breaking on the ocean's shores, its surf's foam (0: none)
   int CV_d3d12_WaterCaustics = 1;     //!< the caustics on the sea floor of the FFT ocean's waves (0: the static texture, the frames before)
   int CV_d3d12_WaterVolume = 1;       //!< the light in the ocean's water: attenuation by channel, scattering, Snell's window (0: the fog volume's fog, the frames before)

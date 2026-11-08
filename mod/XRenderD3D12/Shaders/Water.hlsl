@@ -285,6 +285,20 @@ float GridBehindZ(float z, float3 P)
   return lerp(z, min(g_DrawExt.vLightSpec[0].y - GridTerrainDepth(P.xy), P.z), fHidden);
 }
 
+//! The floor behind the ocean's grid's surface as its foam takes it (d3d12_WaterFoamTerrain, vLightSpec[5].x m): the scene
+//! behind's point vFloor; where that lies within it of the level's terrain heights there (GridTerrainDepth), the terrain as
+//! its level of detail draws it, those heights. The level of detail's triangles change from frame to frame, and in shallow
+//! water the foam of the shore followed their edges (Swamp's ponds, step 331). What stands higher over the terrain (a rock,
+//! a post) keeps its own point.
+float FoamFloorZ(float3 vFloor)
+{
+  const float fSnap = g_DrawExt.vLightSpec[5].x;
+  if (fSnap <= 0)
+    return vFloor.z;
+  const float fTerrain = g_DrawExt.vLightSpec[0].y - GridTerrainDepth(vFloor.xy);
+  return abs(vFloor.z - fTerrain) <= fSnap ? fTerrain : vFloor.z;
+}
+
 //! The ocean's grid (vLightSpec[0].x; OceanGrid.cpp): the vertex vIn (xy its direction across the water from the grid's
 //! centre, the camera, z its ring) on the frame's ring (GridRing: vLightSpec[4].w of them after the disc's table), pulled
 //! onto the edge of the game's disc beyond it, raised to the waves' height there: the FFT ocean's cascades' (each at the
@@ -1044,7 +1058,14 @@ float4 ShadeWater(SWaterOutput In)
     float fFoamDepth = fDepthBelow, fFoamPath = fThick0 * fDistance / max(fSurface, 1e-3);
     if (g_DrawExt.vLightSpec[0].x != 0)
     {
-      fFoamDepth = max(g_DrawExt.vLightSpec[0].y - GridBehindZ(vFloor.z, In.vWorldPos), 0);
+      // 34: the floor behind against the level's terrain heights (red above them, blue below, 0.5 m full; green where the
+      // foam takes the heights, FoamFloorZ).
+      if (g_DrawExt.vParams0.z == 34)
+      {
+        const float d = vFloor.z - (g_DrawExt.vLightSpec[0].y - GridTerrainDepth(vFloor.xy));
+        return float4(saturate(d * 2), FoamFloorZ(vFloor) != vFloor.z ? 0.5 : 0, saturate(-d * 2), 1);
+      }
+      fFoamDepth = max(g_DrawExt.vLightSpec[0].y - GridBehindZ(FoamFloorZ(vFloor), In.vWorldPos), 0);
       fFoamPath = fFoamDepth / max(V.z, 0.01);
     }
     fFoam = WaterFoam(In.vWorldPos.xy, fFoamDepth, fFoamPath, fWakeFoam, fWhitecaps, fShoreFoam, fFoamShade);

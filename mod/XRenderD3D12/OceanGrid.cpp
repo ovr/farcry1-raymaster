@@ -223,6 +223,8 @@ std::optional<SGeomDraw> CD3D12Renderer::SetupOceanGrid(SDrawConstants &dc, cons
   Set4(dc.vLightSpec[4], 0, 0, (float)Disc.nRings, (float)g.Rings.size());
   SetUint(dc.vLightSpec[4][0], (uint32)nTableSRV);
   SetUint(dc.vLightSpec[4][1], (uint32)nTableOffset);
+  // The foam's floor (Water.hlsl's FoamFloorZ): within this of the terrain's heights, those heights.
+  Set4(dc.vLightSpec[5], bTerrain ? std::max(CV_d3d12_WaterFoamTerrain, 0.0f) : 0.0f, 0, 0, 0);
 
   // Its vertices across the water from the disc's centre at the level.
   Matrix44 World;
