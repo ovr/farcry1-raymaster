@@ -29,6 +29,7 @@
 #include "Scene.h"
 #include "Geometry.h"
 #include "RayTracing.h"
+#include "SkyFogBand.h"
 
 #include <bit>
 
@@ -2129,10 +2130,16 @@ void CD3D12Renderer::DrawSkyItem(const SRenderItem &it)
     SSkyBoxTextures New;
     New.Name = it.pShader->GetName();
     static const char *const s_Suffixes[3] = { "_5", "_12", "_34" };
+    // r_TexUpscaledSky 0: the game's own pictures (uncompressed), not the upscaled ones (BC1: the smooth gradients in steps).
+    const bool bOwn = CV_r_TexUpscaledSky <= 0;
+    if (bOwn)
+      m_pTextures->SetKeepOwnPictures(true);
     for (int i = 0; i < 3; i++)
       New.pTex[i] = m_pTextures->LoadTexture(("textures/" + pSkyShader->Box + s_Suffixes[i]).c_str(), FT_CLAMP | FT_NOMIPS, 0, eTT_Base, -1, -1, -1, 0);
     for (const SSkyLayer &Layer : pSkyShader->Layers)
       New.Layers.push_back(m_pTextures->LoadTexture(Layer.Map.c_str(), FT_NOMIPS, 0, eTT_Base, -1, -1, -1, 0));
+    if (bOwn)
+      m_pTextures->SetKeepOwnPictures(false);
     m_SkyBoxes.push_back(std::move(New));
     Box = m_SkyBoxes.end() - 1;
   }
@@ -2306,6 +2313,55 @@ void CD3D12Renderer::DrawSkyItem(const SRenderItem &it)
     }
     DrawImmediate(LayerKey, dc, D3D_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP, VERTEX_FORMAT_P3F_COL4UB_TEX2F, Top, 20);
     DrawImmediate(LayerKey, dc, D3D_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP, VERTEX_FORMAT_P3F_COL4UB_TEX2F, Ring, 20);
+  }
+
+  // The fog over the box's lower part (d3d12_SkyFogBand; SkyFogBand.h), as the D3D9 renderer draws it after the box with
+  // the frame's fog ending before 256 m (Swamp, Volcano): the box's edges and its bottom near the horizon, which
+  // the far ground's fog does not reach, under an even fog. A ring of radius 32 in the box's axes (as the box, turned by
+  // Turn), its 12 segments from the y axis on, in the fog's colour: opaque from 32 below its edge up to the edge, then
+  // fading out over the 16 above. Not faded by the sky's alpha, blended by its own, no depth test or writes, no fog, and
+  // not brighter towards the sun with HDR (as the fog over the far ground below it).
+  if (CV_d3d12_SkyFogBand && SkyFogBand::Drawn(m_fFogEnd))
+  {
+    const float fEdge = SkyFogBand::Edge(m_fFogEnd, m_Camera.GetPos().z);
+    const auto Byte = [](float c) { return (uint8)std::clamp((int)(c * 255 + 0.5f), 0, 255); };
+    constexpr int N = 2 * (SkyFogBand::SEGMENTS + 1);
+    struct_VERTEX_FORMAT_P3F_COL4UB Upper[N], Lower[N];
+    for (int i = 0; i <= SkyFogBand::SEGMENTS; i++)
+    {
+      const float fAngle = DEG2RAD(90.0f + 360.0f / SkyFogBand::SEGMENTS * i);
+      const float x = SkyFogBand::RADIUS * cosf(fAngle), y = SkyFogBand::RADIUS * sinf(fAngle);
+      const auto Vertex = [&](float z, uint8 nAlpha)
+      {
+        struct_VERTEX_FORMAT_P3F_COL4UB v;
+        v.xyz = Vec3(x, y, z);
+        // A D3DCOLOR: B, G, R, A (Common.hlsli's DecodeVertexColor).
+        v.color.bcolor[0] = Byte(m_FogColor[2]);
+        v.color.bcolor[1] = Byte(m_FogColor[1]);
+        v.color.bcolor[2] = Byte(m_FogColor[0]);
+        v.color.bcolor[3] = nAlpha;
+        return v;
+      };
+      Upper[i * 2] = Vertex(fEdge, 255);
+      Upper[i * 2 + 1] = Vertex(fEdge + SkyFogBand::FADE, 0);
+      Lower[i * 2] = Vertex(fEdge - SkyFogBand::BELOW, 255);
+      Lower[i * 2 + 1] = Vertex(fEdge, 255);
+    }
+    SPipelineKey BandKey = Key;
+    BandKey.nState = GS_NODEPTHTEST | GS_BLSRC_SRCALPHA | GS_BLDST_ONEMINUSSRCALPHA;
+    SDrawConstants dc = DefaultDrawConstants();
+    memcpy(dc.mWorldViewProj, ViewProj.data, sizeof(dc.mWorldViewProj));
+    if (m_bUpscaling)
+      memcpy(dc.mPrevWorldViewProj, PrevViewProj.data, sizeof(dc.mPrevWorldViewProj));
+    dc.nFlags = DF_VCOLOR;
+    if (m_pFrameDump)
+    {
+      fprintf(m_pFrameDump.get(), "  sky fog band: edge z %.3f (fog end %g, camera z %.2f), colour (%.3f %.3f %.3f)\n", fEdge, m_fFogEnd,
+              m_Camera.GetPos().z, m_FogColor[0], m_FogColor[1], m_FogColor[2]);
+      DumpDraw(dc, BandKey, nullptr);
+    }
+    DrawImmediate(BandKey, dc, D3D_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP, VERTEX_FORMAT_P3F_COL4UB, Upper, N);
+    DrawImmediate(BandKey, dc, D3D_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP, VERTEX_FORMAT_P3F_COL4UB, Lower, N);
   }
 }
 

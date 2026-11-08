@@ -443,6 +443,16 @@ void CD3D12Renderer::RegisterVariables()
                      "pictures too (the frames before); 0: their own, soft as they are (the upscaler's detail shows in them as streaks); "
                      "read as a material's textures load, from the next level's load");
   CV_r_TexUpscaledLight = CommandLine::IntValue(GetCommandLineA(), "r_TexUpscaledLight", CV_r_TexUpscaledLight);
+  iConsole->Register("r_TexUpscaledSky", &CV_r_TexUpscaledSky, 0, 0,
+                     "With r_TexUpscaled, 1: the sky boxes (and their cloud layers) take their upscaled pictures too (the frames "
+                     "before); 0: their own, the game's uncompressed ones: the upscaled ones are compressed (BC1), which breaks a "
+                     "sky's smooth gradients into steps (Swamp's fog-coloured horizon a rectangle with a straight edge) and its "
+                     "clouds into blotches; read as a sky's textures load, from the next level's load");
+  iConsole->Register("d3d12_SkyFogBand", &CV_d3d12_SkyFogBand, 1, VF_DUMPTODISK,
+                     "1: with the frame's fog ending before 256 m (Swamp, Volcano), the band of the fog's colour over the sky box's "
+                     "lower part as the original draws it, opaque up to a little above the horizon (the lower the nearer the fog's "
+                     "end and the higher the camera) and fading out over half the box above; the water reflects it; 0: the bare box, "
+                     "its edges and its bottom showing near the horizon (the frames before)");
   iConsole->Register("d3d12_FadeBlend", &CV_d3d12_FadeBlend, 1, 0,
                      "1: the objects the engine fades in or out by their distance (their alpha below 1: the crates, the gas "
                      "cylinders and the crane on Carrier's deck) drawn blended by that alpha among the blended surfaces, as the original draws them "

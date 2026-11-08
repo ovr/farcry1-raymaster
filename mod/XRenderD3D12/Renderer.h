@@ -2185,6 +2185,7 @@ public:
   int CV_r_PbrRoughness = 1;          //!< 1: the specular materials' highlights by the RayMaster maps' roughness (raymaster/<texture>_pbr_m.dds; 0: the templates')
   int CV_r_TexUpscaled = 1;           //!< 1: the textures' upscaled pictures from RayMaster (<texture>.dds), read at their load (0: the paks' own)
   int CV_r_TexUpscaledLight = 0;      //!< 1: those of the templates that add light too (0: their own pictures, AddsLight in Shader.cpp)
+  int CV_r_TexUpscaledSky = 0;        //!< 1: the sky boxes' too (0: their own pictures, DrawSkyItem)
   int CV_r_PbrAO = 1;                 //!< 1: the reflections by rays less where the RayMaster maps' ambient occlusion hides them (0: none)
   int CV_r_Skin = 1;                  //!< 1: the characters' faces and heads lit as skin (Skin.hlsli; 0: as the templates, the frames before)
   float CV_r_SkinRoughness = 0.55f;   //!< the matte skin's perceptual roughness (no gloss in the texture's alpha)
@@ -2262,6 +2263,7 @@ public:
   int CV_d3d12_AADebug = 0;                 //!< 1: the anti-aliasing's view of the edges
   int CV_d3d12_AlphaToCoverage = 1;         //!< with MSAA, 1: the alpha-tested draws' edges by the samples their alpha covers
   int CV_d3d12_FadeBlend = 1;               //!< 1: the objects fading in or out by their distance blended by their alpha (SRenderItem::bFade; 0: opaque, the frames before)
+  int CV_d3d12_SkyFogBand = 1;              //!< 1: the fog over the sky box's lower part with a near fog (SkyFogBand.h; DrawSkyItem, the water's sky; 0: the bare box, the frames before)
                                             //!< (sharpened to the test's edge, Draw.cpp's DrawGeometry); 0 the test, a step
   int CV_d3d12_AOQuality = 2;               //!< the ambient occlusion's (d3d12_AO, a string) quality, 0 to 3
   float CV_d3d12_AORadius = 1;              //!< its radius (m)

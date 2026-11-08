@@ -680,6 +680,10 @@ system ones (better not to touch): [`CONFIGURATION.md`](../../CONFIGURATION.md).
   texture that another material takes as well keeps its upscaled picture there. 1: the upscaled
   pictures for them too (the frames before). Read as a material's textures load, as `r_TexUpscaled`
   (the command line too).
+- `r_TexUpscaledSky` (0) keeps the own pictures of the sky boxes and their cloud layers (`DrawSkyItem`,
+  `SetKeepOwnPictures`): their upscaled files are BC1, which turns the fog's smooth gradients into
+  slabs with straight edges and blotches (Swamp's sky over its fog). 1: the upscaled pictures (the
+  frames before). Read as the sky's textures load (a level's load, the command line).
 - Cost (RX 7900 XTX, 3840 x 2160, the raster without the upscaler, `Parallax_river.ini`'s views): in
   River's temple the opaque list 0.65-0.72 to 0.77-0.84 ms, the frame 2.79-2.95 to 2.91-3.05 ms;
   from outside, 37 m off, the same (the depth under a pixel: no march). `r_ParallaxMaterials` and
@@ -2384,6 +2388,26 @@ and lists theirs (`NamesObjects`).
   their flags in the game without the dev mode and in it, on, 0 and on again; Training's mountain
   spot and Swamp changed on against 0, the same as the variables set by the console before the
   level loads, 0 the build before's).
+
+## The sky over a near fog
+
+- With a fog that ends near (its end under 256 m: Swamp 150, Volcano), the original lays the fog's
+  colour over the sky box's lower part, and so do we (`d3d12_SkyFogBand 1`, `SkyFogBand.h`): after the
+  box and its cloud layers, a ring of radius 32 round the camera in the box's axes (turned with it),
+  12 pieces of 30 degrees, in the fog's colour without a texture, blended by its alpha, without depth
+  and fog. Its edge z = (160 - max(end, 64)) / 6 - max(camera z, 0) / 35: up to it the ring is opaque
+  (from 32 under it), over it the alpha goes down to 0 in 16. The water's reflection takes the same
+  band over its sky box (`Water.hlsl`'s `SkySeen`, `SkyFogBand.hlsli`), with the camera's z mirrored
+  in the surface (the edge the original's reflection pass draws). The frame dump's line `sky fog
+  band: edge z E (fog end F, camera z Z), colour (r g b)`.
+- Without the band (0, the frames before) the box's lower faces stand against the fog with their own
+  edges: on Swamp the rectangles of its sides over the ponds and the trees.
+- The sky boxes keep their own pictures (`r_TexUpscaledSky 0`, below): the upscaled ones are BC1, and
+  the compression breaks the fog's smooth gradients into slabs with straight edges and blotches.
+- Tests: unit tests `SkyFogBand_*` (the edges and the levels the original draws it on, the shader's
+  alpha against the C++), `render_tests` suite `skyfog` (`SkyFog_swamp.ini`, `SkyFog_volcano.ini`:
+  five views; the sky as bright as the original's, on Swamp without straight edges stronger than the
+  original's, also ray traced; the frames before fail it).
 
 ## Objects fading with the distance
 

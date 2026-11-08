@@ -36,8 +36,9 @@
 //	  - reflection: the scene where the colour and depth copies show it
 //	    (a ray marched in screen space), else the ocean's planar reflection
 //	    (the scene seen by the camera mirrored in the water plane), else the
-//	    sky box in the reflected direction (the box as the sky draws it;
-//	    without a sky, none); the scene is looked up along the reflection of
+//	    sky box in the reflected direction (the box as the sky draws it for
+//	    the mirrored camera, with the fog band over its lower part; without
+//	    a sky, none); the scene is looked up along the reflection of
 //	    a calmer normal (half the slopes), so that it ripples rather than
 //	    breaks up. Where the ripple gets finer than a pixel (the texture's
 //	    mip levels smooth it out of the normal) it still turns the reflected
@@ -126,7 +127,8 @@
 //	  vParams0  x wave slope scale, y reflection amount, z d3d12_WaterDebug,
 //	            w the strength of the light through the crests
 //	            (d3d12_WaterCrestLight; 0: none)
-//	  vParams1  x z1 of the sky box sides, y 1 when there is a sky box,
+//	  vParams1  x z1 of the sky box sides, y 1 when there is a sky box (2:
+//	            with the fog band over its lower part, SkyFogBand.hlsli),
 //	            z the sky box's alpha (blends it towards the fog colour),
 //	            w 1 when there is a planar reflection
 //	  vParams2  rgb extinction per metre (with a fog volume: x the z of its
@@ -218,6 +220,7 @@
 #include "WaterFoam.hlsli"
 #include "WaterVolume.hlsli"
 #include "Underwater.hlsli"
+#include "SkyFogBand.hlsli"
 #ifdef XR_RAYTRACE
 #include "RayShade.hlsli"
 #else
@@ -517,6 +520,17 @@ float3 SkyBoxColor(float3 vDir)
     vTex = g_Textures[NonUniformResourceIndex(nTex)].SampleLevel(g_SamplerLinearClamp, float2(u, lerp(vTop, 0.5, f)), 0);
   }
   return lerp(vFog, vTex.rgb, g_DrawExt.vParams1.z);
+}
+
+//! The sky as the sky draws it, in the direction vDir (up or level) seen from a camera at height fCameraZ: the sky box
+//! brighter towards the sun with HDR (SkyGlow), the fog band over its lower part (vParams1.y 2; DrawSkyItem, not
+//! brighter towards the sun) over it.
+float3 SkySeen(float3 vDir, float fCameraZ)
+{
+  float3 vSky = SkyBoxColor(vDir) * SkyGlow(vDir);
+  if (g_DrawExt.vParams1.y == 2)
+    vSky = lerp(vSky, g_Frame.vFogColor.rgb, SkyFogBandAlpha(vDir, SkyFogBandEdge(g_Frame.vFogParams.y, fCameraZ)));
+  return vSky;
 }
 
 //! Buffer texture coordinates of a clip space position; vViewToBuffer: the viewport's size over
@@ -913,8 +927,8 @@ float3 OceanVolume(float3 vScene, float3 P, float3 N, float3 V, float3 vBehind, 
 
 //! The scene above the ocean seen from below through Snell's window at the surface point P: the light coming down along D
 //! (the view's ray refracted out of the water, up), where the screen's copy shows it in that direction (what the camera
-//! sees along D is above the water there: the copy's depth beyond where D leaves it), else the sky box (as the sky draws
-//! it; without one the fog's colour). vViewToBuffer the viewport's size over the buffer's.
+//! sees along D is above the water there: the copy's depth beyond where D leaves it), else the sky as the sky draws it
+//! (SkySeen; without a sky box the fog's colour). vViewToBuffer the viewport's size over the buffer's.
 float3 SceneAbove(float3 P, float3 D, float2 vViewToBuffer)
 {
   const float4 vClip = mul(float4(D, 0), g_Frame.mViewProj);
@@ -929,7 +943,7 @@ float3 SceneAbove(float3 P, float3 D, float2 vViewToBuffer)
         return g_Textures[g_Draw.nTex0].SampleLevel(g_SamplerLinearClamp, vUV, 0).rgb;
     }
   }
-  return g_DrawExt.vParams1.y != 0 ? SkyBoxColor(D) * SkyGlow(D) : g_Frame.vFogColor.rgb;
+  return g_DrawExt.vParams1.y != 0 ? SkySeen(D, g_Frame.vCameraPos.z) : g_Frame.vFogColor.rgb;
 }
 
 float4 ShadeWater(SWaterOutput In)
@@ -1101,7 +1115,8 @@ float4 ShadeWater(SWaterOutput In)
     F *= g_DrawExt.vParams0.y;
     float3 R = reflect(-V, N);
     float3 Rs = reflect(-V, Ns);
-    float3 vReflected = g_DrawExt.vParams1.y != 0 ? SkyBoxColor(R) * SkyGlow(R) : vScatter;
+    // The sky in the mirror: as the water's reflection camera (the camera mirrored in the surface) sees it.
+    float3 vReflected = g_DrawExt.vParams1.y != 0 ? SkySeen(R, 2 * In.vWorldPos.z - g_Frame.vCameraPos.z) : vScatter;
     float3 vPlanar = 0;
     float fBlur = 0;
     if (g_DrawExt.vParams1.w != 0)
