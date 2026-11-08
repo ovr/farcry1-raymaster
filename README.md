@@ -26,6 +26,11 @@ Mods for Far Cry, built with the CryENGINE MOD SDK for Far Cry:
   (or run `git submodule update --init`); without them XRenderD3D12 is built without NRD.
 - `third_party/fidelityfx-denoiser` - a git submodule: AMD FidelityFX Denoiser, whose shadows
   denoiser XRenderD3D12 can take for the sun's shadow by rays; without it that denoiser is left out.
+- `assets/levels` - `Patch Levels.cmd`, which moves pieces of the levels where the sun of the ray
+  traced lighting needs them, in the levels of an installed game (`Patch Levels.cmd <game
+  folder>`; each pak it changes is kept as `<name>.orig`, copying that back gives back the original
+  level): in Training the two concrete roof slabs over the north edge of the bunker's roof opening
+  go under its floor, so the sun's shafts come in through both of the roof's openings, not one.
 - `assets/scripts` - patches to the game's scripts, and `Patch Scripts.cmd`, which applies them in
   the order of their numbers to the scripts of an installed game (`Patch Scripts.cmd <game
   folder>`, written to `FCData\zz_RayMaster.pak`; deleting that file gives back the original

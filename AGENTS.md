@@ -58,6 +58,10 @@ console variable gets its row there too (the unit test `Config_Documented` check
   committed, never the game's scripts. The patches are numbered in the order they apply
   (`NN-name.patch`, sorted by name): a later one may be written against a script as an earlier
   one leaves it, and a new one takes the next number.
+- `assets/levels/` - `Patch Levels.cmd`, which moves brushes (`brush.lst` in a level's `level.pak`
+  and `level2.pak`) of a game folder's levels, keeping each pak it changes as `<name>.orig`. Its
+  table of moves is committed, never the game's levels. Training's moved roof slabs change what
+  Training's suites and identity runs measure: compare runs with the same paks.
 - `third_party/` - other projects' files, unchanged from a tagged release in their own folder
   layout, with a `README.md` of ours naming the tag and the hashes of the binaries.
   `third_party/amd-fsr-sdk` is the part of the AMD FSR SDK that XRenderD3D12 uses; its 57 MB
