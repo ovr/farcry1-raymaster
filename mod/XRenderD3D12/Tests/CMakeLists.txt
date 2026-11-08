@@ -131,6 +131,7 @@ set(XRENDERD3D12_TESTS_SOURCES
     FadeTests.cpp
     SkyTests.cpp
     DisplayTests.cpp
+    CascadeCullTests.cpp
     ParallaxTests.cpp
     PbrSpecularTests.cpp
     SkinTests.cpp

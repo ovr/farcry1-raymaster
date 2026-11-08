@@ -44,6 +44,7 @@ set(XRENDERD3D12_SOURCES
     UnderwaterLight.h
     SkyFogBand.h
     DisplayPoll.h
+    CascadeCull.h
     EnvCubes.cpp
     Mirrors.cpp
     TemplateFx.cpp

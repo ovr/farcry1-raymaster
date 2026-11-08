@@ -829,6 +829,21 @@ system ones (better not to touch): [`CONFIGURATION.md`](../../CONFIGURATION.md).
   same (Regulator's time demo outdoors: some 400 draws and 0.11 ms of the GPU less a frame, 301
   to 311 FPS; `d3d12_ShadowDebug 1` shows the slices without the casters outside).
 
+  `d3d12_CascadeCull` (2): without rays (`WantsOffscreenRays`, `WantsRaySun`: they read the casters'
+  scenes), only the slices read what the camera towards the sun and the live casters give, so
+  `CScene::AddEf` leaves out a part that reaches no slice as the engine adds it (`CascadeCullsItem`:
+  the same class filter and spheres as `DrawCascadeItems`), before it is prepared, listed and
+  sorted. A character's part stays: its leaf buffer gets its box from the skinning, after `AddEf`
+  (not skinned yet it has the zero box at the object's origin; skinned, none, and it goes into every
+  slice). Held views at 1280x720 in raster (`render_tests.ps1` suite `cascadecull`): Training 1,329
+  of 1,576 parts from the camera towards the sun left out, Steam 2,063 of 2,315, Pier 440 of 450;
+  every slice gets the same parts, the frames are the same. With 2 the camera towards the sun also
+  ends where nothing can shade a receiver any more (`CascadeCull::CasterFar`): a part shades a
+  receiver only along the sun, so below the level's highest terrain plus 100 m (read once a level
+  from the height map) it lies at most (that top − the lowest receiver) / the sun's height beyond the
+  farthest receiver, plus 10 m; with the sun below 10 degrees the view's far plane (Training 400 m
+  instead of 700, Pier 511 instead of 1,500).
+
   Lit objects take the sun from the full set. Light maps and the terrain, whose light has the
   static world's shadows already, take it from the live set; the terrain is darkened to the
   colour of the engine's shadows on it (`EntityShadowOnTerrain`, which fade out where the

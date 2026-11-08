@@ -1510,6 +1510,8 @@ public:
     int nEdges = 0;
     float fMargin = 0;
     int nCasters[2] = {};     //!< parts drawn into the full and the live slice
+    Vec3 vSphere = Vec3(0, 0, 0); //!< the sphere of its part of the view's frustum (its receivers): the centre
+    float fSphereRadius = 0;  //!< and the radius (m)
   };
   //! A set of cascades' maps: a texture array of a slice per cascade.
   struct SCascadeMaps
@@ -1533,6 +1535,14 @@ public:
   //! reach. With pDrawn: the parts drawn into the set so far (PartKey), the ones in it left out,
   //! the others added.
   void DrawCascadeItems(std::span<const SRenderItem> Items, std::unordered_set<uint64> *pDrawn);
+  //! Whether the sphere c, r (PartSphere; r < 0: none) reaches the cascade Cas (CascadeCull::Reaches).
+  bool PartReaches(const Vec3 &c, float r, const SCascade &Cas) const;
+  //! CScene::AddEf with m_bCascadeCull: true for a part of a casters' scene that no slice takes (not a caster's
+  //! kind, or its sphere reaches none; a character's part stays, its box comes with the skinning), counted in
+  //! m_nCascadeCulled.
+  bool CascadeCullsItem(const SRenderItem &it);
+  //! The level's lowest and highest terrain (m_TerrainRange), read once per level; false without a terrain.
+  bool EnsureTerrainRange();
   //! The nested scene of a casters' pass (CScene::EndEf3D with m_bCascadePass): its items into the
   //! cascades' slices of the set being drawn.
   void DrawCascadeCasters(std::span<const SRenderItem> Items);
@@ -1571,6 +1581,17 @@ public:
   std::vector<SRenderItem> m_StaticCasterItems;       //!< d3d12_StaticCasters: the full set's parts of static casters, for the live set
   bool m_bNoteStaticCasters = false;                  //!< DrawCascadeItems notes them (while the full set is drawn)
   int m_nStaticCasterParts = 0;                       //!< the parts of them the live set got in the frame
+  bool m_bCascadeCull = false;                        //!< d3d12_CascadeCull: CScene::AddEf leaves out the parts no slice takes (in the casters' scenes)
+  int m_nCascadeCulled = 0;                           //!< the parts it left out in the frame
+  float m_fCascadeCasterFar = 0;                      //!< the far plane of the camera towards the sun in the frame (m)
+  //! The level's terrain (EnsureTerrainRange; stale after PreLoad, PostLoad).
+  struct STerrainRange
+  {
+    bool bStale = true;
+    bool bHave = false;
+    float fMin = 0, fMax = 0;                         //!< its lowest and highest height (m)
+  };
+  STerrainRange m_TerrainRange;
   ICVar *m_pShadowMapsVar = nullptr;                  //!< e_shadow_maps, looked up on first use
 
   //////////////////////////////////////////////////////////////////////////
@@ -2252,6 +2273,7 @@ public:
   float CV_d3d12_ShadowDistance = 120;      //!< how far they reach from the camera (m)
   int CV_d3d12_ShadowCascadeSize = 2048;    //!< the size of their maps
   int CV_d3d12_CascadeInstancing = 1;       //!< 1: a caster of the full set drawn once into all the slices it reaches (DrawCascadeItems)
+  int CV_d3d12_CascadeCull = 2;             //!< without rays: 1 the casters' parts no slice takes left out in AddEf, 2 also the camera towards the sun shortened
   int CV_d3d12_StaticCasters = 1;           //!< 1: the static casters of the full set (the vegetation that casts) in the live set too (the terrain's shadows)
   int CV_d3d12_DepthPrepass = 1;            //!< 1: the main view's opaque surfaces into the depth buffer before the opaque list (DrawItems)
   float CV_d3d12_ShadowSoftness = 0.05f;    //!< the radius of their filter (m)

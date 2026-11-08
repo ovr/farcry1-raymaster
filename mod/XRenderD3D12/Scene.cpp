@@ -463,6 +463,11 @@ void CScene::AddEf(int nFog, CRendElement *pRE, IShader *pEf, SRenderShaderResou
   it.nFog = nFog;
   it.nTempl = nTempl;
   it.eDrawClass = eDC;
+  // d3d12_CascadeCull: a part of a casters' scene (the camera towards the sun, the live casters) that no slice of the
+  // sun's cascades takes, while nothing else reads that scene (no rays): not prepared, not listed (CascadeCullsItem
+  // keeps a character's part, its box comes with its skinning).
+  if (g_pRenderer && g_pRenderer->m_bCascadeCull && !bOceanFog && g_pRenderer->CascadeCullsItem(it))
+    return;
   if (nSort)
     it.nSort = nSort;
   else
