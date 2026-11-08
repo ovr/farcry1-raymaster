@@ -546,12 +546,12 @@ int CScene::PrepareItems(SSceneSlot &Slot)
     pMesh->ProcessSkinning(it.pObj->GetTranslation(), it.pObj->m_Matrix, it.nTempl, -1, false);
   }
 
-  // The matrices the renderer derives from the objects, and the distances.
+  // The distances. (The original also derives each object's VP and inverse matrices here; nothing reads
+  // them: the draws take m_Matrix and the camera's, and CCObject::GetVPMatrix / GetInvMatrix derive them
+  // on demand.)
   for (size_t i = 0; i < nItems; i++)
   {
     SRenderItem &it = Slot.Items[i];
-    it.pObj->GetVPMatrix();
-    it.pObj->GetInvMatrix();
     it.fDistance = sqrtf(std::max(0.0f, it.pRE->mfDistanceToCameraSquared(*it.pObj)));
   }
   return (int)nItems;

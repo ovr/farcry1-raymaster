@@ -150,6 +150,9 @@ void CCObject::Init()
   m_pLightImage = nullptr;      // the whole union (m_fBending, m_pLight, ...)
 }
 
+// The SDK's accessors of the matrices derived from the object, made on demand (once per camera: the scene's
+// matrix serial). The original derives both for every object in EF_EndEf3D; nothing in this renderer reads
+// them, so it does not.
 Matrix44 &CCObject::GetInvMatrix()
 {
   CheckMatrixSerial(this);

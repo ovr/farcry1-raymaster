@@ -114,7 +114,8 @@ namespace RendererStructures
 //   - CLeafBuffer::Render and AddRenderElements: m_ObjFlags (can set FOB_HASALPHA); EF_AddEf:
 //     m_ObjFlags (can clear FOB_ENVLIGHTING).
 //   - EF_EndEf3D: m_VPMatrixId, m_InvMatrixId, m_VPMatrixFrame (matrices the renderer derives
-//     from the object; the IDs are 0xFFFF before).
+//     from the object; the IDs are 0xFFFF before). XRenderD3D12 derives them only on demand
+//     (CCObject::GetVPMatrix / GetInvMatrix), which nothing does: the IDs stay -1.
 //   - MakeSprite: m_Counter, m_AmbColor, m_fHeatFactor.
 //   CCObject has a vtable (AddWaves, SetShaderFloat, RemovePermanent; the SDK declares no virtual
 //   destructor). The engine calls AddWaves once per frame for every vegetation instance it draws
