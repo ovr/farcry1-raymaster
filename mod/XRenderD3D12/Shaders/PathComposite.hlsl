@@ -55,11 +55,11 @@ float4 PSMain(SCompositeOutput In) : SV_Target
   const float4 vPaths = g_Textures[g_Draw.nTex3].Load(vAt);
   const float fNL = dot(PathOctDecode(vGBuffer.rg), g_Frame.vSunDir.xyz);
   const float fSun = nMaterial == XR_PT_MAT_VEGETATION + 1 ? saturate(fNL) + 0.5 * saturate(-fNL) : saturate(fNL);
-  float3 vLight = g_Draw.vParams0.rgb * (fSun * fVisible) + vPaths.rgb;
+  float3 vLight = g_DrawExt.vParams0.rgb * (fSun * fVisible) + vPaths.rgb;
   [branch]
   if (PathGBufferSkinRough(g_Textures[g_Draw.nTex5].Load(vAt).a) > 0)
-    vLight = g_Draw.vParams0.rgb * (SkinWrap(fNL, g_Draw.vSkin.w) * fVisible) + vPaths.rgb;
-  const float3 vBaked = nMaterial == XR_PT_MAT_TERRAIN + 1 ? g_Draw.vParams1.rgb * vPaths.w : vPaths.w;
+    vLight = g_DrawExt.vParams0.rgb * (SkinWrap(fNL, g_DrawExt.vSkin.w) * fVisible) + vPaths.rgb;
+  const float3 vBaked = nMaterial == XR_PT_MAT_TERRAIN + 1 ? g_DrawExt.vParams1.rgb * vPaths.w : vPaths.w;
   const float3 vLit = saturate(pow(saturate(vAlbedo), HDR_GAMMA) / max(vBaked, 0.01)) * vLight;
   const float3 vHighlights = g_Textures[g_Draw.nTex4].Load(vAt).rgb;
   return float4((float3(HdrEncode(vLit.r), HdrEncode(vLit.g), HdrEncode(vLit.b)) + vHighlights) * vGBuffer.b, 0);

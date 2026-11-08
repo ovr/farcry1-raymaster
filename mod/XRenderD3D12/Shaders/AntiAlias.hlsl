@@ -49,7 +49,7 @@ SAaOutput VSMain(SVertexInput In)
 
 int2 AaClamp(int2 p)
 {
-  return clamp(p, int2(0, 0), (int2)g_Draw.vParams0.zw);
+  return clamp(p, int2(0, 0), (int2)g_DrawExt.vParams0.zw);
 }
 
 float4 FxaaLoad(int2 p)
@@ -99,7 +99,7 @@ float4 Cmaa2Pixel(int2 p)
   const float4 c = FxaaLoad(p);
   const float3 v = g_Textures[g_Draw.nTex1].Load(int3(p, 0)).rgb;
   // CMAA2's loads outside the picture read black: its border pixels stay as they were (it darkens the corners).
-  const bool bBorder = any(p <= 0) || any(p >= (int2)g_Draw.vParams0.zw);
+  const bool bBorder = any(p <= 0) || any(p >= (int2)g_DrawExt.vParams0.zw);
   const bool bChanged = !bBorder && any(v != c.rgb);
   if (HasFlag(AA_DEBUG))
   {
@@ -127,7 +127,7 @@ float4 PSMain(SAaOutput In) : SV_Target
     return SmaaPixel(p, SmaaBlend(p));
   if (HasFlag(AA_CMAA2))
     return Cmaa2Pixel(p);
-  const SFxaaResult r = Fxaa(p, (uint)g_Draw.vParams1.x);
+  const SFxaaResult r = Fxaa(p, (uint)g_DrawExt.vParams1.x);
   if (HasFlag(AA_DEBUG))
     return AaDebug(FxaaLuma(FxaaLoad(p).rgb), r.bEdge, r.fBlend, r.vColor.a);
   if (!r.bEdge || r.fBlend <= 0)
@@ -164,7 +164,7 @@ SHighlightOutput PSHighlight(SAaOutput In)
   }
   Out.vColor = PSMain(In);
   // The ratio of the pixel's light and of its neighbour's across the edge, blended as their colours.
-  const SFxaaResult r = Fxaa(p, (uint)g_Draw.vParams1.x);
+  const SFxaaResult r = Fxaa(p, (uint)g_DrawExt.vParams1.x);
   const float3 vRatio = LayerRatio(FxaaLoad(p).rgb, g_Textures[g_Draw.nTex4].Load(int3(p, 0)), bScene);
   const int2 q = AaClamp(p + r.vStep);
   const float3 vRatioStep = LayerRatio(FxaaLoad(q).rgb, g_Textures[g_Draw.nTex4].Load(int3(q, 0)), bScene);

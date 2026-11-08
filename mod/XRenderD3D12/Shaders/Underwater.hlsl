@@ -78,8 +78,8 @@ float3 UnderEncode(float3 v)
 //! frame on the CPU: vUnderColor rgb), else as the water seen from above shows it (UnderDeepSource).
 float3 UnderSource(float3 vDeep, float3 c)
 {
-  if (g_Draw.vParams1.y > 0)
-    return g_Draw.vUnderColor.rgb;
+  if (g_DrawExt.vParams1.y > 0)
+    return g_DrawExt.vUnderColor.rgb;
   return UnderDeepSource(vDeep, c);
 }
 
@@ -100,7 +100,7 @@ bool UnderQuadAny(bool b)
 float3 UnderRay(float2 vNDC, float2 vJitter, out float fRayLength)
 {
   const float2 v = vNDC - vJitter;
-  const float3 vRay = g_Draw.vLightPos[4].xyz + v.x * g_Draw.vLightPos[2].xyz + v.y * g_Draw.vLightPos[3].xyz;
+  const float3 vRay = g_DrawExt.vLightPos[4].xyz + v.x * g_DrawExt.vLightPos[2].xyz + v.y * g_DrawExt.vLightPos[3].xyz;
   fRayLength = length(vRay);
   return vRay / fRayLength;
 }
@@ -115,7 +115,7 @@ float UnderSun(float3 x, float fDepth, float fFootprint)
   const float3 E = VolumeSunEntry(x, fDepth, g_Frame.vSunDir.xyz);
   float v = CascadeTap(E);
   [branch]
-  if (g_Draw.vParams0.w > 0 && v > 0 && fDepth < g_Draw.vParams1.z)
+  if (g_DrawExt.vParams0.w > 0 && v > 0 && fDepth < g_DrawExt.vParams1.z)
   {
     const Texture2DArray Caustics = g_TextureArrays[g_Draw.nTex1];
     const float fSize = max(fFootprint, fDepth * CAUSTICS_SUN_ANGLE);
@@ -123,11 +123,11 @@ float UnderSun(float3 x, float fDepth, float fFootprint)
     [unroll]
     for (uint i = 0; i < XR_CAUSTICS_CASCADES; i++)
     {
-      const float fTexels = fSize * g_Draw.vParams2[i] * XR_OCEAN_SIZE;
-      const float4 c = Caustics.SampleLevel(g_SamplerLinearWrap, float3(E.xy * g_Draw.vParams2[i], i), log2(max(fTexels, 1)));
-      fLight *= lerp(1, CausticsAtDepth(c, g_Draw.vParams3[i], fDepth), CausticsFar(fTexels));
+      const float fTexels = fSize * g_DrawExt.vParams2[i] * XR_OCEAN_SIZE;
+      const float4 c = Caustics.SampleLevel(g_SamplerLinearWrap, float3(E.xy * g_DrawExt.vParams2[i], i), log2(max(fTexels, 1)));
+      fLight *= lerp(1, CausticsAtDepth(c, g_DrawExt.vParams3[i], fDepth), CausticsFar(fTexels));
     }
-    v *= CausticsFactor(fLight, saturate(1 - fDepth / g_Draw.vParams1.z), g_Draw.vParams1.w);
+    v *= CausticsFactor(fLight, saturate(1 - fDepth / g_DrawExt.vParams1.z), g_DrawExt.vParams1.w);
   }
   return v;
 }
@@ -139,20 +139,20 @@ float4 PSTaps(SUnderOutput In) : SV_Target
 {
   const int3 vAt = int3(In.vPos.xy, 0);
   float fRayLength;
-  const float3 D = UnderRay(In.vNDC, g_Draw.vParams2.zw, fRayLength);
+  const float3 D = UnderRay(In.vNDC, g_DrawExt.vParams2.zw, fRayLength);
   const float fPixelAngle = max(length(ddx(D)), length(ddy(D)));
 
   const float3 vCamera = g_Frame.vCameraPos.xyz;
-  const float fLevel = g_Draw.vParams0.x;
+  const float fLevel = g_DrawExt.vParams0.x;
   const float fCameraDepth = max(fLevel - vCamera.z, 0);
   const float fDistance = UnderViewDepth(g_Textures[g_Draw.nTex2].Load(vAt).r) * fRayLength;
-  const float fPath = UnderPath(fDistance, D.z, fCameraDepth, g_Draw.vParams0.y);
+  const float fPath = UnderPath(fDistance, D.z, fCameraDepth, g_DrawExt.vParams0.y);
   const float3 c = VolumeAttenuation(UnderDecode(g_Draw.vColor.rgb), g_Draw.vColor.w);
   const float k = c.g * (1 - D.z);
   const float fReach = min(fPath, VOLUME_REACH / max(k, 1e-4));
-  if (!(g_Draw.vParams1.x > 0 && fReach > 0.01))
+  if (!(g_DrawExt.vParams1.x > 0 && fReach > 0.01))
     return 1;
-  const float fNoise = PictureNoise(In.vPos.xy, g_Draw.vParams3.z);
+  const float fNoise = PictureNoise(In.vPos.xy, g_DrawExt.vParams3.z);
   const float t = UnderSegmentAt((UnderBlockSegment(In.vPos.xy) + fNoise) / XR_UNDER_TAPS, k, fReach);
   const float3 x = vCamera + D * t;
   return UnderSun(x, max(fLevel - x.z, 0), t * fPixelAngle);
@@ -200,10 +200,10 @@ float4 PSMain(SUnderOutput In) : SV_Target
   const float3 D = UnderRay(In.vNDC, g_Frame.vJitter.xy, fRayLength);
 
   const float3 vCamera = g_Frame.vCameraPos.xyz;
-  const float fLevel = g_Draw.vParams0.x;
+  const float fLevel = g_DrawExt.vParams0.x;
   const float fCameraDepth = max(fLevel - vCamera.z, 0);
   const float fDistance = UnderViewDepth(g_Textures[g_Draw.nTex2].Load(vAt).r) * fRayLength;
-  const float fPath = UnderPath(fDistance, D.z, fCameraDepth, g_Draw.vParams0.y);
+  const float fPath = UnderPath(fDistance, D.z, fCameraDepth, g_DrawExt.vParams0.y);
   const float3 P = vCamera + D * fDistance;
   const float3 L = g_Frame.vSunDir.xyz;
 
@@ -213,11 +213,11 @@ float4 PSMain(SUnderOutput In) : SV_Target
   const float3 k = c * (1 + fMu);
   const float fReach = min(fPath, VOLUME_REACH / max(k.g, 1e-4));
 
-  const float fShare = g_Draw.vParams1.x;
+  const float fShare = g_DrawExt.vParams1.x;
   const bool bTaps = fShare > 0 && fReach > 0.01;
   float vSun[XR_UNDER_TAPS];
   [branch]
-  if (g_Draw.vParams3.w > 1)
+  if (g_DrawExt.vParams3.w > 1)
     UnderBlockTaps(In.vPos.xy, vSun);
   else
   {
@@ -233,11 +233,11 @@ float4 PSMain(SUnderOutput In) : SV_Target
                                                  vSun, fLit);
   const float fDepth = max(fLevel - P.z, 0);
   const float3 T = exp(-c * (fPath + fDepth / VolumeRefractedCos(saturate(L.z))));
-  if (g_Draw.vParams0.z == 31)
+  if (g_DrawExt.vParams0.z == 31)
     return float4(UnderEncode(vInscatter), 1);
-  if (g_Draw.vParams0.z == 32)
+  if (g_DrawExt.vParams0.z == 32)
     return float4(saturate(fLit * 0.5).xxx, 1);
-  if (g_Draw.vParams0.z == 33)
+  if (g_DrawExt.vParams0.z == 33)
     return float4(T, 1);
   const float3 vScene = UnderDecode(g_Textures[g_Draw.nTex0].Load(vAt).rgb);
   return SceneOutput(float4(UnderEncode(vScene * T + vInscatter), 1));
@@ -251,16 +251,16 @@ float4 PSMain(SUnderOutput In) : SV_Target
   // The pixel's view ray (the upscaler's jitter, which moved the scene, taken off) and the angle between neighbouring
   // pixels' rays (before any branch).
   const float2 v = In.vNDC - g_Frame.vJitter.xy;
-  const float3 vRay = g_Draw.vLightPos[4].xyz + v.x * g_Draw.vLightPos[2].xyz + v.y * g_Draw.vLightPos[3].xyz;
+  const float3 vRay = g_DrawExt.vLightPos[4].xyz + v.x * g_DrawExt.vLightPos[2].xyz + v.y * g_DrawExt.vLightPos[3].xyz;
   const float fRayLength = length(vRay);
   const float3 D = vRay / fRayLength;
   const float fPixelAngle = max(length(ddx(D)), length(ddy(D)));
 
   const float3 vCamera = g_Frame.vCameraPos.xyz;
-  const float fLevel = g_Draw.vParams0.x;
+  const float fLevel = g_DrawExt.vParams0.x;
   const float fCameraDepth = max(fLevel - vCamera.z, 0);
   const float fDistance = UnderViewDepth(g_Textures[g_Draw.nTex2].Load(vAt).r) * fRayLength;
-  const float fPath = UnderPath(fDistance, D.z, fCameraDepth, g_Draw.vParams0.y);
+  const float fPath = UnderPath(fDistance, D.z, fCameraDepth, g_DrawExt.vParams0.y);
   const float3 P = vCamera + D * fDistance;
   const float3 L = g_Frame.vSunDir.xyz;
 
@@ -273,7 +273,7 @@ float4 PSMain(SUnderOutput In) : SV_Target
   // The sun's light at the ray's segments, XR_UNDER_TAPS / 4 a pixel, the quad's shared: lane q (its place in the 2 x 2
   // pixels) the segments 4 i + q of its own ray, at a point of each moved by the pixel's noise over the frames (the
   // temporal anti-aliasing's) and by the golden ratio from one to the next; where any of the quad's pixels needs them.
-  const float fShare = g_Draw.vParams1.x;
+  const float fShare = g_DrawExt.vParams1.x;
   const bool bTaps = fShare > 0 && fReach > 0.01;
   const uint q = (uint)In.vPos.x % 2 + 2 * ((uint)In.vPos.y % 2);
   float4 vTaps = 1;
@@ -305,11 +305,11 @@ float4 PSMain(SUnderOutput In) : SV_Target
                                            fLit);
   const float fDepth = max(fLevel - P.z, 0);
   const float3 T = exp(-c * (fPath + fDepth / VolumeRefractedCos(saturate(L.z))));
-  if (g_Draw.vParams0.z == 31)
+  if (g_DrawExt.vParams0.z == 31)
     return float4(UnderEncode(vInscatter), 1);
-  if (g_Draw.vParams0.z == 32)
+  if (g_DrawExt.vParams0.z == 32)
     return float4(saturate(fLit * 0.5).xxx, 1);
-  if (g_Draw.vParams0.z == 33)
+  if (g_DrawExt.vParams0.z == 33)
     return float4(T, 1);
   const float3 vScene = UnderDecode(g_Textures[g_Draw.nTex0].Load(vAt).rgb);
   return SceneOutput(float4(UnderEncode(vScene * T + vInscatter), 1));

@@ -117,9 +117,9 @@ float ValueNoise(float2 vPos, uint nSeed)
 
 float4 Downsample(float2 vPixel)
 {
-  float2 vTexel = g_Draw.vParams0.xy;
+  float2 vTexel = g_DrawExt.vParams0.xy;
   float2 vUV = vPixel * vTexel;
-  int n = max((int)g_Draw.vParams0.z, 1);
+  int n = max((int)g_DrawExt.vParams0.z, 1);
   float4 vSum = 0;
   for (int y = 0; y < n; y++)
   {
@@ -131,9 +131,9 @@ float4 Downsample(float2 vPixel)
 
 float4 Blur(float2 vPixel)
 {
-  float2 vUV = vPixel * g_Draw.vParams0.xy;
-  float2 vStep = g_Draw.vParams1.xy;
-  float fK = -0.5 / (g_Draw.vParams1.z * g_Draw.vParams1.z);
+  float2 vUV = vPixel * g_DrawExt.vParams0.xy;
+  float2 vStep = g_DrawExt.vParams1.xy;
+  float fK = -0.5 / (g_DrawExt.vParams1.z * g_DrawExt.vParams1.z);
   float4 vSum = SampleClamp(g_Draw.nTex0, vUV);
   float fSum = 1;
   [unroll]
@@ -148,30 +148,30 @@ float4 Blur(float2 vPixel)
 
 float4 Effects(float2 vPixel)
 {
-  float2 vUV = vPixel * g_Draw.vParams0.xy;
+  float2 vUV = vPixel * g_DrawExt.vParams0.xy;
   float4 vScene = g_Textures[g_Draw.nTex0].Load(int3(vPixel, 0));
   float3 vBlur = SampleClamp(g_Draw.nTex1, vUV).rgb;
   float3 c = vScene.rgb;
   if (HasFlag(POST_NIGHTVISION))
   {
-    float fGrain = ValueNoise(vUV * float2(NV_GRAIN_ROWS * g_Draw.vParams0.y / g_Draw.vParams0.x, NV_GRAIN_ROWS), (uint)g_Draw.vParams0.w) - 0.5;
+    float fGrain = ValueNoise(vUV * float2(NV_GRAIN_ROWS * g_DrawExt.vParams0.y / g_DrawExt.vParams0.x, NV_GRAIN_ROWS), (uint)g_DrawExt.vParams0.w) - 0.5;
     float x = max(NV_SHARP * dot(c, LUMINANCE) + NV_GLOW * dot(vBlur, LUMINANCE) + NV_BIAS, 0);
     c = saturate(NV_DARK + NV_SLOPE * x) + NV_GRAIN * fGrain;
   }
   if (HasFlag(POST_SCREENBLUR))
   {
-    float3 vTint = 2 * g_Draw.vParams1.rgb * dot(SampleClamp(g_Draw.nTex3, vUV).rgb, LUMINANCE);
-    c = lerp(c, vTint * vTint, g_Draw.vParams1.w);
+    float3 vTint = 2 * g_DrawExt.vParams1.rgb * dot(SampleClamp(g_Draw.nTex3, vUV).rgb, LUMINANCE);
+    c = lerp(c, vTint * vTint, g_DrawExt.vParams1.w);
   }
   if (HasFlag(POST_FLASHBANG))
   {
     float3 vGhost = SampleClamp(g_Draw.nTex2, vUV).rgb;
-    float2 d = (vUV - g_Draw.vParams3.xy) * g_Draw.vParams3.zw;
-    c = c * g_Draw.vParams2.x + vGhost * g_Draw.vParams2.y + g_Draw.vParams2.z + g_Draw.vParams2.w * exp(-8 * dot(d, d));
+    float2 d = (vUV - g_DrawExt.vParams3.xy) * g_DrawExt.vParams3.zw;
+    c = c * g_DrawExt.vParams2.x + vGhost * g_DrawExt.vParams2.y + g_DrawExt.vParams2.z + g_DrawExt.vParams2.w * exp(-8 * dot(d, d));
   }
   c = saturate(c);
   if (HasFlag(POST_FADE))
-    c *= 1 - g_Draw.vParams0.z;
+    c *= 1 - g_DrawExt.vParams0.z;
   return float4(c, vScene.a);
 }
 
@@ -186,8 +186,8 @@ static const float SUN_MASK_SHRINK = 43.0 / 12;
 
 float4 SunPatch(float2 vPixel)
 {
-  float2 vScreen = g_Draw.vParams1.xy + (vPixel - SUN_PATCH_SIZE / 2) * g_Draw.vParams1.z;
-  int2 vLoad = clamp((int2)floor(vScreen), 0, int2(g_Draw.vParams1.w, g_Draw.vParams2.x) - 1);
+  float2 vScreen = g_DrawExt.vParams1.xy + (vPixel - SUN_PATCH_SIZE / 2) * g_DrawExt.vParams1.z;
+  int2 vLoad = clamp((int2)floor(vScreen), 0, int2(g_DrawExt.vParams1.w, g_DrawExt.vParams2.x) - 1);
   return g_Textures[g_Draw.nTex0].Load(int3(vLoad, 0)).r >= 1 ? 1 : 0;
 }
 
@@ -207,26 +207,26 @@ float4 SunMask(float2 vPixel)
 
 float4 DepthView(float2 vPixel)
 {
-  float fNear = g_Draw.vParams1.x, fFar = g_Draw.vParams1.y;
-  float d = g_Textures[g_Draw.nTex0].SampleLevel(g_SamplerPointClamp, vPixel * g_Draw.vParams0.xy, 0).r;
+  float fNear = g_DrawExt.vParams1.x, fFar = g_DrawExt.vParams1.y;
+  float d = g_Textures[g_Draw.nTex0].SampleLevel(g_SamplerPointClamp, vPixel * g_DrawExt.vParams0.xy, 0).r;
   float fDist = fNear * fFar / max(fFar - d * (fFar - fNear), 1e-6);
   return float4((float3)saturate(log2(fDist / fNear) / log2(fFar / fNear)), 1);
 }
 
 float4 AoTaken(float2 vPixel)
 {
-  float2 vUV = vPixel * g_Draw.vParams0.xy;
+  float2 vUV = vPixel * g_DrawExt.vParams0.xy;
   float fDepth = g_Textures[g_Draw.nTex1].SampleLevel(g_SamplerPointClamp, vUV, 0).r;
-  if (g_Draw.vParams1.y != 0)
+  if (g_DrawExt.vParams1.y != 0)
   {
-    const float3 f = fDepth < 1 ? pow(max(g_Textures[g_Draw.nTex0].SampleLevel(g_SamplerPointClamp, vUV, 0).rgb, 0), g_Draw.vParams1.x) : 1;
-    const float3 d = g_Draw.vParams1.y < 1.5 ? saturate(1 - f) : max(f - 1, 0);
+    const float3 f = fDepth < 1 ? pow(max(g_Textures[g_Draw.nTex0].SampleLevel(g_SamplerPointClamp, vUV, 0).rgb, 0), g_DrawExt.vParams1.x) : 1;
+    const float3 d = g_DrawExt.vParams1.y < 1.5 ? saturate(1 - f) : max(f - 1, 0);
     // (nothing to blend: the pixel left as it is)
     if (all(d <= 0))
       discard;
     return float4(f16tof32(f32tof16(d * g_Textures[g_Draw.nTex2].SampleLevel(g_SamplerPointClamp, vUV, 0).rgb)), 0);
   }
-  float v = fDepth < 1 ? pow(saturate(g_Textures[g_Draw.nTex0].SampleLevel(g_SamplerPointClamp, vUV, 0).r), g_Draw.vParams1.x) : 1;
+  float v = fDepth < 1 ? pow(saturate(g_Textures[g_Draw.nTex0].SampleLevel(g_SamplerPointClamp, vUV, 0).r), g_DrawExt.vParams1.x) : 1;
   return float4(f16tof32(f32tof16((1 - v) * g_Textures[g_Draw.nTex2].SampleLevel(g_SamplerPointClamp, vUV, 0).rgb)), 0);
 }
 
@@ -251,22 +251,22 @@ float4 RenderModeAdapt()
         m += SampleClamp(g_Draw.nTex0, c + ((float2(x, y) + 0.5) / 4 - 0.5) * (2.0 / 256)).rgb;
     }
   }
-  return float4((float3)RenderModeAdaptTarget(m / 64), g_Draw.vParams1.x);
+  return float4((float3)RenderModeAdaptTarget(m / 64), g_DrawExt.vParams1.x);
 }
 
 //! The glare's source at 128 x 128 (RenderModeGlareSource) from the 256 x 256 copy tex0 (bilinear: the mean of its
 //! 2 x 2 texels) and the adapted luminance tex1 (1 x 1); vParams1.xy the threshold and the gain.
 float4 RenderModeBright(float2 vPixel)
 {
-  const float3 d = SampleClamp(g_Draw.nTex0, vPixel * g_Draw.vParams0.xy).rgb;
+  const float3 d = SampleClamp(g_Draw.nTex0, vPixel * g_DrawExt.vParams0.xy).rgb;
   const float3 a = saturate(g_Textures[g_Draw.nTex1].Load(int3(0, 0, 0)).rgb);
-  return float4(RenderModeGlareSource(d, a, g_Draw.vParams1.x, g_Draw.vParams1.y), a.b);
+  return float4(RenderModeGlareSource(d, a, g_DrawExt.vParams1.x, g_DrawExt.vParams1.y), a.b);
 }
 
 //! One of the glare's blur passes: 4 bilinear taps at (1, 2), (-2, 1), (-1, -2), (2, -1) times vParams1.x texels.
 float4 RenderModeBlur(float2 vPixel)
 {
-  const float2 vUV = vPixel * g_Draw.vParams0.xy, s = g_Draw.vParams0.xy * g_Draw.vParams1.x;
+  const float2 vUV = vPixel * g_DrawExt.vParams0.xy, s = g_DrawExt.vParams0.xy * g_DrawExt.vParams1.x;
   return 0.25 * (SampleClamp(g_Draw.nTex0, vUV + s * float2(1, 2)) + SampleClamp(g_Draw.nTex0, vUV + s * float2(-2, 1)) +
                  SampleClamp(g_Draw.nTex0, vUV + s * float2(-1, -2)) + SampleClamp(g_Draw.nTex0, vUV + s * float2(2, -1)));
 }
@@ -275,18 +275,18 @@ float4 RenderModeBlur(float2 vPixel)
 //! the scene first through RenderModeCold with the 256 x 256 copy tex2 (the original's back buffer).
 float4 RenderModeComposite(float2 vPixel)
 {
-  const float2 vUV = vPixel * g_Draw.vParams0.xy;
+  const float2 vUV = vPixel * g_DrawExt.vParams0.xy;
   float3 f = g_Textures[g_Draw.nTex0].Load(int3(vPixel, 0)).rgb;
-  if (g_Draw.vParams1.y > 0)
+  if (g_DrawExt.vParams1.y > 0)
     f = RenderModeCold(f, SampleClamp(g_Draw.nTex2, vUV).rgb);
-  return float4(RenderModeGlared(f, SampleClamp(g_Draw.nTex1, vUV).rgb, g_Draw.vParams1.x), 1);
+  return float4(RenderModeGlared(f, SampleClamp(g_Draw.nTex1, vUV).rgb, g_DrawExt.vParams1.x), 1);
 }
 
 //! The cartoon: its colours (RenderModeCartoonColor) of the pixel times RenderModeEdge of those above, below, left and
 //! right of it (clamped to the screen), as the original's: dark where the colour falls downwards or to the right.
 float4 RenderModeCartoon(float2 vPixel)
 {
-  const int2 p = (int2)vPixel, vLast = (int2)round(1 / g_Draw.vParams0.xy) - 1;
+  const int2 p = (int2)vPixel, vLast = (int2)round(1 / g_DrawExt.vParams0.xy) - 1;
   const float3 c = RenderModeCartoonColor(g_Textures[g_Draw.nTex0].Load(int3(p, 0)).rgb);
   const float3 u = RenderModeCartoonColor(g_Textures[g_Draw.nTex0].Load(int3(clamp(p + int2(0, -1), 0, vLast), 0)).rgb);
   const float3 d = RenderModeCartoonColor(g_Textures[g_Draw.nTex0].Load(int3(clamp(p + int2(0, 1), 0, vLast), 0)).rgb);
@@ -320,7 +320,7 @@ float4 PSMain(SPostOutput In) : SV_Target
   if (HasFlag(POST_BLUR))
     return Blur(In.vPos.xy);
   if (HasFlag(POST_BLEND))
-    return g_Textures[g_Draw.nTex0].SampleLevel(g_SamplerPointClamp, In.vPos.xy * g_Draw.vParams0.xy, 0) * g_Draw.vParams1;
+    return g_Textures[g_Draw.nTex0].SampleLevel(g_SamplerPointClamp, In.vPos.xy * g_DrawExt.vParams0.xy, 0) * g_DrawExt.vParams1;
   return Effects(In.vPos.xy);
 }
 
@@ -341,8 +341,8 @@ SHighlightOutput PSHighlight(SPostOutput In)
   }
   else
   {
-    vRatio = g_Textures[g_Draw.nTex1].SampleLevel(g_SamplerLinearClamp, In.vPos.xy * g_Draw.vParams0.xy, 0).rgb;
-    vRatio = lerp(float3(1, 1, 1), max(vRatio, 1), step(g_Draw.vParams2.x, Out.vColor.rgb));
+    vRatio = g_Textures[g_Draw.nTex1].SampleLevel(g_SamplerLinearClamp, In.vPos.xy * g_DrawExt.vParams0.xy, 0).rgb;
+    vRatio = lerp(float3(1, 1, 1), max(vRatio, 1), step(g_DrawExt.vParams2.x, Out.vColor.rgb));
   }
   Out.vHighlight = float4(vRatio, HighlightFingerprint(Out.vColor.rgb));
   return Out;

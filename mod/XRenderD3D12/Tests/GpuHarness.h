@@ -28,6 +28,8 @@
 //	  .. buffers (g_Buffers: 0 the scene's corners), t0 space1 the 2D
 //	  15 textures (g_Textures: SDispatch::Textures, null ones after them),
 //	     t0 space2, 3 and 6 the other textures (null ones)
+//	  16 CBV b1         SDrawHead (g_Draw of Common.hlsli)
+//	  17 CBV b3         SDrawExt (g_DrawExt of Common.hlsli)
 //	  static samplers s0-s4 as Common.hlsli has them
 //	Every run waits for the GPU: the tests are small.
 //
@@ -160,6 +162,8 @@ namespace XrTest
     const void *pLights = nullptr;        //!< t2 space9 and t2 space5
     size_t nLightBytes = 0;
     const void *pFrame = nullptr;         //!< b0: an SFrameConstants (else zeros)
+    const void *pDraw = nullptr;          //!< b1: an SDrawHead (else zeros)
+    const void *pDrawExt = nullptr;       //!< b3: an SDrawExt (else zeros)
     const SRayScene *pScene = nullptr;    //!< t0, t1 space5 and g_Buffers (needs HasRaytracing)
     std::vector<STestTexture> Textures;   //!< g_Textures[0..] (t0 space1), at most MAX_TEST_TEXTURES
     size_t nOut = 1;

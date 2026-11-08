@@ -66,6 +66,8 @@ foreach(k Resolve Dilate Sharpen Working)
 endforeach()
 # MSAA's resolve (Msaa.hlsli as Msaa.hlsl's passes use it).
 xrender_d3d12_test_shader(Msaa "${CMAKE_CURRENT_SOURCE_DIR}/Shaders/TestMsaa.hlsl" cs_6_0 CSMsaa)
+# The draw's constants as the programs read them (Common.hlsli's g_Draw and g_DrawExt).
+xrender_d3d12_test_shader(DrawLayout "${CMAKE_CURRENT_SOURCE_DIR}/Shaders/TestDraw.hlsl" cs_6_0 CSDrawLayout)
 # Parallax occlusion mapping (r_Parallax: Parallax.hlsli as General.hlsl includes it, its height the test's).
 set(parallax "${CMAKE_CURRENT_SOURCE_DIR}/Shaders/TestParallax.hlsl")
 foreach(k UV Parts MarchGrad)

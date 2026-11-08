@@ -563,11 +563,11 @@ bool CD3D12Pipeline::CreateRootSignature()
   Ranges[4] = Ranges[0];
   Ranges[4].RegisterSpace = 6;                  // Texture3D g_Volumes[] (the volumetric light's froxels)
 
-  D3D12_ROOT_PARAMETER Params[6] = {};
+  D3D12_ROOT_PARAMETER Params[7] = {};
   Params[0].ParameterType = D3D12_ROOT_PARAMETER_TYPE_CBV;      // b0 SFrameConstants
   Params[0].Descriptor.ShaderRegister = 0;
   Params[0].ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
-  Params[1].ParameterType = D3D12_ROOT_PARAMETER_TYPE_CBV;      // b1 SDrawConstants
+  Params[1].ParameterType = D3D12_ROOT_PARAMETER_TYPE_CBV;      // b1 SDrawHead
   Params[1].Descriptor.ShaderRegister = 1;
   Params[1].ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
   Params[2].ParameterType = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
@@ -586,6 +586,9 @@ bool CD3D12Pipeline::CreateRootSignature()
   Params[ROOT_RAY_LIGHTS].Descriptor.ShaderRegister = 2;
   Params[ROOT_RAY_LIGHTS].Descriptor.RegisterSpace = 5;
   Params[ROOT_RAY_LIGHTS].ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
+  Params[ROOT_DRAW_EXT].ParameterType = D3D12_ROOT_PARAMETER_TYPE_CBV;     // b3 SDrawExt
+  Params[ROOT_DRAW_EXT].Descriptor.ShaderRegister = 3;
+  Params[ROOT_DRAW_EXT].ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
 
   D3D12_STATIC_SAMPLER_DESC Samplers[5];
   Samplers[XR_SAMPLER_LINEAR_WRAP] = StaticSampler(XR_SAMPLER_LINEAR_WRAP, D3D12_FILTER_ANISOTROPIC, D3D12_TEXTURE_ADDRESS_MODE_WRAP);

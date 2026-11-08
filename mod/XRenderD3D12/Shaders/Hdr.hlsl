@@ -136,9 +136,9 @@ float Exposure(uint nTex, float fCompensation, bool bAuto)
 
 float4 MeterLuminance(float2 vPixel)
 {
-  float2 vTexel = g_Draw.vParams0.xy;
+  float2 vTexel = g_DrawExt.vParams0.xy;
   float2 vUV = vPixel * vTexel;
-  int n = max((int)g_Draw.vParams0.z, 1);
+  int n = max((int)g_DrawExt.vParams0.z, 1);
   float3 vSum = 0;
   for (int y = 0; y < n; y++)
   {
@@ -150,9 +150,9 @@ float4 MeterLuminance(float2 vPixel)
 
 float4 Reduce(float2 vPixel)
 {
-  float2 vTexel = g_Draw.vParams0.xy;
+  float2 vTexel = g_DrawExt.vParams0.xy;
   float2 vUV = vPixel * vTexel;
-  int n = max((int)g_Draw.vParams0.z, 1);
+  int n = max((int)g_DrawExt.vParams0.z, 1);
   float4 vSum = 0;
   for (int y = 0; y < n; y++)
   {
@@ -165,18 +165,18 @@ float4 Reduce(float2 vPixel)
 float4 Adapt()
 {
   float fTarget;
-  if (g_Draw.vParams1.z > 0)
-    fTarget = clamp(g_Textures[g_Draw.nTex0].Load(int3(0, 0, 0)).r, g_Draw.vParams0.y, g_Draw.vParams0.z);
+  if (g_DrawExt.vParams1.z > 0)
+    fTarget = clamp(g_Textures[g_Draw.nTex0].Load(int3(0, 0, 0)).r, g_DrawExt.vParams0.y, g_DrawExt.vParams0.z);
   else
   {
     float2 vMeter = g_Textures[g_Draw.nTex0].Load(int3(0, 0, 0)).rg;
     float fMeanLog = vMeter.y > 0 ? vMeter.x / vMeter.y : 0;
-    fTarget = clamp(g_Draw.vParams0.x - fMeanLog, g_Draw.vParams0.y, g_Draw.vParams0.z);
+    fTarget = clamp(g_DrawExt.vParams0.x - fMeanLog, g_DrawExt.vParams0.y, g_DrawExt.vParams0.z);
   }
   float fBefore = g_Textures[g_Draw.nTex1].Load(int3(0, 0, 0)).r;
-  if (g_Draw.vParams0.w > 0 || !(abs(fBefore) < 100))
+  if (g_DrawExt.vParams0.w > 0 || !(abs(fBefore) < 100))
     return float4(fTarget, 0, 0, 0);
-  return float4(lerp(fBefore, fTarget, fTarget < fBefore ? g_Draw.vParams1.x : g_Draw.vParams1.y), 0, 0, 0);
+  return float4(lerp(fBefore, fTarget, fTarget < fBefore ? g_DrawExt.vParams1.x : g_DrawExt.vParams1.y), 0, 0, 0);
 }
 
 //////////////////////////////////////////////////////////////////////////
@@ -191,10 +191,10 @@ float3 BloomTap(float2 vUV, bool bScene, float fExposure)
 
 float4 BloomDown(float2 vPixel)
 {
-  float2 vUV = vPixel * g_Draw.vParams0.xy;
-  float2 t = g_Draw.vParams0.zw;
+  float2 vUV = vPixel * g_DrawExt.vParams0.xy;
+  float2 t = g_DrawExt.vParams0.zw;
   bool bScene = HasFlag(HDR_BLOOM_PREFILTER);
-  float fExposure = bScene ? Exposure(g_Draw.nTex1, g_Draw.vParams1.x, g_Draw.vParams1.y > 0) : 1;
+  float fExposure = bScene ? Exposure(g_Draw.nTex1, g_DrawExt.vParams1.x, g_DrawExt.vParams1.y > 0) : 1;
   float3 a = BloomTap(vUV + t * float2(-2, -2), bScene, fExposure);
   float3 b = BloomTap(vUV + t * float2(0, -2), bScene, fExposure);
   float3 c = BloomTap(vUV + t * float2(2, -2), bScene, fExposure);
@@ -208,13 +208,13 @@ float4 BloomDown(float2 vPixel)
   float3 k = BloomTap(vUV + t * float2(-2, 2), bScene, fExposure);
   float3 l = BloomTap(vUV + t * float2(0, 2), bScene, fExposure);
   float3 m = BloomTap(vUV + t * float2(2, 2), bScene, fExposure);
-  return float4(BloomDownTaps(a, b, c, d, e, f, g, h, i, j, k, l, m, bScene, g_Draw.vParams1.z, g_Draw.vParams1.w), 1);
+  return float4(BloomDownTaps(a, b, c, d, e, f, g, h, i, j, k, l, m, bScene, g_DrawExt.vParams1.z, g_DrawExt.vParams1.w), 1);
 }
 
 float4 BloomUp(float2 vPixel)
 {
-  float2 vUV = vPixel * g_Draw.vParams0.xy;
-  float2 t = g_Draw.vParams0.zw;
+  float2 vUV = vPixel * g_DrawExt.vParams0.xy;
+  float2 t = g_DrawExt.vParams0.zw;
   float3 vSum = SampleClamp(g_Draw.nTex0, vUV).rgb * 4;
   vSum += (SampleClamp(g_Draw.nTex0, vUV + float2(-t.x, 0)).rgb + SampleClamp(g_Draw.nTex0, vUV + float2(t.x, 0)).rgb +
            SampleClamp(g_Draw.nTex0, vUV + float2(0, -t.y)).rgb + SampleClamp(g_Draw.nTex0, vUV + float2(0, t.y)).rgb) * 2;
@@ -275,7 +275,7 @@ float3 ToneMap(float3 vLight, int nMode, float fKnee)
   if (nMode == 1)
     return SoftShoulder(vLight, fKnee);
   if (nMode == 4)
-    return NeutralToneMap(vLight, clamp(fKnee, 0, 0.99), 1, g_Draw.vParams3.z);
+    return NeutralToneMap(vLight, clamp(fKnee, 0, 0.99), 1, g_DrawExt.vParams3.z);
   if (nMode == 2)
     return Encode(AcesFitted(vLight));
   if (nMode == 3)
@@ -322,16 +322,16 @@ float3 HighlightRatio(float3 vLight, float3 s, int nMode, float k)
 {
   float3 h;
   if (nMode == 0)
-    h = Encode(min(vLight, g_Draw.vParams3.y));
+    h = Encode(min(vLight, g_DrawExt.vParams3.y));
   else if (nMode == 4)
   {
-    float P = max(g_Draw.vParams3.x, 1);
-    h = HdrOutputToneMap(vLight, clamp(k, 0, 0.99), P, g_Draw.vParams3.z, g_Draw.vParams3.w);
+    float P = max(g_DrawExt.vParams3.x, 1);
+    h = HdrOutputToneMap(vLight, clamp(k, 0, 0.99), P, g_DrawExt.vParams3.z, g_DrawExt.vParams3.w);
   }
   else
   {
     k = clamp(k, 0, 0.99);
-    float fRange = 1 - k, fHead = max(g_Draw.vParams3.x - k, 1e-4);
+    float fRange = 1 - k, fHead = max(g_DrawExt.vParams3.x - k, 1e-4);
     float3 t = nMode == 1 ? max(Encode(vLight) - k, 0) : -fRange * log(max(1 - saturate((s - k) / fRange), 1e-7));
     h = lerp(k + fHead * (1 - exp(-t / fHead)), s, step(s, k));
   }
@@ -344,13 +344,13 @@ float3 HighlightRatio(float3 vLight, float3 s, int nMode, float k)
 //! beyond the volume's far end.
 float3 Volumetric(float2 vPixel, float3 vLight)
 {
-  float4 p = g_Draw.mParams0[0];
+  float4 p = g_DrawExt.mParams0[0];
   float fDepth = g_Textures[g_Draw.nTex5].Load(int3(vPixel, 0)).r;
-  float d = g_Draw.mParams0[1].x / (fDepth + p.w);
+  float d = g_DrawExt.mParams0[1].x / (fDepth + p.w);
   // A froxel's integrated light is at its far end: half a slice after its centre.
   float w = saturate(log2(max(d, 1e-3) / p.x) * p.y) - p.z;
-  float4 v = g_Volumes[g_Draw.nTex4].SampleLevel(g_SamplerLinearClamp, float3(vPixel * g_Draw.vParams0.xy, w), 0);
-  return g_Draw.mParams0[1].y > 0 ? v.rgb : vLight * v.a + v.rgb;
+  float4 v = g_Volumes[g_Draw.nTex4].SampleLevel(g_SamplerLinearClamp, float3(vPixel * g_DrawExt.vParams0.xy, w), 0);
+  return g_DrawExt.mParams0[1].y > 0 ? v.rgb : vLight * v.a + v.rgb;
 }
 
 //! vRatio: the highlight layer's ratio (1 for the clamped scene and the debug views).
@@ -363,17 +363,17 @@ float4 Resolve(float2 vPixel, out float3 vRatio)
   bool bLinear = HasFlag(HDR_LINEAR);
   if (bLinear)
     vScene.rgb = max(vScene.rgb, 0);
-  if (g_Draw.vParams2.y > 0)
+  if (g_DrawExt.vParams2.y > 0)
     return float4(saturate(bLinear ? Encode(vScene.rgb) : vScene.rgb), fAlpha);
-  if ((int)g_Draw.vParams2.z == 3)
+  if ((int)g_DrawExt.vParams2.z == 3)
     return float4(bLinear ? saturate(vScene.rgb) : (g_Textures[g_Draw.nTex5].Load(int3(vPixel, 0)).r >= 1 ? 1 : 0).xxx, fAlpha);
-  float fExposure = Exposure(g_Draw.nTex2, g_Draw.vParams1.x, g_Draw.vParams1.y > 0);
+  float fExposure = Exposure(g_Draw.nTex2, g_DrawExt.vParams1.x, g_DrawExt.vParams1.y > 0);
   float3 vLight = bLinear ? vScene.rgb : Decode(vScene.rgb);
   if (HasFlag(HDR_VOLUMETRIC))
     vLight = Volumetric(vPixel, vLight);
   vLight *= fExposure;
-  float3 vBloom = g_Draw.vParams1.z > 0 ? SampleClamp(g_Draw.nTex1, vPixel * g_Draw.vParams0.xy).rgb * g_Draw.vParams1.z : 0;
-  int nDebug = (int)g_Draw.vParams2.z;
+  float3 vBloom = g_DrawExt.vParams1.z > 0 ? SampleClamp(g_Draw.nTex1, vPixel * g_DrawExt.vParams0.xy).rgb * g_DrawExt.vParams1.z : 0;
+  int nDebug = (int)g_DrawExt.vParams2.z;
   if (nDebug == 1)
     return float4(EvBands(Luminance(vLight)), fAlpha);
   if (nDebug == 2)
@@ -381,12 +381,12 @@ float4 Resolve(float2 vPixel, out float3 vRatio)
   else
     vLight += vBloom;
   // Under the water the eye's white balance: each channel's factor (d3d12_WaterUnderAdapt).
-  if (g_Draw.vUnderColor.w > 0 && nDebug == 0)
-    vLight *= g_Draw.vUnderColor.rgb;
-  float3 c = ToneMap(vLight, (int)g_Draw.vParams1.w, g_Draw.vParams2.x);
+  if (g_DrawExt.vUnderColor.w > 0 && nDebug == 0)
+    vLight *= g_DrawExt.vUnderColor.rgb;
+  float3 c = ToneMap(vLight, (int)g_DrawExt.vParams1.w, g_DrawExt.vParams2.x);
   if (nDebug == 0)
-    vRatio = HighlightRatio(vLight, c, (int)g_Draw.vParams1.w, g_Draw.vParams2.x);
-  if (g_Draw.vParams2.w > 0 && nDebug == 0)
+    vRatio = HighlightRatio(vLight, c, (int)g_DrawExt.vParams1.w, g_DrawExt.vParams2.x);
+  if (g_DrawExt.vParams2.w > 0 && nDebug == 0)
     c = ColorLut(g_Draw.nTex3, c);
   return float4(c, fAlpha);
 }
@@ -396,9 +396,9 @@ float4 SceneLight(float2 vPixel)
 {
   float4 vScene = g_Textures[g_Draw.nTex0].Load(int3(vPixel, 0));
   float fAlpha = saturate(vScene.a);
-  if (g_Draw.vParams2.y > 0)
+  if (g_DrawExt.vParams2.y > 0)
     return float4(Decode(saturate(vScene.rgb)), fAlpha);
-  if ((int)g_Draw.vParams2.z == 3)
+  if ((int)g_DrawExt.vParams2.z == 3)
     return float4((g_Textures[g_Draw.nTex5].Load(int3(vPixel, 0)).r >= 1 ? 1 : 0).xxx, fAlpha);
   float3 vLight = Decode(vScene.rgb);
   if (HasFlag(HDR_VOLUMETRIC))
@@ -439,7 +439,7 @@ float3 TestPatches(float2 vUV, float3 vLight, float fPeak)
 //! the game's light); black between. False outside the rectangle; fNits the light in nits.
 bool PageTest(float2 vPixel, float4 vRect, float fPaper, float fPeak, out float fNits)
 {
-  float2 vSize = 1 / g_Draw.vParams1.xy;
+  float2 vSize = 1 / g_DrawExt.vParams1.xy;
   float2 p0 = floor(vRect.xy * vSize), p1 = floor(vRect.zw * vSize);
   fNits = 0;
   if (any(vPixel < p0) || any(vPixel >= p1))
@@ -473,13 +473,13 @@ float4 Output(float2 vPixel)
   float fLimit = g_Textures[g_Draw.nTex2].Load(int3(0, 0, 0)).r;
   if (fLimit < 1)
     vRatio = 1 + (vRatio - 1) * fLimit;
-  float fPaper = g_Draw.vParams0.x, fPeak = g_Draw.vParams0.y;
+  float fPaper = g_DrawExt.vParams0.x, fPeak = g_DrawExt.vParams0.y;
   float3 vLight = Decode(f);
-  int nDebug = (int)g_Draw.vParams0.w;
+  int nDebug = (int)g_DrawExt.vParams0.w;
   // The HDR page's test: grey at its light in nits, the peak's square above the peak.
   float fTest;
-  if (nDebug == 3 && PageTest(vPixel, g_Draw.vParams2, fPaper, fPeak, fTest))
-    return float4(g_Draw.vParams0.z == 1 ? Pq(fTest.xxx) : (fTest / 80).xxx, 1);
+  if (nDebug == 3 && PageTest(vPixel, g_DrawExt.vParams2, fPaper, fPeak, fTest))
+    return float4(g_DrawExt.vParams0.z == 1 ? Pq(fTest.xxx) : (fTest / 80).xxx, 1);
   if (nDebug == 1)
   {
     // The scene's highlights from yellow (a little) to red (the peak), the rest grey, blue where
@@ -496,11 +496,11 @@ float4 Output(float2 vPixel)
   }
   else if (nDebug == 2)
   {
-    vLight = TestPatches(vPixel * g_Draw.vParams1.xy, vLight * vRatio, fPeak / fPaper);
+    vLight = TestPatches(vPixel * g_DrawExt.vParams1.xy, vLight * vRatio, fPeak / fPaper);
     vRatio = 1;
   }
   float3 vNits = min(vLight * vRatio * fPaper, fPeak);
-  if (g_Draw.vParams0.z == 1)
+  if (g_DrawExt.vParams0.z == 1)
     return float4(Pq(mul(REC709_TO_REC2020, vNits)), 1);
   return float4(vNits / 80, 1);
 }
@@ -527,7 +527,7 @@ float4 PSMain(SHdrOutput In) : SV_Target
   if (HasFlag(HDR_SCENE_LIGHT))
     return SceneLight(In.vPos.xy);
   if (HasFlag(HDR_EXPOSURE_SCALE))
-    return float4(Exposure(g_Draw.nTex0, g_Draw.vParams1.x, g_Draw.vParams1.y > 0), 0, 0, 1);
+    return float4(Exposure(g_Draw.nTex0, g_DrawExt.vParams1.x, g_DrawExt.vParams1.y > 0), 0, 0, 1);
   if (HasFlag(HDR_BLOOM_DOWN))
     return BloomDown(In.vPos.xy);
   if (HasFlag(HDR_BLOOM_UP))

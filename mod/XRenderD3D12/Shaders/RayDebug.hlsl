@@ -126,9 +126,9 @@ float3 PixelRay(float2 vPixel)
 {
   // The pixel's point at the middle of the depth range: in front of the camera whichever way the
   // projection's depth goes.
-  const float2 vUV = vPixel * g_Draw.vParams0.xy;
-  const float4 vWorld = mul(float4(vUV.x * 2 - 1, 1 - vUV.y * 2, 0.5, 1), g_Draw.mParams0);
-  return SafeNormalize(vWorld.xyz / vWorld.w - g_Draw.vParams1.xyz);
+  const float2 vUV = vPixel * g_DrawExt.vParams0.xy;
+  const float4 vWorld = mul(float4(vUV.x * 2 - 1, 1 - vUV.y * 2, 0.5, 1), g_DrawExt.mParams0);
+  return SafeNormalize(vWorld.xyz / vWorld.w - g_DrawExt.vParams1.xyz);
 }
 
 //! Blue at 0, green at 0.5, red at 1.
@@ -140,7 +140,7 @@ float3 Ramp(float f)
 //! The G-buffer's views (XR_RAY_DEBUG_GB_*) at the target's point vPixel.
 float4 GBufferView(uint nView, float2 vPixel)
 {
-  const int3 vAt = int3(min(vPixel * g_Draw.vParams0.xy * g_Draw.vParams2.xy, g_Draw.vParams2.xy - 1), 0);
+  const int3 vAt = int3(min(vPixel * g_DrawExt.vParams0.xy * g_DrawExt.vParams2.xy, g_DrawExt.vParams2.xy - 1), 0);
   const float3 vAlbedo = g_Textures[g_Draw.nTex0].Load(vAt).rgb;
   const float4 vNormal = g_Textures[g_Draw.nTex1].Load(vAt);
   const uint nMaterial = PathGBufferMaterial(vNormal);
@@ -170,17 +170,17 @@ float4 GBufferView(uint nView, float2 vPixel)
 
 float4 PSMain(SRayDebugOutput In) : SV_Target
 {
-  const uint nView = (uint)g_Draw.vParams0.z;
+  const uint nView = (uint)g_DrawExt.vParams0.z;
   if (nView >= XR_RAY_DEBUG_GB_ALBEDO)
     return GBufferView(nView, In.vPos.xy);
-  if (nView == XR_RAY_DEBUG_SHADED && In.vPos.x * g_Draw.vParams0.x < 0.5)
+  if (nView == XR_RAY_DEBUG_SHADED && In.vPos.x * g_DrawExt.vParams0.x < 0.5)
     discard;
   RayDesc Ray;
-  Ray.Origin = g_Draw.vParams1.xyz;
+  Ray.Origin = g_DrawExt.vParams1.xyz;
   Ray.Direction = PixelRay(In.vPos.xy);
   Ray.TMin = 0.01;
-  Ray.TMax = g_Draw.vParams0.w;
-  const uint nMask = asuint(g_Draw.vParams1.w) & 0xff;
+  Ray.TMax = g_DrawExt.vParams0.w;
+  const uint nMask = asuint(g_DrawExt.vParams1.w) & 0xff;
 
   if (nView >= XR_RAY_DEBUG_PT_ALBEDO && nView <= XR_RAY_DEBUG_PT_DIRECT)
   {
@@ -189,13 +189,13 @@ float4 PSMain(SRayDebugOutput In) : SV_Target
     if (!Hit.bHit)
       return nView == XR_RAY_DEBUG_PT_DIRECT ? SceneOutput(float4(g_Frame.vFogColor.rgb, 1)) : float4(0, 0, 0, 1);
     SPathShade P;
-    P.vSun = g_Draw.vParams2.xyz;
-    P.fLamps = g_Draw.vParams2.w;
-    P.fEmission = g_Draw.vParams3.x;
-    P.fDelight = g_Draw.vParams3.y;
-    P.vBakeLight = g_Draw.vAmbient.rgb;
-    P.fLightGap = g_Draw.vParams3.z;
-    P.fBakedFalloff = g_Draw.vParams3.w;
+    P.vSun = g_DrawExt.vParams2.xyz;
+    P.fLamps = g_DrawExt.vParams2.w;
+    P.fEmission = g_DrawExt.vParams3.x;
+    P.fDelight = g_DrawExt.vParams3.y;
+    P.vBakeLight = g_DrawExt.vAmbient.rgb;
+    P.fLightGap = g_DrawExt.vParams3.z;
+    P.fBakedFalloff = g_DrawExt.vParams3.w;
     P.nLights = g_Draw.nTex2;
     P.nMask = nMask;
     P.nMaxTests = XR_RAY_MAX_ALPHA_TESTS;
@@ -244,7 +244,7 @@ float4 PSMain(SRayDebugOutput In) : SV_Target
       return float4(Ramp(fLevel / 8), 1);
     }
     bool bFog;
-    float4 vColor = RayShade(Hit, Ray.Direction, Hit.fT * fSpread, (asuint(g_Draw.vParams1.w) & 0x100) != 0, nMask, bFog);
+    float4 vColor = RayShade(Hit, Ray.Direction, Hit.fT * fSpread, (asuint(g_DrawExt.vParams1.w) & 0x100) != 0, nMask, bFog);
     if (bFog && g_Frame.vFogParams.w != 0)
       vColor.rgb = lerp(g_Frame.vFogColor.rgb, vColor.rgb, SceneFog(Ray.Origin + Ray.Direction * Hit.fT));
     return SceneOutput(float4(vColor.rgb, 1));

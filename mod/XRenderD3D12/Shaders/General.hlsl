@@ -277,7 +277,7 @@
 #include "Underwater.hlsli"
 #include "AlphaCoverage.hlsli"
 // r_Parallax's height: the RayMaster material map's alpha (Draw3D.cpp's nParallax).
-#define PARALLAX_HEIGHT(uv, dx, dy) SampleTextureGrad(g_Draw.nParallax.x, g_Draw.nParallax.y, uv, dx, dy).a
+#define PARALLAX_HEIGHT(uv, dx, dy) SampleTextureGrad(g_DrawExt.nParallax.x, g_DrawExt.nParallax.y, uv, dx, dy).a
 #include "Parallax.hlsli"
 #include "PbrSpecular.hlsli"
 #include "Skin.hlsli"
@@ -349,7 +349,7 @@ float LightVisible(float3 vPos, float3 vToLight, float fDistance, float fMinGap,
   // map's normal): all of its rays (skin is on closed heads; 2 cm along the normal a ray towards the lamp passes the
   // head's curve there).
   const bool bSmooth = (g_Frame.nRaySun.z & (1u << 21)) && dot(s_vRayFace, vToLight) < 0 &&
-                       (g_Draw.vSkin.x > 0 || dot(s_vRayNormal, vToLight) > 0);
+                       (g_DrawExt.vSkin.x > 0 || dot(s_vRayNormal, vToLight) > 0);
   return TraceLight(vPos, bSmooth ? s_vRayNormal : s_vRayFace, vToLight, fDistance, fGap, g_Frame.nRaySun.z & 0xff, s_fRayWidth, fHit, 4);
 }
 #endif
@@ -402,12 +402,12 @@ template<bool SKIN> float LightSpecular(float3 vN, float3 vToLight, float3 vToEy
 template<bool SKIN>
 float3 DrawLightingT(float3 vPos, float3 vN, bool bPerPixel, out float3 vNoSunLight, out float3 vSunSpec, out float3 vOtherSpec)
 {
-  float fScale = g_Draw.vAmbient.w;
+  float fScale = g_DrawExt.vAmbient.w;
   bool bSun = !HasFlag2(DF2_NO_SUN);
-  float3 vLight = g_Draw.vAmbient.rgb / fScale + (bSun ? g_Frame.vSunColor.rgb * saturate(dot(vN, g_Frame.vSunDir.xyz)) : 0);
+  float3 vLight = g_DrawExt.vAmbient.rgb / fScale + (bSun ? g_Frame.vSunColor.rgb * saturate(dot(vN, g_Frame.vSunDir.xyz)) : 0);
   if (SKIN && bSun)
-    vLight = g_Draw.vAmbient.rgb / fScale + g_Frame.vSunColor.rgb * SkinWrap(dot(vN, g_Frame.vSunDir.xyz), g_Draw.vSkin.w);
-  float3 vNoSun = g_Draw.vAmbient.rgb / fScale;
+    vLight = g_DrawExt.vAmbient.rgb / fScale + g_Frame.vSunColor.rgb * SkinWrap(dot(vN, g_Frame.vSunDir.xyz), g_DrawExt.vSkin.w);
+  float3 vNoSun = g_DrawExt.vAmbient.rgb / fScale;
   float3 vOthers = 0;
   // With a light map (DF_TEX1_LIGHTMAP) the highlights are its lamps' alone (XR_LIGHT_LIGHTMAP_LAMP, below).
   bool bSpecular = bPerPixel && HasFlag(DF_SPECULAR) && !HasFlag(DF_TEX1_LIGHTMAP);
@@ -418,8 +418,8 @@ float3 DrawLightingT(float3 vPos, float3 vN, bool bPerPixel, out float3 vNoSunLi
   vOtherSpec = 0;
   for (uint i = 0; i < min(g_Draw.nLights, XR_MAX_DRAW_LIGHTS); i++)
   {
-    float4 vLightPos = g_Draw.vLightPos[i];
-    float4 vAtten = g_Draw.vLightAtten[i];
+    float4 vLightPos = g_DrawExt.vLightPos[i];
+    float4 vAtten = g_DrawExt.vLightAtten[i];
     // A lamp baked into the light map (d3d12_LightmapSpecular): no light (the light map has it, with its shadows), its
     // highlight as the original's light-map bump shaders give it: R.V^32 with R the light reflected about N', nothing
     // left out where N'.L < 0, no ray (the original's has no shadow).
@@ -429,7 +429,7 @@ float3 DrawLightingT(float3 vPos, float3 vN, bool bPerPixel, out float3 vNoSunLi
       {
         const float3 vTo = vLightPos.xyz - vPos;
         const float fDist = length(vTo);
-        vOtherSpec += saturate(g_Draw.vLightSpec[i].rgb) *
+        vOtherSpec += saturate(g_DrawExt.vLightSpec[i].rgb) *
                       (LightmapLampFalloff(fDist * vAtten.w) * LightmapLampHighlight(vN, vTo / max(fDist, 1e-4), vToEye));
       }
       continue;
@@ -457,7 +457,7 @@ float3 DrawLightingT(float3 vPos, float3 vN, bool bPerPixel, out float3 vNoSunLi
       fLightDist = fDist;
 #endif
     }
-    float3 vColor = g_Draw.vLightColor[i].rgb;
+    float3 vColor = g_DrawExt.vLightColor[i].rgb;
     // A bump template's light as the original's shaders take its colour (g_Frame.vLightmap.y, d3d12_LightColorScale): the
     // light's colour times the material's (the draw's colour multiplies it below) scaled down by the largest channel where
     // that is above 1, its hue kept, and its term added without a clamp of its own (the original's clamps the sum of all
@@ -472,11 +472,11 @@ float3 DrawLightingT(float3 vPos, float3 vN, bool bPerPixel, out float3 vNoSunLi
       vColor = saturate(vColor);
     float3 vThis = vColor * saturate(dot(vN, vToLight)) * fAtten;
     if (SKIN)
-      vThis = vColor * SkinWrap(dot(vN, vToLight), g_Draw.vSkin.w) * fAtten;
+      vThis = vColor * SkinWrap(dot(vN, vToLight), g_DrawExt.vSkin.w) * fAtten;
 #ifdef XR_RAY_LIGHT
     // A point light the pixel's ray does not reach: none of its light, nor its highlight.
     float fHit;
-    if (vLightPos.w == 1 && any(vThis > 0) && LightVisible(vPos, vToLight, fLightDist, g_Draw.vLightColor[i].w, fHit) == 0)
+    if (vLightPos.w == 1 && any(vThis > 0) && LightVisible(vPos, vToLight, fLightDist, g_DrawExt.vLightColor[i].w, fHit) == 0)
     {
       // d3d12_RTLightShadows 2: what it takes away red; 3: by where the ray hits, green at the surface to red at the lamp.
       const uint nMode = (g_Frame.nRaySun.z >> 24) & 3;
@@ -489,7 +489,7 @@ float3 DrawLightingT(float3 vPos, float3 vN, bool bPerPixel, out float3 vNoSunLi
     // times the material's specular colour after that); else each channel clamped to 1.
     if (bSpecular)
     {
-      const float3 s = g_Draw.vLightSpec[i].rgb;
+      const float3 s = g_DrawExt.vLightSpec[i].rgb;
       vOtherSpec += (bScale ? s / max(1, max(s.r, max(s.g, s.b))) : saturate(s)) * (fAtten * LightSpecular<SKIN>(vN, vToLight, vToEye));
     }
     if (i == 0 && !bScale)
@@ -502,7 +502,7 @@ float3 DrawLightingT(float3 vPos, float3 vN, bool bPerPixel, out float3 vNoSunLi
   }
 #ifdef XR_AMBIENT
   // What each sum loses without the ambient colour.
-  float3 vAmbient = g_Draw.vAmbient.rgb / fScale;
+  float3 vAmbient = g_DrawExt.vAmbient.rgb / fScale;
   s_vAmbientLight = fScale * (saturate(vLight) - saturate(vLight - vAmbient));
   s_vAmbientNoSun = fScale * (saturate(vNoSun) - saturate(vNoSun - vAmbient));
 #endif
@@ -524,7 +524,7 @@ float3 DrawLighting(float3 vPos, float3 vN, bool bPerPixel, out float3 vNoSunLig
 void MaterialLighting(float3 vPos, float3 vN, float fSun, out float3 vDiffuse, out float3 vSpecular)
 {
   float3 vToEye = SafeNormalize(g_Frame.vCameraPos.xyz - vPos);
-  float fPower = max(g_Draw.vParams3.x, 1);
+  float fPower = max(g_DrawExt.vParams3.x, 1);
   float3 vLight = 0, vSpec = 0, vSun = 0;
   if (!HasFlag2(DF2_NO_SUN))
   {
@@ -536,8 +536,8 @@ void MaterialLighting(float3 vPos, float3 vN, float fSun, out float3 vDiffuse, o
   }
   for (uint i = 0; i < min(g_Draw.nLights, XR_MAX_DRAW_LIGHTS); i++)
   {
-    float4 vLightPos = g_Draw.vLightPos[i];
-    float4 vAtten = g_Draw.vLightAtten[i];
+    float4 vLightPos = g_DrawExt.vLightPos[i];
+    float4 vAtten = g_DrawExt.vLightAtten[i];
     if (vLightPos.w == XR_LIGHT_LIGHTMAP_LAMP)
       continue;
     float3 vToLight = vLightPos.xyz;
@@ -559,23 +559,23 @@ void MaterialLighting(float3 vPos, float3 vN, float fSun, out float3 vDiffuse, o
 #ifdef XR_RAY_LIGHT
     float fHit;
     if (vLightPos.w == 1 && fNL > 0 && fAtten > 0)
-      fAtten *= LightVisible(vPos, vToLight, fLightDist, g_Draw.vLightColor[i].w, fHit);
+      fAtten *= LightVisible(vPos, vToLight, fLightDist, g_DrawExt.vLightColor[i].w, fHit);
 #endif
-    vLight += g_Draw.vLightColor[i].rgb * saturate(fNL) * fAtten;
+    vLight += g_DrawExt.vLightColor[i].rgb * saturate(fNL) * fAtten;
     if (fNL > 0)
-      vSpec += g_Draw.vLightSpec[i].rgb * pow(saturate(dot(vN, SafeNormalize(vToLight + vToEye))), fPower) * fAtten;
+      vSpec += g_DrawExt.vLightSpec[i].rgb * pow(saturate(dot(vN, SafeNormalize(vToLight + vToEye))), fPower) * fAtten;
   }
-  vDiffuse = saturate(g_Draw.vAmbient.rgb + g_Draw.vColor.rgb * vLight);
+  vDiffuse = saturate(g_DrawExt.vAmbient.rgb + g_Draw.vColor.rgb * vLight);
 #ifdef XR_CASCADES
   // DF2_SHADOW_TINT: in the shadow the lit diffuse times the tint where that is more, towards the lit one as the sun
   // shows (never less than without the tint: the light with part of the sun is more than that lerp, saturate's curve).
   if (HasFlag2(DF2_SHADOW_TINT))
   {
-    const float3 vLit = saturate(g_Draw.vAmbient.rgb + g_Draw.vColor.rgb * (vLight + (1 - fSun) * vSun));
+    const float3 vLit = saturate(g_DrawExt.vAmbient.rgb + g_Draw.vColor.rgb * (vLight + (1 - fSun) * vSun));
     vDiffuse = max(vDiffuse, lerp(vLit * g_Frame.vShadowTint.rgb, vLit, fSun));
   }
 #endif
-  vSpecular = saturate(g_Draw.vSpecular.rgb * vSpec);
+  vSpecular = saturate(g_DrawExt.vSpecular.rgb * vSpec);
 #ifdef XR_AMBIENT
   s_vAmbientLight = vDiffuse - saturate(g_Draw.vColor.rgb * vLight);
 #endif
@@ -591,14 +591,14 @@ void MaterialLighting(float3 vPos, float3 vN, float fSun, out float3 vDiffuse, o
 //! fog of the depth from inside and none from above.
 float FogVolumeAlpha(float3 vPos)
 {
-  float fCamera = g_Frame.vCameraPos.z - g_Draw.vParams0.x;
-  float fDepth = g_Draw.vParams0.x - vPos.z;
+  float fCamera = g_Frame.vCameraPos.z - g_DrawExt.vParams0.x;
+  float fDepth = g_DrawExt.vParams0.x - vPos.z;
   if (fCamera <= 0)
-    return (g_Draw.vParams0.z > 0 || fDepth > 0) ? FogInsideVolume(ViewDepth(vPos), g_Draw.vParams0.y) : 0;
-  if (g_Draw.vParams0.z > 0 || fDepth <= 0)
+    return (g_DrawExt.vParams0.z > 0 || fDepth > 0) ? FogInsideVolume(ViewDepth(vPos), g_DrawExt.vParams0.y) : 0;
+  if (g_DrawExt.vParams0.z > 0 || fDepth <= 0)
     return 0;
   float fGate = 1 - pow(1 - saturate(fDepth / 5), lerp(3, 1.6, saturate(fCamera / 5)));
-  return fGate * (1 - exp(-ViewDepth(vPos) * g_Draw.vParams0.y));
+  return fGate * (1 - exp(-ViewDepth(vPos) * g_DrawExt.vParams0.y));
 }
 
 //! The glass of a scope (DF2_SHADER_FX, XR_FX_SCOPE): the copy of the scene (tex0) around the middle of the
@@ -615,15 +615,15 @@ float4 ScopeLens(SVertexOutput In)
   float2 vUV = In.vTex0;
   float2 s1 = (g_Textures[g_Draw.nTex1].Sample(g_SamplerLinearWrap, 2 * vUV).rg * 255 - 128) / 32;
   float2 s2 = (g_Textures[g_Draw.nTex1].Sample(g_SamplerLinearWrap, 2 * vUV.yx + 0.5).gr * 255 - 128) / 32;
-  float2 vOffset = vUV - 0.5 + (s1 + s2) * (0.7071 * g_Draw.vParams0.y);
+  float2 vOffset = vUV - 0.5 + (s1 + s2) * (0.7071 * g_DrawExt.vParams0.y);
   // The offset in pixels p: vOffset = p.x * ddx(uv0) + p.y * ddy(uv0).
   float2 a = ddx(vUV), b = ddy(vUV);
   float fDet = a.x * b.y - b.x * a.y;
   float2 vPixels = abs(fDet) > 1e-12 ? float2(vOffset.x * b.y - b.x * vOffset.y, a.x * vOffset.y - vOffset.x * a.y) / fDet : 0;
-  float2 vAt = clamp((vMiddle + vPixels * g_Draw.vParams0.x) * g_Frame.vScreen.zw, g_Draw.vParams1.xy, g_Draw.vParams1.zw);
+  float2 vAt = clamp((vMiddle + vPixels * g_DrawExt.vParams0.x) * g_Frame.vScreen.zw, g_DrawExt.vParams1.xy, g_DrawExt.vParams1.zw);
   float3 vScene = g_Textures[g_Draw.nTex0].SampleLevel(g_SamplerLinearClamp, vAt, 0).rgb;
 
-  float2 d = (vUV - 0.5) / g_Draw.vParams0.z;
+  float2 d = (vUV - 0.5) / g_DrawExt.vParams0.z;
   float r2 = dot(d, d);
   return float4(vScene * g_Draw.vColor.rgb, g_Draw.vColor.a * exp2(-r2 * r2));
 }
@@ -635,11 +635,11 @@ float4 ScopeLens(SVertexOutput In)
 //! texture's.
 float4 Mirror(SVertexOutput In)
 {
-  float4 vClip = mul(float4(In.vWorldPos, 1), g_Draw.mParams0);
+  float4 vClip = mul(float4(In.vWorldPos, 1), g_DrawExt.mParams0);
   float2 vAt = vClip.xy / max(vClip.w, 1e-4) * float2(0.5, -0.5) + 0.5;
   float3 vScene = g_Textures[g_Draw.nTex0].SampleLevel(g_SamplerLinearClamp, vAt, 0).rgb;
   float4 vDecal = SampleTexture(g_Draw.nTex1, g_Draw.nSamplers & 15, In.vTex0);
-  return float4(vScene * g_Draw.vParams2.x + vDecal.rgb * g_Draw.vParams2.z, In.vColor.a * vDecal.a);
+  return float4(vScene * g_DrawExt.vParams2.x + vDecal.rgb * g_DrawExt.vParams2.z, In.vColor.a * vDecal.a);
 }
 
 //! Heat haze (XR_FX_HAZE; the particles of ParticleMin/Med/MaxHeatHaze, the original's
@@ -649,10 +649,10 @@ float4 Mirror(SVertexOutput In)
 //! * vColor.rgb; alpha the mask (tex2's alpha at uv0, haze_mask) * the particle's alpha.
 float4 HeatHaze(SVertexOutput In)
 {
-  float2 vRipple = SampleTexture(g_Draw.nTex1, XR_SAMPLER_LINEAR_WRAP, (In.vTex0 + g_Draw.vParams0.zw) * g_Draw.vParams0.y).rg * 2 - 1;
+  float2 vRipple = SampleTexture(g_Draw.nTex1, XR_SAMPLER_LINEAR_WRAP, (In.vTex0 + g_DrawExt.vParams0.zw) * g_DrawExt.vParams0.y).rg * 2 - 1;
   uint nW, nH;
   g_Textures[g_Draw.nTex0].GetDimensions(nW, nH);
-  float2 vAt = In.vPos.xy / float2(nW, nH) + vRipple * g_Draw.vParams0.x;
+  float2 vAt = In.vPos.xy / float2(nW, nH) + vRipple * g_DrawExt.vParams0.x;
   float3 vScene = g_Textures[g_Draw.nTex0].SampleLevel(g_SamplerLinearClamp, vAt, 0).rgb;
   float fMask = SampleTexture(g_Draw.nTex2, XR_SAMPLER_LINEAR_CLAMP, In.vTex0).a;
   return float4(vScene * g_Draw.vColor.rgb, fMask * In.vColor.a);
@@ -667,9 +667,9 @@ float4 BumpOffset(SVertexOutput In)
   float2 vBump = SampleTexture(g_Draw.nTex1, XR_SAMPLER_LINEAR_WRAP, In.vTex0).rg * 2 - 1;
   uint nW, nH;
   g_Textures[g_Draw.nTex0].GetDimensions(nW, nH);
-  float2 vAt = In.vPos.xy / float2(nW, nH) + vBump * g_Draw.vParams0.xy;
+  float2 vAt = In.vPos.xy / float2(nW, nH) + vBump * g_DrawExt.vParams0.xy;
   float3 vScene = g_Textures[g_Draw.nTex0].SampleLevel(g_SamplerLinearClamp, vAt, 0).rgb;
-  float3 vBase = g_Draw.vParams0.z > 0 ? SampleTexture(g_Draw.nTex2, g_Draw.nSamplers & 15, In.vTex0).rgb : 0;
+  float3 vBase = g_DrawExt.vParams0.z > 0 ? SampleTexture(g_Draw.nTex2, g_Draw.nSamplers & 15, In.vTex0).rgb : 0;
   return float4(vScene + vBase, 1);
 }
 
@@ -693,7 +693,7 @@ float4 Membrane(SVertexOutput In)
 {
   float3 N = SafeNormalize(In.vNormal);
   float3 E = SafeNormalize(g_Frame.vCameraPos.xyz - In.vWorldPos);
-  return float4(SampleTexture(g_Draw.nTex0, XR_SAMPLER_LINEAR_WRAP, float2(dot(E, N) + g_Draw.vParams0.x, 0)).rgb, 1);
+  return float4(SampleTexture(g_Draw.nTex0, XR_SAMPLER_LINEAR_WRAP, float2(dot(E, N) + g_DrawExt.vParams0.x, 0)).rgb, 1);
 }
 
 //! Cartoon shading (XR_FX_CARTOON; TemplCartoonShading, CGVProg_CartoonShading): tex0 (defaults/4shade, the
@@ -715,7 +715,7 @@ float4 Cartoon(SVertexOutput In)
 float4 Fur(SVertexOutput In)
 {
   float4 vFuzz = SampleTexture(g_Draw.nTex0, XR_SAMPLER_LINEAR_WRAP, In.vTex0);
-  float3 vLight = g_Draw.vAmbient.rgb + g_Frame.vSunColor.rgb * saturate(dot(SafeNormalize(In.vNormal), g_Frame.vSunDir.xyz));
+  float3 vLight = g_DrawExt.vAmbient.rgb + g_Frame.vSunColor.rgb * saturate(dot(SafeNormalize(In.vNormal), g_Frame.vSunDir.xyz));
   return float4(vFuzz.rgb * vLight, vFuzz.a * g_Draw.vColor.a);
 }
 
@@ -729,7 +729,7 @@ float4 Iridescence(SVertexOutput In)
 {
   float4 vBase = SampleTexture(g_Draw.nTex0, g_Draw.nSamplers & 15, In.vTex0);
   float3 N = SafeNormalize(In.vNormal);
-  if (g_Draw.vParams1.y > 0)
+  if (g_DrawExt.vParams1.y > 0)
   {
     float3 m = SampleTexture(g_Draw.nTex1, XR_SAMPLER_LINEAR_WRAP, In.vTex0).rgb * 2 - 1;
     N = SafeNormalize(m.x * In.vTangent + m.y * In.vBinormal + m.z * In.vTNormal);
@@ -738,11 +738,11 @@ float4 Iridescence(SVertexOutput In)
   float3 E = SafeNormalize(g_Frame.vCameraPos.xyz - In.vWorldPos);
   float3 H = SafeNormalize(L + E);
   float fOpacity = 1 - vBase.a;
-  float fScattered = saturate(dot(-N, L)) * vBase.a * g_Draw.vParams1.x;
+  float fScattered = saturate(dot(-N, L)) * vBase.a * g_DrawExt.vParams1.x;
   float3 c = vBase.rgb * (fScattered + saturate(dot(N, L)) + 0.5) * fOpacity;
-  float3 vRainbow = SampleTexture(g_Draw.nTex3, XR_SAMPLER_LINEAR_WRAP, float2(dot(N, E) * g_Draw.vParams0.z + g_Draw.vParams0.w, 0.5)).rgb;
+  float3 vRainbow = SampleTexture(g_Draw.nTex3, XR_SAMPLER_LINEAR_WRAP, float2(dot(N, E) * g_DrawExt.vParams0.z + g_DrawExt.vParams0.w, 0.5)).rgb;
   float3 Nh = dot(In.vNormal, E) < 0 ? -N : N;
-  float3 vGloss = SampleTexture(g_Draw.nTex2, XR_SAMPLER_LINEAR_WRAP, In.vTex0).rgb * (saturate(dot(Nh, H)) * g_Draw.vParams0.x + g_Draw.vParams0.y);
+  float3 vGloss = SampleTexture(g_Draw.nTex2, XR_SAMPLER_LINEAR_WRAP, In.vTex0).rgb * (saturate(dot(Nh, H)) * g_DrawExt.vParams0.x + g_DrawExt.vParams0.y);
   return float4(c + vGloss * vRainbow, fOpacity);
 }
 
@@ -757,7 +757,7 @@ float4 Bubble(SVertexOutput In)
   float4 vEnv = SampleCube(g_Draw.nTex1, XR_SAMPLER_LINEAR_CLAMP, reflect(I, N));
   float fGlow = saturate((vEnv.a * vEnv.a - 0.75) * 4);
   float3 c = lerp(saturate(vBase.rgb * vEnv.rgb * 2), vEnv.rgb, fGlow);
-  return float4(c, (1 - abs(dot(I, N))) * g_Draw.vParams0.x + g_Draw.vParams0.y + fGlow);
+  return float4(c, (1 - abs(dot(I, N))) * g_DrawExt.vParams0.x + g_DrawExt.vParams0.y + fGlow);
 }
 
 //! Lava (XR_FX_LAVA; LavaVolume, the original's CGVProgLava and CGRCLava). b = (dot(world pos, vTexGenU), dot(..,
@@ -771,23 +771,23 @@ float4 Bubble(SVertexOutput In)
 float4 Lava(SVertexOutput In)
 {
   float4 vWorld = float4(In.vWorldPos, 1);
-  float2 b = float2(dot(vWorld, g_Draw.vTexGenU), dot(vWorld, g_Draw.vTexGenV));
-  float2 r = SampleTexture(g_Draw.nTex1, XR_SAMPLER_LINEAR_WRAP, b + g_Draw.vParams2.xy).rg * 2 - 1;
-  float g = SampleTexture(g_Draw.nTex2, XR_SAMPLER_LINEAR_WRAP, b + g_Draw.vParams2.zw + r * g_Draw.vParams3.xy).g;
+  float2 b = float2(dot(vWorld, g_DrawExt.vTexGenU), dot(vWorld, g_DrawExt.vTexGenV));
+  float2 r = SampleTexture(g_Draw.nTex1, XR_SAMPLER_LINEAR_WRAP, b + g_DrawExt.vParams2.xy).rg * 2 - 1;
+  float g = SampleTexture(g_Draw.nTex2, XR_SAMPLER_LINEAR_WRAP, b + g_DrawExt.vParams2.zw + r * g_DrawExt.vParams3.xy).g;
   float k = (2 * (g - 0.5) - 0.75) * 4;
-  float3 vTex = SampleTexture(g_Draw.nTex0, g_Draw.nSamplers & 15, (In.vTex0 + g_Draw.vParams0.zw) * g_Draw.vParams0.xy).rgb;
-  float3 L = g_Draw.vParams1.rgb;
+  float3 vTex = SampleTexture(g_Draw.nTex0, g_Draw.nSamplers & 15, (In.vTex0 + g_DrawExt.vParams0.zw) * g_DrawExt.vParams0.xy).rgb;
+  float3 L = g_DrawExt.vParams1.rgb;
   float3 f = saturate(k * L + 0.5 * L);
   f = saturate(f * f + 0.5 * L);
   float3 o = vTex * f;
-  return float4(2 * lerp(f, o * o * 4, g_Draw.vParams1.w), 1);
+  return float4(2 * lerp(f, o * o * 4, g_DrawExt.vParams1.w), 1);
 }
 
 //! DF2_SHADER_FX: the mode vParams3.w; fogged with DF_FOG (towards black with DF2_FOG_BLACK).
 float4 ShaderFx(SVertexOutput In)
 {
   float4 vColor;
-  switch ((uint)g_Draw.vParams3.w)
+  switch ((uint)g_DrawExt.vParams3.w)
   {
   case XR_FX_SCOPE:
     return ScopeLens(In);
@@ -882,14 +882,14 @@ SVertexOutput VSMain(SVertexInput In)
     // at its xy moving with vParams1.xy, times vParams1.w (CGVProgBubble_VS20's PosWaterDeform_TNorm).
     if (HasFlag2(DF2_SHADER_FX))
     {
-      if (g_Draw.vParams3.w == XR_FX_FUR)
-        vPos.xyz += In.vNormal * g_Draw.vParams0.x;
-      else if (g_Draw.vParams3.w == XR_FX_BUBBLE)
-        vPos.xyz += In.vNormal * (BubbleNoise(vPos.xy + g_Draw.vParams1.xy) * g_Draw.vParams1.w);
+      if (g_DrawExt.vParams3.w == XR_FX_FUR)
+        vPos.xyz += In.vNormal * g_DrawExt.vParams0.x;
+      else if (g_DrawExt.vParams3.w == XR_FX_BUBBLE)
+        vPos.xyz += In.vNormal * (BubbleNoise(vPos.xy + g_DrawExt.vParams1.xy) * g_DrawExt.vParams1.w);
     }
 #ifdef XR_CASCADE_INSTANCES
-    Out.vPos = mul(vPos, g_Draw.mShadow[nInstance]);
-    Out.nSlice = g_Draw.nShadowTex[nInstance];
+    Out.vPos = mul(vPos, g_DrawExt.mShadow[nInstance]);
+    Out.nSlice = g_DrawExt.nShadowTex[nInstance];
 #else
     Out.vPos = mul(vPos, g_Draw.mWorldViewProj);
 #endif
@@ -916,7 +916,7 @@ SVertexOutput VSMain(SVertexInput In)
   }
   // TemplMuzzleFlash_Auto's planes (Training's bunker's shafts of sunlight), as the original's vertex program: faded
   // out seen edge on, by min((2 |N.V|)^4, 1) at each vertex.
-  if (g_Draw.vEdgeFade.x > 0)
+  if (g_DrawExt.vEdgeFade.x > 0)
   {
     const float f = 2 * abs(dot(SafeNormalize(vNormal), SafeNormalize(vWorldPos - g_Frame.vCameraPos.xyz)));
     vColor.rgb *= min(f * f * f * f, 1);
@@ -933,12 +933,12 @@ SVertexOutput VSMain(SVertexInput In)
   if (HasFlag(DF_TEXGEN_WORLD))
   {
     float4 vPos = float4(vWorldPos, 1);
-    vTex0 = float2(dot(vPos, g_Draw.vTexGenU), dot(vPos, g_Draw.vTexGenV));
+    vTex0 = float2(dot(vPos, g_DrawExt.vTexGenU), dot(vPos, g_DrawExt.vTexGenV));
   }
   if (HasFlag(DF_TEXMATRIX))
   {
     float3 vUV = float3(vTex0, 1);
-    vTex0 = float2(dot(vUV, g_Draw.vTexMat0.xyz), dot(vUV, g_Draw.vTexMat1.xyz));
+    vTex0 = float2(dot(vUV, g_DrawExt.vTexMat0.xyz), dot(vUV, g_DrawExt.vTexMat1.xyz));
   }
 
   Out.vColor = vColor;
@@ -947,7 +947,7 @@ SVertexOutput VSMain(SVertexInput In)
   if (HasFlag(DF_TEXGEN1_WORLD))
   {
     float4 vPos = float4(vWorldPos, 1);
-    Out.vTex1 = float2(dot(vPos, g_Draw.vTexGen1U), dot(vPos, g_Draw.vTexGen1V));
+    Out.vTex1 = float2(dot(vPos, g_DrawExt.vTexGen1U), dot(vPos, g_DrawExt.vTexGen1V));
   }
   Out.vWorldPos = vWorldPos;
   Out.vNormal = vNormal;
@@ -1098,30 +1098,30 @@ float3 RefractAbs(float3 I, float3 N, float fEta)
 //!   5 tex4 + the reflection times tex4's alpha, 6 the reflection times tex4 (tex4 at uv0)
 float4 CubeShader(SVertexOutput In, float3 vView, float3 vN, uint nSampler)
 {
-  const int nMode = (int)g_Draw.vParams3.w;
+  const int nMode = (int)g_DrawExt.vParams3.w;
   const float3 P = In.vWorldPos;
   if (nMode == 1)
-    return float4(CubeLookup(RefractAbs(vView, vN, g_Draw.vParams2.w), nSampler).rgb * g_Draw.vParams2.x, 1);
+    return float4(CubeLookup(RefractAbs(vView, vN, g_DrawExt.vParams2.w), nSampler).rgb * g_DrawExt.vParams2.x, 1);
   if (nMode == 2)
   {
-    const float3 vThrough = float3(CubeLookup(RefractAbs(vView, vN, g_Draw.vParams3.x), nSampler).r,
-                                   CubeLookup(RefractAbs(vView, vN, g_Draw.vParams3.y), nSampler).g,
-                                   CubeLookup(RefractAbs(vView, vN, g_Draw.vParams3.z), nSampler).b);
-    const float F = saturate(g_Draw.vParams2.z + g_Draw.vParams2.x * pow(1 - saturate(-dot(vView, vN)), g_Draw.vParams2.y));
+    const float3 vThrough = float3(CubeLookup(RefractAbs(vView, vN, g_DrawExt.vParams3.x), nSampler).r,
+                                   CubeLookup(RefractAbs(vView, vN, g_DrawExt.vParams3.y), nSampler).g,
+                                   CubeLookup(RefractAbs(vView, vN, g_DrawExt.vParams3.z), nSampler).b);
+    const float F = saturate(g_DrawExt.vParams2.z + g_DrawExt.vParams2.x * pow(1 - saturate(-dot(vView, vN)), g_DrawExt.vParams2.y));
     return float4(lerp(vThrough, CubeLookup(reflect(vView, vN), nSampler).rgb, F), 1);
   }
   if (nMode == 3)
   {
     const float fCosI = -dot(vView, vN);
     const float fSinI = sqrt(abs(1 - fCosI * fCosI));
-    const float fSinT = saturate(fSinI * g_Draw.vParams2.w);
+    const float fSinT = saturate(fSinI * g_DrawExt.vParams2.w);
     const float fCosT = sqrt(abs(1 - fSinT * fSinT));
     const float3 vThrough = fSinT * SafeNormalize(vView + fCosI * vN) - fCosT * vN;
-    const float3 vBase = g_Draw.vParams0.rgb;
-    const float3 vRainbow = SampleTexture(g_Draw.nTex4, XR_SAMPLER_LINEAR_WRAP, pow(abs(fCosI), g_Draw.vParams3.x).xx).rgb;
-    float3 c = CubeLookup(vThrough, nSampler).rgb * vBase * ((1 - fSinT) * g_Draw.vParams2.x);
-    c += CubeLookup(reflect(vView, vN), nSampler).rgb * (fSinI * g_Draw.vParams2.y);
-    c += vRainbow * vBase * (fSinT * g_Draw.vParams2.z) + g_Draw.vParams3.y;
+    const float3 vBase = g_DrawExt.vParams0.rgb;
+    const float3 vRainbow = SampleTexture(g_Draw.nTex4, XR_SAMPLER_LINEAR_WRAP, pow(abs(fCosI), g_DrawExt.vParams3.x).xx).rgb;
+    float3 c = CubeLookup(vThrough, nSampler).rgb * vBase * ((1 - fSinT) * g_DrawExt.vParams2.x);
+    c += CubeLookup(reflect(vView, vN), nSampler).rgb * (fSinI * g_DrawExt.vParams2.y);
+    c += vRainbow * vBase * (fSinT * g_DrawExt.vParams2.z) + g_DrawExt.vParams3.y;
     return float4(c, 1);
   }
   if (nMode == 4)
@@ -1136,20 +1136,20 @@ float4 CubeShader(SVertexOutput In, float3 vView, float3 vN, uint nSampler)
     // The eye (camera - point, not normalized) in the tangent frame, as the vertex shader has it.
     const float3 E = g_Frame.vCameraPos.xyz - P;
     const float3 V = float3(dot(vT, E), dot(vB, E), dot(vF, E));
-    const float fRatio = g_Draw.vParams2.y;
+    const float fRatio = g_DrawExt.vParams2.y;
     const float d = sqrt(abs(fRatio * fRatio * dot(V, V) - dot(V.xy, V.xy))) - V.z;
-    const float3 n = g_Draw.vParams0.z > 0 ? SampleTexture(g_Draw.nTex3, XR_SAMPLER_LINEAR_WRAP, In.vTex0).rgb : float3(0.5, 0.5, 1);
-    const float3 D = g_Draw.vParams2.x * (n.x * float3(-d, 0, V.x * d) + n.y * float3(0, -d, V.y * d)) - n.z * V;
-    float fRefract = g_Draw.vParams2.z, fReflect = g_Draw.vParams2.w;
-    if (g_Draw.vParams0.y > 0)
+    const float3 n = g_DrawExt.vParams0.z > 0 ? SampleTexture(g_Draw.nTex3, XR_SAMPLER_LINEAR_WRAP, In.vTex0).rgb : float3(0.5, 0.5, 1);
+    const float3 D = g_DrawExt.vParams2.x * (n.x * float3(-d, 0, V.x * d) + n.y * float3(0, -d, V.y * d)) - n.z * V;
+    float fRefract = g_DrawExt.vParams2.z, fReflect = g_DrawExt.vParams2.w;
+    if (g_DrawExt.vParams0.y > 0)
     {
-      fReflect = saturate(g_Draw.vParams3.z + g_Draw.vParams3.x * pow(1 - saturate(dot(SafeNormalize(E), SafeNormalize(In.vNormal))), g_Draw.vParams3.y));
+      fReflect = saturate(g_DrawExt.vParams3.z + g_DrawExt.vParams3.x * pow(1 - saturate(dot(SafeNormalize(E), SafeNormalize(In.vNormal))), g_DrawExt.vParams3.y));
       fRefract = 1 - fReflect;
     }
     float3 c = CubeLookup(D.x * vT + D.y * vB + D.z * vF, nSampler).rgb * fRefract;
     if (fReflect > 0)
     {
-      const float3 Nb = g_Draw.vParams0.x * (n.x * vT + n.y * vB) + n.z * vF;
+      const float3 Nb = g_DrawExt.vParams0.x * (n.x * vT + n.y * vB) + n.z * vF;
       c += CubeLookup(2 * Nb * dot(Nb, E) / max(dot(Nb, Nb), 1e-8) - E, nSampler).rgb * fReflect;
     }
     return float4(c, 1);
@@ -1183,26 +1183,26 @@ float2 ParallaxFetch(SVertexOutput In)
   s_vParallaxDx = vDx * fBias;
   s_vParallaxDy = vDy * fBias;
   s_bParallax = true;
-  const float fFade = ParallaxFade(g_Draw.vParallax.x, vDx, vDy, g_Draw.vParallax.y, g_Draw.vParallax.z);
+  const float fFade = ParallaxFade(g_DrawExt.vParallax.x, vDx, vDy, g_DrawExt.vParallax.y, g_DrawExt.vParallax.z);
   [branch]
   if (fFade <= 0)
     return In.vTex0;
   const float3 vView = ParallaxView(g_Frame.vCameraPos.xyz - In.vWorldPos, In.vTangent, In.vBinormal, In.vTNormal);
-  float2 vShift = ParallaxShift(vView, g_Draw.vParallax.x * fFade);
+  float2 vShift = ParallaxShift(vView, g_DrawExt.vParallax.x * fFade);
   if (HasFlag(DF_TEXMATRIX))
-    vShift = ParallaxTexMatrix(vShift, g_Draw.vTexMat0.xy, g_Draw.vTexMat1.xy);
-  const uint nSteps = ParallaxSteps(vView.z, g_Draw.nParallax.z);
+    vShift = ParallaxTexMatrix(vShift, g_DrawExt.vTexMat0.xy, g_DrawExt.vTexMat1.xy);
+  const uint nSteps = ParallaxSteps(vView.z, g_DrawExt.nParallax.z);
   // r_ParallaxFilter: the march's height over nParallax.w texels at least and its step; the textures read there by the
   // pixel's footprint.
   float2 vMarchDx = s_vParallaxDx, vMarchDy = s_vParallaxDy;
   [branch]
-  if (g_Draw.nParallax.w != 0)
+  if (g_DrawExt.nParallax.w != 0)
   {
     uint nWidth, nHeight;
-    g_Textures[g_Draw.nParallax.x].GetDimensions(nWidth, nHeight);
-    ParallaxMarchGrad(vShift, nSteps, g_Draw.nParallax.w / (float)max(max(nWidth, nHeight), 1u), vMarchDx, vMarchDy);
+    g_Textures[g_DrawExt.nParallax.x].GetDimensions(nWidth, nHeight);
+    ParallaxMarchGrad(vShift, nSteps, g_DrawExt.nParallax.w / (float)max(max(nWidth, nHeight), 1u), vMarchDx, vMarchDy);
   }
-  return ParallaxUV(In.vTex0, vMarchDx, vMarchDy, vShift, g_Draw.vParallax.w, nSteps);
+  return ParallaxUV(In.vTex0, vMarchDx, vMarchDy, vShift, g_DrawExt.vParallax.w, nSteps);
 }
 
 //! d3d12_RTPbrReflections (nPbr.z; in a branch the same for the draw: the derivatives): the shading normal, the
@@ -1213,10 +1213,10 @@ float2 ParallaxFetch(SVertexOutput In)
 void PbrReflectMaterial(float2 vUVf, float3 vBumpN, float3 vNormal, out float3 vN, out float fRough, out float fAlpha2, out float fMetal,
                         out float fAO)
 {
-  const float3 vMat = SampleUV0(g_Draw.nPbr.z, g_Draw.nPbr.y, vUVf).rgb;
+  const float3 vMat = SampleUV0(g_DrawExt.nPbr.z, g_DrawExt.nPbr.y, vUVf).rgb;
   vN = HasFlag(DF_BUMP) ? vBumpN : SafeNormalize(vNormal);
   const float3 vDx = ddx(vN), vDy = ddy(vN);
-  fRough = g_Draw.nPbr.x != 0 && HasFlag(DF_SPECULAR) ? SampleUV0(g_Draw.nPbr.x, g_Draw.nPbr.y, vUVf).r : vMat.r;
+  fRough = g_DrawExt.nPbr.x != 0 && HasFlag(DF_SPECULAR) ? SampleUV0(g_DrawExt.nPbr.x, g_DrawExt.nPbr.y, vUVf).r : vMat.r;
   fAlpha2 = PbrSpecAlpha2(fRough, dot(vDx, vDx) + dot(vDy, vDy));
   fMetal = vMat.g;
   fAO = vMat.b;
@@ -1225,7 +1225,7 @@ void PbrReflectMaterial(float2 vUVf, float3 vBumpN, float3 vNormal, out float3 v
 //! The share of its diffuse light a surface of fRough and fMetal keeps beside its reflection by rays (nPbr.w's share).
 float PbrReflectDiffuse(float fRough, float fMetal)
 {
-  return 1 - fMetal * PbrReflectWeight(fRough, fMetal) * (1 - asfloat(g_Draw.nPbr.w & ~XR_PBR_LIGHT_PASS));
+  return 1 - fMetal * PbrReflectWeight(fRough, fMetal) * (1 - asfloat(g_DrawExt.nPbr.w & ~XR_PBR_LIGHT_PASS));
 }
 
 float4 ShadePixel(SVertexOutput In)
@@ -1286,14 +1286,14 @@ float4 ShadePixel(SVertexOutput In)
 #ifdef XR_CASCADES
   // A caster of the live cascades: not where the full set has something nearer to the sun.
   if (HasFlag2(DF2_CASCADE_CASTER))
-    clip(g_TextureArrays[g_Draw.nTex4].Load(int4(In.vPos.xy, g_Draw.vParams3.x, 0)).r + g_Draw.vParams3.y - In.vPos.z);
+    clip(g_TextureArrays[g_Draw.nTex4].Load(int4(In.vPos.xy, g_DrawExt.vParams3.x, 0)).r + g_DrawExt.vParams3.y - In.vPos.z);
 #endif
   uint nSampler0 = g_Draw.nSamplers & 15;
   uint nSampler1 = (g_Draw.nSamplers >> 4) & 15;
   // r_Parallax: uv0 where the view meets the texture's height (ParallaxFetch), for the textures at uv0 (SampleUV0).
   float2 vUVf = In.vTex0;
   [branch]
-  if (g_Draw.nParallax.x != 0)
+  if (g_DrawExt.nParallax.x != 0)
     vUVf = ParallaxFetch(In);
 
   // Bump mapping: the normal map in tangent space (vMap) and in world space (vBumpN).
@@ -1302,7 +1302,7 @@ float4 ShadePixel(SVertexOutput In)
   if (HasFlag(DF_BUMP))
   {
     vMap = SafeNormalize(SampleUV0(g_Draw.nTex3, XR_SAMPLER_LINEAR_WRAP, vUVf).rgb * 2 - 1);
-    vMap.y *= g_Draw.vParams1.y;
+    vMap.y *= g_DrawExt.vParams1.y;
     vBumpN = SafeNormalize(vMap.x * In.vTangent + vMap.y * In.vBinormal + vMap.z * In.vTNormal);
 #ifdef XR_PT
     s_vPTNormal = vBumpN;
@@ -1311,11 +1311,11 @@ float4 ShadePixel(SVertexOutput In)
   // r_PbrRoughness: the highlights' lobe by the RayMaster roughness map's red (else the material map's) where the view
   // meets it, wider where the normal changes across the pixel (PbrSpecular.hlsli).
   [branch]
-  if (g_Draw.nPbr.x != 0 && HasFlag(DF_SPECULAR))
+  if (g_DrawExt.nPbr.x != 0 && HasFlag(DF_SPECULAR))
   {
     const float3 vN = HasFlag(DF_BUMP) ? vBumpN : SafeNormalize(In.vNormal);
     const float3 vDx = ddx(vN), vDy = ddy(vN);
-    s_vSpecLobe = PbrSpecLobe(PbrSpecAlpha2(SampleUV0(g_Draw.nPbr.x, g_Draw.nPbr.y, vUVf).r, dot(vDx, vDx) + dot(vDy, vDy)));
+    s_vSpecLobe = PbrSpecLobe(PbrSpecAlpha2(SampleUV0(g_DrawExt.nPbr.x, g_DrawExt.nPbr.y, vUVf).r, dot(vDx, vDx) + dot(vDy, vDy)));
   }
 
   float4 vTex = float4(1, 1, 1, 1);
@@ -1335,17 +1335,17 @@ float4 ShadePixel(SVertexOutput In)
     }
     if (HasFlag2(DF2_GLASS))
     {
-      float4 vThrough = SampleCube(g_Draw.nTex0, nSampler0, refract(vView, vN, g_Draw.vParams2.w));
+      float4 vThrough = SampleCube(g_Draw.nTex0, nSampler0, refract(vView, vN, g_DrawExt.vParams2.w));
 #ifdef XR_RAY_REFL
       if (((g_Frame.nRaySun.z >> 16) & 0xf) != 0)
-        vThrough.rgb = SurfaceRay(vThrough.rgb, In.vWorldPos, vRayFace, refract(vView, vN, g_Draw.vParams2.w), fRayDistance, fPixelAngle);
+        vThrough.rgb = SurfaceRay(vThrough.rgb, In.vWorldPos, vRayFace, refract(vView, vN, g_DrawExt.vParams2.w), fRayDistance, fPixelAngle);
 #endif
-      float fFresnel = saturate(g_Draw.vParams2.z + g_Draw.vParams2.x * pow(1 - saturate(-dot(vView, vN)), g_Draw.vParams2.y));
+      float fFresnel = saturate(g_DrawExt.vParams2.z + g_DrawExt.vParams2.x * pow(1 - saturate(-dot(vView, vN)), g_DrawExt.vParams2.y));
       vTex = lerp(vThrough, vTex, fFresnel);
     }
     if (HasFlag2(DF2_REFL_AMOUNT))
       vTex.rgb = vTex.rgb * SampleTexture(g_Draw.nTex5, XR_SAMPLER_LINEAR_WRAP, In.vTex0).rgb +
-        SampleTexture(g_Draw.nTex4, XR_SAMPLER_LINEAR_WRAP, In.vTex0).rgb * g_Draw.vAddColor.rgb;
+        SampleTexture(g_Draw.nTex4, XR_SAMPLER_LINEAR_WRAP, In.vTex0).rgb * g_DrawExt.vAddColor.rgb;
   }
   else if (HasFlag(DF_TEX0_ARRAY))
     vTex = SampleTextureArrayCoords(g_Draw.nTex0, nSampler0, In.vTex0, PictureNoise(In.vPos.xy, g_Frame.vTime.y));
@@ -1353,15 +1353,15 @@ float4 ShadePixel(SVertexOutput In)
   {
     float2 vUV0 = vUVf;
     if (HasFlag2(DF2_BUMP_OFFSET))
-      vUV0 += (SampleTexture(g_Draw.nTex3, XR_SAMPLER_LINEAR_WRAP, In.vTex1).rg * 2 - 1) * g_Draw.vParams0.x;
+      vUV0 += (SampleTexture(g_Draw.nTex3, XR_SAMPLER_LINEAR_WRAP, In.vTex1).rg * 2 - 1) * g_DrawExt.vParams0.x;
     vTex = SampleUV0(g_Draw.nTex0, nSampler0, vUV0);
     if (HasFlag2(DF2_TEX4_LAYER))
     {
       // A second layer over the texture by its alpha, moving on its own (the fixed function
       // templates' second pass); added with vAddColor.x (TemplDecalLight_SpecAdd's gloss map, lit as the texture).
-      float4 vLayer = SampleUV0(g_Draw.nTex4, XR_SAMPLER_LINEAR_WRAP, vUVf + float2(g_Draw.vTexMat0.w, g_Draw.vTexMat1.w));
-      if (g_Draw.vAddColor.x > 0)
-        vTex.rgb += vLayer.rgb * g_Draw.vAddColor.x;
+      float4 vLayer = SampleUV0(g_Draw.nTex4, XR_SAMPLER_LINEAR_WRAP, vUVf + float2(g_DrawExt.vTexMat0.w, g_DrawExt.vTexMat1.w));
+      if (g_DrawExt.vAddColor.x > 0)
+        vTex.rgb += vLayer.rgb * g_DrawExt.vAddColor.x;
       else
         vTex = float4(lerp(vTex.rgb, vLayer.rgb, vLayer.a), vTex.a + vLayer.a - vTex.a * vLayer.a);
     }
@@ -1403,15 +1403,15 @@ float4 ShadePixel(SVertexOutput In)
     float3 vN = HasFlag(DF_BUMP) ? vBumpN : SafeNormalize(In.vNormal);
     // r_Skin (uniform per draw): the lights DrawLightingT<true>'s, the skin's highlights of the roughness by its gloss
     // (the texture's alpha), widened where the normal changes across the pixel (PbrSpecular.hlsli).
-    const float fSkinGloss = g_Draw.vSpecular.w > 0 ? vTex.a : SKIN_GLOSS_PLAIN;
+    const float fSkinGloss = g_DrawExt.vSpecular.w > 0 ? vTex.a : SKIN_GLOSS_PLAIN;
     float3 vLight;
     [branch]
-    if (g_Draw.vSkin.x > 0)
+    if (g_DrawExt.vSkin.x > 0)
     {
       if (HasFlag(DF_SPECULAR))
       {
         const float3 vDx = ddx(vN), vDy = ddy(vN);
-        s_fSkinAlpha2 = PbrSpecAlpha2(SkinRoughness(fSkinGloss, g_Draw.vSkin.y, g_Draw.vSkin.z), dot(vDx, vDx) + dot(vDy, vDy));
+        s_fSkinAlpha2 = PbrSpecAlpha2(SkinRoughness(fSkinGloss, g_DrawExt.vSkin.y, g_DrawExt.vSkin.z), dot(vDx, vDx) + dot(vDy, vDy));
       }
       vLight = DrawLightingT<true>(In.vWorldPos, vN, true, vNoSunLight, vSunSpec, vOtherSpec);
     }
@@ -1439,11 +1439,11 @@ float4 ShadePixel(SVertexOutput In)
     vAmb = In.vColor.rgb * lerp(vShadowAmb, s_vAmbientLight, fSun);
 #endif
     if (HasFlag(DF_SPECULAR))
-      vSpecular = 2 * g_Draw.vSpecular.rgb * (g_Draw.vSpecular.w > 0 ? vTex.a : 1) * (fSun * vSunSpec + vOtherSpec);
+      vSpecular = 2 * g_DrawExt.vSpecular.rgb * (g_DrawExt.vSpecular.w > 0 ? vTex.a : 1) * (fSun * vSunSpec + vOtherSpec);
     // On skin its highlights' share by the gloss (SkinSpecularShare) times the light's scale, their lobe the gloss's.
     [branch]
-    if (g_Draw.vSkin.x > 0 && HasFlag(DF_SPECULAR))
-      vSpecular = g_Draw.vAmbient.w * g_Draw.vSpecular.rgb * SkinSpecularShare(fSkinGloss) * (fSun * vSunSpec + vOtherSpec);
+    if (g_DrawExt.vSkin.x > 0 && HasFlag(DF_SPECULAR))
+      vSpecular = g_DrawExt.vAmbient.w * g_DrawExt.vSpecular.rgb * SkinSpecularShare(fSkinGloss) * (fSun * vSunSpec + vOtherSpec);
   }
   else if (HasFlag(DF_LIGHTING) && HasFlag2(DF2_MATERIAL_LIGHT))
   {
@@ -1466,7 +1466,7 @@ float4 ShadePixel(SVertexOutput In)
 #ifdef XR_AMBIENT
   // Lit per vertex: about the draw's colour times the ambient colour, not more than the light.
   if (HasFlag(DF_LIGHTING) && !HasFlag(DF_PIXEL_LIGHTING) && !HasFlag2(DF2_MATERIAL_LIGHT))
-    vAmb = min(g_Draw.vColor.rgb * g_Draw.vAmbient.rgb, vVertexColor.rgb);
+    vAmb = min(g_Draw.vColor.rgb * g_DrawExt.vAmbient.rgb, vVertexColor.rgb);
 #endif
 
   float4 vColor;
@@ -1487,23 +1487,23 @@ float4 ShadePixel(SVertexOutput In)
 #endif
   if (HasFlag2(DF2_ADD_TEX4))
   {
-    float4 vTex4 = SampleUV0(g_Draw.nTex4, XR_SAMPLER_LINEAR_WRAP, vUVf + float2(g_Draw.vTexMat0.w, g_Draw.vTexMat1.w));
-    vColor.rgb += vTex4.rgb * g_Draw.vAddColor.rgb + g_Draw.vAddColor.w;
+    float4 vTex4 = SampleUV0(g_Draw.nTex4, XR_SAMPLER_LINEAR_WRAP, vUVf + float2(g_DrawExt.vTexMat0.w, g_DrawExt.vTexMat1.w));
+    vColor.rgb += vTex4.rgb * g_DrawExt.vAddColor.rgb + g_DrawExt.vAddColor.w;
 #ifdef XR_PT
-    s_vPTEmission += vTex4.rgb * g_Draw.vAddColor.rgb + g_Draw.vAddColor.w;
+    s_vPTEmission += vTex4.rgb * g_DrawExt.vAddColor.rgb + g_DrawExt.vAddColor.w;
 #endif
     if (HasFlag2(DF2_GLASS))
       vColor.a *= vTex4.a;
   }
   if (HasFlag2(DF2_PROJECTOR))
   {
-    const float4 vProjected = SampleCube(g_Draw.nTex5, XR_SAMPLER_LINEAR_CLAMP, mul(float4(In.vWorldPos, 1), g_Draw.mParams0).xyz);
+    const float4 vProjected = SampleCube(g_Draw.nTex5, XR_SAMPLER_LINEAR_CLAMP, mul(float4(In.vWorldPos, 1), g_DrawExt.mParams0).xyz);
     vColor *= vProjected;
     vHigh *= vProjected.rgb;
   }
   if (HasFlag2(DF2_MODULATE))
   {
-    vColor = float4(saturate(vColor.rgb + g_Draw.vAddColor.w), 1);
+    vColor = float4(saturate(vColor.rgb + g_DrawExt.vAddColor.w), 1);
     vHigh = 0;
   }
   if (HasFlag(DF_SHADOW_PASS))
@@ -1525,7 +1525,7 @@ float4 ShadePixel(SVertexOutput In)
       }
 #ifdef XR_AMBIENT
       // The colour is unlit here: its light is the light map's and the ambient colour under it.
-      vAmb = vColor.rgb * g_Draw.vAmbient.rgb;
+      vAmb = vColor.rgb * g_DrawExt.vAmbient.rgb;
 #endif
 #ifdef XR_PT
       // A surface the path tracer lights keeps its colour (the albedo); the light map's light goes to its own target.
@@ -1546,14 +1546,14 @@ float4 ShadePixel(SVertexOutput In)
         // The highlights of the light map's lamps (DF_SPECULAR, d3d12_LightmapSpecular), added after it as the original's.
         if (HasFlag(DF_SPECULAR))
         {
-          const float3 vMapSpec = 2 * g_Draw.vSpecular.rgb * (g_Draw.vSpecular.w > 0 ? vTex.a : 1) * vOtherSpec;
+          const float3 vMapSpec = 2 * g_DrawExt.vSpecular.rgb * (g_DrawExt.vSpecular.w > 0 ? vTex.a : 1) * vOtherSpec;
           vColor.rgb += vMapSpec;
           vHigh += vMapSpec;
         }
       }
       else
       {
-        const float3 vMapLight = 4 * fSun * vLight + g_Draw.vAmbient.rgb;
+        const float3 vMapLight = 4 * fSun * vLight + g_DrawExt.vAmbient.rgb;
         vColor.rgb *= vMapLight;
         vHigh *= vMapLight;
       }
@@ -1597,14 +1597,14 @@ float4 ShadePixel(SVertexOutput In)
     s_vPTEmission += vCube;
     if (!(g_Draw.nFlags2 & DF2_PT_MASK))
 #endif
-      vColor.rgb -= 0.25 * vTex.rgb * g_Draw.vColor.rgb * g_Draw.vAmbient.rgb;
+      vColor.rgb -= 0.25 * vTex.rgb * g_Draw.vColor.rgb * g_DrawExt.vAmbient.rgb;
   }
   // d3d12_RTPbrReflections: a light pass or a projector's of a draw whose first pass reflects by rays (nPbr.w's
   // XR_PBR_LIGHT_PASS; Draw.cpp leaves nPbr.z 0 where the first pass has no rays): its diffuse light on a metal as much
   // less as that pass's, its highlights kept (vHigh), no ray (the reflection has the lamp's light where the last frame's
   // picture shows it).
   [branch]
-  if (g_Draw.nPbr.z != 0 && (g_Draw.nPbr.w & XR_PBR_LIGHT_PASS) && ((g_Frame.nRaySun.z >> 16) & 0xf) != 0)
+  if (g_DrawExt.nPbr.z != 0 && (g_DrawExt.nPbr.w & XR_PBR_LIGHT_PASS) && ((g_Frame.nRaySun.z >> 16) & 0xf) != 0)
   {
     float3 vN;
     float fRough, fAlpha2, fMetal, fAO;
@@ -1627,7 +1627,7 @@ float4 ShadePixel(SVertexOutput In)
   // r_PbrAO (nRaySun.z's bit 27) less where the material map's ambient occlusion (its blue) hides the lobe
   // (PbrSpecOcclusion): the pits between a metal's treads, the holes of its mesh dark, not the scene's light.
   [branch]
-  if (g_Draw.nPbr.z != 0 && !(g_Draw.nPbr.w & XR_PBR_LIGHT_PASS) && ((g_Frame.nRaySun.z >> 16) & 0xf) != 0)
+  if (g_DrawExt.nPbr.z != 0 && !(g_DrawExt.nPbr.w & XR_PBR_LIGHT_PASS) && ((g_Frame.nRaySun.z >> 16) & 0xf) != 0)
   {
     float3 vN;
     float fRough, fAlpha2, fMetal, fAO;
@@ -1661,7 +1661,7 @@ float4 ShadePixel(SVertexOutput In)
     {
       const float2 u = float2(PictureNoise(In.vPos.xy, g_Frame.vTime.y), PictureNoise(In.vPos.yx + float2(113, 71), g_Frame.vTime.y + 29));
       const float3 vR = PbrReflectDir(vToEye, vN, fAlpha, u);
-      vFound = SurfaceRayCone(g_Draw.vAmbient.rgb, In.vWorldPos, vRayFace, vR, fRayDistance, fConeAngle,
+      vFound = SurfaceRayCone(g_DrawExt.vAmbient.rgb, In.vWorldPos, vRayFace, vR, fRayDistance, fConeAngle,
                               fConeAngle + PBR_REFL_SPREAD * fAlpha, true);
     }
     if (bQuad)
@@ -1693,12 +1693,12 @@ float4 ShadePixel(SVertexOutput In)
   if (HasFlag(DF_TERRAIN_CLIFF))
   {
     float4 vPos = float4(In.vWorldPos, 1);
-    float2 vW = In.vCliff * g_Draw.vTexGen1V.xy;
+    float2 vW = In.vCliff * g_DrawExt.vTexGen1V.xy;
     vColor.rgb *= 2;
     if (vW.x > 0)
-      vColor.rgb *= lerp(1, 2 * SampleTexture(g_Draw.nTex2, XR_SAMPLER_LINEAR_WRAP, float2(dot(vPos, g_Draw.vParams0), dot(vPos, g_Draw.vParams1))).rgb, vW.x);
+      vColor.rgb *= lerp(1, 2 * SampleTexture(g_Draw.nTex2, XR_SAMPLER_LINEAR_WRAP, float2(dot(vPos, g_DrawExt.vParams0), dot(vPos, g_DrawExt.vParams1))).rgb, vW.x);
     if (vW.y > 0)
-      vColor.rgb *= lerp(1, 2 * SampleTexture(g_Draw.nTex3, XR_SAMPLER_LINEAR_WRAP, float2(dot(vPos, g_Draw.vParams2), dot(vPos, g_Draw.vParams3))).rgb, vW.y);
+      vColor.rgb *= lerp(1, 2 * SampleTexture(g_Draw.nTex3, XR_SAMPLER_LINEAR_WRAP, float2(dot(vPos, g_DrawExt.vParams2), dot(vPos, g_DrawExt.vParams3))).rgb, vW.y);
   }
 #ifdef XR_AMBIENT
   // A baked light's ambient part: the share of it the shadow leaves (the terrain's in the shadow).
@@ -1716,16 +1716,16 @@ float4 ShadePixel(SVertexOutput In)
     vColor.a *= 1 - 0.5 * (r + smoothstep(0, 1, r));
   }
   if (HasFlag2(DF2_GLOW_FALLOFF))
-    vColor.rgb *= pow(saturate(1 - In.vTex0.x), g_Draw.vParams0.x);
+    vColor.rgb *= pow(saturate(1 - In.vTex0.x), g_DrawExt.vParams0.x);
 #ifdef XR_HDR
   if (HasFlag2(DF2_SKY_GLOW))
     vColor.rgb *= SkyGlow(In.vWorldPos);
   if (HasFlag2(DF2_HDR_CORE))
   {
-    float m = max(vTex.r, max(vTex.g, vTex.b)) * (g_Draw.vHdrCore.y > 0 ? vTex.a : 1);
+    float m = max(vTex.r, max(vTex.g, vTex.b)) * (g_DrawExt.vHdrCore.y > 0 ? vTex.a : 1);
     if (HasFlag2(DF2_GLOW_FALLOFF))
-      m *= pow(saturate(1 - In.vTex0.x), g_Draw.vParams0.x);
-    vColor.rgb *= HdrEncode(max(1 + (g_Draw.vHdrCore.x - 1) * pow(saturate(m), HDR_CORE_POWER), 0));
+      m *= pow(saturate(1 - In.vTex0.x), g_DrawExt.vParams0.x);
+    vColor.rgb *= HdrEncode(max(1 + (g_DrawExt.vHdrCore.x - 1) * pow(saturate(m), HDR_CORE_POWER), 0));
   }
 #endif
 
@@ -1742,9 +1742,9 @@ float4 ShadePixel(SVertexOutput In)
   if (HasFlag(DF_ALPHA_ONE))
     vColor.a = 1;
   // An object fading in or out by its distance (d3d12_FadeBlend): its alpha alone after the alpha test (FadeAlpha).
-  vColor.a = FadeAlpha(vColor.a, g_Draw.vEdgeFade.y);
+  vColor.a = FadeAlpha(vColor.a, g_DrawExt.vEdgeFade.y);
   if (HasFlag2(DF2_FOG_VOLUME))
-    return float4(g_Draw.vColor.rgb, FogVolumeAlpha(In.vWorldPos) * (g_Draw.vParams0.w > 0 ? vColor.a : 1));
+    return float4(g_Draw.vColor.rgb, FogVolumeAlpha(In.vWorldPos) * (g_DrawExt.vParams0.w > 0 ? vColor.a : 1));
 #ifdef XR_AMBIENT
   if (HasFlag2(DF2_AO_ALL))
     vAmb = vColor.rgb;
@@ -1755,17 +1755,17 @@ float4 ShadePixel(SVertexOutput In)
   if (g_Draw.nFlags2 & DF2_PT_MASK)
   {
     s_vPTAlbedo = max(vColor.rgb - s_vPTEmission, 0);
-    s_vPTSpecular = saturate(g_Draw.vSpecular.rgb * (g_Draw.vSpecular.w > 0 ? vTex.a : 1));
+    s_vPTSpecular = saturate(g_DrawExt.vSpecular.rgb * (g_DrawExt.vSpecular.w > 0 ? vTex.a : 1));
     // r_Skin: its highlights' colour by the share its gloss leaves, their roughness by the gloss into the light map
     // target's alpha (CSSpecular's SkinSpecular; the composite's sun SkinWrap's).
     [branch]
-    if (g_Draw.vSkin.x > 0)
+    if (g_DrawExt.vSkin.x > 0)
     {
-      const float fGloss = g_Draw.vSpecular.w > 0 ? vTex.a : SKIN_GLOSS_PLAIN;
+      const float fGloss = g_DrawExt.vSpecular.w > 0 ? vTex.a : SKIN_GLOSS_PLAIN;
       const float3 vN = SafeNormalize(s_vPTNormal);
       const float3 vDx = ddx(vN), vDy = ddy(vN);
-      s_vPTSpecular = saturate(g_Draw.vSpecular.rgb * SkinSpecularShare(fGloss));
-      s_fPTSkin = PathGBufferSkin(sqrt(sqrt(PbrSpecAlpha2(SkinRoughness(fGloss, g_Draw.vSkin.y, g_Draw.vSkin.z),
+      s_vPTSpecular = saturate(g_DrawExt.vSpecular.rgb * SkinSpecularShare(fGloss));
+      s_fPTSkin = PathGBufferSkin(sqrt(sqrt(PbrSpecAlpha2(SkinRoughness(fGloss, g_DrawExt.vSkin.y, g_DrawExt.vSkin.z),
                                                           dot(vDx, vDx) + dot(vDy, vDy)))));
     }
     vColor.rgb = s_vPTEmission;
@@ -1776,46 +1776,46 @@ float4 ShadePixel(SVertexOutput In)
   if (HasFlag(DF_DETAIL_LAYER))
   {
     float fDist = distance(In.vWorldPos, g_Frame.vCameraPos.xyz);
-    float fWeight = vColor.a * saturate((g_Draw.vParams0.y - fDist) * g_Draw.vParams0.z);
+    float fWeight = vColor.a * saturate((g_DrawExt.vParams0.y - fDist) * g_DrawExt.vParams0.z);
     float3 vDetail = vTex.rgb;
     if (HasFlag(DF_DETAIL_BUMP))
     {
       float3 vN = SafeNormalize(In.vNormal);
-      float3 vT = SafeNormalize(g_Draw.vTexGenU.xyz - vN * dot(g_Draw.vTexGenU.xyz, vN));
+      float3 vT = SafeNormalize(g_DrawExt.vTexGenU.xyz - vN * dot(g_DrawExt.vTexGenU.xyz, vN));
       float3 vB = cross(vN, vT);
-      if (dot(vB, g_Draw.vTexGenV.xyz) < 0)
+      if (dot(vB, g_DrawExt.vTexGenV.xyz) < 0)
         vB = -vB;
       float3 vMap = SampleTexture(g_Draw.nTex1, nSampler1, In.vTex0).rgb * 2 - 1;
-      float3 vBump = SafeNormalize(vMap.x * vT + vMap.y * g_Draw.vParams1.y * vB + vMap.z * vN);
+      float3 vBump = SafeNormalize(vMap.x * vT + vMap.y * g_DrawExt.vParams1.y * vB + vMap.z * vN);
       float3 vL = g_Frame.vSunDir.xyz;
       float fN = dot(vN, vL);
-      vDetail *= clamp(1 + (dot(vBump, vL) - fN) / (g_Draw.vParams1.x + saturate(fN)), 0, 2);
+      vDetail *= clamp(1 + (dot(vBump, vL) - fN) / (g_DrawExt.vParams1.x + saturate(fN)), 0, 2);
     }
     vColor = float4(lerp(0.5, vDetail, fWeight), 1);
     vFogColor = 0.5;
   }
 
-  if (HasFlag(DF_CAUSTICS) && g_Draw.vParams2.x > 0)
+  if (HasFlag(DF_CAUSTICS) && g_DrawExt.vParams2.x > 0)
   {
     // The FFT ocean's (d3d12_WaterCaustics): each caustics cascade's light at the floor's depth where the sun's refracted
     // ray crossed the surface, blurred by the sun's disc (the gradients at least its width there), its mean where a pixel
     // takes more than its last mip level's texel, their product; the sun's share of the floor's light times it, in the
     // sun's light, fading out with the depth. The sun's visibility only where the light changes (above the water, below
     // the fade and far off none): one bilinear comparison in the cascades (the rays' mask with the rays' shadows).
-    const float fDepth = max(g_Draw.vParams0.x - In.vWorldPos.z, 0);
-    const float2 vP = In.vWorldPos.xy + g_Draw.vParams1.xy * fDepth;
+    const float fDepth = max(g_DrawExt.vParams0.x - In.vWorldPos.z, 0);
+    const float2 vP = In.vWorldPos.xy + g_DrawExt.vParams1.xy * fDepth;
     const Texture2DArray Caustics = g_TextureArrays[g_Draw.nTex1];
     float fLight = 1;
     [unroll]
     for (uint i = 0; i < XR_CAUSTICS_CASCADES; i++)
     {
-      const float2 uv = vP * g_Draw.vParams2[i], dx = ddx(uv), dy = ddy(uv);
-      const float fBlur = fDepth * CAUSTICS_SUN_ANGLE * g_Draw.vParams2[i];
+      const float2 uv = vP * g_DrawExt.vParams2[i], dx = ddx(uv), dy = ddy(uv);
+      const float fBlur = fDepth * CAUSTICS_SUN_ANGLE * g_DrawExt.vParams2[i];
       const float fSize = max(max(length(dx), length(dy)), 1e-9), fGrow = max(1, fBlur / fSize);
-      const float fCascade = CausticsAtDepth(Caustics.SampleGrad(g_SamplerLinearWrap, float3(uv, i), dx * fGrow, dy * fGrow), g_Draw.vParams3[i], fDepth);
+      const float fCascade = CausticsAtDepth(Caustics.SampleGrad(g_SamplerLinearWrap, float3(uv, i), dx * fGrow, dy * fGrow), g_DrawExt.vParams3[i], fDepth);
       fLight *= lerp(1, fCascade, CausticsFar(fSize * fGrow * XR_OCEAN_SIZE));
     }
-    const float fFade = saturate(1 - fDepth / g_Draw.vParams1.z);
+    const float fFade = saturate(1 - fDepth / g_DrawExt.vParams1.z);
     float fLit = 1;
     [branch]
     if (fLight != 1 && fFade > 0 && HasFlag2(DF2_SUN_CASCADES))
@@ -1828,20 +1828,20 @@ float4 ShadePixel(SVertexOutput In)
       fLit = CascadeTapNormal(In.vWorldPos, In.vNormal);
 #endif
     }
-    const float k = g_Draw.vParams0.w * saturate(fLit) * fFade;
-    vColor = float4((0.5 * CausticsFactor(fLight, k, g_Draw.vParams1.w)).xxx, 1);
+    const float k = g_DrawExt.vParams0.w * saturate(fLit) * fFade;
+    vColor = float4((0.5 * CausticsFactor(fLight, k, g_DrawExt.vParams1.w)).xxx, 1);
     vFogColor = 0.5;
   }
   else if (HasFlag(DF_CAUSTICS))
   {
-    float fDepth = g_Draw.vParams0.x - In.vWorldPos.z;
-    float2 vP = (In.vWorldPos.xy + g_Draw.vParams1.xy * fDepth) * g_Draw.vParams0.y;
-    float t = g_Draw.vParams0.z;
+    float fDepth = g_DrawExt.vParams0.x - In.vWorldPos.z;
+    float2 vP = (In.vWorldPos.xy + g_DrawExt.vParams1.xy * fDepth) * g_DrawExt.vParams0.y;
+    float t = g_DrawExt.vParams0.z;
     float c1 = SampleTexture(g_Draw.nTex0, XR_SAMPLER_LINEAR_WRAP, vP + float2(0.031, 0.017) * t).r;
     float c2 = SampleTexture(g_Draw.nTex0, XR_SAMPLER_LINEAR_WRAP, vP * 1.37 + float2(-0.023, 0.029) * t).r;
-    float fLight = min(c1, c2) * g_Draw.vParams1.w;
-    float fFade = saturate(fDepth) * saturate(1 - fDepth / g_Draw.vParams1.z);
-    vColor = float4(saturate(0.5 + 0.5 * g_Draw.vParams0.w * fFade * (fLight - 1)).xxx, 1);
+    float fLight = min(c1, c2) * g_DrawExt.vParams1.w;
+    float fFade = saturate(fDepth) * saturate(1 - fDepth / g_DrawExt.vParams1.z);
+    vColor = float4(saturate(0.5 + 0.5 * g_DrawExt.vParams0.w * fFade * (fLight - 1)).xxx, 1);
     vFogColor = 0.5;
   }
 #ifdef XR_PT
@@ -1872,14 +1872,14 @@ float4 ShadePixel(SVertexOutput In)
   // of it added (by its alpha in the blend: over the water behind, already so, exactly). The light the water scatters as the
   // view's (Underwater.hlsl's UnderSource: vUnder.w over 100 with d3d12_WaterUnderClear, from the scene's sun and sky).
   [branch]
-  if (g_Draw.vUnder.w > 0)
+  if (g_DrawExt.vUnder.w > 0)
   {
     const float3 vToPixel = In.vWorldPos - g_Frame.vCameraPos.xyz;
     const float fDist = length(vToPixel);
-    const float3 vDeep = float3(HdrDecode(g_Draw.vUnderColor.r), HdrDecode(g_Draw.vUnderColor.g), HdrDecode(g_Draw.vUnderColor.b));
-    const float3 c = VolumeAttenuation(vDeep, g_Draw.vUnderColor.w);
-    const bool bClear = g_Draw.vUnder.w > 100;
-    const float fUnder = bClear ? g_Draw.vUnder.w - 100 : g_Draw.vUnder.w;
+    const float3 vDeep = float3(HdrDecode(g_DrawExt.vUnderColor.r), HdrDecode(g_DrawExt.vUnderColor.g), HdrDecode(g_DrawExt.vUnderColor.b));
+    const float3 c = VolumeAttenuation(vDeep, g_DrawExt.vUnderColor.w);
+    const bool bClear = g_DrawExt.vUnder.w > 100;
+    const float fUnder = bClear ? g_DrawExt.vUnder.w - 100 : g_DrawExt.vUnder.w;
     float3 vSource = UnderDeepSource(vDeep, c);
     if (bClear)
     {
@@ -1888,8 +1888,8 @@ float4 ShadePixel(SVertexOutput In)
                                                    float3(HdrDecode(vSky.r), HdrDecode(vSky.g), HdrDecode(vSky.b)), g_Frame.vSunDir.z));
     }
     float3 T;
-    const float3 vScatter = UnderFog(vSource, c, max(g_Draw.vUnder.x - g_Frame.vCameraPos.z, 0), vToPixel / max(fDist, 1e-4), fDist,
-                                     max(g_Draw.vUnder.x - In.vWorldPos.z, 0), g_Draw.vUnder.y, g_Frame.vSunDir.xyz, g_Draw.vUnder.z, T);
+    const float3 vScatter = UnderFog(vSource, c, max(g_DrawExt.vUnder.x - g_Frame.vCameraPos.z, 0), vToPixel / max(fDist, 1e-4), fDist,
+                                     max(g_DrawExt.vUnder.x - In.vWorldPos.z, 0), g_DrawExt.vUnder.y, g_Frame.vSunDir.xyz, g_DrawExt.vUnder.z, T);
     // The mode, and d3d12_WaterDebug 31-33 by tens (the view's terms: an added light none).
     const bool bOver = fmod(fUnder, 10) < 1.5;
     const float fDebug = floor(fUnder / 10);
@@ -1950,14 +1950,14 @@ SPixelOutput PSMain(XR_PS_INPUT)
   if (HasFlag(DF_VCOLOR_X2) && !HasFlag(DF_ALPHATEST))
     s_vPTNormal = s_vPTFace;
   Out.vNormal = PathGBufferNormal(s_vPTNormal, s_vPTFace, s_fPTFog, (g_Draw.nFlags2 & DF2_PT_MASK) >> DF2_PT_SHIFT);
-  float3 vAmbient = g_Draw.vAmbient.rgb;
+  float3 vAmbient = g_DrawExt.vAmbient.rgb;
   // A lit object's fill lights (Draw3D.cpp SetPathFillLights: directional, the characters' light from above), as the
   // raster lights it with them, unshadowed: in these units 2 * colour * N.L.
   const float3 vPTN = SafeNormalize(s_vPTNormal);
   for (uint i = 0; i < min(g_Draw.nLights, XR_MAX_DRAW_LIGHTS); i++)
   {
-    if (g_Draw.vLightPos[i].w == 2)
-      vAmbient += 2 * g_Draw.vLightColor[i].rgb * saturate(dot(vPTN, g_Draw.vLightPos[i].xyz));
+    if (g_DrawExt.vLightPos[i].w == 2)
+      vAmbient += 2 * g_DrawExt.vLightColor[i].rgb * saturate(dot(vPTN, g_DrawExt.vLightPos[i].xyz));
   }
 #ifdef XR_CASCADES
   // A lit object in the cascades' shadow (DF2_SHADOW_TINT): the ambient light the paths fill in with at least its lit

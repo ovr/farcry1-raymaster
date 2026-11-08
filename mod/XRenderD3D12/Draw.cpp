@@ -69,8 +69,15 @@ void Set4(float v[4], float x, float y, float z, float w)
 
 }
 
-// HLSL packs a matrix of a constant buffer from a 16 byte boundary.
-static_assert(offsetof(SDrawConstants, mParams0) % 16 == 0, "SDrawConstants::mParams0 must match the HLSL layout");
+// The draw's constants as HLSL packs them (Shaders/Constants.h): the header one block of the upload ring, its
+// three matrices and its colour before the flags' words; every member of the rest a whole register (a matrix of a
+// constant buffer starts at a 16 byte boundary). Tests/LayoutTests.cpp checks the members against the shaders.
+static_assert(sizeof(SDrawHead) == 256, "SDrawHead must be one 256 byte block");
+static_assert(offsetof(SDrawHead, nFlags) == 4 * 16 * 3 + 16, "SDrawHead's words must follow its matrices and colour");
+static_assert(sizeof(SDrawExt) == 1728 && sizeof(SDrawExt) % 16 == 0, "SDrawExt must match the HLSL layout");
+static_assert(offsetof(SDrawExt, mParams0) % 16 == 0 && offsetof(SDrawExt, mShadow) % 16 == 0,
+  "SDrawExt's matrices must start at a register");
+static_assert(sizeof(SDrawConstants) == sizeof(SDrawHead) + sizeof(SDrawExt), "SDrawConstants must be the two parts");
 
 SDrawConstants CD3D12Renderer::DefaultDrawConstants()
 {
@@ -350,7 +357,8 @@ void CD3D12Renderer::DrawGeometry(const SPipelineKey &Key, const SDrawConstants 
     pList->SetGraphicsRootConstantBufferView(0, m_nFrameCB);
     Set.nFrameCB = m_nFrameCB;
   }
-  pList->SetGraphicsRootConstantBufferView(1, UploadConstants(*m_pUpload, *pDC));
+  pList->SetGraphicsRootConstantBufferView(1, UploadConstants(*m_pUpload, static_cast<const SDrawHead &>(*pDC)));
+  pList->SetGraphicsRootConstantBufferView(ROOT_DRAW_EXT, UploadConstants(*m_pUpload, static_cast<const SDrawExt &>(*pDC)));
   if (nRayScene)
   {
     pList->SetGraphicsRootShaderResourceView(ROOT_RAY_SCENE, nRayScene);

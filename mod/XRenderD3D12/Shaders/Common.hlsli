@@ -32,7 +32,8 @@
 #include "Constants.h"
 
 ConstantBuffer<SFrameConstants> g_Frame : register(b0);
-ConstantBuffer<SDrawConstants> g_Draw : register(b1);
+ConstantBuffer<SDrawHead> g_Draw : register(b1);       // the draw's header (Constants.h)
+ConstantBuffer<SDrawExt> g_DrawExt : register(b3);     // the rest of its constants
 
 Texture2D g_Textures[] : register(t0, space1);
 TextureCube g_Cubes[] : register(t0, space2);
@@ -156,9 +157,9 @@ float3 HeatVision(float3 vColor, float fFacing)
 {
   static const float3 COLD = float3(0.5, 0.7, 1);
   float L = saturate(dot(vColor, float3(0.299, 0.587, 0.114)));
-  float fHeat = saturate(g_Draw.vHeat.x) * lerp(0.55, 1, saturate(fFacing));
+  float fHeat = saturate(g_DrawExt.vHeat.x) * lerp(0.55, 1, saturate(fFacing));
   float3 vHot = lerp(float3(0.9, 0.3, 0.06), float3(1, 0.95, 0.65), saturate(0.3 + L));
-  if (g_Draw.vHeat.y > 0)
+  if (g_DrawExt.vHeat.y > 0)
     return lerp(COLD * 0.5, vHot, fHeat) * L;
   return lerp(COLD * (0.08 + 0.42 * L), vHot, fHeat);
 }
@@ -273,24 +274,24 @@ float SunVisibility(float3 vPos, float3 vNormal, float2 vScreenPos)
     float2(-0.326, -0.406), float2(-0.840, -0.074), float2(-0.696, 0.457), float2(-0.203, 0.621),
     float2(0.962, -0.195), float2(0.473, -0.480), float2(0.519, 0.767), float2(0.185, -0.893),
   };
-  float3 vP = vPos + SafeNormalize(vNormal) * g_Draw.vShadowParams.w;
+  float3 vP = vPos + SafeNormalize(vNormal) * g_DrawExt.vShadowParams.w;
   // A rotation of the disc per pixel (interleaved gradient noise) turns banding into fine noise.
   float fAngle = 6.2831853 * frac(52.9829189 * frac(dot(vScreenPos, float2(0.06711056, 0.00583715))));
   float2 vRot = float2(cos(fAngle), sin(fAngle));
   float fLit = 1;
-  uint nMaps = min((uint)g_Draw.vShadowParams.x, XR_MAX_DRAW_SHADOWS);
+  uint nMaps = min((uint)g_DrawExt.vShadowParams.x, XR_MAX_DRAW_SHADOWS);
   for (uint i = 0; i < nMaps; i++)
   {
-    float4 v = mul(float4(vP, 1), g_Draw.mShadow[i]);
+    float4 v = mul(float4(vP, 1), g_DrawExt.mShadow[i]);
     float fEdge = saturate((1 - length(v.xy)) * 6);
     // In front of the casters: lit; behind them (beyond the map's depth range): as far as they go.
     if (fEdge <= 0 || v.z <= 0)
       continue;
-    Texture2D Map = g_Textures[g_Draw.nShadowTex[i]];
+    Texture2D Map = g_Textures[g_DrawExt.nShadowTex[i]];
     float2 vSize;
     Map.GetDimensions(vSize.x, vSize.y);
     float2 vUV = float2(0.5 + 0.5 * v.x, 0.5 - 0.5 * v.y);
-    float2 vStep = g_Draw.vShadowParams.z / vSize;
+    float2 vStep = g_DrawExt.vShadowParams.z / vSize;
     float fDepth = min(v.z, 1);
     float fSum = 0, fCasters = 0, fCasterDepth = 0;
     [unroll]
@@ -299,7 +300,7 @@ float SunVisibility(float3 vPos, float3 vNormal, float2 vScreenPos)
       float2 d = float2(Disc[k / 2].x * vRot.x - Disc[k / 2].y * vRot.y, Disc[k / 2].x * vRot.y + Disc[k / 2].y * vRot.x);
       float2 vUVk = vUV + d * vStep * ((k & 1) ? 0.5 : 1);
       fSum += Map.SampleCmpLevelZero(g_SamplerShadow, vUVk, fDepth);
-      if (g_Draw.vShadowParams.y > 0)
+      if (g_DrawExt.vShadowParams.y > 0)
       {
         float fMap = Map.SampleLevel(g_SamplerPointClamp, vUVk, 0).r;
         if (fMap < fDepth)
@@ -311,7 +312,7 @@ float SunVisibility(float3 vPos, float3 vNormal, float2 vScreenPos)
     }
     float fShadow = (1 - fSum / 16) * fEdge;
     if (fCasters > 0)
-      fShadow *= saturate(1 - g_Draw.vShadowParams.y * (fDepth - fCasterDepth / fCasters));
+      fShadow *= saturate(1 - g_DrawExt.vShadowParams.y * (fDepth - fCasterDepth / fCasters));
     fLit *= 1 - fShadow;
   }
   return fLit;
