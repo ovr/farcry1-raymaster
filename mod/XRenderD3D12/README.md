@@ -829,7 +829,7 @@ system ones (better not to touch): [`CONFIGURATION.md`](../../CONFIGURATION.md).
   same (Regulator's time demo outdoors: some 400 draws and 0.11 ms of the GPU less a frame, 301
   to 311 FPS; `d3d12_ShadowDebug 1` shows the slices without the casters outside).
 
-  `d3d12_CascadeCull` (2): without rays (`WantsOffscreenRays`, `WantsRaySun`: they read the casters'
+  `d3d12_CascadeCull` (1): without rays (`WantsOffscreenRays`, `WantsRaySun`: they read the casters'
   scenes), only the slices read what the camera towards the sun and the live casters give, so
   `CScene::AddEf` leaves out a part that reaches no slice as the engine adds it (`CascadeCullsItem`:
   the same class filter and spheres as `DrawCascadeItems`), before it is prepared, listed and
@@ -847,7 +847,8 @@ system ones (better not to touch): [`CONFIGURATION.md`](../../CONFIGURATION.md).
   `EF_EndEf3D` 0.03 and 0.10 ms less; Volcano the same, Research has no cascades. Most of the pass
   is the engine's walk of its scene and the drawing of the parts that reach a slice. The shorter far
   plane adds nothing measurable: the engine ends its objects at their own view distances (Pier gives
-  the same 450 parts at 511 m as at 1,500).
+  the same 450 parts at 511 m as at 1,500), and it changes what the engine loads (Pier: 2,350
+  textures instead of 2,357, the same frames), so it stays off unless asked for (2).
 
   Lit objects take the sun from the full set. Light maps and the terrain, whose light has the
   static world's shadows already, take it from the live set; the terrain is darkened to the

@@ -346,7 +346,7 @@ void CD3D12Renderer::RegisterVariables()
   iConsole->Register("d3d12_ShadowCascadeSize", &CV_d3d12_ShadowCascadeSize, 2048, VF_DUMPTODISK, "The size of the sun's cascaded shadow maps, 512 to 4096");
   iConsole->Register("d3d12_CascadeInstancing", &CV_d3d12_CascadeInstancing, 1, 0,
                      "1: each caster of the sun's cascades drawn once into all the slices it reaches (instances); 0: once per slice");
-  iConsole->Register("d3d12_CascadeCull", &CV_d3d12_CascadeCull, 2, 0,
+  iConsole->Register("d3d12_CascadeCull", &CV_d3d12_CascadeCull, 1, 0,
                      "Without rays (none read the scene of the camera towards the sun): 1 the parts that reach no slice of the sun's "
                      "cascades left out as the engine adds them (not prepared), 2 also that camera ending where nothing "
                      "can shade the cascades' receivers any more (the level's heights); 0: all of them prepared, as far as the view");
