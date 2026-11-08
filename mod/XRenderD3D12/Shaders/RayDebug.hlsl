@@ -58,6 +58,17 @@
 //	                          edges darker; every instance is hit on both
 //	                          sides (TRIANGLE_CULL_DISABLE), the raster
 //	                          culls the back of most draws
+//	  XR_RAY_DEBUG_SUN_WAY    from the hit (alpha tested as the paths take
+//	                          it) a ray towards the sun (the frame's
+//	                          vSunDir) among the instances but the pieces
+//	                          of the sky, as the volumetric light's
+//	                          (VolumetricRays.hlsl): white where it reaches
+//	                          the sun, where something hides it the
+//	                          distance to that, as XR_RAY_DEBUG_DISTANCE's
+//	                          colours at half their brightness; with the
+//	                          pieces of the sky in the camera's rays
+//	                          (d3d12_RTDebugSky 1) the openings they close
+//	                          show which of their points the sun reaches
 //	  XR_RAY_DEBUG_GB_*       the path tracer's G-buffer (PathGBuffer.hlsli:
 //	                          the albedo, the normal, the fog's share, the
 //	                          material, the sun's visibility, the ambient
@@ -223,6 +234,24 @@ float4 PSMain(SRayDebugOutput In) : SV_Target
       return float4(0, 0, 0, 1);
     const float fEdge = min(min(Hit.vBary.x, Hit.vBary.y), 1 - Hit.vBary.x - Hit.vBary.y);
     return float4(HashColor(MaterialHash(g_RayInstances[Hit.nInstance])) * (fEdge < 0.03 ? 0.4 : 1), 1);
+  }
+
+  if (nView == XR_RAY_DEBUG_SUN_WAY)
+  {
+    const float fSpread = length(PixelRay(In.vPos.xy + float2(1, 0)) - Ray.Direction);
+    const SRayHit Hit = TraceScene(Ray, nMask, 0, fSpread);
+    if (!Hit.bHit)
+      return float4(0, 0, 0, 1);
+    // From the hit, its own surface left behind by TMin; the sun's rays are parallel (no spread).
+    RayDesc Sun;
+    Sun.Origin = Ray.Origin + Ray.Direction * Hit.fT;
+    Sun.Direction = g_Frame.vSunDir.xyz;
+    Sun.TMin = 0.02;
+    Sun.TMax = Ray.TMax;
+    const SRayHit Block = TraceScene(Sun, nMask & ~(uint)XR_RAY_SKY, Hit.fT * fSpread, 0);
+    if (!Block.bHit)
+      return float4(1, 1, 1, 1);
+    return float4(0.5 * Ramp(saturate(log2(1 + Block.fT) / log2(1 + Ray.TMax))), 1);
   }
 
   if (nView == XR_RAY_DEBUG_SHADED || nView == XR_RAY_DEBUG_SHADED_ALL || nView == XR_RAY_DEBUG_LOD || nView == XR_RAY_DEBUG_ALPHA)

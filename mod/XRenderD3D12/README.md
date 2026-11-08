@@ -1277,7 +1277,14 @@ reference of its features and console variables.
   colour per material the rays take of the hit's instance (the same while it is: to see the rays'
   materials steady); 12 the side of the hit's triangle as the raster's culling takes it (the front
   green, the back red: a red surface is one the rays meet and the raster does not draw from there;
-  Training's cave hole is green, a white unlit disc the level puts in it for the sky);
+  Training's cave hole is green, a white unlit disc the level puts in it for the sky); 13 the way to
+  the sun from the hit as the volumetric light's rays take it (not the pieces of the sky): white
+  where it reaches the sun, the distance to what hides it where not (the colours of 3, half as
+  bright), so the pieces of the sky closing a room's openings show which of their points the sun
+  comes through (Training's bunker: about 92 % of the planes in its roof's openings);
+  `d3d12_RTDebugSky 0` makes its rays leave out the pieces of the sky (`XR_RAY_SKY`, the planes of
+  a sky box's texture closing a room's openings) as the volumetric light's sun rays do, to see
+  what those meet beyond an opening (1, the default: they see them, as the other rays);
   `d3d12_WaterDebug` 13, 14, 15 the water rays' colour, distance and weight. With the rays off the
   frames are the same as without the code (WaterMove, bit for bit). Check the rays under the debug
   layer with `XRENDERD3D12_DEBUG=2`: GPU based validation turns the water rays' frames black.

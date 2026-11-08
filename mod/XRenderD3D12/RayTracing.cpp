@@ -1215,7 +1215,8 @@ void CD3D12Renderer::DrawRayDebug()
   memcpy(dc.mParams0, ClipToWorld.data, sizeof(dc.mParams0));
   Set4(dc.vParams0, 1.0f / w, 1.0f / h, (float)CV_d3d12_RTDebug, std::max(CV_d3d12_RTDistance, 1.0f));
   const Vec3 &vCamera = m_pRayScene->GetCamera();
-  const uint32 nMask = RayMask();
+  // d3d12_RTDebugSky 0: without the pieces of the sky, as the volumetric light's sun rays (Volumetric.cpp).
+  const uint32 nMask = CV_d3d12_RTDebugSky > 0 ? RayMask() : RayMask() & ~(uint32)XR_RAY_SKY;
   Set4(dc.vParams1, vCamera.x, vCamera.y, vCamera.z, 0);
   memcpy(&dc.vParams1[3], &nMask, sizeof(nMask));
   // The path tracer's views: its shading (SPathShade, Shaders/PathShade.hlsli).

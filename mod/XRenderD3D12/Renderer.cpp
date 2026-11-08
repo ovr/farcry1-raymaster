@@ -476,7 +476,11 @@ void CD3D12Renderer::RegisterVariables()
                      "lighter), 6 the alpha tests along the ray, 7 the hits shaded over the whole picture; the path tracer's: 8 the albedo "
                      "of the hits, 9 their emission, 10 them lit by the sun and the lamps; 11 a colour per material the rays take "
                      "of the hits' instances (the same while it is); 12 the side of the hits' triangles as the raster's culling takes it "
-                     "(the front green, the back red)");
+                     "(the front green, the back red); 13 the way to the sun from the hits as the volumetric light's rays take it "
+                     "(not the pieces of the sky): white reaching it, hidden the distance to what hides it (blue near, red far)");
+  iConsole->Register("d3d12_RTDebugSky", &CV_d3d12_RTDebugSky, 1, 0,
+                     "0: d3d12_RTDebug's rays leave out the pieces of the sky (the planes of a sky box's texture closing a room's openings) "
+                     "as the volumetric light's sun rays do; 1 they see them, as the other rays");
   iConsole->Register("d3d12_RTDistance", &CV_d3d12_RTDistance, 150.0f, VF_DUMPTODISK, "The rays' length (m)");
   iConsole->Register("d3d12_RTMemory", &CV_d3d12_RTMemory, 384, VF_DUMPTODISK,
                      "The memory of the static geometry's acceleration structures (MB) beyond which the least recently used go");
