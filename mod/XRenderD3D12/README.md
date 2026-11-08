@@ -842,7 +842,12 @@ system ones (better not to touch): [`CONFIGURATION.md`](../../CONFIGURATION.md).
   receiver only along the sun, so below the level's highest terrain plus 100 m (read once a level
   from the height map) it lies at most (that top − the lowest receiver) / the sun's height beyond the
   farthest receiver, plus 10 m; with the sun below 10 degrees the view's far plane (Training 400 m
-  instead of 700, Pier 511 instead of 1,500).
+  instead of 700, Pier 511 instead of 1,500). The time demos in raster at 4K (`d3d12_FrameLog`, two
+  runs each): the sun camera's pass 0.57 → 0.52 ms on Training, 0.86 → 0.78 ms on Regulator,
+  `EF_EndEf3D` 0.03 and 0.10 ms less; Volcano the same, Research has no cascades. Most of the pass
+  is the engine's walk of its scene and the drawing of the parts that reach a slice. The shorter far
+  plane adds nothing measurable: the engine ends its objects at their own view distances (Pier gives
+  the same 450 parts at 511 m as at 1,500).
 
   Lit objects take the sun from the full set. Light maps and the terrain, whose light has the
   static world's shadows already, take it from the live set; the terrain is darkened to the
