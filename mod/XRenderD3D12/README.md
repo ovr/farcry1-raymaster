@@ -1751,7 +1751,8 @@ and lists theirs (`NamesObjects`).
   way; blue the RMS of the slopes their mip levels smoothed out, white 0.1), 28 their foam's share
   white; with the ocean's grid 29 its height, 30 the shares of the waves left; from under the
   surface 31 the light the water scatters, 32 the sun's light in it over its mean, 33 the share of
-  the scene left.
+  the scene left; with the foam on the ocean's grid 34 the floor behind against the level's terrain
+  heights (red above, blue below, 0.5 m full; green where the foam takes the heights).
 - The FFT ocean (`d3d12_WaterFFT`, 1; 0 draws the static wave texture and the frames of the water
   before it; not saved; `OceanSpectrum.h`, `OceanFFT.cpp`, `Shaders/OceanFFT.hlsl`): the ocean's
   waves are a wind sea made by inverse FFTs on the GPU each frame (Tessendorf's "Simulating Ocean
@@ -2087,6 +2088,14 @@ and lists theirs (`NamesObjects`).
     storm's crests 1.0, now 0.095: Fort's floor under them). The foam of the shore and of what
     stands in the water takes the same floor's depth (`GridBehindZ`: a boat's waterline behind a
     crest drew the foam of the waves against its side over the crest).
+  - Where that floor is the terrain as drawn, within `d3d12_WaterFoamTerrain` (0.2 m; 0 the floor
+    as drawn) of the level's heights there (the grid's heights texture), the foam takes the depth
+    over those heights (`FoamFloorZ`). The terrain's level of detail changes its triangles from
+    frame to frame, a few centimetres on a shallow pond's bottom, and the shore's foam, the square
+    of the depth's share left, turned that into sharp wedges and straight lines across Swamp's
+    ponds that changed every frame (with or without the rays). The level of detail is within 0.05 m
+    of the heights over 98.9 % of those ponds' pixels, 0.1 m 99.7 %, 0.2 m 99.9 %; a rock, a post
+    or a hull standing higher over the terrain keeps its own point.
   - The default sea (3.5 m/s, its significant height 0.15 m) changes little but at the silhouettes
     and the wakes; at 12 m/s (`d3d12_WaterWind 12`, `d3d12_WaterSlope 0`) the crests 1-2 m high a
     few tens of metres off stand over a camera 1.3 m over the water and hide the boats behind them

@@ -141,6 +141,7 @@ Details: [Water](mod/XRenderD3D12/README.md#water).
 | `d3d12_WaterReflectionScale` | `0.5` | yes | Its size, a fraction of the screen's |
 | `d3d12_WaterFFT` | `1` |  | The waves of a wind sea on the ocean (an FFT ocean); 0 the game's wave texture |
 | `d3d12_WaterFoam` | `1` |  | The ocean's foam (whitecaps, the surf), its strength; 0 none |
+| `d3d12_WaterFoamTerrain` | `0.2` |  | m: where the floor behind the water is the terrain as drawn (within this of the level's heights), the foam takes the depth over those heights, not over the terrain's level of detail; 0 over what is drawn |
 | `d3d12_WaterWakes` | `1` |  | The waves behind boats and swimmers; 0 none |
 | `d3d12_Caustics` | `1` | yes | The caustics under the water; 0 off |
 
