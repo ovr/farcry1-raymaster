@@ -343,7 +343,10 @@ void CD3D12Renderer::UpscaleScene()
       pLdr = ResolveHdr(m_nUpscaleColorSRV, m_pDevice->GetSceneColor(), rw, rh, true, m_pDevice->GetSceneDepth(), DXGI_FORMAT_R32_FLOAT);
     InvalidateFrameConstants();
   }
-  GpuSection("upscale");
+  // The pass by what runs in it: an upscaler's (FSR) upscale; TAA (d3d12_AA's, with d3d12_Upscaler none) the anti-aliasing at
+  // the display's size, as DrawPostAA's methods; the path tracer's scene targets without either (CNativeScene) only their
+  // picture drawn over the back buffer.
+  GpuSection(m_pUpscaler->IsAntiAliasing() ? "anti-aliasing" : m_pUpscaler->GathersFrames() ? "upscale" : "scene copy");
   // The upscaler reads its inputs in a compute shader (FSR in exactly the state it is told: both shaders' reads) and writes
   // its output; the device keeps their states (the inputs stay readable by the pixels after).
   constexpr D3D12_RESOURCE_STATES READ = D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE | D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE;
