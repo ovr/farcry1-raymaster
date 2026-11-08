@@ -442,6 +442,7 @@ void CD3D12RayScene::CaptureDraw(const SPipelineKey &Key, const SDrawConstants &
   d.nHash = DrawHash(d);
   d.eSource = bReflection ? SOURCE_REFLECTION : m_eCaptureSource;
   d.bLive = !bReflection && m_bCaptureLive;
+  d.bSky = m_bCaptureMaterial && m_bCaptureSky;
   (bReflection ? m_ReflectionDraws : m_Draws).push_back(d);
 }
 
@@ -522,9 +523,10 @@ void CD3D12RayScene::PathAmbient(const SDrawConstants &dc, float vAmbient[3])
     vAmbient[c] = dc.vAmbient[c] * fScale;
 }
 
-void CD3D12RayScene::SetCaptureMaterial(uint32 nMaterial, const float vAlbedo[4], const float vSpecular[4], const float vAmbient[3])
+void CD3D12RayScene::SetCaptureMaterial(uint32 nMaterial, const float vAlbedo[4], const float vSpecular[4], const float vAmbient[3], bool bSky)
 {
   m_bCaptureMaterial = true;
+  m_bCaptureSky = bSky;
   m_nCaptureMaterial = nMaterial;
   m_nCaptureAmbient = PathPackAmbient(vAmbient);
   memcpy(m_vCaptureAlbedo, vAlbedo, sizeof(m_vCaptureAlbedo));
@@ -909,8 +911,10 @@ void CD3D12RayScene::Build(FILE *pDump, bool bTop)
       D3D12_RAYTRACING_INSTANCE_DESC Instance = {};
       memcpy(Instance.Transform, d.Transform, sizeof(Instance.Transform));
       Instance.InstanceID = nInstance;
-      Instance.InstanceMask = d.nKind | (d.bLive ? XR_RAY_LIVE : 0) | (d.bTerrain ? XR_RAY_TERRAIN : 0);
-      Instance.InstanceContributionToHitGroupIndex = Instance.InstanceMask;
+      const uint32 nKinds = d.nKind | (d.bLive ? XR_RAY_LIVE : 0) | (d.bTerrain ? XR_RAY_TERRAIN : 0);
+      // A piece of the sky: its mask that bit alone (the rays that pass it leave it out), its kinds kept.
+      Instance.InstanceMask = d.bSky ? XR_RAY_SKY : nKinds;
+      Instance.InstanceContributionToHitGroupIndex = nKinds | (d.bSky ? XR_RAY_SKY : 0);
       nLive += d.bLive ? 1 : 0;
       Instance.Flags = D3D12_RAYTRACING_INSTANCE_FLAG_TRIANGLE_CULL_DISABLE;
       Instance.AccelerationStructure = d.nBlas;
@@ -1018,8 +1022,9 @@ void CD3D12Renderer::GetRayView(float vCameraPos[4], float vRayX[4], float vRayY
 
 uint32 CD3D12Renderer::RayMask() const
 {
-  // The terrain's bit is for the path tracer's rays over the terrain alone.
-  return ((uint32)CV_d3d12_RTMask & 0xff & ~(uint32)XR_RAY_TERRAIN) | (CV_d3d12_RTShadows ? 0x100u : 0u);
+  // The terrain's bit is for the path tracer's rays over the terrain alone; the pieces of the sky are seen (not a kind:
+  // their instances' masks have that bit alone).
+  return ((uint32)CV_d3d12_RTMask & 0xff & ~(uint32)XR_RAY_TERRAIN) | XR_RAY_SKY | (CV_d3d12_RTShadows ? 0x100u : 0u);
 }
 
 void CD3D12Renderer::BuildRayScene(std::span<const SRenderItem> Opaque, std::span<const SRenderItem> Blended, bool bTraced)

@@ -496,6 +496,14 @@ void CD3D12Renderer::DrawLeafItem(const SRenderItem &it)
   const EDrawClass eDC = it.eDrawClass;
   if (eDC == eDC_NoDraw || eDC == eDC_Engine || eDC == eDC_Sky || (eDC == eDC_ShadowOnly && !m_bShadowMapPass))
     return;
+  // The planes of TemplMuzzleFlash_Auto stand for shafts of sunlight (Training's bunker): none while the volumetric light
+  // has them by rays (d3d12_VolumetricLightRays).
+  if (pSh->GetProps().bEdgeFade && HasVolumetricShafts())
+  {
+    if (m_pFrameDump && !m_bRayCaptureWalk)
+      fprintf(m_pFrameDump.get(), "shafts of sunlight's plane ('%s') not drawn: the volumetric light's sun by rays has them\n", pSh->GetTemplateName());
+    return;
+  }
   // The objects that show the scene around them are not in its environment cubes.
   if (m_bEnvCubePass && pSh->GetProps().UsesAutoCube())
     return;
@@ -1555,7 +1563,7 @@ void CD3D12Renderer::DrawLeafItem(const SRenderItem &it)
       memset(vPathAmbient, 0, sizeof(vPathAmbient));
   }
   if (bRayMaterial)
-    m_pRayScene->SetCaptureMaterial(nMaterial, vAlbedo, vSpecular, vPathAmbient);
+    m_pRayScene->SetCaptureMaterial(nMaterial, vAlbedo, vSpecular, vPathAmbient, pDiffuse && pDiffuse->m_bSky);
   // Into the G-buffer: a surface the path tracer lights without its light (no sun, ambient, lamps or light map), its
   // colour the albedo (General.hlsl, XR_PT); the sun's visibility from all the casters (its shadow maps, the sun's
   // cascades, the mask by rays), which the composite takes (none where the raster has no sun, DF2_NO_SUN); the game's

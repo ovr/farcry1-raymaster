@@ -160,6 +160,8 @@ public:
   bool m_bUpscaled = false;
   //! r_Skin: a character's face or head (PbrCompanion::IsSkin of its file), lit as skin (Skin.hlsli).
   bool m_bSkin = false;
+  //! A texture of the sky boxes (PbrCompanion::IsSky of its file): its surfaces are pieces of the sky (XR_RAY_SKY).
+  bool m_bSky = false;
   size_t m_nBytes = 0;                //!< its GPU picture's bytes, every face and level (Upload)
   int m_nID;
   int m_nRefs = 1;
@@ -284,6 +286,13 @@ private:
   bool TakeUpscaled(const std::string &Base, SImage &Image, int &nTexWidth, int &nTexHeight);
   //! Makes the GPU texture of pTex from Image (replacing one it has) and sets its sizes.
   bool Upload(CTexture *pTex, const SImage &Image);
+
+public:
+  //! r_TexUpscaledLight 0: while set, the textures loaded keep their files' own pictures, not the upscaled ones (the
+  //! textures of a template that adds light, CShaderManager's EF_LoadShaderItem), under keys of their own ("#own").
+  void SetKeepOwnPictures(bool bKeep) { m_bKeepOwn = bKeep; }
+
+private:
   void AddKey(CTexture *pTex, const std::string &Key);
   CTexture *FindKey(const std::string &Key);
 
@@ -323,6 +332,7 @@ private:
   std::unordered_map<std::string, float> m_DepthShares;  //!< the depth table's shares by file (ReadDepthTable)
   bool m_bDepthRead = false;                          //!< the depth table read (or found missing)
   int m_nUpscaledFolder = -1;                         //!< RayMaster/upscaled_manifest.tsv: -1 not looked for, 0 missing, 1 there
+  bool m_bKeepOwn = false;                            //!< SetKeepOwnPictures
   CTexture *m_pWhite = nullptr;
   CTexture *m_pPlaceholder = nullptr;
   bool m_bInit = false;

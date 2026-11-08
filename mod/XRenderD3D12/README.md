@@ -665,6 +665,13 @@ reference of its features and console variables.
   textures, A MB of B MB`, an item's `upscaled (r_TexUpscaled): W x H, its file's own w x h`; the
   statistics' line `Textures N (A MB), upscaled N (B MB)`. 0: the paks' own pictures (the frames
   before).
+- `r_TexUpscaledLight` (0) keeps the own pictures of the textures of the templates that add their
+  texture as light (`TemplMuzzleFlash*`, `TemplDecalAdd*`, `TemplDecalAlphaAdd`: glows, flashes, the
+  shafts of sunlight of Training's bunker; `Shader.cpp`'s `AddsLight`): soft as they are, the detail
+  the upscaler adds shows in them as streaks. They load under keys of their own (`#own`), so a
+  texture that another material takes as well keeps its upscaled picture there. 1: the upscaled
+  pictures for them too (the frames before). Read as a material's textures load, as `r_TexUpscaled`
+  (the command line too).
 - Cost (RX 7900 XTX, 3840 x 2160, the raster without the upscaler, `Parallax_river.ini`'s views): in
   River's temple the opaque list 0.65-0.72 to 0.77-0.84 ms, the frame 2.79-2.95 to 2.91-3.05 ms;
   from outside, 37 m off, the same (the depth under a pixel: no march). `r_ParallaxMaterials` and
@@ -932,9 +939,10 @@ reference of its features and console variables.
   are of the view without the jitter, which moves a pixel by a small part of a froxel. None in heat
   vision or under water, and indoors where the outdoor lights do not reach (the camera's vis area,
   `IVisArea::IsAfectedByOutLights`; it fades out and in over half a second, and nothing of it runs
-  there). `d3d12_VolumetricLight 0` gives the frames of the renderer without it (DemoCompare
-  difference 0), 2 shows the light scattered alone. All are read every frame. The GPU times have a
-  `volumetric light` section and the frame dump a `volumetric light:` line.
+  there; with the sun by rays, below, it stays). `d3d12_VolumetricLight 0` gives the frames of the
+  renderer without it (DemoCompare difference 0), 2 shows the light scattered alone. All are read
+  every frame. The GPU times have a `volumetric light` section and the frame dump a
+  `volumetric light:` line.
 - `d3d12_VolumetricLightShafts` (4 m) keeps the shafts alone: all the air lit alike is a haze
   over everything (the sky over the sea, the leaves in the shade; the game's own fog is the haze
   already), while a shaft shows as lit air against air in shadow. So a froxel scatters the sun's
@@ -958,6 +966,37 @@ reference of its features and console variables.
   white wall facing the sun gives its light over pi and a metre of air with the extinction a
   quarter of that, shows no shafts at a density the open sea stands) and the light from all round
   of `d3d12_VolumetricLightAmbient`, the scene behind it hidden by its transmittance.
+- `d3d12_VolumetricLightRays` (1; with the sun's shadow by rays, `d3d12_RTSunShadows`, or the path
+  tracer) gives the air its sun by rays in place of the cascades (`Shaders/VolumetricRays.hlsl`,
+  `Volumetric.hlsl`'s `XR_VOL_RAYS`): before the injection a ray from each froxel's point (the one
+  the injection takes this frame) towards a point of the sun's disc (`d3d12_RTSunAngle` wide, another
+  for each froxel and frame) through the scene for rays, alpha tested as the sun's shadow by rays,
+  first over 1.5 m, then on to `d3d12_RTDistance` (150 m), gives the sun's state there (R8_SNORM, a
+  texel a froxel): it reaches it, a shadow, or a surface less than 1.5 m above (not air). The
+  injection takes its own state and, for the shafts' 8 points, the states of the froxels they are in
+  (the view's world to clip; out of the volume left out). So the shadows reach as far as the rays,
+  not the cascades, and the air indoors has the sun too: what keeps the sun out of a room is in the
+  scene for rays (its walls and roof the view has, the rest from the 3D engine's cameras round the
+  camera, as `d3d12_PTBehind` gives the path tracer: `UpdateRayBehind`), so only what comes through
+  the room's openings lights its air. Indoors the frame has no sun: the 3D engine's, raised as the
+  scene's sun is outdoors (`GetSunPosition(true)`), its colour. Training's bunker closes the
+  openings of its roof with planes of its sky box's side (`Textures/SKYS/TRAINING/box_5.dds`, lit by
+  themselves): a texture of the sky boxes (`PbrCompanion::IsSky`, `textures/skys/`) makes its
+  surfaces pieces of the sky (`XR_RAY_SKY`, their instances' mask that bit alone), which every other
+  ray sees as before and these rays pass. Its air indoors is `d3d12_VolumetricLightIndoors` (2.5)
+  times as dense (a closed room's dust; 1 as outdoors; it fades in and out with the camera's way in
+  and out, as the air indoors without the rays), and the planes that stood for its shafts of
+  sunlight (`TemplMuzzleFlash_Auto`) are not drawn while the update of the frame before had the
+  rays (`HasVolumetricShafts`; the frame dump says `shafts of sunlight's plane (...) not drawn`).
+  2 shows the states in colours (with `d3d12_VolumetricLight 2`: red the sun reaches the air, green
+  a shadow, blue not air). 0: the cascades, none indoors, the planes drawn (the frames before). The
+  frame dump's line `volumetric light's sun: by rays|by the cascades, direction, colour, ...`, the
+  GPU times' section `volumetric light's sun by rays`. Cost (RX 7900 XTX, 3840 x 2160, very high,
+  no upscaler): in Training's bunker, where the air had no light before, the rays 0.15-0.16 ms and
+  the froxels 0.07-0.08, the frame +0.37 ms with the rays' effects (8.30; the opaque list's pixels
+  that take the froxels 0.13) and +0.23 with the path tracer (14.92); outdoors against the sun through Training's trees
+  the rays take 0.66-0.77 ms (the leaves' alpha tests), the injection 0.18 less without the
+  cascades: +0.48 ms (8.92, 6%) and +0.76 (20.32, 4%).
 
 ## Foliage translucency
 
@@ -1247,7 +1286,8 @@ reference of its features and console variables.
   1 in real time, 2 the reference. It has the scene for rays, with what is out of the view (as
   `d3d12_RTOffscreen` 1 does for the effects) and what is around the camera (`d3d12_PTBehind`, 40 m: the
   static objects and entities the 3D engine gives cameras at the view looking back, up and down, 170
-  degrees wide each, as far as that, noted as the cascades' parts, `UpdateRayBehind`; the cascades have
+  degrees wide each, as far as that, noted as the cascades' parts, `UpdateRayBehind`, also for the
+  volumetric light's sun by rays where the frame has no sun, `d3d12_VolumetricLightRays`; the cascades have
   only what is towards the sun, a room without the sun none of it: Research's hall has 42 instances
   without it, 259 with it. With the view's and the one looking back alone, what is above and below the
   view out of its frustum was not there: a roof's parts dropped out of the scene as the camera looked
@@ -2384,7 +2424,10 @@ and lists theirs (`NamesObjects`).
 - The shafts of sunlight in Training's bunker are planes of the `TemplMuzzleFlash_Auto` template.
   The original's program draws them added, twice the texture, each vertex's colour times
   min((2 |N.V|)^4, 1), so a plane fades out where it is seen edge on (`d3d12_MuzzleFlashAuto`,
-  1; `SDrawConstants::vEdgeFade`). 0: the texture alone, added, with hard plane edges.
+  1; `SDrawConstants::vEdgeFade`). 0: the texture alone, added, with hard plane edges. With the
+  volumetric light's sun by rays (`d3d12_VolumetricLightRays`) they are not drawn: the air under
+  the roof's openings is lit by the sun through them instead. Their texture keeps its own picture
+  (`r_TexUpscaledLight` 0): upscaled, its soft rays turned into streaks.
 
 ## Projected lights
 

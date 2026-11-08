@@ -118,8 +118,9 @@ public:
   void SetCaptureLive(bool bLive) { m_bCaptureLive = bLive; }
   //! The path tracer's material of the draws captured until ClearCaptureMaterial (SRayInstance's vAlbedo,
   //! vSpecular, nPath; XR_PT_MAT_TERRAIN also XR_RAY_TERRAIN in the masks; vAmbient the game's ambient light, rgb,
-  //! PathPackAmbient). Without one CaptureDraw takes it from the draw's flags (DefaultMaterial).
-  void SetCaptureMaterial(uint32 nMaterial, const float vAlbedo[4], const float vSpecular[4], const float vAmbient[3]);
+  //! PathPackAmbient). Without one CaptureDraw takes it from the draw's flags (DefaultMaterial). bSky: the draws are
+  //! pieces of the sky (XR_RAY_SKY: a texture of the sky boxes, CTexture::m_bSky).
+  void SetCaptureMaterial(uint32 nMaterial, const float vAlbedo[4], const float vSpecular[4], const float vAmbient[3], bool bSky = false);
   //! The game's ambient light on a draw (rgb, the game's colour: what its ambient colour adds to the light 1 its
   //! albedo has) as SRayInstance::nPath.y keeps it: / 2, 8 bits a channel from the lowest.
   static uint32 PathPackAmbient(const float vAmbient[3]);
@@ -207,6 +208,7 @@ private:
     ESource eSource;
     bool bLive;                     //!< SetCaptureLive
     bool bTerrain;                  //!< a sector of the terrain (XR_RAY_TERRAIN)
+    bool bSky;                      //!< a piece of the sky (XR_RAY_SKY; SetCaptureMaterial)
   };
   //! A buffer of a frame slot that grows (RAYTRACING_ACCELERATION_STRUCTURE or UNORDERED_ACCESS).
   struct SSlotBuffer
@@ -257,6 +259,7 @@ private:
   ESource m_eCaptureSource = SOURCE_VIEW;
   bool m_bCaptureLive = false;
   bool m_bCaptureMaterial = false;  //!< SetCaptureMaterial
+  bool m_bCaptureSky = false;       //!< SetCaptureMaterial's bSky
   uint32 m_nCaptureMaterial = XR_PT_MAT_LIT;
   float m_vCaptureAlbedo[4] = {}, m_vCaptureSpecular[4] = {};
   uint32 m_nCaptureAmbient = 0;     //!< PathPackAmbient

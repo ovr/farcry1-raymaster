@@ -5,7 +5,7 @@
 //	File: TestHeaders.hlsl
 //	Description: The unit tests' kernels over the renderer's shader
 //	headers that stand alone (Shader Model 6.0): PathGBuffer.hlsli,
-//	HdrLight.hlsli, HdrToneMap.hlsli, HdrExposure.hlsli, HdrFrameAverage.hlsli, PathCache.hlsli, LightmapLight.hlsli, RenderMode.hlsli, ArrayCoords.hlsli, WaterLight.hlsli, WaterFoam.hlsli, WaterCaustics.hlsli, WaterVolume.hlsli, Underwater.hlsli, AlphaCoverage.hlsli, PbrSpecular.hlsli, Skin.hlsli, RayFace.hlsli and Fxaa.hlsli, included as the renderer's
+//	HdrLight.hlsli, HdrToneMap.hlsli, HdrExposure.hlsli, HdrFrameAverage.hlsli, PathCache.hlsli, LightmapLight.hlsli, RenderMode.hlsli, ArrayCoords.hlsli, WaterLight.hlsli, WaterFoam.hlsli, WaterCaustics.hlsli, WaterVolume.hlsli, Underwater.hlsli, AlphaCoverage.hlsli, PbrSpecular.hlsli, Skin.hlsli, RayFace.hlsli, Volumetric.hlsli and Fxaa.hlsli, included as the renderer's
 //	programs include them. Each kernel runs the tested functions on the
 //	items of g_TestIn and writes what they give to g_TestOut; ShaderTests.cpp
 //	checks it. One compile per kernel (Tests/CMakeLists.txt).
@@ -38,6 +38,7 @@
 #include "PbrSpecular.hlsli"
 #include "Skin.hlsli"
 #include "RayFace.hlsli"
+#include "Volumetric.hlsli"
 
 //! A step of BarrierTests' runs (GpuHarness.h's RunBarrierSteps): each word of the output's first g_Test.nTest.x items
 //! times 3 plus g_Test.nTest.y (a step that read the output before the step before wrote it gives another value).
@@ -862,4 +863,33 @@ void CSGridDisc(uint i : SV_DispatchThreadID)
   const float2 vRing = g_Test.nTest.w > 0 ? GridRing((uint)a.z, g_Test.nTest.y * (1 + XR_GRID_DISC_SEGMENTS), g_Test.nTest.w) : 0;
   const float fTable = g_Test.vTest.x > 0 ? GridDiscAlphaTable(a.xy, (uint)g_Test.vTest.y, g_Test.vTest.x) : 0;
   TestOut(i, float4(GridDiscAlpha(a.xy, g_Test.nTest.y), vRing, fTable));
+}
+//! The volumetric light's sun by rays (Volumetric.hlsli): VolSunState of g_TestIn[3i].xy (something near, something far:
+//! not 0) in out[i].x; VolAirInShadow of the states g_TestIn[3i + 1].xyzw, g_TestIn[3i + 2].xyzw in out[i].y.
+[numthreads(64, 1, 1)]
+void CSVolSun(uint i : SV_DispatchThreadID)
+{
+  if (i >= g_Test.nTest.x)
+    return;
+  const float4 h = TestIn(3 * i), a = TestIn(3 * i + 1), b = TestIn(3 * i + 2);
+  float s[SHAFT_TAPS] = { a.x, a.y, a.z, a.w, b.x, b.y, b.z, b.w };
+  TestOut(i, float4(VolSunState(h.x != 0, h.y != 0), VolAirInShadow(s), 0, 0));
+}
+
+//! The froxels' coordinates (Volumetric.hlsli): with the world to clip g_TestIn[0..3] (rows), the camera g_TestIn[4].xyz,
+//! vRayO, vRayX, vRayY g_TestIn[5..7].xyz and the slices g_TestIn[8], VolFroxelCoord of VolFroxelPos at the point
+//! g_TestIn[9 + i].xyz (0..1 across, down, deep): out[2i].xyz; with the sun's direction g_Test.vTest.xyz, the disc's
+//! radius g_Test.vTest.w and the turn g_TestIn[9 + i].w, VolShaftTap k = i % SHAFT_TAPS: out[2i + 1].xyz.
+[numthreads(64, 1, 1)]
+void CSVolFroxel(uint i : SV_DispatchThreadID)
+{
+  if (i >= g_Test.nTest.x)
+    return;
+  const float4x4 m = float4x4(TestIn(0), TestIn(1), TestIn(2), TestIn(3));
+  const float4 c = TestIn(9 + i), vSlices = TestIn(8);
+  const float3 vPos = VolFroxelPos(c.xy, VolSliceDepth(c.z, vSlices), TestIn(4).xyz, TestIn(5).xyz, TestIn(6).xyz, TestIn(7).xyz);
+  TestOut(2 * i, float4(VolFroxelCoord(vPos, m, vSlices), 0));
+  float3 vA, vB;
+  VolAcross(normalize(g_Test.vTest.xyz), vA, vB);
+  TestOut(2 * i + 1, float4(VolShaftTap(i % SHAFT_TAPS, g_Test.vTest.w, c.w, vA, vB), 0));
 }

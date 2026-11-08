@@ -211,6 +211,15 @@ namespace PbrCompanion
         return false;
     return true;
   }
+
+  //! A texture of the sky boxes, read from Base (as Path's): a file under textures/skys/. A surface of one stands for
+  //! the sky behind an opening (the windows of Training's bunker: planes of its sky box's side, lit by themselves),
+  //! which the volumetric light's rays towards the sun pass (XR_RAY_SKY, d3d12_VolumetricLightRays).
+  inline bool IsSky(std::string_view Base)
+  {
+    constexpr std::string_view SKYS = "textures/skys/";
+    return Base.substr(0, SKYS.size()) == SKYS;
+  }
 }
 
 #endif

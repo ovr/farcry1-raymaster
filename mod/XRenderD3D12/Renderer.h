@@ -1784,6 +1784,11 @@ public:
     float fM22 = 0, fM32 = 0;               //!< its projection's terms of the depth (SFrameConstants::vDepthParams)
     float fOutdoor = 0;                     //!< how much of the air there is: 0 indoors where the outdoor lights do not reach, 1 elsewhere
     int nOutdoorFrame = -1;                 //!< m_nFrames of fOutdoor's last step
+    float fIndoors = 0;                     //!< with the sun by rays, how much of the indoor air's density (d3d12_VolumetricLightIndoors) there is: 1 indoors, 0 elsewhere
+    CD3D12Texture *pSunStates = nullptr;    //!< d3d12_VolumetricLightRays: the sun's state at each froxel's point (R8_SNORM, VolumetricRays.hlsl)
+    int nSunStatesSRV = -1;                 //!< its Texture3D SRV (copied into the injection's table)
+    int nSunTable = -1;                     //!< its kernel's UAV table (COMPUTE_UAVS: u0 the states)
+    bool bRays = false;                     //!< the update of nFrame had the sun by rays
   };
 
   //! Before the HDR resolve of the main view (EndMainScene, or with an upscaler UpscaleScene after
@@ -1793,6 +1798,12 @@ public:
   bool UpdateVolumetricLight(ID3D12Resource *pDepth, DXGI_FORMAT DepthFormat);
   //! The resolve's constants of this frame's froxels (HDR_VOLUMETRIC). False: none this frame.
   bool SetVolumetricConstants(SDrawConstants &dc) const;
+  //! d3d12_VolumetricLightRays with the sun's shadow by rays or the path tracer (WantsRaySun): the volumetric light's sun
+  //! by rays through the scene for rays (Shaders/VolumetricRays.hlsl), indoors as well.
+  bool WantsVolumetricRays() const;
+  //! The shafts of sunlight are the volumetric light's by rays: the frame before's update had them and they are still
+  //! wanted. The planes of TemplMuzzleFlash_Auto that stand for them (Training's bunker) are then not drawn.
+  bool HasVolumetricShafts() const;
   //! true: the main view's depth buffer readable by the resolve (DEPTH_READ, bound read only); false:
   //! writable again.
   void SetVolumetricDepthRead(bool bRead);
@@ -1800,6 +1811,11 @@ public:
   void SetDepthRead(ID3D12Resource *pDepth, bool bRead);
   //! m_Volumetric's targets and tables for nWidth x nHeight froxels, made when it changes. False: none.
   bool EnsureVolumetricTargets(int nWidth, int nHeight);
+  //! m_Volumetric's sun states and their UAV table, for its froxels (made once a size). False: none.
+  bool EnsureVolumetricSunStates();
+  //! The sun's states at the froxels' points of this frame by rays (VolumetricRays.hlsl), the pass constants CB at b2.
+  //! False: none (the scene for rays not built this frame).
+  bool DispatchVolumetricSun(D3D12_GPU_VIRTUAL_ADDRESS CB, UINT nGroupsX, UINT nGroupsY);
   void ReleaseVolumetricLight();
 
   SVolumetricState m_Volumetric;
@@ -2168,6 +2184,7 @@ public:
   int CV_r_PbrNormals = 1;            //!< 1: the RayMaster maps' normals (raymaster/<texture>_pbr_n.dds) where a material has no normal map (0: none)
   int CV_r_PbrRoughness = 1;          //!< 1: the specular materials' highlights by the RayMaster maps' roughness (raymaster/<texture>_pbr_m.dds; 0: the templates')
   int CV_r_TexUpscaled = 1;           //!< 1: the textures' upscaled pictures from RayMaster (<texture>.dds), read at their load (0: the paks' own)
+  int CV_r_TexUpscaledLight = 0;      //!< 1: those of the templates that add light too (0: their own pictures, AddsLight in Shader.cpp)
   int CV_r_PbrAO = 1;                 //!< 1: the reflections by rays less where the RayMaster maps' ambient occlusion hides them (0: none)
   int CV_r_Skin = 1;                  //!< 1: the characters' faces and heads lit as skin (Skin.hlsli; 0: as the templates, the frames before)
   float CV_r_SkinRoughness = 0.55f;   //!< the matte skin's perceptual roughness (no gloss in the texture's alpha)
@@ -2345,6 +2362,8 @@ public:
   float CV_d3d12_VolumetricLightAnisotropy = 0.3f;   //!< the phase's g: 0 the same all round, towards 1 forwards
   float CV_d3d12_VolumetricLightDistance = 60;       //!< the far end of its froxels (m)
   float CV_d3d12_VolumetricLightHeight = 40;         //!< the height above the water over which the air thins to half (0: the same everywhere)
+  int CV_d3d12_VolumetricLightRays = 1;     //!< 1: with the sun's shadow by rays or the path tracer, its sun by rays, indoors too (WantsVolumetricRays)
+  float CV_d3d12_VolumetricLightIndoors = 2.5f;      //!< with the sun by rays: the air's density indoors times this (a closed room's dust)
   float CV_d3d12_FoliageTranslucency = 1.5f;  //!< the sun through the leaves and the grass (DF2_FOLIAGE): its strength, 0 off
   float CV_d3d12_FoliageTranslucencyPower = 4;       //!< the power of the cosine of the angle between the view and the sun
   float CV_d3d12_FoliageTranslucencyDistance = 60;   //!< where it ends (m), all of it up to half of that

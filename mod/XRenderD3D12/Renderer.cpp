@@ -437,6 +437,12 @@ void CD3D12Renderer::RegisterVariables()
   // The engine sets the command line's variables after its start has loaded the menu's and the shaders' textures; this
   // one decides how they load, so its value there ("r_TexUpscaled 0") is taken now.
   CV_r_TexUpscaled = CommandLine::IntValue(GetCommandLineA(), "r_TexUpscaled", CV_r_TexUpscaled);
+  iConsole->Register("r_TexUpscaledLight", &CV_r_TexUpscaledLight, 0, 0,
+                     "With r_TexUpscaled, 1: the textures of the templates that add their texture as light (glows, flashes, the shafts "
+                     "of sunlight of Training's bunker: TemplMuzzleFlash, TemplDecalAdd, TemplDecalAlphaAdd) take their upscaled "
+                     "pictures too (the frames before); 0: their own, soft as they are (the upscaler's detail shows in them as streaks); "
+                     "read as a material's textures load, from the next level's load");
+  CV_r_TexUpscaledLight = CommandLine::IntValue(GetCommandLineA(), "r_TexUpscaledLight", CV_r_TexUpscaledLight);
   iConsole->Register("d3d12_FadeBlend", &CV_d3d12_FadeBlend, 1, 0,
                      "1: the objects the engine fades in or out by their distance (their alpha below 1: the crates, the gas "
                      "cylinders and the crane on Carrier's deck) drawn blended by that alpha among the blended surfaces, as the original draws them "
@@ -749,6 +755,17 @@ void CD3D12Renderer::RegisterVariables()
                      "With d3d12_VolumetricLight, how far it reaches (m; beyond the sun's cascades, d3d12_ShadowDistance, it has no shadows)");
   iConsole->Register("d3d12_VolumetricLightHeight", &CV_d3d12_VolumetricLightHeight, 40.0f, VF_DUMPTODISK,
                      "With d3d12_VolumetricLight, the height above the water over which the air thins to half (m; 0: the same everywhere)");
+  iConsole->Register("d3d12_VolumetricLightRays", &CV_d3d12_VolumetricLightRays, 1, VF_DUMPTODISK,
+                     "With d3d12_VolumetricLight and the sun's shadow by rays (d3d12_RTSunShadows) or the path tracer: 1 the air's "
+                     "sun by a ray from each froxel's point through the scene for rays (its shafts through the leaves, the windows and "
+                     "the holes of a roof, indoors as well: Training's bunker), and the planes that stand for the shafts of sunlight "
+                     "(TemplMuzzleFlash_Auto) not drawn; 0: by the sun's cascades, none indoors, the planes drawn (the frames before); "
+                     "2: as 1, the air lit by the states its rays found, in colours (red the sun reaches it, green in a shadow, "
+                     "blue under a surface: not air; with d3d12_VolumetricLight 2 alone)");
+  iConsole->Register("d3d12_VolumetricLightIndoors", &CV_d3d12_VolumetricLightIndoors, 2.5f, VF_DUMPTODISK,
+                     "With the volumetric light's sun by rays (d3d12_VolumetricLightRays), its air indoors (where the outdoor lights do "
+                     "not reach: Training's bunker) d3d12_VolumetricLightDensity times this: a closed room's dust, which shows the "
+                     "shafts through its openings (1: as outdoors); it fades in and out with the camera's way in and out");
   // The sun through the leaves and the grass (General.hlsl, DF2_FOLIAGE).
   iConsole->Register("d3d12_FoliageTranslucency", &CV_d3d12_FoliageTranslucency, 1.5f, VF_DUMPTODISK,
                      "The sun's light through the leaves and the grass seen against it, where the sun's cascades show the sun, times the "
