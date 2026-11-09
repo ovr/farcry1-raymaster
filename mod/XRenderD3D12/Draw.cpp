@@ -136,7 +136,10 @@ void CD3D12Renderer::MakeFrameConstants(SFrameConstants &fc, bool bScene) const
   Set4(fc.vTime, iTimer ? iTimer->GetCurrTime() : 0.0f, bGathers ? (float)(m_nFrames & 63) : 0.0f, 0, 0);
   Set4(fc.vWorldColor, m_WorldColor[0], m_WorldColor[1], m_WorldColor[2], m_WorldColor[3]);
   Set4(fc.vDepthParams, m_ProjMatrix.data[10], m_ProjMatrix.data[14], 0, 0);
-  Set4(fc.vHdr, HdrSkyGlow(), HdrSkyGlowPower(), 0, 0);
+  // zw: the exposure the resolve applies, for a lamp's glow (d3d12_HDRGlowHue): the adapted EV's target + 1 (0: none) and the compensation.
+  float fExposureTex = 0, fExposureComp = 0;
+  HdrExposureRef(fExposureTex, fExposureComp);
+  Set4(fc.vHdr, HdrSkyGlow(), HdrSkyGlowPower(), fExposureTex, fExposureComp);
   Set4(fc.vLightmap, CV_d3d12_LightmapDot3 ? 1.0f : 0.0f, CV_d3d12_LightColorScale ? 1.0f : 0.0f, CV_d3d12_PTFaceNormal ? 1.0f : 0.0f, 0);
   // d3d12_RTPbrScreen: the picture of the frame before, of the main view's size (General.hlsl's PrevFrameAt).
   if (CV_d3d12_RTPbrScreen && m_nReflCopyFrame == m_nFrames - 1 && !IsCameraCut() && m_ReflCopy.nColorSRV > 0 &&

@@ -983,12 +983,31 @@ float CD3D12Renderer::HdrBoost(float fLight) const
   return fLight > 1 ? 1 + (fLight - 1) / 2.2f : powf(std::max(fLight, 0.0f), 1.0f / 2.2f);
 }
 
-void CD3D12Renderer::SetHdrCore(SDrawConstants &dc, float fLight, uint32 nState) const
+void CD3D12Renderer::SetHdrCore(SDrawConstants &dc, float fLight, uint32 nState, float fHue) const
 {
-  if (fLight == 1 || !IsHdrTarget())
+  if ((fLight == 1 && fHue <= 0) || !IsHdrTarget())
     return;
   dc.nFlags2 |= DF2_HDR_CORE;
-  Set4(dc.vHdrCore, std::max(fLight, 0.0f), (nState & GS_BLSRC_MASK) == GS_BLSRC_SRCALPHA ? 1.0f : 0.0f, 0, 0);
+  Set4(dc.vHdrCore, std::max(fLight, 0.0f), (nState & GS_BLSRC_MASK) == GS_BLSRC_SRCALPHA ? 1.0f : 0.0f, 0, std::max(fHue, 0.0f));
+}
+
+float CD3D12Renderer::HdrGlowHue() const
+{
+  if (!IsHdrTarget() || CV_d3d12_HDRGlowHue <= 0)
+    return 0.0f;
+  // With the HDR output the highlights go on up to the display's peak: as many times more, the peak over paper white.
+  const float fPeak = m_pDevice->HasLayer() && m_HdrOut.fPaperWhite > 0 ? std::max(m_HdrOut.fPeak / m_HdrOut.fPaperWhite, 1.0f) : 1.0f;
+  return std::max(CV_d3d12_HDRGlowHue, 0.25f) * fPeak;
+}
+
+void CD3D12Renderer::HdrExposureRef(float &fTex, float &fComp) const
+{
+  fTex = fComp = 0;
+  if (!IsHdrTarget())
+    return;
+  fComp = CV_d3d12_Exposure;
+  if (CV_d3d12_AutoExposure && m_Hdr.bAdapted && m_Hdr.pExposure[m_Hdr.nExposure])
+    fTex = (float)(m_Hdr.pExposure[m_Hdr.nExposure]->m_nSRV + 1);
 }
 
 float CD3D12Renderer::HdrSkyGlow() const

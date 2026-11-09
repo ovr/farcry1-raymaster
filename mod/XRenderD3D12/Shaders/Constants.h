@@ -200,7 +200,8 @@ struct SFrameConstants
   XR_FLOAT4(vMipBias);            //!< x: the mip bias of the materials' textures (log2(render / display size) - 1 while upscaling, else 0;
                                   //!< plus 1.5 in the cartoon render mode, PostFx.cpp);
                                   //!< yzw: DF2_AO_BAKED's share of the ambient light in a baked colour
-  XR_FLOAT4(vHdr);                //!< x: the light of the sky towards the sun times this (SkyGlow; 1: as the game's, always outside HDR targets), y: the power of the cosine of the angle to the sun it falls off with
+  XR_FLOAT4(vHdr);                //!< x: the light of the sky towards the sun times this (SkyGlow; 1: as the game's, always outside HDR targets), y: the power of the cosine of the angle to the sun it falls off with;
+                                  //!< z: the adapted EV's 1 x 1 target's texture table index + 1 (0: none), w: d3d12_Exposure (the exposure the resolve applies: DF2_HDR_CORE's vHdrCore.w)
   XR_FLOAT4X4_ARRAY(mCascade, XR_MAX_CASCADES);  //!< world to the sun's cascade i (DF2_SUN_CASCADES): x, y -1..1 across its map, z depth 0..1 away from the sun
   XR_FLOAT4(vCascadeEnd);         //!< the view depth (ViewDepth) where each cascade ends
   XR_FLOAT4(vCascadeTexel);       //!< the size of a texel of each in the world (m)

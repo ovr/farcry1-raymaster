@@ -368,7 +368,7 @@ void CD3D12Renderer::DrawFlares(std::span<const SRenderItem> Items)
     memcpy(dc.mWorldViewProj, ViewProj.data, sizeof(dc.mWorldViewProj));
     dc.nFlags = DF_TEX0 | DF_VCOLOR;
     // With r_HDRRendering the sun and the lights brighter in their cores than the game draws them.
-    SetHdrCore(dc, f.bSun ? CV_d3d12_HDRSun : CV_d3d12_HDRGlow, Key.nState);
+    SetHdrCore(dc, f.bSun ? CV_d3d12_HDRSun : CV_d3d12_HDRGlow, Key.nState, f.bSun ? 0.0f : HdrGlowHue());
     dc.nTex0 = pTex->GetSRV();
     dc.nSamplers = XR_SAMPLER_LINEAR_CLAMP;
     if (m_pFrameDump)
@@ -564,7 +564,7 @@ void CD3D12Renderer::DrawProcFlare(const SRenderItem &it, const Matrix44 &World)
   dc.nFlags = m_bFog ? DF_FOG : 0;
   dc.nFlags2 = DF2_GLOW_FALLOFF | DF2_FOG_BLACK;
   dc.vParams0[0] = PROC_FLARE_FALLOFF;
-  SetHdrCore(dc, CV_d3d12_HDRGlow, Key.nState);
+  SetHdrCore(dc, CV_d3d12_HDRGlow, Key.nState, HdrGlowHue());
   dc.vColor[0] = MatColor.r * pObj->m_Color.r * fFacing;
   dc.vColor[1] = MatColor.g * pObj->m_Color.g * fFacing;
   dc.vColor[2] = MatColor.b * pObj->m_Color.b * fFacing;

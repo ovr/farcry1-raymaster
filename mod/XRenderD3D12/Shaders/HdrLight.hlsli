@@ -5,7 +5,8 @@
 //	File: HdrLight.hlsli
 //	Description: The game's colours as light and back, for the HDR
 //	targets (r_HDRRendering), and the fingerprint of the HDR output's
-//	highlight layer, and the sky's glow towards the sun. Without bindings:
+//	highlight layer, the sky's glow towards the sun and a lamp's glow with
+//	its hue kept (GlowHueScale). Without bindings:
 //	the programs (Common.hlsli), the kernels (Bloom.hlsl, HdrStats.hlsl)
 //	and the unit tests include it.
 //
@@ -29,6 +30,16 @@ float HdrDecode(float c)
 float HdrEncode(float fLight)
 {
   return fLight > 1 ? 1 + (fLight - 1) / HDR_GAMMA : pow(max(fLight, 0), 1 / HDR_GAMMA);
+}
+
+//! A lamp's glow brighter only as a whole colour (General.hlsl's DF2_HDR_CORE, d3d12_HDRGlowHue): the factor of the
+//! colour c (the game's, gamma encoded; times fAlpha, what an SRCALPHA blend adds) that makes the light of its brightest
+//! channel under the exposure fEV (the resolve's: 2^fEV) at most fCap, the other channels scaled with it; 1 where it is
+//! below. The tone map takes each channel apart, so a colour whose channels all go far above white comes out white.
+float GlowHueScale(float3 c, float fAlpha, float fCap, float fEV)
+{
+  const float m = max(c.r, max(c.g, c.b)) * fAlpha;
+  return min(1, HdrEncode(fCap * exp2(-fEV)) / max(m, 1e-6));
 }
 
 //! The sky with r_HDRRendering brighter towards the sun (Common.hlsli's SkyGlow, d3d12_HDRSky): the factor of the sky's

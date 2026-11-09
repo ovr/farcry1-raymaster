@@ -1735,7 +1735,15 @@ public:
   //! There: a light added (a flare, a corona, an additive sprite or surface, drawn
   //! with the blend nState) fLight times brighter in its core (DF2_HDR_CORE), its soft edge as the
   //! game's: the sun (d3d12_HDRSun), what glows (d3d12_HDRGlow). Else nothing.
-  void SetHdrCore(SDrawConstants &dc, float fLight, uint32 nState) const;
+  //! fHue > 0 (a lamp's: HdrGlowHue): then the light as a whole colour at most fHue in its brightest channel.
+  void SetHdrCore(SDrawConstants &dc, float fLight, uint32 nState, float fHue = 0) const;
+  //! In the HDR targets the most a lamp's glow and corona bring in their brightest channel, the colour scaled as a
+  //! whole (d3d12_HDRGlowHue, at least 0.25); 0: none (not an HDR target, or the cvar 0).
+  float HdrGlowHue() const;
+  //! The exposure the resolve will apply, for the frame's constants (SFrameConstants::vHdr.zw): fTex the adapted EV's
+  //! 1 x 1 target's texture table index + 1 (0: none, not adapted or not automatic), fComp d3d12_Exposure; both 0
+  //! outside the HDR targets.
+  void HdrExposureRef(float &fTex, float &fComp) const;
   //! There: the light of the sky towards the sun times d3d12_HDRSky (DF2_SKY_GLOW,
   //! SFrameConstants::vHdr), with a sun in the scene; else 1.
   float HdrSkyGlow() const;
@@ -2424,6 +2432,7 @@ public:
   float CV_d3d12_HDRSky = 2;                //!< the light of the sky towards the sun in HDR, times the game's
   float CV_d3d12_HDRSkyAngle = 4;           //!< the angle from the sun where it is half way (degrees; 0: the lobe up to step 257, half way at 11.9)
   float CV_d3d12_HDRGlow = 3;               //!< the light of what glows in HDR, times the game's
+  float CV_d3d12_HDRGlowHue = 1.0f;         //!< a lamp's glow and corona: their brightest channel at most this (the hue kept); 0 off
   int CV_d3d12_HDRSkyPieces = 1;            //!< a piece of the sky (CTexture::m_bSky) with a glow map in HDR: not made brighter, its light at most the game's white (0: as a lamp's glow)
   int CV_d3d12_HDROutput = 0;               //!< the output to the display: 0 SDR, 1 HDR10, 2 scRGB (HdrOutput.cpp)
   float CV_d3d12_HDRPaperWhite = 0;         //!< its paper white in nits (0: Windows' SDR white level of the display)

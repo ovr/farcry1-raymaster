@@ -811,6 +811,11 @@ void CD3D12Renderer::RegisterVariables()
   iConsole->Register("d3d12_HDRGlow", &CV_d3d12_HDRGlow, 3.0f, VF_DUMPTODISK,
                      "With r_HDRRendering, the light of what glows (in their cores: fire and the other additive particles, muzzle flashes and the other additive "
                      "materials, the coronas and flares of the lights, the glow maps of lamps and screens) times this (1: the game's)");
+  iConsole->Register("d3d12_HDRGlowHue", &CV_d3d12_HDRGlowHue, 1.0f, VF_DUMPTODISK,
+                     "With r_HDRRendering, a lamp's glow map and the coronas and procedural flares of the lights brighter only as a whole colour: "
+                     "the brightest channel of what each adds at most this (1: the game's white; at least 0.25), the others scaled with it, so "
+                     "that the tone map keeps its hue (a cyan tube and its corona not a white disc); 0: each channel boosted alone, the frames "
+                     "before");
   iConsole->Register("d3d12_HDRSkyPieces", &CV_d3d12_HDRSkyPieces, 1, 0,
                      "With r_HDRRendering, a piece of the sky with a glow map (a texture of the sky boxes: the opening of Training's cave's shaft, "
                      "the bunker's windows) is the sky, not a lamp: its glow not made brighter (d3d12_HDRGlow), its light at most the game's white, "

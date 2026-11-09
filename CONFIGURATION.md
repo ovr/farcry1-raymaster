@@ -368,6 +368,7 @@ Details: [HDR](mod/XRenderD3D12/README.md#hdr).
 | `d3d12_ExposureMin` | `0` | yes | The least EV of the automatic exposure |
 | `d3d12_ExposureSpeed` | `1.5` | yes | The automatic exposure's rate per second |
 | `d3d12_HDRGlow` | `3` | yes | The light of what glows (fire, flashes, coronas) times this |
+| `d3d12_HDRGlowHue` | `1` | yes | A lamp's glow map and the lights' coronas brighter only as a whole colour: their brightest channel's light after the exposure at most this (times the peak over paper white with the HDR output), the hue kept through the tone map (a cyan tube not a white disc); 0 each channel boosted alone |
 | `d3d12_HDRHighlights` | `2` | yes | With the HDR output, the light from which the scene goes on to the peak |
 | `d3d12_HDRSky` | `2` | yes | The sky's light towards the sun times up to this |
 | `d3d12_HDRSkyAngle` | `4` | yes | The angle from the sun of the sky's glow at half way (degrees) |

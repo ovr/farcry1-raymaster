@@ -67,7 +67,11 @@
 //	      fall-off of DF2_GLOW_FALLOFF. Its core goes above white, its soft edge
 //	      stays as the game's, whatever its colour and fade; vHdrCore.z > 0: then
 //	      rgb (and the path tracer's emission) at most vHdrCore.z (a piece of the
-//	      sky at the game's white, d3d12_HDRSkyPieces)
+//	      sky at the game's white, d3d12_HDRSkyPieces); vHdrCore.w > 0: then rgb
+//	      scaled as a whole so that the light of its largest channel (times a with
+//	      vHdrCore.y) under the resolve's exposure (g_Frame.vHdr.zw) is at most
+//	      vHdrCore.w (a lamp's glow and corona, d3d12_HDRGlowHue: its hue kept
+//	      through the tone map; HdrLight.hlsli's GlowHueScale)
 //	    DF_ALPHATEST: discard when a < fAlphaRef (DF_ALPHATEST_LESS: when a >= fAlphaRef);
 //	      a negative fAlphaRef (alpha to coverage with MSAA): a = CoverageAlpha
 //	      (AlphaCoverage.hlsli) at -fAlphaRef, the samples it covers in place of the test;
@@ -1763,6 +1767,16 @@ float4 ShadePixel(SVertexOutput In)
 #ifdef XR_PT
       s_vPTEmission = min(s_vPTEmission, g_DrawExt.vHdrCore.z);
 #endif
+    }
+    // A lamp's glow (d3d12_HDRGlowHue): brighter only as a whole colour, the light of its brightest channel (of what it
+    // adds) under the exposure the resolve applies (g_Frame.vHdr.zw) at most vHdrCore.w, the colour scaled with it:
+    // the tone map takes each channel apart, and a bright cyan tube and its corona went white as the channels of light
+    // far above white do (Research's ceiling lamps, +1.5 EV in its dark hall). The path tracer's emission, the light it
+    // casts, stays.
+    if (g_DrawExt.vHdrCore.w > 0)
+    {
+      const float fEV = g_Frame.vHdr.w + (g_Frame.vHdr.z > 0 ? g_Textures[(uint)g_Frame.vHdr.z - 1].Load(int3(0, 0, 0)).r : 0);
+      vColor.rgb *= GlowHueScale(vColor.rgb, g_DrawExt.vHdrCore.y > 0 ? saturate(vColor.a) : 1, g_DrawExt.vHdrCore.w, fEV);
     }
   }
 #endif
