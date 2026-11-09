@@ -268,6 +268,16 @@ void CSToneMap(uint i : SV_DispatchThreadID)
   TestOut(i, float4(NeutralToneMap(TestIn(i).rgb, g_Test.vTest.x, g_Test.vTest.y, g_Test.vTest.z), 0));
 }
 
+//! The ACES fit's curve with its soft toe (AcesCurve, d3d12_ToneMapToe) of g_TestIn[i].rgb (each channel in the RRT's
+//! space), the toe's end g_Test.vTest.x.
+[numthreads(64, 1, 1)]
+void CSAcesToe(uint i : SV_DispatchThreadID)
+{
+  if (i >= g_Test.nTest.x)
+    return;
+  TestOut(i, float4(AcesCurve(TestIn(i).rgb, g_Test.vTest.x), 0));
+}
+
 //! The HDR output's tone map (HdrOutputToneMap, Hdr.hlsl's highlight layer) of the light g_TestIn[i].rgb: the knee
 //! g_Test.vTest.x, the peak's display value P g_Test.vTest.y, the desaturation g_Test.vTest.z, d3d12_HDRHighlights
 //! g_Test.vTest.w. out[2i] = (the output's display values, 0), out[2i + 1] = (the SDR picture's, NeutralToneMap to 1, 0).

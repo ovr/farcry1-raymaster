@@ -773,6 +773,10 @@ void CD3D12Renderer::RegisterVariables()
                      "With d3d12_ToneMap 4, how fast the light far above white goes over from the hue kept to the soft shoulder of each "
                      "channel (as the game clips it: the sun white, fire yellow), with the square of how far its brightest channel was "
                      "rolled off (0: never; 3: a sky just above the knee keeps its hue)");
+  iConsole->Register("d3d12_ToneMapToe", &CV_d3d12_ToneMapToe, 0.02f, VF_DUMPTODISK,
+                     "With d3d12_ToneMap 2, the ACES fit's soft toe: from 0 to this light (0.005 to 0.1) linear from black, smoothly into "
+                     "the curve, not black below 0.00325 as the fit (its numerator crosses 0 there: a night scene 3 to 5 times darker than "
+                     "the original); 0: the fit as it is (the frames before)");
   iConsole->Register("d3d12_Exposure", &CV_d3d12_Exposure, 0.0f, VF_DUMPTODISK, "With r_HDRRendering, the exposure's compensation in EV (0: none)");
   iConsole->Register("d3d12_AutoExposure", &CV_d3d12_AutoExposure, 1, VF_DUMPTODISK,
                      "With r_HDRRendering, the exposure adapts to the scene (between d3d12_ExposureMin and Max); 0: d3d12_Exposure alone");
