@@ -467,6 +467,8 @@ public:
 
   float m_fDepthMin = 0, m_fDepthMax = 1;   //!< viewport depth range of the next draws
   bool m_bItemScissor = false;              //!< the scissor rectangle of the object being drawn
+  std::vector<float> m_SpriteDist;          //!< DrawSprites: each sprite's squared distance from the camera (d3d12_SpriteSort)
+  std::vector<int> m_SpriteOrder;           //!< DrawSprites: the order to draw the sprites in (SpriteOrder.h)
   RECT m_ItemScissor = {};
   bool m_bTargetRect = false;               //!< drawing off screen: the viewport is m_TargetRect, not the whole target
   RECT m_TargetRect = {};
@@ -2301,6 +2303,7 @@ public:
   int CV_d3d12_UpscaleDebug = 0;            //!< non-zero: the upscaler's debug view
   int CV_d3d12_UpscaleVersion = 0;          //!< the upscaler's major version (FSR 3 or 4), 0 its own choice
   int CV_d3d12_CutReset = 1;                //!< 1: at a cut of the main view's camera (CameraCut.h) the histories of the screen start again
+  int CV_d3d12_SpriteSort = 1;              //!< 1: the particles drawn back to front by their distance (SpriteOrder.h; 0: in the engine's order, the frames before)
   int CV_d3d12_UpscaleHdr = 1;              //!< with r_HDRRendering: 1 the upscaler gets the scene's light, tone mapped after it; 0 the
                                             //!< scene tone mapped at the render size (as up to step 259)
   int CV_d3d12_AAQuality = 2;               //!< the anti-aliasing's (d3d12_AA, a string) quality, 0 (low) to 3 (ultra)

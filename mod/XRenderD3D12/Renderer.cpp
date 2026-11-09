@@ -380,6 +380,11 @@ void CD3D12Renderer::RegisterVariables()
                      "cuts), the histories of the screen start again: the upscaler's and TAA's, the rays' denoisers (the sun's shadow, the "
                      "AO and GI), the path tracer's light, the volumetric light, the frame before's picture in the reflections; 0: they "
                      "reproject the shot before (its light for some frames)");
+  iConsole->Register("d3d12_SpriteSort", &CV_d3d12_SpriteSort, 1, 0,
+                     "1: the particles (smoke, fire, sparks, heat haze) drawn back to front by the distance of each one's centre "
+                     "from the camera, as the original sorts them: Volcano's smoke over the lava stays the same from frame to frame; "
+                     "0: in the order the engine adds them (the frames before: a heat haze drawn after a nearer smoke wiped it out, "
+                     "the smoke a step brighter at each burst of new particles, every 5 frames)");
   iConsole->Register("d3d12_UpscaleDebug", &CV_d3d12_UpscaleDebug, 0, 0, "1: the upscaler's debug view; 2: the depth it gets (near black, far white)");
   iConsole->Register("d3d12_UpscaleVersion", &CV_d3d12_UpscaleVersion, 0, VF_DUMPTODISK,
                      "The upscaler's major version: 0 its own choice for the GPU, 3 or 4 (AMD FSR 3.1 or FSR 4)");

@@ -2390,6 +2390,13 @@ and lists theirs (`NamesObjects`).
   (`r_HDRRendering 0`: the light the particles add in the lava yard, averaged over 37 frames of
   the time demo, 4.08 against 4.07 of 255). In the original's HDR mode its particles add next to
   nothing; ours keep the game's picture there too.
+- The particles are drawn back to front by the distance of the centre of each one's vertices from
+  the camera (`SpriteOrder.h`, `d3d12_SpriteSort 1`; step 337), as the original sorts them (its
+  trace of Volcano's lava: the runs of smoke and of heat haze one after the other from 92 m to
+  40 m). In the engine's order a heat haze drawn after a nearer smoke laid the copy of the scene
+  (made before the particles) over it, and each burst of new particles (every 5 frames) changed how
+  much smoke was left: the smoke over the lava was a step brighter every 5 frames. Tests: unit
+  tests `SpriteOrder_*`, `render_tests` suite `spritesort`.
 
 ## Vegetation sprites and terrain detail
 
