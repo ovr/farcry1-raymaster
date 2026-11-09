@@ -55,6 +55,7 @@
 #include "FoamPattern.h"
 #include "SkyFogBand.h"
 #include "BeachLayers.h"
+#include "PondRipple.h"
 #include <atomic>
 
 namespace
@@ -536,6 +537,50 @@ int CD3D12Renderer::GetWaveTexture()
       m_nWaveTexture = -1;
   }
   return m_nWaveTexture > 0 ? m_pTextures->GetSRV(m_nWaveTexture) : D3D12_SRV_WHITE;
+}
+
+int CD3D12Renderer::GetPondRippleTexture()
+{
+  // The original's terrain water's ripple (PondRipple.h): the grey height maps of its du/dv sequence, their slopes in the
+  // wave texture's form, a texture array of the frames with their mip levels (the mean slope and the mean of its square).
+  if (!m_nPondRippleTexture && m_pTextures)
+  {
+    m_nPondRippleTexture = -1;
+    constexpr int N = PondRipple::SIZE;
+    std::vector<float> Heights((size_t)N * N * PondRipple::FRAMES);
+    bool bAll = true;
+    for (int f = 0; f < PondRipple::FRAMES && bAll; f++)
+    {
+      char szPath[64];
+      snprintf(szPath, sizeof(szPath), "textures/animated/water/caust%02d.dds", f);
+      std::vector<byte> File;
+      SImage Image;
+      bAll = m_pTextures->ReadFile(szPath, File) && Img::LoadFile(File, ".dds", Image) && Img::Decompress(Image) &&
+             Image.Format == DXGI_FORMAT_B8G8R8A8_UNORM && Image.nWidth == N && Image.nHeight == N;
+      if (bAll)
+      {
+        const byte *p = Image.Bits(0, 0);
+        for (size_t i = 0; i < (size_t)N * N; i++)
+          Heights[(size_t)f * N * N + i] = p[i * 4 + 1];
+      }
+      else if (iLog)
+        iLog->Log("XRenderD3D12: the ponds' ripple has no frame '%s' (d3d12_WaterPondRipple: the FFT waves on the ponds)", szPath);
+    }
+    if (bAll)
+    {
+      const std::vector<uint8_t> Pixels = PondRipple::MakeSlopes(Heights, N, PondRipple::FRAMES);
+      SImage Array;
+      Array.Allocate(DXGI_FORMAT_B8G8R8A8_UNORM, N, N, Img::FullMipCount(N, N), PondRipple::FRAMES);
+      Array.bArray = true;
+      for (int f = 0; f < PondRipple::FRAMES; f++)
+        memcpy(Array.Bits(f, 0), &Pixels[(size_t)f * N * N * 4], (size_t)N * N * 4);
+      Img::GenerateMips(Array);
+      const int nID = m_pTextures->CreateFromImage(Array, "$PondRipple", false, 0);
+      if (nID > 0)
+        m_nPondRippleTexture = nID;
+    }
+  }
+  return m_nPondRippleTexture > 0 ? m_pTextures->GetSRV(m_nPondRippleTexture) : -1;
 }
 
 bool CD3D12Renderer::CopySceneForWater(const int *pRect)

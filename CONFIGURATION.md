@@ -415,6 +415,7 @@ Details: [Water](mod/XRenderD3D12/README.md#water).
 | `d3d12_WaterSlope` | `0.0446` |  | The steepness of the FFT ocean's waves |
 | `d3d12_WaterSurf` | `0.8` |  | The height of the surf breaking on the shores (m) |
 | `d3d12_WaterSurfNight` | `0.3` | yes | The share of the surf's foam shown under a moon (the engine's sun's light up to 0.36, all from 0.42): Steam's night shore without a white line far brighter than its islands; 1 as by day |
+| `d3d12_WaterPondRipple` | `0.05` | yes | On the ponds and lakes the level's terrain cuts off from the sea, the original's ripple in place of the FFT waves (its terrain water's 32 frames at a tile of 8 m): this is its slopes' RMS; 0 the waves |
 | `d3d12_WaterUnderAdapt` | `1` |  | Under the water, the eye's white balance |
 | `d3d12_WaterUnderExposure` | `1` |  | Under the water, the eye's exposure (EV more) |
 | `d3d12_WaterWind` | `3.5` |  | The wind of the FFT ocean's sea (m/s) |

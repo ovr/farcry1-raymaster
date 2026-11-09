@@ -464,6 +464,11 @@ struct SDepthTileConstants
 #define XR_CAUSTICS_MARGIN  8
 #define XR_CAUSTICS_TILE    32
 #define XR_CAUSTICS_MIPS    5
+// The ponds' ripple (PondRipple.h, Water.hlsl's PondRippleSlopes): the original's terrain water's frames, its tile (m) and
+// the square of the slopes at 255 in its texels' alpha.
+#define XR_POND_FRAMES      32
+#define XR_POND_TILE        8.0
+#define XR_POND_SLOPE_SQ_RANGE 16.0
 
 //! b0 of the FFT ocean's kernels (OceanFFT.hlsl, OceanFFT.cpp).
 struct SOceanConstants

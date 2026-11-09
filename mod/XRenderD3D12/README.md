@@ -2288,6 +2288,20 @@ and lists theirs (`NamesObjects`).
     Over Swamp's ponds the frame is now that without any foam (0.00 apart, 7.5 before). They stay
     lighter than the original's (luma 87.8 against 68.2, 95.0 before): the foggy sky in their
     reflection. Tests: unit tests `WaterBodies_*`, `render_tests` suite `waterponds`.
+  - On those ponds and lakes the original's ripple in place of the FFT waves (`d3d12_WaterPondRipple`,
+    0.05: its slopes' RMS along an axis; 0 the waves; step 360; `PondRipple.h`). The game's terrain
+    water (`TerrainWater_OnlySky`) bends its reflection by a du/dv sequence of 32 frames
+    (`textures/animated/water/caust##`, 64 x 64, 0.05 s a frame, looping) laid at a tile of 8 m that
+    drifts 0.06 and 0.12 of a tile a second: a large slow ripple with dark crests, where Swamp's still
+    ponds had the FFT ocean's small wind waves. The sequence's grey height maps (`caust00` to
+    `caust31`) give their slopes in the wave texture's form, with their mip levels and the squares the
+    reflection's blur takes (a texture array, made at the first water on a level with ponds); the
+    water takes them in place of the waves' slopes by the pond's share there (the grid's heights
+    texture's second channel), two frames blended (the original steps them 20 times a second). Its
+    strength is the original's on Swamp's pond by the road: the luma less its blur over its mean
+    0.114 (the original's 0.117; the FFT waves 0.088; a slope RMS of 0.05 is a still pond's under a
+    breath of wind, Cox and Munk). Swamp's ponds and River's river take it; the sea as before.
+    Tests: unit tests `Pond_*`, `render_tests` suite `pondripple`.
   - The characters under the ocean's level (the fish, a shark; `UnderwaterBody.h`,
     `d3d12_UnderwaterBodies 1`; step 338), with the camera above it, are drawn after the rest of the
     main view's opaque list without writing the depth (not with the path tracer): the water over
