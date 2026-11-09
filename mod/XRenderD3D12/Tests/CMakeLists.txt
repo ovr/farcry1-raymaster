@@ -136,6 +136,7 @@ set(XRENDERD3D12_TESTS_SOURCES
     BeachTests.cpp
     FogVolumeTests.cpp
     WaterBodiesTests.cpp
+    RenderModeOutdoorTests.cpp
     SpriteOrderTests.cpp
     UnderwaterBodyTests.cpp
     VegetationLightTests.cpp

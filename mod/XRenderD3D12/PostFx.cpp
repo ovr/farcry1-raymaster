@@ -28,13 +28,16 @@
 //	r_Glare on), as the original's screen process draws it, its passes
 //	traced at 1280 x 720 (DrawRenderMode):
 //	  - Improved, Paradise: the scene's copy reduced to 256 x 256 (D); the
-//	    glare's source at 128 x 128, 2 (saturate(D - t) * 0.8)^2 times
+//	    glare's source at 128 x 128, 2 (saturate(D - t) g)^2 times
 //	    1 - the adapted luminance A, blurred by four passes of 4 taps
 //	    farther and farther apart (G); the scene F + (1 - L) G, then
-//	    towards its luminance L by k (t 0.25, k 0.2 improved; t 0.1, k
-//	    0.1 paradise).
-//	  - Cold: F first 2 saturate(0.75 F - 0.3 D) (contrast), the source's
-//	    gain 0.65 and no blur, k 0.425.
+//	    towards its luminance L by k (k 0.2 improved, 0.1 paradise).
+//	  - Cold: F first 2 saturate(0.75 F - 0.3 D) (contrast), no blur, k
+//	    0.425.
+//	  The threshold t and gain g go from the mode's indoor pair to its
+//	  outdoor one as the original's (d3d12_RenderModeOutdoor,
+//	  RenderModeOutdoor.h): 0.25, 0.8 to 0.2, 0.5 improved; 0.1, 0.8 to
+//	  0.2, 1 paradise; 0.1, 0.65 to 0.2, 0.5 cold.
 //	  - Cartoon: flatter, warmer colours, times a factor dark where the
 //	    colour falls from the pixel above to the one below or from the left
 //	    one to the right one; the frame's textures a mip and a half softer
@@ -56,6 +59,7 @@
 #include "D3D12Descriptors.h"
 #include "D3D12Pipeline.h"
 #include "Scene.h"
+#include "RenderModeOutdoor.h"
 
 namespace
 {
@@ -86,18 +90,18 @@ constexpr float RM_ADAPT_SHARE = 0.05f;
 //! The cartoon's mip bias of every texture: softer surfaces, so its dark edges follow the shapes.
 constexpr float RM_CARTOON_MIP_BIAS = 1.5f;
 
-//! A render mode's constants: the glare's threshold (added before it is squared) and gain, the share of the
-//! luminance at the end, its blur and the cold contrast.
+//! A render mode's constants: the share of the luminance at the end, its blur and the cold contrast (the glare's
+//! threshold and gain: RenderModeOutdoor.h, indoors and outdoors).
 struct SRenderModeLook
 {
-  float fThreshold, fGain, fGrey;
+  float fGrey;
   bool bBlur, bCold;
 };
 
 const SRenderModeLook s_RenderModes[3] = {
-  { -0.25f, 0.8f, 0.2f, true, false },    // 1 improved
-  { -0.1f, 0.8f, 0.1f, true, false },     // 2 paradise
-  { -0.1f, 0.65f, 0.425f, false, true },  // 3 cold
+  { 0.2f, true, false },    // 1 improved
+  { 0.1f, true, false },    // 2 paradise
+  { 0.425f, false, true },  // 3 cold
 };
 
 //! Motion blur: the share of the frame before is 1 - MOTION_BLUR_RATE * r_MotionBlurAmount * the
@@ -146,6 +150,7 @@ void CD3D12Renderer::DrawScreenEffects()
   const bool bFade = fx.bScreenFade && fx.fFadeAlpha > 0;
   const float fMotion = MotionBlurShare();
   const int nRenderMode = RenderMode();
+  UpdateRenderModeOutdoor();
   if (!fx.bFlashBang)
     m_bFlashGhost = false;
   if (!fx.bNightVision && !bBlur && !fx.bFlashBang && !bFade && fMotion <= 0 && !nRenderMode)
@@ -358,6 +363,19 @@ int CD3D12Renderer::RenderMode() const
   return nMode >= 1 && nMode <= 4 ? nMode : 0;
 }
 
+void CD3D12Renderer::UpdateRenderModeOutdoor()
+{
+  // Once a frame of the main view, with a render mode or without (the original's share moves on in the level).
+  if (m_nRmOutdoorFrame == m_nFrames)
+    return;
+  m_nRmOutdoorFrame = m_nFrames;
+  I3DEngine *p3D = iSystem ? iSystem->GetI3DEngine() : nullptr;
+  IVisArea *pArea = p3D ? p3D->GetVisAreaFromPos(m_Camera.GetPos()) : nullptr;
+  m_bRmIndoors = pArea && !pArea->IsAfectedByOutLights();
+  const float dt = iTimer ? std::clamp(iTimer->GetFrameTime(), 0.0f, 1.0f) : RenderModeOutdoor::STEP_TIME;
+  m_fRmOutdoor = RenderModeOutdoor::Step(m_fRmOutdoor, m_bRmIndoors ? 0.0f : 1.0f, dt);
+}
+
 float CD3D12Renderer::RenderModeMipBias() const
 {
   if (!CV_d3d12_RenderMode || !iConsole)
@@ -426,7 +444,11 @@ void CD3D12Renderer::DrawRenderMode(int nMode)
     return;
   const int w = m_pDevice->GetWidth(), h = m_pDevice->GetHeight();
   const bool bCartoon = nMode == 4;
-  const SRenderModeLook &Look = s_RenderModes[bCartoon ? 0 : nMode - 1];
+  const int nLook = bCartoon ? 0 : nMode - 1;
+  const SRenderModeLook &Look = s_RenderModes[nLook];
+  // The glare's threshold and gain by the outdoor share (d3d12_RenderModeOutdoor; 0: the indoor pair, as before).
+  const float fOutdoor = CV_d3d12_RenderModeOutdoor ? m_fRmOutdoor : 0.0f;
+  const RenderModeOutdoor::SGlare Glare = RenderModeOutdoor::Blend(RenderModeOutdoor::INDOOR[nLook], RenderModeOutdoor::OUTDOOR[nLook], fOutdoor);
   SDrawConstants dc = DefaultDrawConstants();
   if (!bCartoon)
   {
@@ -475,7 +497,7 @@ void CD3D12Renderer::DrawRenderMode(int nMode)
     dc.nTex0 = (uint32)m_pRmDown->m_nSRV;
     dc.nTex1 = (uint32)m_pRmAdapt->m_nSRV;
     Set4(dc.vParams0, 1.0f / RM_GLARE_SIZE, 1.0f / RM_GLARE_SIZE, 0, 0);
-    Set4(dc.vParams1, Look.fThreshold, Look.fGain, 0, 0);
+    Set4(dc.vParams1, Glare.fThreshold, Glare.fGain, 0, 0);
     DrawPostPass(m_pRmGlare[0], dc);
     for (int k = 1; k <= 4 && Look.bBlur; k++)
     {
@@ -524,6 +546,9 @@ void CD3D12Renderer::DrawRenderMode(int nMode)
     fprintf(m_pFrameDump.get(), "render mode %d (%s): adapted luminance %d / 255, %.3f s to its next step%s\n", nMode,
             nMode == 1 ? "improved" : nMode == 2 ? "paradise" : nMode == 3 ? "cold" : "cartoon", bRead ? vAdapt[0] : -1,
             std::max(RM_ADAPT_STEP - m_fRmAdaptTime, 0.0f), pLayer ? ", the highlight layer kept" : "");
+    if (!bCartoon)
+      fprintf(m_pFrameDump.get(), "render mode's glare: outdoor share %.4f (the camera %s, d3d12_RenderModeOutdoor %d), threshold %.4f, gain %.4f\n",
+              m_fRmOutdoor, m_bRmIndoors ? "indoors" : "outdoors", CV_d3d12_RenderModeOutdoor, Glare.fThreshold, Glare.fGain);
     m_pDevice->SetBackBufferTargets();
   }
 }

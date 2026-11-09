@@ -49,6 +49,7 @@ set(XRENDERD3D12_SOURCES
     BeachLayers.h
     FogVolume.h
     WaterBodies.h
+    RenderModeOutdoor.h
     VegetationLight.h
     EnvCubes.cpp
     Mirrors.cpp

@@ -1986,6 +1986,9 @@ public:
   //! The render mode of the menu's video options (r_RenderMode with r_Glare on, d3d12_RenderMode): 1 improved,
   //! 2 paradise, 3 cold, 4 cartoon; 0 none.
   int RenderMode() const;
+  //! The render modes' outdoor share, once a frame of the main view (RenderModeOutdoor.h): towards 0 with the camera in
+  //! a vis area the outdoor lights do not reach, else towards 1.
+  void UpdateRenderModeOutdoor();
   //! The mip bias the render mode gives every texture of the frame (the cartoon's softer textures), else 0.
   float RenderModeMipBias() const;
   //! The render mode nMode over the scene drawn, as the original's screen process draws it (PostFx.cpp).
@@ -2021,6 +2024,9 @@ public:
   CD3D12Texture *m_pRmLayer = nullptr;      //!< with the highlight layer: its copy before the render mode's pass
   bool m_bRmAdaptCleared = false;           //!< m_pRmAdapt holds a value (black at first)
   float m_fRmAdaptTime = 0;                 //!< the time since its last step
+  float m_fRmOutdoor = 0;                   //!< the glare's outdoor share (UpdateRenderModeOutdoor), 0 indoors to 1
+  bool m_bRmIndoors = false;                //!< its target this frame was 0 (the camera indoors)
+  int m_nRmOutdoorFrame = -1;               //!< the m_nFrames it last stepped in
 
   //////////////////////////////////////////////////////////////////////////
   // Flares.cpp: the sun's flare and the coronas of the lights
@@ -2299,6 +2305,7 @@ public:
   int CV_d3d12_ProjectorSpecular = 1;       //!< 1: a projector's pass over a light-mapped specular bump template has its highlight (DrawLeafItem)
   int CV_d3d12_LightImages = 1;             //!< 1: a light image's FT2_REPLICATETOALLSIDES (its picture on all six faces) and FT2_CHECKFORALLSEQUENCES (its frames in turn, CTexture::SequenceFrame)
   int CV_d3d12_RenderMode = 1;              //!< 1: the menu's render mode (r_RenderMode, r_Glare) over the scene (DrawRenderMode); 0: none
+  int CV_d3d12_RenderModeOutdoor = 1;       //!< 1: the render modes' glare from their indoor constants to their outdoor ones (RenderModeOutdoor.h); 0: indoor
   int CV_d3d12_ShadowCascades = 4;          //!< the sun's cascaded shadow maps: how many (0: none)
   float CV_d3d12_ShadowDistance = 120;      //!< how far they reach from the camera (m)
   int CV_d3d12_ShadowCascadeSize = 2048;    //!< the size of their maps

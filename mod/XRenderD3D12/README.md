@@ -2738,6 +2738,22 @@ and lists theirs (`NamesObjects`).
   4K Paradise takes about 0.17 ms of the GPU (the GPU time's section `render mode`: the scene's
   copy 0.07, the reductions 0.05, the composite 0.04) rather than 0.34 with 8 x 8 taps a texel.
 - Cold: F first 2 saturate(0.75 F - 0.3 D), the source's gain 0.65, no blur, k 0.425.
+- The threshold and the gain above are the indoor ones. The original moves them to outdoor ones
+  with an outdoor share s (`d3d12_RenderModeOutdoor`, 1; `RenderModeOutdoor.h`). Traced in
+  Training's bunker, on its bay's hill and in Swamp:
+  - s steps 2 % of the way to its target every 1/50 s. The target is 1 outdoors and 0 with the
+    camera in a vis area the outdoor lights do not reach.
+  - From the bunker to the hill at once, s was 0.183 ten frames later and 0.636 fifty frames
+    later (here 0.628: one step later).
+  - The pairs, indoors to outdoors: Improved t 0.25, gain 0.8 to t 0.2, gain 0.5; Paradise
+    t 0.1, gain 0.8 to t 0.2, gain 1; Cold t 0.1, gain 0.65 to t 0.2, gain 0.5. k stays.
+  - With the indoor pair everywhere, Swamp's grey fog at dusk had 2.3 times the original's glare:
+    a flat (86 76 94) instead of the original's (82 72 89), the fog's colour being (79 71 86).
+    The same in the frames with rays and HDR: its sky 1.38 and its ponds 1.28 of the original's.
+  - Now its fog is (82 73 89). In daylight the adapted luminance is high and the glare faint,
+    so outdoor levels in the sun change little.
+  - 0: the indoor pair everywhere, as before. Whether a vis area that the outdoor lights reach
+    counts as indoors for the original is not traced.
 - Cartoon: (0.75 F + 0.225 L) (1.25 1.24 1.2), times saturate(1 - saturate(2 |a|^2) - 2 |b|^2),
   a = 2 saturate(the pixel above - the one below), b = 2 saturate(the left one - the right one):
   dark outlines where the colour falls downwards or to the right. The original also gives every
