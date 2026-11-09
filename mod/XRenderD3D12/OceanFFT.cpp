@@ -416,6 +416,12 @@ void CD3D12Renderer::UpdateOcean(std::span<const SRenderItem> Items)
             o.fWind, oc.vParams[0], fChop, o.fSlopeRMS, o.fFineVar, CV_d3d12_WaterFoam, oc.vFoam[0], oc.vFoamCascades[0][0], oc.vFoamCascades[1][0]);
 }
 
+float CD3D12Renderer::SurfLightShare() const
+{
+  const double fLuma = 0.2126 * m_SunColor[0] + 0.7152 * m_SunColor[1] + 0.0722 * m_SunColor[2];
+  return (float)OceanSpectrum::SurfLightShare(fLuma, CV_d3d12_WaterSurfNight);
+}
+
 bool CD3D12Renderer::SetOceanConstants(SDrawConstants &dc, float fBump, int nFoamPattern) const
 {
   const SOceanState &o = m_Ocean;
@@ -451,9 +457,10 @@ bool CD3D12Renderer::SetOceanConstants(SDrawConstants &dc, float fBump, int nFoa
     Set4(dc.vTexMat0, (float)std::fmod(d[0], XR_FOAM_TILE0), (float)std::fmod(d[1], XR_FOAM_TILE0), (float)std::fmod(r[0], XR_FOAM_TILE1),
          (float)std::fmod(r[1], XR_FOAM_TILE1));
     // The breaker index's noise drifts at 0.25 m/s (its octaves apart: the one turned): where the waves break further out
-    // changes over some seconds (it jumps once in 6 hours, as the drift wraps).
+    // changes over some seconds (it jumps once in 6 hours, as the drift wraps). The share of the surf's foam shown under
+    // the scene's sun (d3d12_WaterSurfNight under a moon: Steam's night).
     const double fNoiseDrift = std::fmod(0.25 * (iTimer ? (double)iTimer->GetCurrTime() : 0.0), 6000.0);
-    Set4(dc.vTexMat1, (float)(fNoiseDrift * W[0]), (float)(fNoiseDrift * W[1]), 0, 0);
+    Set4(dc.vTexMat1, (float)(fNoiseDrift * W[0]), (float)(fNoiseDrift * W[1]), 0, SurfLightShare());
   }
   return true;
 }

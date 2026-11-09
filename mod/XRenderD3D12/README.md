@@ -2023,6 +2023,14 @@ and lists theirs (`NamesObjects`).
       pixel).
     - The game's beaches drop steeply under the water, so the surf zone is a few metres wide: a
       white band that runs to the edge and its lace, under and beyond the game's strips.
+    - Under a moon only `d3d12_WaterSurfNight` (0.3; 1 as by day; saved) of its foam shows. The
+      night levels' sun is a moon, its colour's luminance 0.28 on Steam and 0.31 on Rebellion (by
+      day 0.46 in Volcano's smoke to 0.78): up to 0.36 the night's share, all from 0.42, smoothstep
+      between; a scene without a sun keeps all (`Foam_SurfLight`). Under Steam's moon the surf's
+      white line along every shore stood 3.5-7 times brighter than the dark islands above it, with
+      a white lens over a sand bar (the original has no foam): its pixels at 1280 x 720 are 27.9 ->
+      4.0 brighter than without the surf (33.8 -> 4.8 at the film's frame 551), Rebellion's beach
+      30.8 -> 5.3; by day as before.
   - Pattern. Foam is a lace of bubbles: a 512 x 512 tiling texture made at the start.
     - It holds four octaves of Worley's cells (rims and fill) and patches of value noise, ranked so
       that each value is as common as any other. The water is white where the pattern is above one
