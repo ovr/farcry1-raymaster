@@ -941,6 +941,11 @@ void CD3D12Renderer::RegisterVariables()
                      "(TemplMuzzleFlash_Auto) not drawn; 0: by the sun's cascades, none indoors, the planes drawn (the frames before); "
                      "2: as 1, the air lit by the states its rays found, in colours (red the sun reaches it, green in a shadow, "
                      "blue under a surface: not air; with d3d12_VolumetricLight 2 alone)");
+  iConsole->Register("d3d12_VolumetricLightRaysHalf", &CV_d3d12_VolumetricLightRaysHalf, 1, 0,
+                     "With the volumetric light's sun by rays (d3d12_VolumetricLightRays), 1: every other froxel traces its ray "
+                     "towards the sun in a frame, the froxels between them in the next, each keeping the state it found for a "
+                     "frame (half the rays; the froxels blend the frames before in anyway); 0: every froxel each frame (the "
+                     "frames before)");
   iConsole->Register("d3d12_VolumetricLightIndoors", &CV_d3d12_VolumetricLightIndoors, 2.5f, VF_DUMPTODISK,
                      "With the volumetric light's sun by rays (d3d12_VolumetricLightRays), its air indoors (where the outdoor lights do "
                      "not reach: Training's bunker) d3d12_VolumetricLightDensity times this: a closed room's dust, which shows the "

@@ -1081,6 +1081,24 @@ system ones (better not to touch): [`CONFIGURATION.md`](../../CONFIGURATION.md).
   that take the froxels 0.13) and +0.23 with the path tracer (14.92); outdoors against the sun through Training's trees
   the rays take 0.66-0.77 ms (the leaves' alpha tests), the injection 0.18 less without the
   cascades: +0.48 ms (8.92, 6%) and +0.76 (20.32, 4%).
+- `d3d12_VolumetricLightRaysHalf` (1, not saved, read every frame) traces those rays from every
+  other froxel a frame, a checkerboard across, down and deep (`Volumetric.hlsli`'s `VolSunFroxel`:
+  half as many threads across, each taking one of two froxels next to each other, the other one in
+  the frame after), and the froxels between them keep the state the frame before found at their
+  points: the injection blends the froxels of the frames before in anyway, and each froxel's point
+  moves from frame to frame, so a state a frame old is one more of those. Threads that skipped
+  their froxel in a dispatch of all of them saved only a seventh of the time (the groups ran half
+  empty), so the dispatch itself is half as wide. A froxel then traces in every other frame, and
+  every other place of the points' sequence lies in one half of the froxel (Halton's base 2), so
+  with it the frames go through the sequence in another order (`VolSunPointIndex`: the even frames
+  through all of it in turn, the odd ones half of it on). Not in the first frame with the rays, after
+  a frame without them or with froxels of a new size: all of them then. The rays take a third less
+  (RX 7900 XTX, 3840 x 2160 with FSR Quality, very high; the sweeps of Pier, River, Swamp and
+  Treehouse: 0.31, 0.40, 0.51, 0.22 -> 0.21, 0.26, 0.33, 0.14 ms with the rays' effects, 0.34, 0.43,
+  0.58, 0.22 -> 0.23, 0.27, 0.37, 0.15 with the path tracer; standing in Swamp's jungle 0.89 -> 0.55
+  and 1.15 -> 0.75), and the picture in the jungle is about a level of 255 brighter all over (its mean 27.2 -> 28.4 of
+  255, with the rays' effects and with the path tracer alike). 0: every froxel each frame, the sequence in its order (the frames before). The frame
+  dump's line of the volumetric light's sun says `half the froxels' rays` or `all the froxels' rays`.
 
 ## Foliage translucency
 

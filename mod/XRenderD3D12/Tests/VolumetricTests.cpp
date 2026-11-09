@@ -126,6 +126,103 @@ XR_TEST(Volumetric_SunStates)
   CHECK_NEAR(v[5].second, 0, 0);         // all out of the volume
 }
 
+// d3d12_VolumetricLightRaysHalf. Why: a froxel that no thread takes in either of two frames keeps a state from a view
+// long gone (a shaft that stays where a door closed), one taken in both saves nothing; the froxels of a frame must be
+// spread evenly, each one's neighbours the other frame's, or a whole slice would lag; and a froxel, tracing in every
+// other frame, must still take its points from all of the sequence (every other one of it in turn lies in one half of
+// the froxel).
+XR_TEST(Volumetric_SunHalf)
+{
+  constexpr int W = 6, H = 4, Z = 4;   // the froxels; the threads W / 2 across with the rays halved
+  SDispatch d;
+  d.Shader = XR_BYTECODE(Test_VolSun);
+  struct SItem
+  {
+    int x, y, z, nFrame;
+    bool bHalf;
+  };
+  std::vector<SItem> Items;
+  for (int nFrame : { 0, 1, 2, 1001 })
+    for (int z = 0; z < Z; z++)
+      for (int y = 0; y < H; y++)
+        for (int x = 0; x < W; x++)
+          for (int h = 0; h < 2; h++)
+            if (!h || x < W / 2)
+              Items.push_back({ x, y, z, nFrame, h != 0 });
+  for (const SItem &t : Items)
+  {
+    Push(d.In, 0.0f, 0.0f, (float)t.nFrame, t.bHalf ? 2.0f : 1.0f);
+    Push(d.In, (float)t.x, (float)t.y, (float)t.z, 0.0f);
+    Push(d.In, 0.0f, 0.0f, 0.0f, 0.0f);
+  }
+  d.Test.nTest[0] = (uint32)Items.size();
+  d.nGroups[0] = Groups64(Items.size());
+  d.nOut = Items.size();
+  const std::vector<uint32> Out = Gpu().Run(d);
+  // The froxels taken in a frame: how often each.
+  const auto Taken = [&](int nFrame, bool bHalf)
+  {
+    std::vector<int> n(W * H * Z, 0);
+    for (size_t i = 0; i < Items.size(); i++)
+    {
+      const SItem &t = Items[i];
+      if (t.nFrame != nFrame || t.bHalf != bHalf)
+        continue;
+      const uint32 x = Out[4 * i], y = Out[4 * i + 1], z = Out[4 * i + 2];
+      CHECK_MSG(x < (uint32)W && y == (uint32)t.y && z == (uint32)t.z, "the froxel of a thread");
+      if (x < (uint32)W)
+        n[(z * H + y) * W + x]++;
+    }
+    return n;
+  };
+  for (int nFrame : { 0, 1, 1001 })
+    for (int k : Taken(nFrame, false))
+      CHECK(k == 1);                     // without it every froxel, every frame
+  const std::vector<int> a = Taken(0, true), b = Taken(1, true), c = Taken(2, true), e = Taken(1001, true);
+  for (int z = 0; z < Z; z++)
+  {
+    for (int y = 0; y < H; y++)
+    {
+      for (int x = 0; x < W; x++)
+      {
+        const int i = (z * H + y) * W + x;
+        CHECK(a[i] + b[i] == 1);         // in one of two frames that follow each other
+        CHECK(a[i] == c[i]);             // and again two frames later
+        // Its neighbours in the other frame.
+        if (x + 1 < W)
+          CHECK(e[i] != e[i + 1]);
+        if (y + 1 < H)
+          CHECK(e[i] != e[i + W]);
+        if (z + 1 < Z)
+          CHECK(e[i] != e[i + W * H]);
+      }
+    }
+  }
+  // The points' sequence: all 32 places in 32 frames, and all 32 in the 32 even frames and in the 32 odd ones of 64.
+  SDispatch p;
+  p.Shader = XR_BYTECODE(Test_VolSun);
+  for (int nFrame = 0; nFrame < 64; nFrame++)
+  {
+    Push(p.In, 0.0f, 0.0f, (float)(1000 + nFrame), 0.0f);
+    Push(p.In, 0.0f, 0.0f, 0.0f, 0.0f);
+    Push(p.In, 0.0f, 0.0f, 0.0f, 0.0f);
+  }
+  p.Test.nTest[0] = 64;
+  p.nGroups[0] = 1;
+  p.nOut = 64;
+  const std::vector<uint32> Points = Gpu().Run(p);
+  uint32 nAll = 0, nEven = 0, nOdd = 0;
+  for (int nFrame = 0; nFrame < 64; nFrame++)
+  {
+    const int k = (int)At(Points, nFrame, 2);
+    CHECK(k >= 0 && k < 32);
+    if (nFrame < 32)
+      nAll |= 1u << (k & 31);
+    ((nFrame & 1) ? nOdd : nEven) |= 1u << (k & 31);
+  }
+  CHECK(nAll == 0xffffffffu && nEven == 0xffffffffu && nOdd == 0xffffffffu);
+}
+
 // Why: the injection looks up the state of each point of the disc around a froxel's point in the froxel the point is in,
 // by the view's world to clip matrix (VolFroxelCoord), while the rays' kernel places each froxel's point by the view's
 // rays (VolFroxelPos at VolSliceDepth); the two must agree over the whole volume, also with the projection off its centre

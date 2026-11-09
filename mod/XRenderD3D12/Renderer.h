@@ -2478,6 +2478,7 @@ public:
   float CV_d3d12_VolumetricLightAnisotropy = 0.3f;   //!< the phase's g: 0 the same all round, towards 1 forwards
   float CV_d3d12_VolumetricLightDistance = 60;       //!< the far end of its froxels (m)
   float CV_d3d12_VolumetricLightHeight = 40;         //!< the height above the water over which the air thins to half (0: the same everywhere)
+  int CV_d3d12_VolumetricLightRaysHalf = 1; //!< its rays from every other froxel a frame, the others keep the frame before's states
   int CV_d3d12_VolumetricLightRays = 1;     //!< 1: with the sun's shadow by rays or the path tracer, its sun by rays, indoors too (WantsVolumetricRays)
   float CV_d3d12_VolumetricLightIndoors = 2.5f;      //!< with the sun by rays: the air's density indoors times this (a closed room's dust)
   float CV_d3d12_FoliageTranslucency = 1.5f;  //!< the sun through the leaves and the grass (DF2_FOLIAGE): its strength, 0 off

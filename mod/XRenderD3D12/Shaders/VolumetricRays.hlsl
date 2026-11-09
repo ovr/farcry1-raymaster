@@ -21,6 +21,13 @@
 //	(Volumetric.hlsl's XR_VOL_RAYS), and indoors as well: what keeps the
 //	sun out of a room is in the scene for rays, so only what comes through
 //	its openings lights its air.
+//	With d3d12_VolumetricLightRaysHalf (nRays.z) every other froxel traces
+//	in a frame (half the threads across, VolSunFroxel: threads that skipped
+//	theirs in a group of all of them saved a seventh), the others keep the
+//	state the frame before
+//	found at their points: half the rays; the injection blends the froxels
+//	of the frames before in anyway, and each froxel's point moves from
+//	frame to frame, so a state a frame old is one more of those.
 //	  u0 the states (RWTexture3D, R8_SNORM, a texel a froxel)
 //
 //////////////////////////////////////////////////////////////////////
@@ -58,8 +65,10 @@ bool SunHidden(RayDesc Ray, uint nMask, float fConeWidth, float fSpread)
 }
 
 [numthreads(XR_VOLUMETRIC_GROUP, XR_VOLUMETRIC_GROUP, 1)]
-void CSSun(uint3 vId : SV_DispatchThreadID)
+void CSSun(uint3 vThread : SV_DispatchThreadID)
 {
+  // d3d12_VolumetricLightRaysHalf: every other froxel a frame, the rest keep their states (u0 has the frame before's).
+  const uint3 vId = VolSunFroxel(vThread, g_Vol.nRays.y, g_Vol.nRays.z != 0);
   if (any(vId >= (uint3)g_Vol.vSize.xyz))
     return;
   // The point CSInject takes this frame.

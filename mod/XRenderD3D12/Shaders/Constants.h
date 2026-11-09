@@ -583,7 +583,8 @@ struct SVolumetricConstants
   XR_FLOAT4(vRays);               //!< x the rays' length (m, d3d12_RTDistance), y tan of half the sun's disc (d3d12_RTSunAngle),
                                   //!< z a froxel's height over its view depth (the rays' cone at the alpha tests),
                                   //!< w 1: the states in colours (d3d12_VolumetricLightRays 2)
-  XR_UINT4(nRays);                //!< x the instance mask (RayMask), y the frame (the points of the sun's disc)
+  XR_UINT4(nRays);                //!< x the instance mask (RayMask), y the frame (the points of the sun's disc), z 1: half the
+                                  //!< froxels trace this frame, the others keep the state of the frame before (VolSunTraced)
 };
 
 // The threads a side of a group of TAA's kernels (Taa.hlsl, UpscalerTaa.cpp)
