@@ -397,6 +397,14 @@ void CD3D12Renderer::RegisterVariables()
                      "1: the beach of the shore shader TerrainWaterBeachResearch (Steam, Research, Bunker, Dam, Rebellion, Archive) drawn as "
                      "the original's: the foam running up the sand fainter than TerrainWaterBeach's (textures/wave2 twice, water1's "
                      "detail, the wet sand); 0: not drawn (the frames before)");
+  iConsole->Register("d3d12_WaterVolumeColor", &CV_d3d12_WaterVolumeColor, 1, 0,
+                     "1: the water of a material with the shader WaterVolume or WaterVolumeBumpReflCM (pools, cave water) shows the "
+                     "scene behind it times the material's diffuse colour, as the original's refraction pass; 0: untinted (the frames "
+                     "before)");
+  iConsole->Register("d3d12_FogVolumeDepth", &CV_d3d12_FogVolumeDepth, 1, 0,
+                     "1: a fog volume's fog over a point under its layer, seen from above, at least the fog of the point's depth under "
+                     "the layer, which every ray to it crosses (a dense volume, Training's bunker pool's 0.1 m, hides its floor); 0: "
+                     "the gate of 5 m below the layer alone (the frames before)");
   iConsole->Register("d3d12_UnderwaterBodies", &CV_d3d12_UnderwaterBodies, 1, 0,
                      "1: with the camera above the ocean, the characters under its level (the fish; a body shorter than 1 m by its middle) drawn after the rest of the "
                      "opaque surfaces without writing the depth: the water over them takes the floor under them, its shore's foam no "

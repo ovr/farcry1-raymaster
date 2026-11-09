@@ -47,6 +47,7 @@ set(XRENDERD3D12_SOURCES
     CascadeCull.h
     CameraCut.h
     BeachLayers.h
+    FogVolume.h
     VegetationLight.h
     EnvCubes.cpp
     Mirrors.cpp

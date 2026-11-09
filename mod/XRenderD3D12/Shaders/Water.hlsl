@@ -137,6 +137,9 @@
 //	  vParams3  rgb the colour of deep water; w 0 that of the ocean's fog
 //	            volume (OceanFog), 1 lit by the scene behind it (water
 //	            volumes, which may be indoors), 2 lit by the sky
+//	  vColor    rgb a water volume's scene behind times it (a WaterVolume
+//	            material's diffuse colour, d3d12_WaterVolumeColor; white:
+//	            as it is)
 //	  nTex0     colour copy, nTex1 depth copy (R24 of D24S8, R32 of an
 //	            upscaler's scene)
 //	  nTex2..4  the sky box textures: top, _12, _34
@@ -1114,8 +1117,9 @@ float4 ShadeWater(SWaterOutput In)
     }
     else
     {
+      // A WaterVolume material's water times its diffuse colour (vColor rgb; white for the others: d3d12_WaterVolumeColor).
       float3 T = exp(-vExtinction * fPath);
-      vRefracted = vScene * T * exp(-vExtinction * fLightPath) + vScatter * (1 - T);
+      vRefracted = (vScene * T * exp(-vExtinction * fLightPath) + vScatter * (1 - T)) * g_Draw.vColor.rgb;
     }
 
     // The reflection, all of it at grazing angles: the ocean as the game's terrain water shaders
@@ -1343,7 +1347,7 @@ float4 ShadeWater(SWaterOutput In)
     // Other water from below: the scene above inside the window (critical angle of water, cos
     // 0.66), the water's colour outside it.
     float fWindow = saturate((dot(N, V) - 0.66) * 8);
-    vColor = lerp(vScatter, vScene, fWindow);
+    vColor = lerp(vScatter, vScene * g_Draw.vColor.rgb, fWindow);
   }
 
   if (HasFlag2(DF2_HEAT))
