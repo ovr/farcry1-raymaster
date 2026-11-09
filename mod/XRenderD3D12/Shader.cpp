@@ -18,6 +18,7 @@
 #include "Shader.h"
 #include "Scene.h"
 #include "Texture.h"
+#include "BeachLayers.h"
 
 #include <cctype>
 #include <charconv>
@@ -490,6 +491,9 @@ constexpr SEngineEntry s_EngineShaders[] =
   { "terrainlake",                     "",                     eS_Water,                 0,             0,                   LMF_BUMPMATERIAL, eDC_Water },
   { "terrainwater_onlysky",            "",                     eS_Water,                 0,             0,                   LMF_BUMPMATERIAL, eDC_Water },
   { "terrainwaterbeach",               "",                     eS_WaterBeach,            0,             0,                   LMF_BUMPMATERIAL, eDC_WaterBeach },
+  // The shore of Steam, Research, Bunker, Dam, Rebellion and Archive (their mission's Shaders Shore): the same beach
+  // without the refraction, its waves fainter (Props.bBeachFaint).
+  { "terrainwaterbeachresearch",       "",                     eS_WaterBeach,            0,             0,                   LMF_BUMPMATERIAL, eDC_WaterBeach },
   { "terrainwaterbottomsimple",        "",                     eS_UnderWater,            0,             0,                   0,                eDC_WaterBottom },
 };
 
@@ -1227,6 +1231,7 @@ CShader *CShaderManager::LoadShader(const char *szName, EShClass eClass, int nFl
           Props.nFlags2 = pE->nFlags2;
           Props.nLFlags = pE->nLFlags;
           Props.eDrawClass = pE->eClass;
+          Props.bBeachFaint = BeachLayers::IsFaint(pE->Name);
         }
         else if (FindSky(Name.c_str()))
         {

@@ -133,6 +133,7 @@ set(XRENDERD3D12_TESTS_SOURCES
     DisplayTests.cpp
     CascadeCullTests.cpp
     CameraCutTests.cpp
+    BeachTests.cpp
     SpriteOrderTests.cpp
     UnderwaterBodyTests.cpp
     VegetationLightTests.cpp

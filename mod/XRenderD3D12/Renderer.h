@@ -1028,8 +1028,8 @@ public:
   //! The waves of foam on the beach drawn at a time.
   static constexpr int BEACH_WAVES = 3;
   //! The beach (eDC_WaterBeach): pass nPass, a wave of foam (0 to BEACH_WAVES - 1) or the wet sand
-  //! under them (BEACH_WAVES). False: not drawn.
-  bool SetupBeachDraw(SPipelineKey &Key, SDrawConstants &dc, int nPass);
+  //! under them (BEACH_WAVES); bFaint: TerrainWaterBeachResearch's (SShaderProps::bBeachFaint). False: not drawn.
+  bool SetupBeachDraw(SPipelineKey &Key, SDrawConstants &dc, int nPass, bool bFaint);
   //! The sea floor under the ocean (eDC_WaterBottom) with the element's texture pTex (may be NULL).
   void SetupWaterBottomDraw(SPipelineKey &Key, SDrawConstants &dc, CTexture *pTex);
   //! Copies the main view's target and its depth buffer as drawn so far (m_bSceneCopied); with pRect
@@ -1159,6 +1159,8 @@ public:
   CTexture *m_pBeachTexture = nullptr;      //!< textures/wave1 (one reference)
   CTexture *m_pBeachWetTexture = nullptr;   //!< textures/water2 (one reference)
   CTexture *m_pBeachBumpTexture = nullptr;  //!< textures/fire_noise as a normal map (one reference)
+  CTexture *m_pBeachFaintTexture = nullptr; //!< textures/wave2: TerrainWaterBeachResearch's waves (one reference)
+  CTexture *m_pBeachDetailTexture = nullptr; //!< textures/water1: its third layer (one reference)
   int m_nWaveTexture = 0;                   //!< GetWaveTexture: its ID, 0 not made yet, -1 failed
   int m_nCausticsTexture = 0;               //!< GetCausticsTexture: its ID, 0 not made yet, -1 failed
   int m_nFoamTexture = 0;                   //!< GetFoamTexture: its ID, 0 not made yet, -1 failed
@@ -2307,6 +2309,7 @@ public:
   int CV_d3d12_UpscaleVersion = 0;          //!< the upscaler's major version (FSR 3 or 4), 0 its own choice
   int CV_d3d12_CutReset = 1;                //!< 1: at a cut of the main view's camera (CameraCut.h) the histories of the screen start again
   int CV_d3d12_BeachShadow = 1;             //!< 1: the beach's foam strips in the sun's shadow as the terrain under them (0: lit in it, the frames before)
+  int CV_d3d12_BeachResearch = 1;           //!< 1: the beach of TerrainWaterBeachResearch drawn as the original's (0: not drawn, the frames before)
   int CV_d3d12_UnderwaterBodies = 1;        //!< 1: the characters under the ocean (the fish) drawn last without the depth: the water looks past them (UnderwaterBody.h; 0: the frames before)
   int CV_d3d12_SpriteSort = 1;              //!< 1: the particles drawn back to front by their distance (SpriteOrder.h; 0: in the engine's order, the frames before)
   int CV_d3d12_DecalAddOpacity = 1;         //!< 1: TemplDecalAdd with a material opacity below 1 blended by its alpha times it (Draw3D.cpp; 0: added, the frames before)

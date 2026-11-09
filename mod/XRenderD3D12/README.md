@@ -1898,6 +1898,17 @@ and lists theirs (`NamesObjects`).
       Carrier's wreck on the beach, a glowing border round the dark sand (the foam 0.6-0.7 of its
       brightness in the sun, the sand 0.2-0.3; now both about 0.25). Test: `render_tests` suite
       `beachshadow`.
+    - A level's mission names its shore's shader (`Shaders Shore`). `TerrainWaterBeach` (Training,
+      Carrier, Fort, Pier, ...) is drawn with its technique with the refraction: three waves of
+      `textures/wave1`, then the wet sand of `water2`. `TerrainWaterBeachResearch` (Steam, Research,
+      Bunker, Dam, Rebellion, Archive) has only the technique without it: two waves of `wave2` (wave1's
+      picture, its alpha 0.4 of wave1's), `water1`'s faint detail (u halved, not clamped), the same
+      wet sand (`BeachLayers.h`; `d3d12_BeachResearch 1`, step 346). It was not in the renderer's
+      table of engine shaders, so those six levels had no strips at all: Steam's beach at the start
+      of its night flight showed a smooth band of the surf's foam ending in a corner of the sand
+      where the original draws its waves' streaks (the mean of |luma - its 9 x 9 mean| in that box
+      3.1, the original's 5.6, now 6.7). Tests: `render_tests` suite `beachresearch`, unit tests
+      `Beach_*`.
   - Surf. The shores' waves are mostly swell, long waves from far away that break even in a calm:
     `d3d12_WaterSurf` (0.8 m; 0 none, only the wind sea's) is its height there, its period 9 s
     (a trade wind swell's 8-12 s). It is not in the waves drawn, only in their foam.
