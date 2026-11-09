@@ -1099,6 +1099,13 @@ bool CD3D12Renderer::SetupBeachDraw(SPipelineKey &Key, SDrawConstants &dc, int n
   Key.nState = GS_BLSRC_SRCALPHA | GS_BLDST_ONEMINUSSRCALPHA;
   Key.nCull = R_CULL_NONE;
   dc.nTex0 = pTex->GetSRV();
+  // d3d12_BeachShadow: the sun's shadow of all the casters (the cascades, the rays' mask where it is of the strip's
+  // depth), in the colour of the terrain's shadows (DF2_SHADOW_TINT). The terrain under the strip takes only the live
+  // casters', the static objects' shadows are baked into it; the strip has none baked. Without it the white foam and
+  // the wet sand stayed lit in the shadow of Carrier's wreck on the beach, a glowing border round the dark sand.
+  if (CV_d3d12_BeachShadow > 0)
+    if (const uint32 nCascades = CascadeReceiverFlags(false))
+      dc.nFlags2 |= nCascades | DF2_SHADOW_TINT;
   const float fTime = iTimer ? iTimer->GetCurrTime() : 0.0f;
   if (nPass == BEACH_WAVES)
   {

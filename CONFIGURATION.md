@@ -250,6 +250,7 @@ Details: [Device removal (DRED)](mod/XRenderD3D12/README.md#device-removal-dred)
 |---|---|---|---|
 | `d3d12_AlphaToCoverage` | `1` | yes | With MSAA, the alpha tested surfaces cover the samples by their alpha |
 | `d3d12_BarrierBatch` | `1` |  | The barriers queued and given in one call before the next draw |
+| `d3d12_BeachShadow` | `1` |  | The foam on the beach in the sun's shadow as the terrain under it (no glowing border round the shadow of Carrier's wreck) |
 | `d3d12_CascadeCull` | `1` |  | Without rays, the parts that reach none of the sun's cascades left out as the engine adds them; 2 also the camera towards the sun ending where nothing can shade them (the level's heights: nothing measurable, the engine loads other textures); 0 all of them, as far as the view |
 | `d3d12_CascadeInstancing` | `1` |  | A caster drawn once into all the sun's cascades it reaches |
 | `d3d12_DepthPrepass` | `1` |  | The depth prepass (the sun's shadow by rays needs it) |
