@@ -25,6 +25,10 @@
 //	balance at the camera's depth (none at the surface, the light there
 //	the colour of the light at the surface, its luminance kept, red's
 //	factor the most) and its exposure coming in under the surface.
+//	d3d12_WaterUnderLine: a camera just over the level whose near plane
+//	dips under it, the water from where a ray goes under the level before
+//	the near plane, none where the surface is drawn; how far under the
+//	camera the near plane reaches (Fort's dive: on 0.12 m over the level).
 //
 //////////////////////////////////////////////////////////////////////
 
@@ -33,6 +37,7 @@
 #include "TestMath.h"
 
 #include "Test_UnderPath.h"
+#include "Test_UnderLine.h"
 #include "Test_UnderPhase.h"
 #include "Test_UnderSegments.h"
 #include "Test_UnderInscatter.h"
@@ -189,6 +194,72 @@ XR_TEST(Under_Path)
   const std::vector<uint32> Out = Gpu().Run(d);
   for (size_t i = 0; i < n; i++)
     CHECK_MSG(std::fabs(At(Out, i, 0) - Cases[i][4]) <= 1e-5f * Cases[i][4] + 1e-6f, std::to_string(i) + ": " + std::to_string(At(Out, i, 0)));
+}
+
+// Why: a camera just over the level (Fort's dive, film frames 1323-1325: 0.12 m over it, the near plane 0.25 m) sees the floor
+// where the near plane clips the surface away: those rays take the water from where they go under the level, before the near
+// plane; the rays that meet the level beyond it see the surface drawn (the water's light the surface's), up and level rays no
+// water; a camera under the level its path from the camera (0: the frames before, to the bit).
+XR_TEST(Under_Line)
+{
+  const float Cases[][4] = { // the camera's height, the direction's z, the ray's length to the near plane; the start
+    { 0.12f, -0.6f, 0.3f, 0.2f }, { 0.12f, -0.3f, 0.3f, -1 }, { 0.12f, -0.5f, 0.3f, 0.24f }, { 0.12f, 0, 0.3f, -1 },
+    { 0.12f, 0.3f, 0.3f, -1 }, { 0, -0.2f, 0.3f, 0 }, { 0, 0, 0.3f, -1 }, { 0.5f, -1, 0.3f, -1 }, { -2, 0.5f, 0.3f, 0 },
+    { -0.01f, -0.5f, 0.3f, 0 }, { 0.3f, -1, 0.3f, -1 } };
+  SDispatch d;
+  d.Shader = XR_BYTECODE(Test_UnderLine);
+  for (const auto &c : Cases)
+    Push(d.In, c[0], c[1], c[2], 0);
+  const size_t n = std::size(Cases);
+  d.Test.nTest[0] = (uint32)n;
+  d.nGroups[0] = Groups64(n);
+  d.nOut = n;
+  const std::vector<uint32> Out = Gpu().Run(d);
+  for (size_t i = 0; i < n; i++)
+    CHECK_MSG(std::fabs(At(Out, i, 0) - Cases[i][3]) <= 1e-6f, std::to_string(i) + ": " + std::to_string(At(Out, i, 0)));
+}
+
+// Why: the waterline's pass runs when the near plane reaches under the level: for a level view its lower edge tan(half the
+// vertical angle) times the near plane under the camera, looking down more, looking up less (all of it over the camera
+// looking up past the half angle), rolled the corner lower still; Fort's dive (the film's 120 degrees across a 16:9 view, the
+// near plane 0.25 m) 0.167 m: the camera 0.12 m over the level on, 0.2 m off.
+XR_TEST(Under_NearPlaneDrop)
+{
+  const float fNear = 0.25f, fRatio = 9.0f / 16, fTanY = std::tan(2.094f * fRatio / 2), fTanX = fTanY / fRatio;
+  const float fLevel = UnderwaterLight::NearPlaneDrop(fNear, fTanX, fTanY, 0, 0, 1);
+  CHECK_NEAR(fLevel, fNear * fTanY, 1e-6);
+  CHECK_NEAR(fLevel, 0.167f, 1e-3);
+  CHECK(0.12f < fLevel && 0.2f > fLevel);
+  // Pitched by a: forward (cos a, sin a) in z sin a, up z cos a.
+  auto Pitched = [&](float a) { return UnderwaterLight::NearPlaneDrop(fNear, fTanX, fTanY, std::sin(a), 0, std::cos(a)); };
+  CHECK(Pitched(-0.3f) > fLevel && Pitched(0.3f) < fLevel && Pitched(0.3f) > 0);
+  CHECK(Pitched(std::atan(fTanY) + 0.05f) < 0);
+  CHECK_NEAR(Pitched(-1.5707963f), fNear, 1e-5);
+  // Rolled by r: right z sin r, up z cos r; the lowest corner tan x |sin r| + tan y cos r, more than level.
+  const float r = 0.4f;
+  CHECK_NEAR(UnderwaterLight::NearPlaneDrop(fNear, fTanX, fTanY, 0, std::sin(r), std::cos(r)),
+             fNear * (fTanX * std::sin(r) + fTanY * std::cos(r)), 1e-6);
+  CHECK(UnderwaterLight::NearPlaneDrop(fNear, fTanX, fTanY, 0, -std::sin(r), std::cos(r)) > fLevel);
+  // A brute force check: the corners of the near plane in the world, the lowest under the camera.
+  for (const float a : { -0.8f, -0.2f, 0.0f, 0.35f, 0.9f })
+    for (const float rr : { -0.6f, 0.0f, 0.25f })
+    {
+      // The view's axes: forward pitched by a, then rolled by rr round it.
+      const float F[3] = { std::cos(a), 0, std::sin(a) };
+      const float U0[3] = { -std::sin(a), 0, std::cos(a) }, Rt0[3] = { 0, -1, 0 };
+      float U[3], Rt[3];
+      for (int k = 0; k < 3; k++)
+      {
+        U[k] = std::cos(rr) * U0[k] + std::sin(rr) * Rt0[k];
+        Rt[k] = std::cos(rr) * Rt0[k] - std::sin(rr) * U0[k];
+      }
+      float fLowest = 1e9f;
+      for (const float sx : { -1.0f, 1.0f })
+        for (const float sy : { -1.0f, 1.0f })
+          fLowest = std::min(fLowest, fNear * (F[2] + sx * fTanX * Rt[2] + sy * fTanY * U[2]));
+      CHECK_MSG(std::fabs(UnderwaterLight::NearPlaneDrop(fNear, fTanX, fTanY, F[2], Rt[2], U[2]) + fLowest) < 1e-6f,
+                std::to_string(a) + " " + std::to_string(rr));
+    }
 }
 
 // Why: the phase function shares the light the water scatters among the ways it goes: its mean over all ways must be 1 (the

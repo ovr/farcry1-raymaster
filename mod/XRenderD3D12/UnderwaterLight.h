@@ -132,6 +132,15 @@ namespace UnderwaterLight
   {
     return std::exp2(fEV * std::clamp(fDepth / EXPOSURE_DEPTH, 0.0f, 1.0f));
   }
+
+  //! The waterline (d3d12_WaterUnderLine): how far under the camera the near plane reaches (m; less than 0 where all of it is
+  //! over the camera), fNear its view depth, fTanX and fTanY the tangents of the view's half angles, fForwardZ, fRightZ and
+  //! fUpZ the z of the view's axes (unit vectors): its lowest corner's. A camera fewer metres than this over the level sees
+  //! the water through its near plane.
+  inline float NearPlaneDrop(float fNear, float fTanX, float fTanY, float fForwardZ, float fRightZ, float fUpZ)
+  {
+    return fNear * (fTanX * std::fabs(fRightZ) + fTanY * std::fabs(fUpZ) - fForwardZ);
+  }
 }
 
 #endif

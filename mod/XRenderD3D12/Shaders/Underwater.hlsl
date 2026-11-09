@@ -40,7 +40,12 @@
 //	caustics cascade's 1 / tile, vParams3.xy its first depth; PSTaps:
 //	vParams2.zw the main view's jitter, vParams3.z its noise's frame (an off
 //	screen target's frame constants have neither); vLightPos[2..4] xyz the
-//	view's rays (GetRayView).
+//	view's rays (GetRayView), vLightPos[5].x the near plane's view depth.
+//	The waterline (d3d12_WaterUnderLine): a camera over the level whose
+//	near plane dips under it draws the pass too; a pixel whose ray goes
+//	under the level before the near plane (the surface clipped there) takes
+//	its path through the water from there (UnderLineStart), the others are
+//	left as they are (the surface drawn, seen from above).
 //
 //////////////////////////////////////////////////////////////////////
 
@@ -142,20 +147,23 @@ float4 PSTaps(SUnderOutput In) : SV_Target
   const float3 D = UnderRay(In.vNDC, g_DrawExt.vParams2.zw, fRayLength);
   const float fPixelAngle = max(length(ddx(D)), length(ddy(D)));
 
-  const float3 vCamera = g_Frame.vCameraPos.xyz;
+  // The path through the water from the camera, or with the waterline from where the ray goes under the level.
+  const float3 vEye = g_Frame.vCameraPos.xyz;
   const float fLevel = g_DrawExt.vParams0.x;
+  const float fLine = UnderLineStart(vEye.z - fLevel, D.z, g_DrawExt.vLightPos[5].x * fRayLength);
+  const float3 vCamera = vEye + D * max(fLine, 0);
   const float fCameraDepth = max(fLevel - vCamera.z, 0);
-  const float fDistance = UnderViewDepth(g_Textures[g_Draw.nTex2].Load(vAt).r) * fRayLength;
+  const float fDistance = UnderViewDepth(g_Textures[g_Draw.nTex2].Load(vAt).r) * fRayLength - max(fLine, 0);
   const float fPath = UnderPath(fDistance, D.z, fCameraDepth, g_DrawExt.vParams0.y);
   const float3 c = VolumeAttenuation(UnderDecode(g_Draw.vColor.rgb), g_Draw.vColor.w);
   const float k = c.g * (1 - D.z);
   const float fReach = min(fPath, VOLUME_REACH / max(k, 1e-4));
-  if (!(g_DrawExt.vParams1.x > 0 && fReach > 0.01))
+  if (!(fLine >= 0 && g_DrawExt.vParams1.x > 0 && fReach > 0.01))
     return 1;
   const float fNoise = PictureNoise(In.vPos.xy, g_DrawExt.vParams3.z);
   const float t = UnderSegmentAt((UnderBlockSegment(In.vPos.xy) + fNoise) / XR_UNDER_TAPS, k, fReach);
   const float3 x = vCamera + D * t;
-  return UnderSun(x, max(fLevel - x.z, 0), t * fPixelAngle);
+  return UnderSun(x, max(fLevel - x.z, 0), (fLine + t) * fPixelAngle);
 }
 
 //! The sun's light at the XR_UNDER_TAPS segments of the pixel's ray from the taps pass (tex3): the pixels' of the 4 x 4 window
@@ -199,10 +207,16 @@ float4 PSMain(SUnderOutput In) : SV_Target
   float fRayLength;
   const float3 D = UnderRay(In.vNDC, g_Frame.vJitter.xy, fRayLength);
 
-  const float3 vCamera = g_Frame.vCameraPos.xyz;
+  // The path through the water from the camera, or with the waterline from where the ray goes under the level; the pixels
+  // whose surface is drawn (seen from above) left as they are.
+  const float3 vEye = g_Frame.vCameraPos.xyz;
   const float fLevel = g_DrawExt.vParams0.x;
+  const float fLine = UnderLineStart(vEye.z - fLevel, D.z, g_DrawExt.vLightPos[5].x * fRayLength);
+  if (fLine < 0)
+    discard;
+  const float3 vCamera = vEye + D * fLine;
   const float fCameraDepth = max(fLevel - vCamera.z, 0);
-  const float fDistance = UnderViewDepth(g_Textures[g_Draw.nTex2].Load(vAt).r) * fRayLength;
+  const float fDistance = UnderViewDepth(g_Textures[g_Draw.nTex2].Load(vAt).r) * fRayLength - fLine;
   const float fPath = UnderPath(fDistance, D.z, fCameraDepth, g_DrawExt.vParams0.y);
   const float3 P = vCamera + D * fDistance;
   const float3 L = g_Frame.vSunDir.xyz;
@@ -256,10 +270,14 @@ float4 PSMain(SUnderOutput In) : SV_Target
   const float3 D = vRay / fRayLength;
   const float fPixelAngle = max(length(ddx(D)), length(ddy(D)));
 
-  const float3 vCamera = g_Frame.vCameraPos.xyz;
+  // The path through the water from the camera, or with the waterline from where the ray goes under the level (the pixels
+  // whose surface is drawn discarded at the end: the quad's taps are shared).
+  const float3 vEye = g_Frame.vCameraPos.xyz;
   const float fLevel = g_DrawExt.vParams0.x;
+  const float fLine = UnderLineStart(vEye.z - fLevel, D.z, g_DrawExt.vLightPos[5].x * fRayLength);
+  const float3 vCamera = vEye + D * max(fLine, 0);
   const float fCameraDepth = max(fLevel - vCamera.z, 0);
-  const float fDistance = UnderViewDepth(g_Textures[g_Draw.nTex2].Load(vAt).r) * fRayLength;
+  const float fDistance = UnderViewDepth(g_Textures[g_Draw.nTex2].Load(vAt).r) * fRayLength - max(fLine, 0);
   const float fPath = UnderPath(fDistance, D.z, fCameraDepth, g_DrawExt.vParams0.y);
   const float3 P = vCamera + D * fDistance;
   const float3 L = g_Frame.vSunDir.xyz;
@@ -286,7 +304,7 @@ float4 PSMain(SUnderOutput In) : SV_Target
       const uint j = 4 * i + q;
       const float t = UnderSegmentAt((j + frac(fNoise + 0.618034 * i)) / XR_UNDER_TAPS, k.g, fReach);
       const float3 x = vCamera + D * t;
-      vTaps[i] = UnderSun(x, max(fLevel - x.z, 0), t * fPixelAngle);
+      vTaps[i] = UnderSun(x, max(fLevel - x.z, 0), (max(fLine, 0) + t) * fPixelAngle);
     }
   }
   float vSun[XR_UNDER_TAPS];
@@ -303,6 +321,8 @@ float4 PSMain(SUnderOutput In) : SV_Target
   float fLit;
   const float3 vInscatter = UnderInscatter(UnderSource(vDeep, c), c, fCameraDepth, fMu, fPath, fReach, bTaps ? fShare : 0, fPhase, vSun,
                                            fLit);
+  if (fLine < 0)
+    discard;
   const float fDepth = max(fLevel - P.z, 0);
   const float3 T = exp(-c * (fPath + fDepth / VolumeRefractedCos(saturate(L.z))));
   if (g_DrawExt.vParams0.z == 31)

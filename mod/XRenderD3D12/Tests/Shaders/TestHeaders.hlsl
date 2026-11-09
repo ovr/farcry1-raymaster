@@ -678,6 +678,17 @@ void CSUnderPath(uint i : SV_DispatchThreadID)
   TestOut(i, float4(UnderPath(a.x, a.y, a.z, a.w), 0, 0, 0));
 }
 
+//! UnderLineStart (Underwater.hlsli) of the camera's height over the level g_TestIn[i].x, the direction's z .y and the ray's
+//! length to the near plane .z: out[i].x.
+[numthreads(64, 1, 1)]
+void CSUnderLine(uint i : SV_DispatchThreadID)
+{
+  if (i >= g_Test.nTest.x)
+    return;
+  const float4 a = TestIn(i);
+  TestOut(i, float4(UnderLineStart(a.x, a.y, a.z), 0, 0, 0));
+}
+
 //! UnderPhase (Underwater.hlsli) of the cosine g_TestIn[i].x: out[i].x.
 [numthreads(64, 1, 1)]
 void CSUnderPhase(uint i : SV_DispatchThreadID)

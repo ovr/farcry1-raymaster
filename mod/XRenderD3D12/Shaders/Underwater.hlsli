@@ -53,6 +53,19 @@ float UnderPath(float fDist, float fDirZ, float fDepth, float fCap)
   return fDirZ > 0 ? min(fDist, (fDepth + fCap) / fDirZ) : fDist;
 }
 
+//! The waterline (d3d12_WaterUnderLine): a camera fHeight metres over the level (0 or more) whose near plane dips under it.
+//! Where the view's ray (fDirZ its z) goes under the level before the near plane (fNear the ray's length to it), the near plane
+//! clips the surface away and the scene behind is the water's: the ray's distance to the level returned, the path through the
+//! water from there; -1 where it does not (up and level, or under the level beyond the near plane: the surface drawn there, the
+//! water's light the surface's, seen from above). 0 for a camera under the level (fHeight < 0): its path from the camera.
+float UnderLineStart(float fHeight, float fDirZ, float fNear)
+{
+  if (fHeight < 0)
+    return 0;
+  const float t = fDirZ < 0 ? fHeight / -fDirZ : fNear;
+  return t < fNear ? t : -1;
+}
+
 //! The phase function of sea water at the cosine fCos between the light's way and the way it is scattered, 1 the same every
 //! way (its mean over all ways is 1): UNDER_MOLECULAR of it the molecules' (Morel), the rest the particles'
 //! (Henyey-Greenstein at UNDER_PARTICLE_G, strongly forwards: looking towards the sun the water glows round it).

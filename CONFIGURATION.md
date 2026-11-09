@@ -275,6 +275,7 @@ Details: [Device removal (DRED)](mod/XRenderD3D12/README.md#device-removal-dred)
 | `d3d12_WaterGeometry` | `1` |  | The ocean drawn as a grid raised to the waves' height |
 | `d3d12_WaterUnder` | `1` |  | The light in the water with the camera under the ocean's surface |
 | `d3d12_WaterUnderClear` | `1` |  | Under the water, the light it scatters from the sun and the sky |
+| `d3d12_WaterUnderLine` | `1` |  | A camera just over the water whose near plane dips under it sees the water's light there |
 | `d3d12_WaterUnderShare` | `1` |  | Under the water, the sun's light shared over a 4 x 4 window (faster) |
 | `d3d12_WaterVolume` | `1` |  | The ocean's water attenuates each colour by the level's water colour |
 | `d3d12_WaterCaustics` | `1` |  | The caustics of the FFT ocean's waves on the sea floor |
