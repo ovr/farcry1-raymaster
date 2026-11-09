@@ -26,7 +26,12 @@
 //	Snell's window the light the water below sends up (Water.hlsl). And
 //	the eye under the water (UnderBalance, the HDR resolve's factors): its
 //	white balance at the camera's depth (d3d12_WaterUnderAdapt) and its
-//	exposure there (d3d12_WaterUnderExposure).
+//	exposure there (d3d12_WaterUnderExposure). The waterline
+//	(d3d12_WaterUnderLine): with the camera over the level but its near
+//	plane under it, the near plane clips the surface away from the pixels
+//	whose ray goes under the level before it; the same pass gives those the
+//	light in the water from where their ray does (Underwater.hlsli's
+//	UnderLineStart), the rest of the view as above the water.
 //
 //////////////////////////////////////////////////////////////////////
 
@@ -111,14 +116,33 @@ void CD3D12Renderer::SetUnderwaterFog(SDrawConstants &dc, uint32 nState) const
 
 void CD3D12Renderer::UpdateUnderwater(std::span<const SRenderItem> Items)
 {
-  m_bUnderwater = false;
+  m_bUnderwater = m_bUnderLine = false;
   if (CV_d3d12_WaterUnder <= 0 || CV_d3d12_WaterVolume <= 0 || m_bHeatVision || !m_pScene)
     return;
   const SFogVolume *pFV = m_pScene->GetOceanFogVolume();
-  if (!pFV || m_Camera.GetPos().z >= pFV->fFogLayerZ)
+  if (!pFV)
     return;
-  m_bUnderwater = std::any_of(Items.begin(), Items.end(), IsOceanItem);
-  m_fUnderDepth = pFV->fFogLayerZ - m_Camera.GetPos().z;
+  const float fHeight = m_Camera.GetPos().z - pFV->fFogLayerZ;
+  if (fHeight < 0)
+  {
+    m_bUnderwater = std::any_of(Items.begin(), Items.end(), IsOceanItem);
+    m_fUnderDepth = -fHeight;
+    return;
+  }
+  if (CV_d3d12_WaterUnderLine <= 0)
+    return;
+  // The near plane's lowest corner (the projection's as MakeProjection's; the view's axes the columns of its matrix, the
+  // third backwards), the waterline when it is under the level.
+  const float fRatio = m_Camera.GetProjRatio() > 0 ? m_Camera.GetProjRatio() : 0.75f;
+  const float fTanY = tanf(m_Camera.GetFov() * fRatio * 0.5f);
+  const Matrix44 View = m_Camera.GetVCMatrixD3D9();
+  const float *V = View.data;
+  const float fNear = m_Camera.GetZMin() > 0 ? m_Camera.GetZMin() : 0.25f;
+  const float fDrop = UnderwaterLight::NearPlaneDrop(fNear, fTanY / fRatio, fTanY, -V[10], V[8], V[9]);
+  m_bUnderLine = fHeight < fDrop && std::any_of(Items.begin(), Items.end(), IsOceanItem);
+  if (m_pFrameDump && m_bUnderLine)
+    fprintf(m_pFrameDump.get(), "waterline (d3d12_WaterUnderLine): the camera %.3f m over the ocean's level, the near plane down to %.3f m under the camera\n",
+            fHeight, fDrop);
 }
 
 bool CD3D12Renderer::UnderBalance(float vGain[4]) const
@@ -142,8 +166,13 @@ bool CD3D12Renderer::UnderBalance(float vGain[4]) const
 
 bool CD3D12Renderer::UnderwaterOn() const
 {
-  return m_bUnderwater && m_nRecurseLevel <= 1 && (m_nSceneFlags & SHDF_ALLOWHDR) && !m_bReflectionPass && !m_bEnvCubePass &&
-         !m_bShadowMapPass && !m_bSpritePass && !m_bCascadePass && !m_bRayBehindPass;
+  return m_bUnderwater && UnderPassOn();
+}
+
+bool CD3D12Renderer::UnderPassOn() const
+{
+  return (m_bUnderwater || m_bUnderLine) && m_nRecurseLevel <= 1 && (m_nSceneFlags & SHDF_ALLOWHDR) && !m_bReflectionPass &&
+         !m_bEnvCubePass && !m_bShadowMapPass && !m_bSpritePass && !m_bCascadePass && !m_bRayBehindPass;
 }
 
 void CD3D12Renderer::DrawUnderwater()
@@ -160,7 +189,8 @@ void CD3D12Renderer::DrawUnderwater()
     return;
   ResolveMsaaDepth();
   m_pDevice->CopyTargets(m_UnderCopy.pColor.Get(), m_UnderCopy.pDepth.Get());
-  m_bUnderDrawn = true;
+  // (The waterline's camera over the level: the blended objects after it as above the water.)
+  m_bUnderDrawn = m_bUnderwater;
 
   SPipelineKey Key = {};
   Key.nProgram = eD3D12P_Underwater;
@@ -181,6 +211,7 @@ void CD3D12Renderer::DrawUnderwater()
   Set4(dc.vParams0, pFV->fFogLayerZ, UnderCap(), (float)nDebug, bCaustics && fSun > 0 ? 1.0f : 0.0f);
   float vCamera[4];
   GetRayView(vCamera, dc.vLightPos[2], dc.vLightPos[3], dc.vLightPos[4]);
+  dc.vLightPos[5][0] = m_Camera.GetZMin() > 0 ? m_Camera.GetZMin() : 0.25f;  // (the near plane as MakeProjection's)
 
   // Over the whole view (the viewport in the back buffer's pixels, scaled to the scene's by the draw).
   int Viewport[4];
@@ -252,5 +283,5 @@ void CD3D12Renderer::ReleaseUnderwater()
   if (m_pUnderTaps && m_pUpload)
     m_pUpload->ReleaseTexture(m_pUnderTaps);
   m_pUnderTaps = nullptr;
-  m_bUnderwater = false;
+  m_bUnderwater = m_bUnderLine = false;
 }

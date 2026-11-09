@@ -1324,10 +1324,13 @@ public:
   //! Once a frame before the main view's scenes: m_bUnderwater, the camera under the ocean's surface with the ocean in its
   //! list (Items) and the light in its water on (d3d12_WaterVolume): the main view's lists then leave out the ocean's fog
   //! volume's fog passes, the ocean from below gives its surface's light alone, and the blended list draws the light in the
-  //! water over the scene after the water surfaces (DrawUnderwater); the caustics made for it.
+  //! water over the scene after the water surfaces (DrawUnderwater); the caustics made for it. Else m_bUnderLine
+  //! (d3d12_WaterUnderLine): the camera over the level but its near plane under it (UnderwaterLight.h's NearPlaneDrop).
   void UpdateUnderwater(std::span<const SRenderItem> Items);
   //! m_bUnderwater in the main view's lists (not in the scenes it shows: the reflection, the cubes, the shadow maps).
   bool UnderwaterOn() const;
+  //! DrawUnderwater's pass in the main view's blended list: m_bUnderwater or m_bUnderLine, in the lists of UnderwaterOn.
+  bool UnderPassOn() const;
   //! The blended list's pass after the water surfaces (UnderwaterOn): the scene as drawn so far copied (m_UnderCopy; the
   //! copy of the list's start stays the flares'), with d3d12_WaterUnderShare the sun's light at one point of each pixel's
   //! ray into m_pUnderTaps (Underwater.hlsl's PSTaps), then a triangle over the view of Underwater.hlsl; m_bUnderDrawn.
@@ -1348,6 +1351,10 @@ public:
   bool UnderBalance(float vGain[4]) const;
   void ReleaseUnderwater();
   bool m_bUnderwater = false;
+  //! d3d12_WaterUnderLine: the camera over the ocean's level, its near plane under it: the pass for the pixels whose ray
+  //! goes under the level before the near plane (the surface clipped there), from where it does (Underwater.hlsli's
+  //! UnderLineStart); the rest of the view as above the water.
+  bool m_bUnderLine = false;
   float m_fUnderDepth = 0;        //!< with m_bUnderwater the camera's depth under the ocean's level (m)
   bool m_bUnderDrawn = false;     //!< the blended list being drawn has drawn the light in the water (DrawItems resets it)
   SSceneCopy m_UnderCopy;
@@ -2255,6 +2262,7 @@ public:
   int CV_d3d12_WaterUnderShare = 1;   //!< under the ocean's surface the sun's light at one point of each pixel's ray, the 4 x 4 window round a pixel its ray's segments, the segments' weights in closed form (Underwater.cpp; 0: four points a pixel shared by its quad, the frames before)
   float CV_d3d12_WaterUnderAdapt = 1;  //!< under the ocean's surface the eye's white balance: the light at the camera's depth taken towards the light at the surface by this much, 0 to 1 (UnderBalance; 0: none, the frames before)
   float CV_d3d12_WaterUnderExposure = 1;  //!< under the ocean's surface the eye's exposure: this many EV more than above it, over the first half metre (UnderBalance; 0: none, the frames before)
+  int CV_d3d12_WaterUnderLine = 1;    //!< a camera over the ocean's level whose near plane dips under it: the light in the water where the near plane clips the surface away (Underwater.cpp's m_bUnderLine; 0: the floor there unfogged, the frames before)
   int CV_d3d12_WaterUnderClear = 1;   //!< under the ocean's surface the light its water scatters from the scene's sun and sky, its scattering the attenuation less pure water's absorption; the surface beyond Snell's window the water below's light (Underwater.hlsli's UnderClearSource; 0: twice the fog volume's colour, the frames before)
   int CV_d3d12_GpuTimes = 0;          //!< N: the GPU time of the frame's sections to the log every N frames
   int CV_d3d12_FrameLog = 0;          //!< 1: a line per frame to XRenderD3D12_frames.txt (LogFrame), 2 with the engine's profilers

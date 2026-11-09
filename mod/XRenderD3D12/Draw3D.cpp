@@ -327,9 +327,9 @@ void CD3D12Renderer::DrawItems(SRenderItem *pItems, int nItems, int eList)
   bool bSprites = eList != eRL_Blended;
   // The flares after the rest of the scene, before the elements over it.
   bool bFlares = eList != eRL_Blended;
-  // Under the ocean's surface (d3d12_WaterUnder) the light in its water over the scene after the last water surface, the
-  // sprites after it.
-  bool bUnder = eList != eRL_Blended || !UnderwaterOn();
+  // Under the ocean's surface (d3d12_WaterUnder; or its near plane, d3d12_WaterUnderLine) the light in its water over the
+  // scene after the last water surface, the sprites after it.
+  bool bUnder = eList != eRL_Blended || !UnderPassOn();
   const bool bUnderDrawn = m_bUnderDrawn;  // (a list drawn inside a draw: a mirror's)
   m_bUnderDrawn = false;
   int nLastWater = -1;

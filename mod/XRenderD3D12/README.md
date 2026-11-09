@@ -2232,6 +2232,23 @@ and lists theirs (`NamesObjects`).
   - The fog of the scene, the flares and the sprites as before; the sun's flare from under the
     ocean at the sun's refracted direction (`d3d12_WaterVolume`) and through Snell's window no
     longer fogged.
+  - The waterline (`d3d12_WaterUnderLine`, 1; not saved): a camera just over the level whose near
+    plane dips under it (diving in, riding the waves). The near plane is at 0.25 m, so a level view
+    with the film's 120 degrees across a 16:9 screen reaches 0.17 m under the camera at its lower
+    edge (`UnderwaterLight.h`'s `NearPlaneDrop`: its lowest corner). Where a pixel's ray goes under
+    the level before the near plane, the near plane clips the surface away: the pixel showed the
+    floor as in the air, a line across the view, the fog passes of the ocean's volume being off
+    with the camera over it. With the camera over the level by less than the near plane's drop
+    (`m_bUnderLine`, the frame dump's line `waterline`) the blended list draws the same pass after
+    the water surfaces, and those pixels take the path through the water from where their ray
+    goes under the level (`Underwater.hlsli`'s `UnderLineStart`); the rest are discarded (the
+    surface drawn there, seen from above, the sky). The blended objects after it and the eye's
+    white balance and exposure stay as over the water. Fort's dive (the film's fort-islet, frames
+    1323-1325; `render_tests` suite `underline`, 1280 x 720, the film's rays and paths): the camera
+    0.06 m over the level, the water's light from row 495 of 720 down, blue over red 3.0-3.1 times
+    what it was, the floor's luma spread 0.16-0.24 of what it was (fading into the water as in the
+    next frame, under it); over the line the same frames (98 of 1.9 million px apart by more than 2,
+    at the horizon: the water's reflections of the frame before). 0: the frames before.
   - `d3d12_WaterDebug` 31 the light the water scatters, 32 the sun's light in it over its mean (grey
     1, white 2: the shafts), 33 the share of the scene left (with `r_HDRRendering 0`); the blended
     objects after the pass show the same term.

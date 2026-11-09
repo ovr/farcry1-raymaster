@@ -736,7 +736,7 @@ void CScene::EndEf3D(int nFlags)
     g_pRenderer->DrawPathDebug();
     g_pRenderer->DrawShadowMapDebug();
     g_pRenderer->GpuSection("other");
-    g_pRenderer->m_bUnderwater = false;
+    g_pRenderer->m_bUnderwater = g_pRenderer->m_bUnderLine = false;
   }
 
   m_nDrawing--;

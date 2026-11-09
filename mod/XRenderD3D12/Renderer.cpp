@@ -247,6 +247,11 @@ void CD3D12Renderer::RegisterVariables()
                      "bluer than a floor the sun lights, darker with the depth and looking down), the surface beyond Snell's "
                      "window the light the water below sends up (meeting the water at the horizon); 0: the water's light "
                      "twice its fog volume's colour, as seen from above (the frames before)");
+  iConsole->Register("d3d12_WaterUnderLine", &CV_d3d12_WaterUnderLine, 1, 0,
+                     "With d3d12_WaterUnder: a camera just over the ocean's level whose near plane dips under it (diving in, "
+                     "riding the waves) sees the light in the water where the near plane clips the surface away, from where "
+                     "each pixel's ray goes under the level; 0: the floor there unfogged, a line across the view (the frames "
+                     "before)");
   iConsole->Register("d3d12_WaterUnderAdapt", &CV_d3d12_WaterUnderAdapt, 1.0f, 0,
                      "With d3d12_WaterUnder and r_HDRRendering: the eye's white balance with the camera under the water, as a "
                      "diver's (or a camera's set at the depth): the light at the camera's depth, the water having taken its red "

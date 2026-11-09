@@ -360,7 +360,7 @@ void CD3D12Renderer::UpdateOcean(std::span<const SRenderItem> Items)
   // The caustics (d3d12_WaterCaustics) when the frame draws them or a view from under the water (the light in it,
   // Underwater.cpp), in daylight: from the waves' level 0 at the frame's time, their mip levels as the waves'.
   const bool bCaustics = CV_d3d12_WaterCaustics > 0 && CV_d3d12_Caustics && m_SunDir[2] > 0 &&
-                         (m_bUnderwater ||
+                         (m_bUnderwater || m_bUnderLine ||
                           std::any_of(Items.begin(), Items.end(), [](const SRenderItem &it) { return it.eDrawClass == eDC_Caustics; }));
   if (bCaustics)
   {
