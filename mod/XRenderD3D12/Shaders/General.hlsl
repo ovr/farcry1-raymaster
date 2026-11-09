@@ -1992,6 +1992,14 @@ SPixelOutput PSMain(XR_PS_INPUT)
   Out.vSun = float4(s_fPTSun, saturate(0.5 * vAmbient));
   Out.vSpecular = float4(saturate(s_vPTSpecular), Out.vColor.a);
   Out.vLightmap = float4(saturate(s_vPTLightmap), s_fPTSkin);
+  // d3d12_PTLeafLight: a leaf's light as the raster's (the vertices' normal, the sun's visibility the raster found) in the
+  // light map's target (the vegetation has no light map), as its light / 4: the composite lights the leaf with no less.
+  if (g_DrawExt.vLeafLight.w > 0)
+  {
+    const float fNL = dot(SafeNormalize(s_vPTNormal), g_Frame.vSunDir.xyz);
+    const float3 vRaster = g_DrawExt.vLeafLight.rgb + g_DrawExt.vLeafSun.rgb * ((g_DrawExt.vLeafSun.w > 0 ? abs(fNL) : saturate(fNL)) * s_fPTSun);
+    Out.vLightmap.rgb = saturate(0.25 * vRaster);
+  }
   return Out;
 }
 #elif defined(XR_VELOCITY)

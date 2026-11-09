@@ -35,6 +35,15 @@ namespace VegetationLight
     return 0.5f * fAmbient + std::max(fSunLight - fShadow, 0.f);
   }
 
+  //! The light the raster lights a vertex of the bake with, the shaders' 2x in it, as the path tracer's G-buffer takes it
+  //! for a leaf's least light (d3d12_PTLeafLight, Draw3D.cpp, General.hlsl): fAmbientTerm plus fSunTerm times N.L (|N.L|
+  //! on both sides), 2 Light without the self shadow.
+  inline void RasterTerms(float fAmbient, float fSun, bool bTwoSided, float &fAmbientTerm, float &fSunTerm)
+  {
+    fAmbientTerm = bTwoSided ? 2 * fAmbient : fAmbient;
+    fSunTerm = bTwoSided ? fSun : 2 * fSun;
+  }
+
   //! The light the colours had lit over unlit, in each channel the sum of the vertices' lit colours over the sum of their
   //! unlit (the stored colours, clamped to 1 as they are stored; the unlit half the mesh's colour).
   struct SGain

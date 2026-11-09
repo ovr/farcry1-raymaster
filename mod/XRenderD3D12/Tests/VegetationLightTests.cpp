@@ -85,3 +85,27 @@ XR_TEST(Vegetation_Gain)
       CHECK_NEAR(g[c], 1, 1e-9);
   }
 }
+
+// Why: with the path tracer a leaf under a crown that hid the sky was near black, a third of the raster's (Swamp's path, River's
+// temple: the bake lights the leaves on both sides with twice the ambient, unshadowed). d3d12_PTLeafLight lights it no darker
+// than the raster: General.hlsl takes the ambient term plus the sun term times N.L (|N.L| on both sides) for its least light.
+// These terms are twice the bake's light without the self shadow for every N.L, on both sides and on one.
+XR_TEST(Vegetation_RasterTerms)
+{
+  for (const bool bTwoSided : { true, false })
+    for (const float fAmbient : { 0.0f, 0.3f, 0.52f, 1.0f })
+      for (const float fSun : { 0.0f, 0.45f, 1.2f })
+        for (const float d : { -1.0f, -0.6f, -0.1f, 0.0f, 0.25f, 0.8f, 1.0f })
+        {
+          float fAmbientTerm, fSunTerm;
+          VegetationLight::RasterTerms(fAmbient, fSun, bTwoSided, fAmbientTerm, fSunTerm);
+          const float fRaster = fAmbientTerm + fSunTerm * (bTwoSided ? std::fabs(d) : std::max(d, 0.0f));
+          CHECK_MSG(std::fabs(fRaster - 2 * VegetationLight::Light(fAmbient, fSun, d, bTwoSided, 0)) < 1e-5f,
+                    std::to_string(bTwoSided) + " " + std::to_string(fAmbient) + " " + std::to_string(fSun) + " " + std::to_string(d));
+        }
+  // A leaf in the shade on both sides: twice the ambient, as the raster's (the path tracer's paths alone lit it ~0.33 of that).
+  float a, s;
+  VegetationLight::RasterTerms(0.45f, 1, true, a, s);
+  CHECK_NEAR(a, 0.9f, 1e-6);
+  CHECK_NEAR(s, 1, 1e-6);
+}

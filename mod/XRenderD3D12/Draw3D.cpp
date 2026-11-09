@@ -32,6 +32,7 @@
 #include "SkyFogBand.h"
 #include "SpriteOrder.h"
 #include "FogVolume.h"
+#include "VegetationLight.h"
 
 #include <bit>
 
@@ -1661,6 +1662,17 @@ void CD3D12Renderer::DrawLeafItem(const SRenderItem &it)
     memcpy(dc.vColor, vAlbedo, 3 * sizeof(float));
     memcpy(dc.vAmbient, vPathAmbient, sizeof(vPathAmbient));
     memcpy(dc.vSpecular, vPathSpecular, sizeof(vPathSpecular));
+    // d3d12_PTLeafLight: a leaf's light no less than the raster's (VegetationLight.h: on both sides the ambient twice and the
+    // sun times |N.L|, on one the ambient and the sun twice times N.L).
+    float vBakeAmbient[3], vBakeSun[3];
+    if (nMaterial == XR_PT_MAT_VEGETATION && CV_d3d12_PTLeafLight && Geometry::UnlitVegetationLight(pLB, vBakeAmbient, vBakeSun))
+    {
+      const bool bTwoSided = GetCullMode(pSh, pRes) == eCULL_None;
+      for (int c = 0; c < 3; c++)
+        VegetationLight::RasterTerms(vBakeAmbient[c], vBakeSun[c], bTwoSided, dc.vLeafLight[c], dc.vLeafSun[c]);
+      dc.vLeafLight[3] = 1;
+      dc.vLeafSun[3] = bTwoSided ? 1.0f : 0.0f;
+    }
     // Its fill lights, which General.hlsl adds to that ambient light (SetPathFillLights), where the raster lit it with
     // its lights; no other light.
     if (bLit)

@@ -947,7 +947,8 @@ void CD3D12Renderer::DrawPathTrace()
   Key.nState = GS_NODEPTHTEST | GS_COLMASKONLYRGB | GS_BLSRC_ONE | GS_BLDST_ONE;
   Key.nCull = R_CULL_NONE;
   SDrawConstants dc = DefaultDrawConstants();
-  Set4(dc.vParams0, P.vSun[0], P.vSun[1], P.vSun[2], 0);
+  // w 1: the leaves no darker than the raster (d3d12_PTLeafLight, their light in tex5).
+  Set4(dc.vParams0, P.vSun[0], P.vSun[1], P.vSun[2], CV_d3d12_PTLeafLight ? 1.0f : 0.0f);
   // The terrain's albedo divided by its baked light: CSFilter's share of it times this (none without the delight).
   const bool bDelight = P.fDelight > 1;
   Set4(dc.vParams1, bDelight ? P.vBakeLight[0] : 1, bDelight ? P.vBakeLight[1] : 1, bDelight ? P.vBakeLight[2] : 1, 0);

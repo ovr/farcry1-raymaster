@@ -56,4 +56,6 @@ void CSDrawLayout()
   g_TestOut[o++] = asuint(g_DrawExt.vParallax);
   g_TestOut[o++] = g_DrawExt.nPbr;
   g_TestOut[o++] = asuint(g_DrawExt.vSkin);
+  g_TestOut[o++] = asuint(g_DrawExt.vLeafLight);
+  g_TestOut[o++] = asuint(g_DrawExt.vLeafSun);
 }

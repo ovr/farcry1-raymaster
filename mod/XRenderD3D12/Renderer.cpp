@@ -685,6 +685,11 @@ void CD3D12Renderer::RegisterVariables()
                      "normalised; 0: from the world position's differences from pixel to pixel, as long as they are (the frames "
                      "before: close to a trunk at 4K a normal so short the G-buffer took it for none, straight up, a stipple "
                      "on the trunk in the sun)");
+  iConsole->Register("d3d12_PTLeafLight", &CV_d3d12_PTLeafLight, 1, VF_DUMPTODISK,
+                     "With d3d12_PathTracing, a leaf (the vegetation's alpha tested parts) is lit no darker than the raster lights "
+                     "it: its colours' bake, the ambient twice and the sun times |N.L| on both sides (the ambient and the sun twice "
+                     "times N.L on one), with the sun's visibility the raster found; 0: by the sun and its paths alone (the frames "
+                     "before: under a crown that hides the sky the foliage near black, a third of the raster's)");
   iConsole->Register("d3d12_PTSkyPieces", &CV_d3d12_PTSkyPieces, 1, 0,
                      "With d3d12_PathTracing, its rays pass the pieces of the sky (the surfaces of a sky box's texture: the planes "
                      "that close Training's bunker's windows): a path that reaches one has left the scene (the sky's light, "
