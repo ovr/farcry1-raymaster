@@ -375,6 +375,7 @@ Details: [HDR](mod/XRenderD3D12/README.md#hdr).
 | `d3d12_HDRSun` | `8` | yes | The light of the sun's flare times this |
 | `d3d12_ToneMapDesaturation` | `3` | yes | `d3d12_ToneMap 4`: how fast the light far above white loses its hue |
 | `d3d12_ToneMapKnee` | `0.85` | yes | Where the tone map's shoulder starts |
+| `d3d12_ToneMapToe` | `0.02` | yes | `d3d12_ToneMap 2`: the ACES fit's soft toe, from black linear up to this light and smoothly into the curve, not black below 0.00325; 0 the fit as it is |
 
 ### Tuning of the light in the air and in the leaves
 

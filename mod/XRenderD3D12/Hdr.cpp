@@ -406,7 +406,8 @@ CD3D12Texture *CD3D12Renderer::ResolveHdr(int nSceneSRV, ID3D12Resource *pScene,
   dc.nTex1 = fBloom > 0 ? (uint32)m_Hdr.Bloom[0]->m_nSRV : D3D12_SRV_WHITE;
   dc.nTex2 = (uint32)nExposureSRV;
   dc.nTex3 = nLutSRV >= 0 ? (uint32)nLutSRV : D3D12_SRV_WHITE;
-  Set4(dc.vParams0, 1.0f / nWidth, 1.0f / nHeight, 0, 0);
+  // z: the ACES fit's soft toe (d3d12_ToneMapToe; HdrToneMap.hlsli's AcesToe), 0 the fit as it is.
+  Set4(dc.vParams0, 1.0f / nWidth, 1.0f / nHeight, ToneMapToe(), 0);
   Set4(dc.vParams1, fComp, bAdapted ? 1.0f : 0.0f, fBloom / m_Hdr.Bloom.size(), (float)std::clamp(CV_d3d12_ToneMap, 0, 4));
   Set4(dc.vParams2, CV_d3d12_ToneMapKnee, bHeat ? 1.0f : 0.0f, (float)CV_d3d12_HDRDebug, nLutSRV >= 0 ? 1.0f : 0.0f);
   SetHighlightConstants(dc);
@@ -936,9 +937,9 @@ void CD3D12Renderer::DumpHdrTargets()
 void CD3D12Renderer::DumpHdr()
 {
   const int nToneMap = std::clamp(CV_d3d12_ToneMap, 0, 4);
-  fprintf(m_pFrameDump.get(), "hdr: %d x %d (the meter %d x %d), tone map %s (knee %g), exposure %+g EV, auto %d (%g to %g EV, speed %g), bloom %g "
+  fprintf(m_pFrameDump.get(), "hdr: %d x %d (the meter %d x %d), tone map %s (knee %g, toe %g), exposure %+g EV, auto %d (%g to %g EV, speed %g), bloom %g "
           "(threshold %g)%s\n", m_Hdr.nWidth, m_Hdr.nHeight, m_Hdr.nMeterWidth, m_Hdr.nMeterHeight, s_ToneMapNames[nToneMap], CV_d3d12_ToneMapKnee,
-          CV_d3d12_Exposure, CV_d3d12_AutoExposure, CV_d3d12_ExposureMin, CV_d3d12_ExposureMax, CV_d3d12_ExposureSpeed, CV_d3d12_Bloom,
+          ToneMapToe(), CV_d3d12_Exposure, CV_d3d12_AutoExposure, CV_d3d12_ExposureMin, CV_d3d12_ExposureMax, CV_d3d12_ExposureSpeed, CV_d3d12_Bloom,
           CV_d3d12_BloomThreshold, m_bHeatVision ? ", heat vision: clamped" : "");
   fprintf(m_pFrameDump.get(), "hdr: meter %d (%s; window %g to %g, sky's highlights %g)\n", CV_d3d12_ExposureMeter,
           m_Hdr.bExposureHistogram ? "histogram" : "mean", CV_d3d12_ExposureLow, CV_d3d12_ExposureHigh, CV_d3d12_ExposureHighlights);

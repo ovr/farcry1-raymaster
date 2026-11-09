@@ -239,15 +239,20 @@ float3 SoftShoulder(float3 vLight, float k)
   return lerp(vTop, c, step(c, k));
 }
 
-//! ACES (the RRT and an sRGB ODT), fitted (Stephen Hill): light in, light out (0 .. 1).
-float3 AcesFitted(float3 vLight)
+//! ACES (the RRT and an sRGB ODT), fitted (Stephen Hill): light in, light out (0 .. 1). fToe > 0
+//! (d3d12_ToneMapToe): the fit's curve with a soft toe below it (HdrToneMap.hlsli's AcesToe: not black below
+//! 0.00325); 0: the curve as it is, by the same operations.
+float3 AcesFitted(float3 vLight, float fToe)
 {
   static const float3x3 INPUT = { 0.59719, 0.35458, 0.04823, 0.07600, 0.90834, 0.01566, 0.02840, 0.13383, 0.83777 };
   static const float3x3 OUTPUT = { 1.60475, -0.53108, -0.07367, -0.10208, 1.10813, -0.00605, -0.00327, -0.07276, 1.07602 };
   float3 v = mul(INPUT, vLight);
   float3 a = v * (v + 0.0245786) - 0.000090537;
   float3 b = v * (0.983729 * v + 0.4329510) + 0.238081;
-  return saturate(mul(OUTPUT, a / b));
+  float3 r = a / b;
+  [branch] if (fToe > 0)
+    r = AcesToe(v, r, fToe);
+  return saturate(mul(OUTPUT, r));
 }
 
 //! AgX (Troy Sobotka), its base look, with the polynomial fit of its curve (Benjamin Wrensch):
@@ -277,7 +282,7 @@ float3 ToneMap(float3 vLight, int nMode, float fKnee)
   if (nMode == 4)
     return NeutralToneMap(vLight, clamp(fKnee, 0, 0.99), 1, g_DrawExt.vParams3.z);
   if (nMode == 2)
-    return Encode(AcesFitted(vLight));
+    return Encode(AcesFitted(vLight, g_DrawExt.vParams0.z));
   if (nMode == 3)
     return Encode(AgX(vLight));
   return saturate(Encode(vLight));

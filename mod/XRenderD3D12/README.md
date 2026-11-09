@@ -357,6 +357,15 @@ system ones (better not to touch): [`CONFIGURATION.md`](../../CONFIGURATION.md).
     over a fifth of the frame. No toe: below the knee nothing changes. (Khronos' PBR Neutral's
     own shoulder, P - d^2 / (m - k + d), reaches P too slowly: the sun of the HDR output 380
     nits of a 455 nit peak.)
+    ACES has a soft toe (`d3d12_ToneMapToe` T, 0.02; `AcesToe` in `Shaders/HdrToneMap.hlsli`):
+    the fit's numerator v^2 + 0.0245786 v - 0.000090537 crosses 0 at 0.00325, so all the light
+    below it came out black, and a night scene lies there (Training's opening in the pit: the
+    film's frame 41 a mean luma of 1.8 with rays, 1.2 with the paths, the original 6.2; the light
+    is right: without HDR 7.9). From 0 to T a cubic from black with the chord's slope r(T) / T
+    (linear there) into the curve at T with its value and slope (monotone); above T the curve as it
+    is, middle grey too. Frame 41 is now 5.5 and 4.8 (0.01: 4.5 and 3.9); Training's bay by day
+    112.0 -> 112.1, Steam's moonlit bay's darkest tenth 0.8 -> 5.5 (the original 3.4). 0: the fit as
+    it is (test: unit test `HdrToneMap_AcesToe`, `render_tests` suite `acestoe`).
     `d3d12_Exposure` is a compensation in EV; `d3d12_AutoExposure 0` makes the exposure
     2^`d3d12_Exposure`; `d3d12_ExposureMin` / `d3d12_ExposureMax` limit the automatic one (EV,
     0 is the game's daylight; by default 0 and 1.5: the game's sky and daylight are made for the

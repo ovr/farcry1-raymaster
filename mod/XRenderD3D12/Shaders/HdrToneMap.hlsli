@@ -4,9 +4,10 @@
 //
 //	File: HdrToneMap.hlsli
 //	Description: The neutral tone map of the HDR pipeline (d3d12_ToneMap
-//	4; Hdr.hlsl's resolve and its highlight layer). Without bindings: the
-//	programs and the unit tests (Tests/Shaders/TestHeaders.hlsl) include
-//	it.
+//	4; Hdr.hlsl's resolve and its highlight layer) and the ACES fit's
+//	curve with a soft toe (d3d12_ToneMap 2, d3d12_ToneMapToe). Without
+//	bindings: the programs and the unit tests
+//	(Tests/Shaders/TestHeaders.hlsl) include it.
 //
 //////////////////////////////////////////////////////////////////////
 
@@ -14,6 +15,27 @@
 #define XRENDERD3D12_HDRTONEMAP_HLSLI
 
 #include "HdrLight.hlsli"
+
+//! The ACES fit's curve (Stephen Hill's, Hdr.hlsl's AcesFitted) of v, each channel in the RRT's space, with a soft toe
+//! below T (d3d12_ToneMapToe, at least 0.005): the fit's numerator v^2 + 0.0245786 v - 0.000090537 crosses 0 at
+//! 0.00325, so all light below it came out black (a night scene 3 to 5 times darker than the original's). From 0 to T
+//! a cubic (Hermite) from 0 with the chord's slope r(T) / T, there linear, to the curve at T with its value and slope:
+//! r(T) (t + t^2 - t^3) + T r'(T) (t^3 - t^2), t = v / T; monotone (the curve's slope at T is below 4 chords' for any
+//! T from 0.005 up). Above T the curve r as it is (AcesToe takes it, AcesCurve makes it).
+float3 AcesToe(float3 v, float3 r, float T)
+{
+  T = max(T, 0.005);
+  const float a = T * (T + 0.0245786) - 0.000090537, b = T * (0.983729 * T + 0.4329510) + 0.238081;
+  const float rT = a / b, dT = ((2 * T + 0.0245786) * b - a * (2 * 0.983729 * T + 0.4329510)) / (b * b);
+  const float3 t = saturate(v / T), t2 = t * t, t3 = t2 * t;
+  const float3 g = rT * (t + t2 - t3) + T * dT * (t3 - t2);
+  return select(v < T, g, r);
+}
+
+float3 AcesCurve(float3 v, float T)
+{
+  return AcesToe(v, (v * (v + 0.0245786) - 0.000090537) / (v * (0.983729 * v + 0.4329510) + 0.238081), T);
+}
 
 //! The neutral tone map: light in, display values out (0 .. P; P 1 for the SDR picture, the peak's
 //! display value for the HDR output's layer). Up to the knee k (a display value, d3d12_ToneMapKnee)

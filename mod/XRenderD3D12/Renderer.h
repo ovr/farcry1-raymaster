@@ -1721,6 +1721,8 @@ public:
   void ReleaseHdr();
   //! The frame dump's lines: the settings, the meter and the EV read back.
   void DumpHdr();
+  //! The ACES fit's soft toe for the resolve (d3d12_ToneMapToe, 0.005 to 0.1; 0: none, the fit's curve black below 0.00325).
+  float ToneMapToe() const { return CV_d3d12_ToneMapToe > 0 ? std::clamp(CV_d3d12_ToneMapToe, 0.005f, 0.1f) : 0.0f; }
   //! The frame dump's line of what the HDR pipeline holds (also with r_HDRRendering 0: nothing then).
   void DumpHdrTargets();
   //! With r_HDRRendering, drawing into a target of D3D12_HDR_FORMAT (the main scene, the water's
@@ -2405,6 +2407,7 @@ public:
   int CV_d3d12_ToneMap = 4;                 //!< the HDR pipeline's tone map: 0 clamp, 1 soft shoulder, 2 ACES fitted, 3 AgX, 4 neutral
   float CV_d3d12_ToneMapKnee = 0.85f;       //!< where the soft shoulder and the neutral one start (a display value)
   float CV_d3d12_ToneMapDesaturation = 3.0f;  //!< the neutral tone map: how fast the light far above white goes per channel
+  float CV_d3d12_ToneMapToe = 0.02f;          //!< ACES: the soft toe's end (HdrToneMap.hlsli's AcesToe); 0 the fit as it is
   float CV_d3d12_Exposure = 0;              //!< the exposure's compensation, EV
   int CV_d3d12_AutoExposure = 1;            //!< 0: the exposure is 2^d3d12_Exposure alone
   float CV_d3d12_ExposureMin = 0;           //!< the automatic exposure's range, EV

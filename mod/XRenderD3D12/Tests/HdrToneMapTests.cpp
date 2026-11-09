@@ -3,7 +3,7 @@
 //////////////////////////////////////////////////////////////////////
 //
 //	File: HdrToneMapTests.cpp
-//	Description: Unit tests of the neutral tone map (d3d12_ToneMap 4,
+//	Description: Unit tests of the ACES fit's soft toe (d3d12_ToneMapToe) and of the neutral tone map (d3d12_ToneMap 4,
 //	Shaders/HdrToneMap.hlsli) on the GPU: the game's look below the knee,
 //	the shoulder smooth at the knee, never decreasing and below its limit,
 //	the hue kept, the light far above white white; the HDR output's tone
@@ -21,6 +21,7 @@
 #include "Test_HdrOutput.h"
 #include "Test_SkyGlow.h"
 #include "Test_FrameAverage.h"
+#include "Test_AcesToe.h"
 
 #include <algorithm>
 #include <cmath>
@@ -97,6 +98,59 @@ namespace
 
   //! Saturation as (max - min) / max.
   double Saturation(const SRgb &c) { return c.Max() > 0 ? (c.Max() - c.Min()) / c.Max() : 0; }
+}
+
+//! The ACES fit's soft toe (AcesCurve, d3d12_ToneMapToe T): above T the fit's curve as it is (middle grey too); below it
+//! not black (the fit is 0 below 0.00325) but from 0 with the chord's slope r(T) / T, linear there, never decreasing, into
+//! the curve at T with its value and slope. Why: the fit put all of a night scene's light under 0.00325 to black (Training's
+//! opening, 3 to 5 times darker than the original's); a step or a kink at T would show as a band across a dark gradient.
+XR_TEST(HdrToneMap_AcesToe)
+{
+  auto R = [](double v) { return (v * (v + 0.0245786) - 0.000090537) / (v * (0.983729 * v + 0.4329510) + 0.238081); };
+  const int n = 4096;
+  for (float T : { 0.005f, 0.01f, 0.02f })
+  {
+    std::vector<float> V;
+    for (int i = 0; i < n; i++)
+      V.push_back(i < n / 2 ? 2 * T * i / (n / 2) : 2 * T + (4 - 2 * T) * (i - n / 2) / (n / 2.0f));  // dense to 2 T, then to 4
+    V.push_back(0.18f);
+    const float h = T * 1e-3f;
+    V.push_back(T - h);
+    V.push_back(T);
+    V.push_back(T * 1e-3f);
+    SDispatch d;
+    d.Shader = XR_BYTECODE(Test_AcesToe);
+    d.Test.nTest[0] = (uint32)V.size();
+    d.Test.vTest[0] = T;
+    d.nGroups[0] = Groups64(V.size());
+    for (float v : V)
+      Push(d.In, v, v, v, 0);
+    d.nOut = V.size();
+    const std::vector<uint32> Out = Gpu().Run(d);
+    const std::string What = "T " + std::to_string(T);
+    float fLast = -1;
+    for (int i = 0; i < n; i++)
+    {
+      const float v = V[i], g = At(Out, i, 0);
+      CHECK_MSG(At(Out, i, 1) == g && At(Out, i, 2) == g, What + ": the channels apart");
+      CHECK_MSG(g >= fLast - 1e-7f, What + ": down at " + std::to_string(v));
+      fLast = g;
+      if (v == 0)
+        CHECK_MSG(g == 0, What + ": not black at 0");
+      else
+        CHECK_MSG(g > 0, What + ": black at " + std::to_string(v));
+      if (v >= T)
+        CHECK_MSG(std::fabs(g - R(v)) <= 1e-6 + 1e-5 * R(v), What + ": off the curve at " + std::to_string(v));
+    }
+    const size_t m = n;
+    CHECK_NEAR(At(Out, m, 0), R(0.18), 1e-5);                      // middle grey as the fit
+    const double rT = R(T), dT = (R(T + 1e-6) - R(T - 1e-6)) / 2e-6;
+    CHECK_NEAR(At(Out, m + 2, 0), rT, 1e-6 + 1e-5 * rT);           // the curve's value at T
+    const double fSlope = (At(Out, m + 2, 0) - At(Out, m + 1, 0)) / h;
+    CHECK_MSG(std::fabs(fSlope / dT - 1) <= 0.03, What + ": the slope at T " + std::to_string(fSlope) + " of " + std::to_string(dT));
+    const double fNear = At(Out, m + 3, 0) / (T * 1e-3);
+    CHECK_MSG(std::fabs(fNear / (rT / T) - 1) <= 0.01, What + ": the slope at 0 " + std::to_string(fNear) + " of " + std::to_string(rT / T));
+  }
 }
 
 //! Below the knee the game's look: every colour whose brightest channel is at most the knee comes out as it went in (its
