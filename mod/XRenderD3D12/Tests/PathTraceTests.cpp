@@ -25,6 +25,7 @@
 #include "Test_LampLight.h"
 #include "Test_LampShadow.h"
 #include "Test_LightmapFill.h"
+#include "Test_ShadeFloor.h"
 
 #include "Shaders/Constants.h"
 
@@ -726,4 +727,75 @@ XR_TEST(PathTrace_LightmapFill)
       CHECK(At(Out, 2, 0) == 0);     // by the lamp: its own light
     }
   }
+}
+
+//! PathShadeFloor (d3d12_PTShadeFloor): where the sun is hidden the composite lights a surface with no less than the
+//! raster's shade there, times the share of it the shadow covers. The terrain (in a frame with the sun): the light baked
+//! into its texture, which has the shadows of what does not move (the raster's terrain takes the sun's shadow of the live
+//! casters alone, DF2_CASCADES_LIVE), times the shadow's tint where a live caster hides the sun. A lit surface: the
+//! raster's light, 4 * its light map's light (times the live casters' visibility) + the ambient light, as light. Nothing
+//! for the vegetation, the unlit, the terrain in a frame without the sun, or where nothing is in the shadow. Why: the paths
+//! alone lit the sand under Carrier's wreck (a static caster: the raster keeps the light baked there) at 0.48 of RT's colour
+//! (13.4 of 27.7, the original 52), Training's bunker wall by the pipe at 0.16 (0.8 of 4.9: its lamp's rays hidden where
+//! its light map is lit), now 27.6 and 5.3.
+XR_TEST(PathTrace_ShadeFloor)
+{
+  NeedShaderModel65();
+  const float vTint[3] = { 0.26f, 0.31f, 0.36f };   // Carrier's
+  struct SCase
+  {
+    int nMaterial;   // the path material plus 1
+    float fShade;
+    bool bTerrain;
+    float fBaked, fMap, fHalfAmbient;
+  };
+  const int LIT = XR_PT_MAT_LIT + 1, TERRAIN = XR_PT_MAT_TERRAIN + 1, VEGETATION = XR_PT_MAT_VEGETATION + 1;
+  const SCase Cases[] = {
+    { TERRAIN, 1, true, 1.1f, 1, 0 },          // a static caster's shadow: the baked light
+    { TERRAIN, 1, true, 1.1f, 0, 0 },          // a live caster's: times the tint
+    { TERRAIN, 0.5f, true, 0.8f, 0.5f, 0 },    // half in the shadow, half the live casters'
+    { TERRAIN, 0, true, 1.1f, 0, 0 },          // in the sun
+    { TERRAIN, 1, false, 1.1f, 1, 0 },         // a frame without the sun
+    { LIT, 1, false, 1, 0.1f, 0.05f },         // a light map and the ambient
+    { LIT, 0.25f, true, 1, 0.1f, 0.05f },      // a quarter in the shadow
+    { LIT, 1, true, 1, 0, 0.2f },              // the ambient alone (no light map, or a live caster's shadow)
+    { LIT, 0, true, 1, 0.1f, 0.05f },          // in the sun
+    { VEGETATION, 1, true, 1, 0.2f, 0.1f },
+    { 0, 1, true, 1, 0.2f, 0.1f },             // unlit or no surface
+  };
+  const uint32 n = (uint32)(sizeof(Cases) / sizeof(Cases[0]));
+  SDispatch d;
+  d.Shader = XR_BYTECODE(Test_ShadeFloor);
+  d.Test.nTest[0] = n;
+  for (int c = 0; c < 3; c++)
+    d.Test.vTest[c] = vTint[c];
+  for (const SCase &c : Cases)
+  {
+    Push(d.In, c.fBaked, c.fBaked, c.fBaked, (float)c.nMaterial);
+    Push(d.In, c.fMap, c.fMap, c.fMap, c.fShade);
+    Push(d.In, c.fHalfAmbient, c.fHalfAmbient, c.fHalfAmbient, c.bTerrain ? 1.0f : 0.0f);
+  }
+  d.nGroups[0] = Groups64(n);
+  d.nOut = n;
+  const std::vector<uint32> Out = Gpu().Run(d);
+  for (uint32 i = 0; i < n; i++)
+  {
+    const SCase &c = Cases[i];
+    for (int k = 0; k < 3; k++)
+    {
+      float fWant = 0;
+      if (c.fShade > 0 && c.nMaterial == TERRAIN && c.bTerrain)
+        fWant = c.fShade * c.fBaked * std::pow(vTint[k] + (1 - vTint[k]) * c.fMap, 2.2f);
+      else if (c.fShade > 0 && c.nMaterial == LIT)
+        fWant = c.fShade * std::pow(4 * c.fMap + 2 * c.fHalfAmbient, 2.2f);
+      const float fGot = At(Out, i, k);
+      CHECK_MSG(std::fabs(fGot - fWant) <= 1e-5f + 1e-3f * fWant, "case " + std::to_string(i) + ", channel " + std::to_string(k) + ": " +
+                                                                  std::to_string(fGot) + ", not " + std::to_string(fWant));
+      // Never more than the raster's light where the sun is: the terrain's baked light, scaled by the share.
+      if (c.nMaterial == TERRAIN)
+        CHECK(fGot <= c.fShade * c.fBaked + 1e-5f);
+    }
+  }
+  CHECK(At(Out, 0, 0) > At(Out, 1, 0));   // a static caster's shadow lighter than a live one's
+  CHECK(At(Out, 1, 0) < At(Out, 1, 2));   // the tint's blue
 }

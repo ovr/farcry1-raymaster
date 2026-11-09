@@ -951,7 +951,9 @@ void CD3D12Renderer::DrawPathTrace()
   Set4(dc.vParams0, P.vSun[0], P.vSun[1], P.vSun[2], CV_d3d12_PTLeafLight ? 1.0f : 0.0f);
   // The terrain's albedo divided by its baked light: CSFilter's share of it times this (none without the delight).
   const bool bDelight = P.fDelight > 1;
-  Set4(dc.vParams1, bDelight ? P.vBakeLight[0] : 1, bDelight ? P.vBakeLight[1] : 1, bDelight ? P.vBakeLight[2] : 1, 0);
+  // w: in the sun's shadow no darker than the raster's shade (d3d12_PTShadeFloor), 1 a frame with the sun, 2 one without.
+  Set4(dc.vParams1, bDelight ? P.vBakeLight[0] : 1, bDelight ? P.vBakeLight[1] : 1, bDelight ? P.vBakeLight[2] : 1,
+       CV_d3d12_PTShadeFloor ? (bOutdoors ? 1.0f : 2.0f) : 0.0f);
   dc.nTex0 = (uint32)s.pAlbedo->m_nSRV;
   dc.nTex1 = (uint32)s.pNormal->m_nSRV;
   dc.nTex2 = (uint32)s.pSun->m_nSRV;

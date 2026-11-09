@@ -133,6 +133,17 @@ void CSLightmapFill(uint i : SV_DispatchThreadID)
     TestOut(i, float4(PathLightmapFill(TestIn(3 * i).rgb, TestIn(3 * i + 1).rgb, TestIn(3 * i + 2).xyz, g_Test.vTest.xyz, PathShadeParams(0)), 0));
 }
 
+//! PathGBuffer.hlsli's PathShadeFloor of the material g_TestIn[3i].w (the path material plus 1), the shade's share
+//! g_TestIn[3i + 1].w, the terrain taking it where g_TestIn[3i + 2].w > 0, the terrain's baked light g_TestIn[3i].rgb, the
+//! light map target g_TestIn[3i + 1].rgb, the ambient light / 2 g_TestIn[3i + 2].rgb and the tint g_Test.vTest.rgb: out[i].
+[numthreads(64, 1, 1)]
+void CSShadeFloor(uint i : SV_DispatchThreadID)
+{
+  if (i < g_Test.nTest.x)
+    TestOut(i, float4(PathShadeFloor((uint)TestIn(3 * i).w, TestIn(3 * i + 1).w, TestIn(3 * i + 2).w > 0, TestIn(3 * i).rgb, g_Test.vTest.rgb,
+                                     TestIn(3 * i + 1).rgb, TestIn(3 * i + 2).rgb), 0));
+}
+
 //! PathTraced over a g_Test.nTest.x x g_Test.nTest.y grid of pixels, with g_PT as the test binds it: out[x + y * w].x 1 where traced.
 [numthreads(8, 8, 1)]
 void CSCheckerboard(uint2 p : SV_DispatchThreadID)

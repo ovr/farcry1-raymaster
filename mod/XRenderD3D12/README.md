@@ -1469,7 +1469,21 @@ system ones (better not to touch): [`CONFIGURATION.md`](../../CONFIGURATION.md).
   (half the light through it, the paths leaving it from both sides) was tried first: it made them no
   lighter (River's 0.7 of the raster's with it, the sun high: most leaves face it less than the crown's
   normal) and nothing over the floor (test: unit test `Vegetation_RasterTerms`, `render_tests` suite
-  `ptleaves`).
+  `ptleaves`). Where the sun is hidden the paths' light is no darker than the raster's shade there
+  (`d3d12_PTShadeFloor`, 1; `PathShadeFloor` in `PathGBuffer.hlsli`, times the share of the pixel the
+  raster finds in the shadow, all of a frame without the sun). The raster's terrain takes the sun's
+  shadow of the live casters alone (`DF2_CASCADES_LIVE`): what does not move has its shadow baked into
+  the terrain's texture, softer and lighter than the paths' (they divide that baked light out and light
+  the sand under a hull with its bounces); its shade is that baked light, times the shadow's tint where
+  a live caster hides the sun. A lit surface's is its light map's light (the map has the shadows of what
+  does not move, so times the live casters' visibility) and its ambient. The G-buffer's pass writes the
+  live casters' visibility (the rays' mask or the live cascades) of the terrain into the light map's
+  target (the terrain has no light map; the fill of the light maps leaves it out), the light map's light
+  times it of a lit surface. The sand under Carrier's wreck (a static caster) was half the raster's
+  colour (13.4 of 27.7, the original 52: it puts no shadow there), now 27.6; the wall of Training's
+  bunker by the pipe's mouth, a frame without the sun whose lamps' rays the bunker hides where its light
+  map is lit, a sixth (0.8 of 4.9), now 5.3: the pipe's mouth shows again (test: unit test
+  `PathTrace_ShadeFloor`, `render_tests` suite `ptshadefloor`).
 - Its G-buffer (`Shaders/PathGBuffer.hlsli`) is what the main view's opaque list writes with the general
   program's `XR_PT` permutation (`General_PT_*`, `SPipelineKey::bPathTrace`): the colour gets only what
   the path tracer does not light (glow maps, alpha glow, the unlit templates, the fog), a second target

@@ -47,6 +47,7 @@
 #define XRENDERD3D12_PATHGBUFFER_HLSLI
 
 #include "RayConstants.h"
+#include "HdrLight.hlsli"
 
 //! A unit vector as the octahedral map's point, 0..1.
 float2 PathOctEncode(float3 n)
@@ -117,6 +118,24 @@ float PathGBufferSkin(float fRough)
 float PathGBufferSkinRough(float a)
 {
   return a < 254.5 / 255 ? max(a, 1.0 / 255) : 0;
+}
+
+//! d3d12_PTShadeFloor: the least light the composite lights a surface with where the sun is hidden, the raster's shade
+//! there (as light; 0 where there is none): nMaterial the path material plus 1, fShade the share of the surface the sun's
+//! shadow covers (1 - the raster's visibility; 1 in a frame without the sun), bTerrain the terrain takes it (a frame
+//! with the sun). The terrain: vBaked, the light baked into its texture (the shadows of what does not move in it), times
+//! the shadow's tint vTint (DF2_SHADOW_TINT) where a live caster hides the sun (vMap.r: the visibility of the live
+//! casters). A lit surface: 4 vMap, its light map's light times that visibility (the light map target's rgb), and twice
+//! vHalfAmbient, the game's ambient light / 2 (the G-buffer's, with the tint in the shadow), as the raster's light.
+float3 PathShadeFloor(uint nMaterial, float fShade, bool bTerrain, float3 vBaked, float3 vTint, float3 vMap, float3 vHalfAmbient)
+{
+  if (fShade <= 0)
+    return 0;
+  if (nMaterial == XR_PT_MAT_TERRAIN + 1)
+    return bTerrain ? fShade * vBaked * pow(lerp(saturate(vTint), 1, saturate(vMap.r)), HDR_GAMMA) : 0;
+  if (nMaterial == XR_PT_MAT_LIT + 1)
+    return fShade * pow(max(4 * vMap + 2 * vHalfAmbient, 0), HDR_GAMMA);
+  return 0;
 }
 
 #endif

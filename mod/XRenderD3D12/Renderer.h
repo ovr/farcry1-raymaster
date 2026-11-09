@@ -2378,6 +2378,7 @@ public:
   float CV_d3d12_PTBakedFalloff = 0.0f;     //!< the falloff of its lamps baked into the light maps: 0 the raster's dynamic light's,
                                             //!< > 0 the light maps' (1 - d / r) to that power over the whole radius
   int CV_d3d12_PTVegetationGain = 1;       //!< with d3d12_PathTracing the vegetation's draws the paths do not light take the light its colours had lit, on the mean (Geometry::UnlitVegetationGain; 0: unlit, the frames before)
+  int CV_d3d12_PTShadeFloor = 1;            //!< with d3d12_PathTracing where the sun is hidden no darker than the raster's shade (PathGBuffer.hlsli's PathShadeFloor; 0: the paths' light alone, the frames before)
   int CV_d3d12_PTLeafLight = 1;             //!< with d3d12_PathTracing the leaves lit no darker than the raster's bake lights them (Geometry::UnlitVegetationLight, General.hlsl, PathComposite.hlsl; 0: the sun and the paths alone, the frames before)
   int CV_d3d12_PTFaceNormal = 1;            //!< with d3d12_PathTracing the G-buffer's side of a triangle (a trunk's normal) from 1 / w's plane, normalised (PathGBuffer.hlsli's PathFace; 0: the world positions' differences, the frames before)
   int CV_d3d12_PTSkyPieces = 1;             //!< with d3d12_PathTracing its rays pass the pieces of the sky (XR_RAY_SKY: Training's bunker's windows), a path that reaches one has left the scene (0: they glow with their picture, the frames before)

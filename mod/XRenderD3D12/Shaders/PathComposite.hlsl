@@ -16,7 +16,11 @@
 //	(the G-buffer's), the paths' light that of PathTrace.hlsl's CSFilter.
 //	The leaves let half of the sun through from behind them, and with
 //	d3d12_PTLeafLight (vParams0.w) are lit no darker than the raster lights
-//	them (tex5's rgb, its light / 4: General.hlsl); the skin
+//	them (tex5's rgb, its light / 4: General.hlsl); with d3d12_PTShadeFloor
+//	(vParams1.w) a lit surface and the terrain are no darker where the sun
+//	is hidden than the raster's shade there (PathGBuffer.hlsli's
+//	PathShadeFloor: the light map's light, the ambient, the terrain's baked
+//	light, the tint where a live caster hides the sun); the skin
 //	(r_Skin: the light map target's alpha, tex5) takes N.L wrapped round
 //	the line where the sun passes it (Skin.hlsli's SkinWrap, vSkin.w the
 //	scatter), as the raster does. The
@@ -65,6 +69,17 @@ float4 PSMain(SCompositeOutput In) : SV_Target
   if (PathGBufferSkinRough(g_Textures[g_Draw.nTex5].Load(vAt).a) > 0)
     vLight = g_DrawExt.vParams0.rgb * (SkinWrap(fNL, g_DrawExt.vSkin.w) * fVisible) + vPaths.rgb;
   const float3 vBaked = nMaterial == XR_PT_MAT_TERRAIN + 1 ? g_DrawExt.vParams1.rgb * vPaths.w : vPaths.w;
+  // d3d12_PTShadeFloor (vParams1.w: 1 a frame with the sun, 2 one without): in the sun's shadow (1 - the raster's
+  // visibility; all of a frame without the sun) no darker than the raster's shade (PathShadeFloor; the terrain in a
+  // frame with the sun; tex5 the light map's light times the visibility of the live casters, the terrain's that
+  // visibility, General.hlsl).
+  [branch]
+  if (g_DrawExt.vParams1.w > 0 && (nMaterial == XR_PT_MAT_TERRAIN + 1 || nMaterial == XR_PT_MAT_LIT + 1))
+  {
+    const bool bNoSun = g_DrawExt.vParams1.w > 1.5;
+    vLight = max(vLight, PathShadeFloor(nMaterial, bNoSun ? 1 : 1 - fVisible, !bNoSun, vBaked, g_Frame.vShadowTint.rgb,
+                                        g_Textures[g_Draw.nTex5].Load(vAt).rgb, g_Textures[g_Draw.nTex2].Load(vAt).gba));
+  }
   const float3 vLit = saturate(pow(saturate(vAlbedo), HDR_GAMMA) / max(vBaked, 0.01)) * vLight;
   const float3 vHighlights = g_Textures[g_Draw.nTex4].Load(vAt).rgb;
   return float4((float3(HdrEncode(vLit.r), HdrEncode(vLit.g), HdrEncode(vLit.b)) + vHighlights) * vGBuffer.b, 0);
