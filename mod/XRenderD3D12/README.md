@@ -1313,6 +1313,21 @@ system ones (better not to touch): [`CONFIGURATION.md`](../../CONFIGURATION.md).
   At 3840 x 2160 under 8 lamps (DemoMultiLight with `DemoMultiLightTeapot.ini`: `main_view = 1`
   draws it as the main view) the opaque list takes 0.05 -> 0.23 ms, the GPU 0.96 -> 1.18; in
   Research's hall 1.05 -> 1.23 (the opaque list waits for the scene for rays).
+  `d3d12_RTLightBehind` (1; read every frame, not registered without rays): while a draw traced rays
+  towards its lamps the frame before, the scene for rays also has what is behind, above and below
+  the camera (`UpdateRayBehind`, `d3d12_PTBehind` m, as for the path tracer; `RayBehind.h`).
+  - Before, without the path tracer and without the sun by rays it had only the view's draws and
+    the cascades' parts (what is towards the sun). What stood between a lamp and the view's
+    surfaces out of the view cast no shadow until it came into the view.
+  - In Training's opening cut scene the ceiling over Jack (8 m up) shades the lamp up the shaft
+    (17 m up) from him. It came into the view as the camera tilted at frame 1067, and the lamp's
+    light on him went out at once: the mean luma 60.0 -> 36.0, where the original's frame stays
+    even (52.1 -> 49.6). Now 36.9 -> 34.9, as with the sun by rays, whose volumetric light gathers
+    the same indoors.
+  - The original lights him through the ceiling; the shade itself is the lamps' shadows'.
+  - The frame dump says why it gathers them (`rays behind the camera: ... for the lamps' shadows`).
+    The 3D engine's three cameras took 0.11 ms of the CPU there.
+  - 0: only the view's and the sun's parts, as before.
   `d3d12_RTFaceNormal` (1; read every frame, not registered without rays) picks the side of its
   surface these rays (the lamps' shadows', the reflections') start from by the face of the pixel's
   triangle from the plane 1 / w makes over the screen (`RayFace.hlsli`, `nRaySun.z`'s bit 20; the
@@ -1366,7 +1381,8 @@ system ones (better not to touch): [`CONFIGURATION.md`](../../CONFIGURATION.md).
   `d3d12_RTOffscreen` 1 does for the effects) and what is around the camera (`d3d12_PTBehind`, 40 m: the
   static objects and entities the 3D engine gives cameras at the view looking back, up and down, 170
   degrees wide each, as far as that, noted as the cascades' parts, `UpdateRayBehind`, also for the
-  volumetric light's sun by rays where the frame has no sun, `d3d12_VolumetricLightRays`; the cascades have
+  volumetric light's sun by rays where the frame has no sun, `d3d12_VolumetricLightRays`, and for the
+  lamps' shadows by rays, `d3d12_RTLightBehind`; the cascades have
   only what is towards the sun, a room without the sun none of it: Research's hall has 42 instances
   without it, 259 with it. With the view's and the one looking back alone, what is above and below the
   view out of its frustum was not there: a roof's parts dropped out of the scene as the camera looked

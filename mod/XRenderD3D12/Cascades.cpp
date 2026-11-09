@@ -55,6 +55,7 @@
 #include "D3D12Descriptors.h"
 #include "Scene.h"
 #include "CascadeCull.h"
+#include "RayBehind.h"
 
 namespace
 {
@@ -645,10 +646,12 @@ void CD3D12Renderer::UpdateRayBehind()
   FUNCTION_PROFILER(iSystem, PROFILE_RENDERER);
   m_nRayBehindParts = 0;
   I3DEngine *p3D = iSystem ? iSystem->GetI3DEngine() : nullptr;
-  // For the path tracer; and for the volumetric light's sun by rays where the frame has no sun (indoors: no cascades
-  // towards it), what keeps the sun out of the room.
-  const bool bVolumetric = WantsVolumetricRays() && !(m_pScene && m_pScene->GetSun());
-  if (CV_d3d12_PTBehind <= 0 || !(WantsPathTracing() || bVolumetric) || !WantsOffscreenRays() || !(m_nSceneFlags & SHDF_ALLOWHDR) ||
+  // For the path tracer; for the volumetric light's sun by rays where the frame has no sun (indoors: no cascades
+  // towards it), what keeps the sun out of the room; for the lamps' shadows by rays, what stands between a lamp and the
+  // view out of the view (RayBehind.h).
+  const unsigned nWhy = RayBehind::Reasons(WantsPathTracing(), WantsVolumetricRays(), m_pScene && m_pScene->GetSun(),
+                                           WantsRayLights() && m_nRayLightFrame + 1 >= m_nFrames, CV_d3d12_RTLightBehind != 0);
+  if (CV_d3d12_PTBehind <= 0 || !nWhy || !WantsOffscreenRays() || !(m_nSceneFlags & SHDF_ALLOWHDR) ||
       m_nRecurseLevel > 1 || m_bReflectionPass || m_bEnvCubePass || m_bSpritePass || m_bShadowMapPass || m_bCascadePass || !p3D || !m_pDevice)
     return;
   // What the engine's scene changes, as UpdateSunCascades keeps it.
@@ -713,8 +716,10 @@ void CD3D12Renderer::UpdateRayBehind()
   m_nCascadeSet = nCascadeSet;
   InvalidateFrameConstants();
   if (m_pFrameDump)
-    fprintf(m_pFrameDump.get(), "rays behind the camera: %d parts from the 3D engine's cameras looking back, up and down (%.0f degrees, to %.0f m), %.2f ms\n",
-            m_nRayBehindParts, CASCADE_CAMERA_FOV_DEG, BackCam.GetZMax(), m_fFrameLowDetailMs[LD_BEHIND]);
+    fprintf(m_pFrameDump.get(), "rays behind the camera: %d parts from the 3D engine's cameras looking back, up and down (%.0f degrees, to %.0f m), %.2f ms; for%s%s%s\n",
+            m_nRayBehindParts, CASCADE_CAMERA_FOV_DEG, BackCam.GetZMax(), m_fFrameLowDetailMs[LD_BEHIND],
+            (nWhy & RayBehind::PATHS) ? " the path tracer" : "", (nWhy & RayBehind::VOLUMETRIC) ? " the volumetric light" : "",
+            (nWhy & RayBehind::LAMPS) ? " the lamps' shadows (d3d12_RTLightBehind)" : "");
 }
 
 void CD3D12Renderer::DrawCascadeCasters(std::span<const SRenderItem> Items)

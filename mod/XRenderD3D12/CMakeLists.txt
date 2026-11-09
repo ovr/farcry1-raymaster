@@ -50,6 +50,7 @@ set(XRENDERD3D12_SOURCES
     FogVolume.h
     WaterBodies.h
     RenderModeOutdoor.h
+    RayBehind.h
     VegetationLight.h
     EnvCubes.cpp
     Mirrors.cpp

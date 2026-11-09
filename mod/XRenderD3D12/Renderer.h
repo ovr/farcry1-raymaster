@@ -2359,6 +2359,7 @@ public:
   int CV_d3d12_RTSunShadows = 0;            //!< the sun's shadow by rays in place of the cascades' (RaySun.cpp)
   int CV_d3d12_RTLightShadows = 0;          //!< the lamps' shadows by rays (XR_RAY_LIGHT); 2 the light they take away red
   int CV_d3d12_RTLightShadowsMax = 4;       //!< the lamps a pixel traces rays towards
+  int CV_d3d12_RTLightBehind = 1;           //!< with them the scene for rays has what is around the camera (UpdateRayBehind)
   float CV_d3d12_RTLightShadowGap = 0.1f;   //!< how far short of a lamp its rays end (m): not its own fitting
   float CV_d3d12_RTProjectorShadowGap = 0.5f; //!< how far short of a projector its rays end, at least the gap above (m): its picture draws its shade
   int CV_d3d12_RTFaceNormal = 1;            //!< the side the main view's rays start from by 1 / w's plane (RayFace.hlsli; nRaySun.z bit 20),

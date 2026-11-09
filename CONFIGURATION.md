@@ -108,6 +108,7 @@ Details: [Ray tracing](mod/XRenderD3D12/README.md#ray-tracing).
 | `d3d12_RTSunShadows` | `0` | yes | The sun's shadow by rays: 1 a ray for each 2 x 2 pixels, 2 a ray a pixel; 0 the cascades' |
 | `d3d12_RTLightShadows` | `0` | yes | The lamps' shadows by rays (the flashlight's too): 1 on, 0 off |
 | `d3d12_RTLightShadowsMax` | `4` | yes | The lamps a pixel traces rays towards, 1 to 15 |
+| `d3d12_RTLightBehind` | `1` | yes | With the lamps' shadows by rays, what is behind, above and below the camera shades the lamps too, not only once it comes into the view; 0 only the view's |
 | `d3d12_RTGI` | `0` | yes | The ambient light by rays, one bounce, in place of `d3d12_AO`: 1 a ray for each 2 x 2 pixels, 2 a ray a pixel; 0 off |
 
 ### Path tracing (a graphics card with DXR 1.1, HDR on)
