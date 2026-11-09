@@ -256,7 +256,7 @@ bool CD3D12Renderer::UpdateVolumetricLight(ID3D12Resource *pDepth, DXGI_FORMAT D
   Set4(vc.vShafts, fShafts, std::max(CV_d3d12_VolumetricLightShaftsPower, 0.0f), 0, 0);
   const float fAmbient = fShafts > 0 ? 0.0f : std::max(CV_d3d12_VolumetricLightAmbient, 0.0f);
   Set4(vc.vAmbientLight, HdrDecode(m_FogColor[0]) * fAmbient, HdrDecode(m_FogColor[1]) * fAmbient, HdrDecode(m_FogColor[2]) * fAmbient, AMBIENT_IN_SHADOW);
-  const bool bHistory = m_Volumetric.nFrame == m_nFrames - 1;
+  const bool bHistory = m_Volumetric.nFrame == m_nFrames - 1 && !IsCameraCut();  // none after a cut (d3d12_CutReset)
   const float fDensity = std::max(CV_d3d12_VolumetricLightDensity, 0.0f) * m_Volumetric.fOutdoor *
                          (1 + (std::max(CV_d3d12_VolumetricLightIndoors, 0.0f) - 1) * m_Volumetric.fIndoors);
   Set4(vc.vDensity, fDensity, fWaterZ > -1e6f ? fWaterZ : 0.0f,

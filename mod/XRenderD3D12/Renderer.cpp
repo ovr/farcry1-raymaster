@@ -370,6 +370,11 @@ void CD3D12Renderer::RegisterVariables()
                      "The upscaler's render size: 0 Native AA (the display's: anti-aliasing only), 1 Quality (1/1.5), 2 Balanced (1/1.7), "
                      "3 Performance (1/2), 4 Ultra Performance (1/3)");
   iConsole->Register("d3d12_UpscaleSharpness", &CV_d3d12_UpscaleSharpness, 0.5f, VF_DUMPTODISK, "The upscaler's sharpening (and TAA's: AMD FidelityFX CAS's sharpness), 0 (none) to 1");
+  iConsole->Register("d3d12_CutReset", &CV_d3d12_CutReset, 1, 0,
+                     "Where the camera cuts to another shot (in a frame it moves more than 4 m or turns more than 45 degrees: a cut scene's "
+                     "cuts), the histories of the screen start again: the upscaler's and TAA's, the rays' denoisers (the sun's shadow, the "
+                     "AO and GI), the path tracer's light, the volumetric light, the frame before's picture in the reflections; 0: they "
+                     "reproject the shot before (its light for some frames)");
   iConsole->Register("d3d12_UpscaleDebug", &CV_d3d12_UpscaleDebug, 0, 0, "1: the upscaler's debug view; 2: the depth it gets (near black, far white)");
   iConsole->Register("d3d12_UpscaleVersion", &CV_d3d12_UpscaleVersion, 0, VF_DUMPTODISK,
                      "The upscaler's major version: 0 its own choice for the GPU, 3 or 4 (AMD FSR 3.1 or FSR 4)");

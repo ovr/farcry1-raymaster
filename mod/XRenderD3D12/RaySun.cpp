@@ -350,8 +350,9 @@ void CD3D12Renderer::DrawRaySunMask()
   if (!bFfx && m_RaySun.Ffx.pNormals)
     ReleaseRaySunFfx();
   const bool bDenoise = CV_d3d12_RTSunDenoise != 0 && !bFfx;
-  const bool bFfxHistory = bFfx && m_RaySun.Ffx.nFrame == m_nFrames - 1;
-  const bool bHistory = bDenoise && m_RaySun.nFrame == m_nFrames - 1;
+  // None after a frame without the rays or a cut to another shot (d3d12_CutReset).
+  const bool bFfxHistory = bFfx && m_RaySun.Ffx.nFrame == m_nFrames - 1 && !IsCameraCut();
+  const bool bHistory = bDenoise && m_RaySun.nFrame == m_nFrames - 1 && !IsCameraCut();
   const int nCur = m_RaySun.nHistory ^= 1;
   CD3D12Texture *pHistory = m_RaySun.pHistory[nCur], *pPrevHistory = m_RaySun.pHistory[nCur ^ 1];
   rc.nTextures[0] = (uint32)m_RaySun.nDepthSRV;
@@ -427,7 +428,7 @@ void CD3D12Renderer::DenoiseRaySunFfx(D3D12_GPU_VIRTUAL_ADDRESS FrameCB, const S
 {
   SRaySunState::SFfx &f = m_RaySun.Ffx;
   ID3D12GraphicsCommandList *pList = m_pDevice->GetCmdList();
-  const bool bFirst = f.nFrame != m_nFrames - 1;
+  const bool bFirst = f.nFrame != m_nFrames - 1 || IsCameraCut();
   const int c = f.nCur ^= 1, p = c ^ 1;
   // The sets of casters: all of them, and the live ones where the scene has them (else none hides the sun).
   const int nSets = (rc.nFlags[3] & 0x100) ? 2 : 1;

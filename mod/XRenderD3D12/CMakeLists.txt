@@ -45,6 +45,7 @@ set(XRENDERD3D12_SOURCES
     SkyFogBand.h
     DisplayPoll.h
     CascadeCull.h
+    CameraCut.h
     EnvCubes.cpp
     Mirrors.cpp
     TemplateFx.cpp

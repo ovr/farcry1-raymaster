@@ -763,7 +763,8 @@ void CD3D12Renderer::DrawPathTrace()
     nKey = (nKey ^ n) * 16777619u;
   }
   const bool bSameView = !memcmp(ViewProj.data, s.PrevViewProj, sizeof(s.PrevViewProj)) && nKey == s.nSettingsKey;
-  const bool bHistory = s.nHistoryFrame == m_nFrames - 1 && (bReference ? bSameView && s.bReference : !s.bReference);
+  // None after a cut to another shot (d3d12_CutReset); the radiance cache, in the world, stays.
+  const bool bHistory = s.nHistoryFrame == m_nFrames - 1 && !IsCameraCut() && (bReference ? bSameView && s.bReference : !s.bReference);
   s.nAccumulated = bHistory ? s.nAccumulated + 1 : 1;
 
   SPathTraceConstants pc = {};

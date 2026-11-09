@@ -52,6 +52,7 @@ Details: [Upscaler](mod/XRenderD3D12/README.md#upscaler), [Anti-aliasing](mod/XR
 | `d3d12_UpscaleMode` | `0` | yes | The render size: 0 Native AA (the display's, anti-aliasing only), 1 Quality, 2 Balanced, 3 Performance, 4 Ultra Performance |
 | `d3d12_UpscaleVersion` | `0` | yes | 0 the upscaler's choice for the GPU, 3 FSR 3.1, 4 FSR 4 |
 | `d3d12_UpscaleSharpness` | `0.5` | yes | The sharpening of FSR and of TAA, 0 (none) to 1 |
+| `d3d12_CutReset` | `1` |  | Where the camera cuts to another shot (more than 4 m or 45 degrees in a frame), the histories of the screen start again: the upscaler's and TAA's, the rays' denoisers, the path tracer's light, the volumetric light; 0 they carry the shot before |
 | `d3d12_AA` | `taa` | yes | The anti-aliasing without an upscaler: `none`, `fxaa`, `smaa`, `cmaa2`, `taa`, `msaa2`, `msaa4` or `msaa8`; Video Options: Anti-Aliasing |
 | `d3d12_AAQuality` | `2` | yes | Its quality, 0 (low) to 3 (ultra) |
 

@@ -54,7 +54,25 @@ system ones (better not to touch): [`CONFIGURATION.md`](../../CONFIGURATION.md).
     from the previous world matrix of a character instance or a permanent object. The weapon
     (`FOB_NEAREST`) has none.
   - The history is reset after a frame without the main view, a camera jump of more than 5 m, a
-    field of view change of more than 10 degrees, and a new mode.
+    field of view change of more than 10 degrees, a cut to another shot, and a new mode.
+  - A cut (`d3d12_CutReset` 1, `CameraCut.h`, step 332) is a camera that moved more than 4 m or
+    turned more than 45 degrees in one frame: a cut scene's next shot. `NoteCameraCut` sees it
+    once a frame, before the upscaler, by the camera's position and the view matrix's direction,
+    and in that frame every history of the screen starts again: the upscaler's and TAA's, the
+    sun's and the ambient light's denoisers (`RaySun.cpp`, `RayAO.cpp`), the path tracer's
+    (NRD's restart; its radiance cache is in the world and stays), the volumetric light's and the
+    reflections' copy of the frame before (`d3d12_RTPbrScreen`). Before it, they reprojected the
+    shot before onto the new one: Training's opening cut scene cuts at film frame 1059 2.4 m and
+    130 degrees to the hero's face, and the paths' frames after it took some 8 frames to lose the
+    shot before's darker light (the mean luma 0.72, 0.80, 0.85 of the reset's at 1060-1062). The
+    camera of that scene otherwise moves a few centimetres and less than a degree a frame; a
+    vehicle at 100 km/h moves 1 m a frame at 30 frames a second and a fast flick of the mouse
+    turns 10-20 degrees, under the limits. The frame dump says `camera cut (d3d12_CutReset)` with
+    both cameras. Its first frame is no brighter: the engine gives the shot's light on the hero
+    (a lamp 1.6 m from his head that the cut scene adds with his shadow map) a frame after the
+    cut (the original's frame 1059 has 0.65 of the next one's luma), and the lamp up the shaft
+    above him (17 m) is behind the ceiling for the lamps' rays (`d3d12_RTLightShadows`) and the
+    paths, which the original lights him through.
   - The path tracer (`d3d12_PathTracing`) needs the motion vectors: with `none` it gets the scene
     targets of the display's size, without jitter or mip bias, and the scene's picture as it is
     (`none (the path tracer's scene targets)` in the log and the frame dump).

@@ -32,6 +32,7 @@
 #include "D3D12Descriptors.h"
 #include "D3D12Upload.h"
 #include "Scene.h"
+#include "CameraCut.h"
 
 namespace
 {
@@ -287,6 +288,30 @@ void CD3D12Renderer::UpdateReprojection()
     }
 }
 
+void CD3D12Renderer::NoteCameraCut()
+{
+  if (m_nCutCheckFrame == m_nFrames)
+    return;
+  // The direction the camera looks along: the view matrix's third column (the same sign every frame).
+  const Vec3 vPos = m_Camera.GetPos();
+  const float vP[3] = { vPos.x, vPos.y, vPos.z };
+  float vD[3] = { m_CameraView.data[2], m_CameraView.data[6], m_CameraView.data[10] };
+  const float fLength = sqrtf(vD[0] * vD[0] + vD[1] * vD[1] + vD[2] * vD[2]);
+  for (float &f : vD)
+    f /= std::max(fLength, 1e-6f);
+  if (CV_d3d12_CutReset > 0 && m_nCutCheckFrame >= 0 && CameraCut::IsCut(m_vCutPos, m_vCutDir, vP, vD))
+  {
+    m_nCutFrame = m_nFrames;
+    if (m_pFrameDump)
+      fprintf(m_pFrameDump.get(), "camera cut (d3d12_CutReset): from (%.2f %.2f %.2f) looking (%.2f %.2f %.2f) to (%.2f %.2f %.2f) looking "
+              "(%.2f %.2f %.2f); the histories start again\n", m_vCutPos[0], m_vCutPos[1], m_vCutPos[2], m_vCutDir[0], m_vCutDir[1],
+              m_vCutDir[2], vP[0], vP[1], vP[2], vD[0], vD[1], vD[2]);
+  }
+  m_nCutCheckFrame = m_nFrames;
+  memcpy(m_vCutPos, vP, sizeof(vP));
+  memcpy(m_vCutDir, vD, sizeof(vD));
+}
+
 void CD3D12Renderer::BeginUpscale()
 {
   if (m_bUpscaling || !UpdateUpscaler())
@@ -298,11 +323,11 @@ void CD3D12Renderer::BeginUpscale()
   m_pUpscaler->GetJitter(m_nUpscaleFrames++, m_pDevice->GetSceneWidth(), m_UpscaleJitter[0], m_UpscaleJitter[1]);
 
   // No history after a frame without this view (the menu, a level load), a jump of the camera
-  // or of its field of view, a new mode.
+  // or of its field of view, a cut to another shot (d3d12_CutReset), a new mode.
   const Vec3 vPos = m_Camera.GetPos();
   const float fFovY = 2 * atanf(1 / std::max(m_ProjMatrix.data[5], 1e-6f));
   m_bUpscaleHistoryReset = m_bUpscaleReset || m_nUpscaledFrame != m_nFrames - 1 || (vPos - m_vPrevCameraPos).GetLength() > 5 ||
-                           fabsf(fFovY - m_fPrevFovY) > DEG2RAD(10.0f);
+                           fabsf(fFovY - m_fPrevFovY) > DEG2RAD(10.0f) || IsCameraCut();
   if (m_bUpscaleHistoryReset)
   {
     m_PrevViewProj = m_CameraView * m_ProjMatrix;
