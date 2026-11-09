@@ -108,6 +108,18 @@ namespace OceanSpectrum
     return MONAHAN[0] * std::pow(std::max(U, 0.0), MONAHAN[1]);
   }
 
+  //! m/s: the wind below which the sea has no whitecaps (d3d12_WaterWhitecapWind's default): the onset of whitecapping,
+  //! Beaufort's 3 ("crests begin to break, scattered whitecaps" from 3.4 m/s), the winds Monahan's law was fitted over
+  //! starting about there (a calm sea's crests do not break; the game's sea is calm, its wind 3.5 m/s).
+  constexpr double WHITECAP_ONSET = 4;
+
+  //! The share of the sea white with whitecaps at the wind U (m/s) with none below the wind fOnset (0: Monahan's at
+  //! any wind).
+  inline double WhitecapCoverageFrom(double U, double fOnset)
+  {
+    return U < fOnset ? 0.0 : WhitecapCoverage(U);
+  }
+
   //! The standard normal distribution's quantile: the x below which the share p of it lies (bisection of erfc; for the
   //! few calls at a change of the wind).
   inline double NormalQuantile(double p)

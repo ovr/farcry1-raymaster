@@ -1942,7 +1942,8 @@ and lists theirs (`NamesObjects`).
 - The FFT ocean's foam (`d3d12_WaterFoam`, 1; 0 draws the frames of the water before it; not saved;
   `Shaders/WaterFoam.hlsli`, `FoamPattern.h`, the foam kernel in `Shaders/OceanFFT.hlsl`):
   - Whitecaps. Their share of the sea is Monahan and O'Muircheartaigh's law of the wind,
-    3.84e-6 U^3.41: 0.03 % at the default 3.5 m/s (hardly any), 0.3 % at 7, 1 % at 10, 3.9 % at 15.
+    3.84e-6 U^3.41: 0.03 % at the default 3.5 m/s (none, below the onset), 0.3 % at 7, 1 % at 10,
+    3.9 % at 15.
     - Once a frame after the waves, a kernel finds where the long and the middle cascades' crests
       break (half of the share each; the short cascade's ripple traps no air). That is where the
       surface is squeezed most: the first order of the Jacobian's determinant of the displacement,
@@ -1963,6 +1964,12 @@ and lists theirs (`NamesObjects`).
       (1.07, 1.01 and 1.06 of it; `Ocean_WhitecapCoverage`).
     - The middle cascade's whitecaps break more on the long waves' crests (Longuet-Higgins and
       Stewart's modulation), their share over the sea the same.
+    - None below `d3d12_WaterWhitecapWind` (4 m/s; 0 at any wind; saved): the onset of
+      whitecapping, Beaufort's 3 (scattered white horses from 3.4-5.4 m/s). Monahan's law, fitted
+      to winds above it, still leaves a share below: at the game's 3.5 m/s a lone whitecap or two
+      broke on a calm sea, as on Training's bay (the debug view 22's 742 pixels at 1280 x 720 -> 0,
+      445 pixels of the frame brighter by > 16 -> 0); at 7 m/s they are as before (2914 pixels).
+      The thresholds are taken again when the wind or the onset changes (`Foam_WhitecapOnset`).
   - Shore. A wave breaks where the water under the surface is shallower than its height over the
     breaker index.
     - The index is McCowan's 0.78 on the mean, 0.55-1.0 from a slowly drifting noise (it changes

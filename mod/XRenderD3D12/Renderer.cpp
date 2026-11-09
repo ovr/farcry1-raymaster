@@ -208,6 +208,10 @@ void CD3D12Renderer::RegisterVariables()
                      "The FFT ocean's foam (d3d12_WaterFFT): whitecaps where its crests break (Monahan's share of the sea at the "
                      "wind: hardly any below 5 m/s) and the foam of the waves breaking on the shore, the rocks and what stands in "
                      "the water (shallower than the waves' height over 0.78): its strength; 0: none, the frames before");
+  iConsole->Register("d3d12_WaterWhitecapWind", &CV_d3d12_WaterWhitecapWind, 4.0f, VF_DUMPTODISK,
+                     "With d3d12_WaterFoam: the wind (m/s) below which the FFT ocean has no whitecaps, the onset of "
+                     "whitecapping (Beaufort's 3): none on the game's calm sea (3.5 m/s), no lone whitecap on Training's bay; "
+                     "Monahan's share from it on; 0: at any wind (the frames before)");
   iConsole->Register("d3d12_WaterFoamTerrain", &CV_d3d12_WaterFoamTerrain, 0.2f, 0,
                      "With d3d12_WaterFoam on the ocean's grid: where the floor behind the water is the terrain as drawn (within "
                      "this many m of the level's heights there), the foam takes the water's depth over those heights, not over "
