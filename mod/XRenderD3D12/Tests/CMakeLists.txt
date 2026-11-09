@@ -123,6 +123,7 @@ set(XRENDERD3D12_TESTS_SOURCES
     WaterLightTests.cpp
     OceanTests.cpp
     FoamTests.cpp
+    PondTests.cpp
     CausticsTests.cpp
     VolumeTests.cpp
     WakeTests.cpp

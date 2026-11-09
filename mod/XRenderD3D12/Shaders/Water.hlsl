@@ -200,7 +200,13 @@
 //	            and the byte offset of the disc's table (OceanGrid::
 //	            DiscTable), z its rings, w the grid's rings, their radii after
 //	            it (OceanGrid::FrameRings), then the disc's alpha by radius
-//	            for the deferred ocean (OceanGrid::AlphaTable)
+//	            for the deferred ocean (OceanGrid::AlphaTable); [5] x the
+//	            foam's floor's snap to the terrain (m, FoamFloorZ), y 1 no
+//	            shore's foam where nothing is behind (d3d12_WaterFoamFar), z 1
+//	            no ocean's foam on the ponds (GridOpenShare), w the ponds'
+//	            ripple's slopes' RMS (d3d12_WaterPondRipple, 0 none:
+//	            PondRippleSlopes); [6] x (as uint) its texture array, y its
+//	            frame (blended into the next), zw its tile's drift
 //	  vLightColor, vLightAtten  the grid's bodies: [n] the middle of the
 //	            box (xy) and the cos and sin of its turn (zw); its half sides
 //	            (xy)
@@ -278,17 +284,44 @@ float GridTerrainDepth(float2 P)
   return fDepth;
 }
 
-//! The share of the open sea at P on the ocean's grid (d3d12_WaterFoamPonds, vLightSpec[5].z; the terrain's texture's y,
-//! WaterBodies.h): 0 over a pond or a lake the level's terrain cuts off from the sea, 1 on the sea and off the terrain's
-//! map; 1 off the grid.
-float GridOpenShare(float2 P)
+//! The share of the open sea at P on the ocean's grid with the terrain (the terrain's texture's y, WaterBodies.h): 0 over
+//! a pond or a lake the level's terrain cuts off from the sea, 1 on the sea and off the terrain's map.
+float GridOpenAt(float2 P)
 {
-  if (g_DrawExt.vLightSpec[0].x == 0 || g_DrawExt.vLightSpec[5].z <= 0)
-    return 1;
   const float2 vTerrainUV = P * g_DrawExt.vLightSpec[3].z + g_DrawExt.vLightSpec[3].w;
   if (any(vTerrainUV < 0) || any(vTerrainUV > 1))
     return 1;
   return g_Textures[asuint(g_DrawExt.vLightSpec[1].z)].SampleLevel(g_SamplerLinearClamp, vTerrainUV, 0).y;
+}
+
+//! GridOpenAt for the ocean's foam (d3d12_WaterFoamPonds, vLightSpec[5].z): 1 without it and off the grid.
+float GridOpenShare(float2 P)
+{
+  if (g_DrawExt.vLightSpec[0].x == 0 || g_DrawExt.vLightSpec[5].z <= 0)
+    return 1;
+  return GridOpenAt(P);
+}
+
+//! The ripple of the ponds the level's terrain cuts off from the sea (d3d12_WaterPondRipple, vLightSpec[5].w its slopes'
+//! RMS along an axis, 0 none; PondRipple.h): the original's terrain water's, its frames' slopes in the wave texture's
+//! form (the texture array g_TextureArrays[vLightSpec[6].x]) at a tile of XR_POND_TILE m drifting (vLightSpec[6].zw
+//! tiles), the frame vLightSpec[6].y blended into the next. fScale over the ocean's slope factor (vParams0.x: the calmer
+//! normal's half) scales it as the waves'. fLostVar, fHeight as OceanWaveNormal's: the variance its mip levels smoothed
+//! out of the pixel, the height (RMS 1).
+float2 PondRippleSlopes(float2 vPos, float fScale, out float fLostVar, out float fHeight)
+{
+  const float4 c = g_DrawExt.vLightSpec[6];
+  const float2 vUV = vPos / XR_POND_TILE + c.zw;
+  const float f0 = floor(c.y);
+  const float f1 = f0 + 1 >= XR_POND_FRAMES ? 0 : f0 + 1;
+  const uint nArray = asuint(c.x);
+  const float4 t = lerp(g_TextureArrays[nArray].Sample(g_SamplerLinearWrap, float3(vUV, f0)),
+                        g_TextureArrays[nArray].Sample(g_SamplerLinearWrap, float3(vUV, f1)), c.y - f0);
+  const float2 s = (t.rg * 255 - 128) / 32;
+  const float fRms = g_DrawExt.vLightSpec[5].w * fScale / max(g_DrawExt.vParams0.x, 1e-6);
+  fLostVar = max(t.a * XR_POND_SLOPE_SQ_RANGE - dot(s, s), 0) * (fRms * fRms);
+  fHeight = (t.b * 255 - 128) / 32;
+  return s * fRms;
 }
 
 //! The height z (m) of the scene behind the ocean's grid's surface point P as the water there takes it: what stands over
@@ -421,6 +454,20 @@ float3 OceanWaveNormal(float2 vPos, float fScale, out float fLostVar, out float 
     fHeight += t.z;
   }
   fLostVar *= fScale * fScale;
+  // On the ponds the original's ripple in place of the waves (d3d12_WaterPondRipple, vLightSpec[5].w; the ocean's grid
+  // with the terrain), by the share of the pond there.
+  [branch] if (g_DrawExt.vLightSpec[5].w > 0)
+  {
+    const float fOpen = GridOpenAt(vPos);
+    [branch] if (fOpen < 1)
+    {
+      float fPondVar, fPondHeight;
+      const float2 vPond = PondRippleSlopes(vPos, fScale, fPondVar, fPondHeight);
+      fLostVar = lerp(fPondVar, fLostVar, fOpen);
+      fHeight = lerp(fPondHeight, fHeight, fOpen);
+      return normalize(float3(-lerp(vPond, vSlope * fScale, fOpen), 1));
+    }
+  }
   return normalize(float3(-vSlope * fScale, 1));
 }
 

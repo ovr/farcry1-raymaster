@@ -36,6 +36,7 @@
 #include "Scene.h"
 #include "OceanGrid.h"
 #include "WaterBodies.h"
+#include "PondRipple.h"
 
 namespace
 {
@@ -246,10 +247,22 @@ std::optional<SGeomDraw> CD3D12Renderer::SetupOceanGrid(SDrawConstants &dc, cons
   // ponds cut off from the sea (d3d12_WaterFoamPonds, GridOpenShare).
   Set4(dc.vLightSpec[5], bTerrain ? std::max(CV_d3d12_WaterFoamTerrain, 0.0f) : 0.0f, CV_d3d12_WaterFoamFar > 0 ? 1.0f : 0.0f,
        bTerrain && CV_d3d12_WaterFoamPonds > 0 ? 1.0f : 0.0f, 0);
+  // The ponds' ripple (d3d12_WaterPondRipple; Water.hlsl's PondRippleSlopes): on the ponds cut off from the sea the
+  // original's in place of the waves, w its slopes' RMS; the texture array of its frames, the frame (blended into the
+  // next), the tile's drift.
+  const int nPondRipple = bTerrain && g.nPonds > 0 && CV_d3d12_WaterPondRipple > 0 ? GetPondRippleTexture() : -1;
+  if (nPondRipple >= 0)
+  {
+    const double fTime = iTimer ? (double)iTimer->GetCurrTime() : 0.0;
+    dc.vLightSpec[5][3] = CV_d3d12_WaterPondRipple;
+    Set4(dc.vLightSpec[6], 0, (float)PondRipple::Frame(fTime), (float)PondRipple::Drift(fTime, 0), (float)PondRipple::Drift(fTime, 1));
+    SetUint(dc.vLightSpec[6][0], (uint32)nPondRipple);
+  }
   if (m_pFrameDump && !m_bRayCaptureWalk && bTerrain)
     fprintf(m_pFrameDump.get(), "ocean grid: at the level %.2f m the open sea %d heights, %d ponds cut off from it, %d heights "
-            "(d3d12_WaterFoamPonds %d), the largest %d (%.0f m^2), %d m apart\n", fLevel, g.nSeaHeights, g.nPonds, g.nPondHeights,
-            CV_d3d12_WaterFoamPonds, g.nLargestPond, (float)g.nLargestPond * g.nTerrainUnit * g.nTerrainUnit, g.nTerrainUnit);
+            "(d3d12_WaterFoamPonds %d), the largest %d (%.0f m^2), %d m apart; their ripple %g (frame %.2f)\n", fLevel, g.nSeaHeights,
+            g.nPonds, g.nPondHeights, CV_d3d12_WaterFoamPonds, g.nLargestPond, (float)g.nLargestPond * g.nTerrainUnit * g.nTerrainUnit,
+            g.nTerrainUnit, nPondRipple >= 0 ? dc.vLightSpec[5][3] : 0.0f, nPondRipple >= 0 ? dc.vLightSpec[6][1] : 0.0f);
 
   // Its vertices across the water from the disc's centre at the level.
   Matrix44 World;

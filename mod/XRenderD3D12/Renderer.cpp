@@ -234,6 +234,11 @@ void CD3D12Renderer::RegisterVariables()
                      "The share of the surf's foam (d3d12_WaterSurf) shown under a moon, the engine's sun's light (its colour's "
                      "luminance) up to 0.36, all from 0.42 (by day 0.46 to 0.78): Steam's night shore no longer lies under a "
                      "white line 3.5 to 7 times brighter than its dark islands; 1: as by day");
+  iConsole->Register("d3d12_WaterPondRipple", &CV_d3d12_WaterPondRipple, 0.05f, VF_DUMPTODISK,
+                     "With d3d12_WaterGeometry and the level's terrain: the slopes' RMS (along an axis) of the original's ripple "
+                     "on the ponds and lakes the terrain cuts off from the sea, in place of the FFT ocean's waves: its terrain "
+                     "water's 32 frames (textures/animated/water/caust##, 20 a second) at a tile of 8 m drifting, a large slow "
+                     "ripple with dark crests as on Swamp's ponds; 0: the waves");
   iConsole->Register("d3d12_WaterCaustics", &CV_d3d12_WaterCaustics, 1, 0,
                      "With d3d12_WaterFFT and d3d12_Caustics: the caustics on the sea floor made by the FFT ocean's waves (the "
                      "sun's rays refracted by its middle and short cascades, their light at the floor's depth), in the sun's "
@@ -1377,6 +1382,7 @@ void CD3D12Renderer::Release()
   m_nWaveTexture = 0;
   m_nCausticsTexture = 0;
   m_nFoamTexture = 0;
+  m_nPondRippleTexture = 0;
   m_SkyBoxes.clear();
   m_nSceneSkyBox = -1;
   if (m_pTextures)

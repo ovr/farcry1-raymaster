@@ -291,6 +291,8 @@ public:
   //! r_TexUpscaledLight 0: while set, the textures loaded keep their files' own pictures, not the upscaled ones (the
   //! textures of a template that adds light, CShaderManager's EF_LoadShaderItem), under keys of their own ("#own").
   void SetKeepOwnPictures(bool bKeep) { m_bKeepOwn = bKeep; }
+  //! Reads a whole file through ICryPak (the textures' own reads; the water's ponds' ripple, Water.cpp); false when it does not open.
+  bool ReadFile(const char *szPath, std::vector<byte> &Data);
 
 private:
   void AddKey(CTexture *pTex, const std::string &Key);
@@ -318,8 +320,6 @@ private:
   //! A cube map: six files <base>_posx ... _negz, else the file <base> (a cube file, or one
   //! picture on +X). Base may be the name of any face.
   bool SearchCube(const std::string &Base, const std::string &Dir, SImage &Out, SSearch &Res);
-  //! Reads a whole file through ICryPak; false when it does not open.
-  bool ReadFile(const char *szPath, std::vector<byte> &Data);
 
   std::vector<std::unique_ptr<CTexture>> m_ByID;      //!< [ID - TEXTURE_FIRST_ID], NULL: free
   std::vector<int> m_FreeIDs;                         //!< removed IDs, handed out again from the back

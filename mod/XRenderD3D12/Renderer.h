@@ -1056,6 +1056,9 @@ public:
   int GetCausticsTexture();
   //! The texture index of the foam's pattern (MakeFoamTexture; made on first use), -1 without one.
   int GetFoamTexture();
+  //! The texture array of the ponds' ripple (PondRipple.h: the original's terrain water's frames; made on first use), -1
+  //! without one.
+  int GetPondRippleTexture();
   //! The glass of a scope (eDC_ScopeLens, WorldViewProj its transform). False: not drawn.
   bool SetupScopeLensDraw(SPipelineKey &Key, SDrawConstants &dc, const SRenderItem &it, const Matrix44 &WorldViewProj);
   //! The part of the main view's target (left, top, right, bottom in its pixels) that the glass of a
@@ -1168,6 +1171,7 @@ public:
   CTexture *m_pBeachFaintTexture = nullptr; //!< textures/wave2: TerrainWaterBeachResearch's waves (one reference)
   CTexture *m_pBeachDetailTexture = nullptr; //!< textures/water1: its third layer (one reference)
   int m_nWaveTexture = 0;                   //!< GetWaveTexture: its ID, 0 not made yet, -1 failed
+  int m_nPondRippleTexture = 0;             //!< GetPondRippleTexture: its ID, 0 not made yet, -1 failed
   int m_nCausticsTexture = 0;               //!< GetCausticsTexture: its ID, 0 not made yet, -1 failed
   int m_nFoamTexture = 0;                   //!< GetFoamTexture: its ID, 0 not made yet, -1 failed
   float m_fCausticsMinMean = 1;             //!< the mean of the smaller of two texels of it (its mean 1)
@@ -2292,6 +2296,7 @@ public:
   int CV_d3d12_WaterFoamPonds = 1;    //!< 1: no ocean's foam (whitecaps, shore, surf) on the ponds the level's terrain cuts off from the sea (WaterBodies.h; 0: the frames before)
   float CV_d3d12_WaterSurf = 0.8f;    //!< m: the height of the swell breaking on the ocean's shores, its surf's foam (0: none)
   float CV_d3d12_WaterSurfNight = 0.3f; //!< the share of the surf's foam shown under a moon (the sun's light up to 0.36: Steam's night; 1: as by day)
+  float CV_d3d12_WaterPondRipple = 0.05f; //!< the slopes' RMS of the original's ripple on the ponds cut off from the sea, in place of the FFT waves (0: the waves)
   int CV_d3d12_WaterCaustics = 1;     //!< the caustics on the sea floor of the FFT ocean's waves (0: the static texture, the frames before)
   int CV_d3d12_WaterVolume = 1;       //!< the light in the ocean's water: attenuation by channel, scattering, Snell's window (0: the fog volume's fog, the frames before)
   int CV_d3d12_WaterWakes = 1;        //!< the wakes of the bodies moving through the ocean, their foam (Wake.cpp; 0: none, the frames before)
