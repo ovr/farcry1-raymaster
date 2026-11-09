@@ -2398,6 +2398,7 @@ public:
   float CV_d3d12_HDRSky = 2;                //!< the light of the sky towards the sun in HDR, times the game's
   float CV_d3d12_HDRSkyAngle = 4;           //!< the angle from the sun where it is half way (degrees; 0: the lobe up to step 257, half way at 11.9)
   float CV_d3d12_HDRGlow = 3;               //!< the light of what glows in HDR, times the game's
+  int CV_d3d12_HDRSkyPieces = 1;            //!< a piece of the sky (CTexture::m_bSky) with a glow map in HDR: not made brighter, its light at most the game's white (0: as a lamp's glow)
   int CV_d3d12_HDROutput = 0;               //!< the output to the display: 0 SDR, 1 HDR10, 2 scRGB (HdrOutput.cpp)
   float CV_d3d12_HDRPaperWhite = 0;         //!< its paper white in nits (0: Windows' SDR white level of the display)
   float CV_d3d12_HDRPeak = 0;               //!< its peak in nits (0: the display's)

@@ -756,6 +756,10 @@ void CD3D12Renderer::RegisterVariables()
   iConsole->Register("d3d12_HDRGlow", &CV_d3d12_HDRGlow, 3.0f, VF_DUMPTODISK,
                      "With r_HDRRendering, the light of what glows (in their cores: fire and the other additive particles, muzzle flashes and the other additive "
                      "materials, the coronas and flares of the lights, the glow maps of lamps and screens) times this (1: the game's)");
+  iConsole->Register("d3d12_HDRSkyPieces", &CV_d3d12_HDRSkyPieces, 1, 0,
+                     "With r_HDRRendering, a piece of the sky with a glow map (a texture of the sky boxes: the opening of Training's cave's shaft, "
+                     "the bunker's windows) is the sky, not a lamp: its glow not made brighter (d3d12_HDRGlow), its light at most the game's white, "
+                     "as the original clips it (0: as a lamp's glow, the frames before)");
   // The HDR output to the display (HdrOutput.cpp).
   iConsole->Register("d3d12_HDROutput", &CV_d3d12_HDROutput, 0, VF_DUMPTODISK,
                      "With r_HDRRendering on a display in HDR mode (Windows: Use HDR), the output: 0 SDR, 1 HDR10, 2 scRGB. The scene's highlights "

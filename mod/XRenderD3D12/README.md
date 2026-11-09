@@ -410,7 +410,14 @@ system ones (better not to touch): [`CONFIGURATION.md`](../../CONFIGURATION.md).
     coronas, procedural flares, additive particles and additive materials (not the stealth
     effect) get it in their cores (`DF2_HDR_CORE`: by the fourth power of their texture's
     brightness, so their soft edges stay the game's); the glow maps, which light a surface, all
-    over.
+    over. A piece of the sky with a glow map (a texture of the sky boxes, `CTexture::m_bSky`: the
+    opening of Training's cave's shaft, `TemplDecalGlowSelfIllum` with `box_5.dds`, the bunker's
+    windows) is the sky, not a lamp (`d3d12_HDRSkyPieces`, 1 since step 343): its glow map not
+    made brighter and its light at most the game's white (`DF2_HDR_CORE` with `vHdrCore.z` 1, the
+    path tracer's emission too), as the original's target clips it. Boosted, the texture plus twice
+    its glow map times 1.9 was 3.7 times white, near 10 under the cave's exposure (+1.5 EV, the
+    sky outside 1), and the bloom laid a blue halo over the rock and the boulder round it that
+    went with the opening out of the frame. Suite `skypieces`.
   - Colour grading after the tone map, baked into a 32 x 32 x 32 table when a setting changes
     (`ColorGrading.cpp`, a strip of 1024 x 32): `d3d12_Temperature` (-1 cooler to 1 warmer, up
     to 100 mired from 6504 K, a Bradford adaptation) and `d3d12_Tint` (-1 green to 1 magenta),

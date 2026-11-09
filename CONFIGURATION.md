@@ -360,6 +360,7 @@ Details: [HDR](mod/XRenderD3D12/README.md#hdr).
 | `d3d12_HDRHighlights` | `2` | yes | With the HDR output, the light from which the scene goes on to the peak |
 | `d3d12_HDRSky` | `2` | yes | The sky's light towards the sun times up to this |
 | `d3d12_HDRSkyAngle` | `4` | yes | The angle from the sun of the sky's glow at half way (degrees) |
+| `d3d12_HDRSkyPieces` | `1` |  | A piece of the sky with a glow map (the opening of Training's cave's shaft, the bunker's windows) at most the game's white, not a lamp: no blue halo of the bloom round it |
 | `d3d12_HDRSun` | `8` | yes | The light of the sun's flare times this |
 | `d3d12_ToneMapDesaturation` | `3` | yes | `d3d12_ToneMap 4`: how fast the light far above white loses its hue |
 | `d3d12_ToneMapKnee` | `0.85` | yes | Where the tone map's shoulder starts |

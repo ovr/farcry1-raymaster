@@ -897,10 +897,21 @@ void CD3D12Renderer::DrawLeafItem(const SRenderItem &it)
                            : Props.eGlow == EGlow::PulseSlow ? std::clamp(0.95f + 0.75f * sinf(0.2f * gf_PI * t), 0.0f, 1.0f)
                            : bSelfIllum                      ? 2.0f
                                                              : 1.0f;
-        const float g = fPulse * HdrBoost(CV_d3d12_HDRGlow);
+        // A piece of the sky (d3d12_HDRSkyPieces: a texture of the sky boxes, CTexture::m_bSky) is the sky, not a
+        // lamp: its glow not made brighter, its light at most the game's white (DF2_HDR_CORE's cap vHdrCore.z), as the
+        // original's target clips it. The opening of Training's cave's shaft (TemplDecalGlowSelfIllum, box_5.dds: the
+        // texture plus twice its glow map, that times 1.9) was 3.7 times white, near 10 under the cave's exposure
+        // (+1.5 EV), the sky outside 1: the bloom laid a blue halo over the rock and the boulder in front of it.
+        const bool bSkyPiece = CV_d3d12_HDRSkyPieces > 0 && pDiffuse && pDiffuse->m_bSky && IsHdrTarget();
+        const float g = fPulse * (bSkyPiece ? 1.0f : HdrBoost(CV_d3d12_HDRGlow));
         dc.nFlags2 |= DF2_ADD_TEX4;
         dc.nTex4 = pGlow->GetSRV();
         Set4(dc.vAddColor, g, g, g, 0);
+        if (bSkyPiece)
+        {
+          dc.nFlags2 |= DF2_HDR_CORE;
+          Set4(dc.vHdrCore, 1, 0, 1, 0);
+        }
       }
     }
     if (eLighting == ELighting::VColor)
