@@ -380,6 +380,12 @@ void CD3D12Renderer::RegisterVariables()
                      "cuts), the histories of the screen start again: the upscaler's and TAA's, the rays' denoisers (the sun's shadow, the "
                      "AO and GI), the path tracer's light, the volumetric light, the frame before's picture in the reflections; 0: they "
                      "reproject the shot before (its light for some frames)");
+  iConsole->Register("d3d12_UnderwaterBodies", &CV_d3d12_UnderwaterBodies, 1, 0,
+                     "1: with the camera above the ocean, the characters under its level (the fish; a body shorter than 1 m by its middle) drawn after the rest of the "
+                     "opaque surfaces without writing the depth: the water over them takes the floor under them, its shore's foam no "
+                     "longer lays white foam in the shape of a fish swimming just under the surface (Steam's night sea) and their colour "
+                     "fades by the water down to that floor (the original's fog volume pass hides them); not with the path tracer; "
+                     "0: drawn as the other surfaces (the frames before)");
   iConsole->Register("d3d12_SpriteSort", &CV_d3d12_SpriteSort, 1, 0,
                      "1: the particles (smoke, fire, sparks, heat haze) drawn back to front by the distance of each one's centre "
                      "from the camera, as the original sorts them: Volcano's smoke over the lava stays the same from frame to frame; "

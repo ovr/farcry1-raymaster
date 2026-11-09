@@ -339,6 +339,20 @@ void CD3D12Renderer::DrawItems(SRenderItem *pItems, int nItems, int eList)
       nLastWater = i;
   // A list copies the scene as drawn before it (the water, the flares, the glass of a scope).
   m_bSceneCopied = false;
+  // d3d12_UnderwaterBodies: in the main view's opaque list with the camera above the ocean, the characters under its level
+  // (the fish; UnderwaterBody.h) after the rest of it without writing the depth, so that the water over them takes the
+  // floor under them (its shore's foam took a fish just under the surface for a shallow floor: white foam in its shape).
+  float fBodyLevel = 0, fBodyCameraZ = 0;
+  bool bBodies = false;
+  if (CV_d3d12_UnderwaterBodies > 0 && eList == eRL_Opaque && (m_nSceneFlags & SHDF_ALLOWHDR) && m_nRecurseLevel <= 1 && !m_bReflectionPass &&
+      !m_bSpritePass && !m_bShadowMapPass && !m_bEnvCubePass && !m_bCascadePass && !m_bRayCaptureWalk && !WantsPathTracing())
+  {
+    I3DEngine *p3DEngine = iSystem ? iSystem->GetI3DEngine() : nullptr;
+    fBodyLevel = p3DEngine ? p3DEngine->GetWaterLevel() : 0;
+    fBodyCameraZ = m_Camera.GetPos().z;
+    bBodies = p3DEngine && fBodyCameraZ > fBodyLevel;
+  }
+  std::vector<int> Bodies;
   // d3d12_DepthPrepass: the main view's opaque surfaces that write the depth and discard nothing
   // into the depth buffer first, without a pixel shader (DrawGeometry); the list then shades only
   // the pixels it keeps, where at 4K it shaded each pixel 4 to 6 times outdoors. Its depth test
@@ -357,7 +371,8 @@ void CD3D12Renderer::DrawItems(SRenderItem *pItems, int nItems, int eList)
     {
       const SRenderItem &it = pItems[i];
       if (it.pRE && it.pRE->m_Type == eDATA_OcLeaf &&
-          (it.eDrawClass == eDC_Opaque || it.eDrawClass == eDC_VColor || it.eDrawClass == eDC_Terrain || it.eDrawClass == eDC_WaterBottom))
+          (it.eDrawClass == eDC_Opaque || it.eDrawClass == eDC_VColor || it.eDrawClass == eDC_Terrain || it.eDrawClass == eDC_WaterBottom) &&
+          !(bBodies && LooksPastUnderwater(it, fBodyLevel, fBodyCameraZ)))
         DrawLeafItem(it);
     }
     m_bDepthPrepass = false;
@@ -379,6 +394,11 @@ void CD3D12Renderer::DrawItems(SRenderItem *pItems, int nItems, int eList)
     const SRenderItem &it = pItems[i];
     if (!it.pRE)
       continue;
+    if (bBodies && LooksPastUnderwater(it, fBodyLevel, fBodyCameraZ))
+    {
+      Bodies.push_back(i);
+      continue;
+    }
     if (!bUnder && i > nLastWater)
     {
       DrawUnderwater();
@@ -420,6 +440,21 @@ void CD3D12Renderer::DrawItems(SRenderItem *pItems, int nItems, int eList)
     default:
       break;
     }
+  }
+  if (!Bodies.empty())
+  {
+    m_bNoDepthWrite = true;
+    for (int i : Bodies)
+    {
+      if (m_pFrameDump)
+      {
+        DumpItem(i, pItems[i], eList);
+        fprintf(m_pFrameDump.get(), "    under the ocean (d3d12_UnderwaterBodies): drawn last, without the depth\n");
+      }
+      m_fDrawHeat = m_bHeatPass ? ItemHeat(pItems[i]) : 0;
+      DrawLeafItem(pItems[i]);
+    }
+    m_bNoDepthWrite = false;
   }
   if (!bUnder)
     DrawUnderwater();

@@ -132,6 +132,9 @@ int ScreenElementRank(const CRendElement *pRE);
 //! under the ocean's level): they stay blended after the water, as without the path tracer (in the depth before the water
 //! their leaves under the surface made the shore's foam by what stands in the water: white leaves round the plants).
 bool PathTestsFadingPlant(const SRenderItem &it);
+//! d3d12_UnderwaterBodies: whether the water looks past an element (UnderwaterBody.h): a character's whose skinned vertices
+//! are under the ocean's level fLevel (a body shorter than 1 m: their middle), the camera at fCameraZ above it.
+bool LooksPastUnderwater(const SRenderItem &it, float fLevel, float fCameraZ);
 
 //! The value of a wave of CCObject::m_Waves at time t: level + amp * f(t * freq + phase) with
 //! f the wave form over one period (eWF_Sin: sin(2 pi x)).
