@@ -2307,6 +2307,7 @@ public:
   int CV_d3d12_BeachShadow = 1;             //!< 1: the beach's foam strips in the sun's shadow as the terrain under them (0: lit in it, the frames before)
   int CV_d3d12_UnderwaterBodies = 1;        //!< 1: the characters under the ocean (the fish) drawn last without the depth: the water looks past them (UnderwaterBody.h; 0: the frames before)
   int CV_d3d12_SpriteSort = 1;              //!< 1: the particles drawn back to front by their distance (SpriteOrder.h; 0: in the engine's order, the frames before)
+  int CV_d3d12_DecalAddOpacity = 1;         //!< 1: TemplDecalAdd with a material opacity below 1 blended by its alpha times it (Draw3D.cpp; 0: added, the frames before)
   int CV_d3d12_UpscaleHdr = 1;              //!< with r_HDRRendering: 1 the upscaler gets the scene's light, tone mapped after it; 0 the
                                             //!< scene tone mapped at the render size (as up to step 259)
   int CV_d3d12_AAQuality = 2;               //!< the anti-aliasing's (d3d12_AA, a string) quality, 0 (low) to 3 (ultra)

@@ -2402,6 +2402,16 @@ and lists theirs (`NamesObjects`).
   265). Research's sign "SUB-LEVEL 1" by the lamp (opacity 0.15, black with its letters in the alpha)
   turned 10 x 5 m of the wall black in the raster and the path tracer; now the wall is lit with light
   letters on it, as in the original (test: `render_tests` suite `decalsign`).
+- So are the decals added to the frame (`TemplDecalAdd`, `TemplDecalAdd_VLight`: ONE, ONE) whose
+  material has an opacity below 1 (`d3d12_DecalAddOpacity`, step 340): their colour laid over the
+  frame by the texture's alpha times the opacity (SRCALPHA, INVSRCALPHA). The original's trace of
+  Research's cave cobweb (the level's material `Cave.cave_web`, opacity 0.99, over the model's own
+  `TemplDecalAlphaBlend`) draws it so: the texture's colour, its alpha times the material's 0.99 in
+  the texture factor. Added, its dark grey texture lit the rock behind it as a bright card with
+  straight edges in the raster and the path tracer; now its strands are faint, as in the original
+  (test: `render_tests` suite `decaladdopacity`). The other added templates with such materials
+  (`TemplDecalAlphaAdd` on Carrier, `TemplHologram` on Volcano) were not seen in the original and
+  stay added.
 - What is added (blending ONE, ONE or SRCALPHA, ONE: fire, glows, the smoke of Volcano's lava) is
   fogged towards black (`DF2_FOG_BLACK`), particles and materials alike: towards the fog's colour
   each quad added that colour over all of its rectangle, also where its texture is black, and
