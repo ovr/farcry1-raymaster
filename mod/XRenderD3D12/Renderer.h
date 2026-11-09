@@ -2351,6 +2351,7 @@ public:
                                             //!< > 0 the light maps' (1 - d / r) to that power over the whole radius
   int CV_d3d12_PTVegetationGain = 1;       //!< with d3d12_PathTracing the vegetation's draws the paths do not light take the light its colours had lit, on the mean (Geometry::UnlitVegetationGain; 0: unlit, the frames before)
   int CV_d3d12_PTFaceNormal = 1;            //!< with d3d12_PathTracing the G-buffer's side of a triangle (a trunk's normal) from 1 / w's plane, normalised (PathGBuffer.hlsli's PathFace; 0: the world positions' differences, the frames before)
+  int CV_d3d12_PTSkyPieces = 1;             //!< with d3d12_PathTracing its rays pass the pieces of the sky (XR_RAY_SKY: Training's bunker's windows), a path that reaches one has left the scene (0: they glow with their picture, the frames before)
   int CV_d3d12_PTWaterPlants = 1;           //!< with d3d12_PathTracing the water plants fading in or out blended after the water, as without it (PathTestsFadingPlant; 0: alpha tested among the opaque surfaces, the frames before)
   float CV_d3d12_PTLightMaps = 1.0f;        //!< indoors, the light the light maps give beyond its lamps (times; 0: none)
   float CV_d3d12_PTEmission = 1.0f;         //!< what glows

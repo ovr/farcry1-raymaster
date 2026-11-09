@@ -1467,6 +1467,12 @@ system ones (better not to touch): [`CONFIGURATION.md`](../../CONFIGURATION.md).
   how much each gives (resampled importance sampling) with a ray towards it, then `d3d12_PTBounces` (1)
   bounces in directions the cosine spreads; a hit gives its emission and its albedo times the sun and a
   lamp there, a path that leaves the scene the sky (`d3d12_PTSky` times the outdoor ambient as light).
+  Its rays pass the pieces of the sky (`d3d12_PTSkyPieces`, 1: `XR_RAY_SKY` left out of their mask, as
+  the volumetric light's towards the sun): a path that reaches one of the planes that close Training's
+  bunker's windows has left the scene, and a lamp's ray goes through it; they were surfaces that glow
+  with their picture's colour (unlit, times the glow's brightness), whose light the bounces brought to
+  the boards and the concrete round the windows, white and blue, as if the roof were open (the film's
+  training-bunker; test: `render_tests` suite `ptsky`).
   The game's ambient light fills in (`d3d12_PTAmbient` 1): a ray that finds nothing within
   `d3d12_PTAmbientRange` (2 m) brings the ambient light of the point it leaves (the G-buffer's, then the
   hit's, kept in its instance), as the raster's ambient times its occlusion, besides what it finds; one

@@ -823,7 +823,9 @@ void CD3D12Renderer::DrawPathTrace()
   pc.nFlags[1] = (uint32)m_nFrames;
   // CSFilter's own filter: not after NRD.
   pc.nFlags[2] = bDenoise && !bNrd ? 1 : 0;
-  pc.nFlags[3] = RayMask() & 0xff;
+  // d3d12_PTSkyPieces: its rays pass the pieces of the sky (a path that reaches one has left the scene; a lamp's ray goes
+  // through), as the volumetric light's towards the sun do.
+  pc.nFlags[3] = RayMask() & 0xff & (CV_d3d12_PTSkyPieces > 0 ? ~(uint32)XR_RAY_SKY : 0xffu);
   pc.nPath[0] = P.nLights;
   pc.nPath[1] = (uint32)nBounces;
   pc.nPath[2] = bReference ? XR_RAY_MAX_ALPHA_TESTS : PATH_BOUNCE_TESTS;
