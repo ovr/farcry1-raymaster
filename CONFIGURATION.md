@@ -330,6 +330,7 @@ Details: [Path tracing](mod/XRenderD3D12/README.md#path-tracing).
 | `d3d12_PTCache` | `1` | yes | The radiance cache of the paths' last bounce; 0 none |
 | `d3d12_PTEmission` | `1` | yes | The light of what glows |
 | `d3d12_PTFaceNormal` | `1` |  | The side of a triangle the camera sees (a trunk's normal) from 1 / w's plane, not the world positions' differences |
+| `d3d12_PTFadeBlend` | `1` |  | The objects that fade with the distance (Carrier's deck crates) blended by their alpha after the trace, as without the paths, not whole from the start of their fade |
 | `d3d12_PTFillLights` | `0` | yes | The characters' fill lights: 0 in their ambient light, 1 lamps with a ray |
 | `d3d12_PTLamps` | `1` | yes | The lamps' light |
 | `d3d12_PTLightDistance` | `60` | yes | The lights within this distance of the camera (m) |

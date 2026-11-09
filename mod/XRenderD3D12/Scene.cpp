@@ -116,8 +116,10 @@ namespace
   //! the opaque list they multiplied the scene behind it). The original draws such an object after the water among the
   //! blended surfaces (SRCALPHA, INVSRCALPHA, no depth writes; its ambient pass's alpha the object's squared, c0.w);
   //! drawn opaque the crates and the gas cylinders on Carrier's deck popped in at the far end of their fade. The class stays:
-  //! the sun's cascades and the scene for rays take the object as before. Not with the path tracer (its G-buffer, as the
-  //! grass fading in or out), nor for the first person weapon.
+  //! the sun's cascades and the scene for rays take the object as before. With the path tracer as well (d3d12_PTFadeBlend):
+  //! blended over its frame after the trace, with the raster's light; kept whole in its G-buffer, the crates stood there
+  //! from the far end of their fade (alpha 0.00), and dissolved there by a noise the upscaler and the paths' denoiser threw
+  //! the pixels' history away (crate, sky, crate), a lattice. Not for the first person weapon.
   bool IsFadeItem(const SRenderItem &it)
   {
     if (!g_pRenderer || !g_pRenderer->CV_d3d12_FadeBlend || !it.pRE || it.pRE->m_Type != eDATA_OcLeaf)
@@ -126,7 +128,7 @@ namespace
       return false;
     if (it.eDrawClass != eDC_Opaque && it.eDrawClass != eDC_AlphaTest && it.eDrawClass != eDC_Modulate)
       return false;
-    return SortGroup(it.nSort) != eS_Nearest && !g_pRenderer->WantsPathTracing();
+    return SortGroup(it.nSort) != eS_Nearest && (!g_pRenderer->WantsPathTracing() || g_pRenderer->CV_d3d12_PTFadeBlend > 0);
   }
 
   ERenderList ChooseList(const SRenderItem &it)

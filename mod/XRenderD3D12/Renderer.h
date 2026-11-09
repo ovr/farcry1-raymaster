@@ -2316,6 +2316,7 @@ public:
   int CV_d3d12_AADebug = 0;                 //!< 1: the anti-aliasing's view of the edges
   int CV_d3d12_AlphaToCoverage = 1;         //!< with MSAA, 1: the alpha-tested draws' edges by the samples their alpha covers
   int CV_d3d12_FadeBlend = 1;               //!< 1: the objects fading in or out by their distance blended by their alpha (SRenderItem::bFade; 0: opaque, the frames before)
+  int CV_d3d12_PTFadeBlend = 1;             //!< 1: with the path tracer those objects blended as well, after the trace with the raster's light (0: whole in its G-buffer, the frames before)
   int CV_d3d12_SkyFogBand = 1;              //!< 1: the fog over the sky box's lower part with a near fog (SkyFogBand.h; DrawSkyItem, the water's sky; 0: the bare box, the frames before)
                                             //!< (sharpened to the test's edge, Draw.cpp's DrawGeometry); 0 the test, a step
   int CV_d3d12_AOQuality = 2;               //!< the ambient occlusion's (d3d12_AO, a string) quality, 0 to 3
