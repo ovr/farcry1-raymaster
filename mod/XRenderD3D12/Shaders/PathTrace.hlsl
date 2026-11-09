@@ -340,8 +340,9 @@ void CSTrace(uint3 vId : SV_DispatchThreadID)
   const float fLuminance = PathLuminance(vLight);
   if (g_PT.vParams.w > 0 && fLuminance > g_PT.vParams.w)
     vLight *= g_PT.vParams.w / fLuminance;
-  // d3d12_PTLightMaps, where the frame has no sun: what the pixel's light map lights it with beyond the lamps.
-  if (g_PT.vFill.z > 0)
+  // d3d12_PTLightMaps, where the frame has no sun: what the pixel's light map lights it with beyond the lamps (not a
+  // leaf's: the target has its d3d12_PTLeafLight there, General.hlsl).
+  if (g_PT.vFill.z > 0 && PathGBufferMaterial(vGBuffer) != XR_PT_MAT_VEGETATION + 1)
     vLight += g_PT.vFill.z * PathLightmapFill(g_Textures[g_PT.nTextures4.x].Load(int3(p, 0)).rgb,
                                               g_Textures[g_PT.nTextures2.w].Load(int3(p, 0)).gba, vPos, vN, P);
   g_Out[p] = float4(max(vLight, 0), d);

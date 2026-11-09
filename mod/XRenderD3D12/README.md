@@ -1455,7 +1455,21 @@ system ones (better not to touch): [`CONFIGURATION.md`](../../CONFIGURATION.md).
   (`d3d12_PTVegetationGain`, 1; `Geometry::UnlitVegetationGain`, `VegetationLight.h`: in each channel
   the sum of its vertices' colours lit by the sun and the ambient, the self shadow left out, over the
   sum unlit), not unlit, dark beside the raster's (test: unit tests `Vegetation_Light`,
-  `Vegetation_Gain`, `render_tests` suite `ptplants`).
+  `Vegetation_Gain`, `render_tests` suite `ptplants`). The leaves the paths light are no darker than
+  the raster lights them (`d3d12_PTLeafLight`, 1): the bake lights a leaf drawn on both sides with
+  twice the ambient and the sun times |N.L| by its vertices' normal (the ambient and twice the sun times
+  N.L on one side; `VegetationLight::RasterTerms`), unshadowed, and under a crown that hides the sky the
+  paths brought a third of it: the foliage near black, a third of the original's (the film's swamp-path
+  and river-temple). Each leaf's draw takes the bake's ambient and sun
+  (`Geometry::UnlitVegetationLight`, `SDrawExt::vLeafLight`, `vLeafSun`); the G-buffer's pass writes
+  that light, the sun's part times the visibility the raster found, into the light map's target (a leaf
+  has no light map; its light / 4), and the composite lights the leaf with no less. The leaves of
+  Swamp's path at dusk and River's temple at noon: their mean luma 0.62 and 0.70 of the raster's (the
+  film's rays), now 0.96 and 1.07. Lighting a leaf by its own triangle's normal from both sides instead
+  (half the light through it, the paths leaving it from both sides) was tried first: it made them no
+  lighter (River's 0.7 of the raster's with it, the sun high: most leaves face it less than the crown's
+  normal) and nothing over the floor (test: unit test `Vegetation_RasterTerms`, `render_tests` suite
+  `ptleaves`).
 - Its G-buffer (`Shaders/PathGBuffer.hlsli`) is what the main view's opaque list writes with the general
   program's `XR_PT` permutation (`General_PT_*`, `SPipelineKey::bPathTrace`): the colour gets only what
   the path tracer does not light (glow maps, alpha glow, the unlit templates, the fog), a second target

@@ -301,6 +301,10 @@ struct SDrawExt
   XR_FLOAT4(vSkin);               //!< r_Skin (DF_PIXEL_LIGHTING; Skin.hlsli): x 1 a character's skin (0 none), y the matte skin's
                                   //!< perceptual roughness, z the oily skin's (the texture's alpha the gloss between them), w the
                                   //!< scatter (SkinWrap); with DF_SPECULAR its highlights SkinSpecular in place of the templates'
+  XR_FLOAT4(vLeafLight);          //!< d3d12_PTLeafLight (XR_PT, the vegetation's alpha tested parts whose colours were baked unlit,
+                                  //!< Geometry::UnlitVegetationLight): the light the raster lights them with (VegetationLight.h, the shaders'
+                                  //!< 2x in it): rgb the ambient's, w 1 (0: none); the composite lights them with no less (General.hlsl)
+  XR_FLOAT4(vLeafSun);            //!< rgb the sun's, times N.L by the vertices' normal, |N.L| where w is 1 (drawn on both sides)
 };
 
 #ifdef __cplusplus

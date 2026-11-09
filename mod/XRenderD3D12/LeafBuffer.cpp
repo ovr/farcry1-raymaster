@@ -424,6 +424,7 @@ struct SCustomLighting
   bool bCalcLighting = false;
   bool bUnlit = false;                  //!< baked unlit (Geometry::SetUnlitVegetation): vGain is its lit light
   float vGain[3] = { 1, 1, 1 };         //!< its colours lit over unlit (Geometry::UnlitVegetationGain)
+  float vSun[3] = { 0, 0, 0 };          //!< baked unlit and lit by the bake: the sun it had lit with (Geometry::UnlitVegetationLight)
 };
 
 struct SGeomState
@@ -1842,6 +1843,8 @@ void CLeafBuffer::UpdateCustomLighting(float fBackSideLevel, Vec3 vStatObjAmbien
   Normalize3(L);
   const float amb[3] = { vStatObjAmbientColor.x, vStatObjAmbientColor.y, vStatObjAmbientColor.z };
   const float sun[3] = { vSun.x, vSun.y, vSun.z };
+  for (int c = 0; c < 3; c++)
+    Last.vSun[c] = bLitGain ? sun[c] : 0.0f;
 
   // The vertices of the chunks drawn without culling (leaves, grass) are lit from both sides.
   std::vector<uint8> TwoSided(nVerts, 0);
@@ -2412,6 +2415,22 @@ bool Geometry::UnlitVegetationGain(const CLeafBuffer *pLB, float vGain[3])
   if (it == S.Lighting.end() || !it->second.bUnlit)
     return false;
   memcpy(vGain, it->second.vGain, 3 * sizeof(float));
+  return true;
+}
+
+bool Geometry::UnlitVegetationLight(const CLeafBuffer *pLB, float vAmbient[3], float vSun[3])
+{
+  const SGeomState &S = State();
+  if (!S.bUnlitVegetation || !pLB)
+    return false;
+  const auto it = S.Lighting.find(const_cast<CLeafBuffer *>(pLB));
+  if (it == S.Lighting.end() || !it->second.bUnlit || !it->second.bCalcLighting)
+    return false;
+  const SCustomLighting &L = it->second;
+  vAmbient[0] = L.vAmbient.x;
+  vAmbient[1] = L.vAmbient.y;
+  vAmbient[2] = L.vAmbient.z;
+  memcpy(vSun, L.vSun, 3 * sizeof(float));
   return true;
 }
 

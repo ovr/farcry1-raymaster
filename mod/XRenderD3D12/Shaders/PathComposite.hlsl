@@ -14,7 +14,9 @@
 //	terrain's SPathShade::vBakeLight or 1, times CSFilter's share), the sun its
 //	light (vParams0.rgb) times N.L and the visibility the raster found
 //	(the G-buffer's), the paths' light that of PathTrace.hlsl's CSFilter.
-//	The leaves let half of the sun through from behind them; the skin
+//	The leaves let half of the sun through from behind them, and with
+//	d3d12_PTLeafLight (vParams0.w) are lit no darker than the raster lights
+//	them (tex5's rgb, its light / 4: General.hlsl); the skin
 //	(r_Skin: the light map target's alpha, tex5) takes N.L wrapped round
 //	the line where the sun passes it (Skin.hlsli's SkinWrap, vSkin.w the
 //	scatter), as the raster does. The
@@ -56,6 +58,9 @@ float4 PSMain(SCompositeOutput In) : SV_Target
   const float fNL = dot(PathOctDecode(vGBuffer.rg), g_Frame.vSunDir.xyz);
   const float fSun = nMaterial == XR_PT_MAT_VEGETATION + 1 ? saturate(fNL) + 0.5 * saturate(-fNL) : saturate(fNL);
   float3 vLight = g_DrawExt.vParams0.rgb * (fSun * fVisible) + vPaths.rgb;
+  // d3d12_PTLeafLight: a leaf no darker than the raster lights it (General.hlsl: its light / 4 in the light map's target).
+  if (nMaterial == XR_PT_MAT_VEGETATION + 1 && g_DrawExt.vParams0.w > 0)
+    vLight = max(vLight, pow(4 * g_Textures[g_Draw.nTex5].Load(vAt).rgb, HDR_GAMMA));
   [branch]
   if (PathGBufferSkinRough(g_Textures[g_Draw.nTex5].Load(vAt).a) > 0)
     vLight = g_DrawExt.vParams0.rgb * (SkinWrap(fNL, g_DrawExt.vSkin.w) * fVisible) + vPaths.rgb;

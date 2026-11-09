@@ -111,6 +111,10 @@ namespace Geometry
   //! blended ones, the reflections). False for a leaf buffer not baked so (not the vegetation's) or with the
   //! vegetation lit.
   bool UnlitVegetationGain(const CLeafBuffer *pLB, float vGain[3]);
+  //! With the vegetation baked unlit, the ambient and the sun's colour the engine had the leaf buffer pLB's vertex colours
+  //! lit with (VegetationLight.h; the raster's light on it, d3d12_PTLeafLight). False for one not baked so or baked
+  //! without light.
+  bool UnlitVegetationLight(const CLeafBuffer *pLB, float vAmbient[3], float vSun[3]);
 }
 
 //////////////////////////////////////////////////////////////////////////
