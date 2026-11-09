@@ -161,8 +161,8 @@ namespace Barriers
     }
 
     //! A registered resource wanted in After (all subresources or one): nothing where a read state that holds After it
-    //! has; two shader reads combine.
-    void Require(ID3D12Resource *pRes, D3D12_RESOURCE_STATES After, UINT nSub = ALL)
+    //! has; two shader reads combine. bExact: in After alone (a read state narrowed too).
+    void Require(ID3D12Resource *pRes, D3D12_RESOURCE_STATES After, UINT nSub = ALL, bool bExact = false)
     {
       m_Stats.nRequests++;
       if (!pRes)
@@ -185,7 +185,7 @@ namespace Barriers
       bool bAny = false, bFits = true;
       for (UINT i = n0; i < n1; i++)
       {
-        const D3D12_RESOURCE_STATES Cur = pE ? pE->Subs[i].Want : pRec->State[i], Want = Combined(Cur, After);
+        const D3D12_RESOURCE_STATES Cur = pE ? pE->Subs[i].Want : pRec->State[i], Want = bExact ? After : Combined(Cur, After);
         bAny |= Want != Cur;
         bFits &= !pE || Fits(pE->Subs[i], Want);
       }
@@ -196,7 +196,7 @@ namespace Barriers
         Seal();  // a round trip back to a write state: what is queued first, then this
       SEntry &e = Entry(pRes, pRec);
       for (UINT i = n0; i < n1; i++)
-        Want(e, i, Combined(e.Subs[i].Want, After));
+        Want(e, i, bExact ? After : Combined(e.Subs[i].Want, After));
       if (m_eMode == MODE_IMMEDIATE)
         Seal();
     }

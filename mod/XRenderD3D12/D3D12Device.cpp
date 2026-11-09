@@ -942,6 +942,15 @@ void CD3D12Device::TrackState(ID3D12Resource *pRes, D3D12_RESOURCE_STATES Initia
     m_Barriers.Register(pRes, Initial, nSubresources, pRes->GetDesc().Dimension == D3D12_RESOURCE_DIMENSION_BUFFER);
 }
 
+void CD3D12Device::RequireExact(ID3D12Resource *pRes, D3D12_RESOURCE_STATES State)
+{
+  if (!m_bInFrame || !pRes)
+    return;
+  m_Barriers.Require(pRes, State, D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES, true);
+  if (m_Barriers.GetMode() == Barriers::MODE_IMMEDIATE)
+    FlushBarriers(false);
+}
+
 void CD3D12Device::Require(ID3D12Resource *pRes, D3D12_RESOURCE_STATES After, UINT nSubresource)
 {
   if (!m_bInFrame || !pRes)
@@ -1925,7 +1934,7 @@ void CD3D12Device::SubmitAsyncCompute()
   m_bComputePending = true;
 }
 
-void CD3D12Device::WaitAsyncCompute()
+void CD3D12Device::WaitAsyncCompute(const char *szWait)
 {
   if (!m_bInFrame || !m_bComputePending)
     return;
@@ -1934,7 +1943,7 @@ void CD3D12Device::WaitAsyncCompute()
   const int nMarks = m_nGpuMarks[m_nFrameSlot];
   const char *szSection = nMarks > 0 ? m_GpuSections[m_nFrameSlot][nMarks - 1] : nullptr;
   FlushBarriers(false);
-  GpuSection("ray scene");
+  GpuSection(szWait);
   m_pCmdList->Close();
   if (g_pRenderer->m_pUpload)
     g_pRenderer->m_pUpload->Flush();

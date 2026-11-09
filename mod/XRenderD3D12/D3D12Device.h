@@ -147,9 +147,10 @@ public:
   void SubmitAsyncCompute();
   //! The frame's list from here on after the compute list of SubmitAsyncCompute (nothing when there
   //! is none or it waited already): its list so far executed, the GPU waiting in the section
-  //! "ray scene", the frame going on in the same slot's allocator (the descriptor heap, the root
+  //! szWait, the frame going on in the same slot's allocator (the descriptor heap, the root
   //! signature and the targets set again).
-  void WaitAsyncCompute();
+  void WaitAsyncCompute(const char *szWait = "ray scene");
+  bool HasAsyncCompute() const { return m_pComputeList != nullptr; }
   //! 0 .. D3D12_FRAMES-1: the slot of the current frame (per frame resources, the upload ring).
   int GetFrameSlot() const { return m_nFrameSlot; }
 
@@ -239,6 +240,8 @@ public:
   //! A resource TrackState keeps wanted in After (all of it or one subresource): nothing where a read state it is in
   //! holds After, two shader reads combine. Outside a frame nothing.
   void Require(ID3D12Resource *pRes, D3D12_RESOURCE_STATES After, UINT nSubresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES);
+  //! Require of State alone, a read state narrowed too (for the compute queue, which cannot leave a pixel shader's).
+  void RequireExact(ID3D12Resource *pRes, D3D12_RESOURCE_STATES State);
   bool IsTracked(ID3D12Resource *pRes) const { return m_Barriers.IsRegistered(pRes); }
   //! A released resource forgotten by the barriers' tracker and check (DeferredRelease, the upload pools' ranges).
   void ForgetState(ID3D12Resource *pRes)

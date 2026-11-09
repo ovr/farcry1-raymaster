@@ -874,6 +874,29 @@ XR_TEST(Barrier_ReadStates)
   CHECK(CountKind(t.TakeProblems(), PROBLEM_NOT_REGISTERED) == 1);
 }
 
+// Why: the compute queue's list cannot name a pixel shader's state, so the ocean's targets are parked in a kernel's read
+// state alone (ParkOcean), which a combining Require leaves as it is.
+XR_TEST(Barrier_RequireExact)
+{
+  CBarrierTracker t = Batched();
+  t.Register(Res(1), PSR | NPSR, 1);
+  t.Require(Res(1), NPSR, ALL, true);
+  std::vector<SCall> c = Flush(t);
+  CHECK(c.size() == 1 && c[0].size() == 1 && IsTransition(c[0][0], Res(1), PSR | NPSR, NPSR));
+  t.Require(Res(1), NPSR, ALL, true);
+  CHECK(Flush(t).empty());
+  t.Register(Res(2), PSR, 1);
+  t.Require(Res(2), NPSR, ALL, true);
+  c = Flush(t);
+  CHECK(c.size() == 1 && IsTransition(c[0][0], Res(2), PSR, NPSR));
+  // From a write state as Require.
+  t.Register(Res(3), UAV, 1);
+  t.Require(Res(3), NPSR, ALL, true);
+  c = Flush(t);
+  CHECK(c.size() == 1 && IsTransition(c[0][0], Res(3), UAV, NPSR));
+  CHECK(t.TakeProblems().empty());
+}
+
 // An address given again (a placed resource): registered again, the new resource's state; what was queued for the
 // forgotten one is still given.
 XR_TEST(Barrier_AddressReuse)

@@ -259,6 +259,9 @@ void CD3D12Renderer::RegisterVariables()
                      "With d3d12_WaterGeometry: the ocean's grid drawn into the depth alone, then its water shaded once a pixel "
                      "over the view where it is (its small triangles shaded the pixels along their edges twice); 0: the grid "
                      "shaded as it is drawn");
+  iConsole->Register("d3d12_WaterAsync", &CV_d3d12_WaterAsync, 1, 0,
+                     "The FFT ocean's waves, foam and caustics made on the compute queue beside the frame's shadows and opaque "
+                     "surfaces, the frame waiting for them at the first draw that reads them; 0: in the frame's list");
   iConsole->Register("d3d12_WaterSSR", &CV_d3d12_WaterSSR, 1, 0,
                      "The water's reflection of what the screen shows (the scene's copy, marched along the reflected ray); 0: "
                      "none (the planar reflection, the sky or the rays in its place), to measure what it costs");
@@ -1555,6 +1558,7 @@ void CD3D12Renderer::Update (void)
     m_pDevice->DredTest(CV_d3d12_DredTest);
     CV_d3d12_DredTest = 0;
   }
+  ParkOcean();
   m_pDevice->EndFrame(m_bSwapBuffers, m_bVSync || CV_r_vsync != 0);
   m_pPipeline->SaveKeys();
   // The game asks for the triangles after the frame is shown (the time demo's Tri/Frame).

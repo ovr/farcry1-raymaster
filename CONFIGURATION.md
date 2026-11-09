@@ -282,6 +282,7 @@ Details: [Device removal (DRED)](mod/XRenderD3D12/README.md#device-removal-dred)
 | `d3d12_StaticCasters` | `1` |  | The palms and the other static casters shadow the terrain everywhere |
 | `d3d12_UnderwaterBodies` | `1` |  | The fish under the ocean drawn last without the depth: no shore foam in their shape over the water |
 | `d3d12_UpscaleHdr` | `1` | yes | With HDR, the upscaler gets the scene's light before the tone map |
+| `d3d12_WaterAsync` | `1` |  | The FFT ocean's waves made on the compute queue beside the frame |
 | `d3d12_WaterDeferred` | `1` |  | The ocean's grid shaded once a pixel |
 | `d3d12_WaterGeometry` | `1` |  | The ocean drawn as a grid raised to the waves' height |
 | `d3d12_WaterSSR` | `1` |  | The water's screen space reflection (0: none, to measure it) |

@@ -40,7 +40,9 @@
 //	Munk's of the wind less the cascades' (times the bump amounts' factor,
 //	not that scale: the glint and the sun's path widen with the wind).
 //	The waves stay as they were in a frame without water (the environment
-//	cubes may still draw the ocean).
+//	cubes may still draw the ocean). With d3d12_WaterAsync the kernels run
+//	on the compute queue (UseOcean waits for them, ParkOcean readies the
+//	targets for the next frame's).
 //
 //////////////////////////////////////////////////////////////////////
 
@@ -251,6 +253,7 @@ bool CD3D12Renderer::MakeOcean(float fWind)
   if (o.pH0)
     m_pUpload->ReleaseTexture(o.pH0);
   o.pH0 = m_pUpload->CreateTexture(XR_OCEAN_SIZE, XR_OCEAN_SIZE, 1, FIELDS_FORMAT, false, Sub, XR_OCEAN_CASCADES);
+  o.bParked = false;
   if (!o.pH0)
     return false;
   // As the upload leaves it; read by the rows from here on (UpdateOcean: once, the state kept by the device).
@@ -309,6 +312,21 @@ void CD3D12Renderer::UpdateOcean(std::span<const SRenderItem> Items)
     o.fWhitecapOnset = fOnset;
   }
 
+  // The caustics (d3d12_WaterCaustics) when the frame draws them or a view from under the water (the light in it,
+  // Underwater.cpp), in daylight.
+  const bool bCaustics = CV_d3d12_WaterCaustics > 0 && CV_d3d12_Caustics && m_SunDir[2] > 0 &&
+                         (m_bUnderwater || m_bUnderLine ||
+                          std::any_of(Items.begin(), Items.end(), [](const SRenderItem &it) { return it.eDrawClass == eDC_Caustics; }));
+  o.nFrame = m_nFrames;
+  GpuSection("ocean");
+  // d3d12_WaterAsync: on the compute queue, beside the frame's first passes (it starts when the frame before is done),
+  // but in frames that build the ray scene there (its builds would wait for it: Carrier 0.1 ms slower).
+  RunOcean(bCaustics, CV_d3d12_WaterAsync && o.bParked && !o.bPending && m_pDevice->HasAsyncCompute() && !(CV_d3d12_RTAsync && WantsRays()));
+}
+
+void CD3D12Renderer::RunOcean(bool bCaustics, bool bAsync)
+{
+  SOceanState &o = m_Ocean;
   SOceanConstants oc = {};
   // The time's fraction of the sea's period, in double (the timer's seconds grow without end).
   const double fTime = iTimer ? (double)iTimer->GetCurrTime() : 0.0;
@@ -345,8 +363,15 @@ void CD3D12Renderer::UpdateOcean(std::span<const SRenderItem> Items)
   const SD3D12FrameAlloc CB = m_pUpload->AllocFrame(sizeof(oc), 256);
   memcpy(CB.pCPU, &oc, sizeof(oc));
 
-  GpuSection("ocean");
-  ID3D12GraphicsCommandList *pList = m_pDevice->GetCmdList();
+  // d3d12_WaterAsync: on the compute queue once ParkOcean's states are in the lists run, the frame waiting for it at the
+  // first draw that reads the waves (UseOcean).
+  ID3D12GraphicsCommandList *pAsync = bAsync ? m_pDevice->BeginAsyncCompute("ocean (compute queue)") : nullptr;
+  ID3D12GraphicsCommandList *pList = pAsync ? pAsync : m_pDevice->GetCmdList();
+  if (pAsync)
+  {
+    ID3D12DescriptorHeap *pHeap = m_pDescriptors->GetHeap();
+    pAsync->SetDescriptorHeaps(1, &pHeap);
+  }
   ID3D12Resource *pH0 = o.pH0->m_pResource, *pRows = o.pRows->m_pResource, *pFields = o.pFields->m_pResource;
   ID3D12Resource *pWaves = o.pWaves->m_pResource, *pLevel4 = o.pLevel4->m_pResource;
   const auto Table = [&](int k, bool bUAVs) { return o.nTables + k * TABLE + (bUAVs ? CD3D12Compute::COMPUTE_SRVS : 0); };
@@ -355,62 +380,82 @@ void CD3D12Renderer::UpdateOcean(std::span<const SRenderItem> Items)
   // Each kernel's inputs readable and outputs writable, the device's states kept from frame to frame: no transitions back
   // to UNORDERED_ACCESS after a kernel (the next frame's asks for them), h0 a shader resource of both kinds once.
   constexpr D3D12_RESOURCE_STATES UAV = D3D12_RESOURCE_STATE_UNORDERED_ACCESS, KERNEL_IN = D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE;
-  m_pDevice->Require(pH0, KERNEL_IN);
-  m_pDevice->Require(pRows, UAV);
+  // On the compute list its own barriers from ParkOcean's states (no pixel shader's state there), the device told after.
+  std::vector<std::pair<ID3D12Resource *, D3D12_RESOURCE_STATES>> AsyncStates;
+  const auto Require = [&](ID3D12Resource *pRes, D3D12_RESOURCE_STATES State)
+  {
+    if (!pAsync)
+    {
+      m_pDevice->Require(pRes, State);
+      return;
+    }
+    State = State == UAV ? UAV : KERNEL_IN;
+    auto It = std::find_if(AsyncStates.begin(), AsyncStates.end(), [pRes](const auto &e) { return e.first == pRes; });
+    if (It == AsyncStates.end())
+      It = AsyncStates.insert(AsyncStates.end(), { pRes, pRes == pH0 ? KERNEL_IN : UAV });
+    if (It->second != State)
+      m_pDevice->TransitionOn(pAsync, pRes, It->second, State);
+    It->second = State;
+  };
+  Require(pH0, KERNEL_IN);
+  Require(pRows, UAV);
   m_pCompute->Dispatch(pList, eD3D12K_OceanRows, CB.nGPU, Table(0, false), Table(0, true), 1, N, C);
-  m_pDevice->Require(pRows, KERNEL_IN);
-  m_pDevice->Require(pFields, UAV);
+  Require(pRows, KERNEL_IN);
+  Require(pFields, UAV);
   m_pCompute->Dispatch(pList, eD3D12K_OceanColumns, CB.nGPU, Table(1, false), Table(1, true), 1, N, C);
-  m_pDevice->Require(pFields, KERNEL_IN);
-  m_pDevice->Require(pWaves, UAV);
-  m_pDevice->Require(pLevel4, UAV);
+  Require(pFields, KERNEL_IN);
+  Require(pWaves, UAV);
+  Require(pLevel4, UAV);
   m_pCompute->Dispatch(pList, eD3D12K_OceanWaves, CB.nGPU, Table(2, false), Table(2, true), N / 16, N / 16, C);
   // The waves' last levels written beside the ones the kernel before wrote: no barrier between them.
-  m_pDevice->Require(pLevel4, KERNEL_IN);
+  Require(pLevel4, KERNEL_IN);
   m_pCompute->Dispatch(pList, eD3D12K_OceanMips, CB.nGPU, Table(3, false), Table(3, true), 1, 1, C);
-  // The caustics (d3d12_WaterCaustics) when the frame draws them or a view from under the water (the light in it,
-  // Underwater.cpp), in daylight: from the waves' level 0 at the frame's time, their mip levels as the waves'.
-  const bool bCaustics = CV_d3d12_WaterCaustics > 0 && CV_d3d12_Caustics && m_SunDir[2] > 0 &&
-                         (m_bUnderwater || m_bUnderLine ||
-                          std::any_of(Items.begin(), Items.end(), [](const SRenderItem &it) { return it.eDrawClass == eDC_Caustics; }));
+  // The caustics from the waves' level 0 at the frame's time, their mip levels as the waves'.
   if (bCaustics)
   {
     ID3D12Resource *pCaustics = o.pCaustics->m_pResource;
     constexpr UINT CC = XR_CAUSTICS_CASCADES;
     // The waves read by the kernel and by the water's program (one transition).
-    m_pDevice->Require(pWaves, READ);
-    m_pDevice->Require(pCaustics, UAV);
+    Require(pWaves, READ);
+    Require(pCaustics, UAV);
     m_pCompute->Dispatch(pList, eD3D12K_OceanCaustics, CB.nGPU, Table(CAUSTICS_TABLE, false), Table(CAUSTICS_TABLE, true), N / XR_CAUSTICS_TILE,
                          N / XR_CAUSTICS_TILE, CC);
-    m_pDevice->Require(pCaustics, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+    Require(pCaustics, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
     o.nCausticsFrame = m_nFrames;
   }
   // Read by the water's pixel program and by the ocean grid's vertex program (its heights, OceanGridVertex): with the
   // caustics or without them (only the pixel shaders' state, the grid's reads were not in a state for them).
-  m_pDevice->Require(pWaves, READ);
+  Require(pWaves, READ);
   if (bFoam && (fSince < 0 || fSince >= OceanSpectrum::FOAM_STEP))
   {
     // The foam's state into the other target than the frame before's, from it; then its view and the view's mip levels
     // (at most once a FOAM_STEP: between, the water reads the last).
     const int t = o.nFoamFrame >= 0 ? 1 - o.nFoam : 0;
     ID3D12Resource *pState = o.pFoam[t]->m_pResource, *pView = o.pFoamView->m_pResource, *pFoamLevel4 = o.pFoamLevel4->m_pResource;
-    m_pDevice->Require(pFields, KERNEL_IN);
-    m_pDevice->Require(o.pFoam[1 - t]->m_pResource, KERNEL_IN);
-    m_pDevice->Require(pState, UAV);
+    Require(pFields, KERNEL_IN);
+    Require(o.pFoam[1 - t]->m_pResource, KERNEL_IN);
+    Require(pState, UAV);
     m_pCompute->Dispatch(pList, eD3D12K_OceanFoam, CB.nGPU, Table(FOAM_TABLE + t, false), Table(FOAM_TABLE + t, true), N / 16, N / 16, C);
-    m_pDevice->Require(pState, KERNEL_IN);
-    m_pDevice->Require(pView, UAV);
-    m_pDevice->Require(pFoamLevel4, UAV);
+    Require(pState, KERNEL_IN);
+    Require(pView, UAV);
+    Require(pFoamLevel4, UAV);
     m_pCompute->Dispatch(pList, eD3D12K_OceanFoamView, CB.nGPU, Table(FOAM_VIEW_TABLE + t, false), Table(FOAM_VIEW_TABLE + t, true), N / 16,
                          N / 16, C);
-    m_pDevice->Require(pFoamLevel4, KERNEL_IN);
+    Require(pFoamLevel4, KERNEL_IN);
     m_pCompute->Dispatch(pList, eD3D12K_OceanMips, CB.nGPU, Table(FOAM_MIPS_TABLE, false), Table(FOAM_MIPS_TABLE, true), 1, 1, C);
-    m_pDevice->Require(pView, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+    Require(pView, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
     o.nFoam = t;
     o.nFoamFrame = m_nFrames;
     o.fFoamTime = fTime;
   }
-  o.nFrame = m_nFrames;
+  if (pAsync)
+  {
+    m_pDevice->SubmitAsyncCompute();
+    for (const auto &e : AsyncStates)
+      m_pDevice->Assume(e.first, e.second);
+    o.bPending = true;
+  }
+  o.bParked = false;
   if (m_pFrameDump)
     fprintf(m_pFrameDump.get(), "ocean: wind %g m/s, tau %.6f, chop %.3f, slopes' RMS %.3f, finer ripple %.4f, foam %g (left %.4f, breaks below %.3f %.3f)\n",
             o.fWind, oc.vParams[0], fChop, o.fSlopeRMS, o.fFineVar, CV_d3d12_WaterFoam, oc.vFoam[0], oc.vFoamCascades[0][0], oc.vFoamCascades[1][0]);
@@ -422,11 +467,12 @@ float CD3D12Renderer::SurfLightShare() const
   return (float)OceanSpectrum::SurfLightShare(fLuma, CV_d3d12_WaterSurfNight);
 }
 
-bool CD3D12Renderer::SetOceanConstants(SDrawConstants &dc, float fBump, int nFoamPattern) const
+bool CD3D12Renderer::SetOceanConstants(SDrawConstants &dc, float fBump, int nFoamPattern)
 {
   const SOceanState &o = m_Ocean;
   if (!CV_d3d12_WaterFFT || !o.pWaves || o.nFrame < 0)
     return false;
+  UseOcean();
   // The bump amounts a factor of the wind's sea (1 at their default), d3d12_WaterSlope its slopes' RMS there; the
   // finer ripple the wind's, times the bump amounts' factor alone (scaled as the cascades, the least at 3.5 m/s, 0.0011
   // at 5, Carrier's glint would shrink to a small core of the game's patch).
@@ -465,11 +511,12 @@ bool CD3D12Renderer::SetOceanConstants(SDrawConstants &dc, float fBump, int nFoa
   return true;
 }
 
-bool CD3D12Renderer::SetOceanCaustics(SDrawConstants &dc, float fSun) const
+bool CD3D12Renderer::SetOceanCaustics(SDrawConstants &dc, float fSun)
 {
   const SOceanState &o = m_Ocean;
   if (!CV_d3d12_WaterFFT || CV_d3d12_WaterCaustics <= 0 || !o.pCaustics || o.nCausticsFrame < 0)
     return false;
+  UseOcean();
   // General.hlsl's DF_CAUSTICS of the FFT ocean (vParams2.x > 0): the caustics' texture (nTex1, an array), each caustics
   // cascade's 1 / tile, its first depth; the share of the light they move (fSun: less at a low sun), the depth they are
   // gone by, the most they brighten.
@@ -481,6 +528,42 @@ bool CD3D12Renderer::SetOceanCaustics(SDrawConstants &dc, float fSun) const
   dc.vParams1[2] = CAUSTICS_FADE_DEPTH;
   dc.vParams1[3] = CAUSTICS_MOST;
   return true;
+}
+
+void CD3D12Renderer::UseOcean()
+{
+  SOceanState &o = m_Ocean;
+  if (!m_pDevice || !o.pWaves)
+    return;
+  if (o.bPending)
+  {
+    m_pDevice->WaitAsyncCompute("ocean (wait)");
+    o.bPending = false;
+  }
+  // From the compute queue's states (or ParkOcean's) to the water's; nothing when they are in them.
+  m_pDevice->Require(o.pWaves->m_pResource, READ);
+  m_pDevice->Require(o.pFoamView->m_pResource, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+  m_pDevice->Require(o.pCaustics->m_pResource, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+  o.bParked = false;
+}
+
+void CD3D12Renderer::ParkOcean()
+{
+  SOceanState &o = m_Ocean;
+  if (!CV_d3d12_WaterAsync || !o.pWaves || !o.pH0 || !m_pDevice || !m_pDevice->IsInFrame() || !m_pDevice->HasAsyncCompute())
+    return;
+  // Kernels no draw waited for: EndFrame would run the frame's last list before its wait for them.
+  if (o.bPending)
+  {
+    m_pDevice->WaitAsyncCompute("ocean (wait)");
+    o.bPending = false;
+  }
+  if (o.bParked)
+    return;
+  for (CD3D12Texture *pTex : { o.pRows, o.pFields, o.pWaves, o.pLevel4, o.pFoam[0], o.pFoam[1], o.pFoamView, o.pFoamLevel4, o.pCaustics })
+    m_pDevice->Require(pTex->m_pResource, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+  m_pDevice->RequireExact(o.pH0->m_pResource, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+  o.bParked = true;
 }
 
 void CD3D12Renderer::ReleaseOcean()

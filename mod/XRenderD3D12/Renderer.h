@@ -1213,13 +1213,21 @@ public:
   //! The water's constants of the FFT waves (SetupWaterDraw; fBump the bump amounts' slope factor;
   //! nFoamPattern the foam's pattern's texture index, -1: no foam): false without them (the static
   //! wave texture then).
-  bool SetOceanConstants(SDrawConstants &dc, float fBump, int nFoamPattern) const;
+  bool SetOceanConstants(SDrawConstants &dc, float fBump, int nFoamPattern);
   //! The share of the surf's foam shown under the scene's sun (m_SunColor): d3d12_WaterSurfNight under a moon, all by
   //! day and without a sun (OceanSpectrum::SurfLightShare).
   float SurfLightShare() const;
   //! The caustics' constants of the FFT ocean for the sea floor's draw (SetupCausticsDraw: d3d12_WaterCaustics; fSun
   //! their strength by the sun's height): false without them (the static caustics texture then).
-  bool SetOceanCaustics(SDrawConstants &dc, float fSun) const;
+  bool SetOceanCaustics(SDrawConstants &dc, float fSun);
+  //! d3d12_WaterAsync: the frame's list after the waves of the compute queue and with them readable, before a draw that
+  //! reads them.
+  void UseOcean();
+  //! UpdateOcean's kernels on the frame's list or (bAsync) on the compute queue.
+  void RunOcean(bool bCaustics, bool bAsync);
+  //! d3d12_WaterAsync: at the frame's end the ocean's targets in the compute queue's states, so that the next frame's
+  //! kernels can run there without waiting for its list.
+  void ParkOcean();
   void ReleaseOcean();
   struct SOceanState
   {
@@ -1242,6 +1250,8 @@ public:
     int nTables = -1;                       //!< the kernels' descriptor tables
     int nFrame = -1;                        //!< the frame the waves were made in, -1 none yet
     bool bFailed = false;                   //!< no targets (until d3d12_WaterFFT 0)
+    bool bParked = false;                   //!< ParkOcean's states in the lists executed (the kernels may run on the compute queue)
+    bool bPending = false;                  //!< the kernels on the compute queue, the frame's list not waiting for them yet
     float fWind = 0;                        //!< the wind of the sea in pH0
     float fSlopeRMS = 0;                    //!< its slopes' RMS along an axis
     float fSlopeRMS0 = 0;                   //!< the long cascade's (unscaled)
@@ -2312,6 +2322,7 @@ public:
   int CV_d3d12_WaterWakes = 1;        //!< the wakes of the bodies moving through the ocean, their foam (Wake.cpp; 0: none, the frames before)
   int CV_d3d12_WaterGeometry = 1;     //!< the ocean's grid raised to the waves in place of the game's flat disc (OceanGrid.cpp; 0: the disc, the frames before)
   int CV_d3d12_WaterDeferred = 1;     //!< the grid's depth first, then its water shaded once a pixel over the view (DrawOceanGrid; 0: the grid shaded as drawn)
+  int CV_d3d12_WaterAsync = 1;        //!< the FFT ocean's kernels on the compute queue beside the frame's shadows and opaque list (UpdateOcean; 0: in the frame's list)
   int CV_d3d12_WaterSSR = 1;          //!< the water's reflection of the screen's copy (Water.hlsl's ScreenReflection; 0: none, to measure it)
   int CV_d3d12_WaterUnder = 1;        //!< the view from under the ocean's surface: the light in its water, the sun's shafts (Underwater.cpp; 0: the fog volume's fog, the frames before)
   int CV_d3d12_WaterUnderShare = 1;   //!< under the ocean's surface the sun's light at one point of each pixel's ray, the 4 x 4 window round a pixel its ray's segments, the segments' weights in closed form (Underwater.cpp; 0: four points a pixel shared by its quad, the frames before)

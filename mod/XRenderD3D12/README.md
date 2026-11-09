@@ -1979,6 +1979,14 @@ and lists theirs (`NamesObjects`).
   reflections 1.07 -> 0.80; Bunker's sunset 0.63 -> 0.58, with the rays 0.77 -> 0.78; Carrier's
   frame 3.22 -> 3.14 ms with the pass, 4.45 -> 4.22 with the rays); the spectrum, made on the CPU at
   the first water and when the wind changes, takes under 65 ms.
+  - On the compute queue (`d3d12_WaterAsync`, 1; 0 runs the kernels in the frame's list; not saved):
+    the waves, the foam and the caustics run beside the frame's first passes, the frame waiting for
+    them at the first draw that reads them; at the frame's end their targets go back to states the
+    compute queue can take. Not in frames that build the ray scene on that queue: its builds would
+    wait for them (Carrier with the rays 0.1 ms slower). 3840 x 2160 FSR Quality, standing: Pier from
+    the hill 3.375 -> 3.289 ms of GPU time, Carrier as before (the pass beside the water's reflection
+    slows it by as much as it saves). Submitting the frame so far before the kernels, so that they
+    run beside the sun's cascades instead, left the GPU idle for the CPU (Pier 0.85 ms).
 - The FFT ocean's foam (`d3d12_WaterFoam`, 1; 0 draws the frames of the water before it; not saved;
   `Shaders/WaterFoam.hlsli`, `FoamPattern.h`, the foam kernel in `Shaders/OceanFFT.hlsl`):
   - Whitecaps. Their share of the sea is Monahan and O'Muircheartaigh's law of the wind,
