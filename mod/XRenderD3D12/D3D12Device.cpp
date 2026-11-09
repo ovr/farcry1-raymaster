@@ -2008,6 +2008,7 @@ void CD3D12Device::FlushFrame()
 
 void CD3D12Device::GpuSection(const char *szSection)
 {
+  m_szGpuSection = szSection;
   // d3d12_BarrierBatch 2: what is queued in the section before, as the barriers given at once were.
   if (m_bBarrierSections && m_bInFrame)
     FlushBarriers(false);

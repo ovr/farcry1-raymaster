@@ -2575,6 +2575,8 @@ and lists theirs (`NamesObjects`).
   before, so the frames stay the same bit for bit (Carrier's sweep: the water 1.74 -> 1.53 ms in
   its worst 100 frames, 0.67 -> 0.61 on average). The water volumes go without them: their
   reflection meets the banks near the water, where the tiles cost more than they save.
+  `d3d12_WaterSSR 0` (1; not saved) leaves the screen space reflection and its tiles out, to
+  measure them: the planar reflection, the sky or the rays show in its place.
 - The glass of the scopes (`r_ScopeLens_fx`, the AG36's, the OICW's, the AW50's and the rocket
   launcher's) shows the scene around the middle of the screen through the same copy of the scene
   when its list has one; else (the weapon's list) a copy of only the part of the target it shows

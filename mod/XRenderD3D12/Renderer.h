@@ -408,6 +408,16 @@ public:
   //! d3d12_GpuTimes: from here on the GPU time counts for szSection (static storage), in the main
   //! view only (a nested scene counts for the section that renders it).
   void GpuSection(const char *szSection);
+  //! The GPU time of a pass inside the running section counted as szSection's; the running one again after it.
+  class CGpuSubSection
+  {
+  public:
+    CGpuSubSection(CD3D12Renderer &r, const char *szSection);
+    ~CGpuSubSection();
+  private:
+    CD3D12Renderer &m_r;
+    const char *m_szBefore;
+  };
   //! d3d12_GpuTimes: after each frame; every so many frames the averages to the log.
   void ReportGpuTimes();
 
@@ -2302,6 +2312,7 @@ public:
   int CV_d3d12_WaterWakes = 1;        //!< the wakes of the bodies moving through the ocean, their foam (Wake.cpp; 0: none, the frames before)
   int CV_d3d12_WaterGeometry = 1;     //!< the ocean's grid raised to the waves in place of the game's flat disc (OceanGrid.cpp; 0: the disc, the frames before)
   int CV_d3d12_WaterDeferred = 1;     //!< the grid's depth first, then its water shaded once a pixel over the view (DrawOceanGrid; 0: the grid shaded as drawn)
+  int CV_d3d12_WaterSSR = 1;          //!< the water's reflection of the screen's copy (Water.hlsl's ScreenReflection; 0: none, to measure it)
   int CV_d3d12_WaterUnder = 1;        //!< the view from under the ocean's surface: the light in its water, the sun's shafts (Underwater.cpp; 0: the fog volume's fog, the frames before)
   int CV_d3d12_WaterUnderShare = 1;   //!< under the ocean's surface the sun's light at one point of each pixel's ray, the 4 x 4 window round a pixel its ray's segments, the segments' weights in closed form (Underwater.cpp; 0: four points a pixel shared by its quad, the frames before)
   float CV_d3d12_WaterUnderAdapt = 1;  //!< under the ocean's surface the eye's white balance: the light at the camera's depth taken towards the light at the surface by this much, 0 to 1 (UnderBalance; 0: none, the frames before)

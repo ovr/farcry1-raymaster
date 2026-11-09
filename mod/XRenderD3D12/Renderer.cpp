@@ -259,6 +259,9 @@ void CD3D12Renderer::RegisterVariables()
                      "With d3d12_WaterGeometry: the ocean's grid drawn into the depth alone, then its water shaded once a pixel "
                      "over the view where it is (its small triangles shaded the pixels along their edges twice); 0: the grid "
                      "shaded as it is drawn");
+  iConsole->Register("d3d12_WaterSSR", &CV_d3d12_WaterSSR, 1, 0,
+                     "The water's reflection of what the screen shows (the scene's copy, marched along the reflected ray); 0: "
+                     "none (the planar reflection, the sky or the rays in its place), to measure what it costs");
   iConsole->Register("d3d12_WaterUnder", &CV_d3d12_WaterUnder, 1, 0,
                      "With d3d12_WaterVolume, the camera under the ocean's surface: the light in its water over the scene (each "
                      "colour channel attenuated along the view and the light's way down, the light the water scatters fading "
@@ -1576,6 +1579,18 @@ void CD3D12Renderer::GpuSection(const char *szSection)
 {
   if (m_pDevice && m_nRecurseLevel <= 1)
     m_pDevice->GpuSection(szSection);
+}
+
+CD3D12Renderer::CGpuSubSection::CGpuSubSection(CD3D12Renderer &r, const char *szSection)
+  : m_r(r), m_szBefore(r.m_pDevice ? r.m_pDevice->GetGpuSection() : nullptr)
+{
+  m_r.GpuSection(szSection);
+}
+
+CD3D12Renderer::CGpuSubSection::~CGpuSubSection()
+{
+  if (m_szBefore)
+    m_r.GpuSection(m_szBefore);
 }
 
 void CD3D12Renderer::ReportGpuTimes()

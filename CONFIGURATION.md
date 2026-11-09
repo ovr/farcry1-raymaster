@@ -284,6 +284,7 @@ Details: [Device removal (DRED)](mod/XRenderD3D12/README.md#device-removal-dred)
 | `d3d12_UpscaleHdr` | `1` | yes | With HDR, the upscaler gets the scene's light before the tone map |
 | `d3d12_WaterDeferred` | `1` |  | The ocean's grid shaded once a pixel |
 | `d3d12_WaterGeometry` | `1` |  | The ocean drawn as a grid raised to the waves' height |
+| `d3d12_WaterSSR` | `1` |  | The water's screen space reflection (0: none, to measure it) |
 | `d3d12_WaterUnder` | `1` |  | The light in the water with the camera under the ocean's surface |
 | `d3d12_WaterUnderClear` | `1` |  | Under the water, the light it scatters from the sun and the sky |
 | `d3d12_WaterUnderLine` | `1` |  | A camera just over the water whose near plane dips under it sees the water's light there |

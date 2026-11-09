@@ -591,6 +591,7 @@ bool CD3D12Renderer::CopySceneForWater(const int *pRect)
   SSceneCopy &Copy = m_SceneCopies[m_pDevice->IsInScene() || m_pDevice->IsInHdr() ? 1 : 0];
   if (!EnsureSceneCopy(Copy))
     return false;
+  CGpuSubSection Section(*this, "water scene copy");
   if (pRect)
   {
     const D3D12_BOX Box = { (UINT)pRect[0], (UINT)pRect[1], 0, (UINT)pRect[2], (UINT)pRect[3], 1 };
@@ -706,6 +707,7 @@ bool CD3D12Renderer::BuildDepthTiles()
   ID3D12GraphicsCommandList *pList = m_pDevice->GetCmdList();
   // The depth copy read by the kernel and the water's pixels, the tiles written, then read by the water's pixels (the
   // device keeps their states).
+  CGpuSubSection Section(*this, "water depth tiles");
   m_pDevice->Require(pCopy->pDepth.Get(), READ);
   m_pDevice->Require(pTiles, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
   m_pCompute->Dispatch(pList, eD3D12K_DepthTiles, CB.nGPU, pCopy->nTileTables, pCopy->nTileTables + CD3D12Compute::COMPUTE_SRVS,
@@ -1014,7 +1016,7 @@ bool CD3D12Renderer::SetupWaterDraw(SPipelineKey &Key, SDrawConstants &dc, const
   // The depth tiles of the copy for the march of the ocean's screen space reflection (a lake's or a
   // river's meets its banks near the water: the tiles would cost more than they save).
   dc.nShadowTex[0] = dc.nShadowTex[1] = 0;
-  if (!m_bEnvCubePass && IsOcean(it) && (m_nSceneTileSRV >= 0 || BuildDepthTiles()))
+  if (!m_bEnvCubePass && IsOcean(it) && CV_d3d12_WaterSSR && (m_nSceneTileSRV >= 0 || BuildDepthTiles()))
   {
     dc.nShadowTex[0] = (uint32)m_nSceneTileSRV;
     dc.nShadowTex[1] = DEPTH_TILE_LEVELS;
@@ -1090,6 +1092,7 @@ bool CD3D12Renderer::SetupWaterDraw(SPipelineKey &Key, SDrawConstants &dc, const
     if (CV_d3d12_RTSunShadows > 0)
       dc.vSpecular[3] = 2;
   }
+  dc.vTexGenV[3] = CV_d3d12_WaterSSR ? 0.0f : 1.0f;
 
   Set4(dc.vParams2, WATER_ABSORPTION[0] + WATER_TURBIDITY, WATER_ABSORPTION[1] + WATER_TURBIDITY, WATER_ABSORPTION[2] + WATER_TURBIDITY,
        WATER_DISPLACEMENT);

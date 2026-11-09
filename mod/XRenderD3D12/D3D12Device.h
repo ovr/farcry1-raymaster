@@ -493,6 +493,8 @@ public:
   void SetGpuTiming(bool bOn) { m_bGpuTiming = bOn; }
   //! From here on the GPU time counts for szSection (a string with static storage).
   void GpuSection(const char *szSection);
+  //! The section the GPU time counts for now (nullptr before the first).
+  const char *GetGpuSection() const { return m_szGpuSection; }
   //! The sections' GPU milliseconds added up over GetGpuTimedFrames() frames, in the order they
   //! first came; ResetGpuTimes starts again.
   const std::vector<std::pair<const char *, double>> &GetGpuTimes() const { return m_GpuTimes; }
@@ -675,6 +677,7 @@ private:
   ComPtr<ID3D12Resource> m_pTimestampReadback;      //!< the resolved timestamps, in the same places
   double m_fTimestampMs = 0;                        //!< milliseconds per tick
   bool m_bGpuTiming = false;
+  const char *m_szGpuSection = nullptr;             //!< GetGpuSection
   const char *m_GpuSections[D3D12_FRAMES][GPU_MARKS] = {};   //!< the section each timestamp starts
   int m_nGpuMarks[D3D12_FRAMES] = {};
   std::vector<std::pair<const char *, double>> m_GpuTimes;

@@ -327,7 +327,10 @@ void CD3D12Renderer::DrawOceanGrid(const SPipelineKey &Key, const SDrawConstants
   // The waves' depth alone (the grid as drawn, without its pixel shader).
   SPipelineKey DepthKey = Key;
   DepthKey.bDepthOnly = 1;
-  DrawGrid(DepthKey);
+  {
+    CGpuSubSection Section(*this, "ocean depth");
+    DrawGrid(DepthKey);
+  }
   // The water over the view (the triangle after the grid's), the depth buffer read only and read: Water.hlsl's
   // PSDeferred, vLightPos[2..4] the view's rays, vLightPos[2].w the depth buffer, vLightPos[3].w the triangle's depth:
   // the farthest water's (the disc's edge beyond the camera, 20 m further), the test GREATER, so that the pixels of what
@@ -345,6 +348,7 @@ void CD3D12Renderer::DrawOceanGrid(const SPipelineKey &Key, const SDrawConstants
   FullKey.bWaterDeferred = 1;
   FullKey.nState = GS_DEPTHFUNC_GREAT;
   FullKey.nCull = R_CULL_NONE;
+  CGpuSubSection Section(*this, "ocean shading");
   SetDepthRead(pDepth, true);
   DrawGeometry(FullKey, Full, D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST, Geom.VB, &Geom.IB, 3, g.nIndices, 0);
   SetDepthRead(pDepth, false);
