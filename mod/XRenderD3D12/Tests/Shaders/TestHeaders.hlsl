@@ -41,6 +41,25 @@
 #include "Volumetric.hlsli"
 #include "SkyFogBand.hlsli"
 
+//! The G-buffer's normal of a trunk (PathGBuffer.hlsli's PathFace, PathGBufferNormal with the lit material) at a pixel:
+//! g_TestIn[9i] = (1 / w at the pixel, its change a pixel right, a pixel down, bPrecise), [9i + 1] = (the pixel's NDC
+//! without the jitter, the NDC a pixel spans), [9i + 2 .. 9i + 5] the world to clip matrix's rows, [9i + 6] the world
+//! position's difference a pixel right, [9i + 7] a pixel down, [9i + 8] the way to the camera: out[2i] PathFace's face,
+//! out[2i + 1] the normal texel's normal as R10G10B10A2 stores it.
+[numthreads(64, 1, 1)]
+void CSPathFace(uint i : SV_DispatchThreadID)
+{
+  if (i >= g_Test.nTest.x)
+    return;
+  const float4 a = TestIn(9 * i), b = TestIn(9 * i + 1);
+  const float4x4 m = float4x4(TestIn(9 * i + 2), TestIn(9 * i + 3), TestIn(9 * i + 4), TestIn(9 * i + 5));
+  const float3 vRhw = FaceFromRhw(a.x, a.y, a.z, b.xy, b.zw, m);
+  const float3 vFace = PathFace(cross(TestIn(9 * i + 6).xyz, TestIn(9 * i + 7).xyz), vRhw, TestIn(9 * i + 8).xyz, a.w > 0);
+  const float4 t = QuantizeR10G10B10A2(PathGBufferNormal(vFace, vFace, 1, XR_PT_MAT_LIT + 1));
+  TestOut(2 * i, float4(vFace, 0));
+  TestOut(2 * i + 1, float4(PathOctDecode(t.rg), 0));
+}
+
 //! A step of BarrierTests' runs (GpuHarness.h's RunBarrierSteps): each word of the output's first g_Test.nTest.x items
 //! times 3 plus g_Test.nTest.y (a step that read the output before the step before wrote it gives another value).
 [numthreads(64, 1, 1)]

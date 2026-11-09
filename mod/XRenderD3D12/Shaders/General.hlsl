@@ -283,6 +283,8 @@
 #include "Skin.hlsli"
 #if defined(XR_RAY_REFL) || defined(XR_RAY_LIGHT)
 #include "RayShade.hlsli"
+#endif
+#if defined(XR_RAY_REFL) || defined(XR_RAY_LIGHT) || defined(XR_PT)
 #include "RayFace.hlsli"
 #endif
 #ifdef XR_PT
@@ -1242,14 +1244,16 @@ float4 ShadePixel(SVertexOutput In)
   s_fPTFog = 1;
   s_fPTSun = 1;
   s_fPTSkin = 1;
-  // The side of the triangle the camera sees (before any branch or discard: derivatives); the view's direction where the
-  // triangle has none (edge on).
-  s_vPTFace = cross(ddx(In.vWorldPos), ddy(In.vWorldPos));
-  const float fPTFace = dot(s_vPTFace, g_Frame.vCameraPos.xyz - In.vWorldPos);
-  if (dot(s_vPTFace, s_vPTFace) <= 1e-20 || fPTFace == 0)
-    s_vPTFace = g_Frame.vCameraPos.xyz - In.vWorldPos;
-  else if (fPTFace < 0)
-    s_vPTFace = -s_vPTFace;
+  // The side of the triangle the camera sees (before any branch or discard: derivatives; PathFace): with
+  // d3d12_PTFaceNormal (vLightmap.z) from the plane 1 / w makes over the screen where it has one, normalised.
+  {
+    const float fRhw = 1 / In.vPos.w;
+    const float4 vPTClip = mul(float4(In.vWorldPos, 1), g_Frame.mViewProj);
+    float3 vPTRhw = FaceFromRhw(fRhw, ddx(fRhw), ddy(fRhw), vPTClip.xy / vPTClip.w, float2(2, -2) * g_Frame.vScreen.zw, g_Frame.mViewProj);
+    if (HasFlag(DF_SCREEN_POS) || vPTClip.w <= 0)
+      vPTRhw = 0;
+    s_vPTFace = PathFace(cross(ddx(In.vWorldPos), ddy(In.vWorldPos)), vPTRhw, g_Frame.vCameraPos.xyz - In.vWorldPos, g_Frame.vLightmap.z > 0);
+  }
 #endif
 #if defined(XR_RAY_REFL) || defined(XR_RAY_LIGHT)
   // The rays' cone and their origin's face (before any branch or discard: derivatives).

@@ -616,6 +616,12 @@ void CD3D12Renderer::RegisterVariables()
                      "vegetation's draws the paths do not light (the plants blended after the water, the water's reflection, the "
                      "cubes) take the light its colours had lit by the sun and the ambient, on the mean over each mesh's vertices; "
                      "0: unlit (the frames before)");
+  iConsole->Register("d3d12_PTFaceNormal", &CV_d3d12_PTFaceNormal, 1, 0,
+                     "With d3d12_PathTracing, the side of its triangle the camera sees, which its G-buffer turns the normals to and "
+                     "the vegetation's opaque parts (a trunk) take for their normal, from the plane 1 / w makes over the screen, "
+                     "normalised; 0: from the world position's differences from pixel to pixel, as long as they are (the frames "
+                     "before: close to a trunk at 4K a normal so short the G-buffer took it for none, straight up, a stipple "
+                     "on the trunk in the sun)");
   iConsole->Register("d3d12_PTWaterPlants", &CV_d3d12_PTWaterPlants, 1, 0,
                      "With d3d12_PathTracing, the plants in the ocean (their bottom under its level) that the engine fades in or "
                      "out drawn blended after the water, as without the path tracer; 0: alpha tested among the opaque surfaces "

@@ -1442,7 +1442,12 @@ system ones (better not to touch): [`CONFIGURATION.md`](../../CONFIGURATION.md).
   lit material (`XR_PT_VEGETATION_MATERIAL`, `PathSurfaceNormal` at the rays' hits): their vertices
   carry the crown's normal too, and a trunk's paths went up into the crown or, turned to the camera,
   down into the ground, through the trunk as from a leaf: the trunks were black (the film's river-temple
-  and swamp-path; test: unit test `PathTrace_SurfaceNormal`, `render_tests` suite `pttrunk`), a fourth the sun's
+  and swamp-path; test: unit test `PathTrace_SurfaceNormal`, `render_tests` suite `pttrunk`). That side
+  is `PathFace`'s (`d3d12_PTFaceNormal`, 1): the face of the plane 1 / w makes over the screen
+  (`RayFace.hlsli`, as the rays' `d3d12_RTFaceNormal`), normalised; the cross product of the world
+  position's differences a pixel apart was as long as they are, 2e-6 for a trunk 3 m away at 4K, which
+  the G-buffer took for no normal at all, straight up: a trunk close to the camera stippled in the sun
+  (the film's river-temple; test: unit test `RayFace_PathFace`, `render_tests` suite `ptface`), a fourth the sun's
   visibility as the raster finds it (RGBA8, r: its shadow maps, the sun's cascades and their mask by
   rays, which the path tracer turns on, from all the casters; 0 where the raster has no sun) and the
   game's ambient light on the surface (gba: what the object's ambient colour adds to its light maps or
