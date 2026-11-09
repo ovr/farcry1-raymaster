@@ -380,6 +380,10 @@ void CD3D12Renderer::RegisterVariables()
                      "cuts), the histories of the screen start again: the upscaler's and TAA's, the rays' denoisers (the sun's shadow, the "
                      "AO and GI), the path tracer's light, the volumetric light, the frame before's picture in the reflections; 0: they "
                      "reproject the shot before (its light for some frames)");
+  iConsole->Register("d3d12_BeachShadow", &CV_d3d12_BeachShadow, 1, 0,
+                     "1: the foam running up the beach and the wet sand under it in the sun's shadow as the terrain under them (the "
+                     "sun's cascades and rays, the terrain's shadow colour): no glowing border round the sand in the shadow of "
+                     "Carrier's wreck; 0: lit in the shadow (the frames before)");
   iConsole->Register("d3d12_UnderwaterBodies", &CV_d3d12_UnderwaterBodies, 1, 0,
                      "1: with the camera above the ocean, the characters under its level (the fish; a body shorter than 1 m by its middle) drawn after the rest of the "
                      "opaque surfaces without writing the depth: the water over them takes the floor under them, its shore's foam no "

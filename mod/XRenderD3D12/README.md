@@ -1878,6 +1878,14 @@ and lists theirs (`NamesObjects`).
       height along the view's path through the water.
     - At the default wind both are thin rims (a calm lagoon). On the beaches the game draws its own
       foam strips running up the sand, as before.
+    - Those strips (the foam's three passes and the wet sand's, blended over the terrain;
+      `SetupBeachDraw`) take the sun's shadow of all the casters (`d3d12_BeachShadow 1`; step 339):
+      the cascades, the rays' mask where it is of their depth (the terrain under them), in the colour
+      of the terrain's shadows. The terrain takes only the live casters', the static objects' shadows
+      are baked into it; the strips have none baked, and without it they stayed lit in the shadow of
+      Carrier's wreck on the beach, a glowing border round the dark sand (the foam 0.6-0.7 of its
+      brightness in the sun, the sand 0.2-0.3; now both about 0.25). Test: `render_tests` suite
+      `beachshadow`.
   - Surf. The shores' waves are mostly swell, long waves from far away that break even in a calm:
     `d3d12_WaterSurf` (0.8 m; 0 none, only the wind sea's) is its height there, its period 9 s
     (a trade wind swell's 8-12 s). It is not in the waves drawn, only in their foam.
