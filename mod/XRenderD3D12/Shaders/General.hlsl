@@ -65,7 +65,9 @@
 //	      light that much brighter (Common.hlsli), m the light's shape: the
 //	      largest channel of tex0 (times its alpha with vHdrCore.y), times the
 //	      fall-off of DF2_GLOW_FALLOFF. Its core goes above white, its soft edge
-//	      stays as the game's, whatever its colour and fade
+//	      stays as the game's, whatever its colour and fade; vHdrCore.z > 0: then
+//	      rgb (and the path tracer's emission) at most vHdrCore.z (a piece of the
+//	      sky at the game's white, d3d12_HDRSkyPieces)
 //	    DF_ALPHATEST: discard when a < fAlphaRef (DF_ALPHATEST_LESS: when a >= fAlphaRef);
 //	      a negative fAlphaRef (alpha to coverage with MSAA): a = CoverageAlpha
 //	      (AlphaCoverage.hlsli) at -fAlphaRef, the samples it covers in place of the test;
@@ -1730,6 +1732,14 @@ float4 ShadePixel(SVertexOutput In)
     if (HasFlag2(DF2_GLOW_FALLOFF))
       m *= pow(saturate(1 - In.vTex0.x), g_DrawExt.vParams0.x);
     vColor.rgb *= HdrEncode(max(1 + (g_DrawExt.vHdrCore.x - 1) * pow(saturate(m), HDR_CORE_POWER), 0));
+    // A piece of the sky (d3d12_HDRSkyPieces): its light at most vHdrCore.z, the game's white.
+    if (g_DrawExt.vHdrCore.z > 0)
+    {
+      vColor.rgb = min(vColor.rgb, g_DrawExt.vHdrCore.z);
+#ifdef XR_PT
+      s_vPTEmission = min(s_vPTEmission, g_DrawExt.vHdrCore.z);
+#endif
+    }
   }
 #endif
 

@@ -114,7 +114,7 @@ typedef float float4x4_t[16];
 #define DF2_ALPHA_GLOW      0x00002000  //!< rgb += tex0 rgb * tex0 a after the light and the light map: the texture's alpha is a glow mask, unlit
 #define DF2_BUMP_OFFSET     0x00004000  //!< with DF_TEX0: tex0 looked up at uv0 + (tex3 at uv1 rg * 2 - 1) * vParams0.x, the texture wobbled by a normal map (the beach foam)
 #define DF2_SKY_GLOW        0x00008000  //!< the sky with r_HDRRendering: rgb *= SkyGlow (Common.hlsli) in the direction of the world position
-#define DF2_HDR_CORE        0x00010000  //!< a light added with r_HDRRendering: rgb *= HdrEncode(1 + (vHdrCore.x - 1) * m^4) (HdrLight.hlsli), m its shape 0..1 (tex0's largest channel, times tex0 a with vHdrCore.y, times DF2_GLOW_FALLOFF): brighter in its core, its soft edge as the game's
+#define DF2_HDR_CORE        0x00010000  //!< a light added with r_HDRRendering: rgb *= HdrEncode(1 + (vHdrCore.x - 1) * m^4) (HdrLight.hlsli), m its shape 0..1 (tex0's largest channel, times tex0 a with vHdrCore.y, times DF2_GLOW_FALLOFF): brighter in its core, its soft edge as the game's; vHdrCore.z > 0: then rgb at most vHdrCore.z
 #define DF2_VERTEX_LIGHTS   0x00020000  //!< with DF_PIXEL_LIGHTING: the lights as the vertex lighting takes them, per pixel: colours not clamped, a point light's attenuation 1 / (vLightAtten.x + vLightAtten.y d) up to vLightAtten.z (d3d12_PixelLighting)
 #define DF2_SMOOTH_FALLOFF  0x00040000  //!< with DF2_VERTEX_LIGHTS: a point light falls off as 2 (1 - smoothstep(0, 0.9, d * vLightAtten.w)) instead (static objects: the falloff the per vertex attenuation is fitted to)
 #define DF2_LIGHTMAP_LIGHTS 0x00080000  //!< with DF_TEX1_LIGHTMAP (no DF_LIGHTING): the draw's lights without the sun (per pixel, DF2_VERTEX_LIGHTS) in place of the ambient under the light map (d3d12_PixelLighting)
@@ -275,7 +275,7 @@ struct SDrawExt
   XR_FLOAT4(vSpecular);           //!< DF_SPECULAR: rgb the material's specular colour, w 1: times the texture's alpha (gloss)
   XR_FLOAT4(vAddColor);           //!< DF2_ADD_TEX4: rgb the factor of tex4, w added
   XR_FLOAT4(vHeat);               //!< DF2_HEAT: x the heat 0 (cold) to 1 (hot), y 1 for an additive draw
-  XR_FLOAT4(vHdrCore);            //!< DF2_HDR_CORE: x the factor of the light in its core, y 1: the shape times tex0 a (a SRCALPHA blend)
+  XR_FLOAT4(vHdrCore);            //!< DF2_HDR_CORE: x the factor of the light in its core, y 1: the shape times tex0 a (a SRCALPHA blend), z > 0: then rgb at most z (a piece of the sky, d3d12_HDRSkyPieces)
   XR_FLOAT4(vEdgeFade);           //!< x 1: the colour per vertex times min((2 |N.V|)^4, 1), N the vertex normal, V the view direction: planes
                                   //!< fading out seen edge on (TemplMuzzleFlash_Auto, d3d12_MuzzleFlashAuto); y above 0: the alpha after
                                   //!< the alpha test (FadeAlpha, AlphaCoverage.hlsli: an object fading in or out by its distance, d3d12_FadeBlend)
