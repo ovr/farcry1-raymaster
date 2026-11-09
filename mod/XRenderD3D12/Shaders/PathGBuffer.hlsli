@@ -83,6 +83,23 @@ float4 PathGBufferNormal(float3 vNormal, float3 vFace, float fFog, uint nMateria
   return float4(PathOctEncode(n), saturate(fFog), (float)(nMaterial & 3) / 3);
 }
 
+//! The side of its triangle the camera sees at a pixel of the G-buffer (General.hlsl's s_vPTFace; the vegetation's
+//! opaque parts, a trunk, take it for their normal): vCross the cross product of the world position's differences a pixel
+//! right and down, vRhw the face of the plane 1 / w makes over the screen (RayFace.hlsli's FaceFromRhw; 0 where there is
+//! none), vToCamera the way to the camera. bPrecise (d3d12_PTFaceNormal): vRhw where it has one, else vCross, normalised;
+//! else vCross as long as it is (the frames before: a pixel 1.5 mm across at 4K, a trunk 3 m away, gives one 2e-6 long,
+//! which PathGBufferNormal took for none, straight up; and the world positions' differences round in close ups). The way
+//! to the camera where neither has one (edge on).
+float3 PathFace(float3 vCross, float3 vRhw, float3 vToCamera, bool bPrecise)
+{
+  const float3 n = bPrecise && dot(vRhw, vRhw) > 1e-20 ? vRhw : vCross;
+  const float f = dot(n, vToCamera);
+  if (dot(n, n) <= 1e-20 || f == 0)
+    return bPrecise && dot(vToCamera, vToCamera) > 0 ? normalize(vToCamera) : vToCamera;
+  const float3 v = f < 0 ? -n : n;
+  return bPrecise ? normalize(v) : v;
+}
+
 //! The path material plus 1 of a normal texel (0: no surface the path tracer lights).
 uint PathGBufferMaterial(float4 vNormal)
 {

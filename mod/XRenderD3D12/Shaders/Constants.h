@@ -217,7 +217,8 @@ struct SFrameConstants
   XR_FLOAT4(vLightmap);           //!< x 1: a dot3 light map's N'.D mixed towards 1 by the light map's alpha (DF_LIGHTMAP_DIR, d3d12_LightmapDot3);
                                   //!< y 1: a bump template's light per pixel (DF_PIXEL_LIGHTING) times the material's colour scaled down by its
                                   //!< largest channel above 1, the light's hue kept, its term not clamped (d3d12_LightColorScale; 0: each
-                                  //!< channel of the light's colour clamped to 1)
+                                  //!< channel of the light's colour clamped to 1); z 1: the path tracer's G-buffer takes the side of a
+                                  //!< triangle the camera sees from 1 / w's plane, normalised (d3d12_PTFaceNormal, PathGBuffer.hlsli's PathFace)
   XR_FLOAT4X4(mPrevViewProj);     //!< d3d12_RTPbrScreen: world to the clip space of the last frame's picture copied for the reflections by
                                   //!< rays (m_ReflCopy), without its jitter
   XR_FLOAT4(vPrevParams);         //!< its jitter in clip space (xy: xy += vPrevParams.xy * w), its projection's m22 (z) and m32 (w)

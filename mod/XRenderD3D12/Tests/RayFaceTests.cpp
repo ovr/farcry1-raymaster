@@ -11,7 +11,12 @@
 //	at three pixels as the GPU's float differences take it. Its normal
 //	is the plane's within a fraction of a degree, while the cross product
 //	of the float world positions' differences (the frames before) is off
-//	by degrees there; an orthographic view gives none.
+//	by degrees there; an orthographic view gives none. The path tracer's
+//	G-buffer's side of a triangle (PathGBuffer.hlsli's PathFace,
+//	d3d12_PTFaceNormal, TestHeaders.hlsl's CSPathFace): a trunk 0.5-3 m
+//	away keeps its face's normal in the normal texel, where the world
+//	positions' cross product (the frames before) was so short the texel
+//	was straight up.
 //
 //////////////////////////////////////////////////////////////////////
 
@@ -20,10 +25,12 @@
 #include "TestMath.h"
 
 #include "Test_RayFace.h"
+#include "Test_PathFace.h"
 
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <cstdio>
 #include <string>
 #include <vector>
 
@@ -259,4 +266,144 @@ XR_TEST(RayFace_Orthographic)
   const std::vector<SVec3> Out = RunFace(In);
   for (size_t i = 0; i < In.size(); i++)
     CHECK(Out[i].x * Out[i].x + Out[i].y * Out[i].y + Out[i].z * Out[i].z <= 1e-20f);
+}
+
+namespace
+{
+  //! One case of CSPathFace: 1 / w at the pixel and its differences, the pixel's NDC, the world to clip matrix, the world
+  //! positions' differences a pixel right and down and the way to the camera, as the GPU's floats take them.
+  struct SPathFaceIn
+  {
+    float fRhw[3] = {};
+    float vNdc[2] = {};
+    double m[4][4] = {};
+    SD3 vDx, vDy, vToCamera;
+  };
+
+  //! CSPathFace of each case (bPrecise: d3d12_PTFaceNormal): per case PathFace's face and the normal texel's normal.
+  std::vector<std::array<SVec3, 2>> RunPathFace(const std::vector<SPathFaceIn> &In, bool bPrecise)
+  {
+    SDispatch d;
+    d.Shader = XR_BYTECODE(Test_PathFace);
+    d.Test.nTest[0] = (uint32)In.size();
+    d.nGroups[0] = Groups64(In.size());
+    for (const SPathFaceIn &c : In)
+    {
+      Push(d.In, c.fRhw[0], c.fRhw[1], c.fRhw[2], bPrecise ? 1.0f : 0.0f);
+      Push(d.In, c.vNdc[0], c.vNdc[1], 2.0f / W, -2.0f / H);
+      for (int r = 0; r < 4; r++)
+        Push(d.In, (float)c.m[r][0], (float)c.m[r][1], (float)c.m[r][2], (float)c.m[r][3]);
+      Push(d.In, (float)c.vDx.x, (float)c.vDx.y, (float)c.vDx.z, 0);
+      Push(d.In, (float)c.vDy.x, (float)c.vDy.y, (float)c.vDy.z, 0);
+      Push(d.In, (float)c.vToCamera.x, (float)c.vToCamera.y, (float)c.vToCamera.z, 0);
+    }
+    d.nOut = 2 * In.size();
+    const std::vector<uint32> Out = Gpu().Run(d);
+    std::vector<std::array<SVec3, 2>> R;
+    for (size_t i = 0; i < In.size(); i++)
+      R.push_back({ Vec(Out, 2 * i), Vec(Out, 2 * i + 1) });
+    return R;
+  }
+
+  //! A face case as the G-buffer's pixel sees it: 1 / w and the world positions interpolated in floats, their differences
+  //! a pixel right and down as ddx and ddy take them.
+  SPathFaceIn PathFaceIn(const SFaceCase &c)
+  {
+    SPathFaceIn r;
+    double q0, qx, qy;
+    const SD3 p0 = Hit(c.View, c.Plane, c.px, c.py, q0), p1 = Hit(c.View, c.Plane, c.px + 1, c.py, qx),
+              p2 = Hit(c.View, c.Plane, c.px, c.py + 1, qy);
+    const float f0 = (float)q0;
+    r.fRhw[0] = f0;
+    r.fRhw[1] = (float)qx - f0;
+    r.fRhw[2] = (float)qy - f0;
+    r.vNdc[0] = (float)SView::NdcX(c.px);
+    r.vNdc[1] = (float)SView::NdcY(c.py);
+    for (int i = 0; i < 4; i++)
+      for (int j = 0; j < 4; j++)
+        r.m[i][j] = c.View.m[i][j];
+    auto D = [](SD3 a, SD3 b) { return SD3{ (double)((float)a.x - (float)b.x), (double)((float)a.y - (float)b.y), (double)((float)a.z - (float)b.z) }; };
+    r.vDx = D(p1, p0);
+    r.vDy = D(p2, p0);
+    r.vToCamera = c.View.vPos - p0;
+    return r;
+  }
+
+  //! The plane's normal on the camera's side of pixel (px, py).
+  SD3 CameraSide(const SFaceCase &c)
+  {
+    double q;
+    const SD3 p = Hit(c.View, c.Plane, c.px, c.py, q);
+    return Dot(c.Plane.vNormal, c.View.vPos - p) < 0 ? c.Plane.vNormal * -1 : c.Plane.vNormal;
+  }
+
+  //! The angle (degrees) between a and b, b on its own side.
+  double AngleSigned(SD3 a, SVec3 b)
+  {
+    const SD3 v = { b.x, b.y, b.z };
+    const double l = std::sqrt(Dot(v, v));
+    if (!(l > 0))
+      return 180;
+    return std::acos(std::clamp(Dot(Normalize(a), v) / l, -1.0, 1.0)) * 180 / PI;
+  }
+
+  double Len3(SVec3 a) { return std::sqrt((double)a.x * a.x + (double)a.y * a.y + (double)a.z * a.z); }
+}
+
+XR_TEST(RayFace_PathFace)
+{
+  // The film's river-temple: a trunk 1.5 m from the camera at 4K, its face in the sun stippled straight up (the normal
+  // texel of a face the G-buffer took for none). Faces 0.5-3 m away at the view's centre and corners, head on to nearly
+  // edge on.
+  const SView v = GameView();
+  std::vector<SFaceCase> Faces;
+  const std::array<int, 2> Pixels[] = { { W / 2, H / 2 }, { 40, 30 }, { W - 60, H - 50 }, { 300, H - 400 } };
+  for (double fDistance : { 0.5, 1.0, 1.5, 3.0 })
+    for (const std::array<int, 2> &p : Pixels)
+    {
+      const std::vector<SFaceCase> c = Cases(v, fDistance, { 0, 30, 60, 80 }, p[0], p[1]);
+      Faces.insert(Faces.end(), c.begin(), c.end());
+    }
+  std::vector<SPathFaceIn> In;
+  for (const SFaceCase &c : Faces)
+    In.push_back(PathFaceIn(c));
+  const std::vector<std::array<SVec3, 2>> New = RunPathFace(In, true), Old = RunPathFace(In, false);
+  double fWorst = 0;
+  int nOldUp = 0;
+  for (size_t i = 0; i < In.size(); i++)
+  {
+    const SD3 n = CameraSide(Faces[i]);
+    const double fFace = AngleSigned(n, New[i][0]), fTexel = AngleSigned(n, New[i][1]);
+    fWorst = std::max(fWorst, fTexel);
+    CHECK_MSG(fFace < 0.5, "case " + std::to_string(i) + ": the face " + std::to_string(fFace) + " degrees off");
+    CHECK_MSG(std::abs(Len3(New[i][0]) - 1) < 1e-4, "case " + std::to_string(i) + ": the face " + std::to_string(Len3(New[i][0])) + " long");
+    CHECK_MSG(fTexel < 1, "case " + std::to_string(i) + ": the normal texel " + std::to_string(fTexel) + " degrees off");
+    // Straight up (the texel's quantisation aside) where the face is not.
+    if (AngleSigned({ 0, 0, 1 }, Old[i][1]) < 0.5 && AngleSigned({ 0, 0, 1 }, { (float)n.x, (float)n.y, (float)n.z }) > 10)
+      nOldUp++;
+  }
+  // The frames before: the close faces' texels straight up (the stipple this fixes).
+  std::printf("    %d of %zu faces' texels straight up with the world positions' cross product, the worst texel now %.2f degrees off\n", nOldUp,
+              In.size(), fWorst);
+  CHECK_MSG(nOldUp > 0, "no face's texel straight up with the world positions' cross product");
+  CHECK(fWorst < 1);
+}
+
+XR_TEST(RayFace_PathFaceNone)
+{
+  // An orthographic view (1 / w the same everywhere) edge on to a face (the world positions' differences along a line):
+  // neither gives a side, the way to the camera does, normalised; without bPrecise as long as it is (the frames before).
+  const SView v = GameView(true);
+  SPathFaceIn c;
+  c.fRhw[0] = 1;
+  for (int i = 0; i < 4; i++)
+    for (int j = 0; j < 4; j++)
+      c.m[i][j] = v.m[i][j];
+  c.vDx = { 0.001, 0, 0 };
+  c.vDy = { 0.002, 0, 0 };
+  c.vToCamera = { 1, 2, 2 };
+  const std::vector<std::array<SVec3, 2>> New = RunPathFace({ c }, true), Old = RunPathFace({ c }, false);
+  CHECK_MSG(std::abs(New[0][0].x - 1.0 / 3) < 1e-5 && std::abs(New[0][0].y - 2.0 / 3) < 1e-5 && std::abs(New[0][0].z - 2.0 / 3) < 1e-5,
+            "the face (" + std::to_string(New[0][0].x) + ", " + std::to_string(New[0][0].y) + ", " + std::to_string(New[0][0].z) + ")");
+  CHECK(Old[0][0].x == 1 && Old[0][0].y == 2 && Old[0][0].z == 2);
 }

@@ -137,7 +137,7 @@ void CD3D12Renderer::MakeFrameConstants(SFrameConstants &fc, bool bScene) const
   Set4(fc.vWorldColor, m_WorldColor[0], m_WorldColor[1], m_WorldColor[2], m_WorldColor[3]);
   Set4(fc.vDepthParams, m_ProjMatrix.data[10], m_ProjMatrix.data[14], 0, 0);
   Set4(fc.vHdr, HdrSkyGlow(), HdrSkyGlowPower(), 0, 0);
-  Set4(fc.vLightmap, CV_d3d12_LightmapDot3 ? 1.0f : 0.0f, CV_d3d12_LightColorScale ? 1.0f : 0.0f, 0, 0);
+  Set4(fc.vLightmap, CV_d3d12_LightmapDot3 ? 1.0f : 0.0f, CV_d3d12_LightColorScale ? 1.0f : 0.0f, CV_d3d12_PTFaceNormal ? 1.0f : 0.0f, 0);
   // d3d12_RTPbrScreen: the picture of the frame before, of the main view's size (General.hlsl's PrevFrameAt).
   if (CV_d3d12_RTPbrScreen && m_nReflCopyFrame == m_nFrames - 1 && !IsCameraCut() && m_ReflCopy.nColorSRV > 0 &&
       m_ReflCopySize[0] == (int)w && m_ReflCopySize[1] == (int)h)
