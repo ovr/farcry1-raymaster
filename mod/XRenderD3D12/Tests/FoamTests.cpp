@@ -109,6 +109,22 @@ XR_TEST(Foam_WhitecapLaw)
   }
 }
 
+// Why: a calm sea's crests do not break: below the onset of whitecapping (Beaufort's 3, from 3.4 m/s; the default 4 m/s)
+// there are none, so the game's sea at its wind of 3.5 m/s has no lone whitecap standing on it (Training's bay); from the
+// onset on Monahan's law as it is, and an onset of 0 keeps it at any wind (the frames before).
+XR_TEST(Foam_WhitecapOnset)
+{
+  using namespace OceanSpectrum;
+  CHECK(WHITECAP_ONSET >= 3.4 && WHITECAP_ONSET <= 5.4);
+  CHECK_NEAR(WhitecapCoverageFrom(3.5, WHITECAP_ONSET), 0, 0);
+  CHECK_NEAR(WhitecapCoverageFrom(3.99, 4), 0, 0);
+  CHECK_NEAR(WhitecapCoverageFrom(0, 4), 0, 0);
+  for (double U : { 4.0, 5.0, 7.0, 10.0, 15.0 })
+    CHECK_NEAR(WhitecapCoverageFrom(U, 4), WhitecapCoverage(U), 0);
+  for (double U : { 0.5, 3.5, 7.0 })
+    CHECK_NEAR(WhitecapCoverageFrom(U, 0), WhitecapCoverage(U), 0);
+}
+
 // Why: the crests' threshold is the normal quantile of the whitecaps' share (a few in ten thousand at a light wind):
 // the share of the normal distribution below it must be the share, far into its tail.
 XR_TEST(Foam_NormalQuantile)

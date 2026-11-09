@@ -264,10 +264,9 @@ bool CD3D12Renderer::MakeOcean(float fWind)
   {
     o.fHeightWeight[c] = (float)Sea.HeightWeight(c);
     o.fDivRMS[c] = (float)Sea.JacobianSigma(c, 1.0);
-    // The whitecaps' threshold at a chop of 1 / RMS of the divergence (WhitecapJacobian: 1 + chop RMS z).
-    const double fShare = OceanSpectrum::WhitecapCoverage(fWind) * OceanSpectrum::WHITECAP_SHARE[c] * OceanSpectrum::WHITECAP_ACTIVE;
-    o.fWhitecapZ[c] = fShare > 0 ? (float)OceanSpectrum::NormalQuantile(fShare) : 0.0f;
   }
+  // The whitecaps' thresholds of this wind (UpdateOcean).
+  o.fWhitecapOnset = -1;
   o.fHeightRMS0 = (float)std::sqrt(Sea.Cascades[0].fHeightVar);
   o.fHs = (float)Sea.SignificantHeight();
   o.fPeakSpeed = (float)Sea.PeakSpeed();
@@ -297,6 +296,18 @@ void CD3D12Renderer::UpdateOcean(std::span<const SRenderItem> Items)
   const float fWind = std::max(CV_d3d12_WaterWind, 0.5f);
   if ((!o.pH0 || fWind != o.fWind) && !MakeOcean(fWind))
     return;
+  // The whitecaps' threshold of each cascade at a chop of 1 / RMS of the divergence (WhitecapJacobian: 1 + chop RMS z),
+  // none below the wind d3d12_WaterWhitecapWind; again at a change of the wind or of it.
+  const float fOnset = std::max(CV_d3d12_WaterWhitecapWind, 0.0f);
+  if (fOnset != o.fWhitecapOnset)
+  {
+    for (int c = 0; c < XR_OCEAN_CASCADES; c++)
+    {
+      const double fShare = OceanSpectrum::WhitecapCoverageFrom(fWind, fOnset) * OceanSpectrum::WHITECAP_SHARE[c] * OceanSpectrum::WHITECAP_ACTIVE;
+      o.fWhitecapZ[c] = fShare > 0 ? (float)OceanSpectrum::NormalQuantile(fShare) : 0.0f;
+    }
+    o.fWhitecapOnset = fOnset;
+  }
 
   SOceanConstants oc = {};
   // The time's fraction of the sea's period, in double (the timer's seconds grow without end).
