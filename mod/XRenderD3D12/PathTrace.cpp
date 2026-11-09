@@ -350,16 +350,19 @@ void CD3D12Renderer::UpdatePathLights(std::span<CDLight *const> Lights)
             "%d static alone; left out: %d heat sources, %d fake lights, %d fill lights, %d projectors without a cube, the sun\n",
             m_PathTrace.nLightCount, nCandidates, CV_d3d12_PTLightDistance, (int)Lights.size(), nStatic, nStaticFrame, nLM, nOnlyStatic,
             nSkippedHeat, nSkippedFake, nSkippedFill, nSkippedImage);
+    // The terrain under each lamp: a lamp above it lights a room under it through what is not in the scene for rays.
+    I3DEngine *p3DDump = iSystem ? iSystem->GetI3DEngine() : nullptr;
     for (size_t i = 0; i < Out.size(); i++)
     {
       const SPTLight &L = Out[i];
       const CDLight *pLight = Candidates[i].pLight;
       fprintf(pDump, "  pt light %zu: %s, flags 0x%08x, %s (%.2f %.2f %.2f), radius %.2f, colour (%.3f %.3f %.3f), specular (%.3f %.3f %.3f)%s%s%s, "
-              "%.1f m away, \"%.63s\"\n",
+              "%.1f m away, the terrain under it %.2f, \"%.63s\"\n",
               i, LightKind(L.nParams[0]), (unsigned)pLight->m_Flags, L.nParams[0] == XR_PT_LIGHT_DIRECTIONAL ? "towards" : "at",
               L.vPos[0], L.vPos[1], L.vPos[2], L.vPos[3], L.vColor[0], L.vColor[1], L.vColor[2], L.vSpecular[0], L.vSpecular[1], L.vSpecular[2],
               (L.nParams[1] & XR_PT_LIGHT_LM) ? ", baked" : "", (L.nParams[1] & XR_PT_LIGHT_FILL) ? ", fill" : "",
-              (L.nParams[1] & XR_PT_LIGHT_STATIC) ? ", static" : "", Candidates[i].fKey, pLight->m_Name);
+              (L.nParams[1] & XR_PT_LIGHT_STATIC) ? ", static" : "", Candidates[i].fKey,
+              p3DDump && L.nParams[0] != XR_PT_LIGHT_DIRECTIONAL ? p3DDump->GetTerrainElevation(L.vPos[0], L.vPos[1]) : 0.0f, pLight->m_Name);
     }
   }
 }
