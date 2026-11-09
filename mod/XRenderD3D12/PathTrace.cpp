@@ -453,6 +453,26 @@ void CD3D12Renderer::EndPathTargets()
     fprintf(m_pFrameDump.get(), "pt g-buffer: %d x %d, written by the opaque list\n", m_PathTrace.pAlbedo->m_nWidth, m_PathTrace.pAlbedo->m_nHeight);
 }
 
+void CD3D12Renderer::SetPathDecalLight(SDrawConstants &dc) const
+{
+  // The main view's draws after this frame's composite (its lists after the opaque one), into the scene's targets of the
+  // G-buffer's size.
+  const SPathTraceState &s = m_PathTrace;
+  if (CV_d3d12_PTDecalLight <= 0 || s.nLightFrame != m_nFrames || m_nRecurseLevel != 1 || m_pDevice->IsPathBound() || m_bSpritePass ||
+      m_bDepthPrepass || m_bRayCaptureWalk)
+    return;
+  const CD3D12Texture *pHistory = s.pHistory[s.nHistory];
+  if (!s.pNormal || !s.pSun || !s.pLight || !s.pLightmap || !pHistory || s.pNormal->m_nSRV < 0 || s.pSun->m_nSRV < 0 ||
+      s.pLight->m_nSRV < 0 || s.pLightmap->m_nSRV < 0 || pHistory->m_nSRV < 0)
+    return;
+  dc.nPathDecal[0] = (uint32)s.pNormal->m_nSRV + 1;
+  dc.nPathDecal[1] = (uint32)s.pSun->m_nSRV;
+  dc.nPathDecal[2] = (uint32)s.pLight->m_nSRV;
+  dc.nPathDecal[3] = (uint32)s.pLightmap->m_nSRV;
+  dc.nPathDecalDepth[0] = (uint32)pHistory->m_nSRV;
+  memcpy(dc.vPathDecal, s.vCompositeSun, sizeof(dc.vPathDecal));
+}
+
 bool CD3D12Renderer::UpdatePathKernels(int w, int h)
 {
   SPathTraceState &s = m_PathTrace;
@@ -930,6 +950,9 @@ void CD3D12Renderer::DrawPathTrace()
                            nLights);
   m_pDevice->Require(s.pLight->m_pResource, PATH_READ);
   m_pDevice->Require(s.pHighlights->m_pResource, PATH_READ);
+  // d3d12_PTDecalLight: the draws after it read the history's view depth (General.hlsl's PathDecalFactor).
+  if (CV_d3d12_PTDecalLight > 0)
+    m_pDevice->Require(pHistory->m_pResource, PATH_READ);
   m_pDevice->BindRootSignature();
   InvalidateFrameConstants();
 
@@ -955,6 +978,8 @@ void CD3D12Renderer::DrawPathTrace()
   // w: in the sun's shadow no darker than the raster's shade (d3d12_PTShadeFloor), 1 a frame with the sun, 2 one without.
   Set4(dc.vParams1, bDelight ? P.vBakeLight[0] : 1, bDelight ? P.vBakeLight[1] : 1, bDelight ? P.vBakeLight[2] : 1,
        CV_d3d12_PTShadeFloor ? (bOutdoors ? 1.0f : 2.0f) : 0.0f);
+  // The same for the draws lit by their light maps after it (d3d12_PTDecalLight, SetPathDecalLight).
+  Set4(s.vCompositeSun, P.vSun[0], P.vSun[1], P.vSun[2], dc.vParams1[3]);
   dc.nTex0 = (uint32)s.pAlbedo->m_nSRV;
   dc.nTex1 = (uint32)s.pNormal->m_nSRV;
   dc.nTex2 = (uint32)s.pSun->m_nSRV;

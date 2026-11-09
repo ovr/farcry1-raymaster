@@ -58,4 +58,7 @@ void CSDrawLayout()
   g_TestOut[o++] = asuint(g_DrawExt.vSkin);
   g_TestOut[o++] = asuint(g_DrawExt.vLeafLight);
   g_TestOut[o++] = asuint(g_DrawExt.vLeafSun);
+  g_TestOut[o++] = g_DrawExt.nPathDecal;
+  g_TestOut[o++] = g_DrawExt.nPathDecalDepth;
+  g_TestOut[o++] = asuint(g_DrawExt.vPathDecal);
 }

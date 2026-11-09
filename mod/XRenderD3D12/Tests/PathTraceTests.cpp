@@ -27,6 +27,7 @@
 #include "Test_LightmapFill.h"
 #include "Test_ShadeFloor.h"
 #include "Test_LampTarget.h"
+#include "Test_DecalRatio.h"
 
 #include "Shaders/Constants.h"
 
@@ -799,6 +800,75 @@ XR_TEST(PathTrace_ShadeFloor)
   }
   CHECK(At(Out, 0, 0) > At(Out, 1, 0));   // a static caster's shadow lighter than a live one's
   CHECK(At(Out, 1, 0) < At(Out, 1, 2));   // the tint's blue
+}
+
+//! PathLitLight and PathDecalRatio (d3d12_PTDecalLight): a draw lit by its light map after the paths (a decal blended over
+//! the hull it lies on) takes the light the composite gives the lit surface under it in the raster's ratio of their lights:
+//! its light map's light times the composite's light of the surface (the sun times N.L and the raster's visibility, the
+//! paths, with d3d12_PTShadeFloor no less than the raster's shade) as the game's colour over the raster's light of it
+//! (4 * its light map's light + the ambient), per channel, from 1 / 4 to 4; 1 where the raster's is none, 1 where the
+//! two are the same light. Why: the paths lit Carrier's hull brighter than the raster, and the ship's name over it kept
+//! the raster's light (its own light map 2 to 3 times darker than the hull's, as in the original): dark letters stood out.
+XR_TEST(PathTrace_DecalRatio)
+{
+  NeedShaderModel65();
+  const float vTint[3] = { 0.26f, 0.31f, 0.36f };
+  struct SCase
+  {
+    float fSun, fNL, fPaths, fVisible, fMap, fShadeMode, fHalfAmbient;
+  };
+  const SCase Cases[] = {
+    { 1.2f, 0.8f, 0.30f, 1, 0.15f, 1, 0.20f },     // in the sun: brighter by the paths than the raster
+    { 1.2f, 0.8f, 0.02f, 0, 0.05f, 1, 0.10f },     // in the shadow: the raster's shade, ratio 1
+    { 0.0f, 0.0f, 0.01f, 1, 0.08f, 2, 0.05f },     // a frame without the sun: the raster's at least
+    { 0.0f, 0.0f, 0.20f, 1, 0.00f, 0, 0.00f },     // no raster light at all: 1
+    { 4.0f, 1.0f, 3.00f, 1, 0.01f, 0, 0.01f },     // far brighter: at most 4
+    { 0.0f, 0.0f, 0.0001f, 1, 0.20f, 0, 0.20f },   // far darker (no floor): at least 1 / 4
+    { 1.0f, -0.5f, 0.05f, 1, 0.10f, 0, 0.05f },    // facing away from the sun: the paths alone
+  };
+  const uint32 n = (uint32)(sizeof(Cases) / sizeof(Cases[0]));
+  SDispatch d;
+  d.Shader = XR_BYTECODE(Test_DecalRatio);
+  d.Test.nTest[0] = n;
+  for (int c = 0; c < 3; c++)
+    d.Test.vTest[c] = vTint[c];
+  for (const SCase &c : Cases)
+  {
+    Push(d.In, c.fSun, c.fSun, c.fSun, c.fNL);
+    Push(d.In, c.fPaths, c.fPaths, c.fPaths, c.fVisible);
+    Push(d.In, c.fMap, c.fMap, c.fMap, c.fShadeMode);
+    Push(d.In, c.fHalfAmbient, c.fHalfAmbient, c.fHalfAmbient, 0);
+  }
+  d.nGroups[0] = Groups64(n);
+  d.nOut = 2 * n;
+  const std::vector<uint32> Out = Gpu().Run(d);
+  auto Encode = [](float x) { return x > 1 ? 1 + (x - 1) / 2.2f : std::pow(std::max(x, 0.0f), 1 / 2.2f); };
+  for (uint32 i = 0; i < n; i++)
+  {
+    const SCase &c = Cases[i];
+    const float fRaster = 4 * c.fMap + 2 * c.fHalfAmbient;
+    float fLight = c.fSun * std::max(c.fNL, 0.0f) * c.fVisible + c.fPaths;
+    if (c.fShadeMode > 0)
+    {
+      const float fShade = c.fShadeMode > 1.5f ? 1 : 1 - c.fVisible;
+      fLight = std::max(fLight, fShade > 0 ? fShade * std::pow(fRaster, 2.2f) : 0.0f);
+    }
+    const float fRatio = fRaster > 1e-4f ? std::clamp(Encode(fLight) / fRaster, 0.25f, 4.0f) : 1;
+    for (int k = 0; k < 3; k++)
+    {
+      const float fGotLight = At(Out, 2 * i, k), fGotRatio = At(Out, 2 * i + 1, k);
+      const std::string sCase = "case " + std::to_string(i) + ", channel " + std::to_string(k) + ": ";
+      CHECK_MSG(std::fabs(fGotLight - fLight) <= 1e-5f + 1e-3f * fLight, sCase + "light " + std::to_string(fGotLight) + ", not " + std::to_string(fLight));
+      CHECK_MSG(std::fabs(fGotRatio - fRatio) <= 1e-4f + 1e-3f * fRatio, sCase + "ratio " + std::to_string(fGotRatio) + ", not " + std::to_string(fRatio));
+      CHECK(fGotRatio >= 0.25f - 1e-6f && fGotRatio <= 4 + 1e-6f);
+    }
+  }
+  CHECK(At(Out, 1, 0) > 1.1f);                        // the paths' brighter hull: the decal brighter with it
+  CHECK(std::fabs(At(Out, 3, 0) - 1) <= 1e-3f);       // the raster's shade: as the raster
+  CHECK(std::fabs(At(Out, 5, 0) - 1) <= 1e-3f);       // a frame without the sun: at least as the raster
+  CHECK(At(Out, 7, 0) == 1);                          // no raster light
+  CHECK(std::fabs(At(Out, 9, 0) - 4) <= 1e-5f);
+  CHECK(std::fabs(At(Out, 11, 0) - 0.25f) <= 1e-5f);
 }
 
 //! PathLampTarget (d3d12_PTLampSize): a lamp's shadow ray goes towards a point of a disc of the lamp's radius across the way

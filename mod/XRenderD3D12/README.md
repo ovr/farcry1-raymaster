@@ -1515,6 +1515,18 @@ system ones (better not to touch): [`CONFIGURATION.md`](../../CONFIGURATION.md).
   bunker by the pipe's mouth, a frame without the sun whose lamps' rays the bunker hides where its light
   map is lit, a sixth (0.8 of 4.9), now 5.3: the pipe's mouth shows again (test: unit test
   `PathTrace_ShadeFloor`, `render_tests` suite `ptshadefloor`).
+- A draw lit by its light map after the paths, in the main view's lists after the opaque one (a decal
+  blended over the hull it lies on), takes the paths' light of the lit surface under it in the raster's
+  ratio of their lights (`d3d12_PTDecalLight`, 1; `SetPathDecalLight`, `PathDecalFactor` in
+  `Shaders/General.hlsl`, `PathLitLight` and `PathDecalRatio` in `PathGBuffer.hlsli`): its light map's
+  light times the composite's light of that surface (the sun times N.L and the raster's visibility, the
+  paths, the shade's floor) as the game's colour over the raster's light of it (4 times its light map's
+  light plus its ambient), per channel, from 1 / 4 to 4, where the history's view depth is the pixel's
+  (within 2 % and 10 cm). The paths lit Carrier's hull brighter than the raster, and the ship's name
+  over its bow (`shipSign256_alpha`, blended, its own light map and ambient 2 to 3 times darker than
+  the hull's, as in the original, where it barely shows) kept the raster's light: dark letters (the
+  share of dark pixels in its box 0.202, now 0.128, the rays' 0.113; test: unit test
+  `PathTrace_DecalRatio`, `render_tests` suite `ptdecal`).
 - Its G-buffer (`Shaders/PathGBuffer.hlsli`) is what the main view's opaque list writes with the general
   program's `XR_PT` permutation (`General_PT_*`, `SPipelineKey::bPathTrace`): the colour gets only what
   the path tracer does not light (glow maps, alpha glow, the unlit templates, the fog), a second target

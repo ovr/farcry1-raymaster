@@ -306,6 +306,12 @@ struct SDrawExt
                                   //!< Geometry::UnlitVegetationLight): the light the raster lights them with (VegetationLight.h, the shaders'
                                   //!< 2x in it): rgb the ambient's, w 1 (0: none); the composite lights them with no less (General.hlsl)
   XR_FLOAT4(vLeafSun);            //!< rgb the sun's, times N.L by the vertices' normal, |N.L| where w is 1 (drawn on both sides)
+  XR_UINT4(nPathDecal);           //!< d3d12_PTDecalLight (a draw lit by its light map after the path tracer, General.hlsl's PathDecalFactor):
+                                  //!< the G-buffer's texture table indices, x its normal's + 1 (0: none), y the sun's, z CSFilter's light,
+                                  //!< w the light map target's
+  XR_UINT4(nPathDecalDepth);      //!< x the history's (its w the view depth of the surface)
+  XR_FLOAT4(vPathDecal);          //!< rgb the sun's light the composite takes, w its d3d12_PTShadeFloor (1 a frame with the sun, 2 one
+                                  //!< without, 0 none)
 };
 
 #ifdef __cplusplus
