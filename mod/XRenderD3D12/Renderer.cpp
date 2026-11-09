@@ -364,6 +364,11 @@ void CD3D12Renderer::RegisterVariables()
                      "screen process draws it: 1 improved and 2 paradise a glare of the scene's bright parts (less where the "
                      "adapted luminance is high) and a little less saturation, 3 cold more contrast, a glare and less "
                      "saturation, 4 cartoon flatter, warmer colours with dark edges; 0: none");
+  iConsole->Register("d3d12_RenderModeOutdoor", &CV_d3d12_RenderModeOutdoor, 1, VF_DUMPTODISK,
+                     "1: the render modes' glare goes from its indoor threshold and gain to its outdoor ones as the "
+                     "original's (2 % of the way every 1/50 s; indoors: the camera in a vis area the outdoor lights do not "
+                     "reach): paradise outdoors fainter in a grey fog, improved and cold fainter too; 0: the indoor ones "
+                     "everywhere, as before");
   iConsole->Register("d3d12_ShadowCascades", &CV_d3d12_ShadowCascades, 4, VF_DUMPTODISK,
                      "With e_shadow_maps, the sun's cascaded shadow maps around the camera: how many, 1 to 4 (0: none, the shadow maps of the objects alone)");
   iConsole->Register("d3d12_ShadowDistance", &CV_d3d12_ShadowDistance, 120.0f, VF_DUMPTODISK,

@@ -269,6 +269,7 @@ Details: [Device removal (DRED)](mod/XRenderD3D12/README.md#device-removal-dred)
 | `d3d12_PixelLighting` | `1` | yes | Every lit material lit per pixel |
 | `d3d12_ProjectorSpecular` | `1` | yes | A projected light's highlight over a light mapped specular material |
 | `d3d12_RenderMode` | `1` | yes | The video options' render mode (`r_RenderMode`) drawn over the scene |
+| `d3d12_RenderModeOutdoor` | `1` | yes | The render modes' glare goes from its indoor threshold and gain to its outdoor ones, as the original's |
 | `d3d12_RTAsync` | `1` |  | The acceleration structures built on the compute queue |
 | `d3d12_RTFaceNormal` | `1` |  | The side of a surface the rays start from by the triangle's face (2 that face alone) |
 | `d3d12_RTPbrScreen` | `1` |  | What the metals' rays hit takes its light from the last frame's picture |
