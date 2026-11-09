@@ -622,6 +622,12 @@ void CD3D12Renderer::RegisterVariables()
                      "normalised; 0: from the world position's differences from pixel to pixel, as long as they are (the frames "
                      "before: close to a trunk at 4K a normal so short the G-buffer took it for none, straight up, a stipple "
                      "on the trunk in the sun)");
+  iConsole->Register("d3d12_PTSkyPieces", &CV_d3d12_PTSkyPieces, 1, 0,
+                     "With d3d12_PathTracing, its rays pass the pieces of the sky (the surfaces of a sky box's texture: the planes "
+                     "that close Training's bunker's windows): a path that reaches one has left the scene (the sky's light, "
+                     "indoors the game's ambient light), a lamp's ray goes through; 0: they are surfaces that glow with their "
+                     "picture's colour (the frames before: its bounces lit the boards and the concrete round the windows white "
+                     "and blue, as if the roof were open)");
   iConsole->Register("d3d12_PTWaterPlants", &CV_d3d12_PTWaterPlants, 1, 0,
                      "With d3d12_PathTracing, the plants in the ocean (their bottom under its level) that the engine fades in or "
                      "out drawn blended after the water, as without the path tracer; 0: alpha tested among the opaque surfaces "

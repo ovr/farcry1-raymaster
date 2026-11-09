@@ -328,6 +328,7 @@ Details: [Path tracing](mod/XRenderD3D12/README.md#path-tracing).
 | `d3d12_PTLightDistance` | `60` | yes | The lights within this distance of the camera (m) |
 | `d3d12_PTLightMaps` | `1` | yes | Indoors, the light maps' light beyond the path tracer's own |
 | `d3d12_PTSky` | `1` | yes | The sky's light |
+| `d3d12_PTSkyPieces` | `1` |  | The rays pass the pieces of the sky (Training's bunker's windows): a path that reaches one has left the scene |
 | `d3d12_PTSpecular` | `1` | yes | The highlights of the sun and the lamps |
 | `d3d12_PTSun` | `1` | yes | The sun's light |
 | `d3d12_PTSunHistory` | `64` | yes | The frames the sun's shadow by rays holds at most |
