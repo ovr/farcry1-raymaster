@@ -61,6 +61,12 @@ bool HasNormal(int nFormat)
   }
 }
 
+//! A shader of TemplDecalAdd or TemplDecalAdd_VLight (by its template's name; d3d12_DecalAddOpacity).
+bool IsDecalAdd(const CShader *pSh)
+{
+  return pSh && std::string_view(pSh->GetTemplateName()).starts_with("templdecaladd");
+}
+
 bool HasColor(int nFormat)
 {
   switch (nFormat)
@@ -1200,6 +1206,17 @@ void CD3D12Renderer::DrawLeafItem(const SRenderItem &it)
     const bool bEdgeFade = Props.bEdgeFade && CV_d3d12_MuzzleFlashAuto;
     const float s = GetColorScale(pSh, pObj) * (bEdgeFade ? 2.0f : 1.0f);
     const CFColor Color = eLighting == ELighting::Ambient ? LitColor() : CFColor(1, 1, 1, 1);
+    // TemplDecalAdd (and _VLight) with a material's opacity below 1 (d3d12_DecalAddOpacity): transparent instead, as
+    // the opaque classes and the modulated decals: its colour laid over the frame by the texture's alpha times the
+    // opacity (SRCALPHA, INVSRCALPHA), not added. The original's trace of Research's cave cobweb (the level's material
+    // "Cave.cave_web", opacity 0.99): colour the texture, alpha the texture's * 0.99, blended so; added, its dark grey
+    // texture lit the rock behind it as a bright card with straight edges.
+    if (fOpacity < 1.0f && CV_d3d12_DecalAddOpacity > 0 && eLighting != ELighting::VColor && !Props.bStealth && IsDecalAdd(pSh))
+    {
+      Set4(dc.vColor, s * Color.r, s * Color.g, s * Color.b, fOpacity * std::clamp(pObj->m_Color.a, 0.0f, 1.0f));
+      Key.nState = GS_BLSRC_SRCALPHA | GS_BLDST_ONEMINUSSRCALPHA;
+      break;
+    }
     Set4(dc.vColor, s * Color.r, s * Color.g, s * Color.b, 1);
     if (bEdgeFade)
       dc.vEdgeFade[0] = 1;

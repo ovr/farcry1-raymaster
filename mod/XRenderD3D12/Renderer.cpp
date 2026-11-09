@@ -395,6 +395,10 @@ void CD3D12Renderer::RegisterVariables()
                      "from the camera, as the original sorts them: Volcano's smoke over the lava stays the same from frame to frame; "
                      "0: in the order the engine adds them (the frames before: a heat haze drawn after a nearer smoke wiped it out, "
                      "the smoke a step brighter at each burst of new particles, every 5 frames)");
+  iConsole->Register("d3d12_DecalAddOpacity", &CV_d3d12_DecalAddOpacity, 1, 0,
+                     "1: an added decal (TemplDecalAdd) whose material's opacity is below 1 laid over the frame by its texture's "
+                     "alpha times the opacity instead, as the original draws it: Research's cave cobwebs (opacity 0.99) thin "
+                     "strands; 0: added (the frames before: a bright card with straight edges over the dark rock)");
   iConsole->Register("d3d12_UpscaleDebug", &CV_d3d12_UpscaleDebug, 0, 0, "1: the upscaler's debug view; 2: the depth it gets (near black, far white)");
   iConsole->Register("d3d12_UpscaleVersion", &CV_d3d12_UpscaleVersion, 0, VF_DUMPTODISK,
                      "The upscaler's major version: 0 its own choice for the GPU, 3 or 4 (AMD FSR 3.1 or FSR 4)");

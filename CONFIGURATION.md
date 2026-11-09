@@ -253,6 +253,7 @@ Details: [Device removal (DRED)](mod/XRenderD3D12/README.md#device-removal-dred)
 | `d3d12_BeachShadow` | `1` |  | The foam on the beach in the sun's shadow as the terrain under it (no glowing border round the shadow of Carrier's wreck) |
 | `d3d12_CascadeCull` | `1` |  | Without rays, the parts that reach none of the sun's cascades left out as the engine adds them; 2 also the camera towards the sun ending where nothing can shade them (the level's heights: nothing measurable, the engine loads other textures); 0 all of them, as far as the view |
 | `d3d12_CascadeInstancing` | `1` |  | A caster drawn once into all the sun's cascades it reaches |
+| `d3d12_DecalAddOpacity` | `1` |  | An added decal whose material's opacity is below 1 laid over by its alpha times it, as the original (Research's cave cobwebs: thin strands, no bright card) |
 | `d3d12_DepthPrepass` | `1` |  | The depth prepass (the sun's shadow by rays needs it) |
 | `d3d12_DrawExt` | `1` |  | A draw uploads the rest of its constants only when it reads them |
 | `d3d12_FadeBlend` | `1` |  | The objects that fade with the distance drawn blended |
