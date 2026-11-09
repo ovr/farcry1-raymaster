@@ -150,6 +150,10 @@ reference of the rest.
   short folder under `farcry1_testing1` (and delete them after the run).
   `XRENDERTRACED_SKIP_SPRITES=particlelight_fp,...` holds back the `EF_AddSpriteToScene` calls
   of these shaders, to tell which Direct3D draw belongs to which sprite.
+  `XRENDERTRACED_FOG_END=<metres>` replaces the end of the fog in every `SetFog` call, to see what
+  of the renderer's follows it (the far tree sprites' fade, for instance).
+  `XRENDERTRACED_SPRITE_VIEWDIST=<metres>` replaces the view distance passed to `DrawObjSprites`, and
+  `XRENDERTRACED_OBJMAN_POKE="offset value"` (hex offset) a float of its object manager during the call.
   `XRENDERTRACED_PROBE=FlareInView` moves the object of every flare (`EF_AddEf` with a Flare
   element) onto the camera's line of sight at its own distance or `XRENDERTRACED_FLARE_DIST`, so
   that the renderer tests and draws it; `XRENDERTRACED_FLARE_DIR="dx dy"` turns that line by dx

@@ -527,10 +527,16 @@ void CD3D12Renderer::DrawObjSprites(list2<CStatObjInst*> *pList, float fMaxViewD
   std::array<SGroup, 256> Groups;
   const uint8 *pGroupArray = nullptr;
   int nGroupCount = 0;
+  // The original multiplies each instance's distance by the object manager's factor against the view distances
+  // (River's trees end at 304 m, 0.8 x 500 m / 1.32, with the factor set to 2 at 200 m; d3d12_SpriteDistFactor).
+  float fDistFactor = 1;
   if (pObjMan)
   {
     pGroupArray = *(const uint8 *const *)((const uint8 *)pObjMan + nBin64Offset_ObjManager_Groups);
     nGroupCount = *(const int *)((const uint8 *)pObjMan + nBin64Offset_ObjManager_GroupCount);
+    const float f = *(const float *)((const uint8 *)pObjMan + nBin64Offset_ObjManager_DistFactor);
+    if (CV_d3d12_SpriteDistFactor > 0 && f > 0.01f && f < 100)
+      fDistFactor = f;
   }
   auto FindSet = [this](IStatObj *pObj) -> const SSpriteSet *
   {
@@ -573,12 +579,12 @@ void CD3D12Renderer::DrawObjSprites(list2<CStatObjInst*> *pList, float fMaxViewD
     const float fScale = *(const float *)(p + nBin64Offset_StatObjInst_Scale);
     const int nBrightness = p[nBin64Offset_StatObjInst_Brightness];
 
-    // With bFadeSize the quad shrinks to nothing over the last eighth of the view distance.
+    // With bFadeSize the quad shrinks to nothing over the last eighth of the view distance (against the distance times
+    // the factor); without it the quad keeps its size, as the original's (Swamp's trees past that end).
     float f = 1;
     if (g.bFadeSize)
     {
-      const float E = std::min(fInstMaxViewDist, 0.8f * fMaxViewDist);
-      f = E > 0 ? std::min(1.0f, (E - fDistance) / (E / 8)) : 0.0f;
+      f = FarSpriteAngles::SizeFade(fDistance, fInstMaxViewDist, fMaxViewDist, fDistFactor);
     }
     const float k = fScale * f;
     if (k <= 0)
@@ -636,9 +642,9 @@ void CD3D12Renderer::DrawObjSprites(list2<CStatObjInst*> *pList, float fMaxViewD
       d.fMin = std::min(d.fMin, fLen);
       d.fMax = std::max(d.fMax, fLen);
       const char *szFile = strrchr(g.szName, '\\');
-      fprintf(m_pFrameDump.get(), "    sprite quad: '%s' pos (%.2f %.2f %.2f) centre (%.2f %.2f) %.1f m (engine %.1f), direction %.2f, slice %d + %d %.3f, scale %.3f fade %.3f\n",
+      fprintf(m_pFrameDump.get(), "    sprite quad: '%s' pos (%.2f %.2f %.2f) centre (%.2f %.2f) %.1f m (engine %.1f), direction %.2f, slice %d + %d %.3f, scale %.3f fade %.3f (view distance %.1f, the instance's %.1f, distance factor %.5f)\n",
               szFile ? szFile + 1 : g.szName, vPos.x, vPos.y, vPos.z, cx, cy, fLen, fDistance, fDegrees, Blend.n0, Blend.n1,
-              Blend.fW, fScale, f);
+              Blend.fW, fScale, f, fMaxViewDist, fInstMaxViewDist, fDistFactor);
     }
   }
   if (m_SpriteQuads.empty())

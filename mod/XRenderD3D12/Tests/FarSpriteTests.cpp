@@ -74,6 +74,29 @@ XR_TEST(FarSprite_SliceOfDirection)
   CHECK(SliceOfAngle(75) == 23);
 }
 
+// Why: the far trees must end where the original's do, their distance times the engine's factor against the view
+// distances; by the distance alone River's went on to 400 m, fogged trees on the cliff tops round the sky in a gap of the
+// far mountains, a light block the original does not have.
+XR_TEST(FarSprite_SizeFade)
+{
+  // The original's sprites on River (traced, film river-temple frame 220): the view distance 500 m, the engine's factor
+  // 1.31667, the last quads at 303.8 m; a bush with a view distance of its own, 247.8 m, 176.8 m away at 0.485 of its size.
+  const float z = 1.31667f, E = 0.8f * 500 / z;
+  CHECK(std::fabs(E - 303.8f) < 0.05f);
+  CHECK(SizeFade(100, 1000, 500, z) == 1.0f);
+  CHECK(SizeFade(E * 7 / 8 - 0.01f, 1000, 500, z) == 1.0f);
+  CHECK(std::fabs(SizeFade(E * 15 / 16, 1000, 500, z) - 0.5f) < 1e-4f);
+  CHECK(SizeFade(E, 1000, 500, z) <= 0.0f);
+  CHECK(SizeFade(350, 1000, 500, z) <= 0.0f);
+  CHECK(std::fabs(SizeFade(176.8f, 247.8f, 500, z) - 0.485f) < 0.005f);
+  // The call's distance set to 400 (XRENDERTRACED_SPRITE_VIEWDIST): the original's end 243.1 m; the factor set to 2: 200 m.
+  CHECK(SizeFade(243.0f, 1000, 400, z) > 0 && SizeFade(243.2f, 1000, 400, z) <= 0);
+  CHECK(SizeFade(199.9f, 1000, 500, 2) > 0 && SizeFade(200.1f, 1000, 500, 2) <= 0);
+  // The factor 1 (d3d12_SpriteDistFactor 0): the end at 400 m, as before.
+  CHECK(SizeFade(399.9f, 1000, 500, 1) > 0 && SizeFade(400.1f, 1000, 500, 1) <= 0);
+  CHECK(SizeFade(10, 0, 500, z) == 0.0f);
+}
+
 // Why: d3d12_SpriteBlend's two pictures must be the two nearest the direction, weighed by how near each is: a picture
 // alone at its own direction, half of each where the original changes from one to the other, and the one that weighs
 // more always the original's, so that the blend shows what the original does, only without its jumps.

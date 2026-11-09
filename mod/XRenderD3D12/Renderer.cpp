@@ -303,6 +303,10 @@ void CD3D12Renderer::RegisterVariables()
                      "The part (0 to 1) of the 15 degrees between two pictures of a far vegetation sprite they are blended "
                      "over, about where the original changes from one to the other, so that the far trees do not change "
                      "their outline at once (0.2: 3 degrees); 0 the original's change at once");
+  iConsole->Register("d3d12_SpriteDistFactor", &CV_d3d12_SpriteDistFactor, 1, 0,
+                     "1: the far vegetation sprites shrink and end by their distance times the engine's factor (its object "
+                     "manager's, 1.32 on River), as the original's: River's trees on the cliff tops 300 to 400 m away are not "
+                     "drawn, as in the original; 0 by their distance");
   iConsole->Register("d3d12_Shadows", &CV_d3d12_Shadows, 1, VF_DUMPTODISK, "Shadow maps of the static objects (e_shadow_maps); 0 off");
   iConsole->Register("d3d12_ShadowMapSize", &CV_d3d12_ShadowMapSize, 1024, VF_DUMPTODISK,
                      "Size of the shadow maps, 128 to 4096 (0: the engine's); the maps made from then on");
