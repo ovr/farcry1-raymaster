@@ -189,7 +189,8 @@ void CD3D12Renderer::GetPathShade(SPathShadeParams &P) const
     P.vBakeLight[c] = fOpen > 0 ? std::max(vOpen[c] / fOpen, 0.1f) * fBake : fBake;
   P.fLightGap = std::max(CV_d3d12_RTLightShadowGap, 0.0f);
   P.fBakedFalloff = std::max(CV_d3d12_PTBakedFalloff, 0.0f);
-  P.nLights = m_PathTrace.nLightsFrame == m_nFrames ? m_PathTrace.nLightCount : 0;
+  P.fLampSize = std::clamp(CV_d3d12_PTLampSize, 0.0f, 0.5f);
+  P.nLights =m_PathTrace.nLightsFrame == m_nFrames ? m_PathTrace.nLightCount : 0;
 }
 
 void CD3D12Renderer::UpdatePathLights(std::span<CDLight *const> Lights)
@@ -759,7 +760,7 @@ void CD3D12Renderer::DrawPathTrace()
   const bool bOutdoors = m_pScene && m_pScene->GetSun();
   const float fLightMaps = bOutdoors ? 0.0f : std::max(CV_d3d12_PTLightMaps, 0.0f);
   for (float f : { P.vSun[0], P.vSun[1], P.vSun[2], P.fLamps, P.fEmission, P.fDelight, vSky[0], vSky[1], vSky[2], fAmbient, fAmbientRange,
-                   P.fBakedFalloff, fLightMaps })
+                   P.fBakedFalloff, fLightMaps, P.fLampSize })
   {
     uint32 n;
     memcpy(&n, &f, sizeof(n));
@@ -779,7 +780,7 @@ void CD3D12Renderer::DrawPathTrace()
        bReference ? 0.0f : PATH_SAMPLE_MAX);
   Set4(pc.vSun, P.vSun[0], P.vSun[1], P.vSun[2], P.fLamps);
   Set4(pc.vSky, vSky[0], vSky[1], vSky[2], P.fEmission);
-  Set4(pc.vShade, P.fDelight, P.fLightGap, P.fBakedFalloff, 0);
+  Set4(pc.vShade, P.fDelight, P.fLightGap, P.fBakedFalloff, P.fLampSize);
   Set4(pc.vBakeLight, P.vBakeLight[0], P.vBakeLight[1], P.vBakeLight[2], 0);
   Set4(pc.vFill, fAmbient, fAmbientRange, fLightMaps, 0);
   // The cache's light starts again after a frame without it or where the settings change.

@@ -252,7 +252,7 @@ struct SPathTraceConstants
   XR_FLOAT4(vSun);                //!< rgb the sun's light (SPathShade::vSun), w d3d12_PTLamps
   XR_FLOAT4(vSky);                //!< rgb the sky's light where a path finds nothing, w d3d12_PTEmission
   XR_FLOAT4(vShade);              //!< x d3d12_PTTerrainDelight, y the lamps' rays' gap (d3d12_RTLightShadowGap), z
-                                  //!< d3d12_PTBakedFalloff
+                                  //!< d3d12_PTBakedFalloff, w d3d12_PTLampSize (a lamp's radius over its light's)
   XR_FLOAT4(vFill);               //!< x d3d12_PTAmbient (the game's ambient light a path's ray brings beyond y), y
                                   //!< d3d12_PTAmbientRange (m), z d3d12_PTLightMaps where the frame has no sun (0: no light
                                   //!< maps' light, PathLightmapFill)

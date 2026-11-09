@@ -26,6 +26,7 @@
 #include "Test_LampShadow.h"
 #include "Test_LightmapFill.h"
 #include "Test_ShadeFloor.h"
+#include "Test_LampTarget.h"
 
 #include "Shaders/Constants.h"
 
@@ -798,4 +799,63 @@ XR_TEST(PathTrace_ShadeFloor)
   }
   CHECK(At(Out, 0, 0) > At(Out, 1, 0));   // a static caster's shadow lighter than a live one's
   CHECK(At(Out, 1, 0) < At(Out, 1, 2));   // the tint's blue
+}
+
+//! PathLampTarget (d3d12_PTLampSize): a lamp's shadow ray goes towards a point of a disc of the lamp's radius across the way
+//! to its centre, picked evenly by u, v (the share of the points within half the radius a quarter, their mean the centre),
+//! the radius at most half the distance, the gap at least the radius; none with no radius. Why: a point lamp's shadows
+//! are hard, the cut scene lamp's on Jack's face in Training's opening as cut out (the original's light map lit him
+//! softly).
+XR_TEST(PathTrace_LampTarget)
+{
+  NeedShaderModel65();
+  struct SWay
+  {
+    float x, y, z, fDistance, fGap, fRadius;
+  };
+  const SWay Ways[] = { { 0, 0, 1, 10, 0.1f, 0.5f }, { 1, 2, -0.5f, 30, 0.6f, 0.25f }, { 0.3f, -1, 0, 1, 0.1f, 2 }, { -1, 0, 0, 5, 0.2f, 0 } };
+  const uint32 s = 16, nWay = s * s, nWays = (uint32)(sizeof(Ways) / sizeof(Ways[0])), n = nWay * nWays;
+  SDispatch d;
+  d.Shader = XR_BYTECODE(Test_LampTarget);
+  d.Test.nTest[0] = n;
+  for (const SWay &w : Ways)
+    for (uint32 j = 0; j < nWay; j++)
+    {
+      Push(d.In, w.x, w.y, w.z, w.fDistance);
+      Push(d.In, (j % s + 0.5f) / s, (j / s + 0.5f) / s, w.fGap, w.fRadius);
+    }
+  d.nGroups[0] = Groups64(n);
+  d.nOut = n;
+  const std::vector<uint32> Out = Gpu().Run(d);
+  for (uint32 k = 0; k < nWays; k++)
+  {
+    const SWay &w = Ways[k];
+    const float fLen = std::sqrt(w.x * w.x + w.y * w.y + w.z * w.z);
+    const float vDir[3] = { w.x / fLen, w.y / fLen, w.z / fLen };
+    const float r = std::min(w.fRadius, 0.5f * w.fDistance);
+    const std::string What = "way " + std::to_string(k);
+    float vMean[3] = {}, fMax = 0;
+    uint32 nInner = 0;
+    for (uint32 j = 0; j < nWay; j++)
+    {
+      const uint32 i = k * nWay + j;
+      const float o[3] = { At(Out, i, 0), At(Out, i, 1), At(Out, i, 2) };
+      const float fOff = std::sqrt(o[0] * o[0] + o[1] * o[1] + o[2] * o[2]);
+      CHECK_MSG(std::fabs(o[0] * vDir[0] + o[1] * vDir[1] + o[2] * vDir[2]) <= 1e-3f * w.fDistance, What + ": off the disc");
+      CHECK_MSG(fOff <= r * 1.001f + 1e-5f, What + ": " + std::to_string(fOff) + " beyond the radius " + std::to_string(r));
+      CHECK_MSG(std::fabs(At(Out, i, 3) - std::max(w.fGap, r)) <= 1e-6f, What + ": the gap " + std::to_string(At(Out, i, 3)));
+      for (int c = 0; c < 3; c++)
+        vMean[c] += o[c] / nWay;
+      fMax = std::max(fMax, fOff);
+      nInner += fOff < 0.5f * r ? 1 : 0;
+    }
+    if (r <= 0)
+    {
+      CHECK_MSG(fMax <= 1e-5f, What + ": moved without a radius");
+      continue;
+    }
+    CHECK_MSG(fMax > 0.9f * r, What + ": the disc's edge not reached");
+    CHECK_MSG(std::sqrt(vMean[0] * vMean[0] + vMean[1] * vMean[1] + vMean[2] * vMean[2]) <= 0.02f * r, What + ": the mean off the centre");
+    CHECK_MSG(std::fabs((float)nInner / nWay - 0.25f) <= 0.04f, What + ": " + std::to_string(nInner) + " points within half the radius");
+  }
 }

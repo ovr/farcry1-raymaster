@@ -1410,6 +1410,16 @@ system ones (better not to touch): [`CONFIGURATION.md`](../../CONFIGURATION.md).
   darker, and the game's ambient unoccluded (`d3d12_PTAmbientRange 0`) does not change it. Near the
   lamps k = 1 is brighter than the maps (a still view: 19.5 % of its pixels, 7.4 % with 0). Test: unit
   test `PathTrace_LampFalloff`.
+- A lamp has a size (`d3d12_PTLampSize` s, 0.05 by default: its radius s times its light's, at most half
+  the distance to it): the ray of its shadow goes to a point of a disc that size across the way to its
+  centre (`PathLampTarget`, two more random numbers of the pixel's), the shadow's edge soft over the
+  frames; 0 a point, its shadows hard as cut out (the frames before). The original lights Jack in
+  Training's opening cut scene by a light map, softly; the paths' point lamp over him put his head's
+  hard shadow on his shirt and arm (`Film_training-intro.ini` frames 1080 and 1110: the shirt's mean
+  luma 42.5 and 46.4, now 52.6 and 52.7; the arm's 63.4 and 60.5, now 86.5 and 79.2; his face in the
+  light as it was). The cave's lamp, far from what hides it, about as before (the frame's mean 0.97 and
+  0.98 of a point's): its look there is its light, 1.4 times the original's, not its shadow's edge
+  (test: unit test `PathTrace_LampTarget`, `render_tests` suite `ptlampsize`).
 - Where the frame has no sun (indoors) the light maps give the light their lamps do not
   (`d3d12_PTLightMaps` 1 times it, 0 none: the path tracer's picture as before): the G-buffer keeps the
   light map's light (its sixth target, below), and `CSTrace` adds to the paths' light that of the raster

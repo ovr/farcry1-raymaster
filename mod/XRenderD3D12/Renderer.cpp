@@ -674,6 +674,10 @@ void CD3D12Renderer::RegisterVariables()
   iConsole->Register("d3d12_PTBakedFalloff", &CV_d3d12_PTBakedFalloff, 0.0f, VF_DUMPTODISK,
                      "With d3d12_PathTracing, the falloff of the lamps baked into the light maps: 0 the raster's dynamic light's "
                      "(1 - smoothstep(0, 0.9, d / r)), > 0 the light maps' (1 - d / r) to this power over the whole radius");
+  iConsole->Register("d3d12_PTLampSize", &CV_d3d12_PTLampSize, 0.05f, VF_DUMPTODISK,
+                     "With d3d12_PathTracing, a lamp's radius as a share of its light's radius (at most 0.5): the rays of its "
+                     "shadow go towards points of a disc of that size, a soft shadow's edge; 0: a point, hard shadows (the frames "
+                     "before)");
   iConsole->Register("d3d12_PTVegetationGain", &CV_d3d12_PTVegetationGain, 1, 0,
                      "With d3d12_PathTracing (which bakes the vegetation's colours without light and lights them itself), the "
                      "vegetation's draws the paths do not light (the plants blended after the water, the water's reflection, the "
