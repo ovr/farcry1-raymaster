@@ -2133,6 +2133,18 @@ and lists theirs (`NamesObjects`).
     ponds that changed every frame (with or without the rays). The level of detail is within 0.05 m
     of the heights over 98.9 % of those ponds' pixels, 0.1 m 99.7 %, 0.2 m 99.9 %; a rock, a post
     or a hull standing higher over the terrain keeps its own point.
+  - The characters under the ocean's level (the fish, a shark; `UnderwaterBody.h`,
+    `d3d12_UnderwaterBodies 1`; step 338), with the camera above it, are drawn after the rest of the
+    main view's opaque list without writing the depth (not with the path tracer): the water over
+    them takes the floor under them. The shore's foam took a fish swimming just under the surface
+    for a shallow floor and laid white foam in its shape over Steam's night sea, a flat light fish
+    on the water, which the original does not show (it fogs them by the ocean's fog volume pass);
+    their colour now fades by the water down to that floor. A skinned character's leaf buffer has
+    no box: its span comes from the vertices ProcessSkinning wrote into the video copy, scanned only
+    for a character whose origin is under the level. Under the level means its top 5 cm under it,
+    or for a body shorter than 1 m its middle: Steam's fish rise with their backs 0.15-0.25 m over
+    the level, under the waves' crests, and the water is drawn over that little; a swimmer's head
+    stays. Tests: unit tests `UnderwaterBody_*`, `render_tests` suite `underbodies`.
   - The default sea (3.5 m/s, its significant height 0.15 m) changes little but at the silhouettes
     and the wakes; at 12 m/s (`d3d12_WaterWind 12`, `d3d12_WaterSlope 0`) the crests 1-2 m high a
     few tens of metres off stand over a camera 1.3 m over the water and hide the boats behind them

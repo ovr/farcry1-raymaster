@@ -235,6 +235,9 @@ void CD3D12Renderer::DrawGeometry(const SPipelineKey &Key, const SDrawConstants 
   if (Key.nProgram == eD3D12P_RayDebug && !nRayScene)
     return;
   SPipelineKey FullKey = Key;
+  // The bodies the water looks past (DrawItems, d3d12_UnderwaterBodies) leave the depth to the floor under them.
+  if (m_bNoDepthWrite)
+    FullKey.nState &= ~GS_DEPTHWRITE;
   FullKey.bRayTrace = nRayScene ? (bSurfaceRays || bLightRays ? 1 : Key.bRayTrace) : 0;
   FullKey.nTopology = (uint8)GetTopologyType(eTopology);
   FullKey.nStreams = (pTexCoord1 ? PIPELINE_STREAM_TEXCOORD1 : 0) | (pTangents ? PIPELINE_STREAM_TANGENTS : 0);

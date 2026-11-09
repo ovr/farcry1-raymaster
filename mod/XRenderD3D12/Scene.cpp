@@ -11,6 +11,7 @@
 #include "StdAfx.h"
 #include "Renderer.h"
 #include "Scene.h"
+#include "UnderwaterBody.h"
 #include "Texture.h"
 
 #include <ICryAnimation.h>
@@ -313,6 +314,22 @@ bool PathTestsFadingPlant(const SRenderItem &it)
     return true;
   I3DEngine *p3DEngine = iSystem ? iSystem->GetI3DEngine() : nullptr;
   return !p3DEngine || ZRange(it).first >= p3DEngine->GetWaterLevel();
+}
+
+bool LooksPastUnderwater(const SRenderItem &it, float fLevel, float fCameraZ)
+{
+  // Only a character whose origin is under the level is scanned (the rest stay, a cheap test first).
+  const float *m = it.pObj ? it.pObj->m_Matrix.data : nullptr;
+  if (!it.pRE || !m || it.pRE->m_Type != eDATA_OcLeaf || !it.pObj->m_pCharInstance || m[14] >= fLevel || fCameraZ <= fLevel)
+    return false;
+  // Its skinned vertices, in the video copy (PrepareItems skinned them before the lists).
+  CLeafBuffer *pLB = static_cast<CREOcLeaf *>(it.pRE)->m_pBuffer;
+  const CVertexBuffer *pVB = pLB ? pLB->GetVertexContainer()->m_pVertexBuffer : nullptr;
+  if (!pVB)
+    return false;
+  const UnderwaterBody::SSpan Span =
+    UnderwaterBody::ZSpan(pVB->m_VS[VSF_GENERAL].m_VData, pVB->m_NumVerts, CD3D12Pipeline::GetVertexSize(pVB->m_vertexformat), m);
+  return UnderwaterBody::LooksPast(true, Span, fLevel, fCameraZ);
 }
 
 //////////////////////////////////////////////////////////////////////////
