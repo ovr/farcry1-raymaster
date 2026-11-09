@@ -643,6 +643,13 @@ public:
   Matrix44 m_PrevSkyViewProj;               //!< its sky's (GetSkyViewProj)
   Vec3 m_vPrevCameraPos = Vec3(0, 0, 0);
   float m_fPrevFovY = 0;                    //!< the vertical field of view then
+  int m_nCutFrame = -1;                     //!< m_nFrames whose main view cut to another shot (NoteCameraCut, IsCameraCut)
+  int m_nCutCheckFrame = -1;                //!< m_nFrames of the main view NoteCameraCut saw last (-1: none yet)
+  float m_vCutPos[3] = {};                  //!< that view's camera: its position
+  float m_vCutDir[3] = {};                  //!< and the direction it looks along
+  //! At the main scene's start (BeginMainScene), once a frame: whether its camera cut from the main view's before
+  //! (CameraCut.h, d3d12_CutReset); the frame dump says so.
+  void NoteCameraCut();
   Matrix44 m_Reproject;                     //!< a clip position of this frame's camera to the frame before's
   //! The world matrices of an object with an identity that lasts, by m_pCharInstance or the
   //! permanent CCObject.
@@ -2088,6 +2095,9 @@ public:
   bool m_bVSync = false;
   int m_nFrameID = 65535;             //!< GetFrameID, from 65535; the engine keeps a pointer to it (EFQ_Pointer2FrameID)
   int m_nFrames = 0;                  //!< frames ended by Update
+  //! The main view's camera cut to another shot in this frame (NoteCameraCut, d3d12_CutReset): the histories of the
+  //! screen start again (the upscaler's, the rays' denoisers', the path tracer's, the volumetric light's).
+  bool IsCameraCut() const { return m_nCutFrame == m_nFrames; }
   int m_nFramePolygons = 0;           //!< the triangles drawn since the last Update (DrawGeometry)
   int m_nPolygons = 0;                //!< GetPolyCount: the triangles of the frame the last Update ended
   int m_nFrameDraws = 0;              //!< the draws since the last Update (DrawGeometry)
@@ -2282,6 +2292,7 @@ public:
   float CV_d3d12_UpscaleSharpness = 0.5f;   //!< the upscaler's sharpening, 0 (none) to 1
   int CV_d3d12_UpscaleDebug = 0;            //!< non-zero: the upscaler's debug view
   int CV_d3d12_UpscaleVersion = 0;          //!< the upscaler's major version (FSR 3 or 4), 0 its own choice
+  int CV_d3d12_CutReset = 1;                //!< 1: at a cut of the main view's camera (CameraCut.h) the histories of the screen start again
   int CV_d3d12_UpscaleHdr = 1;              //!< with r_HDRRendering: 1 the upscaler gets the scene's light, tone mapped after it; 0 the
                                             //!< scene tone mapped at the render size (as up to step 259)
   int CV_d3d12_AAQuality = 2;               //!< the anti-aliasing's (d3d12_AA, a string) quality, 0 (low) to 3 (ultra)

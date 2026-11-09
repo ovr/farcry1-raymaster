@@ -228,7 +228,7 @@ bool CAORays::Dispatch(const SAOFrame &Frame)
   Set4(rc.vGI, Frame.fGIBounce, 0, 0, 0);
   Set4(rc.vOutdoorAmbient, Frame.vOutdoorAmbient[0], Frame.vOutdoorAmbient[1], Frame.vOutdoorAmbient[2], 0);
   const bool bDenoise = Frame.nDenoise > 0;
-  const bool bHistory = bDenoise && m_nFrame == r->m_nFrames - 1;
+  const bool bHistory = bDenoise && m_nFrame == r->m_nFrames - 1 && !r->IsCameraCut();  // none after a cut (d3d12_CutReset)
   const int nCur = m_nHistory ^= 1;
   CD3D12Texture *pHistory = m_pHistory[nCur], *pPrevHistory = m_pHistory[nCur ^ 1];
   rc.nTextures[0] = (uint32)m_nDepthSRV;

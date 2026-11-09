@@ -150,6 +150,7 @@ void CD3D12Renderer::BeginMainScene()
   if (CV_d3d12_HDRDebug != 3 && m_Hdr.pDepth)
     ReleaseHdrDepth();
   m_bHdrScene = bHdr;
+  NoteCameraCut();
   BeginUpscale();
   if (!m_bUpscaling && bHdr && m_pDevice->SetHdrTarget(true))
   {
