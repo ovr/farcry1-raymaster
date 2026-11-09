@@ -19,6 +19,7 @@
 #include "Scene.h"
 #include "Texture.h"
 #include "BeachLayers.h"
+#include "FogVolume.h"
 
 #include <cctype>
 #include <charconv>
@@ -592,6 +593,9 @@ SResolvedTemplate ResolveTemplate(const std::string &Name, uint64 nMaskGen)
   // The opacity shifts' pixel shader is the texture times the vertex colour (CGVProgWaterFall passes
   // the mesh's colours, white without them): the material's opacity does not reach it.
   R.Props.bNoOpacity = Name.starts_with("templdecalopacityshift");
+  // WaterVolume, WaterVolumeBumpReflCM: their refraction pass (CGRCIndoorWater_final) is the scene behind times the
+  // material's diffuse colour (FogVolume.h).
+  R.Props.bWaterTint = FogVolume::TintsWater(Name);
   if (const STemplateMotion *pM = FindEntry(s_TemplateMotion, Name))
   {
     R.Props.fScrollU = pM->fScrollU;

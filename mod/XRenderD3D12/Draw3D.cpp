@@ -31,6 +31,7 @@
 #include "RayTracing.h"
 #include "SkyFogBand.h"
 #include "SpriteOrder.h"
+#include "FogVolume.h"
 
 #include <bit>
 
@@ -861,8 +862,9 @@ void CD3D12Renderer::DrawLeafItem(const SRenderItem &it)
     // An object fading in or out: the fog by its alpha alone (as its first pass, below).
     if (it.bFade)
       dc.vEdgeFade[1] = FadeAlpha(pObj);
-    Set4(dc.vParams0, pFogVolume->fFogLayerZ, logf(100) / (2 * std::max(pFogVolume->fMaxFogDist, 0.01f)), bCap ? 1.0f : 0.0f,
-         bBlended ? 1.0f : 0.0f);
+    Set4(dc.vParams0, pFogVolume->fFogLayerZ, FogVolume::Density(pFogVolume->fMaxFogDist), bCap ? 1.0f : 0.0f, bBlended ? 1.0f : 0.0f);
+    // d3d12_FogVolumeDepth: from above at least the fog of the point's depth under the layer (FogVolume.h).
+    Set4(dc.vParams1, CV_d3d12_FogVolumeDepth > 0 ? 1.0f : 0.0f, 0, 0, 0);
     Key.nState = GS_BLSRC_SRCALPHA | GS_BLDST_ONEMINUSSRCALPHA | (bBlended || bCap ? 0 : GS_DEPTHFUNC_EQUAL);
     if (bCap || eDC == eDC_WaterBottom)
       Key.nCull = R_CULL_NONE;

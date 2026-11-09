@@ -249,6 +249,7 @@ struct SShaderProps
   bool bGlossAlpha = false;                       //!< with bSpecular: the specular is times the texture's alpha (*GlossAlpha)
   ETemplateFx eFx = ETemplateFx::None;            //!< eDC_ShaderFx, eDC_ShaderFxBlend: which
   bool bBeachFaint = false;                       //!< eDC_WaterBeach: TerrainWaterBeachResearch's fainter waves (SetupBeachDraw)
+  bool bWaterTint = false;                        //!< eDC_Water: WaterVolume*, the scene behind times the material's diffuse colour (SetupWaterDraw)
   std::string Template;                           //!< materials: the template the material names (lower case)
 
   //! The cube of the scene around the object (EnvCubes.cpp) in place of the material's cube map.

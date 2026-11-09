@@ -1047,6 +1047,18 @@ bool CD3D12Renderer::SetupWaterDraw(SPipelineKey &Key, SDrawConstants &dc, const
   Set4(dc.vParams2, WATER_ABSORPTION[0] + WATER_TURBIDITY, WATER_ABSORPTION[1] + WATER_TURBIDITY, WATER_ABSORPTION[2] + WATER_TURBIDITY,
        WATER_DISPLACEMENT);
 
+  // d3d12_WaterVolumeColor: a WaterVolume material's water (SShaderProps::bWaterTint) shows the scene behind it times the
+  // material's diffuse colour (Water.hlsl, vColor rgb), as the original's refraction pass (FogVolume.h); white: as it is.
+  Set4(dc.vColor, 1, 1, 1, 1);
+  if (bVolume && CV_d3d12_WaterVolumeColor > 0 && it.pShader->GetProps().bWaterTint && it.pRes && it.pRes->m_LMaterial)
+  {
+    const CFColor &d = it.pRes->m_LMaterial->Front.m_Diffuse;
+    Set4(dc.vColor, std::clamp(d.r, 0.0f, 1.0f), std::clamp(d.g, 0.0f, 1.0f), std::clamp(d.b, 0.0f, 1.0f), 1);
+  }
+  if (m_pFrameDump && bVolume && !m_bRayCaptureWalk)
+    fprintf(m_pFrameDump.get(), "water volume '%s' (template '%s'): the scene behind times (%.3f %.3f %.3f)\n", it.pShader->GetName(),
+            it.pShader->GetTemplateName(), dc.vColor[0], dc.vColor[1], dc.vColor[2]);
+
   // The colour of deep water: the ocean's that of its fog volume (the one with caustics) as the level
   // gives it, laid over the scene behind by its layer and distance (1 % of the scene left at twice
   // the distance); else lit by the world colour, the sun's height and the sky; a water volume (not

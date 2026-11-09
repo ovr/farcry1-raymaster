@@ -2425,6 +2425,20 @@ and lists theirs (`NamesObjects`).
   parameters, which the engine sets only for the names the template lists (`GetPublicParams`):
   `s_PublicParams` (`Shader.cpp`) lists them for `LavaVolume`; the other templates list none (their
   materials' parameters, where a material has any, do not arrive: the template's defaults are used).
+- The water of the materials with the shader `WaterVolume` or `WaterVolumeBumpReflCM` (the pools and the cave water of
+  Training, Carrier, Catacombs, Control, Cooler, Dam, Factory, Research, Archive) shows the scene behind it times the
+  material's diffuse colour (`d3d12_WaterVolumeColor`, 1; 0: the frames before; step 347; `FogVolume.h`), as the
+  original's refraction pass (`CGRCIndoorWater_final`: the screen's copy times `WaterColor = DiffuseColor`, "using difuse
+  component for color" as its script says; doubled in its HDR mode, and the game ships with that off). And a fog volume's
+  fog over a point under its layer, seen from above, is at least that of the point's depth there, which every ray to it
+  crosses (`d3d12_FogVolumeDepth`, 1; 0: the frames before): it grew by a gate from nothing at the layer to all of it 5 m
+  down whatever the volume's density. Training's bunker pool (`water.waterA15`, diffuse 0.34 0.36 0.27, in a fog volume
+  of 0.1 m: 23 per metre) showed its floor's tiles and the rocks under the water through clear water, where the
+  original's water is murky; now its floor is in the volume's fog a few centimetres down, and the water tints that a dark
+  olive. In the comparison film's training-bunker at frame 490 the pool's luma is 30.6 against the original's 32.8, its
+  spread 11.1 against 12.7 (before 35.8 and 19.7). The view's whole path under the layer would be more fog still, but it
+  would also thicken the fog of the thin volumes far off at a slant (Swamp's, 35 m), which the gate matches to the
+  original. Tests: unit tests `FogVolume_*`, `render_tests` suite `watervolume`.
 - The decals multiplied into the frame (`TemplDecalModulate`: DESTCOLOR, ZERO) whose material has an
   opacity below 1 are transparent, as the opaque templates are with it: their texture is laid over
   the frame by its alpha times the opacity (SRCALPHA, INVSRCALPHA), unlit, not multiplied in (step
