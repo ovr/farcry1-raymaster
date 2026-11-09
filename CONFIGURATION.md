@@ -338,6 +338,7 @@ Details: [Path tracing](mod/XRenderD3D12/README.md#path-tracing).
 | `d3d12_PTFaceNormal` | `1` |  | The side of a triangle the camera sees (a trunk's normal) from 1 / w's plane, not the world positions' differences |
 | `d3d12_PTShadeFloor` | `1` |  | Where the sun is hidden (all of a frame without the sun) no darker than the raster's shade: the terrain's baked light (times the tint in a live caster's shadow), a light map's light and the ambient |
 | `d3d12_PTLampSize` | `0.05` | yes | A lamp's radius as a share of its light's (at most 0.5): its shadow's rays go to points of a disc of that size, soft edges; 0 a point, hard shadows |
+| `d3d12_PTDecalLight` | `1` | yes | A draw lit by its light map after the paths (a decal blended over the hull it lies on: Carrier's ship's name) takes the paths' light of the surface under it in the raster's ratio of their lights, not the raster's light alone (dark letters over a hull the paths lit brighter); 0 the raster's light |
 | `d3d12_PTLeafLight` | `1` |  | The leaves no darker than the raster lights them (its bake: twice the ambient, the sun times \|N.L\|), not near black under a crown |
 | `d3d12_PTFadeBlend` | `1` |  | The objects that fade with the distance (Carrier's deck crates) blended by their alpha after the trace, as without the paths, not whole from the start of their fade |
 | `d3d12_PTFillLights` | `0` | yes | The characters' fill lights: 0 in their ambient light, 1 lamps with a ray |

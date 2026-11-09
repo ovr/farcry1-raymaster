@@ -160,6 +160,20 @@ void CSShadeFloor(uint i : SV_DispatchThreadID)
                                      TestIn(3 * i + 1).rgb, TestIn(3 * i + 2).rgb), 0));
 }
 
+//! PathLitLight and PathDecalRatio for g_Test.nTest.x cases, 4 vectors each: in (sun rgb, N.L), (paths rgb, visibility),
+//! (map rgb, shade mode), (half ambient rgb, 0); out[2i] the light (rgb), out[2i + 1] the ratio (rgb), as floats; g_Test.vTest
+//! the shadow's tint.
+[numthreads(64, 1, 1)]
+void CSDecalRatio(uint i : SV_DispatchThreadID)
+{
+  if (i >= g_Test.nTest.x)
+    return;
+  const float4 a = TestIn(4 * i), b = TestIn(4 * i + 1), c = TestIn(4 * i + 2), d = TestIn(4 * i + 3);
+  const float3 vLight = PathLitLight(a.rgb, a.w, b.w, b.rgb, c.w, g_Test.vTest.rgb, c.rgb, d.rgb);
+  TestOut(2 * i, float4(vLight, 0));
+  TestOut(2 * i + 1, float4(PathDecalRatio(vLight, c.rgb, d.rgb), 0));
+}
+
 //! PathTraced over a g_Test.nTest.x x g_Test.nTest.y grid of pixels, with g_PT as the test binds it: out[x + y * w].x 1 where traced.
 [numthreads(8, 8, 1)]
 void CSCheckerboard(uint2 p : SV_DispatchThreadID)

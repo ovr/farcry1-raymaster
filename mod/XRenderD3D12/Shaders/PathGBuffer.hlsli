@@ -138,4 +138,33 @@ float3 PathShadeFloor(uint nMaterial, float fShade, bool bTerrain, float3 vBaked
   return 0;
 }
 
+//! The light the composite lights a lit surface (XR_PT_MAT_LIT, not skin) of the G-buffer with (PathComposite.hlsl): the
+//! sun's vSun times N.L (fNL) and the visibility the raster found, plus the paths' vPaths (CSFilter's); with
+//! d3d12_PTShadeFloor (fShadeMode 1 a frame with the sun, 2 one without; 0 none) no less than the raster's shade there.
+float3 PathLitLight(float3 vSun, float fNL, float fVisible, float3 vPaths, float fShadeMode, float3 vTint, float3 vMap, float3 vHalfAmbient)
+{
+  float3 vLight = vSun * (saturate(fNL) * fVisible) + vPaths;
+  if (fShadeMode > 0)
+  {
+    const bool bNoSun = fShadeMode > 1.5;
+    vLight = max(vLight, PathShadeFloor(XR_PT_MAT_LIT + 1, bNoSun ? 1 : 1 - fVisible, !bNoSun, 0, vTint, vMap, vHalfAmbient));
+  }
+  return vLight;
+}
+
+//! d3d12_PTDecalLight: what a light map's light of a draw over a lit surface of the G-buffer is multiplied by (General.hlsl;
+//! the draws after the path tracer, a decal blended over the hull it lies on): the composite's light vLight of the
+//! surface as the game's colour over the raster's of it, 4 vMap + 2 vHalfAmbient (its light map's light times the
+//! visibility of the live casters, the game's ambient light; PathShadeFloor's), per channel, from 1 / 4 to 4 (1 where
+//! the raster's is none). The draw so takes the light the path tracer gives the surface in the raster's ratio of their
+//! lights.
+static const float PATH_DECAL_MIN = 0.25;
+static const float PATH_DECAL_MAX = 4;
+float3 PathDecalRatio(float3 vLight, float3 vMap, float3 vHalfAmbient)
+{
+  const float3 vRaster = max(4 * vMap + 2 * vHalfAmbient, 0);
+  const float3 vPath = float3(HdrEncode(vLight.r), HdrEncode(vLight.g), HdrEncode(vLight.b));
+  return select(vRaster > 1e-4, clamp(vPath / max(vRaster, 1e-4), PATH_DECAL_MIN, PATH_DECAL_MAX), 1);
+}
+
 #endif

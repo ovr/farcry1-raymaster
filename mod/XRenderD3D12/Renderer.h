@@ -923,6 +923,10 @@ public:
   //! The main view's lights for the path tracer (Lights, the scene's), once a frame before its opaque
   //! list: SPTLight in per frame memory (m_PathTrace.nLights); a "pt lights:" line in the frame dump.
   void UpdatePathLights(std::span<CDLight *const> Lights);
+  //! d3d12_PTDecalLight: a draw of the main view lit by its light map after this frame's paths (Draw3D.cpp; a decal
+  //! blended over the hull it lies on) gets the G-buffer and the composite's sun (SDrawExt::nPathDecal, General.hlsl's
+  //! PathDecalFactor): its light map's light times the paths' light of the lit surface under it over the raster's.
+  void SetPathDecalLight(SDrawConstants &dc) const;
   //! The path tracer's views of d3d12_RTDebug (XR_RAY_DEBUG_PT_*): they want the frame's lights too.
   bool WantsPathDebug() const;
   //! SPathShade of Shaders/PathShade.hlsli (its fields there) from the frame and the cvars.
@@ -1009,6 +1013,7 @@ public:
     float PrevJitter[2] = {};               //!< and its jitter
     int nHistoryFrame = -1;                 //!< m_nFrames of the last frame traced (-1: no history)
     int nLightFrame = -1;                   //!< m_nFrames pLight and pHighlights were made in
+    float vCompositeSun[4] = {};            //!< the composite's sun's light (rgb) and its d3d12_PTShadeFloor (w: 1 a frame with the sun, 2 one without, 0 none)
     int nAccumulated = 0;                   //!< the frames in the history (the reference's, while the view stays)
     uint32 nSettingsKey = 0;                //!< the settings the history was traced with
     bool bReference = false;                //!< it was the reference's
@@ -2389,6 +2394,7 @@ public:
   float CV_d3d12_PTBakedFalloff = 0.0f;     //!< the falloff of its lamps baked into the light maps: 0 the raster's dynamic light's,
                                             //!< > 0 the light maps' (1 - d / r) to that power over the whole radius
   float CV_d3d12_PTLampSize = 0.05f;        //!< its lamps' radius as a share of their light's: soft shadows (PathShade.hlsli PathLampTarget; 0 a point)
+  int CV_d3d12_PTDecalLight = 1;            //!< a draw lit by its light map after it: the paths' light of the surface under it in the raster's ratio (SetPathDecalLight; 0 the raster's)
   int CV_d3d12_PTVegetationGain = 1;       //!< with d3d12_PathTracing the vegetation's draws the paths do not light take the light its colours had lit, on the mean (Geometry::UnlitVegetationGain; 0: unlit, the frames before)
   int CV_d3d12_PTShadeFloor = 1;            //!< with d3d12_PathTracing where the sun is hidden no darker than the raster's shade (PathGBuffer.hlsli's PathShadeFloor; 0: the paths' light alone, the frames before)
   int CV_d3d12_PTLeafLight = 1;             //!< with d3d12_PathTracing the leaves lit no darker than the raster's bake lights them (Geometry::UnlitVegetationLight, General.hlsl, PathComposite.hlsl; 0: the sun and the paths alone, the frames before)

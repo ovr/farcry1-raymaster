@@ -678,6 +678,11 @@ void CD3D12Renderer::RegisterVariables()
                      "With d3d12_PathTracing, a lamp's radius as a share of its light's radius (at most 0.5): the rays of its "
                      "shadow go towards points of a disc of that size, a soft shadow's edge; 0: a point, hard shadows (the frames "
                      "before)");
+  iConsole->Register("d3d12_PTDecalLight", &CV_d3d12_PTDecalLight, 1, VF_DUMPTODISK,
+                     "With d3d12_PathTracing, a draw lit by its light map after the paths (a decal blended over the hull it lies "
+                     "on: Carrier's ship's name) takes the light the paths give the surface under it in the raster's ratio of "
+                     "their lights, not the raster's light alone (dark over a hull the paths lit brighter); 0: the raster's light "
+                     "(the frames before)");
   iConsole->Register("d3d12_PTVegetationGain", &CV_d3d12_PTVegetationGain, 1, 0,
                      "With d3d12_PathTracing (which bakes the vegetation's colours without light and lights them itself), the "
                      "vegetation's draws the paths do not light (the plants blended after the water, the water's reflection, the "

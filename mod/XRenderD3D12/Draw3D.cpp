@@ -1694,6 +1694,10 @@ void CD3D12Renderer::DrawLeafItem(const SRenderItem &it)
       Geometry::UnlitVegetationGain(pLB, vGain))
     for (int c = 0; c < 3; c++)
       dc.vColor[c] *= vGain[c];
+  // d3d12_PTDecalLight: a draw lit by its light map (and the ambient under it) after the paths, over a surface they lit
+  // (a decal blended over its hull): the paths' light of that surface in the raster's ratio (General.hlsl's PathDecalFactor).
+  if (bFirstPass && !bPathMaterial && !bLightPass && (dc.nFlags & DF_TEX1_LIGHTMAP) && !(dc.nFlags2 & DF2_LIGHTMAP_LIGHTS))
+    SetPathDecalLight(dc);
   if (bFirstPass)
     Draw();
   if (bRayMaterial)
@@ -2039,6 +2043,8 @@ void CD3D12Renderer::DumpDraw(const SDrawConstants &dc, const SPipelineKey &Key,
     fprintf(f, " parallax (r_Parallax) depth %.4f filter %u", dc.vParallax[0], dc.nParallax[3]);
   if ((dc.nFlags & DF_BUMP) && pTex && pTex->m_pPbrN && dc.nTex3 == (uint32)pTex->m_pPbrN->GetSRV())
     fprintf(f, " normals (r_PbrNormals)");
+  if (dc.nPathDecal[0])
+    fprintf(f, " paths' light of the surface under it (d3d12_PTDecalLight)");
   if (dc.vSkin[0] > 0)
     fprintf(f, " skin (r_Skin) roughness %.2f to %.2f scatter %.2f", dc.vSkin[1], dc.vSkin[2], dc.vSkin[3]);
   if (dc.nPbr[0] && (dc.nFlags & DF_SPECULAR))

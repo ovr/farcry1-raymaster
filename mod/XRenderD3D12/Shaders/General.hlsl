@@ -293,9 +293,8 @@
 #if defined(XR_RAY_REFL) || defined(XR_RAY_LIGHT) || defined(XR_PT)
 #include "RayFace.hlsli"
 #endif
-#ifdef XR_PT
+// XR_PT's G-buffer; the draws after the path tracer read it (d3d12_PTDecalLight).
 #include "PathGBuffer.hlsli"
-#endif
 
 struct SVertexOutput
 {
@@ -1242,6 +1241,34 @@ float PbrReflectDiffuse(float fRough, float fMetal)
   return 1 - fMetal * PbrReflectWeight(fRough, fMetal) * (1 - asfloat(g_DrawExt.nPbr.w & ~XR_PBR_LIGHT_PASS));
 }
 
+#ifndef XR_PT
+//! d3d12_PTDecalLight (nPathDecal.x > 0: a draw lit by its light map after the path tracer, Draw3D.cpp; a decal blended
+//! over the hull it lies on): the factor of its light map's light at the pixel vPos (SV_Position: the scene's pixel, w its
+//! view depth), PathDecalRatio of the G-buffer's lit surface there (its light as the composite makes it over the
+//! raster's), where the draw lies on it (the history's view depth within 2 % and 10 cm of the pixel's); else 1. The path
+//! tracer lit the hull brighter than the raster, the decal kept the raster's light: on Carrier's bow the ship's name
+//! (shipSign256_alpha, its own light map 2 to 3 times darker than the hull's, the original's too) stood out dark.
+float3 PathDecalFactor(float4 vPos)
+{
+  const int3 vAt = int3(vPos.xy, 0);
+  const float4 vGBuffer = g_Textures[g_DrawExt.nPathDecal.x - 1].Load(vAt);
+  if (PathGBufferMaterial(vGBuffer) != XR_PT_MAT_LIT + 1)
+    return 1;
+  const float d = g_Textures[g_DrawExt.nPathDecalDepth.x].Load(vAt).w;
+  if (!(d > 0 && abs(d - vPos.w) <= 0.02 * vPos.w + 0.1))
+    return 1;
+  const float4 vMap = g_Textures[g_DrawExt.nPathDecal.w].Load(vAt);
+  if (PathGBufferSkinRough(vMap.a) > 0)
+    return 1;
+  const float4 vSun = g_Textures[g_DrawExt.nPathDecal.y].Load(vAt);
+  const float3 vPaths = g_Textures[g_DrawExt.nPathDecal.z].Load(vAt).rgb;
+  const float fNL = dot(PathOctDecode(vGBuffer.rg), g_Frame.vSunDir.xyz);
+  const float3 vLight = PathLitLight(g_DrawExt.vPathDecal.rgb, fNL, vSun.r, vPaths, g_DrawExt.vPathDecal.w, g_Frame.vShadowTint.rgb,
+                                     vMap.rgb, vSun.gba);
+  return PathDecalRatio(vLight, vMap.rgb, vSun.gba);
+}
+#endif
+
 float4 ShadePixel(SVertexOutput In)
 {
 #ifdef XR_AMBIENT
@@ -1587,7 +1614,13 @@ float4 ShadePixel(SVertexOutput In)
       }
       else
       {
-        const float3 vMapLight = 4 * fSun * vLight + g_DrawExt.vAmbient.rgb;
+        float3 vMapLight = 4 * fSun * vLight + g_DrawExt.vAmbient.rgb;
+#ifndef XR_PT
+        // d3d12_PTDecalLight: after the path tracer, over a surface it lit, in the raster's ratio to that surface's light.
+        [branch]
+        if (g_DrawExt.nPathDecal.x > 0)
+          vMapLight *= PathDecalFactor(In.vPos);
+#endif
         vColor.rgb *= vMapLight;
         vHigh *= vMapLight;
       }

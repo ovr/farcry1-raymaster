@@ -74,7 +74,7 @@ void Set4(float v[4], float x, float y, float z, float w)
 // constant buffer starts at a 16 byte boundary). Tests/LayoutTests.cpp checks the members against the shaders.
 static_assert(sizeof(SDrawHead) == 256, "SDrawHead must be one 256 byte block");
 static_assert(offsetof(SDrawHead, nFlags) == 4 * 16 * 3 + 16, "SDrawHead's words must follow its matrices and colour");
-static_assert(sizeof(SDrawExt) == 1760 && sizeof(SDrawExt) % 16 == 0, "SDrawExt must match the HLSL layout");
+static_assert(sizeof(SDrawExt) == 1808 && sizeof(SDrawExt) % 16 == 0, "SDrawExt must match the HLSL layout");
 static_assert(offsetof(SDrawExt, mParams0) % 16 == 0 && offsetof(SDrawExt, mShadow) % 16 == 0,
   "SDrawExt's matrices must start at a register");
 static_assert(sizeof(SDrawConstants) == sizeof(SDrawHead) + sizeof(SDrawExt), "SDrawConstants must be the two parts");
