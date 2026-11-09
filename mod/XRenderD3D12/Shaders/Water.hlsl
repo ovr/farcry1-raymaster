@@ -1003,7 +1003,8 @@ float4 ShadeWater(SWaterOutput In)
   float2 vInvSize = 1 / float2(nW, nH);
   float2 vUV0 = In.vPos.xy * vInvSize;
   float fSurface = LinearDepth(In.vPos.z);
-  float fBehind0 = LinearDepth(g_Textures[g_Draw.nTex1].SampleLevel(g_SamplerPointClamp, vUV0, 0).r);
+  const float fRawBehind0 = g_Textures[g_Draw.nTex1].SampleLevel(g_SamplerPointClamp, vUV0, 0).r;
+  float fBehind0 = LinearDepth(fRawBehind0);
   float fThick0 = max(fBehind0 - fSurface, 0);
 
   // Displaced by the waves, less in shallow water and with distance; a displaced sample in front
@@ -1065,7 +1066,14 @@ float4 ShadeWater(SWaterOutput In)
         const float d = vFloor.z - (g_DrawExt.vLightSpec[0].y - GridTerrainDepth(vFloor.xy));
         return float4(saturate(d * 2), FoamFloorZ(vFloor) != vFloor.z ? 0.5 : 0, saturate(-d * 2), 1);
       }
-      fFoamDepth = max(g_DrawExt.vLightSpec[0].y - GridBehindZ(FoamFloorZ(vFloor), In.vWorldPos), 0);
+      // d3d12_WaterFoamFar (vLightSpec[5].y): no shore there where nothing is drawn behind the surface (the depth buffer's
+      // clear) or the floor behind lies off the level's terrain (its heights' map, vLightSpec[3].z > 0): the engine's filler
+      // past the map's edge, which rises through the level far out. The shore's foam drew a thin torn line across the open
+      // sea where it crosses the level (Training's bay 670-700 m off); the original draws no foam there.
+      if (g_DrawExt.vLightSpec[5].y > 0 && (fRawBehind0 >= 1 || (g_DrawExt.vLightSpec[3].z > 0 && GridTerrainDepth(vFloor.xy) >= 1e4)))
+        fFoamDepth = 1e4;
+      else
+        fFoamDepth = max(g_DrawExt.vLightSpec[0].y - GridBehindZ(FoamFloorZ(vFloor), In.vWorldPos), 0);
       fFoamPath = fFoamDepth / max(V.z, 0.01);
     }
     fFoam = WaterFoam(In.vWorldPos.xy, fFoamDepth, fFoamPath, fWakeFoam, fWhitecaps, fShoreFoam, fFoamShade);
