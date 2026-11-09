@@ -2349,6 +2349,8 @@ public:
   float CV_d3d12_PTLamps = 1.0f;            //!< its lamps
   float CV_d3d12_PTBakedFalloff = 0.0f;     //!< the falloff of its lamps baked into the light maps: 0 the raster's dynamic light's,
                                             //!< > 0 the light maps' (1 - d / r) to that power over the whole radius
+  int CV_d3d12_PTVegetationGain = 1;       //!< with d3d12_PathTracing the vegetation's draws the paths do not light take the light its colours had lit, on the mean (Geometry::UnlitVegetationGain; 0: unlit, the frames before)
+  int CV_d3d12_PTWaterPlants = 1;           //!< with d3d12_PathTracing the water plants fading in or out blended after the water, as without it (PathTestsFadingPlant; 0: alpha tested among the opaque surfaces, the frames before)
   float CV_d3d12_PTLightMaps = 1.0f;        //!< indoors, the light the light maps give beyond its lamps (times; 0: none)
   float CV_d3d12_PTEmission = 1.0f;         //!< what glows
   float CV_d3d12_PTTerrainDelight = 2.0f;   //!< the light baked into the terrain's texture: lit over shadowed (<= 1: none taken off)

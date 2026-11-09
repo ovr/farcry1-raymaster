@@ -126,6 +126,12 @@ CRendElement *RE_CreateGeneric(EDataType edt);
 //! The elements drawn over the finished 3D scene, in this order: 1 flares, 2 screen quads, 3 glare
 //! and flash bang, 4 screen effects; 0 for the others.
 int ScreenElementRank(const CRendElement *pRE);
+//! With the path tracer, a plant blended by the alpha of its vertex colour or its object (eDC_AlphaTestVColor fading in
+//! or out, IsBlendedVColor) is alpha tested among the opaque surfaces instead, its alpha times the fade (the paths light
+//! what is in the G-buffer): true for it. Not the water plants (d3d12_PTWaterPlants; the bottom of the leaf buffer's box
+//! under the ocean's level): they stay blended after the water, as without the path tracer (in the depth before the water
+//! their leaves under the surface made the shore's foam by what stands in the water: white leaves round the plants).
+bool PathTestsFadingPlant(const SRenderItem &it);
 
 //! The value of a wave of CCObject::m_Waves at time t: level + amp * f(t * freq + phase) with
 //! f the wave form over one period (eWF_Sin: sin(2 pi x)).

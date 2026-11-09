@@ -138,9 +138,8 @@ namespace
     if (SortGroup(it.nSort) == eS_Nearest)
       return eRL_Nearest;
     // (with the path tracer the grass that fades in or out is alpha tested among the opaque surfaces: the paths light
-    // what is in its G-buffer; DrawLeafItem)
-    if (IsBlendedClass(it.eDrawClass) || it.bFade ||
-        (IsBlendedVColor(it.eDrawClass, it.pRes, it.pObj) && !(it.eDrawClass == eDC_AlphaTestVColor && g_pRenderer->WantsPathTracing())))
+    // what is in its G-buffer; DrawLeafItem; not the water plants: PathTestsFadingPlant)
+    if (IsBlendedClass(it.eDrawClass) || it.bFade || (IsBlendedVColor(it.eDrawClass, it.pRes, it.pObj) && !PathTestsFadingPlant(it)))
       return eRL_Blended;
     if (it.pObj->m_ObjFlags & FOB_NEAREST)
       return eRL_Nearest;
@@ -304,6 +303,16 @@ namespace
       nFlags |= VSM_TANGENTS;
     return nFlags;
   }
+}
+
+bool PathTestsFadingPlant(const SRenderItem &it)
+{
+  if (it.eDrawClass != eDC_AlphaTestVColor || !g_pRenderer || !g_pRenderer->WantsPathTracing())
+    return false;
+  if (g_pRenderer->CV_d3d12_PTWaterPlants <= 0)
+    return true;
+  I3DEngine *p3DEngine = iSystem ? iSystem->GetI3DEngine() : nullptr;
+  return !p3DEngine || ZRange(it).first >= p3DEngine->GetWaterLevel();
 }
 
 //////////////////////////////////////////////////////////////////////////

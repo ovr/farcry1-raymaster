@@ -16,6 +16,7 @@
 #include "Geometry.h"
 #include "Shader.h"
 #include "TangentFrame.h"
+#include "VegetationLight.h"
 #include <CryCompiledFile.h>
 
 #include <array>
@@ -421,6 +422,8 @@ struct SCustomLighting
   Vec3 vAmbient = Vec3(0, 0, 0);
   Vec3 vLight = Vec3(0, 0, 1);
   bool bCalcLighting = false;
+  bool bUnlit = false;                  //!< baked unlit (Geometry::SetUnlitVegetation): vGain is its lit light
+  float vGain[3] = { 1, 1, 1 };         //!< its colours lit over unlit (Geometry::UnlitVegetationGain)
 };
 
 struct SGeomState
@@ -1804,10 +1807,16 @@ void CLeafBuffer::UpdateCustomLighting(float fBackSideLevel, Vec3 vStatObjAmbien
   Last.vAmbient = vStatObjAmbientColor;
   Last.vLight = vLight;
   Last.bCalcLighting = bCalcLighting;
-  // For the path tracer the mesh's colours alone, halved for the shaders' 2x (Geometry::SetUnlitVegetation).
+  // For the path tracer the mesh's colours alone, halved for the shaders' 2x (Geometry::SetUnlitVegetation); the light
+  // they had lit, without the self shadow, summed for the draws the paths do not light (Geometry::UnlitVegetationGain).
   const bool bUnlit = State().bUnlitVegetation;
+  const bool bLitGain = bUnlit && bCalcLighting;
+  Last.bUnlit = bUnlit;
+  for (float &g : Last.vGain)
+    g = 1;
   if (bUnlit)
     bCalcLighting = false;
+  VegetationLight::SGain Gain;
   CVertexBuffer *pSys = m_pSecVertBuffer;
   if (!pSys || !pSys->m_VS[VSF_GENERAL].m_VData)
     return;
@@ -1827,7 +1836,7 @@ void CLeafBuffer::UpdateCustomLighting(float fBackSideLevel, Vec3 vStatObjAmbien
   }
 
   Vec3 vSun(1, 1, 1);
-  if (bCalcLighting && iSystem && iSystem->GetI3DEngine())
+  if ((bCalcLighting || bLitGain) && iSystem && iSystem->GetI3DEngine())
     vSun = iSystem->GetI3DEngine()->GetSunColor();
   float L[3] = { vLight.x, vLight.y, vLight.z };
   Normalize3(L);
@@ -1863,22 +1872,24 @@ void CLeafBuffer::UpdateCustomLighting(float fBackSideLevel, Vec3 vStatObjAmbien
       rgb[1] = m_pLoadedColors[i].y / 255.f;
       rgb[2] = m_pLoadedColors[i].z / 255.f;
     }
-    if (bCalcLighting)
+    if (bCalcLighting || bLitGain)
     {
       // colour * (ambient / 2 + the sun light minus the self shadow, at least 0): on one side the
-      // sun times N.L, on two sides ambient / 2 + sun / 2 times |N.L|. The shaders take vertex
-      // colours times 2.
+      // sun times N.L, on two sides ambient / 2 + sun / 2 times |N.L| (VegetationLight.h). The
+      // shaders take vertex colours times 2. Unlit for the path tracer, the light it had summed.
       float N[3] = { 0, 0, 1 };
       if (pF->nNormal >= 0)
         memcpy(N, pV + pF->nNormal, 12);
       else if (m_TempNormals && i < m_SecVertCount)
         memcpy(N, &m_TempNormals[i], 12);
       const float d = N[0] * L[0] + N[1] * L[1] + N[2] * L[2];
-      const float fShadow = fShadowStep > 0 ? fShadowStep * CountRayHits(p, *pF, nVerts, Tris, (const float *)(pV + pF->nPos), L) : 0;
-      for (int c = 0; c < 3; c++)
+      if (bLitGain)
+        Gain.Add(rgb, amb, sun, d, TwoSided[i] != 0);
+      else
       {
-        const float fSun = TwoSided[i] ? 0.5f * (amb[c] + sun[c] * fabsf(d)) : sun[c] * std::max(d, 0.f);
-        rgb[c] *= 0.5f * amb[c] + std::max(fSun - fShadow, 0.f);
+        const float fShadow = fShadowStep > 0 ? fShadowStep * CountRayHits(p, *pF, nVerts, Tris, (const float *)(pV + pF->nPos), L) : 0;
+        for (int c = 0; c < 3; c++)
+          rgb[c] *= VegetationLight::Light(amb[c], sun[c], d, TwoSided[i] != 0, fShadow);
       }
     }
     if (bUnlit)
@@ -1888,6 +1899,11 @@ void CLeafBuffer::UpdateCustomLighting(float fBackSideLevel, Vec3 vStatObjAmbien
     pCol[1] = (uint8)(std::clamp(rgb[1], 0.f, 1.f) * 255.f + 0.5f);
     pCol[0] = (uint8)(std::clamp(rgb[2], 0.f, 1.f) * 255.f + 0.5f);
   }
+  if (bLitGain)
+    Gain.Get(Last.vGain);
+  else if (bUnlit)
+    for (float &g : Last.vGain)
+      g = 2; // not lit by the bake: the raster's colours are the mesh's, twice these
   m_UpdateVBufferMask |= MASK_GENERAL;
 }
 
@@ -2385,6 +2401,18 @@ void Geometry::SetUnlitVegetation(bool bUnlit)
   for (const auto &[pLB, L] : All)
     if (S.Live.count(pLB))
       pLB->UpdateCustomLighting(L.fBackSideLevel, L.vAmbient, L.vLight, L.bCalcLighting);
+}
+
+bool Geometry::UnlitVegetationGain(const CLeafBuffer *pLB, float vGain[3])
+{
+  const SGeomState &S = State();
+  if (!S.bUnlitVegetation || !pLB)
+    return false;
+  const auto it = S.Lighting.find(const_cast<CLeafBuffer *>(pLB));
+  if (it == S.Lighting.end() || !it->second.bUnlit)
+    return false;
+  memcpy(vGain, it->second.vGain, 3 * sizeof(float));
+  return true;
 }
 
 void Geometry::Shutdown()
