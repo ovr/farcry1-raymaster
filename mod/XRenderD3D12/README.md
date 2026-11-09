@@ -2170,6 +2170,22 @@ and lists theirs (`NamesObjects`).
     level far out, and the shore's foam laid a thin torn white line across Training's open sea where
     it crosses the level 670-700 m off, which the original does not show. Tests: `render_tests`
     suite `farfoam` (the line's pixels in the bay's frames: 8-11 with it, 520-770 without).
+  - No whitecaps, shore's foam or surf on the ponds and lakes the level's terrain cuts off from the
+    sea (`d3d12_WaterFoamPonds`, 1; 0 the sea's foam on them too; step 348; `WaterBodies.h`). The
+    engine's water is one plane at the level's water level over the whole level: a pond is a hollow
+    of the terrain under it, and the ocean's foam drew in it as on the sea's beaches. Swamp's ponds,
+    a few decimetres deep, were white along every bank and over their shallows, where the original
+    draws still grey water; over a pond no wind raises waves that break (over 450 m of fetch the
+    default 3.5 m/s wind's are some 4 cm high) and no swell reaches it. The level's heights (the
+    grid's heights texture, made once per level) are split at its water level: water joined to the
+    map's edge through water (eight neighbours; past the edge lies the sea) is the sea, the rest
+    ponds; the land takes the share of its nearest water, so that between the texels the share
+    changes only on the land between two bodies, never along a shore. It is the texture's second
+    channel (debug view 35). Swamp has 17 ponds (the largest 25,700 m²), River 11 (its river,
+    199,000 m²), Steam 6 small ones, Carrier 2 puddles; Training, Fort, Pier and Rebellion none.
+    Over Swamp's ponds the frame is now that without any foam (0.00 apart, 7.5 before). They stay
+    lighter than the original's (luma 87.8 against 68.2, 95.0 before): the foggy sky in their
+    reflection. Tests: unit tests `WaterBodies_*`, `render_tests` suite `waterponds`.
   - The characters under the ocean's level (the fish, a shark; `UnderwaterBody.h`,
     `d3d12_UnderwaterBodies 1`; step 338), with the camera above it, are drawn after the rest of the
     main view's opaque list without writing the depth (not with the path tracer): the water over

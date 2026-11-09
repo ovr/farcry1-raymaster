@@ -274,6 +274,19 @@ float GridTerrainDepth(float2 P)
   return fDepth;
 }
 
+//! The share of the open sea at P on the ocean's grid (d3d12_WaterFoamPonds, vLightSpec[5].z; the terrain's texture's y,
+//! WaterBodies.h): 0 over a pond or a lake the level's terrain cuts off from the sea, 1 on the sea and off the terrain's
+//! map; 1 off the grid.
+float GridOpenShare(float2 P)
+{
+  if (g_DrawExt.vLightSpec[0].x == 0 || g_DrawExt.vLightSpec[5].z <= 0)
+    return 1;
+  const float2 vTerrainUV = P * g_DrawExt.vLightSpec[3].z + g_DrawExt.vLightSpec[3].w;
+  if (any(vTerrainUV < 0) || any(vTerrainUV > 1))
+    return 1;
+  return g_Textures[asuint(g_DrawExt.vLightSpec[1].z)].SampleLevel(g_SamplerLinearClamp, vTerrainUV, 0).y;
+}
+
 //! The height z (m) of the scene behind the ocean's grid's surface point P as the water there takes it: what stands over
 //! the water behind a crest hidden by it (GridHiddenShare), the floor under P in its place (GridTerrainDepth), so that
 //! the water's light through the crest goes down to that floor (the scene's colour as its: in shallow water the beach
@@ -804,12 +817,14 @@ float WaterFoam(float2 P, float fDepth, float fPath, float fWake, out float fWhi
   fShade = 1;
   const float4 f0 = g_TextureArrays[t].Sample(g_SamplerLinearWrap, float3(P / XR_OCEAN_TILE0, 0));
   const float4 f1 = g_TextureArrays[t].Sample(g_SamplerLinearWrap, float3(P / XR_OCEAN_TILE1, 1));
-  fWhitecaps = WhitecapAmount(f0.x, f1.x, f0.w, g_DrawExt.vTexGen1U.y);
+  // None of the sea's foam on a pond the terrain cuts off from it (GridOpenShare): no fetch for the wind's waves, no swell.
+  const float fOpen = GridOpenShare(P);
+  fWhitecaps = WhitecapAmount(f0.x, f1.x, f0.w, g_DrawExt.vTexGen1U.y) * fOpen;
   fShore = 0;
   // Out to the deepest water a wave breaks in and to the reach of the foam by what stands in it: the surf's height over
   // the least breaker index, the wind sea's highest crests (about its significant height) twice over it, 5 of it.
   const float fNear = max(g_DrawExt.vTexGen1V.z / FoamBreakerIndex(0), 5 * g_DrawExt.vTexGen1U.z) + 0.05;
-  if (FoamQuadAny(fDepth < fNear || fPath < fNear))
+  if (FoamQuadAny((fDepth < fNear || fPath < fNear) && fOpen > 0))
   {
     const float2 vAhead = g_DrawExt.vTexGen1V.xy;
     const float h1 = g_TextureArrays[t].Sample(g_SamplerLinearWrap, float3((P + vAhead * 0.7) / XR_OCEAN_TILE0, 0)).w;
@@ -829,6 +844,7 @@ float WaterFoam(float2 P, float fDepth, float fPath, float fWake, out float fWhi
       if (fSurf > 0)
         fShore = max(fShore, saturate(fSurf * SurfClumps(P, fDepth, fBreak, fCycle)));
     }
+    fShore *= fOpen;
   }
   const float fAmount = saturate((fWhitecaps + fShore + (fWake > 0 ? WakeClumps(P, fWake) : 0)) * g_DrawExt.vTexGen1U.x);
   if (!FoamQuadAny(fAmount > 0))
@@ -1069,6 +1085,9 @@ float4 ShadeWater(SWaterOutput In)
         const float d = vFloor.z - (g_DrawExt.vLightSpec[0].y - GridTerrainDepth(vFloor.xy));
         return float4(saturate(d * 2), FoamFloorZ(vFloor) != vFloor.z ? 0.5 : 0, saturate(-d * 2), 1);
       }
+      // 35: the open sea's share (white; black on the ponds cut off from it: GridOpenShare, d3d12_WaterFoamPonds).
+      if (g_DrawExt.vParams0.z == 35)
+        return float4(GridOpenShare(In.vWorldPos.xy).xxx, 1);
       // d3d12_WaterFoamFar (vLightSpec[5].y): no shore there where nothing is drawn behind the surface (the depth buffer's
       // clear) or the floor behind lies off the level's terrain (its heights' map, vLightSpec[3].z > 0): the engine's filler
       // past the map's edge, which rises through the level far out. The shore's foam drew a thin torn line across the open

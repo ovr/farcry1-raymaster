@@ -1279,8 +1279,9 @@ public:
   //! does not apply (d3d12_WaterGeometry 0, no FFT ocean, an environment cube, a water volume, a disc not as the game's).
   std::optional<SGeomDraw> SetupOceanGrid(SDrawConstants &dc, const SRenderItem &it, CLeafBuffer *pLB);
   bool EnsureOceanGrid();
-  //! The terrain's heights for the grid's depth under the level (made for each level).
-  bool EnsureGridTerrain();
+  //! The terrain's heights for the grid's depth under the level and the open sea's share by them at the water level
+  //! fLevel (WaterBodies.h; made for each level).
+  bool EnsureGridTerrain(float fLevel);
   //! The grid (Geom, SetupOceanGrid's) of the water's draw: with d3d12_WaterDeferred its depth alone, then the water
   //! program over the view where it is in front of the scene's copy (Water.hlsl's PSDeferred), each pixel shaded once;
   //! else (MSAA, its debug views 29 and 30, no view of the depth buffer) the grid shaded as it is drawn.
@@ -1295,8 +1296,10 @@ public:
     DXGI_FORMAT DepthFormat = DXGI_FORMAT_UNKNOWN;
     int nDepthSRV = -1;                     //!< the main view's depth buffer in the texture table (PSDeferred)
     std::vector<float> Rings;               //!< the frame's rings' radii (OceanGrid::FrameRings)
-    CD3D12Texture *pTerrain = nullptr;      //!< the terrain's heights (R32F, a texel a unit of its height map, the texel i at i units)
+    CD3D12Texture *pTerrain = nullptr;      //!< the terrain's heights and the open sea's share there (R32G32F: WaterBodies.h; a texel a unit of its height map, the texel i at i units)
     float fTerrainScale = 0, fTerrainOffset = 0;  //!< the world (m) to its uv: x * scale + offset
+    float fTerrainLevel = 0;                //!< the water level the share was found for
+    int nPonds = 0, nPondHeights = 0, nSeaHeights = 0, nLargestPond = 0, nTerrainUnit = 0;  //!< WaterBodies::OpenShare's, the heights' spacing (m; the frame dump)
     bool bTerrainStale = true;              //!< a level loaded since it was made (PreLoad)
     bool bFailed = false;                   //!< no grid (until d3d12_WaterGeometry 0)
     int nBodiesFrame = -1;                  //!< the frame of Bodies
@@ -2258,6 +2261,7 @@ public:
   float CV_d3d12_WaterFoam = 1;       //!< the FFT ocean's foam: whitecaps, waves breaking on the shore (0: none, the frames before)
   float CV_d3d12_WaterFoamTerrain = 0.2f; //!< m: the foam's floor within this of the level's terrain heights takes them (0: the floor as drawn)
   int CV_d3d12_WaterFoamFar = 1;      //!< 1: no shore's foam where nothing is drawn behind the water or the floor lies off the level's terrain (0: the frames before)
+  int CV_d3d12_WaterFoamPonds = 1;    //!< 1: no ocean's foam (whitecaps, shore, surf) on the ponds the level's terrain cuts off from the sea (WaterBodies.h; 0: the frames before)
   float CV_d3d12_WaterSurf = 0.8f;    //!< m: the height of the swell breaking on the ocean's shores, its surf's foam (0: none)
   int CV_d3d12_WaterCaustics = 1;     //!< the caustics on the sea floor of the FFT ocean's waves (0: the static texture, the frames before)
   int CV_d3d12_WaterVolume = 1;       //!< the light in the ocean's water: attenuation by channel, scattering, Snell's window (0: the fog volume's fog, the frames before)

@@ -173,7 +173,8 @@ void CD3D12Renderer::RegisterVariables()
                      "water scatters towards the camera, 32 the sun's light in it (grey its mean: black its shadow, brighter "
                      "the caustics' shafts), 33 the share of the scene behind left (the other modes there without the water's "
                      "light); with d3d12_WaterFoam on the ocean's grid: 34 the floor behind against the level's terrain heights "
-                     "(red above, blue below, 0.5 m full; green where the foam takes the heights: d3d12_WaterFoamTerrain)");
+                     "(red above, blue below, 0.5 m full; green where the foam takes the heights: d3d12_WaterFoamTerrain), "
+                     "35 the open sea's share (white; black on the ponds the terrain cuts off from it: d3d12_WaterFoamPonds)");
   iConsole->Register("d3d12_Caustics", &CV_d3d12_Caustics, 1, VF_DUMPTODISK, "Caustics on the terrain under the ocean; 0 off");
   // Not saved (d3d12_WaterSunGlint before it was, at 0).
   iConsole->Register("d3d12_WaterGlint", &CV_d3d12_WaterGlint, 1.0f, 0,
@@ -212,6 +213,11 @@ void CD3D12Renderer::RegisterVariables()
                      "the floor behind lies off the level's terrain (the engine's filler past the map's edge, which rises "
                      "through the water far out): no thin torn line of foam across the open sea (Training's bay, 700 m off); "
                      "0: the foam of that floor's depth (the frames before)");
+  iConsole->Register("d3d12_WaterFoamPonds", &CV_d3d12_WaterFoamPonds, 1, 0,
+                     "With d3d12_WaterFoam on the ocean's grid, 1: no whitecaps, shore's foam or surf on the ponds and lakes "
+                     "the level's terrain cuts off from the sea (water under the level not joined to the map's edge through "
+                     "water): Swamp's shallow ponds still, not white from bank to bank; 0: the ocean's foam on them too "
+                     "(the frames before)");
   iConsole->Register("d3d12_WaterSurf", &CV_d3d12_WaterSurf, 0.8f, 0,
                      "With d3d12_WaterFoam: the height (m) of the swell (9 s) breaking on the ocean's shores, where the water "
                      "gets shallower than it over 0.78; its bores run to the shore, a white roller on each front and the lace "
