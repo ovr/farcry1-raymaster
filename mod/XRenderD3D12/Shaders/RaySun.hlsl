@@ -130,7 +130,12 @@ void CSTrace(uint3 vId : SV_DispatchThreadID)
     return;
   }
   const float3 vPos = PixelPos(p + 0.5, d);
-  const float3 vN = FaceNormal(p, vPos, d);
+  // d3d12_RTSunCrease: the pixel's own face where it meets another (FaceNormalCrease), and the ray from 0 on, not 1 cm:
+  // the offset along its face's normal keeps the origin as close to the other face (a floor's pixel against a wall),
+  // and a ray that met that face within a centimetre went through it to the sun (River's temple: its floor's seams
+  // with the walls a bright line in the path tracer's sun).
+  const bool bCrease = (g_Sun.nFlags.z & 2) != 0;
+  const float3 vN = bCrease ? FaceNormalCrease(p, vPos, d) : FaceNormal(p, vPos, d);
   const float fPixel = d * g_Sun.vParams.w;
   // A point of the sun's disc, uniform over it.
   const float u = Noise(p, g_Sun.nFlags.y), v = Noise(float2(p.y, p.x) + 23.0, g_Sun.nFlags.y + 7);
@@ -138,7 +143,7 @@ void CSTrace(uint3 vId : SV_DispatchThreadID)
   RayDesc Ray;
   Ray.Origin = vPos + vN * (0.02 + 2 * fPixel);
   Ray.Direction = normalize(g_Sun.vSun.xyz + vDisc.x * g_Sun.vSunX.xyz + vDisc.y * g_Sun.vSunY.xyz);
-  Ray.TMin = 0.01;
+  Ray.TMin = bCrease ? 0 : 0.01;
   Ray.TMax = g_Sun.vParams.z;
   // Where nothing hides the sun, no live caster does; where a live caster does, it hides it from both.
   uint nKind;
@@ -302,7 +307,7 @@ void CSFilter(uint3 vId : SV_DispatchThreadID)
   // Only the soft edges (and a young history): where the pixel is all in the sun or all in the shadow of
   // each set the history is as its rays round it.
   const bool bEdge = (vVis.x > 0 && vVis.x < 1) || (vVis.y > 0 && vVis.y < 1) || c.z < FILTER_YOUNG;
-  if (g_Sun.nFlags.z && bEdge)
+  if ((g_Sun.nFlags.z & 1) && bEdge)
   {
     // The distance of the casters round the pixel: the mean of the rays that hit (25 of them over 9 x 9
     // pixels: every other one of a ray a pixel, each of 2 x 2 pixels a ray).

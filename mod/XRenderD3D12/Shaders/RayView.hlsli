@@ -82,6 +82,27 @@ float3 FaceNormal(int2 p, float3 vPos, float d)
   return dot(n, vToCamera) < 0 ? -n : n;
 }
 
+//! FaceNormal, each axis's neighbour taken from the side whose two pixels, extended, meet the pixel's depth (the
+//! depth buffer is affine across a face): at a crease, a floor meeting a wall, the pixel's own face, not a cross of
+//! the two faces' slopes that may point along the crease (RaySun.hlsl, d3d12_RTSunCrease).
+float3 FaceNormalCrease(int2 p, float3 vPos, float d)
+{
+  const float z = DepthAt(p);
+  const float zl = DepthAt(p + int2(-1, 0)), zr = DepthAt(p + int2(1, 0)), zu = DepthAt(p + int2(0, -1)), zd = DepthAt(p + int2(0, 1));
+  const float zl2 = DepthAt(p + int2(-2, 0)), zr2 = DepthAt(p + int2(2, 0));
+  const float zu2 = DepthAt(p + int2(0, -2)), zd2 = DepthAt(p + int2(0, 2));
+  const float2 c = p + 0.5;
+  const float3 vX = abs(2 * zr - zr2 - z) < abs(2 * zl - zl2 - z) ? PixelPos(c + float2(1, 0), ViewDepthOf(zr)) - vPos
+                                                                   : vPos - PixelPos(c - float2(1, 0), ViewDepthOf(zl));
+  const float3 vY = abs(2 * zd - zd2 - z) < abs(2 * zu - zu2 - z) ? PixelPos(c + float2(0, 1), ViewDepthOf(zd)) - vPos
+                                                                   : vPos - PixelPos(c - float2(0, 1), ViewDepthOf(zu));
+  const float3 vToCamera = RAY_VIEW.vCameraPos.xyz - vPos;
+  float3 n = cross(vX, vY);
+  const float fLen = length(n);
+  n = fLen > 1e-12 ? n / fLen : normalize(vToCamera);
+  return dot(n, vToCamera) < 0 ? -n : n;
+}
+
 //! Interleaved gradient noise at pixel p, another pattern each frame.
 float Noise(float2 p, uint nFrame)
 {

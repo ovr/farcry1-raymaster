@@ -2346,6 +2346,7 @@ public:
                                             //!< and towards a lamp by the vertices' normal where the face is turned from it (bit 21; 2: not)
   float CV_d3d12_RTSunAngle = 0.53f;        //!< the sun's disc, degrees across (the soft edges of its shadow)
   int CV_d3d12_RTSunDenoise = 1;            //!< the sun's shadow by rays blended over the frames and its soft edges filtered
+  int CV_d3d12_RTSunCrease = 1;             //!< its rays from a crease's pixel off its own face and from 0 m (RaySun.hlsl)
   int CV_d3d12_RTGI = 0;                    //!< the ambient light by rays, a bounce (RayAO.cpp): 1 a ray for each 2 x 2 pixels, 2 a pixel
   float CV_d3d12_RTGIDistance = 4.0f;       //!< how far its rays look (m)
   float CV_d3d12_RTGIBounce = 1.0f;         //!< how much light what they find gives back (0: it only occludes)
