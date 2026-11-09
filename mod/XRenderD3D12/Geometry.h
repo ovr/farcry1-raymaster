@@ -105,6 +105,12 @@ namespace Geometry
   //! them itself. A change bakes the vertex colours of every leaf buffer lit so far again, with the
   //! engine's last values.
   void SetUnlitVegetation(bool bUnlit);
+  //! With the vegetation baked unlit (SetUnlitVegetation): the light the leaf buffer pLB's vertex colours had lit over
+  //! their colours unlit, in each channel the sum over its vertices of the lit colours (the self shadow left out) over the
+  //! sum of the unlit (2 for one the engine bakes without light: halved), for its draws the paths do not light (the
+  //! blended ones, the reflections). False for a leaf buffer not baked so (not the vegetation's) or with the
+  //! vegetation lit.
+  bool UnlitVegetationGain(const CLeafBuffer *pLB, float vGain[3]);
 }
 
 //////////////////////////////////////////////////////////////////////////

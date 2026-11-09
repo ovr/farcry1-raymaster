@@ -1419,7 +1419,15 @@ system ones (better not to touch): [`CONFIGURATION.md`](../../CONFIGURATION.md).
   the raster's point (they bend in the wind, the rays' scene's do not). While the path tracer is on the vegetation's vertex colours
   are baked without the light (the engine's values again on a change), and the grass that fades in or
   out is alpha tested among the opaque surfaces (its alpha times the fade: it thins out), not blended
-  after them.
+  after them; but for the plants in the water (`d3d12_PTWaterPlants`, 1: those whose bounds reach under
+  the ocean's level), blended after it as without the paths: their leaves under the water were in the
+  depth the water takes the shore's foam from, white leaves round each plant (the film's carrier-wreck).
+  The vegetation's draws the paths do not light (those plants, the water's reflection of the jungle, the
+  cubes) take the light its colours were baked with, on the mean over each mesh
+  (`d3d12_PTVegetationGain`, 1; `Geometry::UnlitVegetationGain`, `VegetationLight.h`: in each channel
+  the sum of its vertices' colours lit by the sun and the ambient, the self shadow left out, over the
+  sum unlit), not unlit, dark beside the raster's (test: unit tests `Vegetation_Light`,
+  `Vegetation_Gain`, `render_tests` suite `ptplants`).
 - Its G-buffer (`Shaders/PathGBuffer.hlsli`) is what the main view's opaque list writes with the general
   program's `XR_PT` permutation (`General_PT_*`, `SPipelineKey::bPathTrace`): the colour gets only what
   the path tracer does not light (glow maps, alpha glow, the unlit templates, the fog), a second target

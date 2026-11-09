@@ -1142,8 +1142,9 @@ void CD3D12Renderer::DrawLeafItem(const SRenderItem &it)
       if (CV_d3d12_FoliageTranslucency > 0 && !m_bHeatPass && CascadeReceiverFlags(false))
         dc.nFlags2 |= DF2_FOLIAGE;
     }
-    // (with the path tracer the grass fading in or out is alpha tested, its alpha times the fade: it thins out; Scene.cpp)
-    if (IsBlendedVColor(eDC, pRes, pObj) && !(eDC == eDC_AlphaTestVColor && WantsPathTracing()))
+    // (with the path tracer the grass fading in or out is alpha tested, its alpha times the fade: it thins out; not the
+    // water plants: Scene.cpp's PathTestsFadingPlant)
+    if (IsBlendedVColor(eDC, pRes, pObj) && !(eDC == eDC_AlphaTestVColor && PathTestsFadingPlant(it)))
     {
       // Grass fading in or out, transparent plants: blended, no depth writes.
       Key.nState = GS_BLSRC_SRCALPHA | GS_BLDST_ONEMINUSSRCALPHA;
@@ -1601,6 +1602,14 @@ void CD3D12Renderer::DrawLeafItem(const SRenderItem &it)
     else
       dc.nLights = 0;
   }
+  // With the path tracer the vegetation's colours are baked unlit (Geometry::SetUnlitVegetation): its draws the paths do
+  // not light (the plants blended after the water, the water's reflection, the cubes) take the light its colours had lit,
+  // on the mean over its vertices (d3d12_PTVegetationGain; the scene for rays took the albedo above).
+  float vGain[3];
+  if (!bPathMaterial && (eDC == eDC_VColor || eDC == eDC_AlphaTestVColor) && CV_d3d12_PTVegetationGain > 0 && WantsPathTracing() &&
+      Geometry::UnlitVegetationGain(pLB, vGain))
+    for (int c = 0; c < 3; c++)
+      dc.vColor[c] *= vGain[c];
   if (bFirstPass)
     Draw();
   if (bRayMaterial)

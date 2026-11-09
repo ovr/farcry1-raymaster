@@ -611,6 +611,16 @@ void CD3D12Renderer::RegisterVariables()
   iConsole->Register("d3d12_PTBakedFalloff", &CV_d3d12_PTBakedFalloff, 0.0f, VF_DUMPTODISK,
                      "With d3d12_PathTracing, the falloff of the lamps baked into the light maps: 0 the raster's dynamic light's "
                      "(1 - smoothstep(0, 0.9, d / r)), > 0 the light maps' (1 - d / r) to this power over the whole radius");
+  iConsole->Register("d3d12_PTVegetationGain", &CV_d3d12_PTVegetationGain, 1, 0,
+                     "With d3d12_PathTracing (which bakes the vegetation's colours without light and lights them itself), the "
+                     "vegetation's draws the paths do not light (the plants blended after the water, the water's reflection, the "
+                     "cubes) take the light its colours had lit by the sun and the ambient, on the mean over each mesh's vertices; "
+                     "0: unlit (the frames before)");
+  iConsole->Register("d3d12_PTWaterPlants", &CV_d3d12_PTWaterPlants, 1, 0,
+                     "With d3d12_PathTracing, the plants in the ocean (their bottom under its level) that the engine fades in or "
+                     "out drawn blended after the water, as without the path tracer; 0: alpha tested among the opaque surfaces "
+                     "with the plants on land (the frames before: their leaves under the surface made the water's foam, white "
+                     "leaves round the plants)");
   iConsole->Register("d3d12_PTLightMaps", &CV_d3d12_PTLightMaps, 1.0f, VF_DUMPTODISK,
                      "With d3d12_PathTracing, where the frame has no sun (indoors), the light a surface's light map gives beyond the "
                      "path tracer's own light of its lamps (unshadowed) and the ambient light, times this: the light maps' flat "

@@ -46,6 +46,7 @@ set(XRENDERD3D12_SOURCES
     DisplayPoll.h
     CascadeCull.h
     CameraCut.h
+    VegetationLight.h
     EnvCubes.cpp
     Mirrors.cpp
     TemplateFx.cpp

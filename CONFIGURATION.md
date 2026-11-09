@@ -331,6 +331,8 @@ Details: [Path tracing](mod/XRenderD3D12/README.md#path-tracing).
 | `d3d12_PTSun` | `1` | yes | The sun's light |
 | `d3d12_PTSunHistory` | `64` | yes | The frames the sun's shadow by rays holds at most |
 | `d3d12_PTTerrainDelight` | `2` | yes | The light baked into the terrain's texture taken off for its albedo |
+| `d3d12_PTVegetationGain` | `1` |  | The plants the paths do not light (blended, reflected) take the light baked into their colours |
+| `d3d12_PTWaterPlants` | `1` |  | The plants in the water blended after it, as without the paths (no foam round their leaves) |
 
 ### Tuning of HDR and the exposure
 
