@@ -370,11 +370,12 @@ uint CascadeOf(float fDepth, uint n, out float t)
 }
 
 //! The sun's visibility at world position vPos (normal vNormal) from the cascades where they reach
-//! (DF2_SUN_CASCADES; the live set with DF2_CASCADES_LIVE), each blended into the next one over its
+//! (DF2_SUN_CASCADES; the live set with DF2_CASCADES_LIVE, or nLive 1; the full set with nLive 0),
+//! each blended into the next one over its
 //! last part and the last one into fMaps, the draw's shadow maps' visibility, which counts beyond
 //! them. With DF_SHADOW_PASS (the shadow maps' shadow blended over the terrain) 1 where the cascades
 //! reach: the terrain has its shadows from them in its own pass there.
-float SunCascades(float3 vPos, float3 vNormal, float2 vScreenPos, float fMaps)
+float SunCascades(float3 vPos, float3 vNormal, float2 vScreenPos, float fMaps, int nLive = -1)
 {
   uint n = min((uint)g_Frame.vCascadeParams.x, XR_MAX_CASCADES);
   float fDepth = ViewDepth(vPos);
@@ -382,7 +383,7 @@ float SunCascades(float3 vPos, float3 vNormal, float2 vScreenPos, float fMaps)
     return fMaps;
   float t;
   uint i = CascadeOf(fDepth, n, t);
-  bool bLive = HasFlag2(DF2_CASCADES_LIVE);
+  bool bLive = nLive < 0 ? HasFlag2(DF2_CASCADES_LIVE) : nLive > 0;
   bool bPass = HasFlag(DF_SHADOW_PASS);
   float v = bPass ? 1 : CascadeSample(i, vPos, vNormal, vScreenPos, bLive);
   if (t > 0)

@@ -690,6 +690,12 @@ void CD3D12Renderer::RegisterVariables()
                      "it: its colours' bake, the ambient twice and the sun times |N.L| on both sides (the ambient and the sun twice "
                      "times N.L on one), with the sun's visibility the raster found; 0: by the sun and its paths alone (the frames "
                      "before: under a crown that hides the sky the foliage near black, a third of the raster's)");
+  iConsole->Register("d3d12_PTShadeFloor", &CV_d3d12_PTShadeFloor, 1, VF_DUMPTODISK,
+                     "With d3d12_PathTracing, where the raster finds the sun hidden (all of a frame without the sun) no darker "
+                     "than the raster's shade: the terrain its texture's baked light (the shadows of what does not move are in "
+                     "it), times the shadow's tint where a live caster hides the sun; a lit surface its light map's light and "
+                     "its ambient; 0: the paths' light alone (the frames before: the sand under Carrier's wreck at half the "
+                     "raster's colour, the wall of Training's bunker by the pipe's mouth at a sixth)");
   iConsole->Register("d3d12_PTSkyPieces", &CV_d3d12_PTSkyPieces, 1, 0,
                      "With d3d12_PathTracing, its rays pass the pieces of the sky (the surfaces of a sky box's texture: the planes "
                      "that close Training's bunker's windows): a path that reaches one has left the scene (the sky's light, "

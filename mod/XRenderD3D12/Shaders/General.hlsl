@@ -323,9 +323,10 @@ static float3 s_vAmbientLight, s_vAmbientNoSun, s_vAmbient;
 #ifdef XR_PT
 //! The path tracer's G-buffer of the pixel (PathGBuffer.hlsli): what the colour adds unlit, the albedo, the normal
 //! (N' with DF_BUMP), the side of its triangle the camera sees, the highlights' colour / 2, the fog's share, the sun's
-//! visibility, the light map's light / 4, the skin (the light map target's alpha, PathGBufferSkin; 1 not skin).
+//! visibility, the light map's light / 4, the skin (the light map target's alpha, PathGBufferSkin; 1 not skin); the
+//! terrain's visibility of the live casters alone (d3d12_PTShadeFloor).
 static float3 s_vPTEmission, s_vPTAlbedo, s_vPTNormal, s_vPTFace, s_vPTSpecular, s_vPTLightmap;
-static float s_fPTFog, s_fPTSun, s_fPTSkin;
+static float s_fPTFog, s_fPTSun, s_fPTSkin, s_fPTSunLive;
 #endif
 
 #ifdef XR_RAY_LIGHT
@@ -1251,6 +1252,7 @@ float4 ShadePixel(SVertexOutput In)
   s_fPTFog = 1;
   s_fPTSun = 1;
   s_fPTSkin = 1;
+  s_fPTSunLive = 1;
   // The side of the triangle the camera sees (before any branch or discard: derivatives; PathFace): with
   // d3d12_PTFaceNormal (vLightmap.z) from the plane 1 / w makes over the screen where it has one, normalised.
   {
@@ -1381,6 +1383,9 @@ float4 ShadePixel(SVertexOutput In)
     vTex.rgb = 0.75 * vTex.rgb + 0.25;
 
   float fSun = HasFlag(DF_SHADOWS) ? SunVisibility(In.vWorldPos, In.vNormal, In.vPos.xy) : 1;
+#ifdef XR_PT
+  const float fMapsSun = fSun;
+#endif
 #ifdef XR_RAY_SUN
   float fRayWeight = 0;
   float2 vRaySun = 1;
@@ -1398,6 +1403,20 @@ float4 ShadePixel(SVertexOutput In)
 #endif
 #ifdef XR_PT
   s_fPTSun = HasFlag2(DF2_NO_SUN) ? 0 : fSun;
+  // d3d12_PTShadeFloor: the visibility of the live casters alone of the terrain and a light map, as the raster takes it
+  // (DF2_CASCADES_LIVE: the others' shadows are baked into them).
+#if defined(XR_RAY_SUN) || defined(XR_CASCADES)
+  [branch]
+  if ((((g_Draw.nFlags2 & DF2_PT_MASK) >> DF2_PT_SHIFT) == XR_PT_MAT_TERRAIN + 1 || HasFlag(DF_TEX1_LIGHTMAP | DF_LIGHTMAP_DIR)) &&
+      HasFlag2(DF2_SUN_CASCADES) && !HasFlag(DF_CAUSTICS | DF_SHADOW_PASS))
+  {
+#ifdef XR_RAY_SUN
+    s_fPTSunLive = lerp(fRayWeight < 1 ? SunCascades(In.vWorldPos, In.vNormal, In.vPos.xy, fMapsSun, 1) : 1, vRaySun.y, fRayWeight);
+#else
+    s_fPTSunLive = SunCascades(In.vWorldPos, In.vNormal, In.vPos.xy, fMapsSun, 1);
+#endif
+  }
+#endif
 #endif
   float4 vVertexColor = In.vColor;
   float3 vSpecular = 0;
@@ -1992,6 +2011,13 @@ SPixelOutput PSMain(XR_PS_INPUT)
   Out.vSun = float4(s_fPTSun, saturate(0.5 * vAmbient));
   Out.vSpecular = float4(saturate(s_vPTSpecular), Out.vColor.a);
   Out.vLightmap = float4(saturate(s_vPTLightmap), s_fPTSkin);
+  // d3d12_PTShadeFloor: a light map's light times the visibility of the live casters, as the raster lights with it (the
+  // map has the others' shadows; 1 in a frame without the sun, where PathTrace.hlsl fills in with it); the terrain, which
+  // has none, that visibility (the composite's shade of the terrain).
+  if (((g_Draw.nFlags2 & DF2_PT_MASK) >> DF2_PT_SHIFT) == XR_PT_MAT_TERRAIN + 1)
+    Out.vLightmap.rgb = s_fPTSunLive;
+  else
+    Out.vLightmap.rgb *= s_fPTSunLive;
   // d3d12_PTLeafLight: a leaf's light as the raster's (the vertices' normal, the sun's visibility the raster found) in the
   // light map's target (the vegetation has no light map), as its light / 4: the composite lights the leaf with no less.
   if (g_DrawExt.vLeafLight.w > 0)
