@@ -1120,7 +1120,12 @@ system ones (better not to touch): [`CONFIGURATION.md`](../../CONFIGURATION.md).
   shadow by rays in place of the cascades' (`RaySun.cpp`, `Shaders/RaySun.hlsl`). In the main view's
   opaque list, after the depth prepass and before its surfaces are shaded, a pass makes the mask of
   the sun's visibility at the surfaces in the depth buffer: from a pixel's point (from the depth), a
-  little off its face (the normal from the depths beside it), a ray towards a point of the sun's
+  little off its face (the normal from the depths beside it; with `d3d12_RTSunCrease`, 1, on each
+  axis from the side whose two pixels, extended, meet its depth, so that where a floor meets a wall
+  it is the pixel's own face, not a cross of the two that may point along the seam, and the ray
+  meets what is nearer than 1 cm too: the origin stays as close to the other face, and the rays from
+  the seams of River's temple's floor went through its walls to the sun, a bright line in the path
+  tracer's light), a ray towards a point of the sun's
   disc (`d3d12_RTSunAngle`, 0.53 degrees as the sun's; 0 hard shadows), another point for each pixel
   and frame. With 1 a ray for each 2 x 2 pixels, from each of them in turn over 4 frames (a quarter
   of the rays; the history has them all), with 2 a ray for each pixel. The ray looks among all the

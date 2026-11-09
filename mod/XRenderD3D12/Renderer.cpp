@@ -595,6 +595,10 @@ void CD3D12Renderer::RegisterVariables()
                      "With d3d12_RTSunShadows, 1: the rays of the frames before blended in where the surface was and the soft edges "
                      "filtered; 2: a ray a pixel, denoised by AMD FidelityFX Denoiser's shadows denoiser (where it is built in, else 1); "
                      "0: this frame's ray as it is");
+  iConsole->Register("d3d12_RTSunCrease", &CV_d3d12_RTSunCrease, 1, 0,
+                     "With d3d12_RTSunShadows or d3d12_PathTracing, the sun's rays from a pixel where a floor meets a wall start off "
+                     "its own face (not a cross of the two) and meet what is nearer than 1 cm: the seams of River's temple's floor "
+                     "with its walls no longer a bright line in the path tracer's sun (0: as before)");
   iConsole->Register("d3d12_RTGI", &CV_d3d12_RTGI, 0, VF_DUMPTODISK,
                      "The ambient light by rays, one bounce (a device with DXR 1.1, d3d12_AOApply 1; in place of d3d12_AO): what the "
                      "rays from a surface find, lit by the sun and the light maps, darkens or lights its ambient light, what they miss "

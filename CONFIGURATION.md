@@ -312,6 +312,7 @@ Details: [Ray tracing](mod/XRenderD3D12/README.md#ray-tracing), [Ambient occlusi
 | `d3d12_RTPbrMetalDiffuse` | `0.5` |  | The share of a metal's diffuse light beside its reflection |
 | `d3d12_RTProjectorShadowGap` | `0.5` | yes | How far short of a projected light the rays towards it end (m) |
 | `d3d12_RTSunAngle` | `0.53` | yes | The sun's disc in degrees across, the shadows' soft edges; 0 hard |
+| `d3d12_RTSunCrease` | `1` |  | The sun's rays from a crease (a floor meeting a wall) off the pixel's own face and from 0 m, not 1 cm: no bright seam line in the path tracer's sun |
 | `d3d12_RTSunDenoise` | `1` |  | The sun's shadow by rays: 1 the frames before and a filter, 2 AMD FidelityFX Denoiser, 0 none |
 
 ### Tuning of the path tracer

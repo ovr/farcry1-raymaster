@@ -365,7 +365,7 @@ void CD3D12Renderer::DrawRaySunMask()
   const uint32 nFrames = bLong ? (uint32)std::clamp(CV_d3d12_PTSunHistory, 1, 1024) : 24;
   rc.nFlags[0] = bHistory ? nFrames | (bLong ? 0x10000 : 0) : 0;
   rc.nFlags[1] = (uint32)m_nFrames;
-  rc.nFlags[2] = bDenoise ? 1 : 0;
+  rc.nFlags[2] = (bDenoise ? 1 : 0) | (CV_d3d12_RTSunCrease > 0 ? 2 : 0);
   rc.nFlags[3] = (RayMask() & 0xff) | (m_pRayScene->GetLiveInstances() ? 0x100 : 0);
   // A ray for each 2 x 2 pixels, from each of them in turn over 4 frames (the history has them all), or for each pixel
   // (FidelityFX Denoiser's too).
