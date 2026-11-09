@@ -22,6 +22,7 @@
 #include "Test_SkyGlow.h"
 #include "Test_FrameAverage.h"
 #include "Test_AcesToe.h"
+#include "Test_GlowHue.h"
 
 #include <algorithm>
 #include <cmath>
@@ -98,6 +99,45 @@ namespace
 
   //! Saturation as (max - min) / max.
   double Saturation(const SRgb &c) { return c.Max() > 0 ? (c.Max() - c.Min()) / c.Max() : 0; }
+}
+
+//! A lamp's glow with its hue kept (GlowHueScale, d3d12_HDRGlowHue): a colour whose brightest channel's light (times the
+//! alpha) under the exposure is above the cap is scaled as a whole down to the cap (its channels' ratios kept), one below
+//! it is left as it is; a brighter exposure lowers the cap. Why: the tone map takes each channel apart, and Research's cyan
+//! ceiling lamp and its corona, boosted and under +1.5 EV, came out a white disc.
+XR_TEST(HdrGlowHue_Cap)
+{
+  struct SCase
+  {
+    float r, g, b, a, fCap, fEV;
+  };
+  const SCase Cases[] = { { 0.6f, 1.9f, 1.9f, 1, 1, 1.5f }, { 0.6f, 1.9f, 1.9f, 1, 1, 0 }, { 0.3f, 0.5f, 0.6f, 1, 1, 0 }, { 0.3f, 0.5f, 0.6f, 1, 1, 1.5f },
+                          { 3, 2, 0.5f, 0.5f, 1, 0 }, { 3, 2, 0.5f, 0.25f, 2, 0 }, { 1, 1, 1, 1, 1.9f, 0 }, { 0.2f, 0.9f, 0.4f, 1, 0.5f, -1 } };
+  const size_t n = sizeof(Cases) / sizeof(Cases[0]);
+  for (size_t i = 0; i < n; i++)
+  {
+    const SCase &c = Cases[i];
+    SDispatch e;
+    e.Shader = XR_BYTECODE(Test_GlowHue);
+    e.nGroups[0] = 1;
+    e.Test.nTest[0] = 1;
+    e.Test.vTest[0] = c.fCap;
+    e.Test.vTest[1] = c.fEV;
+    e.nOut = 1;
+    Push(e.In, c.r, c.g, c.b, c.a);
+    const std::vector<uint32> R = Gpu().Run(e);
+    const float k = At(R, 0, 3), m = std::max(c.r, std::max(c.g, c.b)) * c.a;
+    const double fLight = Decode(m) * std::pow(2.0, c.fEV), fLightAfter = Decode(m * k) * std::pow(2.0, c.fEV);
+    const std::string What = "case " + std::to_string(i);
+    CHECK_MSG(k > 0 && k <= 1, What + ": the factor " + std::to_string(k));
+    CHECK_NEAR(At(R, 0, 0), c.r * k, 1e-6);
+    CHECK_NEAR(At(R, 0, 1), c.g * k, 1e-6);
+    CHECK_NEAR(At(R, 0, 2), c.b * k, 1e-6);
+    if (fLight <= c.fCap)
+      CHECK_MSG(k == 1, What + ": scaled below the cap");
+    else
+      CHECK_MSG(std::fabs(fLightAfter / c.fCap - 1) <= 1e-4, What + ": the light after " + std::to_string(fLightAfter) + " of the cap");
+  }
 }
 
 //! The ACES fit's soft toe (AcesCurve, d3d12_ToneMapToe T): above T the fit's curve as it is (middle grey too); below it

@@ -915,6 +915,12 @@ void CD3D12Renderer::DrawLeafItem(const SRenderItem &it)
           dc.nFlags2 |= DF2_HDR_CORE;
           Set4(dc.vHdrCore, 1, 0, 1, 0);
         }
+        // A lamp's glow brighter only as a whole colour (d3d12_HDRGlowHue): its brightest channel at most that.
+        else if (const float fHue = HdrGlowHue(); fHue > 0)
+        {
+          dc.nFlags2 |= DF2_HDR_CORE;
+          Set4(dc.vHdrCore, 1, 0, 0, fHue);
+        }
       }
     }
     if (eLighting == ELighting::VColor)

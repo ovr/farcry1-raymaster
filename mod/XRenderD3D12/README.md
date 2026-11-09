@@ -426,7 +426,19 @@ system ones (better not to touch): [`CONFIGURATION.md`](../../CONFIGURATION.md).
     path tracer's emission too), as the original's target clips it. Boosted, the texture plus twice
     its glow map times 1.9 was 3.7 times white, near 10 under the cave's exposure (+1.5 EV, the
     sky outside 1), and the bloom laid a blue halo over the rock and the boulder round it that
-    went with the opening out of the frame. Suite `skypieces`.
+    went with the opening out of the frame. Suite `skypieces`. A lamp's glow map and the lights'
+    coronas and procedural flares (not the sun's) are brighter only as a whole colour
+    (`d3d12_HDRGlowHue` C, 1 since step 355; `GlowHueScale` in `Shaders/HdrLight.hlsli`):
+    `DF2_HDR_CORE` with `vHdrCore.w` C scales the colour so that the light of its brightest
+    channel under the resolve's exposure (`d3d12_Exposure` and the adapted EV, whose 1 x 1
+    target `g_Frame.vHdr.z` gives the draws) is at most C times white (times the display's peak
+    over paper white with the HDR output's layer), the other channels with it. The tone map
+    takes each channel apart, so a colour whose channels all went far above white came out
+    white: Research's cyan tube lamp was a white disc in a pale halo (174 white pixels about it
+    at 1280 x 720, its brightest 1 % (243, 252, 252), the original's (160, 236, 237)), now a
+    cyan tube with a white core (0; (212, 241, 240)), and Treehouse's lamps by the lab's corridor
+    are no longer white rectangles of glare (1280 white pixels, 0). The path tracer's emission
+    is as it was. Suite `glowhue`.
   - Colour grading after the tone map, baked into a 32 x 32 x 32 table when a setting changes
     (`ColorGrading.cpp`, a strip of 1024 x 32): `d3d12_Temperature` (-1 cooler to 1 warmer, up
     to 100 mired from 6504 K, a Bradford adaptation) and `d3d12_Tint` (-1 green to 1 magenta),

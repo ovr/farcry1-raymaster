@@ -268,6 +268,18 @@ void CSToneMap(uint i : SV_DispatchThreadID)
   TestOut(i, float4(NeutralToneMap(TestIn(i).rgb, g_Test.vTest.x, g_Test.vTest.y, g_Test.vTest.z), 0));
 }
 
+//! A lamp's glow with its hue kept (GlowHueScale, d3d12_HDRGlowHue) of the colour g_TestIn[i].rgb with the alpha
+//! g_TestIn[i].a: the cap g_Test.vTest.x, the exposure's EV g_Test.vTest.y. out[i] = (the colour scaled, the factor).
+[numthreads(64, 1, 1)]
+void CSGlowHue(uint i : SV_DispatchThreadID)
+{
+  if (i >= g_Test.nTest.x)
+    return;
+  const float4 c = TestIn(i);
+  const float k = GlowHueScale(c.rgb, c.a, g_Test.vTest.x, g_Test.vTest.y);
+  TestOut(i, float4(c.rgb * k, k));
+}
+
 //! The ACES fit's curve with its soft toe (AcesCurve, d3d12_ToneMapToe) of g_TestIn[i].rgb (each channel in the RRT's
 //! space), the toe's end g_Test.vTest.x.
 [numthreads(64, 1, 1)]
