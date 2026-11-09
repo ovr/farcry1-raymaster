@@ -271,6 +271,7 @@ Details: [Device removal (DRED)](mod/XRenderD3D12/README.md#device-removal-dred)
 | `d3d12_RTPbrScreen` | `1` |  | What the metals' rays hit takes its light from the last frame's picture |
 | `d3d12_RTShadows` | `1` | yes | The sun's shadow at the rays' hits |
 | `d3d12_SkyFogBand` | `1` | yes | With a near fog (Swamp, Volcano), the fog's colour over the sky box's lower part, as the original draws it |
+| `d3d12_SpriteDistFactor` | `1` |  | The far vegetation sprites end by their distance times the engine's factor, as the original's (River's at 304 m, not 400: no fogged trees round the sky in a gap of the far mountains) |
 | `d3d12_SpriteSort` | `1` |  | The particles drawn back to front, as the original sorts them (Volcano's smoke over the lava without steps) |
 | `d3d12_StaticCasters` | `1` |  | The palms and the other static casters shadow the terrain everywhere |
 | `d3d12_UnderwaterBodies` | `1` |  | The fish under the ocean drawn last without the depth: no shore foam in their shape over the water |

@@ -2462,6 +2462,19 @@ and lists theirs (`NamesObjects`).
   the rays take the nearer picture's outline. Test: `render_tests` suite `sprites` (the palm's
   picture changes at the original's frame with 0, with and without TAA, and no jump with 0.2), unit
   tests `FarSprite_*`.
+- The quad of a group that fades (`bFadeSize`, read from the engine's array of groups, since
+  `GetStatInstGroup` leaves it out) shrinks to nothing over the last eighth of its view distance:
+  the smaller of the instance's own and four fifths of the call's, against the instance's distance
+  times the engine's factor, a float of the object manager (`nBin64Offset_ObjManager_DistFactor`,
+  1.32 on River and Swamp at 1920x1080; `d3d12_SpriteDistFactor 1`, step 342), as the original's.
+  Traced, the original's sprites end at 303.8 m on River (the call's distance 500 m), at 243.1 m
+  with the call's distance set to 400 m and at 200 m with the factor set to 2
+  (`XRENDERTRACED_SPRITE_VIEWDIST`, `XRENDERTRACED_OBJMAN_POKE`); the bushes with a view distance
+  of their own shrink by the same rule. By the distance alone (0) they went on to 400 m: on River's temple the
+  far canopy trees on the cliff tops 340 to 400 m away, grey in the fog, framed the sky in a gap of
+  the far mountains, which looked a white block where the original shows the pale sky and the
+  mountains alone. A group without bFadeSize (Swamp's trees) keeps its quads' size, as the
+  original's. Test: `render_tests` suite `spritedist`.
 - The low detail terrain beyond the sectors (shader "terrainlowlod") has the level's low resolution
   cover texture over the whole terrain; the engine gives it u and v one whole texture further (an
   offset of 1), which wrapping does not see but the terrain's clamped sampling did: all the far land

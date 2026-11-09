@@ -1439,6 +1439,16 @@ void CRendererProxy::SetFog(float density, float fogstart, float fogend, const f
 {
   TRACE_CALL("density %g start %g end %g color %p (%g %g %g %g) mode %d", density, fogstart, fogend, color,
     color ? color[0] : 0.f, color ? color[1] : 0.f, color ? color[2] : 0.f, color ? color[3] : 0.f, fogmode);
+  // XRENDERTRACED_FOG_END: another end of the fog, to see what of the renderer's follows it.
+  if (const char *szEnd = getenv("XRENDERTRACED_FOG_END"))
+  {
+    const float fEnd = (float)atof(szEnd);
+    if (fEnd > 0)
+    {
+      TRACE_RESULT("the end %g replaced by XRENDERTRACED_FOG_END %g", fogend, fEnd);
+      fogend = fEnd;
+    }
+  }
   m_pReal->SetFog(density, fogstart, fogend, color, fogmode);
 }
 
@@ -1891,7 +1901,40 @@ void CRendererProxy::DrawObjSprites(list2<CStatObjInst *> *pList, float fMaxView
       Dump_HexLine("inst", (*pList)[i], 0x90);
     }
   }
+  // XRENDERTRACED_SPRITE_VIEWDIST: another view distance for the far sprites, to see what of theirs follows it.
+  if (const char *szDist = getenv("XRENDERTRACED_SPRITE_VIEWDIST"))
+    if (atof(szDist) > 0)
+    {
+      TRACE_RESULT("maxViewDist %g replaced by XRENDERTRACED_SPRITE_VIEWDIST %g", fMaxViewDist, atof(szDist));
+      fMaxViewDist = (float)atof(szDist);
+    }
+  // The object manager's float at +0x10, which divides the far sprites' fade distance (see FarSprites.cpp), against
+  // the camera's height above the terrain.
+  if (bTraced && pObjMan && Trace_IsReadable((const char *)pObjMan + 0x10, 4))
+  {
+    I3DEngine *p3D = iSystem ? iSystem->GetI3DEngine() : NULL;
+    const Vec3 vCam = GetCamera().GetPos();
+    TRACE_RESULT("objManager +0x10 %g, camera (%g %g %g), terrain under it %g", *(const float *)((const char *)pObjMan + 0x10),
+      vCam.x, vCam.y, vCam.z, p3D ? p3D->GetTerrainElevation(vCam.x, vCam.y) : 0.f);
+  }
+  // XRENDERTRACED_OBJMAN_POKE="offset value": a float of the object manager replaced during the call (and put back
+  // after it), to see which of its members the renderer reads.
+  float *pPoked = NULL, fPokedWas = 0;
+  if (const char *szPoke = getenv("XRENDERTRACED_OBJMAN_POKE"))
+  {
+    unsigned nOffset = 0;
+    float fValue = 0;
+    if (pObjMan && sscanf_s(szPoke, "%x %f", &nOffset, &fValue) == 2 && Trace_IsReadable((const char *)pObjMan + nOffset, 4))
+    {
+      pPoked = (float *)((char *)pObjMan + nOffset);
+      fPokedWas = *pPoked;
+      *pPoked = fValue;
+      TRACE_RESULT("objManager +0x%x %g replaced by XRENDERTRACED_OBJMAN_POKE %g", nOffset, fPokedWas, fValue);
+    }
+  }
   m_pReal->DrawObjSprites(pList, fMaxViewDist, pObjMan);
+  if (pPoked)
+    *pPoked = fPokedWas;
 }
 
 void CRendererProxy::DrawQuad(const Vec3 &right, const Vec3 &up, const Vec3 &origin, int nFlipMode)

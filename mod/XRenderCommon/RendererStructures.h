@@ -354,6 +354,9 @@ static const int nBin64Offset_StatObjInst_Brightness = 0x89;   // byte: 100 when
 //   with the engine's array of groups, which have the layout of IStatInstGroup:
 static const int nBin64Offset_ObjManager_Groups = 0x00;        // pointer to the groups, indexed by group ID
 static const int nBin64Offset_ObjManager_GroupCount = 0x08;    // int: 1024
+static const int nBin64Offset_ObjManager_DistFactor = 0x10;    // float: the original's DrawObjSprites multiplies the
+                                                               // instances' distances by it against their view
+                                                               // distances (1.31667 on River and Swamp at 1920x1080)
 static const int nBin64Size_StatInstGroup = 0x48;              // sizeof(IStatInstGroup) on x64
 static const int nBin64Offset_StatInstGroup_FadeSize = 0x32;   // bool bFadeSize
 

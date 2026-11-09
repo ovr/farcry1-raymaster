@@ -14,6 +14,8 @@
 //	two directions nearest it over that part of the 15 degrees about the
 //	change (BandBlend; 1: over all of them, by how near each is). The
 //	quad's v gives the shader the blend (Shaders/ArrayCoords.hlsli).
+//	SizeFade: how far a quad has shrunk towards the end of its view
+//	distance (d3d12_SpriteDistFactor).
 //	Without the renderer's types.
 //
 //////////////////////////////////////////////////////////////////////
@@ -102,6 +104,16 @@ namespace FarSpriteAngles
   inline int BlendStep(float fW)
   {
     return 1 + (int)lroundf(fminf(fmaxf(fW, 0.0f), 1.0f) * 255);
+  }
+
+  //! The size (0 to 1) of the quad of an instance fDistance m from the camera (the engine's horizontal distance) whose
+  //! group fades: it shrinks to nothing over the last eighth of the smaller of the instance's view distance and four
+  //! fifths of the call's, against the distance times the engine's factor fDistFactor (the object manager's, 1.31667 on
+  //! River at 1920x1080), as the original's: River's trees end at 0.8 x 500 / 1.31667 = 303.8 m.
+  inline float SizeFade(float fDistance, float fInstMaxViewDist, float fMaxViewDist, float fDistFactor)
+  {
+    const float E = fminf(fInstMaxViewDist, 0.8f * fMaxViewDist) / fDistFactor;
+    return E > 0 ? fminf(1.0f, (E - fDistance) / (E / 8)) : 0.0f;
   }
 
   //! A quad's v (v' from 0 to 1 down the picture) with the next slice's weight fW: v' + 2 BlendStep(fW) + 0.5 (with a
