@@ -393,6 +393,10 @@ void CD3D12Renderer::RegisterVariables()
                      "1: the foam running up the beach and the wet sand under it in the sun's shadow as the terrain under them (the "
                      "sun's cascades and rays, the terrain's shadow colour): no glowing border round the sand in the shadow of "
                      "Carrier's wreck; 0: lit in the shadow (the frames before)");
+  iConsole->Register("d3d12_BeachResearch", &CV_d3d12_BeachResearch, 1, 0,
+                     "1: the beach of the shore shader TerrainWaterBeachResearch (Steam, Research, Bunker, Dam, Rebellion, Archive) drawn as "
+                     "the original's: the foam running up the sand fainter than TerrainWaterBeach's (textures/wave2 twice, water1's "
+                     "detail, the wet sand); 0: not drawn (the frames before)");
   iConsole->Register("d3d12_UnderwaterBodies", &CV_d3d12_UnderwaterBodies, 1, 0,
                      "1: with the camera above the ocean, the characters under its level (the fish; a body shorter than 1 m by its middle) drawn after the rest of the "
                      "opaque surfaces without writing the depth: the water over them takes the floor under them, its shore's foam no "
@@ -1301,7 +1305,7 @@ void CD3D12Renderer::Release()
   ReleaseHdrStats();
   m_pDetailTexture = nullptr;   // released with every texture
   m_pDefaultCube = nullptr;
-  m_pBeachTexture = m_pBeachWetTexture = m_pBeachBumpTexture = nullptr;
+  m_pBeachTexture = m_pBeachWetTexture = m_pBeachBumpTexture = m_pBeachFaintTexture = m_pBeachDetailTexture = nullptr;
   m_pHazeMask = m_pHazeBump = nullptr;
   for (CTexture *&pTex : m_pFxTextures)
     pTex = nullptr;

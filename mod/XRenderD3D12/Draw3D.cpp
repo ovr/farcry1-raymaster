@@ -1483,9 +1483,9 @@ void CD3D12Renderer::DrawLeafItem(const SRenderItem &it)
     pTex = nullptr;
     break;
   case eDC_WaterBeach:
-    if (m_bReflectionPass || m_bEnvCubePass || !SetupBeachDraw(Key, dc, 0))
+    if (m_bReflectionPass || m_bEnvCubePass || !SetupBeachDraw(Key, dc, 0, Props.bBeachFaint))
       return;
-    pTex = m_pBeachTexture;
+    pTex = Props.bBeachFaint ? m_pBeachFaintTexture : m_pBeachTexture;
     break;
   case eDC_WaterBottom:
     SetupWaterBottomDraw(Key, dc, (dc.nFlags & DF_TEX0) ? pTex : nullptr);
@@ -1681,7 +1681,7 @@ void CD3D12Renderer::DrawLeafItem(const SRenderItem &it)
   if (m_bDepthPrepass || m_bRayCaptureWalk)
     return;
   // The beach: the other waves and the wet sand.
-  for (int nPass = 1; eDC == eDC_WaterBeach && nPass <= BEACH_WAVES && SetupBeachDraw(Key, dc, nPass); nPass++)
+  for (int nPass = 1; eDC == eDC_WaterBeach && nPass <= BEACH_WAVES && SetupBeachDraw(Key, dc, nPass, Props.bBeachFaint); nPass++)
   {
     if (m_bFog)
       dc.nFlags |= DF_FOG;

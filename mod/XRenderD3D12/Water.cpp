@@ -54,6 +54,7 @@
 #include "RayTracing.h"
 #include "FoamPattern.h"
 #include "SkyFogBand.h"
+#include "BeachLayers.h"
 #include <atomic>
 
 namespace
@@ -1077,9 +1078,9 @@ bool CD3D12Renderer::SetupWaterDraw(SPipelineKey &Key, SDrawConstants &dc, const
   return true;
 }
 
-bool CD3D12Renderer::SetupBeachDraw(SPipelineKey &Key, SDrawConstants &dc, int nPass)
+bool CD3D12Renderer::SetupBeachDraw(SPipelineKey &Key, SDrawConstants &dc, int nPass, bool bFaint)
 {
-  if (!m_pTextures)
+  if (!m_pTextures || (bFaint && CV_d3d12_BeachResearch <= 0))
     return false;
   if (!m_pBeachTexture)
     m_pBeachTexture = m_pTextures->LoadTexture("textures/wave1", FT_CLAMP, 0, eTT_Base, -1, -1, -1, 0);
@@ -1087,7 +1088,22 @@ bool CD3D12Renderer::SetupBeachDraw(SPipelineKey &Key, SDrawConstants &dc, int n
     m_pBeachWetTexture = m_pTextures->LoadTexture("textures/water2", 0, 0, eTT_Base, -1, -1, -1, 0);
   if (!m_pBeachBumpTexture)
     m_pBeachBumpTexture = m_pTextures->LoadTexture("textures/fire_noise", 0, 0, eTT_Bumpmap, -1, -1, -1, 0);
-  CTexture *pTex = nPass < BEACH_WAVES ? m_pBeachTexture : m_pBeachWetTexture;
+  // TerrainWaterBeachResearch has only the technique without the refraction (BeachLayers.h): its first two waves
+  // wave2 (wave1's picture, its alpha 0.4 of wave1's), the third water1's faint detail, then the wet sand.
+  if (bFaint && !m_pBeachFaintTexture)
+    m_pBeachFaintTexture = m_pTextures->LoadTexture("textures/wave2", FT_CLAMP, 0, eTT_Base, -1, -1, -1, 0);
+  if (bFaint && !m_pBeachDetailTexture)
+    m_pBeachDetailTexture = m_pTextures->LoadTexture("textures/water1", 0, 0, eTT_Base, -1, -1, -1, 0);
+  static_assert(BeachLayers::WAVES == BEACH_WAVES);
+  const BeachLayers::SLayer Layer = BeachLayers::Layer(nPass, bFaint);
+  CTexture *pTex = nullptr;
+  switch (Layer.eTexture)
+  {
+  case BeachLayers::ETexture::Wave1: pTex = m_pBeachTexture; break;
+  case BeachLayers::ETexture::Wave2: pTex = m_pBeachFaintTexture; break;
+  case BeachLayers::ETexture::Water1: pTex = m_pBeachDetailTexture; break;
+  case BeachLayers::ETexture::Water2: pTex = m_pBeachWetTexture; break;
+  }
   if (!pTex || !pTex->IsTextureLoaded() || pTex->IsCube())
     return false;
   // The views of the water's own foam (d3d12_WaterDebug 21-23) show it alone, not under these strips.
@@ -1114,7 +1130,7 @@ bool CD3D12Renderer::SetupBeachDraw(SPipelineKey &Key, SDrawConstants &dc, int n
     dc.nFlags = DF_TEX0 | DF_VCOLOR | DF_TEXMATRIX;
     dc.nFlags2 &= ~DF2_BUMP_OFFSET;
     dc.nSamplers = XR_SAMPLER_LINEAR_WRAP;
-    Set4(dc.vTexMat0, 1.25f, 0, 0, 0);
+    Set4(dc.vTexMat0, Layer.fU, 0, 0, 0);
     Set4(dc.vTexMat1, 0, 3, Frac(0.2f * fTime), 0);
     Set4(dc.vColor, 1, 1, 1, 0.6f);
     return true;
@@ -1132,8 +1148,8 @@ bool CD3D12Renderer::SetupBeachDraw(SPipelineKey &Key, SDrawConstants &dc, int n
     fSqueeze = 4 - fSqueeze;
   }
   dc.nFlags = DF_TEX0 | DF_VCOLOR | DF_VALPHA_ONLY | DF_TEXMATRIX;
-  dc.nSamplers = XR_SAMPLER_LINEAR_CLAMP;
-  Set4(dc.vTexMat0, 1, 0, 0, 0);
+  dc.nSamplers = Layer.bClamp ? XR_SAMPLER_LINEAR_CLAMP : XR_SAMPLER_LINEAR_WRAP;
+  Set4(dc.vTexMat0, Layer.fU, 0, 0, 0);
   Set4(dc.vTexMat1, 0, fSqueeze, 0, 0);
   if (m_pBeachBumpTexture && m_pBeachBumpTexture->IsTextureLoaded() && !m_pBeachBumpTexture->IsCube())
   {
