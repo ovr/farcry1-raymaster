@@ -610,6 +610,10 @@ void CD3D12Renderer::RegisterVariables()
                      "by where the ray hits: green next to the surface, red next to the lamp");
   iConsole->Register("d3d12_RTLightShadowsMax", &CV_d3d12_RTLightShadowsMax, 4, VF_DUMPTODISK,
                      "With d3d12_RTLightShadows, the lamps a pixel traces rays towards (1-15); those past them light it unshadowed");
+  iConsole->Register("d3d12_RTLightBehind", &CV_d3d12_RTLightBehind, 1, VF_DUMPTODISK,
+                     "With d3d12_RTLightShadows, the scene for rays has what is behind, above and below the camera (d3d12_PTBehind "
+                     "m, as for the path tracer): what is out of the view shades a lamp too, not only once it comes into the view; "
+                     "0 only the view's and the sun's parts");
   iConsole->Register("d3d12_RTLightShadowGap", &CV_d3d12_RTLightShadowGap, 0.1f, VF_DUMPTODISK,
                      "With d3d12_RTLightShadows, how far short of a lamp its rays end (m, 0-2.5): what is nearer to it, its own "
                      "fitting, casts no shadow");
@@ -1003,6 +1007,7 @@ WIN_HWND CD3D12Renderer::Init(int x,int y,int width,int height,unsigned int cbpp
     iConsole->UnregisterVariable("d3d12_RTLightShadows", true);
     CV_d3d12_RTLightShadows = 0;
     iConsole->UnregisterVariable("d3d12_RTLightShadowsMax", true);
+    iConsole->UnregisterVariable("d3d12_RTLightBehind", true);
     iConsole->UnregisterVariable("d3d12_RTLightShadowGap", true);
     iConsole->UnregisterVariable("d3d12_RTProjectorShadowGap", true);
     iConsole->UnregisterVariable("d3d12_RTFaceNormal", true);
