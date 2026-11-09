@@ -408,6 +408,7 @@ Details: [Water](mod/XRenderD3D12/README.md#water).
 | `d3d12_WaterCrestLight` | `1` |  | The sun's light through the thin crests |
 | `d3d12_WaterGlint` | `1` |  | The sun's glint on the water |
 | `d3d12_WaterGlintRoughness` | `0.004` |  | How wide the glint is |
+| `d3d12_WaterGlintSky` | `1` | yes | The glint only where the sky box shows a sun towards it (its brightness there, from 0.12 none to 0.24 all): none under Rebellion's storm cloud, in Volcano's smoke or under Steam's night sky (its moon is painted elsewhere; the water mirrors it with the sky); 0 everywhere |
 | `d3d12_WaterReflectionBlur` | `0.1` |  | How much the fine ripple blurs the ocean's reflection |
 | `d3d12_WaterReflectionFlags` | `4184` |  | What the water's reflection shows (`DrawLowDetail` flags) |
 | `d3d12_WaterSlope` | `0.0446` |  | The steepness of the FFT ocean's waves |

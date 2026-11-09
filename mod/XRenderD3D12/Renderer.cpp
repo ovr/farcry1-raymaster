@@ -183,6 +183,10 @@ void CD3D12Renderer::RegisterVariables()
   iConsole->Register("d3d12_WaterGlintRoughness", &CV_d3d12_WaterGlintRoughness, 0.004f, 0,
                      "The variance of the slopes of the water's ripple finer than its wave texture, which widens the sun's glint "
                      "(added to that of the ripple finer than a pixel)");
+  iConsole->Register("d3d12_WaterGlintSky", &CV_d3d12_WaterGlintSky, 1, VF_DUMPTODISK,
+                     "1: the sun's glint on the water only where the sky box shows a sun towards it (its brightness there, from "
+                     "0.12 none to 0.24 all): none under a storm's cloud, in smoke, under a night sky whose moon is painted "
+                     "elsewhere; 0: everywhere");
   iConsole->Register("d3d12_WaterCrestLight", &CV_d3d12_WaterCrestLight, 1.0f, 0,
                      "The sun's light through the thin crests of the waves, turquoise, seen against the sun: its strength (0: none, "
                      "as the game draws water)");

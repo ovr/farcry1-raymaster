@@ -2438,13 +2438,26 @@ and lists theirs (`NamesObjects`).
   turned to the sun (the game's twice the sun's colour). Close to the camera the waves the pixels
   resolve glitter; further on the lost slopes widen them into the sun's path towards the camera, a
   column under the sun at Bunker's sunset (36 degrees up), a wide patch under the higher suns of the
-  other levels (41-80 degrees), Steam's moon's too. It is at most the light of the sun's flare
+  other levels (41-80 degrees), Steam's moon's with `d3d12_WaterGlintSky 0`. It is at most the light of the sun's flare
   (`d3d12_HDRSun` with `r_HDRRendering`, white without), so in HDR the path goes on above paper
   white to the peak. In the sun's shadow there is none: the cascades' (a tap; beyond them the ocean
   is lit, the water volumes are not), with `d3d12_RTSunShadows` a ray, cast only where there is a
   glint to shade. None in the environment cubes and in heat vision. The water costs 0.04-0.07 ms
   more at 3840 x 2160 (Bunker's sunset 0.56 -> 0.60 ms, Carrier towards the sun 1.01 -> 1.07, with
   the rays' shadows and reflections 1.22 -> 1.29).
+- The glint only where the sky box shows a sun towards it (`d3d12_WaterGlintSky`, 1; 0 everywhere, the
+  frames before; saved): it is the sun's mirror image, but some levels' engine sun stands where their
+  sky box paints no sun. Rebellion's storm sky is a dark cloud 53 degrees up towards it (the cloud's
+  bright gap is 46 degrees off), so the glint stood at the bottom of the film's frames under a sky
+  without a sun, and the original draws none there. The water looks the sky box up towards the sun
+  and in four directions 5 degrees about it (`Water.hlsl`'s `GlintSkyShare`, only where there is a
+  glint) and takes the glint by their mean brightness (`WaterLight.hlsli`'s `WaterGlintSkyShare`:
+  none up to 0.12, all from 0.24, smoothly between). The film's skies towards their suns: the storm
+  0.08, Volcano's smoke 0.10, Steam's night 0.00 (its moon is painted 40 degrees lower; the water
+  mirrors that with the sky box, the moon's path, as before); by day 0.28-0.49 (River, Pier, Fort,
+  Training, Carrier), Swamp's dusk 0.90. The storm's glint at 1280 x 720 448 -> 0 pixels brighter
+  than without it by > 16, the sun's path round the fort's islet by day as it was (32 539; the gate
+  on against off 11, run noise); without a sky box the glint as before (unit test `Water_GlintSky`, `render_tests` suite `glintsky`).
 - The sun's light through the thin crests of the waves (`d3d12_WaterCrestLight`, 1, its strength;
   0 draws the frames of the water before it; not saved; `Shaders/WaterLight.hlsli`): lit from
   behind, the top of a wave scatters the sun's light forwards, towards a camera that looks at the
