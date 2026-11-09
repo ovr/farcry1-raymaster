@@ -933,6 +933,7 @@ public:
     float vBakeLight[3]; //!< the light baked into the terrain on a lit open face towards the sun, each channel
     float fLamps, fEmission, fDelight, fLightGap;
     float fBakedFalloff; //!< d3d12_PTBakedFalloff (0: the lamps baked into the light maps fall off as the dynamic ones)
+    float fLampSize;     //!< d3d12_PTLampSize: a lamp's radius as a share of its light's (0: a point)
     uint32 nLights;
   };
   void GetPathShade(SPathShadeParams &P) const;
@@ -2377,6 +2378,7 @@ public:
   float CV_d3d12_PTLamps = 1.0f;            //!< its lamps
   float CV_d3d12_PTBakedFalloff = 0.0f;     //!< the falloff of its lamps baked into the light maps: 0 the raster's dynamic light's,
                                             //!< > 0 the light maps' (1 - d / r) to that power over the whole radius
+  float CV_d3d12_PTLampSize = 0.05f;        //!< its lamps' radius as a share of their light's: soft shadows (PathShade.hlsli PathLampTarget; 0 a point)
   int CV_d3d12_PTVegetationGain = 1;       //!< with d3d12_PathTracing the vegetation's draws the paths do not light take the light its colours had lit, on the mean (Geometry::UnlitVegetationGain; 0: unlit, the frames before)
   int CV_d3d12_PTShadeFloor = 1;            //!< with d3d12_PathTracing where the sun is hidden no darker than the raster's shade (PathGBuffer.hlsli's PathShadeFloor; 0: the paths' light alone, the frames before)
   int CV_d3d12_PTLeafLight = 1;             //!< with d3d12_PathTracing the leaves lit no darker than the raster's bake lights them (Geometry::UnlitVegetationLight, General.hlsl, PathComposite.hlsl; 0: the sun and the paths alone, the frames before)

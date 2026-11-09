@@ -120,6 +120,7 @@ SPathShade PathShadeParams(uint nMaxTests)
   P.vBakeLight = g_PT.vBakeLight.rgb;
   P.fLightGap = g_PT.vShade.y;
   P.fBakedFalloff = g_PT.vShade.z;
+  P.fLampSize = g_PT.vShade.w;
   P.nLights = g_PT.nPath.x;
   P.nMask = g_PT.nFlags.w & 0xff;
   P.nMaxTests = nMaxTests;

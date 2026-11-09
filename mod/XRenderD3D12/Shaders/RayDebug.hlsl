@@ -252,6 +252,7 @@ float4 PSMain(SRayDebugOutput In) : SV_Target
     P.vBakeLight = g_DrawExt.vAmbient.rgb;
     P.fLightGap = g_DrawExt.vParams3.z;
     P.fBakedFalloff = g_DrawExt.vParams3.w;
+    P.fLampSize = 0;
     P.nLights = g_Draw.nTex2;
     P.nMask = nMask;
     P.nMaxTests = XR_RAY_MAX_ALPHA_TESTS;
