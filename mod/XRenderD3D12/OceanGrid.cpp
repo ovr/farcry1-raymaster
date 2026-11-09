@@ -35,6 +35,7 @@
 #include "Geometry.h"
 #include "Scene.h"
 #include "OceanGrid.h"
+#include "WaterBodies.h"
 
 namespace
 {
@@ -97,9 +98,11 @@ bool CD3D12Renderer::EnsureOceanGrid()
   return true;
 }
 
-bool CD3D12Renderer::EnsureGridTerrain()
+bool CD3D12Renderer::EnsureGridTerrain(float fLevel)
 {
   SOceanGridState &g = m_OceanGrid;
+  if (g.pTerrain && fabsf(g.fTerrainLevel - fLevel) > 0.01f)
+    g.bTerrainStale = true;
   if (g.pTerrain && !g.bTerrainStale)
     return true;
   if (!g.bTerrainStale || !m_pUpload || !m_pDevice)
@@ -113,16 +116,29 @@ bool CD3D12Renderer::EnsureGridTerrain()
   if (nUnit <= 0 || nSize <= 0 || nSize % nUnit)
     return false;
   // A texel a unit of the height map (the texel i at i units: its centre at x = i * unit), its heights as the engine
-  // gives them there.
+  // gives them there and the open sea's share by them (WaterBodies.h: 0 on the ponds the terrain cuts off from the sea).
   const int n = nSize / nUnit;
-  std::vector<float> H((size_t)n * n);
+  std::vector<float> H((size_t)n * n), Share;
   for (int y = 0; y < n; y++)
     for (int x = 0; x < n; x++)
       H[(size_t)y * n + x] = p3D->GetTerrainElevation((float)(x * nUnit), (float)(y * nUnit));
-  const SD3D12SubData Sub = { H.data(), (uint32)(n * sizeof(float)) };
-  g.pTerrain = m_pUpload->CreateTexture(n, n, 1, DXGI_FORMAT_R32_FLOAT, false, &Sub);
+  const WaterBodies::SStats Bodies = WaterBodies::OpenShare(H.data(), n, fLevel, Share);
+  std::vector<float> T((size_t)n * n * 2);
+  for (size_t i = 0; i < H.size(); i++)
+  {
+    T[2 * i] = H[i];
+    T[2 * i + 1] = Share[i];
+  }
+  const SD3D12SubData Sub = { T.data(), (uint32)(n * 2 * sizeof(float)) };
+  g.pTerrain = m_pUpload->CreateTexture(n, n, 1, DXGI_FORMAT_R32G32_FLOAT, false, &Sub);
   if (!g.pTerrain)
     return false;
+  g.fTerrainLevel = fLevel;
+  g.nPonds = Bodies.nBodies;
+  g.nPondHeights = Bodies.nPond;
+  g.nSeaHeights = Bodies.nSea;
+  g.nLargestPond = Bodies.nLargest;
+  g.nTerrainUnit = nUnit;
   // Read by the vertex program: from the upload's state into both shader stages' (the upload batch runs before the frame;
   // its state kept by the device from here on, never written again).
   m_pDevice->TrackState(g.pTerrain->m_pResource, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
@@ -131,7 +147,9 @@ bool CD3D12Renderer::EnsureGridTerrain()
   g.fTerrainScale = 1.0f / (float)(nUnit * n);
   g.fTerrainOffset = 0.5f / (float)n;
   if (iLog)
-    iLog->Log("XRenderD3D12: the ocean grid's terrain: %d x %d heights, %d m apart", n, n, nUnit);
+    iLog->Log("XRenderD3D12: the ocean grid's terrain: %d x %d heights, %d m apart; at the water level %.2f m the open sea "
+              "%d of them, %d ponds cut off from it, %d (the largest %d, %.0f m^2)", n, n, nUnit, fLevel, Bodies.nSea,
+              Bodies.nBodies, Bodies.nPond, Bodies.nLargest, (float)Bodies.nLargest * nUnit * nUnit);
   return true;
 }
 
@@ -156,7 +174,7 @@ std::optional<SGeomDraw> CD3D12Renderer::SetupOceanGrid(SDrawConstants &dc, cons
   OceanGrid::SDisc Disc;
   if (!OceanGrid::ReadDisc((const OceanGrid::SVertex *)pVB->m_VS[VSF_GENERAL].m_VData, (size_t)pVB->m_NumVerts, Disc) || !EnsureOceanGrid())
     return {};
-  const bool bTerrain = EnsureGridTerrain();
+  const bool bTerrain = EnsureGridTerrain((float)Disc.fZ);
 
   // The frame's rings (OceanGrid::FrameRings): seen from the camera's height over the level, the pixels a radian across
   // the target's height (the projection's y scale over 2), the long cascade's slopes as drawn.
@@ -224,8 +242,14 @@ std::optional<SGeomDraw> CD3D12Renderer::SetupOceanGrid(SDrawConstants &dc, cons
   SetUint(dc.vLightSpec[4][0], (uint32)nTableSRV);
   SetUint(dc.vLightSpec[4][1], (uint32)nTableOffset);
   // The foam's floor (Water.hlsl's FoamFloorZ): within this of the terrain's heights, those heights; y 1: no shore where nothing
-  // is drawn behind the surface or the floor lies off the level's terrain (d3d12_WaterFoamFar).
-  Set4(dc.vLightSpec[5], bTerrain ? std::max(CV_d3d12_WaterFoamTerrain, 0.0f) : 0.0f, CV_d3d12_WaterFoamFar > 0 ? 1.0f : 0.0f, 0, 0);
+  // is drawn behind the surface or the floor lies off the level's terrain (d3d12_WaterFoamFar); z 1: no ocean's foam on the
+  // ponds cut off from the sea (d3d12_WaterFoamPonds, GridOpenShare).
+  Set4(dc.vLightSpec[5], bTerrain ? std::max(CV_d3d12_WaterFoamTerrain, 0.0f) : 0.0f, CV_d3d12_WaterFoamFar > 0 ? 1.0f : 0.0f,
+       bTerrain && CV_d3d12_WaterFoamPonds > 0 ? 1.0f : 0.0f, 0);
+  if (m_pFrameDump && !m_bRayCaptureWalk && bTerrain)
+    fprintf(m_pFrameDump.get(), "ocean grid: at the level %.2f m the open sea %d heights, %d ponds cut off from it, %d heights "
+            "(d3d12_WaterFoamPonds %d), the largest %d (%.0f m^2), %d m apart\n", fLevel, g.nSeaHeights, g.nPonds, g.nPondHeights,
+            CV_d3d12_WaterFoamPonds, g.nLargestPond, (float)g.nLargestPond * g.nTerrainUnit * g.nTerrainUnit, g.nTerrainUnit);
 
   // Its vertices across the water from the disc's centre at the level.
   Matrix44 World;

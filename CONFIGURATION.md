@@ -144,6 +144,7 @@ Details: [Water](mod/XRenderD3D12/README.md#water).
 | `d3d12_WaterFoam` | `1` |  | The ocean's foam (whitecaps, the surf), its strength; 0 none |
 | `d3d12_WaterFoamTerrain` | `0.2` |  | m: where the floor behind the water is the terrain as drawn (within this of the level's heights), the foam takes the depth over those heights, not over the terrain's level of detail; 0 over what is drawn |
 | `d3d12_WaterFoamFar` | `1` |  | No shore's foam where nothing is drawn behind the water or its floor lies off the level's terrain (the filler past the map's edge): no thin line of foam across the open sea far out; 0 the foam of that floor |
+| `d3d12_WaterFoamPonds` | `1` |  | No whitecaps, shore's foam or surf on the ponds and lakes the level's terrain cuts off from the sea (water under the level not joined to the map's edge): Swamp's shallow ponds still, not white from bank to bank; 0 the sea's foam on them too |
 | `d3d12_WaterWakes` | `1` |  | The waves behind boats and swimmers; 0 none |
 | `d3d12_Caustics` | `1` | yes | The caustics under the water; 0 off |
 
