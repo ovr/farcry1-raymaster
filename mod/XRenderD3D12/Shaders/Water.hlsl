@@ -177,7 +177,9 @@
 //	            wind (m)
 //	  vTexMat1  the foam: xy the breaker index's noise's drift (m); z 1: the
 //	            glint only where the sky box shows a sun towards it
-//	            (d3d12_WaterGlintSky, GlintSkyShare)
+//	            (d3d12_WaterGlintSky, GlintSkyShare); w the share of the
+//	            surf's foam shown under the scene's sun (d3d12_WaterSurfNight
+//	            under a moon, 1 by day)
 //	  vLightPos the wakes (WaterWake): [1].w the share shown (0: none), [0] xy the
 //	            window's centre point (m), zw its texel there over the
 //	            window's size, [1] x 1 / the sponge's width (m), y 1 their
@@ -852,13 +854,14 @@ float WaterFoam(float2 P, float fDepth, float fPath, float fWake, out float fWhi
     const float fIndex = FoamBreakerIndex(0.5 + 1.6 * (fNoise - 0.5));
     fShore = max(ShoreFoam(fDepth, fCrest, g_DrawExt.vTexGen1U.z, fIndex), ContactFoam(fPath, fCrest, g_DrawExt.vTexGen1U.z));
     // The swell's surf (vTexGen1V.z its height, 0 none; w the periods gone): its fronts not quite along the depth's lines,
-    // their phase from a noise 40 m across; torn into clumps.
+    // their phase from a noise 40 m across; torn into clumps; the share shown under the scene's sun (vTexMat1.w: less
+    // under a moon, d3d12_WaterSurfNight).
     if (g_DrawExt.vTexGen1V.z > 0)
     {
       const float fBreak = g_DrawExt.vTexGen1V.z / fIndex, fCycle = g_DrawExt.vTexGen1V.w + 0.6 * FoamValueNoise(P / 40);
       const float fSurf = SurfFoam(fDepth, fBreak, fCycle);
       if (fSurf > 0)
-        fShore = max(fShore, saturate(fSurf * SurfClumps(P, fDepth, fBreak, fCycle)));
+        fShore = max(fShore, saturate(fSurf * SurfClumps(P, fDepth, fBreak, fCycle)) * g_DrawExt.vTexMat1.w);
     }
     fShore *= fOpen;
   }

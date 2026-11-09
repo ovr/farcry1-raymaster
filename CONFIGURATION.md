@@ -414,6 +414,7 @@ Details: [Water](mod/XRenderD3D12/README.md#water).
 | `d3d12_WaterReflectionFlags` | `4184` |  | What the water's reflection shows (`DrawLowDetail` flags) |
 | `d3d12_WaterSlope` | `0.0446` |  | The steepness of the FFT ocean's waves |
 | `d3d12_WaterSurf` | `0.8` |  | The height of the surf breaking on the shores (m) |
+| `d3d12_WaterSurfNight` | `0.3` | yes | The share of the surf's foam shown under a moon (the engine's sun's light up to 0.36, all from 0.42): Steam's night shore without a white line far brighter than its islands; 1 as by day |
 | `d3d12_WaterUnderAdapt` | `1` |  | Under the water, the eye's white balance |
 | `d3d12_WaterUnderExposure` | `1` |  | Under the water, the eye's exposure (EV more) |
 | `d3d12_WaterWind` | `3.5` |  | The wind of the FFT ocean's sea (m/s) |

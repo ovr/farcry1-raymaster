@@ -230,6 +230,10 @@ void CD3D12Renderer::RegisterVariables()
                      "With d3d12_WaterFoam: the height (m) of the swell (9 s) breaking on the ocean's shores, where the water "
                      "gets shallower than it over 0.78; its bores run to the shore, a white roller on each front and the lace "
                      "it leaves; 0: none (only the wind sea's)");
+  iConsole->Register("d3d12_WaterSurfNight", &CV_d3d12_WaterSurfNight, 0.3f, VF_DUMPTODISK,
+                     "The share of the surf's foam (d3d12_WaterSurf) shown under a moon, the engine's sun's light (its colour's "
+                     "luminance) up to 0.36, all from 0.42 (by day 0.46 to 0.78): Steam's night shore no longer lies under a "
+                     "white line 3.5 to 7 times brighter than its dark islands; 1: as by day");
   iConsole->Register("d3d12_WaterCaustics", &CV_d3d12_WaterCaustics, 1, 0,
                      "With d3d12_WaterFFT and d3d12_Caustics: the caustics on the sea floor made by the FFT ocean's waves (the "
                      "sun's rays refracted by its middle and short cascades, their light at the floor's depth), in the sun's "

@@ -125,6 +125,37 @@ XR_TEST(Foam_WhitecapOnset)
     CHECK_NEAR(WhitecapCoverageFrom(U, 0), WhitecapCoverage(U), 0);
 }
 
+// Why: under a moon the surf's white line along every shore stood 3.5 to 7 times brighter than the dark islands above it
+// (Steam's night, the original has no foam): the surf's foam shows d3d12_WaterSurfNight of itself there. The suns the
+// levels give (their colours' luminance): the moons of Steam (0.283) and Rebellion (0.306) get the night's share, by day
+// Volcano's smoke (0.456) and the clear days (0.67 to 0.78) all of it, as a scene without a sun (indoors); the share
+// rises steadily between, and a night's share of 1 is the frames before.
+XR_TEST(Foam_SurfLight)
+{
+  using namespace OceanSpectrum;
+  auto Luma = [](double r, double g, double b) { return 0.2126 * r + 0.7152 * g + 0.0722 * b; };
+  CHECK_NEAR(SurfLightShare(Luma(0.26, 0.28, 0.38), 0.3), 0.3, 1e-12);   // Steam
+  CHECK_NEAR(SurfLightShare(Luma(0.26, 0.30, 0.50), 0.3), 0.3, 1e-12);   // Rebellion
+  CHECK_NEAR(SurfLightShare(Luma(0.45, 0.46, 0.43), 0.3), 1, 1e-12);     // Volcano
+  CHECK_NEAR(SurfLightShare(Luma(0.71, 0.67, 0.58), 0.3), 1, 1e-12);     // Training
+  CHECK_NEAR(SurfLightShare(Luma(0.78, 0.74, 0.60), 0.3), 1, 1e-12);     // Pier
+  CHECK_NEAR(SurfLightShare(0, 0.3), 1, 0);
+  CHECK_NEAR(SurfLightShare(-1, 0.3), 1, 0);
+  CHECK_NEAR(SurfLightShare(0.1, 0), 0, 0);
+  CHECK_NEAR(SurfLightShare(0.1, -2), 0, 0);
+  CHECK_NEAR(SurfLightShare(0.1, 3), 1, 0);
+  CHECK_NEAR(SurfLightShare(0.5 * (MOON_LIGHT + DAY_LIGHT), 0.3), 0.65, 1e-12);
+  double fLast = 0;
+  for (int i = 0; i <= 100; i++)
+  {
+    const double s = SurfLightShare(0.01 * i, 0.3);
+    CHECK(s >= 0.3 && s <= 1);
+    CHECK(i == 0 || s >= fLast - 1e-15);
+    fLast = i == 0 ? 0.3 : s;
+    CHECK_NEAR(SurfLightShare(0.01 * i, 1), 1, 0);
+  }
+}
+
 // Why: the crests' threshold is the normal quantile of the whitecaps' share (a few in ten thousand at a light wind):
 // the share of the normal distribution below it must be the share, far into its tail.
 XR_TEST(Foam_NormalQuantile)

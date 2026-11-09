@@ -120,6 +120,24 @@ namespace OceanSpectrum
     return U < fOnset ? 0.0 : WhitecapCoverage(U);
   }
 
+  //! The light (the Rec. 709 luminance of the engine's sun's colour) up to which the sun is a moon: Steam's night 0.28,
+  //! Rebellion's under its storm 0.31; by day 0.46 (in Volcano's smoke) to 0.78.
+  constexpr double MOON_LIGHT = 0.36;
+  //! The light from which the sun is the day's.
+  constexpr double DAY_LIGHT = 0.42;
+
+  //! The share of the surf's foam shown under the sun's light fLuma (the luminance of its colour), fNight the share
+  //! under a moon (d3d12_WaterSurfNight): fNight up to MOON_LIGHT, all from DAY_LIGHT, smoothstep between; all without
+  //! a sun (fLuma 0: a scene indoors has none, and its water's light is not a moon's).
+  inline double SurfLightShare(double fLuma, double fNight)
+  {
+    if (!(fLuma > 0))
+      return 1;
+    const double n = std::min(std::max(fNight, 0.0), 1.0);
+    const double t = std::min(std::max((fLuma - MOON_LIGHT) / (DAY_LIGHT - MOON_LIGHT), 0.0), 1.0);
+    return n + (1 - n) * t * t * (3 - 2 * t);
+  }
+
   //! The standard normal distribution's quantile: the x below which the share p of it lies (bisection of erfc; for the
   //! few calls at a change of the wind).
   inline double NormalQuantile(double p)

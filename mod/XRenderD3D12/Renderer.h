@@ -1200,6 +1200,9 @@ public:
   //! nFoamPattern the foam's pattern's texture index, -1: no foam): false without them (the static
   //! wave texture then).
   bool SetOceanConstants(SDrawConstants &dc, float fBump, int nFoamPattern) const;
+  //! The share of the surf's foam shown under the scene's sun (m_SunColor): d3d12_WaterSurfNight under a moon, all by
+  //! day and without a sun (OceanSpectrum::SurfLightShare).
+  float SurfLightShare() const;
   //! The caustics' constants of the FFT ocean for the sea floor's draw (SetupCausticsDraw: d3d12_WaterCaustics; fSun
   //! their strength by the sun's height): false without them (the static caustics texture then).
   bool SetOceanCaustics(SDrawConstants &dc, float fSun) const;
@@ -2288,6 +2291,7 @@ public:
   int CV_d3d12_WaterFoamFar = 1;      //!< 1: no shore's foam where nothing is drawn behind the water or the floor lies off the level's terrain (0: the frames before)
   int CV_d3d12_WaterFoamPonds = 1;    //!< 1: no ocean's foam (whitecaps, shore, surf) on the ponds the level's terrain cuts off from the sea (WaterBodies.h; 0: the frames before)
   float CV_d3d12_WaterSurf = 0.8f;    //!< m: the height of the swell breaking on the ocean's shores, its surf's foam (0: none)
+  float CV_d3d12_WaterSurfNight = 0.3f; //!< the share of the surf's foam shown under a moon (the sun's light up to 0.36: Steam's night; 1: as by day)
   int CV_d3d12_WaterCaustics = 1;     //!< the caustics on the sea floor of the FFT ocean's waves (0: the static texture, the frames before)
   int CV_d3d12_WaterVolume = 1;       //!< the light in the ocean's water: attenuation by channel, scattering, Snell's window (0: the fog volume's fog, the frames before)
   int CV_d3d12_WaterWakes = 1;        //!< the wakes of the bodies moving through the ocean, their foam (Wake.cpp; 0: none, the frames before)
