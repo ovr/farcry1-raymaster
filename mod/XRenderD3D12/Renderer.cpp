@@ -207,6 +207,11 @@ void CD3D12Renderer::RegisterVariables()
                      "With d3d12_WaterFoam on the ocean's grid: where the floor behind the water is the terrain as drawn (within "
                      "this many m of the level's heights there), the foam takes the water's depth over those heights, not over "
                      "the triangles of the terrain's level of detail, which change from frame to frame; 0: over what is drawn");
+  iConsole->Register("d3d12_WaterFoamFar", &CV_d3d12_WaterFoamFar, 1, 0,
+                     "With d3d12_WaterFoam on the ocean's grid, 1: no shore's foam where nothing is drawn behind the water or "
+                     "the floor behind lies off the level's terrain (the engine's filler past the map's edge, which rises "
+                     "through the water far out): no thin torn line of foam across the open sea (Training's bay, 700 m off); "
+                     "0: the foam of that floor's depth (the frames before)");
   iConsole->Register("d3d12_WaterSurf", &CV_d3d12_WaterSurf, 0.8f, 0,
                      "With d3d12_WaterFoam: the height (m) of the swell (9 s) breaking on the ocean's shores, where the water "
                      "gets shallower than it over 0.78; its bores run to the shore, a white roller on each front and the lace "

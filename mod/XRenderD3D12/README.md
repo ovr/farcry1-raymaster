@@ -2153,6 +2153,12 @@ and lists theirs (`NamesObjects`).
     ponds that changed every frame (with or without the rays). The level of detail is within 0.05 m
     of the heights over 98.9 % of those ponds' pixels, 0.1 m 99.7 %, 0.2 m 99.9 %; a rock, a post
     or a hull standing higher over the terrain keeps its own point.
+  - No shore there where nothing is drawn behind the surface (the depth buffer's clear) or the floor
+    behind lies off the level's terrain, off its heights' map (`d3d12_WaterFoamFar`, 1; 0 the foam of
+    that floor; step 344). Past the map's edge the engine draws a filler that rises through the
+    level far out, and the shore's foam laid a thin torn white line across Training's open sea where
+    it crosses the level 670-700 m off, which the original does not show. Tests: `render_tests`
+    suite `farfoam` (the line's pixels in the bay's frames: 8-11 with it, 520-770 without).
   - The characters under the ocean's level (the fish, a shark; `UnderwaterBody.h`,
     `d3d12_UnderwaterBodies 1`; step 338), with the camera above it, are drawn after the rest of the
     main view's opaque list without writing the depth (not with the path tracer): the water over
