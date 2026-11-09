@@ -2584,15 +2584,23 @@ and lists theirs (`NamesObjects`).
   `carrier-wreck` flight 22 of them are between the ends of their fade at its frame 261 (alpha
   0.00-0.97).
 - The sun's cascades and the scene for rays take the object as opaque all through its fade (it
-  casts its shadow and is seen in the reflections from the start, as before). The path tracer keeps
-  it opaque, as the grass fading in or out (its G-buffer), and so does the first person weapon.
+  casts its shadow and is seen in the reflections from the start, as before). With the path tracer
+  it is blended the same way, over the traced frame with the raster's light (`d3d12_PTFadeBlend`,
+  1; 0 kept whole in the G-buffer; step 345); the paths' rays still meet it as opaque. Kept whole,
+  Carrier's deck crates stood there from the far end of their fade, all of them over the
+  scaffolding while the raster and the original showed one crate or none. Dissolved in the G-buffer
+  by a noise as its alpha instead (tried), the upscaler and the denoiser threw away the history of
+  the pixels that went crate, sky, crate from frame to frame, and the crates showed a lattice. The
+  first person weapon stays whole.
   The water reflection's own capture for the rays takes no blended draw: an object fading in or
   out that only the reflection sees is not in the scene for rays until its fade ends.
 - Tests: `render_tests` suite `fade` (`Fade_carrier.ini`, Carrier's deck from the film at 1080p).
   Over the water the blend changes the frame where the objects fade, and three quarters of those
   pixels come nearer the original's: the mean |d| to it is 26.5-27.8 levels in place of 52.8-56.6.
   The unit tests `Fade_*` check the alpha: the fade's alone whatever the texture's alpha, the
-  alpha test first, the texture's without a fade, and an even fade.
+  alpha test first, the texture's without a fade, and an even fade. The suite `ptfade` (the film's
+  `carrier-wreck` with the paths, the crates over the scaffolding): the mean |d| to the rays'
+  blend 2.9-3.1 levels in place of 5.3-9.3 kept whole.
 
 ## The first person weapon
 

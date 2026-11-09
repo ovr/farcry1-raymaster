@@ -503,7 +503,11 @@ void CD3D12Renderer::RegisterVariables()
   iConsole->Register("d3d12_FadeBlend", &CV_d3d12_FadeBlend, 1, 0,
                      "1: the objects the engine fades in or out by their distance (their alpha below 1: the crates, the gas "
                      "cylinders and the crane on Carrier's deck) drawn blended by that alpha among the blended surfaces, as the original draws them "
-                     "(not with the path tracer); 0: drawn opaque, popping in and out at the far end of their fade (the frames before)");
+                     "(with the path tracer d3d12_PTFadeBlend); 0: drawn opaque, popping in and out at the far end of their fade (the frames before)");
+  iConsole->Register("d3d12_PTFadeBlend", &CV_d3d12_PTFadeBlend, 1, 0,
+                     "1: with the path tracer the objects the engine fades in or out by their distance blended as well (d3d12_FadeBlend), "
+                     "after the trace with the raster's light, the scene for rays keeping them opaque; 0: kept whole in its G-buffer, "
+                     "standing there from the far end of their fade (the frames before)");
   // The ambient occlusion (AmbientOcclusion.cpp).
   iConsole->CreateVariable("d3d12_AO", "cacao", VF_DUMPTODISK,
                            "Ambient occlusion of the 3D scene: none, gtao (Intel XeGTAO), cacao (AMD FidelityFX CACAO), both in screen "
