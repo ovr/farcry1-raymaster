@@ -133,7 +133,7 @@ void CSLightmapFill(uint i : SV_DispatchThreadID)
     TestOut(i, float4(PathLightmapFill(TestIn(3 * i).rgb, TestIn(3 * i + 1).rgb, TestIn(3 * i + 2).xyz, g_Test.vTest.xyz, PathShadeParams(0)), 0));
 }
 
-//! PathLampTarget of the way g_TestIn[2i].xyz (normalised here), the distance g_TestIn[2i].w, the gap g_TestIn[2i + 1].z
+//! LampTarget of the way g_TestIn[2i].xyz (normalised here), the distance g_TestIn[2i].w, the gap g_TestIn[2i + 1].z
 //! and the radius g_TestIn[2i + 1].w at u, v = g_TestIn[2i + 1].xy: out[i] the target's offset from the lamp's centre (xyz)
 //! and the gap (w).
 [numthreads(64, 1, 1)]
@@ -145,8 +145,19 @@ void CSLampTarget(uint i : SV_DispatchThreadID)
   float3 vTo = normalize(a.xyz);
   float fDistance = a.w, fGap = b.z;
   const float3 vCentre = vTo * fDistance;
-  PathLampTarget(vTo, fDistance, fGap, b.w, b.x, b.y);
+  LampTarget(vTo, fDistance, fGap, b.w, b.x, b.y);
   TestOut(i, float4(vTo * fDistance - vCentre, fGap));
+}
+
+//! RayShade.hlsli's LampStratum of the ray g_TestIn[i].x of g_TestIn[i].y (uints) by the random numbers g_TestIn[i].zw:
+//! out[i].xy.
+[numthreads(64, 1, 1)]
+void CSLampStratum(uint i : SV_DispatchThreadID)
+{
+  if (i >= g_Test.nTest.x)
+    return;
+  const float4 a = TestIn(i);
+  TestOut(i, float4(LampStratum(asuint(a.x), asuint(a.y), a.zw), 0, 0));
 }
 
 //! PathGBuffer.hlsli's PathShadeFloor of the material g_TestIn[3i].w (the path material plus 1), the shade's share

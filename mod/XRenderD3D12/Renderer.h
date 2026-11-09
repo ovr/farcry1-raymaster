@@ -2389,6 +2389,8 @@ public:
   int CV_d3d12_RTLightShadowsMax = 4;       //!< the lamps a pixel traces rays towards
   int CV_d3d12_RTLightBehind = 1;           //!< with them the scene for rays has what is around the camera (UpdateRayBehind)
   float CV_d3d12_RTLightShadowGap = 0.1f;   //!< how far short of a lamp its rays end (m): not its own fitting
+  int CV_d3d12_RTLampRays = 4;             //!< with d3d12_RTLampSize, the rays a pixel traces towards points of a lamp's disc (1, 2, 4, 8; nRaySun.z bits 22-23)
+  float CV_d3d12_RTLampSize = 0.05f;        //!< the lamps' radius as a share of their light's for their rays (vLightmap.w, LampTarget): soft shadows (0 a point, the frames before)
   float CV_d3d12_RTProjectorShadowGap = 0.5f; //!< how far short of a projector its rays end, at least the gap above (m): its picture draws its shade
   int CV_d3d12_RTFaceNormal = 1;            //!< the side the main view's rays start from by 1 / w's plane (RayFace.hlsli; nRaySun.z bit 20),
                                             //!< and towards a lamp by the vertices' normal where the face is turned from it (bit 21; 2: not)
@@ -2405,7 +2407,7 @@ public:
   float CV_d3d12_PTLamps = 1.0f;            //!< its lamps
   float CV_d3d12_PTBakedFalloff = 0.0f;     //!< the falloff of its lamps baked into the light maps: 0 the raster's dynamic light's,
                                             //!< > 0 the light maps' (1 - d / r) to that power over the whole radius
-  float CV_d3d12_PTLampSize = 0.05f;        //!< its lamps' radius as a share of their light's: soft shadows (PathShade.hlsli PathLampTarget; 0 a point)
+  float CV_d3d12_PTLampSize = 0.05f;        //!< its lamps' radius as a share of their light's: soft shadows (RayShade.hlsli LampTarget; 0 a point)
   int CV_d3d12_PTDecalLight = 1;            //!< a draw lit by its light map after it: the paths' light of the surface under it in the raster's ratio (SetPathDecalLight; 0 the raster's)
   int CV_d3d12_PTVegetationGain = 1;       //!< with d3d12_PathTracing the vegetation's draws the paths do not light take the light its colours had lit, on the mean (Geometry::UnlitVegetationGain; 0: unlit, the frames before)
   int CV_d3d12_PTShadeFloor = 1;            //!< with d3d12_PathTracing where the sun is hidden no darker than the raster's shade (PathGBuffer.hlsli's PathShadeFloor; 0: the paths' light alone, the frames before)

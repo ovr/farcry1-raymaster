@@ -249,7 +249,10 @@
 //	the lamp, or the light's vLightColor.w where that is more (a projector:
 //	its picture draws its fitting's shade). nRaySun.z >> 24 & 3: 0 none, 2
 //	the light taken away red, 3 the light taken away green where the ray
-//	hits next to the surface to red next to the lamp.
+//	hits next to the surface to red next to the lamp. A lamp has a size
+//	(d3d12_RTLampSize, vLightmap.w: its radius as a share of its light's):
+//	1 << (nRaySun.z >> 22 & 3) rays towards points of its disc, the share
+//	that reaches it (soft shadows; LampTarget).
 //	Compiled with XR_PT (the main view's opaque list into the path tracer's
 //	G-buffer, PathGBuffer.hlsli; the HDR scene targets) the pixel shader
 //	also writes the albedo to SV_Target3, the normal, the fog's share and
@@ -334,16 +337,25 @@ static float s_fPTFog, s_fPTSun, s_fPTSkin, s_fPTSunLive;
 
 #ifdef XR_RAY_LIGHT
 //! The pixel shader's rays towards the lamps (the vertex shader's lighting has none): their origin's
-//! face, their cone's width there, how many more there may be.
+//! face, their cone's width there, how many more there may be, the pixel's two random numbers for the
+//! point of a lamp's disc (d3d12_RTLampSize).
 static bool s_bRayLights = false;
 static float3 s_vRayFace, s_vRayNormal;
 static float s_fRayWidth;
 static uint s_nRayLightsLeft;
+static float2 s_vRayNoise;
 
-//! Whether a point light fDistance away along vToLight reaches vPos (TraceLight; 1 past the pixel's
-//! rays), its ray ending the frame's gap short of it, or fMinGap where that is more (a projector's,
-//! vLightColor.w); fHit: where its ray hits, of the way to the lamp.
-float LightVisible(float3 vPos, float3 vToLight, float fDistance, float fMinGap, out float fHit)
+//! A point light's radius from its attenuation (SetPointLight: w 1 / radius; none: 0).
+float LightRadius(float4 vAtten)
+{
+  return vAtten.w > 0 ? 1 / vAtten.w : 0;
+}
+
+//! How much of a point light fDistance away along vToLight reaches vPos (TraceLight; 1 past the pixel's
+//! rays), its rays ending the frame's gap short of it, or fMinGap where that is more (a projector's,
+//! vLightColor.w); fRadius: its light's radius; fHit: where its rays hit, of the way to the lamp (their
+//! mean; 1 none).
+float LightVisible(float3 vPos, float3 vToLight, float fDistance, float fMinGap, float fRadius, out float fHit)
 {
   fHit = 1;
   if (!s_bRayLights || s_nRayLightsLeft == 0)
@@ -358,7 +370,30 @@ float LightVisible(float3 vPos, float3 vToLight, float fDistance, float fMinGap,
   // head's curve there).
   const bool bSmooth = (g_Frame.nRaySun.z & (1u << 21)) && dot(s_vRayFace, vToLight) < 0 &&
                        (g_DrawExt.vSkin.x > 0 || dot(s_vRayNormal, vToLight) > 0);
-  return TraceLight(vPos, bSmooth ? s_vRayNormal : s_vRayFace, vToLight, fDistance, fGap, g_Frame.nRaySun.z & 0xff, s_fRayWidth, fHit, 4);
+  const float3 vFrom = bSmooth ? s_vRayNormal : s_vRayFace;
+  const uint nMask = g_Frame.nRaySun.z & 0xff;
+  // d3d12_RTLampSize (vLightmap.w): towards points of the lamp's disc, its radius that share of its light's (as the path
+  // tracer's), d3d12_RTLampRays of them (nRaySun.z bits 22-23: their log2) spread over it by the pixel's noise, the share
+  // that reaches it: the shadow's edge soft, a caster hiding part of a big lamp takes part of its light (the lamp over
+  // Training's shaft behind the edge of the slab over Jack in its opening cut scene).
+  const float r = g_Frame.vLightmap.w * fRadius;
+  if (r <= 0)
+    return TraceLight(vPos, vFrom, vToLight, fDistance, fGap, nMask, s_fRayWidth, fHit, 4);
+  const uint nRays = 1u << ((g_Frame.nRaySun.z >> 22) & 3);
+  float fSeen = 0, fHits = 0;
+  for (uint k = 0; k < nRays; k++)
+  {
+    float3 vTo = vToLight;
+    float fTo = fDistance, fGapTo = fGap, fHitK;
+    const float2 uv = LampStratum(k, nRays, s_vRayNoise);
+    LampTarget(vTo, fTo, fGapTo, r, uv.x, uv.y);
+    const float fVis = TraceLight(vPos, vFrom, vTo, fTo, fGapTo, nMask, s_fRayWidth, fHitK, 4);
+    fSeen += fVis;
+    fHits += fVis > 0 ? 0 : fHitK;
+  }
+  if (fSeen < nRays)
+    fHit = fHits / (nRays - fSeen);
+  return fSeen / nRays;
 }
 #endif
 
@@ -482,15 +517,17 @@ float3 DrawLightingT(float3 vPos, float3 vN, bool bPerPixel, out float3 vNoSunLi
     if (SKIN)
       vThis = vColor * SkinWrap(dot(vN, vToLight), g_DrawExt.vSkin.w) * fAtten;
 #ifdef XR_RAY_LIGHT
-    // A point light the pixel's ray does not reach: none of its light, nor its highlight.
+    // A point light the pixel's rays do not reach: none of its light, nor its highlight; the share they reach of a lamp
+    // with a size (d3d12_RTLampSize).
     float fHit;
-    if (vLightPos.w == 1 && any(vThis > 0) && LightVisible(vPos, vToLight, fLightDist, g_DrawExt.vLightColor[i].w, fHit) == 0)
+    const float fVis = vLightPos.w == 1 && any(vThis > 0) ? LightVisible(vPos, vToLight, fLightDist, g_DrawExt.vLightColor[i].w, LightRadius(vAtten), fHit) : 1;
+    if (fVis < 1)
     {
-      // d3d12_RTLightShadows 2: what it takes away red; 3: by where the ray hits, green at the surface to red at the lamp.
+      // d3d12_RTLightShadows 2: what it takes away red; 3: by where the rays hit, green at the surface to red at the lamp.
       const uint nMode = (g_Frame.nRaySun.z >> 24) & 3;
-      const float fMax = max(vThis.r, max(vThis.g, vThis.b));
-      vThis = nMode == 2 ? float3(fMax, 0, 0) : nMode == 3 ? fMax * float3(fHit, 1 - fHit, 0) : 0;
-      fAtten = 0;
+      const float fMax = max(vThis.r, max(vThis.g, vThis.b)) * (1 - fVis);
+      vThis = vThis * fVis + (nMode == 2 ? float3(fMax, 0, 0) : nMode == 3 ? fMax * float3(fHit, 1 - fHit, 0) : 0);
+      fAtten *= fVis;
     }
 #endif
     // Its highlight's colour: with bScale scaled down by its largest channel above 1, as the original's (its hue kept,
@@ -567,7 +604,7 @@ void MaterialLighting(float3 vPos, float3 vN, float fSun, out float3 vDiffuse, o
 #ifdef XR_RAY_LIGHT
     float fHit;
     if (vLightPos.w == 1 && fNL > 0 && fAtten > 0)
-      fAtten *= LightVisible(vPos, vToLight, fLightDist, g_DrawExt.vLightColor[i].w, fHit);
+      fAtten *= LightVisible(vPos, vToLight, fLightDist, g_DrawExt.vLightColor[i].w, LightRadius(vAtten), fHit);
 #endif
     vLight += g_DrawExt.vLightColor[i].rgb * saturate(fNL) * fAtten;
     if (fNL > 0)
@@ -1324,6 +1361,7 @@ float4 ShadePixel(SVertexOutput In)
     s_vRayNormal = -s_vRayNormal;
   s_fRayWidth = fRayDistance * fPixelAngle;
   s_nRayLightsLeft = g_Frame.nRaySun.z >> 28;
+  s_vRayNoise = float2(PictureNoise(In.vPos.xy, g_Frame.vTime.y), PictureNoise(In.vPos.yx + float2(37, 113), g_Frame.vTime.y + 17));
 #endif
   if (HasFlag2(DF2_SHADER_FX))
     return ShaderFx(In);

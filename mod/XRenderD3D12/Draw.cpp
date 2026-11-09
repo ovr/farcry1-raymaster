@@ -161,7 +161,8 @@ void CD3D12Renderer::MakeFrameConstants(SFrameConstants &fc, bool bScene) const
   // the cube maps' mode (bits 16-19), the lamps' (24-25), how many lamps a pixel (28-31) and how far short of a
   // lamp its rays end (9-15, 2 cm steps), the RayMaster reflections' ray a quad (26, d3d12_RTPbrQuad) and their
   // occlusion by the material map's (27, r_PbrAO), the side they start from by 1 / w's plane (20,
-  // d3d12_RTFaceNormal) and by the vertices' normal where a face is turned from a lamp (21), the ocean's level.
+  // d3d12_RTFaceNormal) and by the vertices' normal where a face is turned from a lamp (21), the rays towards a lamp
+  // with a size (22-23: their log2, d3d12_RTLampRays), the ocean's level.
   const bool bSurfaceRays = WantsRaySurfaces(), bLightRays = WantsRayLights();
   if (bSurfaceRays || bLightRays)
   {
@@ -175,6 +176,14 @@ void CD3D12Renderer::MakeFrameConstants(SFrameConstants &fc, bool bScene) const
     if (bLightRays)
       fc.nRaySun[2] |= ((uint32)std::clamp((int)(CV_d3d12_RTLightShadowGap * 50 + 0.5f), 0, 127) << 9) |
                        ((uint32)std::clamp(CV_d3d12_RTLightShadows, 0, 3) << 24) | ((uint32)std::clamp(CV_d3d12_RTLightShadowsMax, 1, 15) << 28);
+    // d3d12_RTLampSize: the lamps' radius over their light's for their rays, d3d12_RTLampRays towards points of that
+    // disc (bits 22-23: their log2; General.hlsl's LightVisible).
+    if (bLightRays)
+    {
+      fc.vLightmap[3] = std::clamp(CV_d3d12_RTLampSize, 0.0f, 0.5f);
+      const int nRays = std::clamp(CV_d3d12_RTLampRays, 1, 8);
+      fc.nRaySun[2] |= (uint32)(nRays >= 8 ? 3 : nRays >= 4 ? 2 : nRays >= 2 ? 1 : 0) << 22;
+    }
     memcpy(&fc.nRaySun[3], &fWater, sizeof(fWater));
   }
 }

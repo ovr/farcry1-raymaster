@@ -75,7 +75,7 @@ foreach(k UV Parts MarchGrad)
 endforeach()
 # The path tracer's functions, PathTrace.hlsl included as it is (Shader Model 6.5, as Shaders.cmake compiles it).
 set(pathtrace "${CMAKE_CURRENT_SOURCE_DIR}/Shaders/TestPathTrace.hlsl")
-foreach(k LeafSide Cosine Checkerboard Layout PixelSurface TerrainShare SurfaceNormal LampLight LampShadow LightmapFill ShadeFloor LampTarget DecalRatio)
+foreach(k LeafSide Cosine Checkerboard Layout PixelSurface TerrainShare SurfaceNormal LampLight LampShadow LightmapFill ShadeFloor LampTarget LampStratum DecalRatio)
     xrender_d3d12_test_shader(${k} "${pathtrace}" cs_6_5 CS${k})
 endforeach()
 # The FFT ocean's kernels, from the renderer's own source as Shaders.cmake compiles them (GpuHarness.h's RunOcean runs
