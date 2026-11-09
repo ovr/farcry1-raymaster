@@ -383,6 +383,34 @@ float TraceSun(float3 vPos, float3 vNormal, uint nMask, float fConeWidth, uint n
   return Query.CommittedStatus() == COMMITTED_TRIANGLE_HIT ? 0 : 1;
 }
 
+//! d3d12_PTLampSize, d3d12_RTLampSize: the way from a point towards a lamp with a size, for its shadow's ray. vToLight (normalised) and
+//! fDistance the way to its centre, fRadius the lamp's radius (its light's, SPTLight::vPos.w, times the share), u, v
+//! random numbers of 0..1: towards a point of the disc of that radius across the way, picked evenly (a sphere as the
+//! point sees it), and the gap short of it at least the radius (what is inside the lamp casts no shadow); the radius
+//! at most half the distance. The lamp's light stays its centre's (PathLampLight); its shadow's edge, the share of the
+//! disc a caster hides, is soft. The path tracer's and the general program's rays (General.hlsl's LightVisible).
+void LampTarget(inout float3 vToLight, inout float fDistance, inout float fGap, float fRadius, float u, float v)
+{
+  const float r = min(fRadius, 0.5 * fDistance);
+  if (r <= 0)
+    return;
+  const float3 vAxis = abs(vToLight.z) < 0.9 ? float3(0, 0, 1) : float3(1, 0, 0);
+  const float3 t = normalize(cross(vAxis, vToLight)), b = cross(vToLight, t);
+  const float a = 6.28318530718 * u, s = r * sqrt(v);
+  const float3 vTo = vToLight * fDistance + (t * cos(a) + b * sin(a)) * s;
+  fDistance = length(vTo);
+  vToLight = vTo / fDistance;
+  fGap = max(fGap, r);
+}
+
+//! d3d12_RTLampRays: LampTarget's u, v of the k-th of nRays rays towards a lamp's disc by the pixel's random numbers n
+//! (0..1): the angle's nRays sectors and the radius' square's nRays rings paired across (3 k mod nRays: each sector once,
+//! each ring once, the next ray half way round), so a few rays spread over the whole disc.
+float2 LampStratum(uint k, uint nRays, float2 n)
+{
+  return float2(frac(n.x + (float)k / nRays), ((k * 3) % nRays + n.y) / nRays);
+}
+
 //! How much of a lamp fDistance away along vToLight (normalised) reaches vPos (0 or 1): a ray towards
 //! it among the instances of nMask from a little off the surface along vFace (the face's normal, the
 //! side the lamp is on), ending fGap short of the lamp (not its own bulb or fitting), alpha tested as

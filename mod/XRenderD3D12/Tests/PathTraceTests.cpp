@@ -27,10 +27,12 @@
 #include "Test_LightmapFill.h"
 #include "Test_ShadeFloor.h"
 #include "Test_LampTarget.h"
+#include "Test_LampStratum.h"
 #include "Test_DecalRatio.h"
 
 #include "Shaders/Constants.h"
 
+#include <array>
 #include <algorithm>
 #include <cstdio>
 
@@ -871,7 +873,7 @@ XR_TEST(PathTrace_DecalRatio)
   CHECK(std::fabs(At(Out, 11, 0) - 0.25f) <= 1e-5f);
 }
 
-//! PathLampTarget (d3d12_PTLampSize): a lamp's shadow ray goes towards a point of a disc of the lamp's radius across the way
+//! LampTarget (d3d12_PTLampSize, d3d12_RTLampSize): a lamp's shadow ray goes towards a point of a disc of the lamp's radius across the way
 //! to its centre, picked evenly by u, v (the share of the points within half the radius a quarter, their mean the centre),
 //! the radius at most half the distance, the gap at least the radius; none with no radius. Why: a point lamp's shadows
 //! are hard, the cut scene lamp's on Jack's face in Training's opening as cut out (the original's light map lit him
@@ -927,5 +929,56 @@ XR_TEST(PathTrace_LampTarget)
     CHECK_MSG(fMax > 0.9f * r, What + ": the disc's edge not reached");
     CHECK_MSG(std::sqrt(vMean[0] * vMean[0] + vMean[1] * vMean[1] + vMean[2] * vMean[2]) <= 0.02f * r, What + ": the mean off the centre");
     CHECK_MSG(std::fabs((float)nInner / nWay - 0.25f) <= 0.04f, What + ": " + std::to_string(nInner) + " points within half the radius");
+  }
+}
+
+//! LampStratum (d3d12_RTLampRays): the rays of a pixel towards a lamp's disc, LampTarget's u, v of each: for 1, 2, 4 and 8
+//! rays and any of the pixel's random numbers each in 0..1, each of the angle's sectors once and each of the radius'
+//! square's rings once, the ray's own random numbers within them, and from 4 rays not the same sector as ring (paired
+//! across, not along the disc's diagonal). Why: one ray a pixel towards a lamp with a size (d3d12_RTLampSize) left a
+//! pattern of the pixels' noise over a soft shadow where the frames are not gathered (the cut to Jack lying under
+//! Training's shaft) and smears where they are; a few rays must cover the whole disc between them.
+XR_TEST(PathTrace_LampStratum)
+{
+  NeedShaderModel65();
+  const uint32 Counts[] = { 1, 2, 4, 8 };
+  const float Noise[][2] = { { 0, 0 }, { 0.999f, 0.999f }, { 0.31f, 0.77f }, { 0.5f, 0.02f } };
+  std::vector<std::array<uint32, 3>> Rays;
+  SDispatch d;
+  d.Shader = XR_BYTECODE(Test_LampStratum);
+  for (uint32 nRays : Counts)
+    for (uint32 m = 0; m < 4; m++)
+      for (uint32 k = 0; k < nRays; k++)
+      {
+        PushWords(d.In, k, nRays, Bits(Noise[m][0]), Bits(Noise[m][1]));
+        Rays.push_back({ k, nRays, m });
+      }
+  const uint32 n = (uint32)Rays.size();
+  d.Test.nTest[0] = n;
+  d.nGroups[0] = Groups64(n);
+  d.nOut = n;
+  const std::vector<uint32> Out = Gpu().Run(d);
+  for (uint32 i = 0; i < n;)
+  {
+    const uint32 nRays = Rays[i][1], m = Rays[i][2];
+    const std::string What = std::to_string(nRays) + " rays, noise " + std::to_string(m);
+    std::vector<int> Sectors(nRays, 0), Rings(nRays, 0);
+    int nSame = 0;
+    for (uint32 k = 0; k < nRays; k++, i++)
+    {
+      const float u = At(Out, i, 0), v = At(Out, i, 1);
+      CHECK_MSG(u >= 0 && u < 1 && v >= 0 && v < 1, What + ": u, v out of 0..1");
+      const int s = std::min((int)(u * nRays), (int)nRays - 1), r = std::min((int)(v * nRays), (int)nRays - 1);
+      Sectors[s]++;
+      Rings[r]++;
+      nSame += s == r ? 1 : 0;
+      // Within its sector and ring the ray's own random numbers: the pixel's, shifted by whole strata.
+      CHECK_NEAR(std::fmod(u * nRays, 1.0f), std::fmod(Noise[m][0] * nRays, 1.0f), 1e-3f);
+      CHECK_NEAR(v * nRays - r, Noise[m][1], 1e-3f);
+    }
+    for (uint32 k = 0; k < nRays; k++)
+      CHECK_MSG(Sectors[k] == 1 && Rings[k] == 1, What + ": a sector or ring not taken once");
+    if (nRays >= 4)
+      CHECK_MSG(nSame < (int)nRays, What + ": the sectors along the rings");
   }
 }

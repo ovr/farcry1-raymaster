@@ -318,6 +318,8 @@ Details: [Ray tracing](mod/XRenderD3D12/README.md#ray-tracing), [Ambient occlusi
 | `d3d12_RTGIBounce` | `1` | yes | `d3d12_RTGI`: how much light what the rays find gives back |
 | `d3d12_RTGIDistance` | `4` | yes | `d3d12_RTGI`: how far its rays look (m) |
 | `d3d12_RTLightShadowGap` | `0.1` | yes | The lamps' shadows: how far short of a lamp its rays end (m) |
+| `d3d12_RTLampSize` | `0.05` | yes | The lamps' shadows: a lamp's radius as a share of its light's (at most 0.5, as `d3d12_PTLampSize`): each pixel's ray goes to a point of that disc, soft edges, a caster hiding part of a big lamp takes part of its light; 0 a point, hard shadows |
+| `d3d12_RTLampRays` | `4` | yes | With `d3d12_RTLampSize`, the rays a pixel traces towards points of a lamp's disc (1, 2, 4 or 8): the share that reaches it is its light; fewer, a noisier edge where the frames are not gathered |
 | `d3d12_RTPbrMetalDiffuse` | `0.5` |  | The share of a metal's diffuse light beside its reflection |
 | `d3d12_RTProjectorShadowGap` | `0.5` | yes | How far short of a projected light the rays towards it end (m) |
 | `d3d12_RTSunAngle` | `0.53` | yes | The sun's disc in degrees across, the shadows' soft edges; 0 hard |

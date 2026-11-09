@@ -634,6 +634,15 @@ void CD3D12Renderer::RegisterVariables()
   iConsole->Register("d3d12_RTLightShadowGap", &CV_d3d12_RTLightShadowGap, 0.1f, VF_DUMPTODISK,
                      "With d3d12_RTLightShadows, how far short of a lamp its rays end (m, 0-2.5): what is nearer to it, its own "
                      "fitting, casts no shadow");
+  iConsole->Register("d3d12_RTLampSize", &CV_d3d12_RTLampSize, 0.05f, VF_DUMPTODISK,
+                     "With d3d12_RTLightShadows, a lamp's radius as a share of its light's (0-0.5, as d3d12_PTLampSize for the "
+                     "path tracer): each pixel's ray goes towards a point of that disc, another from frame to frame where a temporal "
+                     "anti-aliasing or upscaler gathers the frames, so the shadow's edge is soft and a caster that hides part of a "
+                     "big lamp takes part of its light; 0 a point, hard shadows");
+  iConsole->Register("d3d12_RTLampRays", &CV_d3d12_RTLampRays, 4, VF_DUMPTODISK,
+                     "With d3d12_RTLightShadows and d3d12_RTLampSize, the rays a pixel traces towards points of a lamp's disc, spread "
+                     "over it, the share that reaches the lamp its light (1, 2, 4 or 8: fewer, a noisier edge where the frames are "
+                     "not gathered, after a camera's cut)");
   iConsole->Register("d3d12_RTProjectorShadowGap", &CV_d3d12_RTProjectorShadowGap, 0.5f, VF_DUMPTODISK,
                      "How far short of a projected light (a lamp with a picture) the rays towards it end, of the lamps' shadows "
                      "(d3d12_RTLightShadows) and of the path tracer (m, at least d3d12_RTLightShadowGap): its picture draws the "
@@ -1055,6 +1064,8 @@ WIN_HWND CD3D12Renderer::Init(int x,int y,int width,int height,unsigned int cbpp
     iConsole->UnregisterVariable("d3d12_RTLightShadowsMax", true);
     iConsole->UnregisterVariable("d3d12_RTLightBehind", true);
     iConsole->UnregisterVariable("d3d12_RTLightShadowGap", true);
+    iConsole->UnregisterVariable("d3d12_RTLampSize", true);
+    iConsole->UnregisterVariable("d3d12_RTLampRays", true);
     iConsole->UnregisterVariable("d3d12_RTProjectorShadowGap", true);
     iConsole->UnregisterVariable("d3d12_RTFaceNormal", true);
     iConsole->UnregisterVariable("d3d12_RTGI", true);

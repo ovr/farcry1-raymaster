@@ -88,7 +88,7 @@ struct SPathShade
   float fLightGap;      //!< how far short of a lamp its ray ends (d3d12_RTLightShadowGap)
   float fBakedFalloff;  //!< d3d12_PTBakedFalloff: 0 the lamps baked into the light maps fall off as the dynamic ones, > 0 the
                         //!< power of (1 - d / r), the light maps' falloff
-  float fLampSize;      //!< d3d12_PTLampSize: a lamp's radius as a share of its light's (PathLampTarget; 0: a point)
+  float fLampSize;      //!< d3d12_PTLampSize: a lamp's radius as a share of its light's (LampTarget; 0: a point)
   uint nLights;         //!< the lamps in g_PTLights
   uint nMask;           //!< the instances the rays towards the sun and the lamps see
   uint nMaxTests;       //!< their alpha tests at most
@@ -324,29 +324,9 @@ float3 PathDirect(SPathSurface H, SPathShade P, float fConeWidth)
   return vLight;
 }
 
-//! d3d12_PTLampSize: the way from a point towards a lamp with a size, for its shadow's ray. vToLight (normalised) and
-//! fDistance the way to its centre, fRadius the lamp's radius (its light's, SPTLight::vPos.w, times the share), u, v
-//! random numbers of 0..1: towards a point of the disc of that radius across the way, picked evenly (a sphere as the
-//! point sees it), and the gap short of it at least the radius (what is inside the lamp casts no shadow); the radius
-//! at most half the distance. The lamp's light stays its centre's (PathLampLight); its shadow's edge, the share of the
-//! disc a caster hides, is soft.
-void PathLampTarget(inout float3 vToLight, inout float fDistance, inout float fGap, float fRadius, float u, float v)
-{
-  const float r = min(fRadius, 0.5 * fDistance);
-  if (r <= 0)
-    return;
-  const float3 vAxis = abs(vToLight.z) < 0.9 ? float3(0, 0, 1) : float3(1, 0, 0);
-  const float3 t = normalize(cross(vAxis, vToLight)), b = cross(vToLight, t);
-  const float a = 6.28318530718 * u, s = r * sqrt(v);
-  const float3 vTo = vToLight * fDistance + (t * cos(a) + b * sin(a)) * s;
-  fDistance = length(vTo);
-  vToLight = vTo / fDistance;
-  fGap = max(fGap, r);
-}
-
 //! The lamps' light on a point at vPos (normal vN, face vFace) by one ray (see the head of the file); nSeed the random
 //! numbers' state, fConeWidth the ray cone's width there. With d3d12_PTLampSize the ray goes towards a point of the
-//! lamp's disc (PathLampTarget): soft shadows.
+//! lamp's disc (LampTarget): soft shadows.
 float3 PathSampleLamp(float3 vPos, float3 vN, float3 vFace, SPathShade P, inout uint nSeed, float fConeWidth)
 {
   if (P.nLights == 0)
@@ -381,7 +361,7 @@ float3 PathSampleLamp(float3 vPos, float3 vN, float3 vFace, SPathShade P, inout 
   if (fPickedRadius > 0)
   {
     const float u = PathRandom(nSeed), v = PathRandom(nSeed);
-    PathLampTarget(vPickedDir, fPickedDistance, fPickedGap, fPickedRadius, u, v);
+    LampTarget(vPickedDir, fPickedDistance, fPickedGap, fPickedRadius, u, v);
   }
   // The picked one's light over its chance: fSum / fPicked among the candidates, they nCandidates of all the lamps.
   const float fScale = fSum / fPicked * (bAll ? 1 : (float)P.nLights / nCandidates);

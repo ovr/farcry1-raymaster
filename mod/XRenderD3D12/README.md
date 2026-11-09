@@ -71,8 +71,9 @@ system ones (better not to touch): [`CONFIGURATION.md`](../../CONFIGURATION.md).
     both cameras. Its first frame is no brighter: the engine gives the shot's light on the hero
     (a lamp 1.6 m from his head that the cut scene adds with his shadow map) a frame after the
     cut (the original's frame 1059 has 0.65 of the next one's luma), and the lamp up the shaft
-    above him (17 m) is behind the ceiling for the lamps' rays (`d3d12_RTLightShadows`) and the
-    paths, which the original lights him through.
+    above him (17 m) stands by the edge of a slab: the lamps' rays (`d3d12_RTLightShadows`) and the
+    paths reach only a part of its disc (`d3d12_RTLampSize`, `d3d12_PTLampSize`), where the
+    original lights him through.
   - The path tracer (`d3d12_PathTracing`) needs the motion vectors: with `none` it gets the scene
     targets of the display's size, without jitter or mip bias, and the scene's picture as it is
     (`none (the path tracer's scene targets)` in the log and the frame dump).
@@ -1365,6 +1366,27 @@ system ones (better not to touch): [`CONFIGURATION.md`](../../CONFIGURATION.md).
   passes) for every lit pixel. A thin surface lit from behind (its vertices' normal turned from the
   lamp too) keeps its face. 2 takes the face alone, 0 gives the frames before. That cut scene's
   close up at 3840 x 2160 with the film's RT settings: the GPU's frame 14.36 -> 14.39 ms (noise).
+  `d3d12_RTLampSize` (0.05; read every frame, not registered without rays) gives a lamp of these
+  shadows a size, as the path tracer's `d3d12_PTLampSize` (step 353): `LightVisible` traces
+  `d3d12_RTLampRays` (4: 1, 2, 4 or 8) rays a lamp towards points of a disc facing the pixel of that
+  share of the light's radius (`LightRadius`, 1 / `vAtten.w`; 2.5 m for a lamp of 50 m), and the
+  share of them that reach it is the light's and its specular's (`RayShade.hlsli`: `LampTarget`, moved
+  from the path tracer unchanged, its programs' DXIL the same, and `LampStratum`: the k-th ray's
+  sector of the disc's angle and ring of its radius's square, n of each, paired by 3k mod n so that
+  they are not on a diagonal, both turned by the pixel's noise of the frame, `PictureNoise`, which
+  TAA and the upscaler gather). `vLightmap.w` carries the size, `nRaySun.z`'s bits 22-23 the rays'
+  log2. Before, a lamp was a point, and a point behind an edge shades all at once: in Training's
+  opening cut scene the lamp up the shaft over Jack (17.5 m) stands by the edge of the concrete slab
+  under the shaft's top (`materialcontainer_3`'s part 16), the shaft is open to the sky piece over it
+  as the original's view up from his chest shows, and the lamp's point was behind the edge for all
+  of him. The mean luma of the film's frames at 1280 x 720 against the original's (56.0, 51.5, 36.9
+  at 1062, 1066, 1085): 49.1, 38.7, 26.9 -> 57.8, 46.4, 29.0; the cut's first frame 1059 13.7 ->
+  20.2 (the original's 34.1, its lamp by the head given a frame late, see `d3d12_CutReset`). From
+  1075 the hero is still some 0.8 of the original's: the slab shades most of the disc too, where the
+  original's light goes through it. Four rays leave 0.37 of one ray's fine noise on Jack at the cut
+  and 0.66 after it (TAA gathers it). Modes 2 and 3 show the share taken away. Research's demo at
+  3840 x 2160 with the lamps' shadows: the opaque list 1.61 -> 1.80 ms, the GPU 8.44 -> 8.69 ms
+  (one ray: 1.62, 8.44), 117.0 -> 113.8 FPS. 0 gives the frames before.
   `d3d12_PathTracing`, the path tracer of the main view's lighting, has its own section (Path tracing).
   `d3d12_RTDebug` views the scene for rays from the camera: 1 instances (a colour of the mesh and
   where it is to 0.25 m, the same from frame to frame), 2 shaded hits on the right
@@ -1433,7 +1455,7 @@ system ones (better not to touch): [`CONFIGURATION.md`](../../CONFIGURATION.md).
   test `PathTrace_LampFalloff`.
 - A lamp has a size (`d3d12_PTLampSize` s, 0.05 by default: its radius s times its light's, at most half
   the distance to it): the ray of its shadow goes to a point of a disc that size across the way to its
-  centre (`PathLampTarget`, two more random numbers of the pixel's), the shadow's edge soft over the
+  centre (`LampTarget`, two more random numbers of the pixel's), the shadow's edge soft over the
   frames; 0 a point, its shadows hard as cut out (the frames before). The original lights Jack in
   Training's opening cut scene by a light map, softly; the paths' point lamp over him put his head's
   hard shadow on his shirt and arm (`Film_training-intro.ini` frames 1080 and 1110: the shirt's mean
