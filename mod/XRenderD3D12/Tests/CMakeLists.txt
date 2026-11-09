@@ -33,7 +33,7 @@ endfunction()
 # The headers that stand alone (Shader Model 6.0).
 set(headers "${CMAKE_CURRENT_SOURCE_DIR}/Shaders/TestHeaders.hlsl")
 foreach(k Oct GBufferNormal Hdr HdrStats ToneMap HdrOutput SkyGlow FrameAverage Exposure CacheCell CacheLookup CacheAdd CacheRead CachePoke
-          LightmapLight RenderMode Fxaa ArrayCoords BlendPictures PictureNoise WaterGlint WaterCap WaterCrest Foam FoamMix FoamLight FoamContact FoamSurf FoamClumps FoamShade CausticsRay CausticsDepth CausticsFar
+          LightmapLight RenderMode Fxaa ArrayCoords BlendPictures PictureNoise WaterGlint WaterCap WaterGlintSky WaterCrest Foam FoamMix FoamLight FoamContact FoamSurf FoamClumps FoamShade CausticsRay CausticsDepth CausticsFar
           VolumeAttenuation VolumeInscatter VolumeSegments VolumeRay WakeShape Grid GridDisc UnderPath UnderLine UnderPhase UnderSegments
           UnderInscatter UnderInscatterClosed UnderWindow UnderSurface UnderFog UnderClear CoverageAlpha FadeAlpha PbrSpecLobe PbrReflect PbrPrev PbrQuad PbrQuadShares PbrSpecOcclusion
           SkinSpecular SkinParts RayFace PathFace BarrierStep VolSun VolFroxel SkyFogBand AcesToe GlowHue)

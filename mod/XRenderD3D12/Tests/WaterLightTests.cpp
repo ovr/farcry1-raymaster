@@ -7,7 +7,7 @@
 //	(Shaders/WaterLight.hlsli on the GPU, TestHeaders.hlsl): the glint's
 //	distribution of the facets, its light against the sun's, the slopes
 //	finer than a pixel (LEAN) as the facets they average, its lobe, and
-//	its cap; the light through the crests and its colour.
+//	its cap, the sky it shows in; the light through the crests and its colour.
 //
 //////////////////////////////////////////////////////////////////////
 
@@ -17,6 +17,7 @@
 
 #include "Test_WaterGlint.h"
 #include "Test_WaterCap.h"
+#include "Test_WaterGlintSky.h"
 #include "Test_WaterCrest.h"
 
 #include <algorithm>
@@ -306,6 +307,60 @@ XR_TEST(Water_GlintCap)
   for (size_t i = 0; i < std::size(Cases); i++)
     for (int k = 0; k < 3; k++)
       CHECK_NEAR(At(Out, i, k), Cases[i].Out[k], 1e-6);
+}
+
+// Why: the glint is the sun's mirror image, so where the sky box shows no sun towards it (a storm's cloud over
+// Rebellion's bay, a volcano's smoke, a night sky whose moon is painted elsewhere) there must be none, and where it shows
+// a sky as bright as by day all of it: the measured skies (0.08, 0.10 and 0.00 against 0.28 to 0.90) on either side
+// of the fade, monotonic and smooth between. The sky is looked up in four directions 5 degrees about the sun's, around
+// it (their mean along it), whatever the sun's height.
+XR_TEST(Water_GlintSky)
+{
+  const double D = PI / 180;
+  struct SCase
+  {
+    SVec3 L;
+    float fLuma;
+  };
+  std::vector<SCase> Cases = {
+    { Direction(53 * D, -0.28), 0.08f },  // 0: Rebellion's storm
+    { Direction(82 * D, 1.0), 0.10f },    // 1: Volcano's smoke
+    { Direction(56 * D, 0.97), 0.0f },    // 2: Steam's night sky
+    { Direction(71 * D, 2.0), 0.28f },    // 3: River by day
+    { Direction(54 * D, 3.0), 0.49f },    // 4: Training by day
+    { Direction(44 * D, -2.0), 0.90f },   // 5: Swamp at dusk
+    { { 0, 0, 1 }, 0.12f },               // 6: the sun overhead, the fade's ends
+    { Direction(2 * D, 0.5), 0.24f },     // 7: on the horizon
+  };
+  const size_t nFade = Cases.size();
+  for (float f = 0.10f; f <= 0.26f; f += 0.01f)
+    Cases.push_back({ Direction(40 * D, 0.1), f });
+  SDispatch d;
+  d.Shader = XR_BYTECODE(Test_WaterGlintSky);
+  d.Test.nTest[0] = (uint32)Cases.size();
+  for (const SCase &c : Cases)
+    Push(d.In, c.L, c.fLuma);
+  d.nOut = Cases.size();
+  const std::vector<uint32> Out = Gpu().Run(d);
+  for (size_t i : { 0, 1, 2 })
+    CHECK_NEAR(At(Out, i, 0), 0, 0);
+  for (size_t i : { 3, 4, 5 })
+    CHECK_NEAR(At(Out, i, 0), 1, 0);
+  CHECK_NEAR(At(Out, 6, 0), 0, 1e-6);
+  CHECK_NEAR(At(Out, 7, 0), 1, 1e-6);
+  for (size_t i = nFade + 1; i < Cases.size(); i++)
+    CHECK(At(Out, i, 0) >= At(Out, i - 1, 0));
+  // Halfway in brightness, halfway in share (smoothstep).
+  for (size_t i = nFade; i < Cases.size(); i++)
+    if (std::abs(Cases[i].fLuma - 0.18f) < 1e-3f)
+      CHECK_NEAR(At(Out, i, 0), 0.5, 1e-3);
+  const double c5 = std::cos(5 * D);
+  for (size_t i = 0; i < Cases.size(); i++)
+  {
+    CHECK_NEAR(At(Out, i, 1), c5, 2e-4);
+    CHECK_NEAR(At(Out, i, 2), c5, 2e-4);
+    CHECK_NEAR(At(Out, i, 3), 1, 1e-5);
+  }
 }
 
 namespace

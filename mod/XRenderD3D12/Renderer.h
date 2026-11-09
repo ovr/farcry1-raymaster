@@ -2275,6 +2275,7 @@ public:
   int CV_d3d12_Caustics = 1;          //!< 0: no caustics under the ocean
   float CV_d3d12_WaterGlint = 1;      //!< strength of the sun's glint on water (0: none, as the game)
   float CV_d3d12_WaterGlintRoughness = 0.004f;  //!< the variance of the slopes of the water's ripple finer than its wave texture (the glint's)
+  int CV_d3d12_WaterGlintSky = 1;     //!< 1: the glint only where the sky box shows a sun towards it (Water.hlsl's GlintSkyShare)
   float CV_d3d12_WaterCrestLight = 1;  //!< strength of the sun's light through the waves' crests (0: none, as the game)
   int CV_d3d12_WaterFFT = 1;          //!< 1: the FFT ocean's waves (OceanFFT.cpp); 0: the static wave texture, as before
   float CV_d3d12_WaterWind = 3.5f;    //!< m/s: the wind of the FFT ocean's sea (its waves' lengths, directions, speeds)

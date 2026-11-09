@@ -1018,6 +1018,8 @@ bool CD3D12Renderer::SetupWaterDraw(SPipelineKey &Key, SDrawConstants &dc, const
       dc.nTex3 = pTex[1]->GetSRV();
       dc.nTex4 = pTex[2]->GetSRV();
       Set4(dc.vParams1, m_fSceneSkyZ1, CV_d3d12_SkyFogBand && SkyFogBand::Drawn(m_fFogEnd) ? 2.0f : 1.0f, m_fSceneSkyAlpha, 0);
+      // The glint only where the sky box shows a sun towards it (d3d12_WaterGlintSky): none under a storm's cloud.
+      dc.vTexMat1[2] = bGlint && CV_d3d12_WaterGlintSky > 0 ? 1.0f : 0.0f;
     }
   }
 

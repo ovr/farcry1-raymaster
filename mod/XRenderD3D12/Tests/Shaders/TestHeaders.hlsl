@@ -556,6 +556,27 @@ void CSWaterCap(uint i : SV_DispatchThreadID)
   TestOut(i, float4(WaterCapLight(a.rgb, a.w), 0));
 }
 
+//! WaterGlintSkyShare (WaterLight.hlsli) of the sky's brightness g_TestIn[i].w and WaterGlintSkyDir about the direction
+//! g_TestIn[i].xyz (a unit vector): out[i] = (the share, the least and the most cosine of the four directions with it, the
+//! cosine of their sum's direction with it).
+[numthreads(64, 1, 1)]
+void CSWaterGlintSky(uint i : SV_DispatchThreadID)
+{
+  if (i >= g_Test.nTest.x)
+    return;
+  const float4 a = TestIn(i);
+  float fMin = 2, fMax = -2;
+  float3 vSum = 0;
+  for (uint k = 0; k < 4; k++)
+  {
+    const float3 D = WaterGlintSkyDir(a.xyz, k);
+    fMin = min(fMin, dot(D, a.xyz));
+    fMax = max(fMax, dot(D, a.xyz));
+    vSum += D;
+  }
+  TestOut(i, float4(WaterGlintSkyShare(a.w), fMin, fMax, dot(normalize(vSum), a.xyz)));
+}
+
 //! The foam's share of a pixel (WaterFoam.hlsli): ShoreFoam of the depth, crest, significant height and breaker index
 //! g_TestIn[3i]; FoamCover of the amount, the pattern's value, its width and the blur g_TestIn[3i + 1] and FoamOpacity of
 //! that cover and the amount; FoamUniform of g_TestIn[3i + 2].xy: out[i] = (shore, cover, opacity, uniform).

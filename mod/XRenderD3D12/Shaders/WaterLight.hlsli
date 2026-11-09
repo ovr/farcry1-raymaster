@@ -14,7 +14,9 @@
 //	camera, the sun's path. And the sun's light through the thin crests of
 //	the waves: lit from behind, the water of a crest scatters it forwards,
 //	towards a camera that looks at the sun past it (turquoise: the red is
-//	absorbed on the way). Without bindings: Water.hlsl and the unit tests
+//	absorbed on the way). The glint only where the sky box shows a sun
+//	towards it (d3d12_WaterGlintSky): none under a storm's cloud.
+//	Without bindings: Water.hlsl and the unit tests
 //	(Tests/Shaders/TestHeaders.hlsl) include it.
 //
 //////////////////////////////////////////////////////////////////////
@@ -82,6 +84,33 @@ float3 WaterCapLight(float3 vLight, float fCap)
 {
   const float m = max(vLight.r, max(vLight.g, vLight.b));
   return m > fCap ? vLight * (fCap / m) : vLight;
+}
+
+//! The sky box's brightness towards the sun (the luma of its texels as the game draws them) up to which the sky shows
+//! no sun there, and from which it shows it as a day sky does (d3d12_WaterGlintSky): a storm's cloud 0.08 (Rebellion),
+//! a volcano's smoke 0.10 (Volcano), a night sky with its moon painted elsewhere 0.00 (Steam); 0.28 to 0.49 by day
+//! (River, Pier, Training), 0.90 at dusk (Swamp).
+static const float WATER_GLINT_SKY_DARK = 0.12;
+static const float WATER_GLINT_SKY_LIT = 0.24;
+//! The angle (radians, 5 degrees) of the four directions about the sun's that the sky box is looked up in with it.
+static const float WATER_GLINT_SKY_CONE = 0.0873;
+
+//! How much of the sun's glint the sky lets through (d3d12_WaterGlintSky): fLuma the sky box's brightness towards the
+//! sun; none up to WATER_GLINT_SKY_DARK (no sun there: what the sun lights the water with stays, its mirror image does
+//! not), all from WATER_GLINT_SKY_LIT, smoothly between.
+float WaterGlintSkyShare(float fLuma)
+{
+  return smoothstep(WATER_GLINT_SKY_DARK, WATER_GLINT_SKY_LIT, fLuma);
+}
+
+//! The k-th (0 to 3) of the four directions WATER_GLINT_SKY_CONE about L (a unit vector, z up), a quarter turn apart.
+float3 WaterGlintSkyDir(float3 L, uint k)
+{
+  const float3 T = normalize(cross(L, abs(L.z) < 0.9 ? float3(0, 0, 1) : float3(1, 0, 0)));
+  const float3 B = cross(L, T);
+  float s, c;
+  sincos(k * (WATER_LIGHT_PI / 2), s, c);
+  return normalize(L * cos(WATER_GLINT_SKY_CONE) + (T * c + B * s) * sin(WATER_GLINT_SKY_CONE));
 }
 
 //! The brightness of the sun's light through a crest lit all the way through (WaterCrestLight 1)

@@ -175,7 +175,9 @@
 //	            XR_FOAM_SURF_PERIOD)
 //	  vTexMat0  the foam: xy, zw the pattern's two samples' drift with the
 //	            wind (m)
-//	  vTexMat1  the foam: xy the breaker index's noise's drift (m)
+//	  vTexMat1  the foam: xy the breaker index's noise's drift (m); z 1: the
+//	            glint only where the sky box shows a sun towards it
+//	            (d3d12_WaterGlintSky, GlintSkyShare)
 //	  vLightPos the wakes (WaterWake): [1].w the share shown (0: none), [0] xy the
 //	            window's centre point (m), zw its texel there over the
 //	            window's size, [1] x 1 / the sponge's width (m), y 1 their
@@ -550,6 +552,20 @@ float3 SkyBoxColor(float3 vDir)
     vTex = g_Textures[NonUniformResourceIndex(nTex)].SampleLevel(g_SamplerLinearClamp, float2(u, lerp(vTop, 0.5, f)), 0);
   }
   return lerp(vFog, vTex.rgb, g_DrawExt.vParams1.z);
+}
+
+//! The share of the sun's glint the sky lets through (d3d12_WaterGlintSky, vTexMat1.z; WaterLight.hlsli's
+//! WaterGlintSkyShare): by the sky box's brightness towards the sun L, the mean of L's and four directions about it; 1
+//! without it.
+float GlintSkyShare(float3 L)
+{
+  if (g_DrawExt.vTexMat1.z <= 0 || g_DrawExt.vParams1.y == 0)
+    return 1;
+  float3 vSky = SkyBoxColor(L);
+  [unroll]
+  for (uint k = 0; k < 4; k++)
+    vSky += SkyBoxColor(WaterGlintSkyDir(L, k));
+  return WaterGlintSkyShare(dot(vSky / 5, float3(0.2126, 0.7152, 0.0722)));
 }
 
 //! The sky as the sky draws it, in the direction vDir (up or level) seen from a camera at height fCameraZ: the sky box
@@ -1209,7 +1225,8 @@ float4 ShadeWater(SWaterOutput In)
     // fLostVar at full strength, d3d12_WaterReflectionBlur is the reflection's) and of the ripple
     // finer than the texture (d3d12_WaterGlintRoughness, vSpecular.y; the FFT ocean's: Cox and Munk's
     // of the wind less its cascades', vAddColor.y); times the reflection amount,
-    // fading out as the sun sets (below 6 degrees), at most the sun's flare (vSpecular.z). The sun's
+    // fading out as the sun sets (below 6 degrees), none where the sky box shows no sun towards it
+    // (GlintSkyShare), at most the sun's flare (vSpecular.z). The sun's
     // light through the thin crests (d3d12_WaterCrestLight, vParams0.w; WaterCrestLight), what the
     // surface does not reflect of it (1 - F), fading out as the glint. In the sun's shadow
     // (WaterSunShadow, looked up only where there is light to shade) neither.
@@ -1218,7 +1235,11 @@ float4 ShadeWater(SWaterOutput In)
     float3 vGlint = 0, vCrest = 0;
     if (g_DrawExt.vSpecular.x > 0)
     {
-      const float fGlint = WaterGlint(N, V, L, fGlintVar) * g_DrawExt.vSpecular.x * g_DrawExt.vParams0.y * fSunUp;
+      float fGlint = WaterGlint(N, V, L, fGlintVar) * g_DrawExt.vSpecular.x * g_DrawExt.vParams0.y * fSunUp;
+      // None where the sky box shows no sun towards it (d3d12_WaterGlintSky).
+      [branch]
+      if (fGlint > 1e-6)
+        fGlint *= GlintSkyShare(L);
       vGlint = WaterCapLight(WaterSunLight() * fGlint, g_DrawExt.vSpecular.z);
     }
     if (g_DrawExt.vParams0.w > 0)
