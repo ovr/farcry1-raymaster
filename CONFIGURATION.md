@@ -269,6 +269,7 @@ Details: [Device removal (DRED)](mod/XRenderD3D12/README.md#device-removal-dred)
 | `d3d12_RTPbrScreen` | `1` |  | What the metals' rays hit takes its light from the last frame's picture |
 | `d3d12_RTShadows` | `1` | yes | The sun's shadow at the rays' hits |
 | `d3d12_SkyFogBand` | `1` | yes | With a near fog (Swamp, Volcano), the fog's colour over the sky box's lower part, as the original draws it |
+| `d3d12_SpriteSort` | `1` |  | The particles drawn back to front, as the original sorts them (Volcano's smoke over the lava without steps) |
 | `d3d12_StaticCasters` | `1` |  | The palms and the other static casters shadow the terrain everywhere |
 | `d3d12_UpscaleHdr` | `1` | yes | With HDR, the upscaler gets the scene's light before the tone map |
 | `d3d12_WaterDeferred` | `1` |  | The ocean's grid shaded once a pixel |

@@ -30,6 +30,7 @@
 #include "Geometry.h"
 #include "RayTracing.h"
 #include "SkyFogBand.h"
+#include "SpriteOrder.h"
 
 #include <bit>
 
@@ -2391,6 +2392,26 @@ void CD3D12Renderer::DrawSprites()
   m_fDepthMin = 0;
   m_fDepthMax = 1;
   m_bItemScissor = false;
+  // Their order (d3d12_SpriteSort, SpriteOrder.h): back to front by the centre of each one's vertices, as the
+  // original draws them. In the engine's order Volcano's heat haze over the lava, drawn after a nearer smoke,
+  // laid the scene copied before the particles over it, and each burst of new particles changed how much smoke
+  // was left (a step brighter every 5 frames).
+  const bool bSort = CV_d3d12_SpriteSort > 0;
+  static_assert(sizeof(SColorVert) % sizeof(float) == 0 && offsetof(SColorVert, vert) == 0);
+  m_SpriteDist.assign(Sprites.size(), 0.0f);
+  if (bSort)
+  {
+    const Vec3 vCam = m_Camera.GetPos();
+    for (size_t i = 0; i < Sprites.size(); i++)
+    {
+      const SSceneSprite &Sprite = Sprites[i];
+      if (Sprite.nVerts > 0 && Sprite.nFirstVert >= 0 && Sprite.nFirstVert + Sprite.nVerts <= (int)Verts.size())
+        m_SpriteDist[i] = SpriteOrder::CentreDistance2(&Verts[Sprite.nFirstVert].vert.x, Sprite.nVerts,
+                                                       (int)(sizeof(SColorVert) / sizeof(float)), vCam.x, vCam.y, vCam.z);
+    }
+  }
+  SpriteOrder::BackToFront(m_SpriteDist, bSort, m_SpriteOrder);
+  auto At = [&](size_t k) -> const SSceneSprite & { return Sprites[m_SpriteOrder[k]]; };
   // One draw per run of sprites with the same texture, blending and shader (each sprite has an object
   // of its own; the ambient colour goes into the vertices).
   auto SameDraw = [](const SSceneSprite &a, const SSceneSprite &b)
@@ -2400,7 +2421,7 @@ void CD3D12Renderer::DrawSprites()
   };
   for (size_t nRun = 0; nRun < Sprites.size();)
   {
-    const CCObject *pObj = Sprites[nRun].pObj;
+    const CCObject *pObj = At(nRun).pObj;
     if (!pObj)
     {
       nRun++;
@@ -2408,15 +2429,15 @@ void CD3D12Renderer::DrawSprites()
     }
     // Heat haze (its shader's draw class): the scene behind rippled, or nothing (r_HeatHaze 0, the
     // reflections); never the particle texture.
-    CShader *pShader = m_pShaders ? m_pShaders->GetByID(Sprites[nRun].nShaderID) : nullptr;
+    CShader *pShader = m_pShaders ? m_pShaders->GetByID(At(nRun).nShaderID) : nullptr;
     const bool bHaze = pShader && pShader->GetDrawClass() == eDC_HeatHaze;
     BatchVerts.clear();
     BatchInds.clear();
     int nCount = 0;
     size_t nNext = nRun;
-    for (; nNext < Sprites.size() && SameDraw(Sprites[nNext], Sprites[nRun]); nNext++)
+    for (; nNext < Sprites.size() && SameDraw(At(nNext), At(nRun)); nNext++)
     {
-      const SSceneSprite &Sprite = Sprites[nNext];
+      const SSceneSprite &Sprite = At(nNext);
       if (Sprite.nVerts <= 0 || Sprite.nIndices <= 0 ||
           Sprite.nFirstVert + Sprite.nVerts > (int)Verts.size() || Sprite.nFirstIndex + Sprite.nIndices > (int)Inds.size())
         continue;
@@ -2489,7 +2510,7 @@ void CD3D12Renderer::DrawSprites()
     }
     if (m_pFrameDump)
     {
-      const UCol &c = Verts[Sprites[nNext - 1].nFirstVert].color;
+      const UCol &c = Verts[At(nNext - 1).nFirstVert].color;
       const Vec3 &Amb = pObj->m_AmbColor;
       fprintf(m_pFrameDump.get(), "  sprites: %d (%d verts), texture %d, shader %s%s, state 0x%x, sort %g, first amb (%.2f %.2f %.2f), a vertex colour's bytes %u %u %u %u\n",
               nCount, (int)BatchVerts.size(), pObj->m_NumCM, pShader ? pShader->GetName() : "-", bHaze ? " (heat haze)" : "", pObj->m_RenderState,
