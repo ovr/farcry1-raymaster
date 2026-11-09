@@ -11,7 +11,9 @@
 //	alpha tested triangle (not opaque) is a hit where its draw's alpha test
 //	passes (the vertex colour's and texture 0's alpha, as ShadePixel),
 //	sampled at the ray cone's mip level; after XR_RAY_MAX_ALPHA_TESTS
-//	tests on one ray the rest count as they are.
+//	tests on one ray the rest count as they are. The rays whose light is
+//	averaged over many (d3d12_RTAlphaCoverage) take a candidate by its
+//	triangle's share the test passes on instead (RayCandidatePasses).
 //	RaySurface: the hit's point, normals, vertex colour and texture
 //	coordinates from the instance's vertices and indices (g_Buffers), uv0
 //	through its texgen and texture matrix, and the mip level of a texture
@@ -319,9 +321,71 @@ bool RayAlphaPasses(uint nInstance, SRaySurface S, float3 vRayDir)
   return (I.nMaterial.x & DF_ALPHATEST_LESS) ? fRef - fAlpha - 1.0 / 512 >= 0 : fAlpha - fRef >= 0;
 }
 
+//! The share of triangle nPrimitive of instance nInstance (0..255) its draw's alpha test passes on: XR_RAY_COVERAGE_SIDE^2
+//! points spread evenly over it, each tested as a ray's candidate at the mip level of their spacing (object space).
+uint RayTriangleCoverage(uint nInstance, uint nPrimitive)
+{
+  const float3x4 mIdentity = float3x4(1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0);
+  const SRayInstance I = g_RayInstances[nInstance];
+  float3 p[3];
+  uint3 vIndex, vByte;
+  float fArea;
+  RayTriangle(I, nPrimitive, mIdentity, p, vIndex, vByte);
+  const float3 vDir = -RayTriangleFace(p, float3(0, 0, 1), fArea);
+  const uint N = XR_RAY_COVERAGE_SIDE;
+  const float fCone = sqrt(0.5 * fArea) / N;
+  uint nPass = 0;
+  [loop]
+  for (uint i = 0; i < N * N; i++)
+  {
+    // Cell centres of the unit square onto the triangle, evenly (sqrt u along the way from corner 0).
+    const float u = ((i % N) + 0.5) / N, v = ((i / N) + 0.5) / N, s = sqrt(u);
+    const SRaySurface S = RaySurface(nInstance, nPrimitive, float2(s * (1 - v), s * v), mIdentity, vDir, fCone, true);
+    nPass += RayAlphaPasses(nInstance, S, vDir) ? 1 : 0;
+  }
+  return (nPass * 255 + N * N / 2) / (N * N);
+}
+
+uint RayCoverageHash(uint x)
+{
+  x ^= x >> 16;
+  x *= 0x7feb352d;
+  x ^= x >> 15;
+  x *= 0x846ca68b;
+  x ^= x >> 16;
+  return x;
+}
+
+//! A triangle of share nShare (0..255) a hit for the ray of seed nCoverage: with that chance, another for each triangle.
+bool RayCoverageDraw(uint nShare, uint nCoverage, uint nInstance, uint nPrimitive)
+{
+  return nShare == 255 || (RayCoverageHash(nCoverage ^ nInstance * 0x9e3779b1u ^ nPrimitive * 0x85ebca77u) >> 24) < nShare;
+}
+
+//! Whether an alpha tested candidate is a hit. d3d12_RTAlphaCoverage: for a ray of seed nCoverage (0: the exact test)
+//! taken by its triangle's share at random, no surface nor texture read (the rays whose light is averaged); else the test.
+bool RayCandidatePasses(uint nInstance, uint nPrimitive, float2 vBary, float3x4 mObjectToWorld, float3 vRayDir, float fConeWidth,
+                        uint nCoverage)
+{
+  if (nCoverage != 0 && g_Frame.nRayCoverage.x != 0)
+  {
+    const uint nAt = g_RayInstances[nInstance].nPath.w;
+    if (nAt != XR_RAY_NONE)
+    {
+      const uint nByte = nAt + nPrimitive;
+      const uint nShare = (RayLoad(g_Frame.nRayCoverage.x, nByte & ~3u) >> (8 * (nByte & 3))) & 255;
+      return RayCoverageDraw(nShare, nCoverage, nInstance, nPrimitive);
+    }
+  }
+  const SRaySurface S = RaySurface(nInstance, nPrimitive, vBary, mObjectToWorld, vRayDir, fConeWidth, true);
+  return RayAlphaPasses(nInstance, S, vRayDir);
+}
+
 //! The nearest hit of Ray among the instances of nMask; the ray cone fConeWidth wide at its origin,
-//! widening by fConeSpread per metre (the alpha tests' mip levels); nMaxTests alpha tests at most.
-SRayHit TraceScene(RayDesc Ray, uint nMask, float fConeWidth, float fConeSpread, uint nMaxTests = XR_RAY_MAX_ALPHA_TESTS)
+//! widening by fConeSpread per metre (the alpha tests' mip levels); nMaxTests alpha tests at most;
+//! nCoverage RayCandidatePasses' seed.
+SRayHit TraceScene(RayDesc Ray, uint nMask, float fConeWidth, float fConeSpread, uint nMaxTests = XR_RAY_MAX_ALPHA_TESTS,
+                   uint nCoverage = 0)
 {
   RayQuery<RAY_FLAG_SKIP_PROCEDURAL_PRIMITIVES> Query;
   Query.TraceRayInline(g_RayScene, RAY_FLAG_NONE, nMask, Ray);
@@ -335,9 +399,8 @@ SRayHit TraceScene(RayDesc Ray, uint nMask, float fConeWidth, float fConeSpread,
     {
       nTests++;
       const float fT = Query.CandidateTriangleRayT();
-      const SRaySurface S = RaySurface(Query.CandidateInstanceID(), Query.CandidatePrimitiveIndex(), Query.CandidateTriangleBarycentrics(),
-        Query.CandidateObjectToWorld3x4(), Ray.Direction, fConeWidth + fT * fConeSpread, true);
-      bHit = RayAlphaPasses(Query.CandidateInstanceID(), S, Ray.Direction);
+      bHit = RayCandidatePasses(Query.CandidateInstanceID(), Query.CandidatePrimitiveIndex(), Query.CandidateTriangleBarycentrics(),
+        Query.CandidateObjectToWorld3x4(), Ray.Direction, fConeWidth + fT * fConeSpread, nCoverage);
     }
     if (bHit)
       Query.CommitNonOpaqueTriangleHit();
@@ -355,7 +418,7 @@ SRayHit TraceScene(RayDesc Ray, uint nMask, float fConeWidth, float fConeSpread,
 
 //! How much of the sun reaches vPos (0 or 1): a ray towards it among the instances of nMask, from
 //! a little off the surface along vNormal (the side the ray came from), alpha tested as TraceScene.
-float TraceSun(float3 vPos, float3 vNormal, uint nMask, float fConeWidth, uint nMaxTests = XR_RAY_MAX_ALPHA_TESTS)
+float TraceSun(float3 vPos, float3 vNormal, uint nMask, float fConeWidth, uint nMaxTests = XR_RAY_MAX_ALPHA_TESTS, uint nCoverage = 0)
 {
   RayDesc Ray;
   Ray.Origin = vPos + vNormal * (0.02 + 0.5 * fConeWidth);
@@ -373,9 +436,8 @@ float TraceSun(float3 vPos, float3 vNormal, uint nMask, float fConeWidth, uint n
     if (!bHit)
     {
       nTests++;
-      const SRaySurface S = RaySurface(Query.CandidateInstanceID(), Query.CandidatePrimitiveIndex(), Query.CandidateTriangleBarycentrics(),
-        Query.CandidateObjectToWorld3x4(), Ray.Direction, fConeWidth, true);
-      bHit = RayAlphaPasses(Query.CandidateInstanceID(), S, Ray.Direction);
+      bHit = RayCandidatePasses(Query.CandidateInstanceID(), Query.CandidatePrimitiveIndex(), Query.CandidateTriangleBarycentrics(),
+        Query.CandidateObjectToWorld3x4(), Ray.Direction, fConeWidth, nCoverage);
     }
     if (bHit)
       Query.CommitNonOpaqueTriangleHit();
@@ -416,7 +478,7 @@ float2 LampStratum(uint k, uint nRays, float2 n)
 //! side the lamp is on), ending fGap short of the lamp (not its own bulb or fitting), alpha tested as
 //! TraceScene; fHit: where a hit is, of the way to the lamp (0 at vPos, 1 at the lamp).
 float TraceLight(float3 vPos, float3 vFace, float3 vToLight, float fDistance, float fGap, uint nMask, float fConeWidth, out float fHit,
-                 uint nMaxTests = XR_RAY_MAX_ALPHA_TESTS)
+                 uint nMaxTests = XR_RAY_MAX_ALPHA_TESTS, uint nCoverage = 0)
 {
   fHit = 1;
   RayDesc Ray;
@@ -438,9 +500,8 @@ float TraceLight(float3 vPos, float3 vFace, float3 vToLight, float fDistance, fl
     if (!bHit)
     {
       nTests++;
-      const SRaySurface S = RaySurface(Query.CandidateInstanceID(), Query.CandidatePrimitiveIndex(), Query.CandidateTriangleBarycentrics(),
-        Query.CandidateObjectToWorld3x4(), Ray.Direction, fConeWidth, true);
-      bHit = RayAlphaPasses(Query.CandidateInstanceID(), S, Ray.Direction);
+      bHit = RayCandidatePasses(Query.CandidateInstanceID(), Query.CandidatePrimitiveIndex(), Query.CandidateTriangleBarycentrics(),
+        Query.CandidateObjectToWorld3x4(), Ray.Direction, fConeWidth, nCoverage);
     }
     if (bHit)
       Query.CommitNonOpaqueTriangleHit();
@@ -453,9 +514,9 @@ float TraceLight(float3 vPos, float3 vFace, float3 vToLight, float fDistance, fl
 
 //! The colour of the hit's draw there (see the head of the file), not fogged; bFog: the draw is
 //! fogged (DF_FOG). fConeWidth: the ray cone's width at the hit; bShadows: the sun's visibility by a
-//! ray (TraceSun among nMask, nMaxTests alpha tests at most), else lit.
+//! ray (TraceSun among nMask, nMaxTests alpha tests at most, nCoverage its seed), else lit.
 float4 RayShade(SRayHit Hit, float3 vRayDir, float fConeWidth, bool bShadows, uint nMask, out bool bFog,
-  uint nMaxTests = XR_RAY_MAX_ALPHA_TESTS)
+  uint nMaxTests = XR_RAY_MAX_ALPHA_TESTS, uint nCoverage = 0)
 {
   const SRayInstance I = g_RayInstances[Hit.nInstance];
   const SRaySurface S = RaySurface(Hit.nInstance, Hit.nPrimitive, Hit.vBary, Hit.mObjectToWorld, vRayDir, fConeWidth);
@@ -467,7 +528,7 @@ float4 RayShade(SRayHit Hit, float3 vRayDir, float fConeWidth, bool bShadows, ui
   float fSun = 1;
   const uint nCasters = (nFlags2 & DF2_CASCADES_LIVE) ? nMask & XR_RAY_DYNAMIC : nMask;
   if (bShadows && ((nFlags & DF_SHADOWS) || (nFlags2 & DF2_SUN_CASCADES)) && nCasters && dot(S.vNormal, g_Frame.vSunDir.xyz) > 0)
-    fSun = TraceSun(S.vPos, S.vFaceNormal, nCasters, fConeWidth, nMaxTests);
+    fSun = TraceSun(S.vPos, S.vFaceNormal, nCasters, fConeWidth, nMaxTests, nCoverage);
 
   float4 vVertexColor = RayVertexColor(I, S);
   if (nFlags & DF_LIGHTING)

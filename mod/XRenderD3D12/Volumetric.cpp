@@ -274,7 +274,7 @@ bool CD3D12Renderer::UpdateVolumetricLight(ID3D12Resource *pDepth, DXGI_FORMAT D
   memcpy(vc.mViewProj, ViewProj.data, sizeof(vc.mViewProj));
   Set4(vc.vRays, std::max(CV_d3d12_RTDistance, 1.0f), tanf(DEG2RAD(std::clamp(CV_d3d12_RTSunAngle, 0.0f, 10.0f)) * 0.5f),
        2 / (fabsf(P[5]) * m_Volumetric.nHeight), CV_d3d12_VolumetricLightRays >= 2 ? 1.0f : 0.0f);
-  vc.nRays[0] = RayMask() & 0xff & ~(uint32)XR_RAY_SKY;
+  vc.nRays[0] = (RayMask() & 0xff & ~(uint32)XR_RAY_SKY) | ((CV_d3d12_RTAlphaCoverage & 4) ? XR_RAY_COVERAGE_RAYS : 0);
   vc.nRays[1] = (uint32)m_nFrames;
   vc.nRays[2] = bHalf ? 1 : 0;
   const SD3D12FrameAlloc CB = m_pUpload->AllocFrame(sizeof(vc), 256);

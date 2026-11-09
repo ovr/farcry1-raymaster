@@ -65,6 +65,11 @@
 //	- Binding: root SRVs ROOT_RAY_SCENE and ROOT_RAY_INSTANCES
 //	  (D3D12Pipeline.h), for the programs with rays, from GetTLAS and
 //	  GetInstances in the same frame.
+//	- Alpha tests' shares (d3d12_RTAlphaCoverage): for each static alpha
+//	  tested mesh and material (SCoverageKey) a byte a triangle, the share
+//	  of it its alpha test passes on, made once by RayCoverage.hlsl into one
+//	  buffer (SRayInstance::nPath.w, GetCoverageView). The rays whose light
+//	  is averaged take a leaf by it at random in place of the test.
 //
 //////////////////////////////////////////////////////////////////////
 
@@ -148,6 +153,12 @@ public:
   D3D12_GPU_VIRTUAL_ADDRESS GetTLAS() const;
   //! Its instances (SRayInstance, by InstanceID), with GetTLAS.
   D3D12_GPU_VIRTUAL_ADDRESS GetInstances() const { return m_nInstances; }
+  //! d3d12_RTAlphaCoverage: the raw view of the alpha tests' shares (SFrameConstants::nRayCoverage; 0: none).
+  uint32 GetCoverageView() const { return m_nCoverageSRV > 0 ? (uint32)m_nCoverageSRV : 0; }
+  //! Its meshes, bytes in use and the triangles the last Build made (the frame log, r_Stats).
+  uint32 GetCoverageMeshes() const { return (uint32)m_Coverage.size(); }
+  uint32 GetCoverageBytes() const { return m_nCoverageBytes; }
+  uint32 GetCoverageMade() const { return m_nCoverageMade; }
   //! Of them those of the live casters (XR_RAY_LIVE), with GetTLAS.
   uint32 GetLiveInstances() const { return m_nLiveInstances; }
   //! The last Build's TLAS: its instances (0: none built) and their triangles (r_DisplayInfo).
@@ -220,6 +231,31 @@ private:
   {
     SSlotBuffer Scratch, Blas, Tlas;
   };
+  //! What an alpha tested instance's shares depend on: its geometry, its texture 0 and how its alpha is read.
+  struct SCoverageKey
+  {
+    SBlasKey Blas;
+    uint32 nFlags, nTex0, nTexGeneration, nSamplers;
+    uint32 nAlphaRef, nColorAlpha, nLayout, nPad;
+    float TexMat[8];
+
+    bool operator==(const SCoverageKey &o) const { return memcmp(this, &o, sizeof(*this)) == 0; }
+  };
+  struct SCoverageKeyHash
+  {
+    size_t operator()(const SCoverageKey &Key) const;
+  };
+  struct SCoverage
+  {
+    uint32 nOffset = 0, nBytes = 0;   //!< in m_pCoverage
+    int nLastFrame = 0;
+    bool bMade = false;               //!< its kernel recorded
+  };
+  //! A job of RayCoverage.hlsl (SRayCoverageConstants::nJobs).
+  struct SCoverageJob
+  {
+    uint32 nInstance, nOffset, nTriangles;
+  };
 
   //! The texture slots of an instance (SRayInstance: nTex0, nTex1, nTex4, nTex2).
   static void GetTextureSlots(const SRayInstance &Inst, uint32 Slots[4]);
@@ -249,6 +285,19 @@ private:
   //! The static BLAS not used in this frame, least recently used first, until the pools hold at most
   //! nBudget bytes; and those not used for a while.
   void Evict(uint64 nBudget);
+  //! The shares' buffer, its raw view and its UAV table; false (logged once) leaves the exact tests.
+  bool InitCoverage();
+  void ReleaseCoverage();
+  //! The key of a draw's shares; false: it has none (not a static alpha tested draw, a texture read by the world or a cube).
+  static bool CoverageKey(const SDraw &d, SCoverageKey &Key);
+  //! The byte of the draw's triangle 0 in the shares (XR_RAY_NONE: none this frame), its job queued in Jobs where not
+  //! made (nInstance its InstanceID; at most MAX_COVERAGE_TRIANGLES a frame).
+  uint32 UseCoverage(const SDraw &d, uint32 nInstance, std::vector<SCoverageJob> &Jobs, uint32 &nJobTriangles);
+  //! The jobs' kernels into pList (the compute queue's: bAsync), the shares readable after.
+  void MakeCoverage(ID3D12GraphicsCommandList *pList, bool bAsync, const std::vector<SCoverageJob> &Jobs, D3D12_GPU_VIRTUAL_ADDRESS nInstances);
+  //! The shares not used for a while go; then the least recently used until nBytes fit.
+  bool AllocCoverage(uint32 nBytes, uint32 &nOffset);
+  void CollectCoverage();
 
   Microsoft::WRL::ComPtr<ID3D12Device5> m_pDevice5;
   bool m_bCapturing = false;
@@ -281,5 +330,15 @@ private:
   uint64 m_nStaticBytes = 0;        //!< the pool memory of m_Static
   std::vector<std::unique_ptr<SPool>> m_Pools;   //!< the same index for good (an empty pool's buffer goes)
   std::vector<std::pair<SPoolRange, uint64>> m_PendingFree;   //!< with the fence after which they are free
+  // d3d12_RTAlphaCoverage
+  std::unordered_map<SCoverageKey, SCoverage, SCoverageKeyHash> m_Coverage;
+  Microsoft::WRL::ComPtr<ID3D12Resource> m_pCoverage;  //!< the shares, a byte a triangle (COVERAGE_BYTES)
+  int m_nCoverageSRV = -1;                            //!< its raw view in the texture table
+  int m_nCoverageTable = -1;                          //!< its UAV table (u0) for RayCoverage.hlsl
+  bool m_bCoverageFailed = false;
+  std::map<uint32, uint32> m_CoverageFree;            //!< offset -> bytes, merged with their neighbours
+  std::vector<std::pair<std::pair<uint32, uint32>, uint64>> m_CoveragePending;   //!< freed: offset, bytes, the fence
+  uint32 m_nCoverageBytes = 0;                        //!< in use
+  uint32 m_nCoverageMade = 0;                         //!< the last Build's triangles made (the frame dump)
   SFrameSlot m_Slots[D3D12_FRAMES];
 };

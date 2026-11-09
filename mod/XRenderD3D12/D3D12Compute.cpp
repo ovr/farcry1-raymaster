@@ -31,6 +31,7 @@
 #include "VolumetricIntegrate_CS.h"
 #include "VolumetricInjectRays_CS.h"
 #include "VolumetricSun_CS.h"
+#include "RayCoverage_CS.h"
 #include "HdrHistogram_CS.h"
 #include "HdrOutputStats_CS.h"
 #include "ExposureHistogram_CS.h"
@@ -199,6 +200,7 @@ const SKernel s_Kernels[eD3D12K_Num] =
   { "wakes (heights)", g_WakeHeight_CS, sizeof(g_WakeHeight_CS) },
   { "volumetric light's sun by rays", g_VolumetricSun_CS, sizeof(g_VolumetricSun_CS), true },
   { "volumetric light (sun by rays)", g_VolumetricInjectRays_CS, sizeof(g_VolumetricInjectRays_CS) },
+  { "alpha tests' shares", g_RayCoverage_CS, sizeof(g_RayCoverage_CS), true },
 };
 static_assert(sizeof(s_Kernels) / sizeof(s_Kernels[0]) == eD3D12K_Num, "a kernel for each ED3D12Kernel");
 

@@ -243,6 +243,8 @@ bool CAORays::Dispatch(const SAOFrame &Frame)
   rc.nFlags[2] = bDenoise ? 1 : 0;
   // (the GI's with the sun's shadow at the hits, 0x100)
   rc.nFlags[3] = m_bGI ? r->RayMask() & 0x1ff : r->RayMask() & 0xff;
+  if (r->CV_d3d12_RTAlphaCoverage & 2)
+    rc.nFlags[3] |= XR_RAY_COVERAGE_RAYS;
   // A ray for each 2 x 2 pixels, from each of them in turn over 4 frames (the history has them all), or for each pixel.
   const int nStep = (m_bGI ? Frame.nGI >= 2 : Frame.nQuality >= 3) ? 1 : 2;
   static constexpr uint32 CellPixels[4][2] = { { 0, 0 }, { 1, 1 }, { 1, 0 }, { 0, 1 } };

@@ -684,6 +684,11 @@ void CD3D12Renderer::RegisterVariables()
   iConsole->Register("d3d12_RTAsync", &CV_d3d12_RTAsync, 1, 0,
                      "1: the acceleration structures for the rays built on the compute queue, beside the frame's shadows, opaque "
                      "geometry and ambient occlusion; 0: in the frame's command list, before the opaque geometry");
+  iConsole->Register("d3d12_RTAlphaCoverage", &CV_d3d12_RTAlphaCoverage, 3, 0,
+                     "The rays whose light is averaged take an alpha tested triangle (a leaf) at random by the share of it its alpha "
+                     "test passes on, made once a mesh, in place of the test (faster in the foliage). Bits: 1 the path tracer's "
+                     "bounces and radiance cache, 2 the rays' GI and AO, 4 the volumetric light's sun (blurs the shafts); 0 the "
+                     "exact tests everywhere");
   iConsole->Register("d3d12_RTOffscreen", &CV_d3d12_RTOffscreen, 1, VF_DUMPTODISK,
                      "What is out of the main view in the scene for rays: the parts of the sun's cascades (the static objects "
                      "and entities towards the sun, the live casters). 1 for the effects that trace rays from the main view's "

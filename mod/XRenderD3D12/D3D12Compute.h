@@ -122,6 +122,7 @@ enum ED3D12Kernel
   eD3D12K_WakeHeight,               //!< the heights for the ocean's grid (d3d12_WaterGeometry), their mip levels 1 to 3
   eD3D12K_VolumetricSun,            //!< the volumetric light's sun by rays: its state at the froxels' points (Shaders/VolumetricRays.hlsl; with rays)
   eD3D12K_VolumetricInjectRays,     //!< the froxels with those states in place of the cascades (Shaders/Volumetric.hlsl, XR_VOL_RAYS)
+  eD3D12K_RayCoverage,              //!< the alpha tests' shares by triangle (Shaders/RayCoverage.hlsl; d3d12_RTAlphaCoverage, with rays)
   eD3D12K_Num
 };
 

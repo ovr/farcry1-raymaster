@@ -236,6 +236,9 @@ void CD3D12Renderer::LogFrame()
                                             m_nFrameDrawBytes, m_nFrameDrawExt[DrawExt::REASON_DEFAULT], m_nFrameDrawExt[DrawExt::REASON_ALL],
                                             m_nFrameDrawExt[DrawExt::REASON_PROGRAM], m_nFrameDrawExt[DrawExt::REASON_VERTEX],
                                             m_nFrameDrawExt[DrawExt::REASON_DIFFERS]);
+      const std::string CoverageCounts = m_pRayScene ? Format(";rt_coverage_meshes=%u;rt_coverage_bytes=%u;rt_coverage_made=%u", m_pRayScene->GetCoverageMeshes(),
+                                                              m_pRayScene->GetCoverageBytes(), m_pRayScene->GetCoverageMade())
+                                                     : std::string();
       const std::string DisplayCounts = Format(",display_lookups=%u;display_lookup_ms=%.3f;display_active=%d", m_pDevice->GetDisplayLookups() - m_nFrameLogDisplayLookups,
                                                m_pDevice->GetDisplayLookupMs() - m_fFrameLogDisplayMs, m_pDevice->IsAppActive() ? 1 : 0);
       const CCamera &Camera = iSystem->GetViewCamera();
@@ -245,7 +248,7 @@ void CD3D12Renderer::LogFrame()
               fNow - m_fFrameLogLast, m_pDevice->GetWaitMs(), m_pDevice->GetPresentMs(), m_fFrameEndEf3DMs, m_fFrameLowDetailMs[LD_WATER],
               m_fFrameLowDetailMs[LD_CASCADES], m_fFrameLowDetailMs[LD_ENVCUBES], nGpuFrames ? fGpuMs / nGpuFrames : -1.0, m_nFrameDraws,
               m_nFramePSOChanges, m_nPolygons, m_nFrameDynLights, vPos.x, vPos.y, vPos.z, vAngles.x, vAngles.y, vAngles.z, Sections.c_str(),
-              Profiles.c_str(), BarrierCounts.c_str(), DrawCounts.c_str(), DisplayCounts.c_str());
+              Profiles.c_str(), BarrierCounts.c_str(), (DrawCounts + CoverageCounts).c_str(), DisplayCounts.c_str());
       // Since the last line: the first line has the lookups since the start (the first one, when the swap chain came).
       m_nFrameLogDisplayLookups = m_pDevice->GetDisplayLookups();
       m_fFrameLogDisplayMs = m_pDevice->GetDisplayLookupMs();
@@ -535,6 +538,9 @@ void CD3D12Renderer::DrawStats()
         Value("RT shadows", Shadows);
       if (CV_d3d12_RTReflections > 0)
         Value("RT reflections", std::string(CV_d3d12_RTReflections >= 2 ? "water (hybrid)" : "water") + (WantsRaySurfaces() ? ", cube map surfaces" : ""));
+      if (CV_d3d12_RTAlphaCoverage != 0)
+        Value("RT alpha coverage", Format("%s meshes, %.1f MB", Thousands(m_pRayScene->GetCoverageMeshes()).c_str(),
+                                          m_pRayScene->GetCoverageBytes() / 1048576.0));
       if (CV_d3d12_RTDebug != 0)
         Value("RT debug view", Format("%d", CV_d3d12_RTDebug));
     }

@@ -124,6 +124,7 @@ SPathShade PathShadeParams(uint nMaxTests)
   P.nLights = g_PT.nPath.x;
   P.nMask = g_PT.nFlags.w & 0xff;
   P.nMaxTests = nMaxTests;
+  P.nCoverage = 0;
   return P;
 }
 
@@ -276,8 +277,9 @@ void CSTrace(uint3 vId : SV_DispatchThreadID)
   // The game's ambient light the paths fill in with, at the point a ray leaves: the pixel's, then each hit's.
   float3 vFill = PathAmbientLight(g_Textures[g_PT.nTextures2.w].Load(int3(p, 0)).gba) * g_PT.vFill.x;
 
-  // The bounces.
+  // The bounces, their leaves by their shares (d3d12_RTAlphaCoverage): seeds of the path's numbers, not drawn from them.
   P.nMaxTests = g_PT.nPath.z;
+  const bool bCoverage = (g_PT.nFlags.w & XR_RAY_COVERAGE_RAYS) != 0;
   float3 vThrough = 1;
   float3 vOrigin = vPos, vNormal = vN, vFaceNormal = vFace;
   float fWidth = fPixel;
@@ -297,7 +299,8 @@ void CSTrace(uint3 vId : SV_DispatchThreadID)
     Ray.Direction = vDir;
     Ray.TMin = 0.005;
     Ray.TMax = g_PT.vParams.x;
-    const SRayHit Hit = TraceScene(Ray, P.nMask, fWidth, PT_CONE_SPREAD, P.nMaxTests);
+    P.nCoverage = bCoverage ? RayCoverageHash(nSeed) | 1 : 0;
+    const SRayHit Hit = TraceScene(Ray, P.nMask, fWidth, PT_CONE_SPREAD, P.nMaxTests, bCoverage ? nSeed | 1 : 0);
     if (b == 0)
       fHitDistance = Hit.bHit ? Hit.fT : Ray.TMax;
     if (!Hit.bHit)
@@ -553,6 +556,9 @@ void CSCacheUpdate(uint3 vId : SV_DispatchThreadID)
   float3 vPos = PixelPos(p + 0.5, d), vFace = FaceNormal(p, vPos, d);
   PixelSurface(vPos, vFace, PathGBufferMaterial(vGBuffer), g_PT.nFlags.w & 0xff);
   SPathShade P = PathShadeParams(g_PT.nPath.z);
+  // d3d12_RTAlphaCoverage: all its rays' leaves by their shares (the cache's light is an average), as CSTrace's.
+  const bool bCoverage = (g_PT.nFlags.w & XR_RAY_COVERAGE_RAYS) != 0;
+  P.nCoverage = bCoverage ? RayCoverageHash(nSeed) | 1 : 0;
   // The path's points (each one's entry, the light that comes straight to it from the sun and a lamp, what its ray's hit
   // gives back of its own, that hit's albedo), then from the last back all the light that comes to each.
   uint Entries[CACHE_BOUNCES];
@@ -594,7 +600,8 @@ void CSCacheUpdate(uint3 vId : SV_DispatchThreadID)
     Ray.Direction = vDir;
     Ray.TMin = 0.005;
     Ray.TMax = g_PT.vParams.x;
-    const SRayHit Hit = TraceScene(Ray, P.nMask, fWidth, PT_CONE_SPREAD, P.nMaxTests);
+    const SRayHit Hit = TraceScene(Ray, P.nMask, fWidth, PT_CONE_SPREAD, P.nMaxTests, bCoverage ? nSeed | 1 : 0);
+    P.nCoverage = bCoverage ? RayCoverageHash(nSeed) | 1 : 0;
     if (!Hit.bHit)
     {
       Gives[b] = max(g_PT.vSky.rgb, vFill);

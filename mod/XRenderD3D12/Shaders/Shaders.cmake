@@ -221,6 +221,8 @@ xrender_d3d12_shader(VolumetricIntegrate_CS Volumetric.hlsl cs_6_0 CSIntegrate)
 # compute root signature with rays, run only on a device with DXR 1.1) and the froxels from them.
 xrender_d3d12_shader(VolumetricSun_CS VolumetricRays.hlsl cs_6_5 CSSun)
 xrender_d3d12_shader(VolumetricInjectRays_CS Volumetric.hlsl cs_6_0 CSInject XR_VOL_RAYS)
+# The alpha tests' shares by triangle (d3d12_RTAlphaCoverage, RayTracing.cpp), with rays' root signature.
+xrender_d3d12_shader(RayCoverage_CS RayCoverage.hlsl cs_6_5 CSCoverage)
 xrender_d3d12_shader(HdrHistogram_CS HdrStats.hlsl cs_6_0 CSHistogram)
 xrender_d3d12_shader(HdrOutputStats_CS HdrStats.hlsl cs_6_0 CSOutput)
 xrender_d3d12_shader(ExposureHistogram_CS Exposure.hlsl cs_6_0 CSHistogram)

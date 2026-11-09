@@ -30,6 +30,7 @@ typedef float float4x4_t[16];
 #define XR_FLOAT4(name) float name[4]
 #define XR_UINT4(name) uint32 name[4]
 #define XR_FLOAT4_ARRAY(name, n) float name[n][4]
+#define XR_UINT4_ARRAY(name, n) uint32 name[n][4]
 #define XR_UINT(name) uint32 name
 #define XR_FLOAT(name) float name
 #else
@@ -38,6 +39,7 @@ typedef float float4x4_t[16];
 #define XR_FLOAT4(name) float4 name
 #define XR_UINT4(name) uint4 name
 #define XR_FLOAT4_ARRAY(name, n) float4 name[n]
+#define XR_UINT4_ARRAY(name, n) uint4 name[n]
 #define XR_UINT(name) uint name
 #define XR_FLOAT(name) float name
 #endif
@@ -225,6 +227,8 @@ struct SFrameConstants
                                   //!< rays (m_ReflCopy), without its jitter
   XR_FLOAT4(vPrevParams);         //!< its jitter in clip space (xy: xy += vPrevParams.xy * w), its projection's m22 (z) and m32 (w)
   XR_UINT4(nPrevScene);           //!< x its colour's texture table index (0: no copy), y its depth's, z w its size (pixels)
+  XR_UINT4(nRayCoverage);         //!< x the raw view (g_Buffers) of the alpha tests' shares by triangle (d3d12_RTAlphaCoverage,
+                                  //!< RayShade.hlsli's RayCandidatePasses; 0: none), y z w unused
 };
 
 //! b1: per draw, the header that every draw uploads: 256 bytes, one block of the upload ring (Draw.cpp).

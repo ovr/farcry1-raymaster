@@ -850,6 +850,9 @@ void CD3D12Renderer::DrawPathTrace()
   // d3d12_PTSkyPieces: its rays pass the pieces of the sky (a path that reaches one has left the scene; a lamp's ray goes
   // through), as the volumetric light's towards the sun do.
   pc.nFlags[3] = RayMask() & 0xff & (CV_d3d12_PTSkyPieces > 0 ? ~(uint32)XR_RAY_SKY : 0xffu);
+  // d3d12_RTAlphaCoverage: the bounces' leaves by their shares; the reference's exact.
+  if ((CV_d3d12_RTAlphaCoverage & 1) && !bReference)
+    pc.nFlags[3] |= XR_RAY_COVERAGE_RAYS;
   pc.nPath[0] = P.nLights;
   pc.nPath[1] = (uint32)nBounces;
   pc.nPath[2] = bReference ? XR_RAY_MAX_ALPHA_TESTS : PATH_BOUNCE_TESTS;

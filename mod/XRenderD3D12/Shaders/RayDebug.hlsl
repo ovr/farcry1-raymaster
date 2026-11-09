@@ -134,7 +134,7 @@ uint MaterialHash(SRayInstance I)
 {
   const uint4 Words[] = { uint4(I.nLayout.xyz, 0), I.nMaterial, I.nMaterial2, asuint(I.vColor), asuint(I.vAmbient),
                           asuint(I.vTexGenU), asuint(I.vTexGenV), asuint(I.vTexMat0), asuint(I.vTexMat1), asuint(I.vAddColor),
-                          asuint(I.vAlbedo), asuint(I.vSpecular), I.nPath };
+                          asuint(I.vAlbedo), asuint(I.vSpecular), uint4(I.nPath.xyz, 0) };
   uint n = 2166136261u;
   [unroll]
   for (uint i = 0; i < 13; i++)
@@ -256,6 +256,7 @@ float4 PSMain(SRayDebugOutput In) : SV_Target
     P.nLights = g_Draw.nTex2;
     P.nMask = nMask;
     P.nMaxTests = XR_RAY_MAX_ALPHA_TESTS;
+    P.nCoverage = 0;
     const float fWidth = Hit.fT * fSpread;
     const SPathSurface H = PathSurface(Hit, Ray.Direction, fWidth, P);
     float3 vLight;
@@ -280,6 +281,21 @@ float4 PSMain(SRayDebugOutput In) : SV_Target
       return float4(0, 0, 0, 1);
     const float fEdge = min(min(Hit.vBary.x, Hit.vBary.y), 1 - Hit.vBary.x - Hit.vBary.y);
     return float4(HashColor(MaterialHash(g_RayInstances[Hit.nInstance])) * (fEdge < 0.03 ? 0.4 : 1), 1);
+  }
+
+  if (nView == XR_RAY_DEBUG_COVERAGE)
+  {
+    const float fSpread = length(PixelRay(In.vPos.xy + float2(1, 0)) - Ray.Direction);
+    const SRayHit Hit = TraceScene(Ray, nMask, 0, fSpread);
+    if (!Hit.bHit)
+      return float4(0, 0, 0, 1);
+    const SRayInstance I = g_RayInstances[Hit.nInstance];
+    if (!(I.nMaterial.x & DF_ALPHATEST))
+      return float4(0.05, 0.05, 0.25, 1);
+    if (I.nPath.w == XR_RAY_NONE || g_Frame.nRayCoverage.x == 0)
+      return float4(0.8, 0.1, 0.1, 1);
+    const uint nByte = I.nPath.w + Hit.nPrimitive;
+    return float4(((RayLoad(g_Frame.nRayCoverage.x, nByte & ~3u) >> (8 * (nByte & 3))) & 255).xxx / 255.0, 1);
   }
 
   if (nView == XR_RAY_DEBUG_SUN_WAY)

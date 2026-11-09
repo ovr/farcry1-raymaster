@@ -95,8 +95,8 @@ float SurfaceDepth(int2 p)
 }
 
 //! The distance along Ray to the nearest of the instances of nMask, 0 where there is none; fConeWidth
-//! the ray cone's width at the origin (the alpha tests' mip levels).
-float AOHit(RayDesc Ray, uint nMask, float fConeWidth)
+//! the ray cone's width at the origin (the alpha tests' mip levels); nCoverage RayCandidatePasses' seed.
+float AOHit(RayDesc Ray, uint nMask, float fConeWidth, uint nCoverage)
 {
   RayQuery<RAY_FLAG_SKIP_PROCEDURAL_PRIMITIVES> Query;
   Query.TraceRayInline(g_RayScene, RAY_FLAG_NONE, nMask, Ray);
@@ -109,9 +109,8 @@ float AOHit(RayDesc Ray, uint nMask, float fConeWidth)
     if (!bHit)
     {
       nTests++;
-      const SRaySurface S = RaySurface(Query.CandidateInstanceID(), Query.CandidatePrimitiveIndex(), Query.CandidateTriangleBarycentrics(),
-        Query.CandidateObjectToWorld3x4(), Ray.Direction, fConeWidth, true);
-      bHit = RayAlphaPasses(Query.CandidateInstanceID(), S, Ray.Direction);
+      bHit = RayCandidatePasses(Query.CandidateInstanceID(), Query.CandidatePrimitiveIndex(), Query.CandidateTriangleBarycentrics(),
+        Query.CandidateObjectToWorld3x4(), Ray.Direction, fConeWidth, nCoverage);
     }
     if (bHit)
       Query.CommitNonOpaqueTriangleHit();
@@ -122,15 +121,16 @@ float AOHit(RayDesc Ray, uint nMask, float fConeWidth)
 #ifdef RAY_GI
 //! The factor of the ambient light Ray brings: 1 where it finds nothing, else the light what it finds
 //! gives back over its ambient colour, towards 1 over the falloff; fPixel the ray cone's width at
-//! its origin.
-float3 GIRay(RayDesc Ray, float fPixel)
+//! its origin, nCoverage RayCandidatePasses' seed.
+float3 GIRay(RayDesc Ray, float fPixel, uint nCoverage)
 {
   const uint nMask = g_AO.nFlags.w & 0xff;
-  const SRayHit Hit = TraceScene(Ray, nMask, fPixel, GI_CONE_SPREAD, GI_ALPHA_TESTS);
+  const SRayHit Hit = TraceScene(Ray, nMask, fPixel, GI_CONE_SPREAD, GI_ALPHA_TESTS, nCoverage);
   if (!Hit.bHit)
     return 1;
   bool bFog;
-  const float3 vLight = RayShade(Hit, Ray.Direction, fPixel + Hit.fT * GI_CONE_SPREAD, (g_AO.nFlags.w & 0x100) != 0, nMask, bFog, GI_ALPHA_TESTS).rgb;
+  const float3 vLight = RayShade(Hit, Ray.Direction, fPixel + Hit.fT * GI_CONE_SPREAD, (g_AO.nFlags.w & 0x100) != 0, nMask, bFog, GI_ALPHA_TESTS,
+                                 nCoverage ? RayCoverageHash(nCoverage) | 1 : 0).rgb;
   const float3 vAmbient = g_RayInstances[Hit.nInstance].vAmbient.rgb;
   const float3 vOwn = max(any(vAmbient > 1.0 / 255) ? vAmbient : g_AO.vOutdoorAmbient.rgb, 0.02);
   const float3 vGiven = min(max(vLight, 0) / vOwn, GI_GIVEN_MAX) * g_AO.vGI.x;
@@ -169,10 +169,12 @@ void CSTrace(uint3 vId : SV_DispatchThreadID)
   Ray.Direction = normalize(r * cos(a) * vT + r * sin(a) * vB + sqrt(saturate(1 - u)) * vN);
   Ray.TMin = 0.005;
   Ray.TMax = g_AO.vParams.x;
+  // d3d12_RTAlphaCoverage: the leaves by their shares, another draw for each pixel and frame.
+  const uint nCoverage = (g_AO.nFlags.w & XR_RAY_COVERAGE_RAYS) ? (Hash(p.x | (p.y << 16) | 0x4000) ^ Hash(g_AO.nFlags.y)) | 1 : 0;
 #ifdef RAY_GI
-  g_Out[q] = float4(GIRay(Ray, fPixel), d);
+  g_Out[q] = float4(GIRay(Ray, fPixel, nCoverage), d);
 #else
-  const float t = AOHit(Ray, g_AO.nFlags.w & 0xff, fPixel);
+  const float t = AOHit(Ray, g_AO.nFlags.w & 0xff, fPixel, nCoverage);
   g_Out[q] = float4(t > 0 ? saturate((t / g_AO.vParams.x - (1 - AO_FALLOFF)) / AO_FALLOFF) : 1, 0, d, 0);
 #endif
 }

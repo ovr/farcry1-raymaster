@@ -39,8 +39,8 @@ ConstantBuffer<SVolumetricConstants> g_Vol : register(b2);
 RWTexture3D<float> g_Out : register(u0);
 
 //! Whether something among the instances of nMask hides the sun along Ray (alpha tested as RaySun.hlsl's SunHit:
-//! fConeWidth the ray cone's width at the origin, fSpread its growth a metre).
-bool SunHidden(RayDesc Ray, uint nMask, float fConeWidth, float fSpread)
+//! fConeWidth the ray cone's width at the origin, fSpread its growth a metre; nCoverage RayCandidatePasses' seed).
+bool SunHidden(RayDesc Ray, uint nMask, float fConeWidth, float fSpread, uint nCoverage)
 {
   RayQuery<RAY_FLAG_SKIP_PROCEDURAL_PRIMITIVES | RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH> Query;
   Query.TraceRayInline(g_RayScene, RAY_FLAG_NONE, nMask, Ray);
@@ -54,9 +54,8 @@ bool SunHidden(RayDesc Ray, uint nMask, float fConeWidth, float fSpread)
     {
       nTests++;
       const float fCone = fConeWidth + Query.CandidateTriangleRayT() * fSpread;
-      const SRaySurface S = RaySurface(Query.CandidateInstanceID(), Query.CandidatePrimitiveIndex(), Query.CandidateTriangleBarycentrics(),
-        Query.CandidateObjectToWorld3x4(), Ray.Direction, fCone, true);
-      bHit = RayAlphaPasses(Query.CandidateInstanceID(), S, Ray.Direction);
+      bHit = RayCandidatePasses(Query.CandidateInstanceID(), Query.CandidatePrimitiveIndex(), Query.CandidateTriangleBarycentrics(),
+        Query.CandidateObjectToWorld3x4(), Ray.Direction, fCone, nCoverage);
     }
     if (bHit)
       Query.CommitNonOpaqueTriangleHit();
@@ -89,14 +88,15 @@ void CSSun(uint3 vThread : SV_DispatchThreadID)
   Ray.TMax = min(SHAFT_SURFACE, g_Vol.vRays.x);
   const uint nMask = g_Vol.nRays.x & 0xff;
   const float fCone = d * g_Vol.vRays.z, fSpread = 2 * g_Vol.vRays.y;
+  const uint nCoverage = (g_Vol.nRays.x & XR_RAY_COVERAGE_RAYS) ? asuint(u) ^ (asuint(v) * 0x9e3779b1u) | 1 : 0;
   // Near first (not air), then the rest of the way (a shadow): each the first hit it finds.
-  const bool bNear = SunHidden(Ray, nMask, fCone, fSpread);
+  const bool bNear = SunHidden(Ray, nMask, fCone, fSpread, nCoverage);
   bool bFar = false;
   if (!bNear && g_Vol.vRays.x > SHAFT_SURFACE)
   {
     Ray.TMin = SHAFT_SURFACE;
     Ray.TMax = g_Vol.vRays.x;
-    bFar = SunHidden(Ray, nMask, fCone, fSpread);
+    bFar = SunHidden(Ray, nMask, fCone, fSpread, nCoverage ? RayCoverageHash(nCoverage) | 1 : 0);
   }
   g_Out[vId] = VolSunState(bNear, bFar);
 }

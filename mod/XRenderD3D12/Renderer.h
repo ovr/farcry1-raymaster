@@ -2399,6 +2399,7 @@ public:
   int CV_d3d12_RTMask = 31;                 //!< the kinds of instances the rays see (XR_RAY_* bits)
   int CV_d3d12_RTShadows = 1;               //!< the sun's shadow at the hits (a ray towards it, RayShade.hlsli)
   int CV_d3d12_RTAsync = 1;                 //!< the ray scene's builds on the compute queue beside the frame
+  int CV_d3d12_RTAlphaCoverage = 3;         //!< the rays that take a leaf by its triangle's alpha share (bits: 1 the paths, 2 GI and AO, 4 the volumetric sun)
   int CV_d3d12_RTOffscreen = 1;             //!< what is out of the main view in the scene for rays: 1 for the effects that need it, 2 always
   int CV_d3d12_RTReflections = 0;           //!< the water's reflection by rays: 1 in place of the screen space one, 2 where it misses
   int CV_d3d12_RTReflectionSurfaces = 1;    //!< with d3d12_RTReflections, the cube maps' reflections by rays (XR_RAY_REFL); 2 tinted
