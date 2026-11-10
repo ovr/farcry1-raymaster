@@ -76,6 +76,7 @@
 #include "Cmaa2Candidates_CS.h"
 #include "Cmaa2Apply_CS.h"
 #include "TaaResolve_CS.h"
+#include "TaaResolveLight_CS.h"
 #include "TaaSharpen_CS.h"
 #include "OceanRows_CS.h"
 #include "OceanColumns_CS.h"
@@ -199,6 +200,7 @@ const SKernel s_Kernels[eD3D12K_Num] =
   { "volumetric light's sun by rays", g_VolumetricSun_CS, sizeof(g_VolumetricSun_CS), true },
   { "volumetric light (sun by rays)", g_VolumetricInjectRays_CS, sizeof(g_VolumetricInjectRays_CS) },
   { "alpha tests' shares", g_RayCoverage_CS, sizeof(g_RayCoverage_CS), true },
+  { "TAA resolve (scene's light)", g_TaaResolveLight_CS, sizeof(g_TaaResolveLight_CS), true },
 };
 static_assert(sizeof(s_Kernels) / sizeof(s_Kernels[0]) == eD3D12K_Num, "a kernel for each ED3D12Kernel");
 

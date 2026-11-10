@@ -167,6 +167,8 @@ set(XRENDERD3D12_SHADER_INCLUDES "")
 # TAA (d3d12_AA taa, UpscalerTaa.cpp, Taa.hlsli): the frame blended into the history at each pixel's motion, the sharpening
 # (AMD FidelityFX CAS of third_party/fidelityfx-cas, TaaCas.hlsli).
 xrender_d3d12_shader(TaaResolve_CS Taa.hlsl cs_6_0 CSMain XR_TAA_RESOLVE)
+# The resolve that makes the scene's light itself (d3d12_AASceneLight), with rays' root signature (the texture table).
+xrender_d3d12_shader(TaaResolveLight_CS Taa.hlsl cs_6_0 CSMain XR_TAA_RESOLVE XR_TAA_LIGHT)
 set(XRENDERD3D12_SHADER_INCLUDES "${XRENDERD3D12_CAS_DIR}")
 xrender_d3d12_shader(TaaSharpen_CS Taa.hlsl cs_6_0 CSMain)
 set(XRENDERD3D12_SHADER_INCLUDES "")

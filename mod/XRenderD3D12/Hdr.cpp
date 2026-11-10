@@ -307,7 +307,8 @@ bool CD3D12Renderer::MeterHdr(int nSceneSRV, ID3D12Resource *pScene, int nWidth,
   return true;
 }
 
-CD3D12Texture *CD3D12Renderer::HdrSceneLight(int nSceneSRV, int nWidth, int nHeight, ID3D12Resource *pDepth, DXGI_FORMAT DepthFormat)
+CD3D12Texture *CD3D12Renderer::HdrSceneLight(int nSceneSRV, int nWidth, int nHeight, ID3D12Resource *pDepth, DXGI_FORMAT DepthFormat,
+                                             SUpscaleInputs *pMakes)
 {
   if (nSceneSRV < 0 || m_Hdr.nMeteredFrame != m_nFrames || !EnsureSceneLightTargets(nWidth, nHeight))
     return nullptr;
@@ -324,7 +325,23 @@ CD3D12Texture *CD3D12Renderer::HdrSceneLight(int nSceneSRV, int nWidth, int nHei
     dc.nTex5 = (uint32)m_Hdr.nDepthSRV;
   else if (!bHeat)
     SetVolumetricConstants(dc);
-  DrawHdrPass(m_Hdr.pLight, dc);
+  // d3d12_AASceneLight: the upscaler makes it (TAA's resolve, Taa.hlsl's XR_TAA_LIGHT) from what the pass would take.
+  if (pMakes && CV_d3d12_AASceneLight && !bHeat && !bSkyMask)
+  {
+    pMakes->bSceneLight = true;
+    pMakes->nSceneSRV = nSceneSRV;
+    pMakes->bVolumetric = (dc.nFlags & HDR_VOLUMETRIC) != 0;
+    if (pMakes->bVolumetric)
+    {
+      pMakes->nVolumeDepthSRV = (int)dc.nTex5;
+      pMakes->nFroxelsSRV = (int)dc.nTex4;
+      memcpy(pMakes->vVolume0, &dc.mParams0[0], sizeof(pMakes->vVolume0));
+      Set4(pMakes->vVolume1, dc.mParams0[4], dc.mParams0[5], dc.vParams0[0], dc.vParams0[1]);
+    }
+    m_Hdr.SceneLight = dc;
+  }
+  else
+    DrawHdrPass(m_Hdr.pLight, dc);
   // The exposure's factor, which the upscaler gets.
   SDrawConstants ec = DefaultDrawConstants();
   ec.nFlags = HDR_EXPOSURE_SCALE;
@@ -334,6 +351,15 @@ CD3D12Texture *CD3D12Renderer::HdrSceneLight(int nSceneSRV, int nWidth, int nHei
   DrawHdrPass(m_Hdr.pExposureScale, ec);
   m_pDevice->SetBackBufferTargets();
   return m_Hdr.pLight;
+}
+
+void CD3D12Renderer::DrawSceneLight()
+{
+  if (!m_Hdr.pLight)
+    return;
+  DrawHdrPass(m_Hdr.pLight, m_Hdr.SceneLight);
+  m_pDevice->SetBackBufferTargets();
+  m_pDevice->Require(m_Hdr.pLight->m_pResource, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE | D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
 }
 
 CD3D12Texture *CD3D12Renderer::ResolveHdr(int nSceneSRV, ID3D12Resource *pScene, int nWidth, int nHeight, bool bToTexture, ID3D12Resource *pDepth,

@@ -19,6 +19,9 @@
 //	     Shaders/TaaCas.hlsli), its sharpness d3d12_UpscaleSharpness.
 //	d3d12_AAQuality is the frame's least share in the picture: low 1/5
 //	to ultra 1/14, how many frames it gathers.
+//	With d3d12_AASceneLight the first kernel makes the HDR scene's light
+//	itself (Hdr.hlsl's pass, the volumetric light through the froxels)
+//	into a tile of its group, in place of reading that pass's target.
 //
 //////////////////////////////////////////////////////////////////////
 
@@ -137,6 +140,7 @@ public:
     m_nWidth = nWidth;
     m_nHeight = nHeight;
     m_bHdr = bHdr;
+    m_bSceneLight = bHdr && pCompute->HasKernel(eD3D12K_TaaResolveLight);
     return true;
   }
 
@@ -180,6 +184,27 @@ public:
     Consts.vParams[3] = s_MovingShare[nQuality];
     Consts.vFlags[0] = (In.bReset || !m_bHistory ? TAA_RESET : 0) | (m_bHdr ? TAA_HDR : 0) | (m_bHdr && In.pExposure ? TAA_EXPOSURE : 0) |
                        (bSharpen ? 0 : TAA_OUTPUT) | (In.bDebugView ? TAA_DEBUG : 0);
+    // The scene's light made by the resolve (d3d12_AASceneLight): its inputs by their slots of the texture table, the
+    // resolve's table's views of the depth, the motion vectors and the history read.
+    const bool bSceneLight = In.bSceneLight && m_bSceneLight && In.nSceneSRV >= 0;
+    if (In.bSceneLight && !bSceneLight)
+      return false;
+    const int nResolve = eT_Resolve0 + m_nRead;
+    if (bSceneLight)
+    {
+      Consts.vInputs[0] = (uint32)In.nSceneSRV;
+      Consts.vInputs[1] = (uint32)(Table(nResolve) + 1);
+      Consts.vInputs[2] = (uint32)(Table(nResolve) + 2);
+      Consts.vInputs[3] = (uint32)(Table(nResolve) + 3);
+      if (In.bVolumetric && In.nVolumeDepthSRV >= 0 && In.nFroxelsSRV >= 0)
+      {
+        Consts.vFlags[0] |= TAA_VOLUMETRIC;
+        Consts.vVolumeInputs[0] = (uint32)In.nVolumeDepthSRV;
+        Consts.vVolumeInputs[1] = (uint32)In.nFroxelsSRV;
+        memcpy(Consts.vVolume0, In.vVolume0, sizeof(Consts.vVolume0));
+        memcpy(Consts.vVolume1, In.vVolume1, sizeof(Consts.vVolume1));
+      }
+    }
     // CAS's sharpness is d3d12_UpscaleSharpness (0 its least, which 0 turns off here, 1 its most), at the picture's size.
     AU1 Cas0[4], Cas1[4];
     CasSetup(Cas0, Cas1, Consts.vParams[1], (AF1)m_nWidth, (AF1)m_nHeight, (AF1)m_nWidth, (AF1)m_nHeight);
@@ -211,8 +236,10 @@ public:
     if (bExposure)
       pDevice->Require(In.pExposure, UAV);
 
-    const int nResolve = eT_Resolve0 + nRead;
-    pCompute->Dispatch(pList, eD3D12K_TaaResolve, CB.nGPU, Table(nResolve), Table(nResolve) + SRVS, gx, gy);
+    if (bSceneLight)
+      pCompute->DispatchRays(pList, eD3D12K_TaaResolveLight, 0, CB.nGPU, 0, 0, Table(nResolve) + SRVS, gx, gy);
+    else
+      pCompute->Dispatch(pList, eD3D12K_TaaResolve, CB.nGPU, Table(nResolve), Table(nResolve) + SRVS, gx, gy);
     // The new history read by the sharpening and next frame.
     Move(pWrite, UAV, READ);
     m_eHistoryState[nWrite] = READ;
@@ -230,6 +257,7 @@ public:
 
   const char *GetName() const override { return "TAA"; }
   bool IsAntiAliasing() const override { return true; }
+  bool MakesSceneLight() const override { return m_bSceneLight; }
 
 private:
   void Release()
@@ -308,6 +336,7 @@ private:
 
   int m_nWidth = 0, m_nHeight = 0;          //!< the display's size
   bool m_bHdr = false;                      //!< the HDR scene's light with its exposure (Create's bHdr)
+  bool m_bSceneLight = false;               //!< with m_bHdr: the resolve that makes the scene's light is there
   CD3D12Texture *m_pHistory[2] = {};        //!< R16G16B16A16_FLOAT: [m_nRead] the history, the other one written next
   D3D12_RESOURCE_STATES m_eHistoryState[2] = { UAV, UAV };
   int m_nRead = 0;

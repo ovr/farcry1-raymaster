@@ -225,7 +225,15 @@ system ones (better not to touch): [`CONFIGURATION.md`](../../CONFIGURATION.md).
     scene's light for it in `hdr` and the motion vectors). Since step 383 the motion is the
     resolve's own (the exposure read there as a UAV, its four SRVs taken): 0.57-0.58 ms against
     0.61-0.64 (PerfSweep Pier in the player's settings, five runs each), the picture the same to
-    the pixel.
+    the pixel. Since step 385 (`d3d12_AASceneLight 1`) the resolve with the HDR light makes that
+    light itself, `Hdr.hlsl`'s scene pass (the scene's colours decoded, the volumetric light
+    through the froxels, `HdrShared.hlsli`'s `VolumetricThrough`) once per pixel of its group's
+    tile (8 x 8 and a pixel round), rounded to 16-bit floats as that pass's target held it; the
+    pass and its R16G16B16A16_FLOAT target of the display's size are gone (kept with the heat haze,
+    the sky's mask and the upscalers). The kernel takes the rays' root signature for the texture
+    table. PerfSweep Pier in the player's settings, three runs each: `hdr` 0.30-0.31 ms against
+    0.44-0.45, `anti-aliasing` 0.56 in both, the GPU's frame 3.64-3.67 against 3.78-3.82; frames
+    1, 181 and 661 in pairs of 0 px with the build before and with `d3d12_AASceneLight 0`.
   - Unit tests `Taa_*`: the jitter covers the pixel; a still edge gathers the frames (under half
     of the error without it after 48 frames at every quality); a reset takes the frame; the history
     follows the motion (by the nearest of the 3 x 3) and is ignored off the picture; a stale history

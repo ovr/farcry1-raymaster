@@ -601,8 +601,9 @@ struct SVolumetricConstants
 #define TAA_EXPOSURE        0x00000004  //!< with TAA_HDR: t3 holds the light's exposure (else vParams.z)
 #define TAA_OUTPUT          0x00000008  //!< the resolve writes the picture too (no sharpening after it)
 #define TAA_DEBUG           0x00000010  //!< its debug view in place of the picture (d3d12_AADebug 1)
+#define TAA_VOLUMETRIC      0x00000020  //!< the resolve with the scene's light (XR_TAA_LIGHT): through the volumetric light
 
-//! b0 of TAA's kernels (Taa.hlsl, UpscalerTaa.cpp).
+//! b0 of TAA's kernels (Taa.hlsl, UpscalerTaa.cpp), b2 of the resolve with the scene's light.
 struct STaaConstants
 {
   XR_FLOAT4(vSize);               //!< x width, y height (pixels), z 1 / width, w 1 / height
@@ -612,6 +613,12 @@ struct STaaConstants
   XR_UINT4(vFlags);               //!< x TAA_*
   XR_UINT4(vCas0);                //!< the sharpening's CAS constants of its sharpness (CasSetup's const0, const1; TaaCas.hlsli)
   XR_UINT4(vCas1);
+  // The resolve with the scene's light (XR_TAA_LIGHT, d3d12_AASceneLight): its inputs' slots of the texture table, the
+  // volumetric light's constants as HDR_SCENE_LIGHT has them (Volumetric.cpp's SetVolumetricConstants).
+  XR_UINT4(vInputs);              //!< x the scene's colours, y the depth, z the motion vectors, w the history
+  XR_UINT4(vVolumeInputs);        //!< x the depth buffer the froxels are at, y the integrated froxels (Texture3D)
+  XR_FLOAT4(vVolume0);            //!< mParams0[0]: the froxels' near, 1 / log2(far / near), half a slice, M22
+  XR_FLOAT4(vVolume1);            //!< x M32, y 1: the scattered light alone (mParams0[1].xy), zw the froxels' uv of a pixel
 };
 
 // MSAA's resolve's flags (SMsaaConstants::vParams.y)

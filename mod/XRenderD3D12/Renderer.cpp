@@ -485,6 +485,9 @@ void CD3D12Renderer::RegisterVariables()
   iConsole->Register("d3d12_AADebug", &CV_d3d12_AADebug, 0, 0,
                      "1: the anti-aliasing's view of the edges (grey where it leaves the picture, red by how much it blends; SMAA and "
                      "CMAA2: also the edges they found; TAA: red where its history goes, yellow where it is clipped)");
+  iConsole->Register("d3d12_AASceneLight", &CV_d3d12_AASceneLight, 1, 0,
+                     "1: with TAA and the HDR scene's light (d3d12_UpscaleHdr) its resolve makes that light itself from the scene "
+                     "(the same picture, no full-screen pass of its own); 0: the light's own pass, as the frames before");
   iConsole->Register("d3d12_AlphaToCoverage", &CV_d3d12_AlphaToCoverage, 1, VF_DUMPTODISK,
                      "With MSAA (d3d12_AA msaa2, msaa4, msaa8), 1: the alpha-tested surfaces (grass, leaves, gratings) cover the samples "
                      "their alpha sharpened to the test's edge covers (alpha to coverage): their edges smooth; 0: the alpha test, a step");

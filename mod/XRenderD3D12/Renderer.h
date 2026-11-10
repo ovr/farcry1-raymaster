@@ -1700,6 +1700,7 @@ public:
     int nWidth = 0, nHeight = 0;            //!< the size of the resolve Bloom, pLdr and pRatio are for
     CD3D12Texture *pLight = nullptr;        //!< d3d12_UpscaleHdr 1: the scene's light for the upscaler (D3D12_HDR_FORMAT, HdrSceneLight)
     CD3D12Texture *pExposureScale = nullptr;  //!< and its exposure's factor (1 x 1 R32_FLOAT)
+    SDrawConstants SceneLight = {};         //!< the pass of pLight that HdrSceneLight left to the upscaler (DrawSceneLight)
     bool bAdapted = false;                  //!< pExposure[nExposure] holds an adapted EV
     int nMeteredFrame = -1;                 //!< m_nFrames of the last meter (MeterHdr)
     ComPtr<ID3D12Resource> pHdrColor;       //!< the device's HDR target nHdrColorSRV is of (kept: a new one is never at its address)
@@ -1738,7 +1739,12 @@ public:
   //! frame's froxels at the depth pDepth, readable already) and not exposed, into m_Hdr.pLight
   //! (the scene's size), which it returns, and the exposure's factor into m_Hdr.pExposureScale, for
   //! the upscaler; ResolveHdr with bLight tone maps its picture. nullptr: no targets, or no meter.
-  CD3D12Texture *HdrSceneLight(int nSceneSRV, int nWidth, int nHeight, ID3D12Resource *pDepth, DXGI_FORMAT DepthFormat);
+  //! With pMakes (an upscaler that MakesSceneLight) and d3d12_AASceneLight the light is not drawn but
+  //! left to the upscaler (pMakes's bSceneLight and the rest; DrawSceneLight draws it after all).
+  CD3D12Texture *HdrSceneLight(int nSceneSRV, int nWidth, int nHeight, ID3D12Resource *pDepth, DXGI_FORMAT DepthFormat,
+                               SUpscaleInputs *pMakes = nullptr);
+  //! The light HdrSceneLight left to the upscaler into m_Hdr.pLight after all (the upscaler failed).
+  void DrawSceneLight();
   //! m_Hdr.nDepthSRV for pDepth (a new view when it changes). -1: none.
   int HdrDepthSRV(ID3D12Resource *pDepth, DXGI_FORMAT DepthFormat);
   //! This frame's table of the bloom's kernel for level nPass (m_Hdr.KernelTables). The GPU is done
@@ -2419,6 +2425,7 @@ public:
                                             //!< scene tone mapped at the render size (as up to step 259)
   int CV_d3d12_AAQuality = 2;               //!< the anti-aliasing's (d3d12_AA, a string) quality, 0 (low) to 3 (ultra)
   int CV_d3d12_AADebug = 0;                 //!< 1: the anti-aliasing's view of the edges
+  int CV_d3d12_AASceneLight = 1;            //!< 1: TAA's resolve makes the HDR scene's light itself (no pass of its own; 0: the pass, the frames before)
   int CV_d3d12_AlphaToCoverage = 1;         //!< with MSAA, 1: the alpha-tested draws' edges by the samples their alpha covers
   int CV_d3d12_FadeBlend = 1;               //!< 1: the objects fading in or out by their distance blended by their alpha (SRenderItem::bFade; 0: opaque, the frames before)
   int CV_d3d12_PTFadeBlend = 1;             //!< 1: with the path tracer those objects blended as well, after the trace with the raster's light (0: whole in its G-buffer, the frames before)

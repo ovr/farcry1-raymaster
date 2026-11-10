@@ -252,6 +252,7 @@ Details: [Device removal (DRED)](mod/XRenderD3D12/README.md#device-removal-dred)
 
 | Variable | Default | Saved | What it does |
 |---|---|---|---|
+| `d3d12_AASceneLight` | `1` |  | With TAA and HDR, its resolve makes the scene's light itself, without that light's full-screen pass (the same frames, faster) |
 | `d3d12_AlphaToCoverage` | `1` | yes | With MSAA, the alpha tested surfaces cover the samples by their alpha |
 | `d3d12_BarrierBatch` | `1` |  | The barriers queued and given in one call before the next draw |
 | `d3d12_BeachShadow` | `1` |  | The foam on the beach in the sun's shadow as the terrain under it (no glowing border round the shadow of Carrier's wreck) |
