@@ -203,6 +203,9 @@ private:
   SDrawExt m_DefaultDrawExt = {};
   //! Every key asked for, with nullptr for the keys that failed (logged once).
   std::unordered_map<SPipelineKey, Microsoft::WRL::ComPtr<ID3D12PipelineState>, SKeyHash, SKeyEqual> m_PSOs;
+  SPipelineKey m_LastKey = {};          //!< the key GetPSO found last and its state (the table's entries stay)
+  ID3D12PipelineState *m_pLastPSO = nullptr;
+  bool m_bLastKey = false;
   std::vector<SPipelineKey> m_NewKeys;  //!< made and not yet in the file
   size_t m_nNewKeysBefore = 0;          //!< m_NewKeys.size() at the last SaveKeys
 };

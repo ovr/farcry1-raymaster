@@ -18,6 +18,7 @@
 #include "D3D12Pipeline.h"
 #include "Shaders/Constants.h"
 #include "DrawExt.h"
+#include "WordHash.h"
 
 // The programs, compiled by dxc at build time (Shaders/Shaders.cmake).
 #include "General_VS.h"
@@ -494,15 +495,8 @@ namespace
 
 size_t CD3D12Pipeline::SKeyHash::operator()(const SPipelineKey &Key) const
 {
-  // FNV-1a over the bytes of the key (callers zero-initialise it).
-  const uint8 *p = (const uint8 *)&Key;
-  uint64 nHash = 14695981039346656037ull;
-  for (size_t i = 0; i < sizeof(Key); i++)
-  {
-    nHash ^= p[i];
-    nHash *= 1099511628211ull;
-  }
-  return (size_t)nHash;
+  // Its bytes as words (callers zero-initialise it).
+  return SWordHash()(Key);
 }
 
 bool CD3D12Pipeline::SKeyEqual::operator()(const SPipelineKey &a, const SPipelineKey &b) const
@@ -533,6 +527,7 @@ void CD3D12Pipeline::Shutdown()
     WriteKeyFile("ab", m_NewKeys.data(), m_NewKeys.size());
   m_NewKeys.clear();
   m_nNewKeysBefore = 0;
+  m_bLastKey = false;
   m_PSOs.clear();
   m_pDefaultStream.Reset();
   m_DefaultStreamView = {};
@@ -732,9 +727,17 @@ ID3D12PipelineState *CD3D12Pipeline::GetPSO(const SPipelineKey &Key)
 {
   if (!m_pRootSignature)
     return nullptr;
+  // A run of draws of one pipeline state (most of a pass's) asks the table once.
+  if (m_bLastKey && memcmp(&Key, &m_LastKey, sizeof(Key)) == 0)
+    return m_pLastPSO;
   auto it = m_PSOs.find(Key);
   if (it != m_PSOs.end())
-    return it->second.Get();
+  {
+    m_LastKey = Key;
+    m_pLastPSO = it->second.Get();
+    m_bLastKey = true;
+    return m_pLastPSO;
+  }
   ComPtr<ID3D12PipelineState> pPSO;
   {
     FRAME_PROFILER("CD3D12Pipeline::CreatePSO", iSystem, PROFILE_RENDERER);
@@ -798,6 +801,7 @@ void CD3D12Pipeline::LoadKeys()
     Thread.join();
   // A key the device refuses now is made again (and its error logged) when a draw asks for it.
   std::erase_if(m_PSOs, [](const auto &Entry) { return !Entry.second; });
+  m_bLastKey = false;
   if (!bValid || m_PSOs.size() != Keys.size())
   {
     std::vector<SPipelineKey> Made;

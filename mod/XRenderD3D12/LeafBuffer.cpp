@@ -18,6 +18,7 @@
 #include "TangentFrame.h"
 #include "VegetationLight.h"
 #include "IndexLists.h"
+#include "WordHash.h"
 #include <CryCompiledFile.h>
 
 #include <array>
@@ -419,7 +420,7 @@ struct SCustomLighting
 
 struct SGeomState
 {
-  std::unordered_set<CLeafBuffer *> Live;
+  std::unordered_set<CLeafBuffer *, SWordHash> Live;   //!< looked up twice a draw (GetDraw)
   std::unordered_map<CLeafBuffer *, SCustomLighting> Lighting;
   bool bUnlitVegetation = false;    //!< Geometry::SetUnlitVegetation
 };

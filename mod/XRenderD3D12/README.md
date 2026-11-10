@@ -1752,6 +1752,16 @@ sweep at 3840 x 2160 with the rays, row 360 (the camera's jump to the flight's s
 engine makes 178 leaf buffers): 14.4–15.2 ms → 13.7–13.9 (`EF_EndEf3D` 7.2–7.8 → 6.2–6.8); its
 heavy part's `EF_EndEf3D` 5.00–5.05 → 4.89–4.92 ms; the frames the same. Unit tests `IndexLists_*`.
 
+## Tables looked up every draw
+
+The pipeline states, the live leaf buffers (twice a draw), the parts drawn into the sun's
+cascades, the objects' motion and the static casters are hashed as whole words (`WordHash.h`,
+the scene for rays' hash): the standard library's FNV-1a takes a multiply a byte, and a pipeline
+key's 24 bytes took 2 % of Pier's heavy frames. `GetPSO` also keeps the key it found last: most of
+a pass's draws ask for the same state. Pier's sweep at 3840 x 2160 with the rays, five pairs of
+runs: its heavy part's `EF_EndEf3D` 4.86–4.98 → 4.77–4.85 ms, the whole sweep's 1.83–2.00 →
+1.80–1.82; the frames the same. Unit tests `WordHash_*`.
+
 ## Resource states and barriers
 
 The frame's barriers go through the device (`CD3D12Device::Transition`, `UavBarrier`,

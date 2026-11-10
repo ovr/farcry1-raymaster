@@ -26,6 +26,7 @@
 #include "D3D12Pipeline.h"
 #include "D3D12Compute.h"
 #include "RayTracing.h"
+#include "WordHash.h"
 #include "Scene.h"
 #include "Shaders/RayConstants.h"
 
@@ -76,41 +77,6 @@ namespace
   }
 
   const float s_FullScreen[3][3] = { { -1, -1, 0 }, { -1, 3, 0 }, { 3, -1, 0 } };
-
-  //! A hash of whole 64 bit words: MurmurHash3's mixing of each word and its final mix (a
-  //! multiply a word on the chain, where a hash of the bytes takes one a byte).
-  class CWordHash
-  {
-  public:
-    template <class T> void Add(const T &Data)
-    {
-      static_assert(sizeof(T) % 8 == 0 && std::is_trivially_copyable_v<T>, "hashed as whole words");
-      const uint8 *p = (const uint8 *)&Data;
-      for (size_t i = 0; i < sizeof(T); i += 8)
-      {
-        uint64 k;
-        memcpy(&k, p + i, 8);
-        k *= 0x87c37b91114253d5ull;
-        k = _rotl64(k, 31);
-        k *= 0x4cf5ad432745937full;
-        m_nHash ^= k;
-        m_nHash = _rotl64(m_nHash, 27) * 5 + 0x52dce729;
-      }
-    }
-    uint64 Get() const
-    {
-      uint64 h = m_nHash;
-      h ^= h >> 33;
-      h *= 0xff51afd7ed558ccdull;
-      h ^= h >> 33;
-      h *= 0xc4ceb9fe1a85ec53ull;
-      h ^= h >> 33;
-      return h;
-    }
-
-  private:
-    uint64 m_nHash = 0;
-  };
 }
 
 size_t CD3D12RayScene::SBlasKeyHash::operator()(const SBlasKey &Key) const
@@ -1361,7 +1327,7 @@ void CD3D12Renderer::BuildRayScene(std::span<const SRenderItem> Opaque, std::spa
   // the main view would draw them.
   if (WantsOffscreenRays() && m_nRayOffscreenFrame == m_nFrames && !m_RayOffscreenItems.empty())
   {
-    std::unordered_set<uint64> Parts;
+    std::unordered_set<uint64, SWordHash> Parts;
     Parts.reserve((Opaque.size() + m_RayOffscreenItems.size()) * 2);
     for (const SRenderItem &it : Opaque)
     {
