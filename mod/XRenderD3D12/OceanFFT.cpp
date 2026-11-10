@@ -132,6 +132,7 @@ bool CD3D12Renderer::EnsureOceanTargets()
     return true;
   if (o.bFailed || !m_pDevice || !m_pUpload || !m_pDescriptors || !m_pCompute)
     return false;
+  const auto t0 = std::chrono::steady_clock::now();
   constexpr int N = XR_OCEAN_SIZE, C = XR_OCEAN_CASCADES;
   o.pRows = m_pUpload->CreateComputeTarget(N, N, 1, FIELDS_FORMAT, L"XRenderD3D12 ocean rows", 2 * C);
   o.pFields = m_pUpload->CreateComputeTarget(N, N, 1, FIELDS_FORMAT, L"XRenderD3D12 ocean fields", 2 * C);
@@ -237,7 +238,8 @@ bool CD3D12Renderer::EnsureOceanTargets()
   o.nFoamFrame = -1;
   o.nCausticsFrame = -1;
   if (iLog)
-    iLog->Log("XRenderD3D12: the FFT ocean: %d cascades of %d x %d texels (%g, %g, %g m)", C, N, N, XR_OCEAN_TILE0, XR_OCEAN_TILE1, XR_OCEAN_TILE2);
+    iLog->Log("XRenderD3D12: the FFT ocean: %d cascades of %d x %d texels (%g, %g, %g m) (%.0f ms)", C, N, N, XR_OCEAN_TILE0, XR_OCEAN_TILE1,
+              XR_OCEAN_TILE2, std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count());
   return true;
 }
 
@@ -322,6 +324,25 @@ void CD3D12Renderer::UpdateOcean(std::span<const SRenderItem> Items)
   // d3d12_WaterAsync: on the compute queue, beside the frame's first passes (it starts when the frame before is done),
   // but in frames that build the ray scene there (its builds would wait for it: Carrier 0.1 ms slower).
   RunOcean(bCaustics, CV_d3d12_WaterAsync && o.bParked && !o.bPending && m_pDevice->HasAsyncCompute() && !(CV_d3d12_RTAsync && WantsRays()));
+}
+
+void CD3D12Renderer::PrepareOcean()
+{
+  // Treehouse's first frame with the sea took 69 ms more: the grid's terrain 34, the sea 10, the grid 9, the ponds'
+  // ripple 5, the targets 5, the beach's textures 4, the foam 1 (the terrain made again for each level, the rest once).
+  I3DEngine *p3D = iSystem ? iSystem->GetI3DEngine() : nullptr;
+  const float fLevel = p3D ? p3D->GetWaterLevel() : WATER_LEVEL_UNKNOWN;
+  if (fLevel <= WATER_LEVEL_UNKNOWN)
+    return;
+  LoadBeachTextures(CV_d3d12_BeachResearch > 0);
+  if (!CV_d3d12_WaterFFT || !EnsureOceanTargets())
+    return;
+  GetFoamTexture();
+  const float fWind = std::max(CV_d3d12_WaterWind, 0.5f);
+  if ((!m_Ocean.pH0 || fWind != m_Ocean.fWind) && !MakeOcean(fWind))
+    return;
+  if (CV_d3d12_WaterGeometry && EnsureOceanGrid() && EnsureGridTerrain(fLevel) && m_OceanGrid.nPonds > 0 && CV_d3d12_WaterPondRipple > 0)
+    GetPondRippleTexture();
 }
 
 void CD3D12Renderer::RunOcean(bool bCaustics, bool bAsync)

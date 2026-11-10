@@ -1136,10 +1136,10 @@ bool CD3D12Renderer::SetupWaterDraw(SPipelineKey &Key, SDrawConstants &dc, const
   return true;
 }
 
-bool CD3D12Renderer::SetupBeachDraw(SPipelineKey &Key, SDrawConstants &dc, int nPass, bool bFaint)
+void CD3D12Renderer::LoadBeachTextures(bool bFaint)
 {
-  if (!m_pTextures || (bFaint && CV_d3d12_BeachResearch <= 0))
-    return false;
+  if (!m_pTextures)
+    return;
   if (!m_pBeachTexture)
     m_pBeachTexture = m_pTextures->LoadTexture("textures/wave1", FT_CLAMP, 0, eTT_Base, -1, -1, -1, 0);
   if (!m_pBeachWetTexture)
@@ -1152,6 +1152,13 @@ bool CD3D12Renderer::SetupBeachDraw(SPipelineKey &Key, SDrawConstants &dc, int n
     m_pBeachFaintTexture = m_pTextures->LoadTexture("textures/wave2", FT_CLAMP, 0, eTT_Base, -1, -1, -1, 0);
   if (bFaint && !m_pBeachDetailTexture)
     m_pBeachDetailTexture = m_pTextures->LoadTexture("textures/water1", 0, 0, eTT_Base, -1, -1, -1, 0);
+}
+
+bool CD3D12Renderer::SetupBeachDraw(SPipelineKey &Key, SDrawConstants &dc, int nPass, bool bFaint)
+{
+  if (!m_pTextures || (bFaint && CV_d3d12_BeachResearch <= 0))
+    return false;
+  LoadBeachTextures(bFaint);
   static_assert(BeachLayers::WAVES == BEACH_WAVES);
   const BeachLayers::SLayer Layer = BeachLayers::Layer(nPass, bFaint);
   CTexture *pTex = nullptr;

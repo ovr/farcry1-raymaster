@@ -37,6 +37,7 @@
 #include "OceanGrid.h"
 #include "WaterBodies.h"
 #include "PondRipple.h"
+#include <chrono>
 
 namespace
 {
@@ -72,6 +73,7 @@ bool CD3D12Renderer::EnsureOceanGrid()
     return true;
   if (g.bFailed || !m_pUpload)
     return false;
+  const auto t0 = std::chrono::steady_clock::now();
   std::vector<OceanGrid::SVertex> V;
   std::vector<uint32_t> I;
   OceanGrid::Build(0xffffffffu, V, I);
@@ -94,8 +96,8 @@ bool CD3D12Renderer::EnsureOceanGrid()
   g.nVertices = nVertices;
   g.nIndices = nIndices;
   if (iLog)
-    iLog->Log("XRenderD3D12: the ocean's grid: %u vertices, %u triangles (%d rings)", g.nVertices, g.nIndices / 3,
-              (int)OceanGrid::Rings().size());
+    iLog->Log("XRenderD3D12: the ocean's grid: %u vertices, %u triangles (%d rings) (%.0f ms)", g.nVertices, g.nIndices / 3,
+              (int)OceanGrid::Rings().size(), std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count());
   return true;
 }
 
@@ -108,14 +110,16 @@ bool CD3D12Renderer::EnsureGridTerrain(float fLevel)
     return true;
   if (!g.bTerrainStale || !m_pUpload || !m_pDevice)
     return false;
-  g.bTerrainStale = false;
-  if (g.pTerrain)
-    m_pUpload->ReleaseTexture(g.pTerrain);
-  g.pTerrain = nullptr;
+  // Stale until there is a terrain to read (PostLoad's call may come before it).
   I3DEngine *p3D = iSystem ? iSystem->GetI3DEngine() : nullptr;
   const int nUnit = p3D ? p3D->GetHeightMapUnitSize() : 0, nSize = p3D ? p3D->GetTerrainSize() : 0;
   if (nUnit <= 0 || nSize <= 0 || nSize % nUnit)
     return false;
+  g.bTerrainStale = false;
+  const auto t0 = std::chrono::steady_clock::now();
+  if (g.pTerrain)
+    m_pUpload->ReleaseTexture(g.pTerrain);
+  g.pTerrain = nullptr;
   // A texel a unit of the height map (the texel i at i units: its centre at x = i * unit), its heights as the engine
   // gives them there and the open sea's share by them (WaterBodies.h: 0 on the ponds the terrain cuts off from the sea).
   const int n = nSize / nUnit;
@@ -149,8 +153,9 @@ bool CD3D12Renderer::EnsureGridTerrain(float fLevel)
   g.fTerrainOffset = 0.5f / (float)n;
   if (iLog)
     iLog->Log("XRenderD3D12: the ocean grid's terrain: %d x %d heights, %d m apart; at the water level %.2f m the open sea "
-              "%d of them, %d ponds cut off from it, %d (the largest %d, %.0f m^2)", n, n, nUnit, fLevel, Bodies.nSea,
-              Bodies.nBodies, Bodies.nPond, Bodies.nLargest, (float)Bodies.nLargest * nUnit * nUnit);
+              "%d of them, %d ponds cut off from it, %d (the largest %d, %.0f m^2) (%.0f ms)", n, n, nUnit, fLevel, Bodies.nSea,
+              Bodies.nBodies, Bodies.nPond, Bodies.nLargest, (float)Bodies.nLargest * nUnit * nUnit,
+              std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count());
   return true;
 }
 

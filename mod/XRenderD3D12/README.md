@@ -1991,6 +1991,14 @@ and lists theirs (`NamesObjects`).
   reflections 1.07 -> 0.80; Bunker's sunset 0.63 -> 0.58, with the rays 0.77 -> 0.78; Carrier's
   frame 3.22 -> 3.14 ms with the pass, 4.45 -> 4.22 with the rays); the spectrum, made on the CPU at
   the first water and when the wind changes, takes under 65 ms.
+  - Made when a level with water is loaded (`PrepareOcean`, from `PostLoad`; the engine's water level
+    known), not in the first frame that shows the sea: the FFT's targets, the spectrum, the foam's
+    texture, the ocean's grid and its terrain (made again for each level), the ponds' ripple and the
+    beach's textures. Treehouse's sweep at 3840 x 2160 with the rays: its first frame with the sea
+    (row 491, out of the hut) took 88 ms (the main view's CPU 86: the grid's terrain 34, the sea 10,
+    the grid 9, the ponds' ripple 5, the targets 5, the beach's textures 4, the foam 1), now 10 ms
+    (8), no more than the frames around the view's other new sights; the load is that much longer.
+    The frames the same (the sweep's frame 661 bit for bit). `render_tests.ps1 -Suites oceanprep`.
   - On the compute queue (`d3d12_WaterAsync`, 1; 0 runs the kernels in the frame's list; not saved):
     the waves, the foam and the caustics run beside the frame's first passes, the frame waiting for
     them at the first draw that reads them; at the frame's end their targets go back to states the

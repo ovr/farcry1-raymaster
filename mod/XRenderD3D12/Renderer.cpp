@@ -1479,6 +1479,7 @@ void CD3D12Renderer::PostLoad (void)
 {
   m_OceanGrid.bTerrainStale = true;
   m_TerrainRange.bStale = true;
+  PrepareOcean();
 }
 
 //////////////////////////////////////////////////////////////////////////

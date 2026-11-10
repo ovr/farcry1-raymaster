@@ -1046,6 +1046,8 @@ public:
   //! The beach (eDC_WaterBeach): pass nPass, a wave of foam (0 to BEACH_WAVES - 1) or the wet sand
   //! under them (BEACH_WAVES); bFaint: TerrainWaterBeachResearch's (SShaderProps::bBeachFaint). False: not drawn.
   bool SetupBeachDraw(SPipelineKey &Key, SDrawConstants &dc, int nPass, bool bFaint);
+  //! Its textures, loaded once (bFaint: TerrainWaterBeachResearch's two as well).
+  void LoadBeachTextures(bool bFaint);
   //! The sea floor under the ocean (eDC_WaterBottom) with the element's texture pTex (may be NULL).
   void SetupWaterBottomDraw(SPipelineKey &Key, SDrawConstants &dc, CTexture *pTex);
   //! Copies the main view's target and its depth buffer as drawn so far (m_bSceneCopied); with pRect
@@ -1207,6 +1209,9 @@ public:
   //! the frame's time into m_Ocean.pWaves (the targets made on the first call, the sea when
   //! d3d12_WaterWind changes). d3d12_WaterFFT 0: released.
   void UpdateOcean(std::span<const SRenderItem> Items);
+  //! A level with water loaded (PostLoad): what the first frame with its water would make made now (the FFT ocean's
+  //! targets, its sea and foam, the grid, its terrain and the ponds' ripple, the beach's textures).
+  void PrepareOcean();
   bool EnsureOceanTargets();
   //! The sea of the wind fWind (m / s) on the CPU, its h0 uploaded.
   bool MakeOcean(float fWind);
