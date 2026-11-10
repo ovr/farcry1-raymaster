@@ -159,6 +159,7 @@ set(XRENDERD3D12_TESTS_SOURCES
     DrawDistanceTests.cpp
     DrawExtTests.cpp
     BytesEqualTests.cpp
+    KeySortTests.cpp
     DrawBatchTests.cpp
     MatrixMulTests.cpp
     RayCoverageTests.cpp

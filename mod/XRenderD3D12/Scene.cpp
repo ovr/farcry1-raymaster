@@ -656,8 +656,9 @@ void CScene::BuildLists(SSceneSlot &Slot, int nItems, bool bSort)
     return;
   for (std::vector<SRenderItem> &l : Slot.Lists)
   {
-    // Stable: equal keys keep the order of EF_AddEf (shadow volumes between their stencil clears).
-    std::stable_sort(l.begin(), l.end(), [](const SRenderItem &a, const SRenderItem &b) { return a.nSortKey < b.nSortKey; });
+    // Stable: equal keys keep the order of EF_AddEf (shadow volumes between their stencil clears). The keys with their
+    // places sorted, the items moved once (KeySort.h: std::stable_sort's order).
+    KeySort::Stable(l, [](const SRenderItem &it) { return it.nSortKey; }, m_SortOrder, m_SortedItems);
   }
 }
 

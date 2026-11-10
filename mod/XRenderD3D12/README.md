@@ -1849,6 +1849,18 @@ sweep at 3840 x 2160 with the rays, row 360 (the camera's jump to the flight's s
 engine makes 178 leaf buffers): 14.4–15.2 ms → 13.7–13.9 (`EF_EndEf3D` 7.2–7.8 → 6.2–6.8); its
 heavy part's `EF_EndEf3D` 5.00–5.05 → 4.89–4.92 ms; the frames the same. Unit tests `IndexLists_*`.
 
+## The lists' order
+
+`CScene::BuildLists` puts each list in the order of its items' keys, equal keys as `EF_AddEf` gave
+them (`KeySort.h`): `std::stable_sort` of the keys with the items' places, 16 bytes each, and then
+the items (88 bytes) moved once. Sorting the items themselves moved them at each of the merge
+sort's passes. The lists come almost in order, where the merge sort is near linear: `std::sort` of
+the pairs instead was slower (River's heavy frames 4.81–5.03 → 4.99–5.27 ms). River's sweep,
+sampled, four pairs of runs: `EF_EndEf3D` 1.946–1.956 → 1.929–1.935 ms (frames 60 to 1160),
+4.84–4.89 → 4.76–4.81 (600 to 800), lower in every pair; `BuildLists`' samples 588 → 503, the
+sort's 401 → 260. The order is the same, so the frames are (0 px against the build before). Unit test
+`KeySort_StableSortsOrder`: lists of every length to 300 and two long ones, against `std::stable_sort`.
+
 ## Tables looked up every draw
 
 The pipeline states, the live leaf buffers (twice a draw), the parts drawn into the sun's

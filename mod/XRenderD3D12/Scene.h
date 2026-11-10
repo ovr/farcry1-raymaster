@@ -36,6 +36,7 @@
 #include <span>
 #include <vector>
 
+#include "KeySort.h"
 #include "Shader.h"
 
 class CREScreenProcess;
@@ -301,4 +302,6 @@ private:
   std::vector<CREScreenProcess *> m_ScreenProcesses;
   std::vector<CCObject *> m_Skinned;              //!< scratch of PrepareItems
   std::vector<uint64> m_LightMappedParts;         //!< scratch of BuildLists: PartKey of the surfaces drawn with their light map
+  std::vector<KeySort::SKeyPlace> m_SortOrder;    //!< scratch of BuildLists' sort (KeySort::Stable)
+  std::vector<SRenderItem> m_SortedItems;         //!< scratch of BuildLists' sort: a list's old storage after it
 };

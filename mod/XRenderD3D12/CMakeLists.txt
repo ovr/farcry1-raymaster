@@ -61,6 +61,7 @@ set(XRENDERD3D12_SOURCES
     DrawDistance.h
     DrawExt.h
     BytesEqual.h
+    KeySort.h
     MatrixMul.h
     Shadows.cpp
     Cascades.cpp
