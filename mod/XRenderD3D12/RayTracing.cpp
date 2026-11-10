@@ -1217,6 +1217,8 @@ void CD3D12RayScene::Build(FILE *pDump, bool bTop)
   }
   m_nSceneInstances = nInstance;
   m_nSceneTriangles = nInstance ? nTris : 0;
+  m_nFrameBlasBuilt = (uint32)nFrame;
+  m_nStaticBlasBuilt = (uint32)nNewStatic;
   if (pAsync)
     Device.SubmitAsyncCompute();
 

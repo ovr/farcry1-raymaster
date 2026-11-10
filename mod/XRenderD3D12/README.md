@@ -1153,6 +1153,17 @@ system ones (better not to touch): [`CONFIGURATION.md`](../../CONFIGURATION.md).
   `d3d12_RTDistance` (150 m) the rays' length, `d3d12_RTMemory` (384 MB) the static BLAS kept,
   `d3d12_RTMask` (31) the kinds the rays see (1 static, 2 alpha tested, 4 of the frame; a draw is
   in the scene when the mask has all of its kinds).
+  A draw is static in the scene when its vertices and indices are in a static buffer; geometry the
+  game rewrites (its copy on the GPU changes within two frames, or again in a frame that drew it)
+  goes to the frame's memory, and its draws get a BLAS a frame, built for speed. Once it has not
+  changed for 16 frames it goes back to a static buffer (`LeafBuffer.cpp`), and its BLAS is built
+  once, for fast tracing. The path tracer relights the vegetation in a level's first frames, which
+  left it in the frame's memory for good: Pier had 1883 BLAS built a frame. Back in static buffers
+  (40 a frame) the path tracer on Pier at 4K with FSR Quality took 8.66 ms of the GPU in place of
+  10.29 (the ray scene's builds on the compute queue 1.75 → 0.60 ms, the paths 2.52 → 2.07 ms) and
+  the CPU's 3D engine 5.20 ms in place of 7.39; Training 9.15 → 8.80 ms, Swamp and RT the same.
+  The frame log has `rt_frame_blas`, `rt_static_blas_built` and the copies (`geom_frame_copies`,
+  `geom_frame_kb`, `geom_to_frame_quick`, `geom_to_frame_redraw`, `geom_to_static`).
   `d3d12_RTOffscreen` (1) puts what is out of the main view into the scene too: the parts of the
   sun's cascades (what the 3D engine gives the camera towards the sun at the view's position, with
   the detail it picks for the view, and the live casters), set up as the main view would draw them,

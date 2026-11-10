@@ -159,6 +159,8 @@ public:
   uint32 GetCoverageMeshes() const { return (uint32)m_Coverage.size(); }
   uint32 GetCoverageBytes() const { return m_nCoverageBytes; }
   uint32 GetCoverageMade() const { return m_nCoverageMade; }
+  uint32 GetFrameBlasBuilt() const { return m_nFrameBlasBuilt; }
+  uint32 GetStaticBlasBuilt() const { return m_nStaticBlasBuilt; }
   //! Of them those of the live casters (XR_RAY_LIVE), with GetTLAS.
   uint32 GetLiveInstances() const { return m_nLiveInstances; }
   //! The last Build's TLAS: its instances (0: none built) and their triangles (r_DisplayInfo).
@@ -340,5 +342,6 @@ private:
   std::vector<std::pair<std::pair<uint32, uint32>, uint64>> m_CoveragePending;   //!< freed: offset, bytes, the fence
   uint32 m_nCoverageBytes = 0;                        //!< in use
   uint32 m_nCoverageMade = 0;                         //!< the last Build's triangles made (the frame dump)
+  uint32 m_nFrameBlasBuilt = 0, m_nStaticBlasBuilt = 0;   //!< the last Build's BLAS of the frame's geometry and new static ones
   SFrameSlot m_Slots[D3D12_FRAMES];
 };

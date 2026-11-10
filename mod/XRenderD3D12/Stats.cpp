@@ -43,6 +43,7 @@
 #include "D3D12Device.h"
 #include "D3D12Upload.h"
 #include "D3D12Pipeline.h"
+#include "Geometry.h"
 #include "RayTracing.h"
 #include "Texture.h"
 #include "CpuSampler.h"
@@ -236,9 +237,13 @@ void CD3D12Renderer::LogFrame()
                                             m_nFrameDrawBytes, m_nFrameDrawExt[DrawExt::REASON_DEFAULT], m_nFrameDrawExt[DrawExt::REASON_ALL],
                                             m_nFrameDrawExt[DrawExt::REASON_PROGRAM], m_nFrameDrawExt[DrawExt::REASON_VERTEX],
                                             m_nFrameDrawExt[DrawExt::REASON_DIFFERS]);
-      const std::string CoverageCounts = m_pRayScene ? Format(";rt_coverage_meshes=%u;rt_coverage_bytes=%u;rt_coverage_made=%u", m_pRayScene->GetCoverageMeshes(),
-                                                              m_pRayScene->GetCoverageBytes(), m_pRayScene->GetCoverageMade())
+      const std::string CoverageCounts = m_pRayScene ? Format(";rt_coverage_meshes=%u;rt_coverage_bytes=%u;rt_coverage_made=%u;rt_frame_blas=%u;rt_static_blas_built=%u",
+                                                              m_pRayScene->GetCoverageMeshes(), m_pRayScene->GetCoverageBytes(), m_pRayScene->GetCoverageMade(),
+                                                              m_pRayScene->GetFrameBlasBuilt(), m_pRayScene->GetStaticBlasBuilt())
                                                      : std::string();
+      const Geometry::SCopyStats Copies = Geometry::TakeCopyStats();
+      const std::string CopyCounts = Format(";geom_frame_copies=%u;geom_frame_kb=%u;geom_to_frame_quick=%u;geom_to_frame_redraw=%u;geom_to_static=%u",
+                                            Copies.nFrameCopies, Copies.nFrameBytes >> 10, Copies.nToFrameQuick, Copies.nToFrameRedraw, Copies.nToStatic);
       const std::string DisplayCounts = Format(",display_lookups=%u;display_lookup_ms=%.3f;display_active=%d", m_pDevice->GetDisplayLookups() - m_nFrameLogDisplayLookups,
                                                m_pDevice->GetDisplayLookupMs() - m_fFrameLogDisplayMs, m_pDevice->IsAppActive() ? 1 : 0);
       const CCamera &Camera = iSystem->GetViewCamera();
@@ -248,7 +253,7 @@ void CD3D12Renderer::LogFrame()
               fNow - m_fFrameLogLast, m_pDevice->GetWaitMs(), m_pDevice->GetPresentMs(), m_fFrameEndEf3DMs, m_fFrameLowDetailMs[LD_WATER],
               m_fFrameLowDetailMs[LD_CASCADES], m_fFrameLowDetailMs[LD_ENVCUBES], nGpuFrames ? fGpuMs / nGpuFrames : -1.0, m_nFrameDraws,
               m_nFramePSOChanges, m_nPolygons, m_nFrameDynLights, vPos.x, vPos.y, vPos.z, vAngles.x, vAngles.y, vAngles.z, Sections.c_str(),
-              Profiles.c_str(), BarrierCounts.c_str(), (DrawCounts + CoverageCounts).c_str(), DisplayCounts.c_str());
+              Profiles.c_str(), BarrierCounts.c_str(), (DrawCounts + CoverageCounts + CopyCounts).c_str(), DisplayCounts.c_str());
       // Since the last line: the first line has the lookups since the start (the first one, when the swap chain came).
       m_nFrameLogDisplayLookups = m_pDevice->GetDisplayLookups();
       m_fFrameLogDisplayMs = m_pDevice->GetDisplayLookupMs();

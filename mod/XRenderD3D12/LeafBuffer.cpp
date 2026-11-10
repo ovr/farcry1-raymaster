@@ -250,8 +250,14 @@ bool HaveGPU()
   return g_pRenderer && g_pRenderer->m_pDevice && g_pRenderer->m_pUpload;
 }
 
+Geometry::SCopyStats s_CopyStats;
+
+//! Frames without a change after which per-frame memory goes back to a static buffer.
+constexpr uint64 PER_FRAME_QUIET_FRAMES = 16;
+
 //! The GPU copy of a block of system memory: a static buffer in the default heap, or per-frame
-//! memory once the data changes in consecutive frames (or after it was drawn in the same frame).
+//! memory once the data changes in consecutive frames (or after it was drawn in the same frame),
+//! until it stays the same for PER_FRAME_QUIET_FRAMES.
 class CGeomGPUCopy
 {
 public:
@@ -289,6 +295,14 @@ public:
     if (!pData || !nSize || !HaveGPU())
       return 0;
     const uint64 nFence = g_pRenderer->m_pDevice->GetFrameFence();
+    // Changes that stopped (the path tracer's vegetation relit in a level's first frames): a static buffer again, else
+    // the rays build a BLAS for each of its draws every frame.
+    if (m_bPerFrame && !m_bDirty && m_nFrameGPU && nFence - m_nChangeFence > PER_FRAME_QUIET_FRAMES)
+    {
+      s_CopyStats.nToStatic++;
+      m_bPerFrame = false;
+      m_bDirty = true;
+    }
     if (!m_bPerFrame && m_pStatic && !m_bDirty && nSize <= m_nStaticSize)
     {
       m_nUseFence = nFence;
@@ -297,8 +311,10 @@ public:
     if (!m_bPerFrame && m_pStatic && (nFence - m_nUploadFence <= 2 || m_nUseFence == nFence))
     {
       // Changes often, or again in a frame that already drew it: per-frame memory from now on.
+      (nFence - m_nUploadFence <= 2 ? s_CopyStats.nToFrameQuick : s_CopyStats.nToFrameRedraw)++;
       Release();
       m_bPerFrame = true;
+      m_nChangeFence = nFence;
     }
     if (!m_bPerFrame)
     {
@@ -319,12 +335,16 @@ public:
       }
       m_bPerFrame = true;
     }
+    if (m_bDirty)
+      m_nChangeFence = nFence;
     if (m_bDirty || !m_nFrameGPU || m_nFrameFence != nFence || m_nFrameSize != nSize)
     {
       const SD3D12FrameAlloc a = g_pRenderer->m_pUpload->AllocFrame(nSize, 16);
       if (!a.pCPU)
         return 0;
       memcpy(a.pCPU, pData, nSize);
+      s_CopyStats.nFrameCopies++;
+      s_CopyStats.nFrameBytes += nSize;
       m_nFrameGPU = a.nGPU;
       m_nFrameFence = nFence;
       m_nFrameSize = nSize;
@@ -343,6 +363,7 @@ private:
   uint32 m_nFrameSize = 0;
   uint64 m_nUploadFence = 0;      //!< frame of the last upload into m_pStatic
   uint64 m_nUseFence = 0;         //!< last frame m_pStatic was handed to a draw
+  uint64 m_nChangeFence = 0;      //!< per-frame memory: the last frame the data changed
   bool m_bDirty = true;
   bool m_bPerFrame = false;
 };
@@ -2432,6 +2453,13 @@ bool Geometry::UnlitVegetationLight(const CLeafBuffer *pLB, float vAmbient[3], f
   vAmbient[2] = L.vAmbient.z;
   memcpy(vSun, L.vSun, 3 * sizeof(float));
   return true;
+}
+
+Geometry::SCopyStats Geometry::TakeCopyStats()
+{
+  const SCopyStats Stats = s_CopyStats;
+  s_CopyStats = {};
+  return Stats;
 }
 
 void Geometry::Shutdown()
