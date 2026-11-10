@@ -2555,6 +2555,11 @@ and lists theirs (`NamesObjects`).
     are of the disc's vertices alone: `OceanGrid::CDiscCache` reads them again only when a byte of
     the vertices changed (the main thread's 0.07 ms a frame where the camera stands; River's sweep,
     whose ring moves most frames, 178 → 123 samples of 1148 frames). Unit test `Grid_DiscCache`.
+    `ReadDisc` finds the rings without sorting the radii (each the least radius over the last
+    ring's not near it) and a vertex's segment by a cheaper angle than atan2 (within 2.1e-4 radians;
+    atan2 where it is within 0.01 segments of a tenth off one); its disc is the sorted read's, bit
+    for bit (unit test `Grid_DiscReadExact`): on River's sweep 311 → 118 samples, `EF_EndEf3D`
+    1.927-1.936 → 1.896-1.906 ms.
   - The height: the FFT ocean's cascades, each at the mip level whose texel is as wide as the grid's
     spacing there (no wave shorter than two cells: those would crawl over the vertices), and the
     wakes' (the window's height, a texture of its own with 4 mip levels written after their view).

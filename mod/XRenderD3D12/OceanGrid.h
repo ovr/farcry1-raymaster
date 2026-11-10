@@ -142,13 +142,57 @@ namespace OceanGrid
     return (float)(nColor >> 24) / 255.0f;
   }
 
+  //! The segment (of XR_GRID_DISC_SEGMENTS, from +x counterclockwise) of the direction (x, y) into nSegment as from atan2,
+  //! false where it is more than a tenth of a segment off one. A cheaper angle (within 2.1e-4 radians, 0.0012 segments)
+  //! decides where it is 0.01 segments or more inside that tenth (the game's vertices are at their segments), atan2 else.
+  inline bool SegmentOf(double x, double y, int &nSegment)
+  {
+    constexpr int S = XR_GRID_DISC_SEGMENTS;
+    constexpr double PI = 3.14159265358979323846;
+    const double ax = std::fabs(x), ay = std::fabs(y), fMax = std::max(ax, ay);
+    if (fMax > 0)
+    {
+      const double a = std::min(ax, ay) / fMax, a2 = a * a;
+      double r = ((-0.0464964749 * a2 + 0.15931422) * a2 - 0.327622764) * a2 * a + a;
+      r = ay > ax ? 0.5 * PI - r : r;
+      r = x < 0 ? PI - r : r;
+      r = y < 0 ? -r : r;
+      // Within 0.09 of a segment its nearest one however it is rounded.
+      const double u = r * (S / (2 * PI));
+      const int s = (int)(u + (u < 0 ? -0.5 : 0.5));
+      if (std::fabs(u - s) <= 0.1 - 0.01)
+      {
+        nSegment = ((s % S) + S) % S;
+        return true;
+      }
+    }
+    const double u = std::atan2(y, x) / (2 * PI) * S;
+    const double s = std::round(u);
+    if (std::fabs(u - s) > 0.1)
+      return false;
+    nSegment = (((int)s % S) + S) % S;
+    return true;
+  }
+
+  //! ReadDisc's ring after fLast: the least of the n radii R over it and not near it (|a - b| <= 0.01 max(a, b) + 0.01),
+  //! into fNext; false where there is none.
+  inline bool NextRing(const double *R, size_t n, double fLast, double &fNext)
+  {
+    double f = HUGE_VAL;
+    for (size_t i = 0; i < n; i++)
+      if (R[i] > fLast && R[i] < f && !(std::fabs(fLast - R[i]) <= 0.01 * std::max(fLast, R[i]) + 0.01))
+        f = R[i];
+    fNext = f;
+    return f != HUGE_VAL;
+  }
+
   //! The disc of the n vertices V into D: rings of vertices XR_GRID_DISC_SEGMENTS segments apart around a centre, all at
   //! one level, in any order (the game's a strip, some of them repeated: their colours alike). Its centre the middle of
   //! their box (the outer ring has vertices at 0, 90, 180 and 270 degrees); a ring all the vertices within 1 % (and 1 cm)
   //! of the radius of its nearest (the centre's within 1 cm of it, at 0); a segment without a vertex the alpha of the
-  //! nearest one with one in its ring. False
-  //! where they are no such disc (a vertex between two segments, above or below the others, too many rings).
-  inline bool ReadDisc(const SVertex *V, size_t n, SDisc &D)
+  //! nearest one with one in its ring. False where they are no such disc (a vertex between two segments, above or below
+  //! the others, too many rings). pRadii: a buffer for the vertices' radii, else its own.
+  inline bool ReadDisc(const SVertex *V, size_t n, SDisc &D, std::vector<double> *pRadii = nullptr)
   {
     constexpr int S = XR_GRID_DISC_SEGMENTS;
     D = SDisc();
@@ -167,25 +211,41 @@ namespace OceanGrid
     D.fX = 0.5 * (x0 + x1);
     D.fY = 0.5 * (y0 + y1);
     D.fZ = V[0].z;
-    std::vector<double> R(n);
+    std::vector<double> Own;
+    std::vector<double> &R = pRadii ? *pRadii : Own;
+    R.resize(n);
+    double fLeast = 0;
     for (size_t i = 0; i < n; i++)
+    {
       R[i] = std::hypot(V[i].x - D.fX, V[i].y - D.fY);
-    const auto Near = [](double a, double b) { return std::fabs(a - b) <= 0.01 * std::max(a, b) + 0.01; };
-    std::vector<double> Sorted = R, Rings;
-    std::sort(Sorted.begin(), Sorted.end());
-    for (double r : Sorted)
-      if (Rings.empty() || !Near(Rings.back(), r))
-        Rings.push_back(r);
-    if (Rings.size() < 2 || Rings.size() > (size_t)XR_GRID_DISC_RINGS)
+      fLeast = i == 0 || R[i] < fLeast ? R[i] : fLeast;
+    }
+    // The rings the radii give in order (a ring each radius not near the last ring's) without sorting them: the next
+    // ring the least radius over the last one's not near it.
+    double Rings[XR_GRID_DISC_RINGS];
+    int nRings = 0;
+    Rings[nRings++] = fLeast;
+    double fNext;
+    while (NextRing(R.data(), n, Rings[nRings - 1], fNext))
+    {
+      if (nRings == XR_GRID_DISC_RINGS)
+        return false;
+      Rings[nRings++] = fNext;
+    }
+    if (nRings < 2)
       return false;
     float fSum[XR_GRID_DISC_RINGS][S] = {};
     int nCount[XR_GRID_DISC_RINGS][S] = {};
     for (size_t i = 0; i < n; i++)
     {
-      size_t k = 0;
-      for (size_t j = 1; j < Rings.size(); j++)
-        if (std::fabs(R[i] - Rings[j]) < std::fabs(R[i] - Rings[k]))
-          k = j;
+      // The nearest ring, the first of the nearest: |R - ring| falls up to the first ring not under R, then rises.
+      const int p = (int)(std::lower_bound(Rings, Rings + nRings, R[i]) - Rings);
+      int k = p - 1;
+      if (p == 0 || (p < nRings && std::fabs(R[i] - Rings[p]) < std::fabs(R[i] - Rings[p - 1])))
+        k = p;
+      else
+        while (k > 0 && std::fabs(R[i] - Rings[k - 1]) == std::fabs(R[i] - Rings[k]))
+          k--;
       const float a = ColorAlpha(V[i].nColor);
       if (k == 0 && R[i] < 0.01)
       {
@@ -193,15 +253,13 @@ namespace OceanGrid
           fSum[0][s] += a, nCount[0][s]++;
         continue;
       }
-      const double u = std::atan2(V[i].y - D.fY, V[i].x - D.fX) / (2 * 3.14159265358979323846) * S;
-      const double s = std::round(u);
-      if (std::fabs(u - s) > 0.1)
+      int nSegment;
+      if (!SegmentOf(V[i].x - D.fX, V[i].y - D.fY, nSegment))
         return false;
-      const int nSegment = (((int)s % S) + S) % S;
       fSum[k][nSegment] += a;
       nCount[k][nSegment]++;
     }
-    D.nRings = (int)Rings.size();
+    D.nRings = nRings;
     for (int k = 0; k < D.nRings; k++)
     {
       D.fRadius[k] = k == 0 && Rings[0] < 0.01 ? 0.0f : (float)Rings[k];
@@ -285,7 +343,7 @@ namespace OceanGrid
       if (m_V.size() != n || (n && memcmp(m_V.data(), V, n * sizeof(SVertex)) != 0))
       {
         m_V.assign(V, V + n);
-        m_bDisc = ReadDisc(V, n, m_Disc);
+        m_bDisc = ReadDisc(V, n, m_Disc, &m_Radii);
         m_Table.assign(m_bDisc ? DiscTableSize(m_Disc) : 0, 0.0f);
         m_Alpha.assign(m_bDisc ? AlphaTableSize() : 0, 0.0f);
         if (m_bDisc)
@@ -306,6 +364,7 @@ namespace OceanGrid
     SDisc m_Disc;
     bool m_bDisc = false;
     std::vector<float> m_Table, m_Alpha;
+    std::vector<double> m_Radii;  //!< ReadDisc's buffer
     int m_nReads = 0;
   };
 }
