@@ -29,6 +29,7 @@
 #include "PbrCompanion.h"
 #include "Scene.h"
 #include "Geometry.h"
+#include "MatrixMul.h"
 #include "RayTracing.h"
 #include "SkyFogBand.h"
 #include "SpriteOrder.h"
@@ -602,7 +603,7 @@ void CD3D12Renderer::DrawLeafItem(const SRenderItem &it)
   // Transform, depth range and scissor.
   const Matrix44 World = GetWorldMatrix(pObj);
   const bool bNearest = (pObj->m_ObjFlags & FOB_NEAREST) != 0;
-  const Matrix44 WorldViewProj = World * m_CameraView * (bNearest ? m_NearestProj : m_ProjMatrix);
+  const Matrix44 WorldViewProj = MatrixMul::Mul(MatrixMul::Mul(World, m_CameraView), bNearest ? m_NearestProj : m_ProjMatrix);
   m_fDepthMin = 0;
   m_fDepthMax = bNearest ? 0.1f : 1.0f;
   m_bItemScissor = pObj->m_nScissorX2 > pObj->m_nScissorX1 && pObj->m_nScissorY2 > pObj->m_nScissorY1;
@@ -862,7 +863,7 @@ void CD3D12Renderer::DrawLeafItem(const SRenderItem &it)
       for (uint32 i = 0; i < n; i++, pRecord += 80)
       {
         const SCascadeObject &o = m_CascadeObjects[i];
-        const Matrix44 WorldToSlice = o.World * m_Cascades[o.nSlice].WorldToMap * m_ProjMatrix;
+        const Matrix44 WorldToSlice = MatrixMul::Mul(MatrixMul::Mul(o.World, m_Cascades[o.nSlice].WorldToMap), m_ProjMatrix);
         const uint32 Slice[4] = { (uint32)o.nSlice, 0, 0, 0 };
         memcpy(pRecord, WorldToSlice.data, 64);
         memcpy(pRecord + 64, Slice, sizeof(Slice));
@@ -878,7 +879,7 @@ void CD3D12Renderer::DrawLeafItem(const SRenderItem &it)
       for (int i = 0; i < m_nCascadeInstances; i++)
       {
         const int nSlice = m_CascadeInstances[i];
-        const Matrix44 WorldToSlice = World * m_Cascades[nSlice].WorldToMap * m_ProjMatrix;
+        const Matrix44 WorldToSlice = MatrixMul::Mul(MatrixMul::Mul(World, m_Cascades[nSlice].WorldToMap), m_ProjMatrix);
         memcpy(dc.mShadow[i], WorldToSlice.data, sizeof(dc.mShadow[i]));
         dc.nShadowTex[i] = (uint32)nSlice;
       }

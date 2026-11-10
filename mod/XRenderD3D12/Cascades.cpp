@@ -55,6 +55,7 @@
 #include "D3D12Descriptors.h"
 #include "Scene.h"
 #include "CascadeCull.h"
+#include "MatrixMul.h"
 #include "RayBehind.h"
 
 namespace
@@ -846,7 +847,7 @@ bool CD3D12Renderer::IsWithinCascades(const Matrix44 &World, const Vec3 &vMin, c
   // the last cascade gives way (CascadeOf); the depth is linear, so the box's is between theirs.
   const float fEnd = m_Cascades[m_nCascades - 1].fEnd, fStart = m_nCascades > 1 ? m_Cascades[m_nCascades - 2].fEnd : 0;
   const float fFull = fEnd - (fEnd - fStart) * CASCADE_BLEND;
-  const Matrix44 WorldView = World * m_CameraView;
+  const Matrix44 WorldView = MatrixMul::Mul(World, m_CameraView);
   for (int c = 0; c < 8; c++)
   {
     const Vec3 p((c & 1) ? vMax.x : vMin.x, (c & 2) ? vMax.y : vMin.y, (c & 4) ? vMax.z : vMin.z);

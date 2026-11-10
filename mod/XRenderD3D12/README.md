@@ -1843,6 +1843,26 @@ samples of the drawing thread, 1148 frames): the sets' work about 378 → 134 sa
 `BuildRayScene` 1505 → 1273, the cascades' 1740 → 1559. Nothing walks these sets, so the frames are
 the same (River's sweep 0 and 7 px against the build before). Unit tests `WordSet_*`.
 
+## Matrix products
+
+The draws' transforms (`World * View * Proj` in `DrawLeafItem`), the cascades' (`World * WorldToMap
+* Proj`), their test of an object's box and the rays' check of a captured draw's transform multiply
+by `MatrixMul.h`: four SSE rows, each element its four products added from the left, as
+`Cry_Matrix.h`'s `operator*` does. Under `/fp:precise` that gives the very same bits. The SDK's
+product took a quarter of `DrawLeafItem`'s own samples. River's sweep at 3840 x 2160 with the rays
+(player settings, `d3d12_PathTracing 0`), five runs of the build before and four of this one:
+
+| | before | after |
+|---|---|---|
+| frames 600–800: frame ms | 7.23–7.70 | 6.90–6.98 |
+| frames 600–800: `EF_EndEf3D` ms | 5.89–6.22 | 5.58–5.67 |
+| frames 600–800: the water's reflection (CPU) ms | 2.10–2.21 | 1.95–1.97 |
+| frames 60–1160: `EF_EndEf3D` ms | 1.36–1.46 | 1.26–1.32 |
+
+The whole sweep's GPU is the same (3.45–3.51 and 3.47–3.50 ms). Frame 181 of River and of Pier has
+0 px pairs against the build before. Unit tests `MatrixMul_*` compare 20,000 random pairs with the
+SDK's sum bit for bit, and a product written over either factor.
+
 ## The alpha test's empty texels
 
 The general program tests the alpha at its end, after the light, the sun's cascades and the path

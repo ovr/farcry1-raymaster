@@ -27,6 +27,7 @@
 #include "D3D12Compute.h"
 #include "RayTracing.h"
 #include "WordHash.h"
+#include "MatrixMul.h"
 #include "Scene.h"
 #include "Shaders/RayConstants.h"
 
@@ -551,16 +552,14 @@ void CD3D12RayScene::CaptureDraw(const SPipelineKey &Key, const SDrawConstants &
   float fMax = 0;
   for (int i = 0; i < 16; i++)
     fMax = std::max(fMax, fabsf(wvp[i]));
-  for (int r = 0; r < 4; r++)
+  float Product[16];
+  MatrixMul::Mul44(w, vp, Product);
+  for (int i = 0; i < 16; i++)
   {
-    for (int c = 0; c < 4; c++)
+    if (fabsf(Product[i] - wvp[i]) > 1e-3f * fMax + 1e-5f)
     {
-      const float f = w[r * 4] * vp[c] + w[r * 4 + 1] * vp[4 + c] + w[r * 4 + 2] * vp[8 + c] + w[r * 4 + 3] * vp[12 + c];
-      if (fabsf(f - wvp[r * 4 + c]) > 1e-3f * fMax + 1e-5f)
-      {
-        m_nSkippedTransform += bReflection ? 0 : 1;
-        return;
-      }
+      m_nSkippedTransform += bReflection ? 0 : 1;
+      return;
     }
   }
 
