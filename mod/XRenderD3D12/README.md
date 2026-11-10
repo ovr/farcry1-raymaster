@@ -1762,6 +1762,15 @@ a pass's draws ask for the same state. Pier's sweep at 3840 x 2160 with the rays
 runs: its heavy part's `EF_EndEf3D` 4.86–4.98 → 4.77–4.85 ms, the whole sweep's 1.83–2.00 →
 1.80–1.82; the frames the same. Unit tests `WordHash_*`.
 
+The sets asked only whether a key is in them (the live leaf buffers, the parts drawn into the
+cascades' full set, the live casters' parts and the main view's for the rays' walk of the parts out
+of it, the static casters' leaf buffers) are `CWordSet`s: one array of words probed in a line, at
+most half full, cleared by filling it. `std::unordered_set` made a node with the game's allocator
+for each key and freed them all when it was cleared, every frame. River's sweep with the rays (CPU
+samples of the drawing thread, 1148 frames): the sets' work about 378 → 134 samples, 0.12 ms a frame;
+`BuildRayScene` 1505 → 1273, the cascades' 1740 → 1559. Nothing walks these sets, so the frames are
+the same (River's sweep 0 and 7 px against the build before). Unit tests `WordSet_*`.
+
 ## The alpha test's empty texels
 
 The general program tests the alpha at its end, after the light, the sun's cascades and the path

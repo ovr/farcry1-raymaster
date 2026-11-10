@@ -7,7 +7,8 @@
 //	(WordHash.h): every bit of a key counts, the words' order too, and the
 //	keys the tables hold (pipeline keys of small fields, pointers to
 //	aligned blocks, parts' keys) spread over the low bits as well as
-//	random numbers would.
+//	random numbers would; CWordSet holds what std::unordered_set holds
+//	through inserts, erases (the keys after a hole shifted back) and clears.
 //
 //////////////////////////////////////////////////////////////////////
 
@@ -91,4 +92,57 @@ XR_TEST(WordHash_LowBitsSpread)
   for (int i = 0; i < N; i++)
     Ids.push_back((uint64_t)i);
   CHECK(Buckets(Ids, BITS) >= 3000);
+}
+
+XR_TEST(WordSet_AgreesWithStd)
+{
+  // Few keys (0 among them) under many operations: long runs, holes erased in them, the table grown and cleared.
+  uint64_t nState = 7;
+  CWordSet<uint64_t> Set;
+  std::unordered_set<uint64_t> Std;
+  std::vector<uint64_t> Keys = { 0 };
+  for (int i = 0; i < 700; i++)
+    Keys.push_back(i < 300 ? (uint64_t)i : Next(nState));
+  for (int n = 0; n < 200000; n++)
+  {
+    const uint64_t k = Keys[Next(nState) % Keys.size()];
+    const uint64_t nOp = Next(nState) % 16;
+    if (n % 40000 == 39999)
+    {
+      Set.clear();
+      Std.clear();
+    }
+    else if (nOp < 7)
+      CHECK(Set.insert(k) == Std.insert(k).second);
+    else if (nOp < 13)
+      CHECK(Set.erase(k) == (Std.erase(k) != 0));
+    else
+      CHECK(Set.count(k) == Std.count(k));
+    CHECK(Set.size() == Std.size());
+  }
+  for (uint64_t k : Keys)
+    CHECK(Set.count(k) == Std.count(k));
+}
+
+XR_TEST(WordSet_Pointers)
+{
+  // Leaf buffers' addresses, a part's keys: inserted once each, found, a second insert refused; reserve keeps them.
+  CWordSet<const void *> Set;
+  CHECK(Set.empty() && Set.count(nullptr) == 0 && !Set.erase(nullptr));
+  for (int i = 0; i < 5000; i++)
+    CHECK(Set.insert((const void *)(uintptr_t)(0x1d3a5b40000ull + 64ull * i)));
+  Set.reserve(20000);
+  for (int i = 0; i < 5000; i++)
+  {
+    CHECK(Set.count((const void *)(uintptr_t)(0x1d3a5b40000ull + 64ull * i)) == 1);
+    CHECK(!Set.insert((const void *)(uintptr_t)(0x1d3a5b40000ull + 64ull * i)));
+    CHECK(Set.count((const void *)(uintptr_t)(0x1d3a5b40000ull + 64ull * i + 8)) == 0);
+  }
+  CHECK(Set.size() == 5000);
+  for (int i = 0; i < 5000; i += 2)
+    CHECK(Set.erase((const void *)(uintptr_t)(0x1d3a5b40000ull + 64ull * i)));
+  for (int i = 0; i < 5000; i++)
+    CHECK(Set.count((const void *)(uintptr_t)(0x1d3a5b40000ull + 64ull * i)) == (size_t)(i & 1));
+  Set.clear();
+  CHECK(Set.empty() && Set.count((const void *)(uintptr_t)(0x1d3a5b40000ull + 64ull)) == 0);
 }

@@ -420,7 +420,7 @@ struct SCustomLighting
 
 struct SGeomState
 {
-  std::unordered_set<CLeafBuffer *, SWordHash> Live;   //!< looked up twice a draw (GetDraw)
+  CWordSet<CLeafBuffer *> Live;   //!< looked up twice a draw (GetDraw)
   std::unordered_map<CLeafBuffer *, SCustomLighting> Lighting;
   bool bUnlitVegetation = false;    //!< Geometry::SetUnlitVegetation
 };

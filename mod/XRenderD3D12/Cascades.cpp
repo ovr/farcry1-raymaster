@@ -551,7 +551,7 @@ void CD3D12Renderer::UpdateSunCascades(std::span<const SRenderItem> MainItems)
   }
 }
 
-void CD3D12Renderer::DrawCascadeItems(std::span<const SRenderItem> Items, std::unordered_set<uint64, SWordHash> *pDrawn)
+void CD3D12Renderer::DrawCascadeItems(std::span<const SRenderItem> Items, CWordSet<uint64> *pDrawn)
 {
   if (!m_nCascades || !EnsureFrame())
     return;
@@ -570,7 +570,7 @@ void CD3D12Renderer::DrawCascadeItems(std::span<const SRenderItem> Items, std::u
   {
     if (!IsCascadeCasterClass(it))
       continue;
-    if (pDrawn && !pDrawn->insert(PartKey(it)).second)
+    if (pDrawn && !pDrawn->insert(PartKey(it)))
       continue;
     if (m_bNoteStaticCasters && m_nCascadeSet == 0 && IsStaticCaster(it))
       m_StaticCasterItems.push_back(it);

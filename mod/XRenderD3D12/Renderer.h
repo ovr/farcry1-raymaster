@@ -1552,7 +1552,7 @@ public:
   std::vector<const void *> m_FrameCasterLists;       //!< the same, taken by UpdateShadowMaps for the rest of the frame
   //! MakeShadowMapFrustum: the leaf buffers of the static objects the engine makes shadow maps for (the vegetation that
   //! casts), of each of their levels of detail (IsStaticCaster, d3d12_StaticCasters).
-  std::unordered_set<const void *, SWordHash> m_StaticCasterBuffers;
+  CWordSet<const void *> m_StaticCasterBuffers;
   //! Whether an item is a part of one of those (its leaf buffer one of m_StaticCasterBuffers).
   bool IsStaticCaster(const SRenderItem &it) const;
   int m_nNextShadowMapID = 0x40000000;                //!< the maps' IDs, apart from the texture IDs
@@ -1601,7 +1601,7 @@ public:
   //! Draws the casting parts of Items into every slice of the set m_nCascadeSet that their bounds
   //! reach. With pDrawn: the parts drawn into the set so far (PartKey), the ones in it left out,
   //! the others added.
-  void DrawCascadeItems(std::span<const SRenderItem> Items, std::unordered_set<uint64, SWordHash> *pDrawn);
+  void DrawCascadeItems(std::span<const SRenderItem> Items, CWordSet<uint64> *pDrawn);
   //! Whether the sphere c, r (PartSphere; r < 0: none) reaches the cascade Cas (CascadeCull::Reaches).
   bool PartReaches(const Vec3 &c, float r, const SCascade &Cas) const;
   //! CScene::AddEf with m_bCascadeCull: true for a part of a casters' scene that no slice takes (not a caster's
@@ -1644,7 +1644,7 @@ public:
   int m_CascadeInstances[XR_MAX_CASCADES] = {};       //!< d3d12_CascadeInstancing: the slices the part being drawn reaches
   int m_nCascadeInstances = 0;                        //!< how many (0: one slice, m_nCascadeSlice)
   int m_nCascadeFrame = -1;                           //!< m_nFrames of the cascades (m_nCascades), when drawn
-  std::unordered_set<uint64, SWordHash> m_CascadeDrawn;   //!< the parts drawn into the full set (DrawCascadeItems)
+  CWordSet<uint64> m_CascadeDrawn;                    //!< the parts drawn into the full set (DrawCascadeItems)
   std::vector<SRenderItem> m_StaticCasterItems;       //!< d3d12_StaticCasters: the full set's parts of static casters, for the live set
   bool m_bNoteStaticCasters = false;                  //!< DrawCascadeItems notes them (while the full set is drawn)
   int m_nStaticCasterParts = 0;                       //!< the parts of them the live set got in the frame
@@ -2264,7 +2264,8 @@ public:
   bool m_bAlphaColour = false;              //!< an item of that pass in the list: its draws' colour where the pass left their depth
   bool m_bRayCaptureWalk = false;           //!< the main view's opaque list set up for the scene for rays, not drawn (BuildRayScene)
   std::vector<SRenderItem> m_RayOffscreenItems;   //!< NoteRayOffscreenItems' of the frame m_nRayOffscreenFrame
-  std::unordered_set<uint64, SWordHash> m_RayLiveParts;   //!< the PartKeys of the live casters of that frame (d3d12_RTSunShadows: XR_RAY_LIVE)
+  CWordSet<uint64> m_RayLiveParts;          //!< the PartKeys of the live casters of that frame (d3d12_RTSunShadows: XR_RAY_LIVE)
+  CWordSet<uint64> m_RayWalkedParts;        //!< BuildRayScene: the parts of the main view's lists, apart from the cascades' out of it
   int m_nRayOffscreenFrame = -1;
   int m_nRaySurfaceFrame = -2;              //!< the last frame with a draw that traced rays in place of its cube map
   int m_nRayLightFrame = -2;                //!< the last frame with a draw that traced rays towards its lamps

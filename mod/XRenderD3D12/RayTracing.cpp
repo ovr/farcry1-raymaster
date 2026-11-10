@@ -1327,8 +1327,9 @@ void CD3D12Renderer::BuildRayScene(std::span<const SRenderItem> Opaque, std::spa
   // the main view would draw them.
   if (WantsOffscreenRays() && m_nRayOffscreenFrame == m_nFrames && !m_RayOffscreenItems.empty())
   {
-    std::unordered_set<uint64, SWordHash> Parts;
-    Parts.reserve((Opaque.size() + m_RayOffscreenItems.size()) * 2);
+    CWordSet<uint64> &Parts = m_RayWalkedParts;
+    Parts.clear();
+    Parts.reserve(Opaque.size() + m_RayOffscreenItems.size());
     for (const SRenderItem &it : Opaque)
     {
       if (IsRayWalked(it))
@@ -1342,7 +1343,7 @@ void CD3D12Renderer::BuildRayScene(std::span<const SRenderItem> Opaque, std::spa
     m_pRayScene->SetCaptureSource(CD3D12RayScene::SOURCE_OFFSCREEN);
     for (const SRenderItem &it : m_RayOffscreenItems)
     {
-      if (Parts.insert(PartKey(it)).second)
+      if (Parts.insert(PartKey(it)))
         Walk(it);
     }
   }
