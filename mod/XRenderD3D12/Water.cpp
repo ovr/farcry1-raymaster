@@ -582,7 +582,7 @@ int CD3D12Renderer::GetPondRippleTexture()
   return m_nPondRippleTexture > 0 ? m_pTextures->GetSRV(m_nPondRippleTexture) : -1;
 }
 
-bool CD3D12Renderer::CopySceneForWater(const int *pRect)
+bool CD3D12Renderer::CopySceneForWater(const int *pRect, bool bDepth)
 {
   if (!m_pDevice || !m_pDescriptors)
     return false;
@@ -596,6 +596,8 @@ bool CD3D12Renderer::CopySceneForWater(const int *pRect)
     const D3D12_BOX Box = { (UINT)pRect[0], (UINT)pRect[1], 0, (UINT)pRect[2], (UINT)pRect[3], 1 };
     m_pDevice->CopyTargets(Copy.pColor.Get(), nullptr, &Box);
   }
+  else if (!bDepth)
+    m_pDevice->CopyTargets(Copy.pColor.Get(), nullptr);
   else
   {
     // With MSAA the depth buffer's nearest samples first (Msaa.cpp; CopyTargets resolves the colour).
@@ -604,8 +606,8 @@ bool CD3D12Renderer::CopySceneForWater(const int *pRect)
   }
   m_nSceneColorSRV = Copy.nColorSRV;
   m_nSceneDepthSRV = Copy.nDepthSRV;
-  m_bSceneCopied = !pRect;
-  m_pSceneCopy = pRect ? nullptr : &Copy;
+  m_bSceneCopied = !pRect && bDepth;
+  m_pSceneCopy = m_bSceneCopied ? &Copy : nullptr;
   m_nSceneTileSRV = -1;
   return true;
 }

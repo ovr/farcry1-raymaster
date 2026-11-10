@@ -3016,6 +3016,9 @@ and lists theirs (`NamesObjects`).
   a screen wider than about 1800 is first reduced to a quarter (the mean of 4 x 4 pixels), so at
   4K Paradise takes about 0.17 ms of the GPU (the GPU time's section `render mode`: the scene's
   copy 0.07, the reductions 0.05, the composite 0.04) rather than 0.34 with 8 x 8 taps a texel.
+  The copy is of the scene's colour alone (`CopySceneForWater` without its depth, as for the other
+  screen effects: none of their passes reads it): the 4K sweeps' `water scene copy` section
+  0.100 -> 0.062 ms a frame on Treehouse, 0.119 -> 0.083 on Pier, the frames the same.
 - Cold: F first 2 saturate(0.75 F - 0.3 D), the source's gain 0.65, no blur, k 0.425.
 - The threshold and the gain above are the indoor ones. The original moves them to outdoor ones
   with an outdoor share s (`d3d12_RenderModeOutdoor`, 1; `RenderModeOutdoor.h`). Traced in

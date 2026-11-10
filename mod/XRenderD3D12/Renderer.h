@@ -1054,9 +1054,9 @@ public:
   //! The sea floor under the ocean (eDC_WaterBottom) with the element's texture pTex (may be NULL).
   void SetupWaterBottomDraw(SPipelineKey &Key, SDrawConstants &dc, CTexture *pTex);
   //! Copies the main view's target and its depth buffer as drawn so far (m_bSceneCopied); with pRect
-  //! (left, top, right, bottom in its pixels) only that part of the target, which leaves the copies
-  //! incomplete (not m_bSceneCopied).
-  bool CopySceneForWater(const int *pRect = nullptr);
+  //! (left, top, right, bottom in its pixels) only that part of the target, and without bDepth only the
+  //! target: both leave the copies incomplete (not m_bSceneCopied).
+  bool CopySceneForWater(const int *pRect = nullptr, bool bDepth = true);
   void ReleaseWaterResources();
   //! Starts making the pixels of the wave and caustics textures on a thread of their own (at
   //! start-up; GetWaveTexture and GetCausticsTexture wait for it).

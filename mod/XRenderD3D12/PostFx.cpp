@@ -206,7 +206,8 @@ void CD3D12Renderer::DrawScreenEffects()
 
 void CD3D12Renderer::DrawScreenComposite(const SScreenFxState &fx, bool bBlur, bool bFade)
 {
-  if (!CopySceneForWater())
+  // The scene's colour alone (no pass here reads its depth).
+  if (!CopySceneForWater(nullptr, false))
     return;
   const int w = m_pDevice->GetWidth(), h = m_pDevice->GetHeight();
 
@@ -440,7 +441,8 @@ void CD3D12Renderer::ReleaseRenderModeTargets()
 
 void CD3D12Renderer::DrawRenderMode(int nMode)
 {
-  if (!EnsureRenderModeTargets() || !CopySceneForWater())
+  // The scene's colour alone (no pass here reads its depth, which at the swap chain's size cost as much again).
+  if (!EnsureRenderModeTargets() || !CopySceneForWater(nullptr, false))
     return;
   const int w = m_pDevice->GetWidth(), h = m_pDevice->GetHeight();
   const bool bCartoon = nMode == 4;
@@ -543,7 +545,7 @@ void CD3D12Renderer::DrawRenderMode(int nMode)
   {
     uint8 vAdapt[4] = {};
     const bool bRead = !bCartoon && m_pDevice->ReadBackTexture(m_pRmAdapt->m_pResource, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, vAdapt, 1, 1);
-    fprintf(m_pFrameDump.get(), "render mode %d (%s): adapted luminance %d / 255, %.3f s to its next step%s\n", nMode,
+    fprintf(m_pFrameDump.get(), "render mode %d (%s): adapted luminance %d / 255, %.3f s to its next step%s; the scene's colour copied alone\n", nMode,
             nMode == 1 ? "improved" : nMode == 2 ? "paradise" : nMode == 3 ? "cold" : "cartoon", bRead ? vAdapt[0] : -1,
             std::max(RM_ADAPT_STEP - m_fRmAdaptTime, 0.0f), pLayer ? ", the highlight layer kept" : "");
     if (!bCartoon)
