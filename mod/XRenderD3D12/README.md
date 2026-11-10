@@ -1863,6 +1863,51 @@ The whole sweep's GPU is the same (3.45–3.51 and 3.47–3.50 ms). Frame 181 of
 0 px pairs against the build before. Unit tests `MatrixMul_*` compare 20,000 random pairs with the
 SDK's sum bit for bit, and a product written over either factor.
 
+## Draws joined into one
+
+Most of a view's draws repeat the one before but for the object's transforms: the same mesh,
+range, material, textures and constants, a rock or a palm placed many times. With
+`d3d12_DrawBatch 1` (the default, not saved) the renderer holds a leaf's draw back
+(`DrawBatch.h`); the next one joins it when all it binds and draws is the same, but its header's
+three matrices (`mWorld`, `mWorldViewProj`, `mPrevWorldViewProj`), and its header is the next 256
+bytes of the frame memory. The run is recorded as one `DrawIndexedInstanced`. Its vertex program
+(`General.hlsl`'s `XR_DRAW_OBJECTS`) reads instance i's matrices from header i through a root SRV
+(`ROOT_DRAW_OBJECTS`); the pixel program reads the first header, the same in all of them. The
+instances are drawn in order, so the frames are the same.
+
+- Only the leaves' draws join (`DrawItems`): the depth prepass, the leaves' prepass, the lists and
+  the bodies. Not the draws into a shadow map, those that trace rays or those instanced already.
+- A draw joins only when no barrier waits. Any other use of the frame's list (`CFrameCmdList`'s
+  `->`, `GetCmdList`, `ForgetDrawState`) records the held run first.
+- Every draw that could join takes the instanced pipeline state, also one drawn alone (one
+  instance), so a run changes no state. With the instanced state for the runs alone, and the
+  plain one again after each, Pier's opaque list took 0.03 ms more on the GPU.
+- The vertex program goes through the wave's objects one at a time: each one's matrices are read
+  once at an address the same in the wave, as the constant buffer's.
+- `2` holds and joins the same draws but records them one by one under the plain state, each with
+  its own header bound; `0` records every draw at once, as before. `d3d12_FrameLog` counts the
+  draws that joined (`draw_joined`), the instanced draws of two or more (`draw_batches`) and the
+  draws in them (`draw_instanced`).
+
+Player settings at 3840 x 2160 with TAA, `d3d12_PathTracing 0`, `d3d12_HDROutput 0`, `r_VSync 0`;
+one DLL, `0` and `1` in turn, three runs each, medians:
+
+| | `0` | `1` |
+|---|---|---|
+| River, frames 600–800: draws / draw calls | 8,768 / 8,768 | 8,768 / about 1,230 |
+| Pier, frames 600–800: draws / draw calls | 4,308 / 4,308 | 4,308 / about 2,160 |
+| River, frames 600–800: frame ms | 6.566 / 6.497 / 6.538 | 6.131 / 6.013 / 6.040 |
+| River, frames 600–800: `EF_EndEf3D` ms | 5.120 / 5.138 / 5.127 | 4.686 / 4.728 / 4.687 |
+| River, frames 600–800: the water's reflection (CPU) ms | 1.829 / 1.827 / 1.826 | 1.558 / 1.553 / 1.548 |
+| River, frames 60–1160: `EF_EndEf3D` ms | 1.215 / 1.206 / 1.203 | 1.144 / 1.140 / 1.161 |
+| Pier, frames 600–800: `EF_EndEf3D` ms | 2.827 / 2.833 / 2.843 | 2.750 / 2.764 / 2.744 |
+| Pier, frames 600–800: GPU ms | 3.325 / 3.309 / 3.340 | 3.295 / 3.300 / 3.290 |
+
+The GPU of the whole sweeps is the same (River 3.49–3.52 ms either way). Frame 181 of Pier and
+of River and frame 700 of Pier have 0 px pairs between `0` and `1`; River's frame 700 is 9 px
+from the nearest run of `0` (runs of `0` fall into states up to 1.8 million px apart there).
+Unit tests `DrawBatch_*`; render_tests suite `drawbatch`.
+
 ## The alpha test's empty texels
 
 The general program tests the alpha at its end, after the light, the sun's cascades and the path

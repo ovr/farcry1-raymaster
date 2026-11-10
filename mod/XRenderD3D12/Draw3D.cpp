@@ -363,6 +363,15 @@ void CD3D12Renderer::DrawItems(SRenderItem *pItems, int nItems, int eList)
     bBodies = p3DEngine && fBodyCameraZ > fBodyLevel;
   }
   std::vector<int> Bodies;
+  // d3d12_DrawBatch: the items' draws of one mesh for consecutive objects in one (DrawGeometry, DrawBatch.h). What it holds
+  // back is recorded before anything else goes on the list and at the end of each pass over the items.
+  const auto DrawLeaf = [this](const SRenderItem &it)
+  {
+    const bool bBatching = m_bDrawBatching;
+    m_bDrawBatching = true;
+    DrawLeafItem(it);
+    m_bDrawBatching = bBatching;
+  };
   // The leaves' and the grass's items of their depth pass (d3d12_FoliagePrepass, below; their draws DrawGeometry's).
   const auto AlphaPrepassItem = [&](const SRenderItem &it)
   {
@@ -390,8 +399,9 @@ void CD3D12Renderer::DrawItems(SRenderItem *pItems, int nItems, int eList)
       if (it.pRE && it.pRE->m_Type == eDATA_OcLeaf &&
           (it.eDrawClass == eDC_Opaque || it.eDrawClass == eDC_VColor || it.eDrawClass == eDC_Terrain || it.eDrawClass == eDC_WaterBottom) &&
           !(bBodies && LooksPastUnderwater(it, fBodyLevel, fBodyCameraZ)))
-        DrawLeafItem(it);
+        DrawLeaf(it);
     }
+    m_pDevice->RecordHeldDraw();
     m_bDepthPrepass = false;
     m_fDepthMin = fDepthMin;
     m_fDepthMax = fDepthMax;
@@ -409,7 +419,8 @@ void CD3D12Renderer::DrawItems(SRenderItem *pItems, int nItems, int eList)
       m_bAlphaPrepass = true;
       for (int i = 0; i < nItems; i++)
         if (AlphaPrepassItem(pItems[i]))
-          DrawLeafItem(pItems[i]);
+          DrawLeaf(pItems[i]);
+      m_pDevice->RecordHeldDraw();
       m_bAlphaPrepass = false;
       bAlphaPrepass = true;
       m_fDepthMin = fDepthMin;
@@ -463,7 +474,7 @@ void CD3D12Renderer::DrawItems(SRenderItem *pItems, int nItems, int eList)
     case eDATA_OcLeaf:
       // (an item of the leaves' depth pass: its draws' colour where the pass left their depth, DrawGeometry)
       m_bAlphaColour = bAlphaPrepass && AlphaPrepassItem(it);
-      DrawLeafItem(it);
+      DrawLeaf(it);
       m_bAlphaColour = false;
       break;
     case eDATA_Sky:
@@ -479,6 +490,7 @@ void CD3D12Renderer::DrawItems(SRenderItem *pItems, int nItems, int eList)
       break;
     }
   }
+  m_pDevice->RecordHeldDraw();
   if (!Bodies.empty())
   {
     m_bNoDepthWrite = true;
@@ -490,8 +502,9 @@ void CD3D12Renderer::DrawItems(SRenderItem *pItems, int nItems, int eList)
         fprintf(m_pFrameDump.get(), "    under the ocean (d3d12_UnderwaterBodies): drawn last, without the depth\n");
       }
       m_fDrawHeat = m_bHeatPass ? ItemHeat(pItems[i]) : 0;
-      DrawLeafItem(pItems[i]);
+      DrawLeaf(pItems[i]);
     }
+    m_pDevice->RecordHeldDraw();
     m_bNoDepthWrite = false;
   }
   if (!bUnder)

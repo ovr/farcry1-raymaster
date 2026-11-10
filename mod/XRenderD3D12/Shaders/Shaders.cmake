@@ -16,6 +16,10 @@ xrender_d3d12_shader(General_CascadeInstances_VS General.hlsl vs_6_0 VSMain XR_C
 # The same for the parts of one mesh drawn once for all their objects (d3d12_CascadeInstancing 3): the instances'
 # matrices and slices in a raw buffer of the frame (SPipelineKey::bCascadeInstances 2).
 xrender_d3d12_shader(General_CascadeObjects_VS General.hlsl vs_6_0 VSMain XR_CASCADE_INSTANCES XR_CASCADE_OBJECTS)
+# The draws of one mesh for consecutive objects at once (d3d12_DrawBatch, DrawBatch.h): an instance per object, its matrices
+# from its header in the frame's memory (SPipelineKey::bDrawObjects); without and with velocity.
+xrender_d3d12_shader(General_Objects_VS General.hlsl vs_6_0 VSMain XR_DRAW_OBJECTS)
+xrender_d3d12_shader(General_Objects_Velocity_VS General.hlsl vs_6_0 VSMain XR_DRAW_OBJECTS XR_VELOCITY)
 # The live set's casters drawn so (d3d12_CascadeInstancing 2): compared with the full set in their instance's slice.
 xrender_d3d12_shader(General_CascadeInstances_PS General.hlsl ps_6_0 PSMain XR_CASCADES XR_CASCADE_INSTANCES)
 # Their pixel shaders with the steps of the HDR targets (XR_HDR: DF2_SKY_GLOW, DF2_HDR_CORE), for the

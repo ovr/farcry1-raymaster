@@ -318,6 +318,11 @@ void CD3D12Renderer::RegisterVariables()
   iConsole->Register("d3d12_DrawExtReuse", &CV_d3d12_DrawExtReuse, 1, 0,
                      "1: a draw whose rest of its constants (b3) has the same bytes as the last one uploaded in this frame's memory "
                      "binds that copy (the GPU reads the same bytes); 0 every such draw uploads its own (read at each draw)");
+  iConsole->Register("d3d12_DrawBatch", &CV_d3d12_DrawBatch, 1, 0,
+                     "1: a list's draws of one mesh for consecutive objects, alike but for their matrices, in one instanced draw "
+                     "whose vertex shader reads each object's matrices from its constants (the same frames, fewer calls of the "
+                     "driver; every such draw takes the instanced pipeline state, one instance or more); 2 held back the same way "
+                     "but drawn one by one under the plain state (a check); 0 each draw at once (read at each draw)");
   iConsole->Register("d3d12_FrameMemoryVideo", &CV_d3d12_FrameMemoryVideo, 1, 0,
                      "1: the per frame memory (the draws' constants, the vertices drawn once, the rays' instances) in video memory "
                      "the CPU writes through the bus (the GPU upload heap: resizable BAR) where the device has it, so the GPU reads "

@@ -31,6 +31,7 @@
 #include "Shaders/Constants.h"
 #include "WakeBodies.h"
 #include "DrawDistance.h"
+#include "DrawBatch.h"
 #include "DrawExt.h"
 #include "OceanGrid.h"
 #include "WordHash.h"
@@ -2211,6 +2212,16 @@ public:
   int m_nFrameDrawExt[DrawExt::REASON_NUM] = {};  //!< the draws by why they uploaded the rest of their constants (DrawExt.h)
   int m_nFrameDrawExtReused = 0;      //!< of those, the draws that bound the copy the last upload made (d3d12_DrawExtReuse)
   DrawExt::SLast m_LastExt;           //!< the rest of the constants (b3) the last upload wrote (d3d12_DrawExtReuse)
+  //! d3d12_DrawBatch: the draw DrawGeometry holds back and those that joined it (recorded by RecordDrawBatch, also from the
+  //! device before anything else goes on the frame's list), while DrawItems draws a list's items (m_bDrawBatching).
+  DrawBatch::CBatch m_DrawBatch;
+  int m_nDrawBatchMode = 0;           //!< CV_d3d12_DrawBatch when it was held back
+  bool m_bDrawBatching = false;
+  int m_nFrameDrawsJoined = 0;        //!< the draws that joined a held one (no call of their own)
+  int m_nFrameDrawBatches = 0;        //!< the instanced draws of two or more
+  int m_nFrameDrawsInstanced = 0;     //!< the draws in them
+  void RecordDrawBatch();
+  static void RecordDrawBatchOf(void *pRenderer) { static_cast<CD3D12Renderer *>(pRenderer)->RecordDrawBatch(); }
   int m_nFrameSunLights = 0;          //!< r_DisplayInfo: the main view's sun (DLF_SUN) and other lights in this
   int m_nFrameDynLights = 0;          //!< frame (CScene::EndEf3D), 0 again at the end of Update
   ID3D12PipelineState *m_pLastPSO = nullptr;  //!< the pipeline state of the last draw (counted only)
@@ -2381,6 +2392,7 @@ public:
   int CV_d3d12_BarrierCheck = 0;      //!< 1: the transitions' befores checked, the problems logged
   int CV_d3d12_DrawExt = 1;           //!< 1: a draw uploads the rest of its constants (b3) only when it reads other bytes than the default block's (DrawExt.h); 0 every draw
   int CV_d3d12_DrawExtReuse = 1;      //!< 1: a draw whose rest has the bytes of the last one uploaded this frame binds that copy; 0 uploads its own
+  int CV_d3d12_DrawBatch = 1;         //!< 1: the lists' draws of one mesh for consecutive objects in one instanced draw (DrawBatch.h); 2 held back but drawn one by one; 0 each at once
   int CV_d3d12_FrameMemoryVideo = 1;  //!< 1: the per frame memory in the GPU upload heap (video memory) where the device has it; 0 system memory
   int CV_d3d12_CpuSamples = 0;        //!< N: the render thread's stack every N microseconds, to XRenderD3D12_samples.txt at 0 (CpuSampler)
   int CV_r_Stats = 0;                 //!< the statistics on the screen: 1 the GPU time of the passes, 2 also the memory

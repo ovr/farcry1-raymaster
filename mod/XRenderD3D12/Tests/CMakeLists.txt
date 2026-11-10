@@ -154,6 +154,7 @@ set(XRENDERD3D12_TESTS_SOURCES
     RayFaceTests.cpp
     DrawDistanceTests.cpp
     DrawExtTests.cpp
+    DrawBatchTests.cpp
     MatrixMulTests.cpp
     RayCoverageTests.cpp
     BarrierTests.cpp

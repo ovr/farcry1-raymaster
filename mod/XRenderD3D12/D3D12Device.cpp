@@ -237,7 +237,7 @@ bool CD3D12Device::Init(HWND hWnd, int nWidth, int nHeight, int nDebug, int nDre
     if (Failed(m_pDevice->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&pAllocator)), "CreateCommandAllocator"))
       return false;
   }
-  if (Failed(m_pDevice->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, m_pAllocators[0].Get(), nullptr, IID_PPV_ARGS(&m_pCmdList)), "CreateCommandList"))
+  if (Failed(m_pDevice->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, m_pAllocators[0].Get(), nullptr, IID_PPV_ARGS(&m_pCmdList.Ptr())), "CreateCommandList"))
     return false;
   m_pCmdList->SetName(L"XRenderD3D12 frame");
   m_pCmdList->Close();

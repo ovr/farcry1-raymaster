@@ -71,6 +71,44 @@ struct SDisplayInfo
   char szName[32] = {};             //!< its GDI name (\\.\DISPLAY1), empty: not found
 };
 
+//! The frame's command list as the device holds it: every call through -> first records the draw DrawGeometry holds back
+//! (d3d12_DrawBatch, DrawBatch.h; CD3D12Device::HoldDraw), so that whatever else goes on the list comes after it.
+class CFrameCmdList
+{
+public:
+  ID3D12GraphicsCommandList *operator->() const
+  {
+    RecordHeld();
+    return m_p.Get();
+  }
+  ID3D12GraphicsCommandList *Get() const { return m_p.Get(); }
+  ComPtr<ID3D12GraphicsCommandList> &Ptr() { return m_p; }
+  void Reset()
+  {
+    m_pfnRecord = nullptr;
+    m_p.Reset();
+  }
+  //! pfnRecord(pContext) records the draw held back before anything else is recorded.
+  void Hold(void (*pfnRecord)(void *), void *pContext) const
+  {
+    m_pfnRecord = pfnRecord;
+    m_pContext = pContext;
+  }
+  void RecordHeld() const
+  {
+    if (void (*const pfn)(void *) = m_pfnRecord)
+    {
+      m_pfnRecord = nullptr;
+      pfn(m_pContext);
+    }
+  }
+
+private:
+  ComPtr<ID3D12GraphicsCommandList> m_p;
+  mutable void (*m_pfnRecord)(void *) = nullptr;
+  mutable void *m_pContext = nullptr;
+};
+
 class CD3D12Device
 {
 public:
@@ -123,9 +161,10 @@ public:
   ID3D12Device *GetDevice() const { return m_pDevice.Get(); }
   ID3D12CommandQueue *GetQueue() const { return m_pQueue.Get(); }
   //! The frame's command list; valid between BeginFrame and EndFrame. The caller may set state of
-  //! its own on it: what DrawGeometry set is forgotten (GetStateEpoch).
+  //! its own on it: what DrawGeometry set is forgotten (GetStateEpoch). The draw held back is recorded first.
   ID3D12GraphicsCommandList *GetCmdList() const
   {
+    m_pCmdList.RecordHeld();
     m_nStateEpoch++;
     return m_pCmdList.Get();
   }
@@ -135,7 +174,17 @@ public:
   //! Changes whenever the command list's state may have changed other than by DrawGeometry: a new
   //! list, targets bound, the root signature, a GetCmdList, ForgetDrawState.
   uint32 GetStateEpoch() const { return m_nStateEpoch; }
-  void ForgetDrawState() const { m_nStateEpoch++; }
+  void ForgetDrawState() const
+  {
+    m_pCmdList.RecordHeld();
+    m_nStateEpoch++;
+  }
+  //! DrawGeometry's draw it holds back for the next ones of the same mesh (d3d12_DrawBatch): pfnRecord(pContext)
+  //! records it before whatever else goes on the frame's list (the device's calls on it, GetCmdList, ForgetDrawState).
+  void HoldDraw(void (*pfnRecord)(void *), void *pContext) const { m_pCmdList.Hold(pfnRecord, pContext); }
+  void RecordHeldDraw() const { m_pCmdList.RecordHeld(); }
+  //! No barrier is queued for the frame's list (a draw after a held one may join it only then).
+  bool NoQueuedBarriers() const { return m_Barriers.IsQueueEmpty(); }
   //! In a frame, an open command list of the compute queue for work beside the frame's (the ray
   //! scene's builds), its GPU time that of szSection (a string with static storage) in
   //! GetComputeGpuTimes; NULL without the queue. SubmitAsyncCompute runs it.
@@ -613,7 +662,7 @@ private:
 
   ComPtr<ID3D12CommandAllocator> m_pAllocators[D3D12_FRAMES];
   uint64 m_nFrameFence[D3D12_FRAMES] = {};
-  ComPtr<ID3D12GraphicsCommandList> m_pCmdList;
+  CFrameCmdList m_pCmdList;
   mutable uint32 m_nStateEpoch = 0;                 //!< GetStateEpoch
   ComPtr<ID3D12Fence> m_pFence;
   HANDLE m_hFenceEvent = nullptr;

@@ -454,6 +454,9 @@ namespace Barriers
 
     // The list --------------------------------------------------------------------------------------------------------
 
+    //! Nothing queued at all (Flush's quick case); HasPending can still be false where this is.
+    bool IsQueueEmpty() const { return m_Entries.empty() && !m_bUavAll && m_SealedSizes.empty(); }
+
     bool HasPending() const
     {
       if (m_bUavAll || !m_SealedSizes.empty())

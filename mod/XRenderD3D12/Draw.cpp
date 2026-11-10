@@ -319,7 +319,23 @@ void CD3D12Renderer::DrawGeometry(const SPipelineKey &Key, const SDrawConstants 
                              !(dc.nFlags2 & (DF2_FOG_VOLUME | DF2_SHADER_FX)) &&
                              nSrcBlend != GS_BLSRC_SRCALPHA && nSrcBlend != GS_BLSRC_ONEMINUSSRCALPHA && nSrcBlend != GS_BLSRC_ALPHASATURATE &&
                              nDstBlend != GS_BLDST_SRCALPHA && nDstBlend != GS_BLDST_ONEMINUSSRCALPHA ? 1 : 0;
+  // d3d12_DrawBatch: the draws of one mesh for consecutive objects of a list's items (DrawItems) in one instanced draw.
+  // A draw is held back; the next joins it where all it binds and draws is the same but its header's matrices and its
+  // header is the next 256 bytes (DrawBatch.h). Not the draws with rays, into a shadow map or instanced already.
+  const int nBatchMode = m_bDrawBatching ? CV_d3d12_DrawBatch : 0;
+  bool bBatch = nBatchMode > 0 && pIB && nInstances == 1 && !nRayScene && Key.nProgram == eD3D12P_General && FullKey.nTarget != 2 &&
+                !FullKey.bCascadeInstances;
+  // 1: every such draw with the instanced pipeline state, one instance or more: a run changes no state (the instanced
+  // state for the runs alone and the plain one after each: Pier's opaque list 0.03 ms more).
+  if (bBatch && nBatchMode == 1)
+    FullKey.bDrawObjects = 1;
   ID3D12PipelineState *pPSO = m_pPipeline->GetPSO(FullKey);
+  if (!pPSO && FullKey.bDrawObjects)
+  {
+    FullKey.bDrawObjects = 0;
+    bBatch = false;
+    pPSO = m_pPipeline->GetPSO(FullKey);
+  }
   if (!pPSO)
     return;
 
@@ -336,58 +352,6 @@ void CD3D12Renderer::DrawGeometry(const SPipelineKey &Key, const SDrawConstants 
   // in or the fog volumes; an additive draw other than a light pass is hot (fire, muzzle flashes).
   const bool bHeat = m_bHeatPass && (Key.nProgram == eD3D12P_General || Key.nProgram == eD3D12P_Water) &&
                      !(dc.nFlags & (DF_DETAIL_LAYER | DF_CAUSTICS | DF_SHADOW_PASS | DF_SCREEN_POS)) && !(dc.nFlags2 & DF2_FOG_VOLUME);
-  // The state the draw before set stays while nothing else touched the command list.
-  ID3D12GraphicsCommandList *pList = m_pDevice->GetDrawCmdList();
-  SDrawState &Set = m_DrawState;
-  if (Set.nEpoch != m_pDevice->GetStateEpoch())
-  {
-    Set = {};
-    Set.nEpoch = m_pDevice->GetStateEpoch();
-  }
-  if (pPSO != Set.pPSO)
-  {
-    pList->SetPipelineState(pPSO);
-    Set.pPSO = pPSO;
-  }
-  m_nFramePSOChanges += pPSO != m_pLastPSO;
-  m_nFrameAlphaCoverage += FullKey.bAlphaToCoverage;
-  m_pLastPSO = pPSO;
-  if (m_nFrameCB != Set.nFrameCB)
-  {
-    pList->SetGraphicsRootConstantBufferView(0, m_nFrameCB);
-    Set.nFrameCB = m_nFrameCB;
-  }
-  if (nRayScene)
-  {
-    pList->SetGraphicsRootShaderResourceView(ROOT_RAY_SCENE, nRayScene);
-    pList->SetGraphicsRootShaderResourceView(ROOT_RAY_INSTANCES, m_pRayScene->GetInstances());
-    if (m_PathTrace.nLights && m_PathTrace.nLightsFrame == m_nFrames)
-      pList->SetGraphicsRootShaderResourceView(ROOT_RAY_LIGHTS, m_PathTrace.nLights);
-  }
-  const auto SetVB = [&](UINT nSlot, const D3D12_VERTEX_BUFFER_VIEW &View)
-  {
-    if (memcmp(&View, &Set.VB[nSlot], sizeof(View)))
-    {
-      pList->IASetVertexBuffers(nSlot, 1, &View);
-      Set.VB[nSlot] = View;
-    }
-  };
-  SetVB(0, VB);
-  if (!Set.bDefaultStream)
-  {
-    m_pPipeline->BindDefaultStream(pList);
-    Set.bDefaultStream = true;
-  }
-  if (pTexCoord1)
-    SetVB(2, *pTexCoord1);
-  if (pTangents)
-    SetVB(3, *pTangents);
-  if (eTopology != Set.eTopology)
-  {
-    pList->IASetPrimitiveTopology(eTopology);
-    Set.eTopology = eTopology;
-  }
-
   // The viewport inside the back buffer (an off screen target: all of it, or m_TargetRect); the
   // scissor rectangle inside the viewport (the scissors are the back buffer's). In an upscaler's
   // scene both are scaled from the back buffer's pixels to the scene's.
@@ -416,11 +380,6 @@ void CD3D12Renderer::DrawGeometry(const SPipelineKey &Key, const SDrawConstants 
   if (vw <= 0 || vh <= 0)
     return;
   const D3D12_VIEWPORT Viewport = { (float)vx, (float)vy, (float)vw, (float)vh, m_fDepthMin, m_fDepthMax };
-  if (memcmp(&Viewport, &Set.Viewport, sizeof(Viewport)))
-  {
-    pList->RSSetViewports(1, &Viewport);
-    Set.Viewport = Viewport;
-  }
   RECT Scissor = { vx, vy, vx + vw, vy + vh };
   if (m_bItemScissor && !bOffscreen)
   {
@@ -438,11 +397,6 @@ void CD3D12Renderer::DrawGeometry(const SPipelineKey &Key, const SDrawConstants 
   }
   if (Scissor.right <= Scissor.left || Scissor.bottom <= Scissor.top)
     return;
-  if (memcmp(&Scissor, &Set.Scissor, sizeof(Scissor)))
-  {
-    pList->RSSetScissorRects(1, &Scissor);
-    Set.Scissor = Scissor;
-  }
 
   // The draw's constants (Shaders/Constants.h), each part written once into the frame's memory with the renderer's
   // changes (write-combined memory: never read back). The header (b1), every draw's, from a copy on the stack.
@@ -460,7 +414,6 @@ void CD3D12Renderer::DrawGeometry(const SPipelineKey &Key, const SDrawConstants 
     Head.fAlphaRef = -dc.fAlphaRef;
   const SD3D12FrameAlloc HeadMem = m_pUpload->AllocFrame(sizeof(SDrawHead), 256);
   memcpy(HeadMem.pCPU, &Head, sizeof(Head));
-  pList->SetGraphicsRootConstantBufferView(1, HeadMem.nGPU);
   m_nFrameDrawBytes += sizeof(SDrawHead);
   // The rest (b3): the draw's own where it reads it, else the default block (DrawExt.h); bound when it changes.
   DrawExt::SDraw Ext;
@@ -505,14 +458,118 @@ void CD3D12Renderer::DrawGeometry(const SPipelineKey &Key, const SDrawConstants 
     if (!bExtChanged)
       m_LastExt.Keep(dc, ExtMem.nGPU, nUploadFrame);
   }
+
+  m_nFramePSOChanges += pPSO != m_pLastPSO;
+  m_nFrameAlphaCoverage += FullKey.bAlphaToCoverage;
+  m_pLastPSO = pPSO;
+  m_nFramePolygons += CountTriangles(eTopology, nCount) * nInstances;
+  m_nFrameDraws++;
+
+  DrawBatch::SState Batch;
+  if (bBatch)
+  {
+    memset(&Batch, 0, sizeof(Batch));
+    Batch.pPSO = pPSO;
+    Batch.nFrameCB = m_nFrameCB;
+    Batch.nExt = nExt;
+    const D3D12_VERTEX_BUFFER_VIEW *const pViews[3] = { &VB, pTexCoord1, pTangents };
+    for (int i = 0; i < 3; i++)
+      if (pViews[i])
+      {
+        Batch.VB[i][0] = pViews[i]->BufferLocation;
+        Batch.VB[i][1] = ((uint64)pViews[i]->SizeInBytes << 32) | pViews[i]->StrideInBytes;
+      }
+    Batch.IB[0] = pIB->BufferLocation;
+    Batch.IB[1] = ((uint64)pIB->SizeInBytes << 32) | (uint32)pIB->Format;
+    Batch.nTopology = (uint64)eTopology;
+    memcpy(Batch.Viewport, &Viewport, sizeof(Batch.Viewport));
+    Batch.Scissor[0] = Scissor.left;
+    Batch.Scissor[1] = Scissor.top;
+    Batch.Scissor[2] = Scissor.right;
+    Batch.Scissor[3] = Scissor.bottom;
+    Batch.nCount = nCount;
+    Batch.nFirst = nFirst;
+    Batch.nBaseVertex = nBaseVertex;
+    Batch.nEpoch = m_pDevice->GetStateEpoch();
+    memcpy(Batch.Rest, reinterpret_cast<const uint8 *>(&Head) + DrawBatch::HEAD_MATRICES, DrawBatch::HEAD_REST);
+    // (a barrier queued since would have to come before this draw)
+    if (nBatchMode == m_nDrawBatchMode && m_pDevice->NoQueuedBarriers() && m_DrawBatch.Joins(Batch, HeadMem.nGPU))
+    {
+      m_DrawBatch.Join();
+      m_nFrameDrawsJoined++;
+      return;
+    }
+  }
+  // The draw held back first.
+  m_pDevice->RecordHeldDraw();
+
+  // The state the draw before set stays while nothing else touched the command list.
+  ID3D12GraphicsCommandList *pList = m_pDevice->GetDrawCmdList();
+  SDrawState &Set = m_DrawState;
+  if (Set.nEpoch != m_pDevice->GetStateEpoch())
+  {
+    Set = {};
+    Set.nEpoch = m_pDevice->GetStateEpoch();
+  }
+  if (pPSO != Set.pPSO)
+  {
+    pList->SetPipelineState(pPSO);
+    Set.pPSO = pPSO;
+  }
+  if (m_nFrameCB != Set.nFrameCB)
+  {
+    pList->SetGraphicsRootConstantBufferView(0, m_nFrameCB);
+    Set.nFrameCB = m_nFrameCB;
+  }
+  if (nRayScene)
+  {
+    pList->SetGraphicsRootShaderResourceView(ROOT_RAY_SCENE, nRayScene);
+    pList->SetGraphicsRootShaderResourceView(ROOT_RAY_INSTANCES, m_pRayScene->GetInstances());
+    if (m_PathTrace.nLights && m_PathTrace.nLightsFrame == m_nFrames)
+      pList->SetGraphicsRootShaderResourceView(ROOT_RAY_LIGHTS, m_PathTrace.nLights);
+  }
+  const auto SetVB = [&](UINT nSlot, const D3D12_VERTEX_BUFFER_VIEW &View)
+  {
+    if (memcmp(&View, &Set.VB[nSlot], sizeof(View)))
+    {
+      pList->IASetVertexBuffers(nSlot, 1, &View);
+      Set.VB[nSlot] = View;
+    }
+  };
+  SetVB(0, VB);
+  if (!Set.bDefaultStream)
+  {
+    m_pPipeline->BindDefaultStream(pList);
+    Set.bDefaultStream = true;
+  }
+  if (pTexCoord1)
+    SetVB(2, *pTexCoord1);
+  if (pTangents)
+    SetVB(3, *pTangents);
+  if (eTopology != Set.eTopology)
+  {
+    pList->IASetPrimitiveTopology(eTopology);
+    Set.eTopology = eTopology;
+  }
+  if (memcmp(&Viewport, &Set.Viewport, sizeof(Viewport)))
+  {
+    pList->RSSetViewports(1, &Viewport);
+    Set.Viewport = Viewport;
+  }
+  if (memcmp(&Scissor, &Set.Scissor, sizeof(Scissor)))
+  {
+    pList->RSSetScissorRects(1, &Scissor);
+    Set.Scissor = Scissor;
+  }
+  pList->SetGraphicsRootConstantBufferView(1, HeadMem.nGPU);
+  if (FullKey.bDrawObjects)
+    pList->SetGraphicsRootShaderResourceView(ROOT_DRAW_OBJECTS, HeadMem.nGPU);
   if (nExt != Set.nDrawExt)
   {
     pList->SetGraphicsRootConstantBufferView(ROOT_DRAW_EXT, nExt);
     Set.nDrawExt = nExt;
   }
 
-  m_nFramePolygons += CountTriangles(eTopology, nCount) * nInstances;
-  m_nFrameDraws++;
   if (pIB)
   {
     if (memcmp(pIB, &Set.IB, sizeof(*pIB)))
@@ -521,12 +578,48 @@ void CD3D12Renderer::DrawGeometry(const SPipelineKey &Key, const SDrawConstants 
       Set.IB = *pIB;
     }
     m_pDevice->FlushBarriersForDraw();
+    // Held back for the next draws of the mesh (d3d12_DrawBatch).
+    if (bBatch)
+    {
+      m_DrawBatch.Start(Batch, HeadMem.nGPU);
+      m_nDrawBatchMode = nBatchMode;
+      m_pDevice->HoldDraw(&RecordDrawBatchOf, this);
+      return;
+    }
     pList->DrawIndexedInstanced(nCount, nInstances, nFirst, nBaseVertex, 0);  // barriers flushed
   }
   else
   {
     m_pDevice->FlushBarriersForDraw();
     pList->DrawInstanced(nCount, nInstances, nFirst, 0);  // barriers flushed
+  }
+}
+
+void CD3D12Renderer::RecordDrawBatch()
+{
+  // The draw held back and those that joined it: their state is the list's (nothing else was recorded since, CFrameCmdList).
+  const uint32 n = m_DrawBatch.Take();
+  if (!n || !m_pDevice || !m_pPipeline)
+    return;
+  const DrawBatch::SState &s = m_DrawBatch.State();
+  ID3D12GraphicsCommandList *pList = m_pDevice->GetDrawCmdList();
+  // 1: the instanced pipeline state and the first header's bound already (DrawGeometry), an instance a draw.
+  if (m_nDrawBatchMode == 1)
+  {
+    pList->DrawIndexedInstanced(s.nCount, n, s.nFirst, s.nBaseVertex, 0);  // barriers flushed (before the first)
+    if (n > 1)
+    {
+      m_nFrameDrawBatches++;
+      m_nFrameDrawsInstanced += (int)n;
+    }
+    return;
+  }
+  // 2: one by one under the plain pipeline state, each with its own header.
+  for (uint32 i = 0; i < n; i++)
+  {
+    if (i)
+      pList->SetGraphicsRootConstantBufferView(1, m_DrawBatch.Head() + (uint64)i * sizeof(SDrawHead));
+    pList->DrawIndexedInstanced(s.nCount, 1, s.nFirst, s.nBaseVertex, 0);  // barriers flushed (before the first)
   }
 }
 

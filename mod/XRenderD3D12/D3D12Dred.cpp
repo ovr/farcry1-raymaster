@@ -204,7 +204,7 @@ void CD3D12Device::DredTest(int nMode)
   if (nMode != 2)
     return;
   ComPtr<ID3D12GraphicsCommandList2> pList2;
-  if (FAILED(m_pCmdList.As(&pList2)))
+  if (FAILED(m_pCmdList.Ptr().As(&pList2)))
     return;
   // A buffer made only to give its address back: once it is freed the address leads nowhere.
   D3D12_HEAP_PROPERTIES Heap = {};

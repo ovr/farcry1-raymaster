@@ -266,6 +266,7 @@ Details: [Device removal (DRED)](mod/XRenderD3D12/README.md#device-removal-dred)
 | `d3d12_FoliagePrepass` | `1` |  | The leaves' and the grass's depth before their colour: 1 with the path tracer, 2 always (the same frames, faster foliage) |
 | `d3d12_DrawExt` | `1` |  | A draw uploads the rest of its constants only when it reads them |
 | `d3d12_DrawExtReuse` | `1` |  | A draw whose rest of its constants is the same as the last one uploaded binds that copy (the same frames, less CPU) |
+| `d3d12_DrawBatch` | `1` |  | A run of draws that differ only in their transforms recorded as one instanced draw: 1 instanced, 2 held and joined but drawn one by one, 0 each at once (the same frames, less CPU) |
 | `d3d12_FrameMemoryVideo` | `1` |  | The per frame memory (draw constants, vertices drawn once) in video memory the CPU writes (resizable BAR), where the GPU has it (the same frames, less GPU) |
 | `d3d12_FadeBlend` | `1` |  | The objects that fade with the distance drawn blended |
 | `d3d12_LightColorScale` | `1` | yes | A bump template's light colour as the original's shaders take it |

@@ -18,6 +18,8 @@
 //	  6: root CBV b3 (SDrawExt, the rest of the draw's constants;
 //	     ROOT_DRAW_EXT: after the rays' so that 2 to 5 are as they were),
 //	     the draw's own or the default block (GetDefaultDrawExt, DrawExt.h)
+//	  7: root SRV t3 space5, the vertex shader's: the headers of a draw of
+//	     consecutive objects from its own on (ROOT_DRAW_OBJECTS, d3d12_DrawBatch)
 //	  static samplers s0..s3, s4 the comparison sampler of the shadow maps
 //	Only the programs with rays (Shader Model 6.5, RayTracing.h) read 3 to
 //	5; DrawGeometry binds them for those alone (5 when the frame has the
@@ -75,6 +77,8 @@ constexpr UINT ROOT_RAY_INSTANCES = 4;
 constexpr UINT ROOT_RAY_LIGHTS = 5;
 //! The root parameter of the rest of a draw's constants (b3, SDrawExt).
 constexpr UINT ROOT_DRAW_EXT = 6;
+//! The headers of a draw of consecutive objects (SPipelineKey::bDrawObjects; the frame's memory, DrawBatch.h).
+constexpr UINT ROOT_DRAW_OBJECTS = 7;
 
 //! SPipelineKey::nStreams: the extra vertex streams of a draw.
 constexpr uint8 PIPELINE_STREAM_TEXCOORD1 = 1;    //!< TEXCOORD1 from slot 2 (VERTEX_FORMAT_TEX2F)
@@ -134,8 +138,10 @@ struct SPipelineKey
                           //!< colour writes; 2 the draw's colour after it, the depth test EQUAL and no depth writes (the rest as
                           //!< GS_DEPTHWRITE's: the motion vectors, the upscaler's depth): the leaves' and the grass's depth pass
                           //!< (d3d12_FoliagePrepass; DrawGeometry sets it); 3 nTarget 2: a caster of the sun's cascades by its
-                          //!< discards alone (General.hlsl's CasterMain, d3d12_CascadeCasterShader); the last byte: the key has
-                          //!< no padding (it is hashed and compared as bytes)
+                          //!< discards alone (General.hlsl's CasterMain, d3d12_CascadeCasterShader)
+  uint8 bDrawObjects;     //!< the general program's draw of consecutive objects of one mesh, an instance each, their matrices
+                          //!< from their headers (XR_DRAW_OBJECTS, ROOT_DRAW_OBJECTS; d3d12_DrawBatch, DrawBatch.h)
+  uint8 nReserved[7];     //!< 0: the key has no padding (it is hashed as whole words and compared as bytes)
 };
 
 //! SPipelineKey::nColorFormat.

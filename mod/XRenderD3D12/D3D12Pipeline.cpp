@@ -28,6 +28,8 @@
 #include "General_CascadeInstances_VS.h"
 #include "General_CascadeInstances_PS.h"
 #include "General_CascadeObjects_VS.h"
+#include "General_Objects_VS.h"
+#include "General_Objects_Velocity_VS.h"
 #include "General_Hdr_PS.h"
 #include "General_Hdr_Velocity_PS.h"
 #include "General_Cascades_PS.h"
@@ -377,7 +379,7 @@ namespace
   static_assert(sizeof(struct_VERTEX_FORMAT_P3F_N_COL4UB_COL4UB_TEX2F) == 40);
   static_assert(sizeof(SPipTangents) == 36);
   static_assert(sizeof(SDefaultStream) == 72);
-  static_assert(sizeof(SPipelineKey) == 24, "SPipelineKey is hashed and compared as bytes");
+  static_assert(sizeof(SPipelineKey) == 32, "SPipelineKey is hashed and compared as bytes");
 
   //! The most elements of an input layout.
   constexpr int MAX_INPUT_ELEMENTS = 9;
@@ -568,7 +570,7 @@ bool CD3D12Pipeline::CreateRootSignature()
   Ranges[4] = Ranges[0];
   Ranges[4].RegisterSpace = 6;                  // Texture3D g_Volumes[] (the volumetric light's froxels)
 
-  D3D12_ROOT_PARAMETER Params[7] = {};
+  D3D12_ROOT_PARAMETER Params[8] = {};
   Params[0].ParameterType = D3D12_ROOT_PARAMETER_TYPE_CBV;      // b0 SFrameConstants
   Params[0].Descriptor.ShaderRegister = 0;
   Params[0].ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
@@ -594,6 +596,10 @@ bool CD3D12Pipeline::CreateRootSignature()
   Params[ROOT_DRAW_EXT].ParameterType = D3D12_ROOT_PARAMETER_TYPE_CBV;     // b3 SDrawExt
   Params[ROOT_DRAW_EXT].Descriptor.ShaderRegister = 3;
   Params[ROOT_DRAW_EXT].ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
+  Params[ROOT_DRAW_OBJECTS].ParameterType = D3D12_ROOT_PARAMETER_TYPE_SRV;  // t3 space5 the headers of a draw of objects
+  Params[ROOT_DRAW_OBJECTS].Descriptor.ShaderRegister = 3;
+  Params[ROOT_DRAW_OBJECTS].Descriptor.RegisterSpace = 5;
+  Params[ROOT_DRAW_OBJECTS].ShaderVisibility = D3D12_SHADER_VISIBILITY_VERTEX;
 
   D3D12_STATIC_SAMPLER_DESC Samplers[5];
   Samplers[XR_SAMPLER_LINEAR_WRAP] = StaticSampler(XR_SAMPLER_LINEAR_WRAP, D3D12_FILTER_ANISOTROPIC, D3D12_TEXTURE_ADDRESS_MODE_WRAP);
@@ -945,6 +951,11 @@ ComPtr<ID3D12PipelineState> CD3D12Pipeline::CreatePSO(const SPipelineKey &Key, b
     // (the leaves' sun through them, XR_FOLIAGE, as the cascades: the path tracer lights them)
     Desc.PS = s_PathPS[Key.bCascades == 3 ? 2 : Key.bCascades ? 1 : 0][bMotion ? 1 : 0];
   }
+  // A draw of consecutive objects of one mesh (d3d12_DrawBatch): the vertex shader above reading each instance's matrices
+  // from its header.
+  if (bGeneral && !bShadowMap && Key.bDrawObjects)
+    Desc.VS = Desc.VS.pShaderBytecode == g_General_Velocity_VS ? D3D12_SHADER_BYTECODE{ g_General_Objects_Velocity_VS, sizeof(g_General_Objects_Velocity_VS) }
+                                                               : D3D12_SHADER_BYTECODE{ g_General_Objects_VS, sizeof(g_General_Objects_VS) };
   // A caster of the sun's cascades into all its slices at once; the live set's compared with the full set's map in its
   // instance's slice.
   if (bGeneral && bShadowMap && Key.bCascadeInstances)

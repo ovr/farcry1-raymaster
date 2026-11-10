@@ -223,6 +223,11 @@
 //	With XR_CASCADE_OBJECTS too (the parts of one mesh for all their objects)
 //	instance i's matrix and slice are the record i of 80 bytes at byte
 //	nShadowTex.y of raw buffer nShadowTex.x.
+//	Compiled with XR_DRAW_OBJECTS (the vertex shader of the draws of one mesh
+//	for consecutive objects at once, d3d12_DrawBatch, DrawBatch.h) instance
+//	i's mWorld, mWorldViewProj and mPrevWorldViewProj are those of the
+//	header (SDrawHead) i * 256 bytes after the draw's (g_DrawHeads); the rest
+//	of every header is the draw's.
 //	Compiled with XR_RAY_REFL (Shader Model 6.5, the main view's draws with
 //	DF_CUBE0 while d3d12_RTReflections and d3d12_RTReflectionSurfaces are on,
 //	SPipelineKey::bRayTrace) DF_CUBE0 traces a ray where it looks the cube
@@ -906,7 +911,29 @@ float BubbleNoise(float2 v)
 ByteAddressBuffer g_Buffers[] : register(t0, space4);
 #endif
 
-#ifdef XR_CASCADE_INSTANCES
+#ifdef XR_DRAW_OBJECTS
+//! The draws' headers from the draw's on (the frame's memory, D3D12Pipeline.h's ROOT_DRAW_OBJECTS).
+ByteAddressBuffer g_DrawHeads : register(t3, space5);
+
+//! The matrix at byte nByte of the headers (row major, as the constant buffer's).
+float4x4 DrawHeadMatrix(uint nByte)
+{
+  return float4x4(asfloat(g_DrawHeads.Load4(nByte)), asfloat(g_DrawHeads.Load4(nByte + 16)), asfloat(g_DrawHeads.Load4(nByte + 32)),
+                  asfloat(g_DrawHeads.Load4(nByte + 48)));
+}
+#define XR_DRAW_WORLD mDrawWorld
+#define XR_DRAW_WVP mDrawWorldViewProj
+#define XR_DRAW_PREV_WVP mDrawPrevWorldViewProj
+#else
+#define XR_DRAW_WORLD g_Draw.mWorld
+#define XR_DRAW_WVP g_Draw.mWorldViewProj
+#define XR_DRAW_PREV_WVP g_Draw.mPrevWorldViewProj
+#endif
+
+#if defined(XR_DRAW_OBJECTS)
+//! XR_DRAW_OBJECTS: a vertex of one object, its matrices from its header (VSMain below).
+SVertexOutput VSDrawObject(SVertexInput In, float4x4 mDrawWorld, float4x4 mDrawWorldViewProj, float4x4 mDrawPrevWorldViewProj)
+#elif defined(XR_CASCADE_INSTANCES)
 //! A caster of the full set of the sun's cascades into all the slices it reaches at once, an
 //! instance each: mShadow[i] the world to slice nShadowTex[i] in place of mWorldViewProj.
 SVertexOutput VSMain(SVertexInput In, uint nInstance : SV_InstanceID)
@@ -957,18 +984,18 @@ SVertexOutput VSMain(SVertexInput In)
     Out.vPos = mul(vPos, g_DrawExt.mShadow[nInstance]);
     Out.nSlice = g_DrawExt.nShadowTex[nInstance];
 #else
-    Out.vPos = mul(vPos, g_Draw.mWorldViewProj);
+    Out.vPos = mul(vPos, XR_DRAW_WVP);
 #endif
-    vWorldPos = mul(vPos, g_Draw.mWorld).xyz;
+    vWorldPos = mul(vPos, XR_DRAW_WORLD).xyz;
 #ifdef XR_VELOCITY
     Out.vCurClip = Out.vPos;
-    Out.vPrevClip = mul(vPos, g_Draw.mPrevWorldViewProj);
+    Out.vPrevClip = mul(vPos, XR_DRAW_PREV_WVP);
 #endif
     if (bOverlay)
       Out.vPos.w += 0.005;
   }
   Out.vPos = Jitter(Out.vPos);
-  float3 vNormal = mul(float4(In.vNormal, 0), g_Draw.mWorld).xyz;
+  float3 vNormal = mul(float4(In.vNormal, 0), XR_DRAW_WORLD).xyz;
 
   float4 vColor = g_Draw.vColor;
   if (HasFlag(DF_VCOLOR | DF_VCOLOR_X2))
@@ -1019,11 +1046,30 @@ SVertexOutput VSMain(SVertexInput In)
   Out.vNormal = vNormal;
   Out.vCliff = HasFlag(DF_TERRAIN_CLIFF) ? DecodeVertexColor(In.vColor0).rg : 0;
   Out.vColorNoSun = vColorNoSun;
-  Out.vTangent = mul(float4(In.vTangent, 0), g_Draw.mWorld).xyz;
-  Out.vBinormal = mul(float4(In.vBinormal, 0), g_Draw.mWorld).xyz;
-  Out.vTNormal = mul(float4(In.vTNormal, 0), g_Draw.mWorld).xyz;
+  Out.vTangent = mul(float4(In.vTangent, 0), XR_DRAW_WORLD).xyz;
+  Out.vBinormal = mul(float4(In.vBinormal, 0), XR_DRAW_WORLD).xyz;
+  Out.vTNormal = mul(float4(In.vTNormal, 0), XR_DRAW_WORLD).xyz;
   return Out;
 }
+
+#ifdef XR_DRAW_OBJECTS
+//! An instance per object: the wave's objects one at a time, each one's matrices read once at an address the same in
+//! the wave (scalar registers, as the constant buffer's).
+SVertexOutput VSMain(SVertexInput In, uint nInstance : SV_InstanceID)
+{
+  SVertexOutput Out = (SVertexOutput)0;
+  [loop] for (bool bDone = false; !bDone;)
+  {
+    const uint nObject = WaveReadLaneFirst(nInstance);
+    if (nObject == nInstance)
+    {
+      Out = VSDrawObject(In, DrawHeadMatrix(nObject * 256), DrawHeadMatrix(nObject * 256 + 64), DrawHeadMatrix(nObject * 256 + 128));
+      bDone = true;
+    }
+  }
+  return Out;
+}
+#endif
 
 //! DF2_HDR_CORE: how fast the light's factor falls off from its core to its edge.
 static const float HDR_CORE_POWER = 4;
