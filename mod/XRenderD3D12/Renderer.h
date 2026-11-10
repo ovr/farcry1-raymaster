@@ -2360,7 +2360,7 @@ public:
   int CV_d3d12_ShadowCascades = 4;          //!< the sun's cascaded shadow maps: how many (0: none)
   float CV_d3d12_ShadowDistance = 120;      //!< how far they reach from the camera (m)
   int CV_d3d12_ShadowCascadeSize = 2048;    //!< the size of their maps
-  int CV_d3d12_CascadeInstancing = 1;       //!< 1: a caster of the full set drawn once into all the slices it reaches (DrawCascadeItems)
+  int CV_d3d12_CascadeInstancing = 2;       //!< 1: a caster of the full set drawn once into all the slices it reaches (DrawCascadeItems); 2: the live set's too
   int CV_d3d12_CascadeCull = 1;             //!< without rays: 1 the casters' parts no slice takes left out in AddEf, 2 also the camera towards the sun shortened
   int CV_d3d12_StaticCasters = 1;           //!< 1: the static casters of the full set (the vegetation that casts) in the live set too (the terrain's shadows)
   int CV_d3d12_DepthPrepass = 1;            //!< 1: the main view's opaque surfaces into the depth buffer before the opaque list (DrawItems)

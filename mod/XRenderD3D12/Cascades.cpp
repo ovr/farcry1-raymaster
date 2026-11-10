@@ -600,10 +600,10 @@ void CD3D12Renderer::DrawCascadeItems(std::span<const SRenderItem> Items, std::u
     InvalidateFrameConstants();
   };
   m_bShadowMapPass = true;
-  // The full set: each part once, into all the slices it reaches (an instance each; the depth is
-  // the same as slice by slice, with one draw per part instead of one per slice). The live set
-  // compares each slice with the full set's (SetupCascadeCaster): slice by slice.
-  if (m_nCascadeSet == 0 && CV_d3d12_CascadeInstancing && !Parts.empty())
+  // Each part once, into all the slices it reaches (an instance each; the depth is the same as slice
+  // by slice, with one draw per part instead of one per slice); the live set's with 2 (each instance
+  // compared with the full set's slice, SetupCascadeCaster).
+  if (CV_d3d12_CascadeInstancing > m_nCascadeSet && !Parts.empty())
   {
     SetSlice(0, Maps.hDSV[XR_MAX_CASCADES]);
     for (const SPart &p : Parts)
@@ -613,7 +613,7 @@ void CD3D12Renderer::DrawCascadeItems(std::span<const SRenderItem> Items, std::u
         if (Reaches(p, m_Cascades[i]))
         {
           m_CascadeInstances[m_nCascadeInstances++] = i;
-          m_Cascades[i].nCasters[0]++;
+          m_Cascades[i].nCasters[m_nCascadeSet]++;
         }
       if (m_nCascadeInstances)
         DrawLeafItem(*p.pItem);
@@ -747,6 +747,10 @@ void CD3D12Renderer::SetupCascadeCaster(SDrawConstants &dc) const
   dc.nTex4 = (uint32)m_CascadeMaps[0].nSRV;
   dc.vParams3[0] = (float)m_nCascadeSlice;
   dc.vParams3[1] = std::max(CASCADE_LIVE_EPS_M, 2 * Cas.fTexel) / (Cas.fZMax - Cas.fZMin);
+  // Into all its slices at once: each slice's margin.
+  if (m_nCascadeInstances > 0)
+    for (int i = 0; i < m_nCascades; i++)
+      dc.vShadowParams[i] = std::max(CASCADE_LIVE_EPS_M, 2 * m_Cascades[i].fTexel) / (m_Cascades[i].fZMax - m_Cascades[i].fZMin);
 }
 
 uint32 CD3D12Renderer::CascadeReceiverFlags(bool bLive) const

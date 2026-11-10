@@ -868,8 +868,9 @@ system ones (better not to touch): [`CONFIGURATION.md`](../../CONFIGURATION.md).
   `General_CascadeInstances_VS`). The depth is the same as drawn slice by slice (DemoLevelSurvey
   with `d3d12_CascadeInstancing 0`, which draws slice by slice, and 1: DemoCompare difference 0;
   elsewhere only what the game animates differently from run to run) with far fewer draws
-  (Training's time demo, frame 2600: 1,677 in the frame instead of 3,120). The live set is
-  drawn slice by slice, each compared with the full set's. A part goes only into the slices
+  (Training's time demo, frame 2600: 1,677 in the frame instead of 3,120). The live set's parts
+  are drawn so too (`d3d12_CascadeInstancing 2`; 1 draws them slice by slice), each instance
+  compared with the full set's slice (`General_CascadeInstances_PS`). A part goes only into the slices
   where its shadow (its sphere drawn out away from the sun) falls on the slice's receivers: seen
   from the sun, the outline of the part of the view's frustum that takes its shadow from the
   slice, with the filter's reach around it; elsewhere a slice is not read, so the frames are the

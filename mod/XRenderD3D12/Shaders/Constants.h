@@ -123,7 +123,7 @@ typedef float float4x4_t[16];
 #define DF2_SUN_CASCADES    0x00100000  //!< the sun's visibility from the cascades (SunCascades, Common.hlsli) where they reach, the shadow maps' (DF_SHADOWS) beyond; with DF_SHADOW_PASS the shadow maps' fade out where the cascades reach
 #define DF2_CASCADES_LIVE   0x00200000  //!< with DF2_SUN_CASCADES: the cascades of the live casters only (light maps, the terrain)
 #define DF2_SHADOW_TINT     0x00400000  //!< with DF2_SUN_CASCADES: rgb *= lerp(vShadowTint, 1, the visibility) (the terrain); with DF_LIGHTING (lit objects) the light in the shadow at least the lit one times vShadowTint; XR_PT: the G-buffer's ambient light so
-#define DF2_CASCADE_CASTER  0x00800000  //!< a caster of the live cascades: drawn only where it is not behind the full set's map g_TextureArrays[nTex4] slice vParams3.x by more than vParams3.y (depth)
+#define DF2_CASCADE_CASTER  0x00800000  //!< a caster of the live cascades: drawn only where it is not behind the full set's map g_TextureArrays[nTex4] slice vParams3.x by more than vParams3.y (depth; XR_CASCADE_INSTANCES: the instance's slice, vShadowParams[slice])
 // The ambient light's part of a colour whose light is baked into it, for the ambient occlusion's target
 // (XR_AMBIENT, General.hlsl; set only while it is bound)
 #define DF2_AO_BAKED        0x01000000  //!< the terrain, the vegetation: the colour (before DF2_SHADOW_TINT) times vMipBias.yzw, the share of the light the shadow leaves

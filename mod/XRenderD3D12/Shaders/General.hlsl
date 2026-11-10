@@ -215,10 +215,11 @@
 //	the factor; the rest 0 (the unlit, the light passes, the fog volumes,
 //	the scope's glass). Without an upscaler SV_Target1 and 2 are null
 //	targets.
-//	Compiled with XR_CASCADE_INSTANCES (the vertex shader of the full set of
-//	the sun's cascades, Cascades.cpp) instance i is drawn with mShadow[i] in
-//	place of mWorldViewProj into slice nShadowTex[i] of the array
-//	(SV_RenderTargetArrayIndex).
+//	Compiled with XR_CASCADE_INSTANCES (the vertex shader of the sun's
+//	cascades, Cascades.cpp) instance i is drawn with mShadow[i] in place of
+//	mWorldViewProj into slice nShadowTex[i] of the array
+//	(SV_RenderTargetArrayIndex); the pixel shader of the live set's casters
+//	takes that slice of the full set's map and vShadowParams[slice]'s margin.
 //	Compiled with XR_RAY_REFL (Shader Model 6.5, the main view's draws with
 //	DF_CUBE0 while d3d12_RTReflections and d3d12_RTReflectionSurfaces are on,
 //	SPipelineKey::bRayTrace) DF_CUBE0 traces a ray where it looks the cube
@@ -1368,7 +1369,13 @@ float4 ShadePixel(SVertexOutput In)
 #ifdef XR_CASCADES
   // A caster of the live cascades: not where the full set has something nearer to the sun.
   if (HasFlag2(DF2_CASCADE_CASTER))
+  {
+#ifdef XR_CASCADE_INSTANCES
+    clip(g_TextureArrays[g_Draw.nTex4].Load(int4(In.vPos.xy, In.nSlice, 0)).r + g_DrawExt.vShadowParams[In.nSlice] - In.vPos.z);
+#else
     clip(g_TextureArrays[g_Draw.nTex4].Load(int4(In.vPos.xy, g_DrawExt.vParams3.x, 0)).r + g_DrawExt.vParams3.y - In.vPos.z);
+#endif
+  }
 #endif
   uint nSampler0 = g_Draw.nSamplers & 15;
   uint nSampler1 = (g_Draw.nSamplers >> 4) & 15;

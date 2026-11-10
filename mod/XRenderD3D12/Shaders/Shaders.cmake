@@ -13,6 +13,8 @@ xrender_d3d12_shader(General_Velocity_PS General.hlsl ps_6_0 PSMain XR_VELOCITY)
 # The vertex shader of the full set of the sun's cascades: a caster drawn once into all the slices it
 # reaches, an instance each (SPipelineKey::bCascadeInstances, Cascades.cpp).
 xrender_d3d12_shader(General_CascadeInstances_VS General.hlsl vs_6_0 VSMain XR_CASCADE_INSTANCES)
+# The live set's casters drawn so (d3d12_CascadeInstancing 2): compared with the full set in their instance's slice.
+xrender_d3d12_shader(General_CascadeInstances_PS General.hlsl ps_6_0 PSMain XR_CASCADES XR_CASCADE_INSTANCES)
 # Their pixel shaders with the steps of the HDR targets (XR_HDR: DF2_SKY_GLOW, DF2_HDR_CORE), for the
 # draws into D3D12_HDR_FORMAT (SPipelineKey::nColorFormat PIPELINE_COLOR_HDR); without them the others are
 # the programs without HDR, instruction for instruction.

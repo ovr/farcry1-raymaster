@@ -25,6 +25,7 @@
 #include "General_Velocity_VS.h"
 #include "General_Velocity_PS.h"
 #include "General_CascadeInstances_VS.h"
+#include "General_CascadeInstances_PS.h"
 #include "General_Hdr_PS.h"
 #include "General_Hdr_Velocity_PS.h"
 #include "General_Cascades_PS.h"
@@ -934,9 +935,14 @@ ComPtr<ID3D12PipelineState> CD3D12Pipeline::CreatePSO(const SPipelineKey &Key, b
     // (the leaves' sun through them, XR_FOLIAGE, as the cascades: the path tracer lights them)
     Desc.PS = s_PathPS[Key.bCascades == 3 ? 2 : Key.bCascades ? 1 : 0][bMotion ? 1 : 0];
   }
-  // A caster of the sun's cascades into all its slices at once.
+  // A caster of the sun's cascades into all its slices at once; the live set's compared with the full set's map in its
+  // instance's slice.
   if (bGeneral && bShadowMap && Key.bCascadeInstances)
+  {
     Desc.VS = { g_General_CascadeInstances_VS, sizeof(g_General_CascadeInstances_VS) };
+    if (Key.bCascades == 1)
+      Desc.PS = { g_General_CascadeInstances_PS, sizeof(g_General_CascadeInstances_PS) };
+  }
   // The depth alone: the rasterizer's, as with the pixel shader that discards nothing.
   if (Key.bDepthOnly)
     Desc.PS = {};
