@@ -2624,6 +2624,10 @@ and lists theirs (`NamesObjects`).
   and the others, with `r_HeatHaze 1`, as the original) show the copy of the scene behind them moved
   by the slopes of `WaterBump` and blended by `haze_mask`; the copy is taken where the particles are
   drawn, so the grass and the fire stay in it (the original's, made before the water, loses them).
+  Its two textures, the templates' below, the terrain's detail and the default cube are loaded when a
+  level is loaded (`PreloadTextures`, from `PostLoad`), not in the frame that first needs one:
+  Treehouse's sweep at 3840 x 2160 with the rays took 17.4 ms at the hut's first heat haze (row 216;
+  the main view's CPU 13.3, `WaterBump` made a normal map), now 5.1 (1.0); the frames the same.
 - The templates with shaders of their own (`TemplateFx.cpp`; one mode of `General.hlsl`'s `ShaderFx`
   each, `DF2_SHADER_FX` with the mode in `vParams3.w`, the screen copies' and the mirrors' too): the
   rainbow (`Defaults/colors2` at N.E, N.H, unlit), the membrane (a row of colours at E.N moving with

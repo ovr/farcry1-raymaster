@@ -64,7 +64,7 @@ void Set4(float v[4], float x, float y, float z, float w)
   v[0] = x; v[1] = y; v[2] = z; v[3] = w;
 }
 
-//! GetFxTexture's textures.
+//! GetFxTexture's textures (FX_TEXTURES: their files, FT_CLAMP for clamped ones).
 enum EFxTexture
 {
   eFT_Colors2,
@@ -74,6 +74,23 @@ enum EFxTexture
   eFT_Fuzz,
   eFT_RainbowGradient,
   eFT_WhitePlain,
+  eFT_Count
+};
+
+struct SFxTextureFile
+{
+  const char *szName;
+  int nFlags;
+};
+
+constexpr SFxTextureFile FX_TEXTURES[eFT_Count] = {
+  { "textures/defaults/colors2", 0 },
+  { "textures/defaults/membrane/yellowred", 0 },
+  { "textures/defaults/4shade", FT_CLAMP },
+  { "textures/defaults/edgeimage", FT_CLAMP },
+  { "textures/defaults/fuzz", 0 },
+  { "textures/defaults/rainbowgradient", 0 },
+  { "textures/defaults/white_plain_d", 0 },
 };
 
 constexpr float MEMBRANE_SPEED = 0.2f;        //!< the membrane's colours per second (its TexCoordMod)
@@ -107,14 +124,25 @@ Matrix44 GetWorldMatrix(const CCObject *pObj)
 
 }
 
-CTexture *CD3D12Renderer::GetFxTexture(int nIndex, const char *szName, int nFlags)
+CTexture *CD3D12Renderer::GetFxTexture(int nIndex)
 {
-  if (nIndex < 0 || nIndex >= (int)std::size(m_pFxTextures) || !m_pTextures)
+  static_assert(eFT_Count <= (int)std::size(m_pFxTextures));
+  if (nIndex < 0 || nIndex >= eFT_Count || !m_pTextures)
     return nullptr;
   if (!m_pFxTextures[nIndex])
-    m_pFxTextures[nIndex] = m_pTextures->LoadTexture(szName, nFlags, 0, eTT_Base, -1, -1, -1, 0);
+    m_pFxTextures[nIndex] = m_pTextures->LoadTexture(FX_TEXTURES[nIndex].szName, FX_TEXTURES[nIndex].nFlags, 0, eTT_Base, -1, -1, -1, 0);
   CTexture *pTex = m_pFxTextures[nIndex];
   return pTex && !(pTex->GetFlags() & FT_NOTFOUND) && pTex->IsTextureLoaded() ? pTex : nullptr;
+}
+
+void CD3D12Renderer::PreloadTextures()
+{
+  // Treehouse's first heat haze (the hut's fire) took 13 ms of its frame for its two textures, WaterBump made a normal map.
+  LoadHazeTextures();
+  for (int i = 0; i < eFT_Count; i++)
+    GetFxTexture(i);
+  GetDetailTexture();
+  GetEnvCubeMap(nullptr);
 }
 
 bool CD3D12Renderer::SetupTemplateFxDraw(SPipelineKey &Key, SDrawConstants &dc, const SRenderItem &it, const SShaderProps &Props, CTexture *pTex)
@@ -134,7 +162,7 @@ bool CD3D12Renderer::SetupTemplateFxDraw(SPipelineKey &Key, SDrawConstants &dc, 
   {
   case ETemplateFx::Rainbow:
   {
-    CTexture *pColors = GetFxTexture(eFT_Colors2, "textures/defaults/colors2", 0);
+    CTexture *pColors = GetFxTexture(eFT_Colors2);
     if (!pColors)
       return false;
     dc.vParams3[3] = XR_FX_RAINBOW;
@@ -144,7 +172,7 @@ bool CD3D12Renderer::SetupTemplateFxDraw(SPipelineKey &Key, SDrawConstants &dc, 
   }
   case ETemplateFx::Membrane:
   {
-    CTexture *pColors = GetFxTexture(eFT_Membrane, "textures/defaults/membrane/yellowred", 0);
+    CTexture *pColors = GetFxTexture(eFT_Membrane);
     if (!pColors)
       return false;
     dc.vParams3[3] = XR_FX_MEMBRANE;
@@ -156,8 +184,8 @@ bool CD3D12Renderer::SetupTemplateFxDraw(SPipelineKey &Key, SDrawConstants &dc, 
   }
   case ETemplateFx::Cartoon:
   {
-    CTexture *pShade = GetFxTexture(eFT_Shade, "textures/defaults/4shade", FT_CLAMP);
-    CTexture *pEdge = GetFxTexture(eFT_Edge, "textures/defaults/edgeimage", FT_CLAMP);
+    CTexture *pShade = GetFxTexture(eFT_Shade);
+    CTexture *pEdge = GetFxTexture(eFT_Edge);
     if (!pShade || !pEdge)
       return false;
     dc.vParams3[3] = XR_FX_CARTOON;
@@ -170,7 +198,7 @@ bool CD3D12Renderer::SetupTemplateFxDraw(SPipelineKey &Key, SDrawConstants &dc, 
   case ETemplateFx::Fur:
   {
     // The model itself, opaque; its shells follow (SetupFurShell).
-    CTexture *pFuzz = GetFxTexture(eFT_Fuzz, "textures/defaults/fuzz", 0);
+    CTexture *pFuzz = GetFxTexture(eFT_Fuzz);
     if (!pFuzz)
       return false;
     dc.vParams3[3] = XR_FX_FUR;
@@ -181,7 +209,7 @@ bool CD3D12Renderer::SetupTemplateFxDraw(SPipelineKey &Key, SDrawConstants &dc, 
   case ETemplateFx::Iridescence:
   {
     // The script's parameters, the material's public ones over them.
-    CTexture *pRainbow = GetFxTexture(eFT_RainbowGradient, "textures/defaults/rainbowgradient", 0);
+    CTexture *pRainbow = GetFxTexture(eFT_RainbowGradient);
     if (!pRainbow)
       return false;
     CTexture *pBump = GetNormalMap(it.pRes);
@@ -214,10 +242,8 @@ bool CD3D12Renderer::SetupTemplateFxDraw(SPipelineKey &Key, SDrawConstants &dc, 
   case ETemplateFx::Lava:
   {
     // The script's parameters, the material's public ones over them (s_PublicParams lists them, Shader.cpp).
-    CTexture *pGlow = GetFxTexture(eFT_WhitePlain, "textures/defaults/white_plain_d", 0);
-    if (!m_pHazeBump && m_pTextures)
-      m_pHazeBump = m_pTextures->LoadTexture("textures/waterbump", 0, 0, eTT_Bumpmap, -1, -1, -1, 0);
-    if (!pGlow || !m_pHazeBump)
+    CTexture *pGlow = GetFxTexture(eFT_WhitePlain);
+    if (!pGlow || !LoadHazeTextures())
       return false;
     dc.vParams3[3] = XR_FX_LAVA;
     dc.nTex0 = pTex ? (uint32)pTex->GetSRV() : nWhite;

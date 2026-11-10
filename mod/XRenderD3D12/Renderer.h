@@ -1114,6 +1114,8 @@ public:
   //! Heat haze particles (a run of sprites of a heat haze shader): their mask (haze_mask) times their
   //! alpha over the copy of the scene seen through a ripple (WaterBump); r_HeatHaze 1. False: not drawn.
   bool SetupHeatHazeDraw(SPipelineKey &Key, SDrawConstants &dc);
+  //! Its textures (m_pHazeMask, m_pHazeBump; the lava's ripple too), loaded once: false without them.
+  bool LoadHazeTextures();
   //! r_HeatHaze (looked up on first use).
   bool IsHeatHazeOn();
 
@@ -1124,8 +1126,11 @@ public:
   //! The fur's shell n (1 to FUR_SHELLS) over the model drawn by SetupTemplateFxDraw: n cm out, blended.
   static void SetupFurShell(SPipelineKey &Key, SDrawConstants &dc, int n);
   static constexpr int FUR_SHELLS = 8;
-  //! A texture of the game the templates name (Defaults/colors2, ...), loaded once (FT_CLAMP: clamped).
-  CTexture *GetFxTexture(int nIndex, const char *szName, int nFlags);
+  //! A texture of the game the templates name (TemplateFx.cpp's FX_TEXTURES: Defaults/colors2, ...), loaded once.
+  CTexture *GetFxTexture(int nIndex);
+  //! A level loaded (PostLoad): the renderer's own textures of fixed names (the heat haze's, the templates', the terrain's
+  //! detail, the default cube) loaded now, not in the frame that first needs one.
+  void PreloadTextures();
 
   ComPtr<ID3D12Resource> m_pMirrorColor, m_pMirrorDepth;
   D3D12_CPU_DESCRIPTOR_HANDLE m_hMirrorRTV = {}, m_hMirrorDSV = {};

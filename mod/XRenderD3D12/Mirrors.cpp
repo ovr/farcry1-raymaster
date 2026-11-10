@@ -193,9 +193,9 @@ bool CD3D12Renderer::SetupScreenBumpDraw(SPipelineKey &Key, SDrawConstants &dc, 
   return true;
 }
 
-bool CD3D12Renderer::SetupHeatHazeDraw(SPipelineKey &Key, SDrawConstants &dc)
+bool CD3D12Renderer::LoadHazeTextures()
 {
-  if (!IsHeatHazeOn() || m_bReflectionPass || m_bEnvCubePass || m_bShadowMapPass || m_bSpritePass || m_nRecurseLevel > 1 || !m_pTextures)
+  if (!m_pTextures)
     return false;
   if (!m_pHazeMask)
     m_pHazeMask = m_pTextures->LoadTexture("textures/haze_mask", FT_CLAMP, 0, eTT_Base, -1, -1, -1, 0);
@@ -203,7 +203,13 @@ bool CD3D12Renderer::SetupHeatHazeDraw(SPipelineKey &Key, SDrawConstants &dc)
   // ripple, as the original's du/dv map made from it (V8U8, texbem).
   if (!m_pHazeBump)
     m_pHazeBump = m_pTextures->LoadTexture("textures/waterbump", 0, 0, eTT_Bumpmap, -1, -1, -1, 0);
-  if (!m_pHazeMask || !m_pHazeBump || (!m_bSceneCopied && !CopySceneForWater()))
+  return m_pHazeMask && m_pHazeBump;
+}
+
+bool CD3D12Renderer::SetupHeatHazeDraw(SPipelineKey &Key, SDrawConstants &dc)
+{
+  if (!IsHeatHazeOn() || m_bReflectionPass || m_bEnvCubePass || m_bShadowMapPass || m_bSpritePass || m_nRecurseLevel > 1 ||
+      !LoadHazeTextures() || (!m_bSceneCopied && !CopySceneForWater()))
     return false;
   // The particles' alpha from their vertices (the particle system's), the scene's colour as it is
   // (RefrColor 1 1 1; their HeatMoveSpeed is 0: the ripple moves with the particles).
