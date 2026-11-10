@@ -2401,6 +2401,7 @@ public:
   int CV_d3d12_DepthPrepass = 1;            //!< 1: the main view's opaque surfaces into the depth buffer before the opaque list (DrawItems)
   int CV_d3d12_AlphaTestEarly = 1;          //!< 1: the alpha test's empty texels out before their light (General.hlsl's ShadePixel)
   int CV_d3d12_FoliagePrepass = 1;          //!< 1: with the path tracer the leaves' depth before the opaque list (DrawItems); 2: always
+  int CV_d3d12_CascadeCasterShader = 1;     //!< 1: the sun's cascades' casters that discard by a pixel shader of their discards (DrawGeometry)
   float CV_d3d12_ShadowSoftness = 0.05f;    //!< the radius of their filter (m)
   int CV_d3d12_UpscaleMode = 0;             //!< EUpscaleMode of the upscaler (d3d12_Upscaler, a string)
   float CV_d3d12_UpscaleSharpness = 0.5f;   //!< the upscaler's sharpening, 0 (none) to 1

@@ -90,6 +90,9 @@
 #include "General_PT_RaySun_Hdr_Velocity_PS.h"
 #include "General_AlphaDepth_PS.h"
 #include "General_AlphaDepth_Velocity_PS.h"
+#include "General_Caster_PS.h"
+#include "General_Caster_Cascades_PS.h"
+#include "General_Caster_CascadeInstances_PS.h"
 #include "Water_VS.h"
 #include "Water_PS.h"
 #include "Water_Velocity_VS.h"
@@ -951,6 +954,11 @@ ComPtr<ID3D12PipelineState> CD3D12Pipeline::CreatePSO(const SPipelineKey &Key, b
     if (Key.bCascades == 1)
       Desc.PS = { g_General_CascadeInstances_PS, sizeof(g_General_CascadeInstances_PS) };
   }
+  // A caster of the sun's cascades by its discards alone (d3d12_CascadeCasterShader): the vertex shader's above.
+  if (bGeneral && bShadowMap && Key.bAlphaDepth == 3)
+    Desc.PS = !Key.bCascades ? D3D12_SHADER_BYTECODE{ g_General_Caster_PS, sizeof(g_General_Caster_PS) }
+              : Key.bCascadeInstances ? D3D12_SHADER_BYTECODE{ g_General_Caster_CascadeInstances_PS, sizeof(g_General_Caster_CascadeInstances_PS) }
+                                      : D3D12_SHADER_BYTECODE{ g_General_Caster_Cascades_PS, sizeof(g_General_Caster_Cascades_PS) };
   // The depth alone where the alpha test passes (d3d12_FoliagePrepass): the vertex shader's above.
   if (bGeneral && Key.bAlphaDepth == 1)
     Desc.PS = bVelocity || bUpscaleDepth ? D3D12_SHADER_BYTECODE{ g_General_AlphaDepth_Velocity_PS, sizeof(g_General_AlphaDepth_Velocity_PS) }

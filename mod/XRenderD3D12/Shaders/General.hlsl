@@ -1322,6 +1322,21 @@ float3 PathDecalFactor(float4 vPos)
 }
 #endif
 
+#ifdef XR_CASCADES
+//! A caster of the live cascades: not where the full set has something nearer to the sun (SetupCascadeCaster).
+void CascadeCasterClip(SVertexOutput In)
+{
+  if (HasFlag2(DF2_CASCADE_CASTER))
+  {
+#ifdef XR_CASCADE_INSTANCES
+    clip(g_TextureArrays[g_Draw.nTex4].Load(int4(In.vPos.xy, In.nSlice, 0)).r + g_DrawExt.vShadowParams[In.nSlice] - In.vPos.z);
+#else
+    clip(g_TextureArrays[g_Draw.nTex4].Load(int4(In.vPos.xy, g_DrawExt.vParams3.x, 0)).r + g_DrawExt.vParams3.y - In.vPos.z);
+#endif
+  }
+}
+#endif
+
 float4 ShadePixel(SVertexOutput In)
 {
 #ifdef XR_AMBIENT
@@ -1382,15 +1397,7 @@ float4 ShadePixel(SVertexOutput In)
   if (HasFlag2(DF2_SHADER_FX))
     return ShaderFx(In);
 #ifdef XR_CASCADES
-  // A caster of the live cascades: not where the full set has something nearer to the sun.
-  if (HasFlag2(DF2_CASCADE_CASTER))
-  {
-#ifdef XR_CASCADE_INSTANCES
-    clip(g_TextureArrays[g_Draw.nTex4].Load(int4(In.vPos.xy, In.nSlice, 0)).r + g_DrawExt.vShadowParams[In.nSlice] - In.vPos.z);
-#else
-    clip(g_TextureArrays[g_Draw.nTex4].Load(int4(In.vPos.xy, g_DrawExt.vParams3.x, 0)).r + g_DrawExt.vParams3.y - In.vPos.z);
-#endif
-  }
+  CascadeCasterClip(In);
 #endif
   uint nSampler0 = g_Draw.nSamplers & 15;
   uint nSampler1 = (g_Draw.nSamplers >> 4) & 15;
@@ -2193,4 +2200,15 @@ float4 PSMain(XR_PS_INPUT) : SV_Target
 void AlphaDepthMain(SVertexOutput In)
 {
   clip(In.vColor.a * SampleTexture(g_Draw.nTex0, g_Draw.nSamplers & 15, In.vTex0).a < g_Draw.fAlphaRef ? -1 : 1);
+}
+
+//! d3d12_CascadeCasterShader: a caster of the sun's cascades (SetupShadowCasterDraw: DF_TEX0, DF_TEXMATRIX, DF_ALPHATEST,
+//! DF_ALPHA_FROM_TEX at most; DF2_CASCADE_CASTER) by ShadePixel's discards alone, in its order: the depth its pixels left.
+void CasterMain(SVertexOutput In)
+{
+#ifdef XR_CASCADES
+  CascadeCasterClip(In);
+#endif
+  if (HasFlag(DF_ALPHATEST))
+    clip(SampleTexture(g_Draw.nTex0, g_Draw.nSamplers & 15, In.vTex0).a < g_Draw.fAlphaRef ? -1 : 1);
 }

@@ -296,6 +296,9 @@ void CD3D12Renderer::DrawGeometry(const SPipelineKey &Key, const SDrawConstants 
     if (m_bAlphaPrepass)
       FullKey.bCascades = 0;
   }
+  // A caster of the sun's cascades that discards (SetupShadowCasterDraw's flags alone): a pixel shader of its discards.
+  if (CV_d3d12_CascadeCasterShader && m_bCascadePass && FullKey.nTarget == 2 && Key.nProgram == eD3D12P_General && !FullKey.bDepthOnly)
+    FullKey.bAlphaDepth = 3;
   // The ambient occlusion's target bound to the main view (AmbientOcclusion.cpp).
   FullKey.bAmbient = (FullKey.nTarget == 0 || FullKey.nTarget == 3) && m_pDevice->IsAmbientBound() ? 1 : 0;
   // The path tracer's G-buffer bound to the scene's targets (PathTrace.cpp).

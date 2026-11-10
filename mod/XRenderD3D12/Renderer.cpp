@@ -421,6 +421,9 @@ void CD3D12Renderer::RegisterVariables()
                      "their alpha test passes (a pixel shader of the texture's alpha alone), their colour then only there (the depth "
                      "test EQUAL, before the pixel shader): the opaque list shades only the leaves in front; the same frames; 2: also "
                      "without it; 0: none");
+  iConsole->Register("d3d12_CascadeCasterShader", &CV_d3d12_CascadeCasterShader, 1, 0,
+                     "1: a caster of the sun's cascades that discards (an alpha tested leaf, the live set's casters) drawn by a pixel "
+                     "shader of its discards alone, not the general one: the same maps, faster; 0: the general one");
   iConsole->Register("d3d12_ShadowSoftness", &CV_d3d12_ShadowSoftness, 0.05f, VF_DUMPTODISK,
                      "The softness of the sun's cascaded shadows: the radius of their filter (m; at least a texel and a half of each map)");
   iConsole->CreateVariable("d3d12_Upscaler", "none", VF_DUMPTODISK,

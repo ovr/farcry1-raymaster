@@ -133,8 +133,9 @@ struct SPipelineKey
   uint8 bAlphaDepth;      //!< 1 the general program's depth alone where its alpha test passes (General.hlsl's AlphaDepthMain), no
                           //!< colour writes; 2 the draw's colour after it, the depth test EQUAL and no depth writes (the rest as
                           //!< GS_DEPTHWRITE's: the motion vectors, the upscaler's depth): the leaves' and the grass's depth pass
-                          //!< (d3d12_FoliagePrepass; DrawGeometry sets it); the last byte: the key has no padding (it is hashed
-                          //!< and compared as bytes)
+                          //!< (d3d12_FoliagePrepass; DrawGeometry sets it); 3 nTarget 2: a caster of the sun's cascades by its
+                          //!< discards alone (General.hlsl's CasterMain, d3d12_CascadeCasterShader); the last byte: the key has
+                          //!< no padding (it is hashed and compared as bytes)
 };
 
 //! SPipelineKey::nColorFormat.

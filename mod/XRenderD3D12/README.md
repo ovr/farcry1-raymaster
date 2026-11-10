@@ -879,6 +879,14 @@ system ones (better not to touch): [`CONFIGURATION.md`](../../CONFIGURATION.md).
   instances as with 2; PerfSweep's frames 0 px apart) with far fewer draws into the two sets (Pier
   1,831 → 137, Swamp's jungle 2,808 → 194): there the cascades take about 0.5 ms less of the CPU a
   frame, and the GPU's sun shadows 7 to 15 % less (4K RT: Pier 203 → 206 FPS, River 192 → 196).
+  A caster that discards (an alpha tested leaf; a part of the live set, compared with the full set)
+  has a pixel shader of its discards alone (`d3d12_CascadeCasterShader` 1, General.hlsl's
+  `CasterMain`: the live set's comparison, then the texture's alpha against the reference, as
+  `ShadePixel` makes them with the caster's flags), not the general one with all the program's
+  paths. The maps are the same (PerfSweep's raster frames 0 px apart in pairs of one state; suite
+  `castershader`), the sun shadows about 10 % less: Swamp's jungle at 4K with FSR raster 1.13 → 0.99
+  ms (the GPU's frame 3.87 → 3.70), RT 1.09 → 0.98, PT 1.14 → 1.04; the 4K RT sweeps Pier 0.276 →
+  0.249, Swamp 0.647 → 0.584 (194 → 197.5 FPS).
   A part goes only into the slices
   where its shadow (its sphere drawn out away from the sun) falls on the slice's receivers: seen
   from the sun, the outline of the part of the view's frustum that takes its shadow from the

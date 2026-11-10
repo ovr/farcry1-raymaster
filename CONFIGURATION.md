@@ -256,6 +256,7 @@ Details: [Device removal (DRED)](mod/XRenderD3D12/README.md#device-removal-dred)
 | `d3d12_BarrierBatch` | `1` |  | The barriers queued and given in one call before the next draw |
 | `d3d12_BeachShadow` | `1` |  | The foam on the beach in the sun's shadow as the terrain under it (no glowing border round the shadow of Carrier's wreck) |
 | `d3d12_BeachResearch` | `1` |  | The beach of the shore shader `TerrainWaterBeachResearch` (Steam, Research, Bunker, Dam, Rebellion, Archive) drawn as the original's, its foam fainter than `TerrainWaterBeach`'s (0: not drawn) |
+| `d3d12_CascadeCasterShader` | `1` |  | A caster of the sun's cascades that discards (an alpha tested leaf) drawn by a pixel shader of its discards alone (the same shadows, faster) |
 | `d3d12_CascadeCull` | `1` |  | Without rays, the parts that reach none of the sun's cascades left out as the engine adds them; 2 also the camera towards the sun ending where nothing can shade them (the level's heights: nothing measurable, the engine loads other textures); 0 all of them, as far as the view |
 | `d3d12_CascadeInstancing` | `3` |  | A caster drawn once into all the sun's cascades it reaches: 1 the full set's, 2 the live set's too, 3 also the parts of one mesh and material once for all their objects, 0 once per slice |
 | `d3d12_DecalAddOpacity` | `1` |  | An added decal whose material's opacity is below 1 laid over by its alpha times it, as the original (Research's cave cobwebs: thin strands, no bright card) |
