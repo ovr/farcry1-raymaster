@@ -17,6 +17,8 @@
 #include "Shader.h"
 #include "TangentFrame.h"
 #include "VegetationLight.h"
+#include "IndexLists.h"
+#include "WordHash.h"
 #include <CryCompiledFile.h>
 
 #include <array>
@@ -25,6 +27,11 @@
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
+
+static_assert(IndexLists::PRIM_TRIANGLES == R_PRIMV_TRIANGLES && IndexLists::PRIM_TRIANGLE_STRIP == R_PRIMV_TRIANGLE_STRIP &&
+              IndexLists::PRIM_QUADS == R_PRIMV_QUADS && IndexLists::PRIM_TRIANGLE_FAN == R_PRIMV_TRIANGLE_FAN &&
+              IndexLists::PRIM_MULTI_STRIPS == R_PRIMV_MULTI_STRIPS && IndexLists::PRIM_MULTI_GROUPS == R_PRIMV_MULTI_GROUPS);
+static_assert(sizeof(uint16) == sizeof(uint16_t));
 
 CLeafBuffer CLeafBuffer::m_Root("Root");
 CLeafBuffer CLeafBuffer::m_RootGlobal("RootGlobal");
@@ -199,47 +206,10 @@ void ConvertVertices(uint8 *pDst, int nDstFormat, const uint8 *pSrc, int nSrcFor
   }
 }
 
-//! Primitives of nPrimType (R_PRIMV_*) appended as a triangle list.
+//! Primitives of nPrimType (R_PRIMV_*) appended as a triangle list (IndexLists.h).
 void AppendAsList(std::vector<uint16> &Out, const uint16 *p, int n, int nPrimType)
 {
-  if (!p || n < 3)
-    return;
-  switch (nPrimType)
-  {
-  case R_PRIMV_TRIANGLE_STRIP:
-  case R_PRIMV_MULTI_STRIPS:
-    for (int i = 0; i + 2 < n; i++)
-    {
-      uint16 a = p[i], b = p[i + 1];
-      const uint16 c = p[i + 2];
-      if (a == b || b == c || a == c)
-        continue;
-      if (i & 1)
-        std::swap(a, b);
-      Out.push_back(a);
-      Out.push_back(b);
-      Out.push_back(c);
-    }
-    break;
-  case R_PRIMV_TRIANGLE_FAN:
-    for (int i = 1; i + 1 < n; i++)
-    {
-      Out.push_back(p[0]);
-      Out.push_back(p[i]);
-      Out.push_back(p[i + 1]);
-    }
-    break;
-  case R_PRIMV_QUADS:
-    for (int i = 0; i + 3 < n; i += 4)
-    {
-      const uint16 q[6] = { p[i], p[i + 1], p[i + 2], p[i], p[i + 2], p[i + 3] };
-      Out.insert(Out.end(), q, q + 6);
-    }
-    break;
-  default:    // R_PRIMV_TRIANGLES, R_PRIMV_MULTI_GROUPS (lists here)
-    Out.insert(Out.end(), p, p + (n - n % 3));
-    break;
-  }
+  IndexLists::Append(Out, p, n, nPrimType);
 }
 
 //////////////////////////////////////////////////////////////////////////
@@ -250,8 +220,14 @@ bool HaveGPU()
   return g_pRenderer && g_pRenderer->m_pDevice && g_pRenderer->m_pUpload;
 }
 
+Geometry::SCopyStats s_CopyStats;
+
+//! Frames without a change after which per-frame memory goes back to a static buffer.
+constexpr uint64 PER_FRAME_QUIET_FRAMES = 16;
+
 //! The GPU copy of a block of system memory: a static buffer in the default heap, or per-frame
-//! memory once the data changes in consecutive frames (or after it was drawn in the same frame).
+//! memory once the data changes in consecutive frames (or after it was drawn in the same frame),
+//! until it stays the same for PER_FRAME_QUIET_FRAMES.
 class CGeomGPUCopy
 {
 public:
@@ -289,6 +265,14 @@ public:
     if (!pData || !nSize || !HaveGPU())
       return 0;
     const uint64 nFence = g_pRenderer->m_pDevice->GetFrameFence();
+    // Changes that stopped (the path tracer's vegetation relit in a level's first frames): a static buffer again, else
+    // the rays build a BLAS for each of its draws every frame.
+    if (m_bPerFrame && !m_bDirty && m_nFrameGPU && nFence - m_nChangeFence > PER_FRAME_QUIET_FRAMES)
+    {
+      s_CopyStats.nToStatic++;
+      m_bPerFrame = false;
+      m_bDirty = true;
+    }
     if (!m_bPerFrame && m_pStatic && !m_bDirty && nSize <= m_nStaticSize)
     {
       m_nUseFence = nFence;
@@ -297,8 +281,10 @@ public:
     if (!m_bPerFrame && m_pStatic && (nFence - m_nUploadFence <= 2 || m_nUseFence == nFence))
     {
       // Changes often, or again in a frame that already drew it: per-frame memory from now on.
+      (nFence - m_nUploadFence <= 2 ? s_CopyStats.nToFrameQuick : s_CopyStats.nToFrameRedraw)++;
       Release();
       m_bPerFrame = true;
+      m_nChangeFence = nFence;
     }
     if (!m_bPerFrame)
     {
@@ -319,12 +305,16 @@ public:
       }
       m_bPerFrame = true;
     }
+    if (m_bDirty)
+      m_nChangeFence = nFence;
     if (m_bDirty || !m_nFrameGPU || m_nFrameFence != nFence || m_nFrameSize != nSize)
     {
       const SD3D12FrameAlloc a = g_pRenderer->m_pUpload->AllocFrame(nSize, 16);
       if (!a.pCPU)
         return 0;
       memcpy(a.pCPU, pData, nSize);
+      s_CopyStats.nFrameCopies++;
+      s_CopyStats.nFrameBytes += nSize;
       m_nFrameGPU = a.nGPU;
       m_nFrameFence = nFence;
       m_nFrameSize = nSize;
@@ -343,6 +333,7 @@ private:
   uint32 m_nFrameSize = 0;
   uint64 m_nUploadFence = 0;      //!< frame of the last upload into m_pStatic
   uint64 m_nUseFence = 0;         //!< last frame m_pStatic was handed to a draw
+  uint64 m_nChangeFence = 0;      //!< per-frame memory: the last frame the data changed
   bool m_bDirty = true;
   bool m_bPerFrame = false;
 };
@@ -429,7 +420,7 @@ struct SCustomLighting
 
 struct SGeomState
 {
-  std::unordered_set<CLeafBuffer *> Live;
+  CWordSet<CLeafBuffer *> Live;   //!< looked up twice a draw (GetDraw)
   std::unordered_map<CLeafBuffer *, SCustomLighting> Lighting;
   bool bUnlitVegetation = false;    //!< Geometry::SetUnlitVegetation
 };
@@ -688,6 +679,14 @@ void UpdateList(CLeafBuffer *pLB, SGeomStream &IS)
   const int nInds = pInds ? pLB->m_Indices.m_nItems : 0;
   const int nPrim = pLB->m_nPrimetiveType;
   IS.List.clear();
+  size_t nBound = 0;
+  for (int i = 0; i < nMats; i++)
+  {
+    const CMatInfo &m = (*pLB->m_pMats)[i];
+    const int nFirst = std::clamp(m.nFirstIndexId, 0, nInds);
+    nBound += IndexLists::Bound(std::clamp(m.nNumIndices, 0, nInds - nFirst), nPrim);
+  }
+  IS.List.reserve(nBound);
   IS.Ranges.assign(nMats, SGeomRange());
   IS.Sources.assign(nMats, SChunkSource());
   for (int i = 0; i < nMats; i++)
@@ -2178,32 +2177,35 @@ void CLeafBuffer::Render(const SRendParams &rParams, CCObject *pObj, TArray<int>
 
 std::optional<SGeomDraw> Geometry::GetDraw(CLeafBuffer *pLB, const CMatInfo *pChunk)
 {
+  // Every return the one named result, made in the caller's place (a local copied there was written field by field
+  // and read back 16 bytes at a time: four stalls of the store forwarding a draw).
+  std::optional<SGeomDraw> Draw;
   if (!pLB || !pChunk || !GeometryImpl::IsLeafBuffer(pLB) || !MatCount(pLB))
-    return std::nullopt;
+    return Draw;
   const ptrdiff_t nMat = pChunk - &(*pLB->m_pMats)[0];
   if (nMat < 0 || nMat >= MatCount(pLB))
-    return std::nullopt;
+    return Draw;
   CLeafBuffer *pVC = pLB->GetVertexContainer();
   if (pVC != pLB && !GeometryImpl::IsLeafBuffer(pVC))
-    return std::nullopt;
+    return Draw;
   PrepareVideo(pVC, 0);
   CVertexBuffer *pVB = pVC->m_pVertexBuffer;
   if (!pVB || !GeometryImpl::IsDrawableFormat(pVB->m_vertexformat) || pVB->m_NumVerts <= 0)
-    return std::nullopt;
+    return Draw;
 
   SGeomStream &IS = LeafIndices(pLB);
   UpdateList(pLB, IS);
   const SGeomRange r = IS.Ranges[nMat];
   if (!r.nCount)
-    return std::nullopt;
+    return Draw;
   uint32 nVBBytes = 0;
   const D3D12_GPU_VIRTUAL_ADDRESS nVB = VertexGPU(pVB, nVBBytes);
   const uint32 nIBBytes = (uint32)(IS.List.size() * sizeof(uint16));
   const D3D12_GPU_VIRTUAL_ADDRESS nIB = nVB ? IS.GPU.Get(IS.List.data(), nIBBytes) : 0;
   if (!nVB || !nIB)
-    return std::nullopt;
+    return Draw;
 
-  SGeomDraw d;
+  SGeomDraw &d = Draw.emplace();
   d.VB.BufferLocation = nVB;
   d.VB.SizeInBytes = nVBBytes;
   d.VB.StrideInBytes = GeometryImpl::VertexSize(pVB->m_vertexformat);
@@ -2217,7 +2219,7 @@ std::optional<SGeomDraw> Geometry::GetDraw(CLeafBuffer *pLB, const CMatInfo *pCh
   d.nBaseVertex = 0;
   d.nFirstVertex = (uint32)std::max(pChunk->nFirstVertId, 0);
   d.nNumVertices = (uint32)std::max(pChunk->nNumVerts, 0);
-  return d;
+  return Draw;
 }
 
 std::span<const uint16> Geometry::GetTriangles(CLeafBuffer *pLB, const CMatInfo *pChunk)
@@ -2432,6 +2434,13 @@ bool Geometry::UnlitVegetationLight(const CLeafBuffer *pLB, float vAmbient[3], f
   vAmbient[2] = L.vAmbient.z;
   memcpy(vSun, L.vSun, 3 * sizeof(float));
   return true;
+}
+
+Geometry::SCopyStats Geometry::TakeCopyStats()
+{
+  const SCopyStats Stats = s_CopyStats;
+  s_CopyStats = {};
+  return Stats;
 }
 
 void Geometry::Shutdown()

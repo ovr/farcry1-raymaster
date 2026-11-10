@@ -5,7 +5,9 @@
 //	File: GridTests.cpp
 //	Description: Unit tests of the ocean's grid (d3d12_WaterGeometry): its
 //	rings and triangles (OceanGrid.h), the game's disc read from its
-//	vertices and its alpha between them (ReadDisc, DiscTable and
+//	vertices (ReadDisc, bit for bit the read with the radii sorted and
+//	atan2; SegmentOf) and its alpha between them (DiscTable and
+//	CDiscCache, which reads it again only when a byte of them changed;
 //	OceanGrid.hlsli's GridDiscAlpha; the deferred ocean's by its table,
 //	AlphaTable and GridDiscAlphaTable), how much of the waves' height a vertex
 //	takes (OceanGrid.hlsli: by the depth under the level, the bodies in the
@@ -31,6 +33,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstring>
 #include <string>
 #include <vector>
 
@@ -803,4 +806,192 @@ XR_TEST(Grid_WakeHeights)
   CHECK_MSG(nWrong == 0, std::to_string(nWrong) + " texels off");
   // The window itself as it was (a view, no step).
   CHECK(o.State == Start);
+}
+
+// The disc is read once a frame from the game's vertices, which change only when its ring moves: the cache gives back the
+// disc and both tables as a fresh read would, bit for bit, reads again for one changed byte, and nothing for no disc.
+XR_TEST(Grid_DiscCache)
+{
+  const auto Same = [](const CDiscCache &C, const SDisc &D)
+  {
+    std::vector<float> Table(DiscTableSize(D)), Alpha(AlphaTableSize());
+    DiscTable(D, Table.data());
+    AlphaTable(D, Alpha.data());
+    return C.GetTable() == Table && C.GetAlphaTable() == Alpha;
+  };
+  // Field by field (the struct may have padding).
+  const auto Equal = [](const SDisc &a, const SDisc &b)
+  {
+    return a.fX == b.fX && a.fY == b.fY && a.fZ == b.fZ && a.nRings == b.nRings && memcmp(a.fRadius, b.fRadius, sizeof(a.fRadius)) == 0 &&
+           memcmp(a.fAlpha, b.fAlpha, sizeof(a.fAlpha)) == 0;
+  };
+  CDiscCache C;
+  const std::vector<SVertex> V = GameDisc(GAME_RINGS);
+  SDisc D;
+  CHECK(ReadDisc(V.data(), V.size(), D));
+  const SDisc *p = C.Read(V.data(), V.size());
+  CHECK(p && C.GetReads() == 1 && Equal(*p, D) && Same(C, D));
+  // The same bytes elsewhere: not read again.
+  const std::vector<SVertex> Copy = V;
+  CHECK(C.Read(Copy.data(), Copy.size()) == p && C.GetReads() == 1 && Same(C, D));
+  // One vertex's alpha a step lower: read again, as fresh.
+  std::vector<SVertex> Changed = V;
+  Changed[40].nColor -= 1u << 24;
+  SDisc E;
+  CHECK(ReadDisc(Changed.data(), Changed.size(), E) && !Equal(D, E));
+  p = C.Read(Changed.data(), Changed.size());
+  CHECK(p && C.GetReads() == 2 && Equal(*p, E) && Same(C, E));
+  // No disc (turned by half a segment), none read, then the disc again; no vertices.
+  const std::vector<SVertex> Turned = GameDisc(GAME_RINGS, 5 * PI / 180);
+  CHECK(!C.Read(Turned.data(), Turned.size()) && C.GetReads() == 3 && C.GetTable().empty() && C.GetAlphaTable().empty());
+  CHECK(!C.Read(Turned.data(), Turned.size()) && C.GetReads() == 3);
+  p = C.Read(V.data(), V.size());
+  CHECK(p && C.GetReads() == 4 && Equal(*p, D) && Same(C, D));
+  CHECK(!C.Read(nullptr, V.size()) && C.GetReads() == 5);
+}
+
+namespace
+{
+  //! ReadDisc as it was before it found the rings without sorting the radii and the segments by a cheaper angle (the
+  //! reference its disc must be bit for bit).
+  bool ReadDiscSorted(const SVertex *V, size_t n, SDisc &D)
+  {
+    constexpr int S = XR_GRID_DISC_SEGMENTS;
+    D = SDisc();
+    if (!V || n < 2 * (size_t)S)
+      return false;
+    double x0 = V[0].x, x1 = x0, y0 = V[0].y, y1 = y0;
+    for (size_t i = 0; i < n; i++)
+    {
+      if (V[i].z != V[0].z)
+        return false;
+      x0 = std::min(x0, (double)V[i].x);
+      x1 = std::max(x1, (double)V[i].x);
+      y0 = std::min(y0, (double)V[i].y);
+      y1 = std::max(y1, (double)V[i].y);
+    }
+    D.fX = 0.5 * (x0 + x1);
+    D.fY = 0.5 * (y0 + y1);
+    D.fZ = V[0].z;
+    std::vector<double> R(n);
+    for (size_t i = 0; i < n; i++)
+      R[i] = std::hypot(V[i].x - D.fX, V[i].y - D.fY);
+    const auto Near = [](double a, double b) { return std::fabs(a - b) <= 0.01 * std::max(a, b) + 0.01; };
+    std::vector<double> Sorted = R, Rings;
+    std::sort(Sorted.begin(), Sorted.end());
+    for (double r : Sorted)
+      if (Rings.empty() || !Near(Rings.back(), r))
+        Rings.push_back(r);
+    if (Rings.size() < 2 || Rings.size() > (size_t)XR_GRID_DISC_RINGS)
+      return false;
+    float fSum[XR_GRID_DISC_RINGS][S] = {};
+    int nCount[XR_GRID_DISC_RINGS][S] = {};
+    for (size_t i = 0; i < n; i++)
+    {
+      size_t k = 0;
+      for (size_t j = 1; j < Rings.size(); j++)
+        if (std::fabs(R[i] - Rings[j]) < std::fabs(R[i] - Rings[k]))
+          k = j;
+      const float a = ColorAlpha(V[i].nColor);
+      if (k == 0 && R[i] < 0.01)
+      {
+        for (int s = 0; s < S; s++)
+          fSum[0][s] += a, nCount[0][s]++;
+        continue;
+      }
+      const double u = std::atan2(V[i].y - D.fY, V[i].x - D.fX) / (2 * PI) * S;
+      const double s = std::round(u);
+      if (std::fabs(u - s) > 0.1)
+        return false;
+      const int nSegment = (((int)s % S) + S) % S;
+      fSum[k][nSegment] += a;
+      nCount[k][nSegment]++;
+    }
+    D.nRings = (int)Rings.size();
+    for (int k = 0; k < D.nRings; k++)
+    {
+      D.fRadius[k] = k == 0 && Rings[0] < 0.01 ? 0.0f : (float)Rings[k];
+      for (int s = 0; s < S; s++)
+      {
+        int nFrom = -1;
+        for (int d = 0; d <= S / 2 && nFrom < 0; d++)
+          for (int e : { s + d, s - d })
+            if (nFrom < 0 && nCount[k][((e % S) + S) % S] > 0)
+              nFrom = ((e % S) + S) % S;
+        D.fAlpha[k][s] = nFrom >= 0 ? fSum[k][nFrom] / nCount[k][nFrom] : 0.0f;
+      }
+    }
+    return true;
+  }
+}
+
+// Why: the disc is read again each time the game's ring moves (most frames of a flight), so ReadDisc finds its rings
+// without sorting the radii and its segments by a cheaper angle than atan2 where that decides; its disc must stay the one
+// the sorted radii and atan2 give, bit for bit, whatever the vertices' order, rings near each other, turns near a tenth.
+XR_TEST(Grid_DiscReadExact)
+{
+  const auto Equal = [](bool a, const SDisc &A, bool b, const SDisc &B)
+  {
+    return a == b && A.fX == B.fX && A.fY == B.fY && A.fZ == B.fZ && A.nRings == B.nRings &&
+           memcmp(A.fRadius, B.fRadius, sizeof(A.fRadius)) == 0 && memcmp(A.fAlpha, B.fAlpha, sizeof(A.fAlpha)) == 0;
+  };
+  CRandom Random(4417);
+  const double fTenth = 0.1 * 2 * PI / DS;
+  const double Turns[] = { 0, 0.3, fTenth, -fTenth, fTenth * (1 + 1e-9), fTenth * (1 - 1e-9), 0.9 * fTenth, 1.1 * fTenth, 5 * fTenth };
+  int nWrong = 0, nDiscs = 0;
+  std::vector<double> Radii;
+  for (int t = 0; t < 600; t++)
+  {
+    // Every 4th the radii moved by up to 1.5 % (rings near the next one's), every 9th a ring 1.01 times the one before,
+    // every 5th the vertices in another order, every 11th some of them moved by 2 mm.
+    std::vector<double> Rings = GAME_RINGS;
+    if (t % 4 == 1)
+      for (double &r : Rings)
+        r *= 1 + (Random.Unit() * 2 - 1) * 0.015;
+    if (t % 9 == 2)
+      Rings.insert(Rings.begin() + 8, Rings[8] * 1.0101);
+    if (t % 13 == 5)
+      for (int k = (int)Rings.size(); k <= XR_GRID_DISC_RINGS + 1 - t % 2; k++)
+        Rings.push_back(Rings.back() * 1.2);
+    std::vector<SVertex> V = GameDisc(Rings, t % 3 == 0 ? Turns[(t / 3) % 9] : 0);
+    if (t % 5 == 3)
+      for (size_t i = V.size() - 1; i > 0; i--)
+        std::swap(V[i], V[Random.Next() % (i + 1)]);
+    if (t % 11 == 4)
+      for (SVertex &v : V)
+        v.x += (float)((int)(Random.Next() % 3) - 1) * 0.002f;
+    // Every 7th an odd number of vertices (NextRing's last one alone); every other one with a buffer of the read before.
+    if (t % 7 == 6)
+      V.erase(V.begin() + (ptrdiff_t)(Random.Next() % V.size()));
+    SDisc A, B;
+    const bool a = ReadDisc(V.data(), V.size(), A, t % 2 ? &Radii : nullptr), b = ReadDiscSorted(V.data(), V.size(), B);
+    nWrong += !Equal(a, A, b, B);
+    nDiscs += a;
+  }
+  CHECK_MSG(nWrong == 0, std::to_string(nWrong) + " of 600 discs not the sorted read's");
+  CHECK(nDiscs > 300 && nDiscs < 600);
+
+  // SegmentOf against atan2: random directions, ones a tenth of a segment off one (a little more or less), the axes.
+  int nOff = 0;
+  for (int i = 0; i < 2000000; i++)
+  {
+    double a = (Random.Unit() * 2 - 1) * PI;
+    if (i % 4 == 1)
+      a = std::round(a / (2 * PI / DS)) * (2 * PI / DS) + (double)((int)(Random.Next() % 3) - 1) * fTenth * (1 + (Random.Unit() * 2 - 1) * 1e-3);
+    const double r = 0.01 + Random.Unit() * 2000.0;
+    double x = r * std::cos(a), y = r * std::sin(a);
+    if (i % 1000 == 7)
+    {
+      x = (double)(Random.Next() % 3) - 1;
+      y = i % 2000 == 7 ? -0.0 : (double)(Random.Next() % 3) - 1;
+    }
+    int s1 = -1, s2 = -1;
+    const bool b1 = SegmentOf(x, y, s1);
+    const double u = std::atan2(y, x) / (2 * PI) * DS, s = std::round(u);
+    const bool b2 = !(std::fabs(u - s) > 0.1);
+    if (b2)
+      s2 = (((int)s % DS) + DS) % DS;
+    nOff += b1 != b2 || (b1 && s1 != s2);
+  }
+  CHECK_MSG(nOff == 0, std::to_string(nOff) + " of 2000000 directions not atan2's segment");
 }

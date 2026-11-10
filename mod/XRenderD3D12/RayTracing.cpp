@@ -24,7 +24,10 @@
 #include "D3D12Descriptors.h"
 #include "D3D12Upload.h"
 #include "D3D12Pipeline.h"
+#include "D3D12Compute.h"
 #include "RayTracing.h"
+#include "WordHash.h"
+#include "MatrixMul.h"
 #include "Scene.h"
 #include "Shaders/RayConstants.h"
 
@@ -45,6 +48,9 @@ namespace
   constexpr uint32 MAX_STATIC_BUILD_TRIANGLES = 1u << 20;     //!< the new static BLAS of a frame (one bigger alone)
   constexpr uint32 MAX_FRAME_TRIANGLES = 2u << 20;            //!< the BLAS of a frame
   constexpr int EVICT_FRAMES = 300;                           //!< a static BLAS not used for so many frames goes
+  // d3d12_RTAlphaCoverage: a byte a triangle; a frame makes at most so many (a level's first frames, a new place).
+  constexpr uint32 COVERAGE_BYTES = 16u << 20;
+  constexpr uint32 MAX_COVERAGE_TRIANGLES = 128u << 10;
 
   constexpr uint64 AlignUp(uint64 n, uint64 nAlign)
   {
@@ -72,46 +78,19 @@ namespace
   }
 
   const float s_FullScreen[3][3] = { { -1, -1, 0 }, { -1, 3, 0 }, { 3, -1, 0 } };
-
-  //! A hash of whole 64 bit words: MurmurHash3's mixing of each word and its final mix (a
-  //! multiply a word on the chain, where a hash of the bytes takes one a byte).
-  class CWordHash
-  {
-  public:
-    template <class T> void Add(const T &Data)
-    {
-      static_assert(sizeof(T) % 8 == 0 && std::is_trivially_copyable_v<T>, "hashed as whole words");
-      const uint8 *p = (const uint8 *)&Data;
-      for (size_t i = 0; i < sizeof(T); i += 8)
-      {
-        uint64 k;
-        memcpy(&k, p + i, 8);
-        k *= 0x87c37b91114253d5ull;
-        k = _rotl64(k, 31);
-        k *= 0x4cf5ad432745937full;
-        m_nHash ^= k;
-        m_nHash = _rotl64(m_nHash, 27) * 5 + 0x52dce729;
-      }
-    }
-    uint64 Get() const
-    {
-      uint64 h = m_nHash;
-      h ^= h >> 33;
-      h *= 0xff51afd7ed558ccdull;
-      h ^= h >> 33;
-      h *= 0xc4ceb9fe1a85ec53ull;
-      h ^= h >> 33;
-      return h;
-    }
-
-  private:
-    uint64 m_nHash = 0;
-  };
 }
 
 size_t CD3D12RayScene::SBlasKeyHash::operator()(const SBlasKey &Key) const
 {
   static_assert(sizeof(SBlasKey) == 48, "SBlasKey is hashed and compared as bytes");
+  CWordHash Hash;
+  Hash.Add(Key);
+  return (size_t)Hash.Get();
+}
+
+size_t CD3D12RayScene::SCoverageKeyHash::operator()(const SCoverageKey &Key) const
+{
+  static_assert(sizeof(SCoverageKey) == 112, "SCoverageKey is hashed and compared as bytes");
   CWordHash Hash;
   Hash.Add(Key);
   return (size_t)Hash.Get();
@@ -170,12 +149,14 @@ void CD3D12RayScene::Shutdown()
     Slot = SFrameSlot();
   m_nBuiltFrame = -1;
   m_nInstances = 0;
+  ReleaseCoverage();
+  m_bCoverageFailed = false;
   m_pDevice5.Reset();
 }
 
 void CD3D12RayScene::Release()
 {
-  bool bHeld = !m_Pools.empty() || !m_ReflectionDraws.empty();
+  bool bHeld = !m_Pools.empty() || !m_ReflectionDraws.empty() || m_pCoverage;
   for (const SFrameSlot &Slot : m_Slots)
     bHeld = bHeld || Slot.Scratch.pBuffer || Slot.Blas.pBuffer || Slot.Tlas.pBuffer;
   if (!bHeld || !g_pRenderer->m_pDevice)
@@ -203,6 +184,259 @@ void CD3D12RayScene::Release()
   m_ReflectionDraws.clear();
   m_nBuiltFrame = -1;
   m_nInstances = 0;
+  ReleaseCoverage();
+}
+
+//////////////////////////////////////////////////////////////////////////
+// Alpha tests' shares (d3d12_RTAlphaCoverage)
+
+bool CD3D12RayScene::InitCoverage()
+{
+  if (m_pCoverage)
+    return true;
+  CD3D12Descriptors *pDesc = g_pRenderer->m_pDescriptors.get();
+  if (m_bCoverageFailed || !pDesc || !g_pRenderer->m_pCompute || !g_pRenderer->m_pCompute->HasKernel(eD3D12K_RayCoverage))
+    return false;
+  // Created common: a buffer is promoted to the kernel's UAV and to the rays' reads, and decays back after each list.
+  ComPtr<ID3D12Resource> pBuffer = CreateBuffer(COVERAGE_BYTES, D3D12_RESOURCE_STATE_COMMON, L"XRenderD3D12 ray scene alpha shares");
+  const int nTable = pBuffer ? pDesc->AllocRange(CD3D12Compute::COMPUTE_UAVS) : -1;
+  D3D12_SHADER_RESOURCE_VIEW_DESC SRV = {};
+  SRV.Format = DXGI_FORMAT_R32_TYPELESS;
+  SRV.ViewDimension = D3D12_SRV_DIMENSION_BUFFER;
+  SRV.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+  SRV.Buffer.NumElements = COVERAGE_BYTES / 4;
+  SRV.Buffer.Flags = D3D12_BUFFER_SRV_FLAG_RAW;
+  const int nSRV = nTable >= 0 ? pDesc->AllocSRV(pBuffer.Get(), &SRV) : -1;
+  if (nSRV <= 0)
+  {
+    if (nTable >= 0)
+      pDesc->FreeRange(nTable, CD3D12Compute::COMPUTE_UAVS);
+    iLog->LogWarning("XRenderD3D12: no alpha tests' shares for the rays (d3d12_RTAlphaCoverage): no buffer or views; the exact tests");
+    m_bCoverageFailed = true;
+    return false;
+  }
+  D3D12_UNORDERED_ACCESS_VIEW_DESC UAV = {};
+  UAV.Format = DXGI_FORMAT_R32_TYPELESS;
+  UAV.ViewDimension = D3D12_UAV_DIMENSION_BUFFER;
+  UAV.Buffer.NumElements = COVERAGE_BYTES / 4;
+  UAV.Buffer.Flags = D3D12_BUFFER_UAV_FLAG_RAW;
+  pDesc->WriteUAV(nTable, pBuffer.Get(), &UAV);
+  UAV.Buffer.NumElements = 1;
+  for (int i = 1; i < CD3D12Compute::COMPUTE_UAVS; i++)
+    pDesc->WriteUAV(nTable + i, nullptr, &UAV);
+  m_pCoverage = std::move(pBuffer);
+  m_nCoverageSRV = nSRV;
+  m_nCoverageTable = nTable;
+  m_CoverageFree.clear();
+  m_CoverageFree[0] = COVERAGE_BYTES;
+  m_CoveragePending.clear();
+  m_nCoverageBytes = 0;
+  return true;
+}
+
+void CD3D12RayScene::ReleaseCoverage()
+{
+  m_Coverage.clear();
+  m_CoverageFree.clear();
+  m_CoveragePending.clear();
+  m_nCoverageBytes = 0;
+  if (!m_pCoverage)
+    return;
+  if (g_pRenderer->m_pDevice)
+    g_pRenderer->m_pDevice->DeferredRelease(m_pCoverage);
+  m_pCoverage.Reset();
+  if (CD3D12Descriptors *pDesc = g_pRenderer->m_pDescriptors.get())
+  {
+    pDesc->FreeSRV(m_nCoverageSRV);
+    pDesc->FreeRange(m_nCoverageTable, CD3D12Compute::COMPUTE_UAVS);
+  }
+  m_nCoverageSRV = m_nCoverageTable = -1;
+}
+
+bool CD3D12RayScene::CoverageKey(const SDraw &d, SCoverageKey &Key)
+{
+  const SRayInstance &I = d.Inst;
+  const uint32 nFlags = I.nMaterial[0];
+  // A texture by the world's coordinates or a cube: its alpha is not the mesh's alone.
+  if ((d.nKind & (XR_RAY_STATIC | XR_RAY_ALPHATEST)) != (XR_RAY_STATIC | XR_RAY_ALPHATEST) || I.nGeom[0] == XR_RAY_NONE ||
+      (nFlags & (DF_CUBE0 | DF_TEXGEN_WORLD)) || !(nFlags & DF_ALPHATEST))
+    return false;
+  Key = {};
+  Key.Blas = d.Key;
+  Key.nFlags = nFlags & (DF_ALPHATEST | DF_ALPHATEST_LESS | DF_ALPHA_FROM_TEX | DF_VCOLOR | DF_VCOLOR_X2 | DF_VALPHA_ONLY | DF_TEX0 |
+                         DF_TEX0_ARRAY | DF_TEXMATRIX);
+  Key.nTex0 = I.nMaterial[2];
+  Key.nTexGeneration = d.nTexGeneration[0];
+  Key.nSamplers = I.nMaterial2[0] & 15;
+  Key.nAlphaRef = I.nMaterial2[1];
+  // Vegetation's colour alpha moves a little each frame (its light): steps of 1/64 keep its shares.
+  if (!(nFlags & DF_ALPHA_FROM_TEX))
+    Key.nColorAlpha = (uint32)(int32)std::lround(std::max(I.vColor[3], 0.0f) * 64.0f) + 1;
+  Key.nLayout = I.nLayout[1];
+  if (nFlags & DF_TEXMATRIX)
+  {
+    memcpy(Key.TexMat, I.vTexMat0, 16);
+    memcpy(Key.TexMat + 4, I.vTexMat1, 16);
+  }
+  return true;
+}
+
+bool CD3D12RayScene::AllocCoverage(uint32 nBytes, uint32 &nOffset)
+{
+  for (auto it = m_CoverageFree.begin(); it != m_CoverageFree.end(); ++it)
+  {
+    if (it->second < nBytes)
+      continue;
+    nOffset = it->first;
+    const uint32 nRest = it->second - nBytes;
+    m_CoverageFree.erase(it);
+    if (nRest)
+      m_CoverageFree[nOffset + nBytes] = nRest;
+    m_nCoverageBytes += nBytes;
+    return true;
+  }
+  // Full: the least recently used half of those not used in this frame go, free for a later frame once the GPU is done.
+  std::vector<std::pair<int, const SCoverageKey *>> Old;
+  for (const auto &e : m_Coverage)
+  {
+    if (e.second.nLastFrame != m_nFrame)
+      Old.emplace_back(e.second.nLastFrame, &e.first);
+  }
+  std::sort(Old.begin(), Old.end(), [](const auto &a, const auto &b) { return a.first < b.first; });
+  const uint64 nFence = g_pRenderer->m_pDevice->GetFrameFence();
+  for (size_t i = 0; i < (Old.size() + 1) / 2; i++)
+  {
+    auto it = m_Coverage.find(*Old[i].second);
+    m_CoveragePending.push_back({ { it->second.nOffset, it->second.nBytes }, nFence });
+    m_Coverage.erase(it);
+  }
+  return false;
+}
+
+void CD3D12RayScene::CollectCoverage()
+{
+  const uint64 nCompleted = g_pRenderer->m_pDevice->GetCompletedFence();
+  // Those not used for a while.
+  const uint64 nFence = g_pRenderer->m_pDevice->GetFrameFence();
+  for (auto it = m_Coverage.begin(); it != m_Coverage.end();)
+  {
+    if (m_nFrame - it->second.nLastFrame > EVICT_FRAMES)
+    {
+      m_CoveragePending.push_back({ { it->second.nOffset, it->second.nBytes }, nFence });
+      it = m_Coverage.erase(it);
+    }
+    else
+      ++it;
+  }
+  size_t nKept = 0;
+  for (size_t i = 0; i < m_CoveragePending.size(); i++)
+  {
+    if (m_CoveragePending[i].second > nCompleted)
+    {
+      m_CoveragePending[nKept++] = m_CoveragePending[i];
+      continue;
+    }
+    const uint32 nOffset = m_CoveragePending[i].first.first, nBytes = m_CoveragePending[i].first.second;
+    m_nCoverageBytes -= std::min(m_nCoverageBytes, nBytes);
+    auto it = m_CoverageFree.emplace(nOffset, nBytes).first;
+    auto Next = std::next(it);
+    if (Next != m_CoverageFree.end() && it->first + it->second == Next->first)
+    {
+      it->second += Next->second;
+      m_CoverageFree.erase(Next);
+    }
+    if (it != m_CoverageFree.begin())
+    {
+      auto Prev = std::prev(it);
+      if (Prev->first + Prev->second == it->first)
+      {
+        Prev->second += it->second;
+        m_CoverageFree.erase(it);
+      }
+    }
+  }
+  m_CoveragePending.resize(nKept);
+}
+
+uint32 CD3D12RayScene::UseCoverage(const SDraw &d, uint32 nInstance, std::vector<SCoverageJob> &Jobs, uint32 &nJobTriangles)
+{
+  SCoverageKey Key;
+  if (!CoverageKey(d, Key))
+    return XR_RAY_NONE;
+  const D3D12_RAYTRACING_GEOMETRY_TRIANGLES_DESC &Tri = d.Geom.Triangles;
+  const uint32 nTri = (Tri.IndexCount ? Tri.IndexCount : Tri.VertexCount) / 3;
+  auto it = m_Coverage.find(Key);
+  if (it == m_Coverage.end())
+  {
+    if (nJobTriangles + nTri > MAX_COVERAGE_TRIANGLES && nJobTriangles)
+      return XR_RAY_NONE;
+    SCoverage c;
+    c.nBytes = (nTri + 3) & ~3u;
+    if (!AllocCoverage(c.nBytes, c.nOffset))
+      return XR_RAY_NONE;
+    it = m_Coverage.emplace(Key, c).first;
+  }
+  SCoverage &c = it->second;
+  c.nLastFrame = m_nFrame;
+  if (!c.bMade)
+  {
+    if (nJobTriangles + nTri > MAX_COVERAGE_TRIANGLES && nJobTriangles)
+      return XR_RAY_NONE;
+    Jobs.push_back({ nInstance, c.nOffset, nTri });
+    nJobTriangles += nTri;
+    c.bMade = true;
+  }
+  return c.nOffset;
+}
+
+void CD3D12RayScene::MakeCoverage(ID3D12GraphicsCommandList *pList, bool bAsync, const std::vector<SCoverageJob> &Jobs,
+                                  D3D12_GPU_VIRTUAL_ADDRESS nInstances)
+{
+  if (Jobs.empty())
+    return;
+  CD3D12Compute &Compute = *g_pRenderer->m_pCompute;
+  if (bAsync)
+  {
+    ID3D12DescriptorHeap *pHeap = g_pRenderer->m_pDescriptors->GetHeap();
+    pList->SetDescriptorHeaps(1, &pHeap);
+  }
+  for (size_t nFirst = 0; nFirst < Jobs.size(); nFirst += XR_RAY_COVERAGE_JOBS)
+  {
+    const size_t n = std::min<size_t>(Jobs.size() - nFirst, XR_RAY_COVERAGE_JOBS);
+    const SD3D12FrameAlloc CB = g_pRenderer->m_pUpload->AllocFrame((uint32)sizeof(SRayCoverageConstants), 256);
+    if (!CB.pCPU)
+      return;
+    SRayCoverageConstants &cc = *(SRayCoverageConstants *)CB.pCPU;
+    cc.nParams[0] = (uint32)n;
+    cc.nParams[1] = cc.nParams[2] = cc.nParams[3] = 0;
+    uint32 nThreads = 0;
+    for (size_t i = 0; i < n; i++)
+    {
+      const SCoverageJob &j = Jobs[nFirst + i];
+      cc.nJobs[i][0] = j.nInstance;
+      cc.nJobs[i][1] = j.nOffset;
+      cc.nJobs[i][2] = j.nTriangles;
+      cc.nJobs[i][3] = nThreads;
+      nThreads += (j.nTriangles + 3) / 4;
+    }
+    Compute.DispatchRays(pList, eD3D12K_RayCoverage, 0, CB.nGPU, 0, nInstances, m_nCoverageTable,
+                         (nThreads + XR_RAY_COVERAGE_GROUP - 1) / XR_RAY_COVERAGE_GROUP, 1);
+    if (nFirst + XR_RAY_COVERAGE_JOBS < Jobs.size())
+    {
+      D3D12_RESOURCE_BARRIER Barrier = {};
+      Barrier.Type = D3D12_RESOURCE_BARRIER_TYPE_UAV;
+      Barrier.UAV.pResource = m_pCoverage.Get();
+      pList->ResourceBarrier(1, &Barrier);  // barriers flushed: the shares are no tracked resource
+    }
+  }
+  // Readable by the rays (the compute queue's: by its kernels alone; the frame's list's: by the draws' too).
+  D3D12_RESOURCE_BARRIER Barrier = {};
+  Barrier.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+  Barrier.Transition.pResource = m_pCoverage.Get();
+  Barrier.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
+  Barrier.Transition.StateBefore = D3D12_RESOURCE_STATE_UNORDERED_ACCESS;
+  Barrier.Transition.StateAfter = bAsync ? D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE : D3D12_RESOURCE_STATE_ALL_SHADER_RESOURCE;
+  pList->ResourceBarrier(1, &Barrier);  // barriers flushed: the shares are no tracked resource
 }
 
 //////////////////////////////////////////////////////////////////////////
@@ -318,16 +552,14 @@ void CD3D12RayScene::CaptureDraw(const SPipelineKey &Key, const SDrawConstants &
   float fMax = 0;
   for (int i = 0; i < 16; i++)
     fMax = std::max(fMax, fabsf(wvp[i]));
-  for (int r = 0; r < 4; r++)
+  float Product[16];
+  MatrixMul::Mul44(w, vp, Product);
+  for (int i = 0; i < 16; i++)
   {
-    for (int c = 0; c < 4; c++)
+    if (fabsf(Product[i] - wvp[i]) > 1e-3f * fMax + 1e-5f)
     {
-      const float f = w[r * 4] * vp[c] + w[r * 4 + 1] * vp[4 + c] + w[r * 4 + 2] * vp[8 + c] + w[r * 4 + 3] * vp[12 + c];
-      if (fabsf(f - wvp[r * 4 + c]) > 1e-3f * fMax + 1e-5f)
-      {
-        m_nSkippedTransform += bReflection ? 0 : 1;
-        return;
-      }
+      m_nSkippedTransform += bReflection ? 0 : 1;
+      return;
     }
   }
 
@@ -433,12 +665,10 @@ void CD3D12RayScene::CaptureDraw(const SPipelineKey &Key, const SDrawConstants &
   GetTextureSlots(d.Inst, Slots);
   for (int i = 0; i < 4; i++)
     d.nTexGeneration[i] = g_pRenderer->m_pDescriptors->GetGeneration((int)Slots[i]);
-  // The instance's transform: object to world for column vectors, mWorld's for row vectors transposed.
-  for (int r = 0; r < 3; r++)
-  {
-    for (int c = 0; c < 4; c++)
-      d.Transform[r][c] = w[c * 4 + r];
-  }
+  // The instance's transform: object to world for column vectors, mWorld's for row vectors transposed (a row a store:
+  // DrawHash reads it back at once).
+  static_assert(sizeof(d.Transform) == 48, "three rows of four floats");
+  MatrixMul::Columns3(w, &d.Transform[0][0]);
   d.nHash = DrawHash(d);
   d.eSource = bReflection ? SOURCE_REFLECTION : m_eCaptureSource;
   d.bLive = !bReflection && m_bCaptureLive;
@@ -450,7 +680,9 @@ void CD3D12RayScene::FillInstance(SRayInstance &Inst, const SPipelineKey &Key, c
   D3D12_GPU_VIRTUAL_ADDRESS nTexCoord1)
 {
   CD3D12Upload &Upload = *g_pRenderer->m_pUpload;
-  Inst = {};
+  // (in place: Inst = {} zeroes a copy on the stack first and reads it back)
+  static_assert(std::is_trivially_copyable_v<SRayInstance>, "zeroed as bytes");
+  memset(&Inst, 0, sizeof(Inst));
   uint64 nOffset = 0;
   const int nVB = Upload.GetRawSRV(Tri.VertexBuffer.StartAddress, nOffset);
   Inst.nGeom[0] = nVB >= 0 ? (uint32)nVB : XR_RAY_NONE;
@@ -481,6 +713,7 @@ void CD3D12RayScene::FillInstance(SRayInstance &Inst, const SPipelineKey &Key, c
       Inst.nLayout[3] = (uint32)nOffset;
     }
   }
+  Inst.nPath[3] = XR_RAY_NONE;
   Inst.nMaterial[0] = dc.nFlags;
   Inst.nMaterial[1] = dc.nFlags2;
   Inst.nMaterial[2] = dc.nTex0;
@@ -718,6 +951,12 @@ void CD3D12RayScene::Build(FILE *pDump, bool bTop)
   if (FAILED(Device.GetCmdList()->QueryInterface(IID_PPV_ARGS(&pList))))
     return;
   CollectPools();
+  const bool bCoverage = g_pRenderer->CV_d3d12_RTAlphaCoverage != 0 && bTop && InitCoverage();
+  if (m_pCoverage)
+    CollectCoverage();
+  if (m_pCoverage && !g_pRenderer->CV_d3d12_RTAlphaCoverage)
+    ReleaseCoverage();
+  m_nCoverageMade = 0;
   const int nSlot = Device.GetFrameSlot();
   SFrameSlot &Slot = m_Slots[nSlot];
   for (SFrameSlot &Each : m_Slots)
@@ -904,6 +1143,7 @@ void CD3D12RayScene::Build(FILE *pDump, bool bTop)
     D3D12_RAYTRACING_INSTANCE_DESC *pInstances = (D3D12_RAYTRACING_INSTANCE_DESC *)InstanceMem.pCPU;
     const SD3D12FrameAlloc RayInstanceMem = g_pRenderer->m_pUpload->AllocFrame(std::max(nInstances, 1u) * (uint32)sizeof(SRayInstance), 256);
     SRayInstance *pRayInstances = (SRayInstance *)RayInstanceMem.pCPU;
+    std::vector<SCoverageJob> CoverageJobs;
     for (const SDraw &d : m_Draws)
     {
       if (!d.nBlas || nInstance >= nInstances)
@@ -919,8 +1159,12 @@ void CD3D12RayScene::Build(FILE *pDump, bool bTop)
       Instance.Flags = D3D12_RAYTRACING_INSTANCE_FLAG_TRIANGLE_CULL_DISABLE;
       Instance.AccelerationStructure = d.nBlas;
       pRayInstances[nInstance] = d.Inst;
+      if (bCoverage)
+        pRayInstances[nInstance].nPath[3] = UseCoverage(d, nInstance, CoverageJobs, m_nCoverageMade);
       pInstances[nInstance++] = Instance;
     }
+    if (bCoverage)
+      MakeCoverage(pList.Get(), pAsync != nullptr, CoverageJobs, RayInstanceMem.nGPU);
     TopInputs.NumDescs = nInstance;
     TopInputs.InstanceDescs = InstanceMem.nGPU;
     D3D12_BUILD_RAYTRACING_ACCELERATION_STRUCTURE_DESC TopDesc = {};
@@ -938,10 +1182,15 @@ void CD3D12RayScene::Build(FILE *pDump, bool bTop)
   }
   m_nSceneInstances = nInstance;
   m_nSceneTriangles = nInstance ? nTris : 0;
+  m_nFrameBlasBuilt = (uint32)nFrame;
+  m_nStaticBlasBuilt = (uint32)nNewStatic;
   if (pAsync)
     Device.SubmitAsyncCompute();
 
   Evict((uint64)std::max(g_pRenderer->CV_d3d12_RTMemory, 16) << 20);
+  if (pDump && m_pCoverage)
+    fprintf(pDump, "ray scene: alpha tests' shares (d3d12_RTAlphaCoverage) of %d meshes, %.1f MB of %.0f, %u triangles made this frame\n",
+            (int)m_Coverage.size(), m_nCoverageBytes / 1048576.0, COVERAGE_BYTES / 1048576.0, m_nCoverageMade);
   if (pDump)
   {
     uint64 nPools = 0;
@@ -1077,8 +1326,9 @@ void CD3D12Renderer::BuildRayScene(std::span<const SRenderItem> Opaque, std::spa
   // the main view would draw them.
   if (WantsOffscreenRays() && m_nRayOffscreenFrame == m_nFrames && !m_RayOffscreenItems.empty())
   {
-    std::unordered_set<uint64> Parts;
-    Parts.reserve((Opaque.size() + m_RayOffscreenItems.size()) * 2);
+    CWordSet<uint64> &Parts = m_RayWalkedParts;
+    Parts.clear();
+    Parts.reserve(Opaque.size() + m_RayOffscreenItems.size());
     for (const SRenderItem &it : Opaque)
     {
       if (IsRayWalked(it))
@@ -1092,7 +1342,7 @@ void CD3D12Renderer::BuildRayScene(std::span<const SRenderItem> Opaque, std::spa
     m_pRayScene->SetCaptureSource(CD3D12RayScene::SOURCE_OFFSCREEN);
     for (const SRenderItem &it : m_RayOffscreenItems)
     {
-      if (Parts.insert(PartKey(it)).second)
+      if (Parts.insert(PartKey(it)))
         Walk(it);
     }
   }

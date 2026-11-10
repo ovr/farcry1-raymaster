@@ -42,6 +42,9 @@ console variable gets its row there too (the unit test `Config_Documented` check
   or `list2` where the engine sees the container. No global objects with non-trivial destructors
   (the DLL's unload order): state lives in classes made in `Init`. Objects on the heap take no
   over-aligned types (`StdAfx.h`: CrySystem's heap aligns to 4 bytes).
+- **Comments** are at most 3 lines and say the main point: why the code is there or what it
+  is for, never what it does line by line. A comment never repeats the code (names, values,
+  steps that the code already shows). Longer only for a diagram or an architectural decision.
 - **Parity with the original renderer:** where ours differs for the better (it looks better or is
   more correct), keep ours; fix only what is worse or wrong.
 

@@ -92,6 +92,7 @@ struct SPathShade
   uint nLights;         //!< the lamps in g_PTLights
   uint nMask;           //!< the instances the rays towards the sun and the lamps see
   uint nMaxTests;       //!< their alpha tests at most
+  uint nCoverage;       //!< their RayCandidatePasses' seed (d3d12_RTAlphaCoverage; 0: the exact tests)
 };
 
 //! A point of the scene as the path tracer takes it.
@@ -235,7 +236,7 @@ float3 PathSun(float3 vPos, float3 vN, float3 vFace, SPathShade P, float fConeWi
   const float fNL = dot(vN, g_Frame.vSunDir.xyz);
   if (fNL <= 0 || all(P.vSun <= 0))
     return 0;
-  return P.vSun * fNL * TraceSun(vPos, vFace, P.nMask, fConeWidth, P.nMaxTests);
+  return P.vSun * fNL * TraceSun(vPos, vFace, P.nMask, fConeWidth, P.nMaxTests, P.nCoverage);
 }
 
 //! A lamp's falloff, as light, at x = its distance over its radius: as the raster's dynamic light (1 - smoothstep(0, 0.9,
@@ -319,7 +320,7 @@ float3 PathDirect(SPathSurface H, SPathShade P, float fConeWidth)
       continue;
     float fHit;
     vLight += vLamp * TraceLight(H.vPos, H.vFaceNormal, vToLight, fDistance, PathLampGap(g_PTLights[i], P), P.nMask, fConeWidth, fHit,
-                                 P.nMaxTests);
+                                 P.nMaxTests, P.nCoverage);
   }
   return vLight;
 }
@@ -366,7 +367,7 @@ float3 PathSampleLamp(float3 vPos, float3 vN, float3 vFace, SPathShade P, inout 
   // The picked one's light over its chance: fSum / fPicked among the candidates, they nCandidates of all the lamps.
   const float fScale = fSum / fPicked * (bAll ? 1 : (float)P.nLights / nCandidates);
   float fHit;
-  return vPicked * fScale * TraceLight(vPos, vFace, vPickedDir, fPickedDistance, fPickedGap, P.nMask, fConeWidth, fHit, P.nMaxTests);
+  return vPicked * fScale * TraceLight(vPos, vFace, vPickedDir, fPickedDistance, fPickedGap, P.nMask, fConeWidth, fHit, P.nMaxTests, P.nCoverage);
 }
 
 #endif

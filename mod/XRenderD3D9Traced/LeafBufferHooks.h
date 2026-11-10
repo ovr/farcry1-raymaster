@@ -10,12 +10,15 @@
 //	not through IRenderer. The hooks replace the entries of the CLeafBuffer
 //	vtable of the original renderer with tracing functions that forward to
 //	the original ones, so every leaf buffer is traced, including the ones the
-//	renderer uses internally. XRENDERTRACED_NO_LB_HOOKS=1 turns them off.
+//	renderer uses internally. XRENDERTRACED_NO_LB_HOOKS=1 turns them off, and
+//	so does LeafBufferHooks_Disable (XRenderD3D12 without XRENDERTRACED_HOOKS=1).
 //
 //////////////////////////////////////////////////////////////////////
 
 #pragma once
 
+//! No hooks from now on (before the first one); szReason goes in the log.
+void LeafBufferHooks_Disable(const char *szReason);
 //! Hooks the vtable of pLB's class (once; later calls only check it is the same class).
 void LeafBufferHooks_Install(CLeafBuffer *pLB);
 //! Restores the original vtable entries.

@@ -21,7 +21,10 @@
 #include "Test_TaaResolve.h"
 #include "Test_TaaDilate.h"
 #include "Test_TaaSharpen.h"
+#include "Test_TaaSharpenKernel.h"
+#include "Test_TaaResolveKernel.h"
 #include "Test_TaaWorking.h"
+#include "Shaders/Constants.h"
 
 #include <algorithm>
 #include <cmath>
@@ -89,6 +92,8 @@ namespace
     d.Test.vTest[0] = fLeastShare;
     d.Test.vTest[1] = fExposure;
     d.Test.vTest[3] = fMovingShare;
+    d.Test.vTest2[0] = 1.0f / Frame.w;
+    d.Test.vTest2[1] = 1.0f / Frame.h;
     d.nGroups[0] = Groups64(n);
     d.Textures = { Texture(Frame), Texture(Depth), Texture(Motion), Texture(History) };
     d.nOut = 2 * n;
@@ -620,4 +625,120 @@ XR_TEST(Taa_CasKeepsHighlights)
         CHECK_MSG(fWorst < 2e-3, std::string(pPicture == &Sky ? "sky" : "opening") + ", exposure " + std::to_string(fExposure) +
                                      ", sharpness " + std::to_string(fSharpness) + ": " + std::to_string(fWorst) + " past the 3 x 3's range");
       }
+}
+
+//! The renderer's sharpening kernel (Taa.hlsl's, from its own source), which loads its group's pixels and their border
+//! into groupshared once and takes CAS's 3 x 3s from there, gives each pixel the bits CSTaaSharpen gives (each of its 3 x
+//! 3s loaded from the picture): at 37 x 21 (the last groups partly off the picture, the tile's border clamped into it), on
+//! a noise of the LDR colours and of the HDR light from 0.001 to 2000, at the exposure of the constants and of the
+//! exposure's texture, at the sharpness's middle and most. Why: the tile is there only to load and convert each pixel
+//! once (d3d12_AA taa's sharpening 0.56 -> 0.52 ms at 4K); the picture must not change by a bit.
+XR_TEST(Taa_CasTileGivesTheSameBits)
+{
+  const int w = 37, h = 21;
+  struct SCase
+  {
+    float fExposure;
+    bool bTexture;   // the exposure from t1 (TAA_EXPOSURE), else vParams.z
+  };
+  for (const SCase c : { SCase{ 0, false }, SCase{ 0.7f, false }, SCase{ 4, true } })
+  {
+    SImage Picture(w, h);
+    uint32 s = 777;
+    for (size_t i = 0; i < Picture.v.size(); i++)
+    {
+      s = s * 1664525u + 1013904223u;
+      const float u = (float)(s >> 8) / 16777216.0f;
+      Picture.v[i] = i % 4 == 3 ? 1 : c.fExposure > 0 ? 0.001f * std::pow(2e6f, u) : u;
+    }
+    for (const float fSharpness : { 0.5f, 1.0f })
+    {
+      STaaConstants k = {};
+      k.vSize[0] = (float)w;
+      k.vSize[1] = (float)h;
+      k.vSize[2] = 1.0f / w;
+      k.vSize[3] = 1.0f / h;
+      k.vParams[1] = fSharpness;
+      k.vParams[2] = c.bTexture ? 1 : c.fExposure;
+      k.vFlags[0] = (c.fExposure > 0 ? TAA_HDR : 0) | (c.bTexture ? TAA_EXPOSURE : 0);
+      CasSetup(k.vCas0, k.vCas1, fSharpness, (float)w, (float)h, (float)w, (float)h);
+      std::vector<STestTexture> Textures = { Texture(Picture) };
+      if (c.bTexture)
+      {
+        STestTexture e;
+        e.nWidth = e.nHeight = 1;
+        e.Format = DXGI_FORMAT_R32_FLOAT;
+        e.Data.resize(4);
+        memcpy(e.Data.data(), &c.fExposure, 4);
+        Textures.push_back(e);
+      }
+      const uint32 nGroups[3] = { (w + XR_TAA_GROUP - 1) / XR_TAA_GROUP, (h + XR_TAA_GROUP - 1) / XR_TAA_GROUP, 1 };
+      const std::vector<float> Got = Gpu().RunCompute2D(XR_BYTECODE(Test_TaaSharpenKernel), &k, sizeof(k), Textures, w, h, nGroups);
+      const SImage Want = Sharpen(Picture, fSharpness, c.fExposure);
+      size_t nDiffer = 0;
+      for (size_t i = 0; i < Want.v.size(); i++)
+        nDiffer += memcmp(&Got[i], &Want.v[i], 4) != 0;
+      CHECK_MSG(nDiffer == 0, "exposure " + std::to_string(c.fExposure) + (c.bTexture ? " (texture)" : "") + ", sharpness " +
+                                  std::to_string(fSharpness) + ": " + std::to_string(nDiffer) + " of " + std::to_string(Want.v.size()) +
+                                  " floats differ");
+    }
+  }
+}
+
+//! The renderer's resolve kernel (Taa.hlsl's with XR_TAA_RESOLVE, from its own source) gives each pixel the new
+//! history's bits CSTaaResolve gives, the kernel the other tests of the resolve run: at 37 x 21 (the last groups partly
+//! off the picture), depths of eight levels (many equal: the first of equals wins), motions up to two pixels, LDR, HDR
+//! and a reset. Why: those tests hold for the renderer's resolve only while its loads, clamps and constants (vSize's
+//! reciprocals from the CPU) are what the test kernel's are.
+XR_TEST(Taa_ResolveKernelGivesTheSameBits)
+{
+  const int w = 37, h = 21;
+  uint32 s = 4242;
+  auto Next = [&s]() {
+    s = s * 1664525u + 1013904223u;
+    return (float)(s >> 8) / 16777216.0f;
+  };
+  SImage Frame(w, h), Depth(w, h), Motion(w, h), History(w, h);
+  for (int y = 0; y < h; y++)
+    for (int x = 0; x < w; x++)
+    {
+      float *f = Frame.At(x, y), *d = Depth.At(x, y), *m = Motion.At(x, y), *c = History.At(x, y);
+      for (int k = 0; k < 3; k++)
+      {
+        f[k] = Next();
+        c[k] = Next();
+      }
+      f[3] = 1;
+      c[3] = Next();
+      d[0] = (float)(int)(Next() * 8) / 8;
+      m[0] = (Next() * 4 - 2) / w;
+      m[1] = (Next() * 4 - 2) / h;
+    }
+  struct SCase
+  {
+    uint32 nTest;     // CSTaaResolve's flags: NO_HISTORY, HDR
+    uint32 nKernel;   // the kernel's: TAA_RESET, TAA_HDR
+    float fExposure;
+  };
+  for (const SCase c : { SCase{ 0, 0, 0 }, SCase{ HDR, TAA_HDR, 0.7f }, SCase{ NO_HISTORY, TAA_RESET, 0 } })
+  {
+    STaaConstants k = {};
+    k.vSize[0] = (float)w;
+    k.vSize[1] = (float)h;
+    k.vSize[2] = 1.0f / w;
+    k.vSize[3] = 1.0f / h;
+    k.vParams[0] = HIGH;
+    k.vParams[2] = c.fExposure;
+    k.vParams[3] = HIGH_MOVING;
+    k.vFlags[0] = c.nKernel;
+    const uint32 nGroups[3] = { (w + XR_TAA_GROUP - 1) / XR_TAA_GROUP, (h + XR_TAA_GROUP - 1) / XR_TAA_GROUP, 1 };
+    const std::vector<float> Got = Gpu().RunCompute2D(XR_BYTECODE(Test_TaaResolveKernel), &k, sizeof(k),
+                                                      { Texture(Frame), Texture(Depth), Texture(Motion), Texture(History) }, w, h, nGroups);
+    const SImage Want = Resolve(Frame, Depth, Motion, History, c.nTest, HIGH, c.fExposure, HIGH_MOVING).Picture;
+    size_t nDiffer = 0;
+    for (size_t i = 0; i < Want.v.size(); i++)
+      nDiffer += memcmp(&Got[i], &Want.v[i], 4) != 0;
+    CHECK_MSG(nDiffer == 0, "flags " + std::to_string(c.nKernel) + ": " + std::to_string(nDiffer) + " of " + std::to_string(Want.v.size()) +
+                                " floats differ");
+  }
 }

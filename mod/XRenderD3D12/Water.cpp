@@ -56,6 +56,7 @@
 #include "SkyFogBand.h"
 #include "BeachLayers.h"
 #include "PondRipple.h"
+#include "WaterReflection.h"
 #include <atomic>
 
 namespace
@@ -95,9 +96,7 @@ float Sign(float f)
   return f > 0 ? 1.0f : f < 0 ? -1.0f : 0.0f;
 }
 
-// The water reflection is redrawn after at most this many seconds (with r_WaterUpdateFactor), and
-// its camera's near plane is at most this far.
-constexpr float REFLECTION_MAX_INTERVAL = 0.3f;
+// The water reflection camera's near plane is at most this far.
 constexpr float REFLECTION_MAX_NEAR = 16.0f;
 
 //! A triangle over the whole target (clip space).
@@ -583,18 +582,27 @@ int CD3D12Renderer::GetPondRippleTexture()
   return m_nPondRippleTexture > 0 ? m_pTextures->GetSRV(m_nPondRippleTexture) : -1;
 }
 
-bool CD3D12Renderer::CopySceneForWater(const int *pRect)
+bool CD3D12Renderer::CopySceneForWater(const int *pRect, bool bDepth)
 {
   if (!m_pDevice || !m_pDescriptors)
     return false;
   // The copies of the main view's target: the back buffer, or the HDR target or an upscaler's scene.
   SSceneCopy &Copy = m_SceneCopies[m_pDevice->IsInScene() || m_pDevice->IsInHdr() ? 1 : 0];
-  if (!EnsureSceneCopy(Copy))
+  const bool bKernel = WaterDepthByKernel();
+  if (!EnsureSceneCopy(Copy, bKernel))
     return false;
+  CGpuSubSection Section(*this, "water scene copy");
   if (pRect)
   {
     const D3D12_BOX Box = { (UINT)pRect[0], (UINT)pRect[1], 0, (UINT)pRect[2], (UINT)pRect[3], 1 };
     m_pDevice->CopyTargets(Copy.pColor.Get(), nullptr, &Box);
+  }
+  else if (!bDepth)
+    m_pDevice->CopyTargets(Copy.pColor.Get(), nullptr);
+  else if (bKernel)
+  {
+    m_pDevice->CopyTargets(Copy.pColor.Get(), nullptr);
+    CopyDepthByKernel(Copy);
   }
   else
   {
@@ -604,22 +612,23 @@ bool CD3D12Renderer::CopySceneForWater(const int *pRect)
   }
   m_nSceneColorSRV = Copy.nColorSRV;
   m_nSceneDepthSRV = Copy.nDepthSRV;
-  m_bSceneCopied = !pRect;
-  m_pSceneCopy = pRect ? nullptr : &Copy;
+  m_bSceneCopied = !pRect && bDepth;
+  m_pSceneCopy = m_bSceneCopied ? &Copy : nullptr;
   m_nSceneTileSRV = -1;
   return true;
 }
 
-bool CD3D12Renderer::EnsureSceneCopy(SSceneCopy &Copy)
+bool CD3D12Renderer::EnsureSceneCopy(SSceneCopy &Copy, bool bDepthByKernel)
 {
   if (!m_pDevice || !m_pDescriptors)
     return false;
   const int w = m_pDevice->GetMainWidth(), h = m_pDevice->GetMainHeight();
   const DXGI_FORMAT ColorFormat = m_pDevice->GetMainColorFormat(), DepthFormat = m_pDevice->GetMainDepthSRVFormat();
-  if (!Copy.pColor || w != Copy.nWidth || h != Copy.nHeight || ColorFormat != Copy.ColorFormat || DepthFormat != Copy.DepthFormat)
+  if (!Copy.pColor || w != Copy.nWidth || h != Copy.nHeight || ColorFormat != Copy.ColorFormat || DepthFormat != Copy.DepthFormat ||
+      bDepthByKernel != Copy.bDepthByKernel)
   {
     FreeSceneCopy(Copy);
-    if (!m_pDevice->CreateTargetCopies(Copy.pColor, &Copy.pDepth))
+    if (!m_pDevice->CreateTargetCopies(Copy.pColor, &Copy.pDepth, bDepthByKernel))
       return false;
     Copy.nColorSRV = m_pDescriptors->AllocSRV(Copy.pColor.Get(), nullptr);
     D3D12_SHADER_RESOURCE_VIEW_DESC Desc = {};
@@ -632,13 +641,64 @@ bool CD3D12Renderer::EnsureSceneCopy(SSceneCopy &Copy)
     Copy.nHeight = h;
     Copy.ColorFormat = ColorFormat;
     Copy.DepthFormat = DepthFormat;
-    if (Copy.nColorSRV < 0 || Copy.nDepthSRV < 0)
+    Copy.bDepthByKernel = bDepthByKernel;
+    if (bDepthByKernel)
+    {
+      // The kernel's tables, one a frame slot (t0 the depth buffer, written each frame; u0 the copy's words).
+      constexpr int TABLE = CD3D12Compute::COMPUTE_SRVS + CD3D12Compute::COMPUTE_UAVS;
+      Copy.nCopyTables = m_pDescriptors->AllocRange(D3D12_FRAMES * TABLE);
+      D3D12_SHADER_RESOURCE_VIEW_DESC SRV = {};
+      SRV.Format = DXGI_FORMAT_R32_FLOAT;
+      SRV.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
+      SRV.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+      SRV.Texture2D.MipLevels = 1;
+      D3D12_UNORDERED_ACCESS_VIEW_DESC UAV = {};
+      UAV.Format = DXGI_FORMAT_R32_UINT;
+      UAV.ViewDimension = D3D12_UAV_DIMENSION_TEXTURE2D;
+      for (int f = 0; Copy.nCopyTables >= 0 && f < D3D12_FRAMES; f++)
+      {
+        const int nTable = Copy.nCopyTables + f * TABLE;
+        for (int i = 0; i < CD3D12Compute::COMPUTE_SRVS; i++)
+          m_pDescriptors->WriteSRV(nTable + i, nullptr, &SRV);
+        for (int i = 0; i < CD3D12Compute::COMPUTE_UAVS; i++)
+          m_pDescriptors->WriteUAV(nTable + CD3D12Compute::COMPUTE_SRVS + i, i == 0 ? Copy.pDepth.Get() : nullptr, &UAV);
+      }
+    }
+    if (Copy.nColorSRV < 0 || Copy.nDepthSRV < 0 || (bDepthByKernel && Copy.nCopyTables < 0))
     {
       FreeSceneCopy(Copy);
       return false;
     }
   }
   return true;
+}
+
+bool CD3D12Renderer::WaterDepthByKernel()
+{
+  return CV_d3d12_WaterDepthCopy && m_pDevice && m_pCompute && m_pDevice->IsInScene() && !m_pDevice->IsInMsaa() &&
+         m_pDevice->GetMainDepthSRVFormat() == DXGI_FORMAT_R32_FLOAT && m_pCompute->HasKernel(eD3D12K_DepthCopy);
+}
+
+void CD3D12Renderer::CopyDepthByKernel(SSceneCopy &Copy)
+{
+  ID3D12Resource *pDepth = m_pDevice->GetMainDepth();
+  if (!pDepth || !Copy.pDepth || Copy.nCopyTables < 0)
+    return;
+  const int nTable = Copy.nCopyTables + m_pDevice->GetFrameSlot() * (CD3D12Compute::COMPUTE_SRVS + CD3D12Compute::COMPUTE_UAVS);
+  D3D12_SHADER_RESOURCE_VIEW_DESC SRV = {};
+  SRV.Format = DXGI_FORMAT_R32_FLOAT;
+  SRV.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
+  SRV.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+  SRV.Texture2D.MipLevels = 1;
+  m_pDescriptors->WriteSRV(nTable, pDepth, &SRV);
+  // The depth buffer read with its depth test's state kept (the next draw gets it back to write), the copy written, then
+  // read as the copy of the resource left it.
+  constexpr D3D12_RESOURCE_STATES DEPTH_READ = D3D12_RESOURCE_STATE_DEPTH_READ | D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE;
+  m_pDevice->Require(pDepth, DEPTH_READ);
+  m_pDevice->Require(Copy.pDepth.Get(), D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+  m_pCompute->Dispatch(m_pDevice->GetCmdList(), eD3D12K_DepthCopy, 0, nTable, nTable + CD3D12Compute::COMPUTE_SRVS,
+                       (UINT)(Copy.nWidth + 7) / 8, (UINT)(Copy.nHeight + 7) / 8);
+  m_pDevice->Require(Copy.pDepth.Get(), D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
 }
 
 bool CD3D12Renderer::BuildDepthTiles()
@@ -706,6 +766,7 @@ bool CD3D12Renderer::BuildDepthTiles()
   ID3D12GraphicsCommandList *pList = m_pDevice->GetCmdList();
   // The depth copy read by the kernel and the water's pixels, the tiles written, then read by the water's pixels (the
   // device keeps their states).
+  CGpuSubSection Section(*this, "water depth tiles");
   m_pDevice->Require(pCopy->pDepth.Get(), READ);
   m_pDevice->Require(pTiles, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
   m_pCompute->Dispatch(pList, eD3D12K_DepthTiles, CB.nGPU, pCopy->nTileTables, pCopy->nTileTables + CD3D12Compute::COMPUTE_SRVS,
@@ -744,6 +805,8 @@ void CD3D12Renderer::FreeSceneCopy(SSceneCopy &Copy)
       m_pDescriptors->FreeSRV(Copy.nColorSRV);
     if (Copy.nDepthSRV >= 0)
       m_pDescriptors->FreeSRV(Copy.nDepthSRV);
+    if (Copy.nCopyTables >= 0)
+      m_pDescriptors->FreeRange(Copy.nCopyTables, D3D12_FRAMES * (CD3D12Compute::COMPUTE_SRVS + CD3D12Compute::COMPUTE_UAVS));
   }
   if (m_pDevice)
   {
@@ -830,16 +893,13 @@ void CD3D12Renderer::UpdateWaterReflection(std::span<const SRenderItem> Items)
     m_nReflectionHeight = h;
   }
 
-  // Due when the last one is older than r_WaterUpdateFactor seconds per metre to the nearest water
-  // (at most 0.3 s), or the camera has moved more than r_WaterUpdateDistance or turned more than
-  // r_WaterUpdateDeltaAngle degrees since.
   const float fToWater = p3D->GetDistanceToSectorWithWater();
   const float fTime = iTimer ? iTimer->GetCurrTime() : 0.0f;
   const Vec3 vDir = ConvertToRadAngles(Camera.GetAngles());
   const bool bDue = !m_bReflectionValid || fWaterZ != m_fReflectionWaterZ || fTime < m_fReflectionTime ||
-                    fTime - m_fReflectionTime > std::min(CV_r_WaterUpdateFactor * fToWater, REFLECTION_MAX_INTERVAL) ||
-                    (vPos - m_vReflectionCamPos).GetLength() > CV_r_WaterUpdateDistance ||
-                    vDir.Dot(m_vReflectionCamDir) < cosf(DEG2RAD(CV_r_WaterUpdateDeltaAngle));
+                    WaterReflection::IsDue(fTime - m_fReflectionTime, fToWater, (vPos - m_vReflectionCamPos).GetLength(),
+                                           vDir.Dot(m_vReflectionCamDir), CV_r_WaterUpdateFactor, CV_r_WaterUpdateMinInterval,
+                                           CV_r_WaterUpdateDistance, cosf(DEG2RAD(CV_r_WaterUpdateDeltaAngle)));
   if (!bDue)
     return;
 
@@ -1014,7 +1074,7 @@ bool CD3D12Renderer::SetupWaterDraw(SPipelineKey &Key, SDrawConstants &dc, const
   // The depth tiles of the copy for the march of the ocean's screen space reflection (a lake's or a
   // river's meets its banks near the water: the tiles would cost more than they save).
   dc.nShadowTex[0] = dc.nShadowTex[1] = 0;
-  if (!m_bEnvCubePass && IsOcean(it) && (m_nSceneTileSRV >= 0 || BuildDepthTiles()))
+  if (!m_bEnvCubePass && IsOcean(it) && CV_d3d12_WaterSSR && (m_nSceneTileSRV >= 0 || BuildDepthTiles()))
   {
     dc.nShadowTex[0] = (uint32)m_nSceneTileSRV;
     dc.nShadowTex[1] = DEPTH_TILE_LEVELS;
@@ -1090,6 +1150,7 @@ bool CD3D12Renderer::SetupWaterDraw(SPipelineKey &Key, SDrawConstants &dc, const
     if (CV_d3d12_RTSunShadows > 0)
       dc.vSpecular[3] = 2;
   }
+  dc.vTexGenV[3] = CV_d3d12_WaterSSR ? 0.0f : 1.0f;
 
   Set4(dc.vParams2, WATER_ABSORPTION[0] + WATER_TURBIDITY, WATER_ABSORPTION[1] + WATER_TURBIDITY, WATER_ABSORPTION[2] + WATER_TURBIDITY,
        WATER_DISPLACEMENT);
@@ -1137,10 +1198,10 @@ bool CD3D12Renderer::SetupWaterDraw(SPipelineKey &Key, SDrawConstants &dc, const
   return true;
 }
 
-bool CD3D12Renderer::SetupBeachDraw(SPipelineKey &Key, SDrawConstants &dc, int nPass, bool bFaint)
+void CD3D12Renderer::LoadBeachTextures(bool bFaint)
 {
-  if (!m_pTextures || (bFaint && CV_d3d12_BeachResearch <= 0))
-    return false;
+  if (!m_pTextures)
+    return;
   if (!m_pBeachTexture)
     m_pBeachTexture = m_pTextures->LoadTexture("textures/wave1", FT_CLAMP, 0, eTT_Base, -1, -1, -1, 0);
   if (!m_pBeachWetTexture)
@@ -1153,6 +1214,13 @@ bool CD3D12Renderer::SetupBeachDraw(SPipelineKey &Key, SDrawConstants &dc, int n
     m_pBeachFaintTexture = m_pTextures->LoadTexture("textures/wave2", FT_CLAMP, 0, eTT_Base, -1, -1, -1, 0);
   if (bFaint && !m_pBeachDetailTexture)
     m_pBeachDetailTexture = m_pTextures->LoadTexture("textures/water1", 0, 0, eTT_Base, -1, -1, -1, 0);
+}
+
+bool CD3D12Renderer::SetupBeachDraw(SPipelineKey &Key, SDrawConstants &dc, int nPass, bool bFaint)
+{
+  if (!m_pTextures || (bFaint && CV_d3d12_BeachResearch <= 0))
+    return false;
+  LoadBeachTextures(bFaint);
   static_assert(BeachLayers::WAVES == BEACH_WAVES);
   const BeachLayers::SLayer Layer = BeachLayers::Layer(nPass, bFaint);
   CTexture *pTex = nullptr;

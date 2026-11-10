@@ -15,6 +15,7 @@
 #include "D3D12Upload.h"
 #include "D3D12Descriptors.h"
 #include "RayTracing.h"
+#include "AlphaDepth.h"
 
 namespace
 {
@@ -153,6 +154,9 @@ void CD3D12Renderer::MakeFrameConstants(SFrameConstants &fc, bool bScene) const
     fc.nPrevScene[3] = (uint32)m_ReflCopySize[1];
   }
   SetCascadeConstants(fc);
+  if (m_pRayScene && CV_d3d12_RTAlphaCoverage)
+    fc.nRayCoverage[0] = m_pRayScene->GetCoverageView();
+  fc.nRayCoverage[1] = CV_d3d12_AlphaTestEarly ? 1 : 0;
   const float fFoliageEnd = std::max(CV_d3d12_FoliageTranslucencyDistance, 1.0f);
   Set4(fc.vFoliage, std::max(CV_d3d12_FoliageTranslucency, 0.0f), std::max(CV_d3d12_FoliageTranslucencyPower, 0.1f), fFoliageEnd, 2 / fFoliageEnd);
   if (m_RaySun.bActive && m_RaySun.pMask)
@@ -207,10 +211,20 @@ void CD3D12Renderer::DrawGeometry(const SPipelineKey &Key, const SDrawConstants 
                           (Key.nState & (GS_BLSRC_MASK | GS_BLDST_MASK | GS_NODEPTHTEST | GS_DEPTHFUNC_EQUAL | GS_DEPTHFUNC_GREAT)) ||
                           (dc.nFlags & DF_ALPHATEST)))
     return;
+  // The leaves' and the grass's depth pass and their colour after it (DrawItems, d3d12_FoliagePrepass): the general program's
+  // draws that write the depth with LESS_EQUAL and whose alpha at their test is their vertices' times their texture's
+  // (AlphaDepth.h); the depth pass draws them alone. The same draws in both: the same items, constants and flags.
+  const bool bAlphaDepth = (m_bAlphaPrepass || m_bAlphaColour) && Key.nProgram == eD3D12P_General && Key.nTarget == 0 && !Key.bWireframe &&
+                           !Key.bDepthBias && (Key.nState & GS_DEPTHWRITE) &&
+                           !(Key.nState & (GS_BLSRC_MASK | GS_BLDST_MASK | GS_NODEPTHTEST | GS_DEPTHFUNC_EQUAL | GS_DEPTHFUNC_GREAT)) &&
+                           !m_bNoDepthWrite && AlphaDepth::Covers(dc.nFlags, dc.nFlags2, dc.fAlphaRef, dc.nParallax[0]);
+  if (m_bAlphaPrepass && !bAlphaDepth)
+    return;
+  const bool bPrepass = m_bDepthPrepass || m_bAlphaPrepass;
   const bool bOffscreen = m_pDevice->IsOffscreen();
   const bool bScene = m_pDevice->IsSceneBound();
   // The water reflection's draws for the scene for rays (RayTracing.h).
-  if (m_pRayScene && !m_bDepthPrepass && m_pRayScene->IsCapturingReflection())
+  if (m_pRayScene && !bPrepass && m_pRayScene->IsCapturingReflection())
     m_pRayScene->CaptureDraw(Key, dc, eTopology, VB, pIB, nCount, nFirst, nBaseVertex, pTexCoord1);
   // The main view's draws that reflect a cube map, with rays in its place (d3d12_RTReflectionSurfaces;
   // not the leaves letting the sun through), and the metals and smooth materials of the RayMaster maps
@@ -220,7 +234,7 @@ void CD3D12Renderer::DrawGeometry(const SPipelineKey &Key, const SDrawConstants 
   const bool bPbrLightPass = dc.nPbr[2] && (dc.nPbr[3] & XR_PBR_LIGHT_PASS);
   const bool bRayView = Key.nProgram == eD3D12P_General && !(dc.nFlags2 & DF2_FOLIAGE) && Key.nTarget == 0 && !bOffscreen && !m_bEnvCubePass &&
                         !m_bReflectionPass && !m_bSpritePass && WantsRaySurfaces();
-  const bool bSurfaceRays = bRayView && ((dc.nFlags & DF_CUBE0) || (dc.nPbr[2] && !bPbrLightPass)) && !m_bDepthPrepass;
+  const bool bSurfaceRays = bRayView && ((dc.nFlags & DF_CUBE0) || (dc.nPbr[2] && !bPbrLightPass)) && !bPrepass;
   if (bSurfaceRays)
     m_nRaySurfaceFrame = m_nFrames;
   // d3d12_RTPbrScreen: the main view a draw reflects by rays of the RayMaster maps in (the picture copied at its end).
@@ -230,12 +244,12 @@ void CD3D12Renderer::DrawGeometry(const SPipelineKey &Key, const SDrawConstants 
   // lights of the draw's list per pixel, a light pass's, a projector's.
   bool bLightRays = false;
   if (Key.nProgram == eD3D12P_General && dc.nLights && (dc.nFlags & DF_LIGHTING) && ((dc.nFlags & DF_PIXEL_LIGHTING) || (dc.nFlags2 & DF2_MATERIAL_LIGHT)) &&
-      Key.nTarget == 0 && !bOffscreen && !m_bDepthPrepass && !m_bEnvCubePass && !m_bReflectionPass && !m_bSpritePass && WantsRayLights())
+      Key.nTarget == 0 && !bOffscreen && !bPrepass && !m_bEnvCubePass && !m_bReflectionPass && !m_bSpritePass && WantsRayLights())
     for (uint32 i = 0; i < std::min<uint32>(dc.nLights, XR_MAX_DRAW_LIGHTS) && !bLightRays; i++)
       bLightRays = dc.vLightPos[i][3] == 1;
   // (DF2_LIGHTMAP_LIGHTS lights per pixel without DF_LIGHTING.)
   if (!bLightRays && Key.nProgram == eD3D12P_General && dc.nLights && (dc.nFlags2 & DF2_LIGHTMAP_LIGHTS) && (dc.nFlags & DF_TEX1_LIGHTMAP) &&
-      Key.nTarget == 0 && !bOffscreen && !m_bDepthPrepass && !m_bEnvCubePass && !m_bReflectionPass && !m_bSpritePass && WantsRayLights())
+      Key.nTarget == 0 && !bOffscreen && !bPrepass && !m_bEnvCubePass && !m_bReflectionPass && !m_bSpritePass && WantsRayLights())
     for (uint32 i = 0; i < std::min<uint32>(dc.nLights, XR_MAX_DRAW_LIGHTS) && !bLightRays; i++)
       bLightRays = dc.vLightPos[i][3] == 1;
   if (bLightRays)
@@ -274,6 +288,17 @@ void CD3D12Renderer::DrawGeometry(const SPipelineKey &Key, const SDrawConstants 
   // The depth prepass: the depth alone too; and a draw that asks for it (the ocean's grid's depth pass, DrawOceanGrid).
   FullKey.bDepthOnly = (FullKey.nTarget == 2 && Key.nProgram == eD3D12P_General && !(dc.nFlags & DF_ALPHATEST) &&
                         !(dc.nFlags2 & (DF2_CASCADE_CASTER | DF2_SHADER_FX))) || m_bDepthPrepass || Key.bDepthOnly ? 1 : 0;
+  // The leaves' and the grass's depth pass: the alpha's pixel shader alone (one pipeline whatever the colour's); their colour
+  // after it: the depth test EQUAL without writes, so the GPU tests before the pixel shader (the rest as the draw's).
+  if (bAlphaDepth)
+  {
+    FullKey.bAlphaDepth = m_bAlphaPrepass ? 1 : 2;
+    if (m_bAlphaPrepass)
+      FullKey.bCascades = 0;
+  }
+  // A caster of the sun's cascades that discards (SetupShadowCasterDraw's flags alone): a pixel shader of its discards.
+  if (CV_d3d12_CascadeCasterShader && m_bCascadePass && FullKey.nTarget == 2 && Key.nProgram == eD3D12P_General && !FullKey.bDepthOnly)
+    FullKey.bAlphaDepth = 3;
   // The ambient occlusion's target bound to the main view (AmbientOcclusion.cpp).
   FullKey.bAmbient = (FullKey.nTarget == 0 || FullKey.nTarget == 3) && m_pDevice->IsAmbientBound() ? 1 : 0;
   // The path tracer's G-buffer bound to the scene's targets (PathTrace.cpp).
@@ -294,7 +319,23 @@ void CD3D12Renderer::DrawGeometry(const SPipelineKey &Key, const SDrawConstants 
                              !(dc.nFlags2 & (DF2_FOG_VOLUME | DF2_SHADER_FX)) &&
                              nSrcBlend != GS_BLSRC_SRCALPHA && nSrcBlend != GS_BLSRC_ONEMINUSSRCALPHA && nSrcBlend != GS_BLSRC_ALPHASATURATE &&
                              nDstBlend != GS_BLDST_SRCALPHA && nDstBlend != GS_BLDST_ONEMINUSSRCALPHA ? 1 : 0;
+  // d3d12_DrawBatch: the draws of one mesh for consecutive objects of a list's items (DrawItems) in one instanced draw.
+  // A draw is held back; the next joins it where all it binds and draws is the same but its header's matrices and its
+  // header is the next 256 bytes (DrawBatch.h). Not the draws with rays, into a shadow map or instanced already.
+  const int nBatchMode = m_bDrawBatching ? CV_d3d12_DrawBatch : 0;
+  bool bBatch = nBatchMode > 0 && pIB && nInstances == 1 && !nRayScene && Key.nProgram == eD3D12P_General && FullKey.nTarget != 2 &&
+                !FullKey.bCascadeInstances;
+  // 1: every such draw with the instanced pipeline state, one instance or more: a run changes no state (the instanced
+  // state for the runs alone and the plain one after each: Pier's opaque list 0.03 ms more).
+  if (bBatch && nBatchMode == 1)
+    FullKey.bDrawObjects = 1;
   ID3D12PipelineState *pPSO = m_pPipeline->GetPSO(FullKey);
+  if (!pPSO && FullKey.bDrawObjects)
+  {
+    FullKey.bDrawObjects = 0;
+    bBatch = false;
+    pPSO = m_pPipeline->GetPSO(FullKey);
+  }
   if (!pPSO)
     return;
 
@@ -311,6 +352,152 @@ void CD3D12Renderer::DrawGeometry(const SPipelineKey &Key, const SDrawConstants 
   // in or the fog volumes; an additive draw other than a light pass is hot (fire, muzzle flashes).
   const bool bHeat = m_bHeatPass && (Key.nProgram == eD3D12P_General || Key.nProgram == eD3D12P_Water) &&
                      !(dc.nFlags & (DF_DETAIL_LAYER | DF_CAUSTICS | DF_SHADOW_PASS | DF_SCREEN_POS)) && !(dc.nFlags2 & DF2_FOG_VOLUME);
+  // The viewport inside the back buffer (an off screen target: all of it, or m_TargetRect); the
+  // scissor rectangle inside the viewport (the scissors are the back buffer's). In an upscaler's
+  // scene both are scaled from the back buffer's pixels to the scene's.
+  const int nBufW = m_pDevice->GetTargetWidth(), nBufH = m_pDevice->GetTargetHeight();
+  float sx = 1, sy = 1;
+  if (bScene)
+    GetSceneScale(sx, sy);
+  const auto X = [sx](int x) { return sx == 1 ? x : (int)lroundf(x * sx); };
+  const auto Y = [sy](int y) { return sy == 1 ? y : (int)lroundf(y * sy); };
+  const int x0 = X(m_Viewport[0]), y0 = Y(m_Viewport[1]);
+  int vx = std::clamp(x0, 0, nBufW), vy = std::clamp(y0, 0, nBufH);
+  int vw = std::clamp(X(m_Viewport[0] + m_Viewport[2]) - x0, 0, nBufW - vx), vh = std::clamp(Y(m_Viewport[1] + m_Viewport[3]) - y0, 0, nBufH - vy);
+  if (bOffscreen && m_bTargetRect)
+  {
+    vx = std::clamp((int)m_TargetRect.left, 0, nBufW);
+    vy = std::clamp((int)m_TargetRect.top, 0, nBufH);
+    vw = std::clamp((int)(m_TargetRect.right - m_TargetRect.left), 0, nBufW - vx);
+    vh = std::clamp((int)(m_TargetRect.bottom - m_TargetRect.top), 0, nBufH - vy);
+  }
+  else if (bOffscreen)
+  {
+    vx = vy = 0;
+    vw = nBufW;
+    vh = nBufH;
+  }
+  if (vw <= 0 || vh <= 0)
+    return;
+  const D3D12_VIEWPORT Viewport = { (float)vx, (float)vy, (float)vw, (float)vh, m_fDepthMin, m_fDepthMax };
+  RECT Scissor = { vx, vy, vx + vw, vy + vh };
+  if (m_bItemScissor && !bOffscreen)
+  {
+    Scissor.left = std::max<LONG>(Scissor.left, X(m_ItemScissor.left));
+    Scissor.top = std::max<LONG>(Scissor.top, Y(m_ItemScissor.top));
+    Scissor.right = std::min<LONG>(Scissor.right, X(m_ItemScissor.right));
+    Scissor.bottom = std::min<LONG>(Scissor.bottom, Y(m_ItemScissor.bottom));
+  }
+  if (m_bScissor && !bOffscreen)
+  {
+    Scissor.left = std::max<LONG>(Scissor.left, X(m_Scissor[0]));
+    Scissor.top = std::max<LONG>(Scissor.top, Y(m_Scissor[1]));
+    Scissor.right = std::min<LONG>(Scissor.right, X(m_Scissor[0] + m_Scissor[2]));
+    Scissor.bottom = std::min<LONG>(Scissor.bottom, Y(m_Scissor[1] + m_Scissor[3]));
+  }
+  if (Scissor.right <= Scissor.left || Scissor.bottom <= Scissor.top)
+    return;
+
+  // The draw's constants (Shaders/Constants.h), each part written once into the frame's memory with the renderer's
+  // changes (write-combined memory: never read back). The header (b1), every draw's, from a copy on the stack.
+  SDrawHead Head = dc;
+  if (bHeat)
+    Head.nFlags2 = dc.nFlags2 | DF2_HEAT;
+  // The motion vectors of a draw that gave none: still on the screen. Not for the depth alone (the depth prepass: no
+  // pixel shader reads them), but with d3d12_DrawExt 0, which uploads what the draws did before the default block.
+  const bool bAllExt = CV_d3d12_DrawExt <= 0;
+  if (bScene && (!FullKey.bDepthOnly || bAllExt) &&
+      std::all_of(std::begin(dc.mPrevWorldViewProj), std::end(dc.mPrevWorldViewProj), [](float f) { return f == 0; }))
+    memcpy(Head.mPrevWorldViewProj, dc.mWorldViewProj, sizeof(Head.mPrevWorldViewProj));
+  // Alpha to coverage: the reference negated (the scene for rays took the draw's own above).
+  if (FullKey.bAlphaToCoverage)
+    Head.fAlphaRef = -dc.fAlphaRef;
+  const SD3D12FrameAlloc HeadMem = m_pUpload->AllocFrame(sizeof(SDrawHead), 256);
+  memcpy(HeadMem.pCPU, &Head, sizeof(Head));
+  m_nFrameDrawBytes += sizeof(SDrawHead);
+  // The rest (b3): the draw's own where it reads it, else the default block (DrawExt.h); bound when it changes.
+  DrawExt::SDraw Ext;
+  Ext.bAll = bAllExt;
+  Ext.bGeneral = Key.nProgram == eD3D12P_General;
+  Ext.bDepthOnly = FullKey.bDepthOnly != 0;
+  Ext.bCascadeInstances = FullKey.bCascadeInstances != 0;
+  Ext.bChanged = bHeat;
+  Ext.nFlags2 = dc.nFlags2;
+  const DrawExt::EReason eExt = DrawExt::Needs(Ext, dc, m_pPipeline->GetDefaultDrawExtData());
+  m_nFrameDrawExt[eExt]++;
+  D3D12_GPU_VIRTUAL_ADDRESS nExt = m_pPipeline->GetDefaultDrawExt();
+  // The same bytes as the rest uploaded last in this frame's memory (most draws repeat the one before): that copy again
+  // (d3d12_DrawExtReuse). Not the renderer's changes below.
+  const bool bExtChanged = bHeat || (bPbrLightPass && !bRayView);
+  const uint64 nUploadFrame = m_pUpload->GetFrameGeneration();
+  const D3D12_GPU_VIRTUAL_ADDRESS nLastExt =
+    eExt != DrawExt::REASON_DEFAULT && !bExtChanged && CV_d3d12_DrawExtReuse > 0 ? m_LastExt.Find(dc, nUploadFrame) : 0;
+  if (nLastExt)
+  {
+    nExt = nLastExt;
+    m_nFrameDrawExtReused++;
+  }
+  else if (eExt != DrawExt::REASON_DEFAULT)
+  {
+    const SD3D12FrameAlloc ExtMem = m_pUpload->AllocFrame((sizeof(SDrawExt) + 255) & ~255u, 256);
+    memcpy(ExtMem.pCPU, static_cast<const SDrawExt *>(&dc), sizeof(SDrawExt));
+    SDrawExt &Copy = *reinterpret_cast<SDrawExt *>(ExtMem.pCPU);
+    if (bHeat)
+    {
+      const bool bAdditive = (Key.nState & GS_BLDST_MASK) == GS_BLDST_ONE;
+      Set4(Copy.vHeat, bAdditive && !(dc.nFlags2 & DF2_NO_SUN) ? 1.0f : m_fDrawHeat, bAdditive ? 1.0f : 0.0f, 0, 0);
+    }
+    // A light pass of a draw reflecting by rays where its first pass has none: its light as it was.
+    if (bPbrLightPass && !bRayView)
+    {
+      Copy.nPbr[2] = 0;
+      Copy.nPbr[3] = 0;
+    }
+    nExt = ExtMem.nGPU;
+    m_nFrameDrawBytes += sizeof(SDrawExt);
+    if (!bExtChanged)
+      m_LastExt.Keep(dc, ExtMem.nGPU, nUploadFrame);
+  }
+
+  m_nFramePSOChanges += pPSO != m_pLastPSO;
+  m_nFrameAlphaCoverage += FullKey.bAlphaToCoverage;
+  m_pLastPSO = pPSO;
+  m_nFramePolygons += CountTriangles(eTopology, nCount) * nInstances;
+  m_nFrameDraws++;
+
+  DrawBatch::SState Batch;
+  if (bBatch)
+  {
+    // Every byte written, the 4 byte fields in pairs (DrawBatch::PutPair): Joins compares them at once.
+    Batch.pPSO = pPSO;
+    Batch.nFrameCB = m_nFrameCB;
+    Batch.nExt = nExt;
+    const D3D12_VERTEX_BUFFER_VIEW *const pViews[3] = { &VB, pTexCoord1, pTangents };
+    for (int i = 0; i < 3; i++)
+    {
+      Batch.VB[i][0] = pViews[i] ? pViews[i]->BufferLocation : 0;
+      Batch.VB[i][1] = pViews[i] ? ((uint64)pViews[i]->SizeInBytes << 32) | pViews[i]->StrideInBytes : 0;
+    }
+    Batch.IB[0] = pIB->BufferLocation;
+    Batch.IB[1] = ((uint64)pIB->SizeInBytes << 32) | (uint32)pIB->Format;
+    Batch.nTopology = (uint64)eTopology;
+    memcpy(Batch.Viewport, &Viewport, sizeof(Batch.Viewport));
+    DrawBatch::PutPair(&Batch.Scissor[0], (uint32)Scissor.left, (uint32)Scissor.top);
+    DrawBatch::PutPair(&Batch.Scissor[2], (uint32)Scissor.right, (uint32)Scissor.bottom);
+    DrawBatch::PutPair(&Batch.nCount, nCount, nFirst);
+    DrawBatch::PutPair(&Batch.nBaseVertex, (uint32)nBaseVertex, m_pDevice->GetStateEpoch());
+    memcpy(Batch.Rest, reinterpret_cast<const uint8 *>(&Head) + DrawBatch::HEAD_MATRICES, DrawBatch::HEAD_REST);
+    // (a barrier queued since would have to come before this draw)
+    if (nBatchMode == m_nDrawBatchMode && m_pDevice->NoQueuedBarriers() && m_DrawBatch.Joins(Batch, HeadMem.nGPU))
+    {
+      m_DrawBatch.Join();
+      m_nFrameDrawsJoined++;
+      return;
+    }
+  }
+  // The draw held back first.
+  m_pDevice->RecordHeldDraw();
+
   // The state the draw before set stays while nothing else touched the command list.
   ID3D12GraphicsCommandList *pList = m_pDevice->GetDrawCmdList();
   SDrawState &Set = m_DrawState;
@@ -324,9 +511,6 @@ void CD3D12Renderer::DrawGeometry(const SPipelineKey &Key, const SDrawConstants 
     pList->SetPipelineState(pPSO);
     Set.pPSO = pPSO;
   }
-  m_nFramePSOChanges += pPSO != m_pLastPSO;
-  m_nFrameAlphaCoverage += FullKey.bAlphaToCoverage;
-  m_pLastPSO = pPSO;
   if (m_nFrameCB != Set.nFrameCB)
   {
     pList->SetGraphicsRootConstantBufferView(0, m_nFrameCB);
@@ -362,119 +546,25 @@ void CD3D12Renderer::DrawGeometry(const SPipelineKey &Key, const SDrawConstants 
     pList->IASetPrimitiveTopology(eTopology);
     Set.eTopology = eTopology;
   }
-
-  // The viewport inside the back buffer (an off screen target: all of it, or m_TargetRect); the
-  // scissor rectangle inside the viewport (the scissors are the back buffer's). In an upscaler's
-  // scene both are scaled from the back buffer's pixels to the scene's.
-  const int nBufW = m_pDevice->GetTargetWidth(), nBufH = m_pDevice->GetTargetHeight();
-  float sx = 1, sy = 1;
-  if (bScene)
-    GetSceneScale(sx, sy);
-  const auto X = [sx](int x) { return sx == 1 ? x : (int)lroundf(x * sx); };
-  const auto Y = [sy](int y) { return sy == 1 ? y : (int)lroundf(y * sy); };
-  const int x0 = X(m_Viewport[0]), y0 = Y(m_Viewport[1]);
-  int vx = std::clamp(x0, 0, nBufW), vy = std::clamp(y0, 0, nBufH);
-  int vw = std::clamp(X(m_Viewport[0] + m_Viewport[2]) - x0, 0, nBufW - vx), vh = std::clamp(Y(m_Viewport[1] + m_Viewport[3]) - y0, 0, nBufH - vy);
-  if (bOffscreen && m_bTargetRect)
-  {
-    vx = std::clamp((int)m_TargetRect.left, 0, nBufW);
-    vy = std::clamp((int)m_TargetRect.top, 0, nBufH);
-    vw = std::clamp((int)(m_TargetRect.right - m_TargetRect.left), 0, nBufW - vx);
-    vh = std::clamp((int)(m_TargetRect.bottom - m_TargetRect.top), 0, nBufH - vy);
-  }
-  else if (bOffscreen)
-  {
-    vx = vy = 0;
-    vw = nBufW;
-    vh = nBufH;
-  }
-  if (vw <= 0 || vh <= 0)
-    return;
-  const D3D12_VIEWPORT Viewport = { (float)vx, (float)vy, (float)vw, (float)vh, m_fDepthMin, m_fDepthMax };
   if (memcmp(&Viewport, &Set.Viewport, sizeof(Viewport)))
   {
     pList->RSSetViewports(1, &Viewport);
     Set.Viewport = Viewport;
   }
-  RECT Scissor = { vx, vy, vx + vw, vy + vh };
-  if (m_bItemScissor && !bOffscreen)
-  {
-    Scissor.left = std::max<LONG>(Scissor.left, X(m_ItemScissor.left));
-    Scissor.top = std::max<LONG>(Scissor.top, Y(m_ItemScissor.top));
-    Scissor.right = std::min<LONG>(Scissor.right, X(m_ItemScissor.right));
-    Scissor.bottom = std::min<LONG>(Scissor.bottom, Y(m_ItemScissor.bottom));
-  }
-  if (m_bScissor && !bOffscreen)
-  {
-    Scissor.left = std::max<LONG>(Scissor.left, X(m_Scissor[0]));
-    Scissor.top = std::max<LONG>(Scissor.top, Y(m_Scissor[1]));
-    Scissor.right = std::min<LONG>(Scissor.right, X(m_Scissor[0] + m_Scissor[2]));
-    Scissor.bottom = std::min<LONG>(Scissor.bottom, Y(m_Scissor[1] + m_Scissor[3]));
-  }
-  if (Scissor.right <= Scissor.left || Scissor.bottom <= Scissor.top)
-    return;
   if (memcmp(&Scissor, &Set.Scissor, sizeof(Scissor)))
   {
     pList->RSSetScissorRects(1, &Scissor);
     Set.Scissor = Scissor;
   }
-
-  // The draw's constants (Shaders/Constants.h), each part written once into the frame's memory with the renderer's
-  // changes (write-combined memory: never read back). The header (b1), every draw's, from a copy on the stack.
-  SDrawHead Head = dc;
-  if (bHeat)
-    Head.nFlags2 = dc.nFlags2 | DF2_HEAT;
-  // The motion vectors of a draw that gave none: still on the screen. Not for the depth alone (the depth prepass: no
-  // pixel shader reads them), but with d3d12_DrawExt 0, which uploads what the draws did before the default block.
-  const bool bAllExt = CV_d3d12_DrawExt <= 0;
-  if (bScene && (!FullKey.bDepthOnly || bAllExt) &&
-      std::all_of(std::begin(dc.mPrevWorldViewProj), std::end(dc.mPrevWorldViewProj), [](float f) { return f == 0; }))
-    memcpy(Head.mPrevWorldViewProj, dc.mWorldViewProj, sizeof(Head.mPrevWorldViewProj));
-  // Alpha to coverage: the reference negated (the scene for rays took the draw's own above).
-  if (FullKey.bAlphaToCoverage)
-    Head.fAlphaRef = -dc.fAlphaRef;
-  const SD3D12FrameAlloc HeadMem = m_pUpload->AllocFrame(sizeof(SDrawHead), 256);
-  memcpy(HeadMem.pCPU, &Head, sizeof(Head));
   pList->SetGraphicsRootConstantBufferView(1, HeadMem.nGPU);
-  m_nFrameDrawBytes += sizeof(SDrawHead);
-  // The rest (b3): the draw's own where it reads it, else the default block (DrawExt.h); bound when it changes.
-  DrawExt::SDraw Ext;
-  Ext.bAll = bAllExt;
-  Ext.bGeneral = Key.nProgram == eD3D12P_General;
-  Ext.bDepthOnly = FullKey.bDepthOnly != 0;
-  Ext.bCascadeInstances = FullKey.bCascadeInstances != 0;
-  Ext.bChanged = bHeat;
-  Ext.nFlags2 = dc.nFlags2;
-  const DrawExt::EReason eExt = DrawExt::Needs(Ext, dc, m_pPipeline->GetDefaultDrawExtData());
-  m_nFrameDrawExt[eExt]++;
-  D3D12_GPU_VIRTUAL_ADDRESS nExt = m_pPipeline->GetDefaultDrawExt();
-  if (eExt != DrawExt::REASON_DEFAULT)
-  {
-    const SD3D12FrameAlloc ExtMem = m_pUpload->AllocFrame((sizeof(SDrawExt) + 255) & ~255u, 256);
-    memcpy(ExtMem.pCPU, static_cast<const SDrawExt *>(&dc), sizeof(SDrawExt));
-    SDrawExt &Copy = *reinterpret_cast<SDrawExt *>(ExtMem.pCPU);
-    if (bHeat)
-    {
-      const bool bAdditive = (Key.nState & GS_BLDST_MASK) == GS_BLDST_ONE;
-      Set4(Copy.vHeat, bAdditive && !(dc.nFlags2 & DF2_NO_SUN) ? 1.0f : m_fDrawHeat, bAdditive ? 1.0f : 0.0f, 0, 0);
-    }
-    // A light pass of a draw reflecting by rays where its first pass has none: its light as it was.
-    if (bPbrLightPass && !bRayView)
-    {
-      Copy.nPbr[2] = 0;
-      Copy.nPbr[3] = 0;
-    }
-    nExt = ExtMem.nGPU;
-    m_nFrameDrawBytes += sizeof(SDrawExt);
-  }
+  if (FullKey.bDrawObjects)
+    pList->SetGraphicsRootShaderResourceView(ROOT_DRAW_OBJECTS, HeadMem.nGPU);
   if (nExt != Set.nDrawExt)
   {
     pList->SetGraphicsRootConstantBufferView(ROOT_DRAW_EXT, nExt);
     Set.nDrawExt = nExt;
   }
 
-  m_nFramePolygons += CountTriangles(eTopology, nCount) * nInstances;
-  m_nFrameDraws++;
   if (pIB)
   {
     if (memcmp(pIB, &Set.IB, sizeof(*pIB)))
@@ -483,12 +573,48 @@ void CD3D12Renderer::DrawGeometry(const SPipelineKey &Key, const SDrawConstants 
       Set.IB = *pIB;
     }
     m_pDevice->FlushBarriersForDraw();
+    // Held back for the next draws of the mesh (d3d12_DrawBatch).
+    if (bBatch)
+    {
+      m_DrawBatch.Start(Batch, HeadMem.nGPU);
+      m_nDrawBatchMode = nBatchMode;
+      m_pDevice->HoldDraw(&RecordDrawBatchOf, this);
+      return;
+    }
     pList->DrawIndexedInstanced(nCount, nInstances, nFirst, nBaseVertex, 0);  // barriers flushed
   }
   else
   {
     m_pDevice->FlushBarriersForDraw();
     pList->DrawInstanced(nCount, nInstances, nFirst, 0);  // barriers flushed
+  }
+}
+
+void CD3D12Renderer::RecordDrawBatch()
+{
+  // The draw held back and those that joined it: their state is the list's (nothing else was recorded since, CFrameCmdList).
+  const uint32 n = m_DrawBatch.Take();
+  if (!n || !m_pDevice || !m_pPipeline)
+    return;
+  const DrawBatch::SState &s = m_DrawBatch.State();
+  ID3D12GraphicsCommandList *pList = m_pDevice->GetDrawCmdList();
+  // 1: the instanced pipeline state and the first header's bound already (DrawGeometry), an instance a draw.
+  if (m_nDrawBatchMode == 1)
+  {
+    pList->DrawIndexedInstanced(s.nCount, n, s.nFirst, s.nBaseVertex, 0);  // barriers flushed (before the first)
+    if (n > 1)
+    {
+      m_nFrameDrawBatches++;
+      m_nFrameDrawsInstanced += (int)n;
+    }
+    return;
+  }
+  // 2: one by one under the plain pipeline state, each with its own header.
+  for (uint32 i = 0; i < n; i++)
+  {
+    if (i)
+      pList->SetGraphicsRootConstantBufferView(1, m_DrawBatch.Head() + (uint64)i * sizeof(SDrawHead));
+    pList->DrawIndexedInstanced(s.nCount, 1, s.nFirst, s.nBaseVertex, 0);  // barriers flushed (before the first)
   }
 }
 

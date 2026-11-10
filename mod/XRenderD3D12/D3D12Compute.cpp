@@ -27,10 +27,12 @@
 #include "Bloom_CS.h"
 #include "DepthTiles_CS.h"
 #include "DepthTilesUp_CS.h"
+#include "DepthCopy_CS.h"
 #include "VolumetricInject_CS.h"
 #include "VolumetricIntegrate_CS.h"
 #include "VolumetricInjectRays_CS.h"
 #include "VolumetricSun_CS.h"
+#include "RayCoverage_CS.h"
 #include "HdrHistogram_CS.h"
 #include "HdrOutputStats_CS.h"
 #include "ExposureHistogram_CS.h"
@@ -74,8 +76,8 @@
 #include "Cmaa2DispatchArgs_CS.h"
 #include "Cmaa2Candidates_CS.h"
 #include "Cmaa2Apply_CS.h"
-#include "TaaDilate_CS.h"
 #include "TaaResolve_CS.h"
+#include "TaaResolveLight_CS.h"
 #include "TaaSharpen_CS.h"
 #include "OceanRows_CS.h"
 #include "OceanColumns_CS.h"
@@ -122,6 +124,7 @@ const SKernel s_Kernels[eD3D12K_Num] =
   { "bloom", g_Bloom_CS, sizeof(g_Bloom_CS) },
   { "depth tiles", g_DepthTiles_CS, sizeof(g_DepthTiles_CS) },
   { "depth tiles (levels 5, 6)", g_DepthTilesUp_CS, sizeof(g_DepthTilesUp_CS) },
+  { "depth copy", g_DepthCopy_CS, sizeof(g_DepthCopy_CS) },
   { "volumetric light", g_VolumetricInject_CS, sizeof(g_VolumetricInject_CS) },
   { "volumetric light (integration)", g_VolumetricIntegrate_CS, sizeof(g_VolumetricIntegrate_CS) },
   { "HDR statistics (histogram)", g_HdrHistogram_CS, sizeof(g_HdrHistogram_CS) },
@@ -182,7 +185,6 @@ const SKernel s_Kernels[eD3D12K_Num] =
   { "CMAA2 dispatch arguments", g_Cmaa2DispatchArgs_CS, sizeof(g_Cmaa2DispatchArgs_CS), false, true },
   { "CMAA2 candidates", g_Cmaa2Candidates_CS, sizeof(g_Cmaa2Candidates_CS), false, true },
   { "CMAA2 apply", g_Cmaa2Apply_CS, sizeof(g_Cmaa2Apply_CS), false, true },
-  { "TAA motion", g_TaaDilate_CS, sizeof(g_TaaDilate_CS) },
   { "TAA resolve", g_TaaResolve_CS, sizeof(g_TaaResolve_CS) },
   { "TAA sharpening", g_TaaSharpen_CS, sizeof(g_TaaSharpen_CS) },
   { "ocean (rows)", g_OceanRows_CS, sizeof(g_OceanRows_CS) },
@@ -199,6 +201,8 @@ const SKernel s_Kernels[eD3D12K_Num] =
   { "wakes (heights)", g_WakeHeight_CS, sizeof(g_WakeHeight_CS) },
   { "volumetric light's sun by rays", g_VolumetricSun_CS, sizeof(g_VolumetricSun_CS), true },
   { "volumetric light (sun by rays)", g_VolumetricInjectRays_CS, sizeof(g_VolumetricInjectRays_CS) },
+  { "alpha tests' shares", g_RayCoverage_CS, sizeof(g_RayCoverage_CS), true },
+  { "TAA resolve (scene's light)", g_TaaResolveLight_CS, sizeof(g_TaaResolveLight_CS), true },
 };
 static_assert(sizeof(s_Kernels) / sizeof(s_Kernels[0]) == eD3D12K_Num, "a kernel for each ED3D12Kernel");
 

@@ -939,7 +939,9 @@ void CSGridDisc(uint i : SV_DispatchThreadID)
   TestOut(i, float4(GridDiscAlpha(a.xy, g_Test.nTest.y), vRing, fTable));
 }
 //! The volumetric light's sun by rays (Volumetric.hlsli): VolSunState of g_TestIn[3i].xy (something near, something far:
-//! not 0) in out[i].x; VolAirInShadow of the states g_TestIn[3i + 1].xyzw, g_TestIn[3i + 2].xyzw in out[i].y.
+//! not 0) in out[i].x; VolAirInShadow of the states g_TestIn[3i + 1].xyzw, g_TestIn[3i + 2].xyzw in out[i].y;
+//! VolSunPointIndex of the frame g_TestIn[3i].z in out[i].z; with g_TestIn[3i].w not 0 instead out[i].xyz (words) the
+//! froxel VolSunFroxel gives the thread g_TestIn[3i + 1].xyz in that frame (halved with .w 2).
 [numthreads(64, 1, 1)]
 void CSVolSun(uint i : SV_DispatchThreadID)
 {
@@ -947,7 +949,9 @@ void CSVolSun(uint i : SV_DispatchThreadID)
     return;
   const float4 h = TestIn(3 * i), a = TestIn(3 * i + 1), b = TestIn(3 * i + 2);
   float s[SHAFT_TAPS] = { a.x, a.y, a.z, a.w, b.x, b.y, b.z, b.w };
-  TestOut(i, float4(VolSunState(h.x != 0, h.y != 0), VolAirInShadow(s), 0, 0));
+  TestOut(i, float4(VolSunState(h.x != 0, h.y != 0), VolAirInShadow(s), VolSunPointIndex((uint)h.z), 0));
+  if (h.w != 0)
+    g_TestOut[i] = uint4(VolSunFroxel((uint3)a.xyz, (uint)h.z, h.w > 1.5), 0);
 }
 
 //! The froxels' coordinates (Volumetric.hlsli): with the world to clip g_TestIn[0..3] (rows), the camera g_TestIn[4].xyz,

@@ -24,10 +24,12 @@
 #include "Renderer.h"
 #include "D3D12Device.h"
 #include "D3D12Descriptors.h"
+#include "D3D12Upload.h"
 #include "Texture.h"
 #include "PbrCompanion.h"
 #include "Scene.h"
 #include "Geometry.h"
+#include "MatrixMul.h"
 #include "RayTracing.h"
 #include "SkyFogBand.h"
 #include "SpriteOrder.h"
@@ -361,6 +363,22 @@ void CD3D12Renderer::DrawItems(SRenderItem *pItems, int nItems, int eList)
     bBodies = p3DEngine && fBodyCameraZ > fBodyLevel;
   }
   std::vector<int> Bodies;
+  // d3d12_DrawBatch: the items' draws of one mesh for consecutive objects in one (DrawGeometry, DrawBatch.h). What it holds
+  // back is recorded before anything else goes on the list and at the end of each pass over the items.
+  const auto DrawLeaf = [this](const SRenderItem &it)
+  {
+    const bool bBatching = m_bDrawBatching;
+    m_bDrawBatching = true;
+    DrawLeafItem(it);
+    m_bDrawBatching = bBatching;
+  };
+  // The leaves' and the grass's items of their depth pass (d3d12_FoliagePrepass, below; their draws DrawGeometry's).
+  const auto AlphaPrepassItem = [&](const SRenderItem &it)
+  {
+    return it.pRE && it.pRE->m_Type == eDATA_OcLeaf && it.eDrawClass == eDC_AlphaTestVColor && !it.bFade && !it.bFogPass &&
+           !(it.pObj->m_ObjFlags & (FOB_LIGHTPASS | FOB_FOGPASS)) && !(bBodies && LooksPastUnderwater(it, fBodyLevel, fBodyCameraZ));
+  };
+  bool bAlphaPrepass = false;
   // d3d12_DepthPrepass: the main view's opaque surfaces that write the depth and discard nothing
   // into the depth buffer first, without a pixel shader (DrawGeometry); the list then shades only
   // the pixels it keeps, where at 4K it shaded each pixel 4 to 6 times outdoors. Its depth test
@@ -381,8 +399,9 @@ void CD3D12Renderer::DrawItems(SRenderItem *pItems, int nItems, int eList)
       if (it.pRE && it.pRE->m_Type == eDATA_OcLeaf &&
           (it.eDrawClass == eDC_Opaque || it.eDrawClass == eDC_VColor || it.eDrawClass == eDC_Terrain || it.eDrawClass == eDC_WaterBottom) &&
           !(bBodies && LooksPastUnderwater(it, fBodyLevel, fBodyCameraZ)))
-        DrawLeafItem(it);
+        DrawLeaf(it);
     }
+    m_pDevice->RecordHeldDraw();
     m_bDepthPrepass = false;
     m_fDepthMin = fDepthMin;
     m_fDepthMax = fDepthMax;
@@ -390,6 +409,25 @@ void CD3D12Renderer::DrawItems(SRenderItem *pItems, int nItems, int eList)
     m_ItemScissor = ItemScissor;
     // The sun's shadow by rays at the surfaces in the depth buffer, for the list's receivers.
     DrawRaySunMask();
+    // d3d12_FoliagePrepass: then the leaves' and the grass's depth where their alpha test passes (DrawGeometry, AlphaDepth.h),
+    // their colour after it only there (the depth test before the pixel shader: the list shades the leaves in front alone).
+    // Not with MSAA (alpha to coverage) nor heat vision.
+    if ((CV_d3d12_FoliagePrepass >= 2 || (CV_d3d12_FoliagePrepass == 1 && m_pDevice->IsPathBound())) && m_pDevice->GetBoundSamples() <= 1 &&
+        !m_bHeatVision)
+    {
+      GpuSection("foliage prepass");
+      m_bAlphaPrepass = true;
+      for (int i = 0; i < nItems; i++)
+        if (AlphaPrepassItem(pItems[i]))
+          DrawLeaf(pItems[i]);
+      m_pDevice->RecordHeldDraw();
+      m_bAlphaPrepass = false;
+      bAlphaPrepass = true;
+      m_fDepthMin = fDepthMin;
+      m_fDepthMax = fDepthMax;
+      m_bItemScissor = bItemScissor;
+      m_ItemScissor = ItemScissor;
+    }
   }
   GpuSection(eList == eRL_Opaque ? "opaque" : eList == eRL_Nearest ? "nearest" : "water");
   if (m_pFrameDump)
@@ -434,7 +472,10 @@ void CD3D12Renderer::DrawItems(SRenderItem *pItems, int nItems, int eList)
     switch (it.pRE->m_Type)
     {
     case eDATA_OcLeaf:
-      DrawLeafItem(it);
+      // (an item of the leaves' depth pass: its draws' colour where the pass left their depth, DrawGeometry)
+      m_bAlphaColour = bAlphaPrepass && AlphaPrepassItem(it);
+      DrawLeaf(it);
+      m_bAlphaColour = false;
       break;
     case eDATA_Sky:
       DrawSkyItem(it);
@@ -449,6 +490,7 @@ void CD3D12Renderer::DrawItems(SRenderItem *pItems, int nItems, int eList)
       break;
     }
   }
+  m_pDevice->RecordHeldDraw();
   if (!Bodies.empty())
   {
     m_bNoDepthWrite = true;
@@ -460,8 +502,9 @@ void CD3D12Renderer::DrawItems(SRenderItem *pItems, int nItems, int eList)
         fprintf(m_pFrameDump.get(), "    under the ocean (d3d12_UnderwaterBodies): drawn last, without the depth\n");
       }
       m_fDrawHeat = m_bHeatPass ? ItemHeat(pItems[i]) : 0;
-      DrawLeafItem(pItems[i]);
+      DrawLeaf(pItems[i]);
     }
+    m_pDevice->RecordHeldDraw();
     m_bNoDepthWrite = false;
   }
   if (!bUnder)
@@ -573,7 +616,7 @@ void CD3D12Renderer::DrawLeafItem(const SRenderItem &it)
   // Transform, depth range and scissor.
   const Matrix44 World = GetWorldMatrix(pObj);
   const bool bNearest = (pObj->m_ObjFlags & FOB_NEAREST) != 0;
-  const Matrix44 WorldViewProj = World * m_CameraView * (bNearest ? m_NearestProj : m_ProjMatrix);
+  const Matrix44 WorldViewProj = MatrixMul::Mul(MatrixMul::Mul(World, m_CameraView), bNearest ? m_NearestProj : m_ProjMatrix);
   m_fDepthMin = 0;
   m_fDepthMax = bNearest ? 0.1f : 1.0f;
   m_bItemScissor = pObj->m_nScissorX2 > pObj->m_nScissorX1 && pObj->m_nScissorY2 > pObj->m_nScissorY1;
@@ -819,18 +862,47 @@ void CD3D12Renderer::DrawLeafItem(const SRenderItem &it)
     if (!SetupShadowCasterDraw(Key, dc, it))
       return;
     // Into the slices of the sun's cascades it reaches, an instance each (DrawCascadeItems): the
-    // world to each slice as WorldViewProj would be with its matrix.
-    if (m_nCascadeInstances > 0)
+    // world to each slice as WorldViewProj would be with its matrix. The parts of a mesh at once
+    // (d3d12_CascadeInstancing 3): each instance's object and slice in this frame's memory.
+    if (m_nCascadeObjects > 0)
+    {
+      const uint32 n = (uint32)m_nCascadeObjects;
+      const SD3D12FrameAlloc Mem = m_pUpload->AllocFrame(n * 80, 16);
+      uint64 nOffset = 0;
+      const int nSRV = Mem.pCPU ? m_pUpload->GetRawSRV(Mem.nGPU, nOffset) : -1;
+      if (nSRV < 0)
+        return;
+      uint8 *pRecord = (uint8 *)Mem.pCPU;
+      for (uint32 i = 0; i < n; i++, pRecord += 80)
+      {
+        const SCascadeObject &o = m_CascadeObjects[i];
+        const Matrix44 WorldToSlice = MatrixMul::Mul(MatrixMul::Mul(o.World, m_Cascades[o.nSlice].WorldToMap), m_ProjMatrix);
+        const uint32 Slice[4] = { (uint32)o.nSlice, 0, 0, 0 };
+        memcpy(pRecord, WorldToSlice.data, 64);
+        memcpy(pRecord + 64, Slice, sizeof(Slice));
+      }
+      dc.nShadowTex[0] = (uint32)nSRV;
+      dc.nShadowTex[1] = (uint32)nOffset;
+      Key.bCascadeInstances = 2;
+      nInstances = n;
+      m_bCascadeObjectsDrawn = true;
+    }
+    else if (m_nCascadeInstances > 0)
     {
       for (int i = 0; i < m_nCascadeInstances; i++)
       {
         const int nSlice = m_CascadeInstances[i];
-        const Matrix44 WorldToSlice = World * m_Cascades[nSlice].WorldToMap * m_ProjMatrix;
+        const Matrix44 WorldToSlice = MatrixMul::Mul(MatrixMul::Mul(World, m_Cascades[nSlice].WorldToMap), m_ProjMatrix);
         memcpy(dc.mShadow[i], WorldToSlice.data, sizeof(dc.mShadow[i]));
         dc.nShadowTex[i] = (uint32)nSlice;
       }
       Key.bCascadeInstances = 1;
       nInstances = (uint32)m_nCascadeInstances;
+    }
+    if (m_bCascadePass)
+    {
+      m_nCascadeDraws[m_nCascadeSet & 1]++;
+      m_nCascadeDrawInstances[m_nCascadeSet & 1] += (int)nInstances;
     }
     Draw();
     return;

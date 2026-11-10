@@ -349,13 +349,9 @@ float3 HighlightRatio(float3 vLight, float3 s, int nMode, float k)
 //! beyond the volume's far end.
 float3 Volumetric(float2 vPixel, float3 vLight)
 {
-  float4 p = g_DrawExt.mParams0[0];
   float fDepth = g_Textures[g_Draw.nTex5].Load(int3(vPixel, 0)).r;
-  float d = g_DrawExt.mParams0[1].x / (fDepth + p.w);
-  // A froxel's integrated light is at its far end: half a slice after its centre.
-  float w = saturate(log2(max(d, 1e-3) / p.x) * p.y) - p.z;
-  float4 v = g_Volumes[g_Draw.nTex4].SampleLevel(g_SamplerLinearClamp, float3(vPixel * g_DrawExt.vParams0.xy, w), 0);
-  return g_DrawExt.mParams0[1].y > 0 ? v.rgb : vLight * v.a + v.rgb;
+  return VolumetricThrough(g_Volumes[g_Draw.nTex4], g_SamplerLinearClamp, vPixel, vLight, fDepth, g_DrawExt.mParams0[0], g_DrawExt.mParams0[1].xy,
+                           g_DrawExt.vParams0.xy);
 }
 
 //! vRatio: the highlight layer's ratio (1 for the clamped scene and the debug views).

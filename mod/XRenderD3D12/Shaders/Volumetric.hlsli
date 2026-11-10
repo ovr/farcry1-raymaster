@@ -84,6 +84,24 @@ float3 VolShaftTap(uint k, float fRadius, float fTurn, float3 vA, float3 vB)
   return r * (cos(a) * vA + sin(a) * vB);
 }
 
+//! The froxel thread vThread traces its rays towards the sun for in the frame nFrame: with bHalf
+//! (d3d12_VolumetricLightRaysHalf) the threads are half as many across, and each takes one of two froxels next to each
+//! other across, the other one in the frame after (and the one beside it down or deep this frame: every other froxel,
+//! a checkerboard), so that each froxel keeps its state for one frame; else its own.
+uint3 VolSunFroxel(uint3 vThread, uint nFrame, bool bHalf)
+{
+  return bHalf ? uint3(2 * vThread.x + ((vThread.y + vThread.z + nFrame) & 1), vThread.yz) : vThread;
+}
+
+//! The frame's place in the sequence of the froxels' points (0 to 31) with those rays halved: the even frames' go
+//! through all of it in turn, and the odd frames' half of it on, so that a froxel, which traces in every other frame,
+//! takes its states at points all over it (in the sequence as it is, 0 1 2 ..., it would take every other one: the
+//! halves of a froxel nearer the left).
+uint VolSunPointIndex(uint nFrame)
+{
+  return ((nFrame >> 1) + ((nFrame & 1) ? 16 : 0)) & 31;
+}
+
 //! The sun's state at a point from its rays towards the sun: bNear something hides the sun within SHAFT_SURFACE of the
 //! point (VOL_SUN_NOT_AIR), else bFar something farther does (VOL_SUN_SHADOW), else VOL_SUN_LIT.
 float VolSunState(bool bNear, bool bFar)

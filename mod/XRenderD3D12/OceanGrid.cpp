@@ -37,6 +37,7 @@
 #include "OceanGrid.h"
 #include "WaterBodies.h"
 #include "PondRipple.h"
+#include <chrono>
 
 namespace
 {
@@ -72,6 +73,7 @@ bool CD3D12Renderer::EnsureOceanGrid()
     return true;
   if (g.bFailed || !m_pUpload)
     return false;
+  const auto t0 = std::chrono::steady_clock::now();
   std::vector<OceanGrid::SVertex> V;
   std::vector<uint32_t> I;
   OceanGrid::Build(0xffffffffu, V, I);
@@ -94,8 +96,8 @@ bool CD3D12Renderer::EnsureOceanGrid()
   g.nVertices = nVertices;
   g.nIndices = nIndices;
   if (iLog)
-    iLog->Log("XRenderD3D12: the ocean's grid: %u vertices, %u triangles (%d rings)", g.nVertices, g.nIndices / 3,
-              (int)OceanGrid::Rings().size());
+    iLog->Log("XRenderD3D12: the ocean's grid: %u vertices, %u triangles (%d rings) (%.0f ms)", g.nVertices, g.nIndices / 3,
+              (int)OceanGrid::Rings().size(), std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count());
   return true;
 }
 
@@ -108,14 +110,16 @@ bool CD3D12Renderer::EnsureGridTerrain(float fLevel)
     return true;
   if (!g.bTerrainStale || !m_pUpload || !m_pDevice)
     return false;
-  g.bTerrainStale = false;
-  if (g.pTerrain)
-    m_pUpload->ReleaseTexture(g.pTerrain);
-  g.pTerrain = nullptr;
+  // Stale until there is a terrain to read (PostLoad's call may come before it).
   I3DEngine *p3D = iSystem ? iSystem->GetI3DEngine() : nullptr;
   const int nUnit = p3D ? p3D->GetHeightMapUnitSize() : 0, nSize = p3D ? p3D->GetTerrainSize() : 0;
   if (nUnit <= 0 || nSize <= 0 || nSize % nUnit)
     return false;
+  g.bTerrainStale = false;
+  const auto t0 = std::chrono::steady_clock::now();
+  if (g.pTerrain)
+    m_pUpload->ReleaseTexture(g.pTerrain);
+  g.pTerrain = nullptr;
   // A texel a unit of the height map (the texel i at i units: its centre at x = i * unit), its heights as the engine
   // gives them there and the open sea's share by them (WaterBodies.h: 0 on the ponds the terrain cuts off from the sea).
   const int n = nSize / nUnit;
@@ -149,8 +153,9 @@ bool CD3D12Renderer::EnsureGridTerrain(float fLevel)
   g.fTerrainOffset = 0.5f / (float)n;
   if (iLog)
     iLog->Log("XRenderD3D12: the ocean grid's terrain: %d x %d heights, %d m apart; at the water level %.2f m the open sea "
-              "%d of them, %d ponds cut off from it, %d (the largest %d, %.0f m^2)", n, n, nUnit, fLevel, Bodies.nSea,
-              Bodies.nBodies, Bodies.nPond, Bodies.nLargest, (float)Bodies.nLargest * nUnit * nUnit);
+              "%d of them, %d ponds cut off from it, %d (the largest %d, %.0f m^2) (%.0f ms)", n, n, nUnit, fLevel, Bodies.nSea,
+              Bodies.nBodies, Bodies.nPond, Bodies.nLargest, (float)Bodies.nLargest * nUnit * nUnit,
+              std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count());
   return true;
 }
 
@@ -172,9 +177,10 @@ std::optional<SGeomDraw> CD3D12Renderer::SetupOceanGrid(SDrawConstants &dc, cons
                              : pVC ? pVC->m_pVertexBuffer : nullptr;
   if (!pVB || pVB->m_vertexformat != VERTEX_FORMAT_P3F_COL4UB || !pVB->m_VS[VSF_GENERAL].m_VData || pVB->m_NumVerts <= 0)
     return {};
-  OceanGrid::SDisc Disc;
-  if (!OceanGrid::ReadDisc((const OceanGrid::SVertex *)pVB->m_VS[VSF_GENERAL].m_VData, (size_t)pVB->m_NumVerts, Disc) || !EnsureOceanGrid())
+  const OceanGrid::SDisc *pDisc = g.Disc.Read((const OceanGrid::SVertex *)pVB->m_VS[VSF_GENERAL].m_VData, (size_t)pVB->m_NumVerts);
+  if (!pDisc || !EnsureOceanGrid())
     return {};
+  const OceanGrid::SDisc &Disc = *pDisc;
   const bool bTerrain = EnsureGridTerrain((float)Disc.fZ);
 
   // The frame's rings (OceanGrid::FrameRings): seen from the camera's height over the level, the pixels a radian across
@@ -185,13 +191,14 @@ std::optional<SGeomDraw> CD3D12Renderer::SetupOceanGrid(SDrawConstants &dc, cons
   OceanGrid::FrameRings(m_Camera.GetPos().z - fLevel, o.fSlopeRMS0 * dc.vParams0[0], fPixelsPerRadian, g.Rings);
   // The disc's table (OceanGrid.hlsli's GridDiscAlpha), the rings' (GridRing), the disc's alpha by radius for the
   // deferred ocean (GridDiscAlphaTable), in this frame's memory.
-  const size_t nDisc = OceanGrid::DiscTableSize(Disc), nAlpha = nDisc + g.Rings.size();
-  const SD3D12FrameAlloc Table = m_pUpload->AllocFrame((uint32)(sizeof(float) * (nAlpha + OceanGrid::AlphaTableSize())), 16);
+  const std::vector<float> &DiscTable = g.Disc.GetTable(), &AlphaTable = g.Disc.GetAlphaTable();
+  const size_t nDisc = DiscTable.size(), nAlpha = nDisc + g.Rings.size();
+  const SD3D12FrameAlloc Table = m_pUpload->AllocFrame((uint32)(sizeof(float) * (nAlpha + AlphaTable.size())), 16);
   if (!Table.pCPU)
     return {};
-  OceanGrid::DiscTable(Disc, (float *)Table.pCPU);
+  std::copy(DiscTable.begin(), DiscTable.end(), (float *)Table.pCPU);
   std::copy(g.Rings.begin(), g.Rings.end(), (float *)Table.pCPU + nDisc);
-  OceanGrid::AlphaTable(Disc, (float *)Table.pCPU + nAlpha);
+  std::copy(AlphaTable.begin(), AlphaTable.end(), (float *)Table.pCPU + nAlpha);
   uint64 nTableOffset = 0;
   const int nTableSRV = m_pUpload->GetRawSRV(Table.nGPU, nTableOffset);
   if (nTableSRV < 0)
@@ -327,7 +334,10 @@ void CD3D12Renderer::DrawOceanGrid(const SPipelineKey &Key, const SDrawConstants
   // The waves' depth alone (the grid as drawn, without its pixel shader).
   SPipelineKey DepthKey = Key;
   DepthKey.bDepthOnly = 1;
-  DrawGrid(DepthKey);
+  {
+    CGpuSubSection Section(*this, "ocean depth");
+    DrawGrid(DepthKey);
+  }
   // The water over the view (the triangle after the grid's), the depth buffer read only and read: Water.hlsl's
   // PSDeferred, vLightPos[2..4] the view's rays, vLightPos[2].w the depth buffer, vLightPos[3].w the triangle's depth:
   // the farthest water's (the disc's edge beyond the camera, 20 m further), the test GREATER, so that the pixels of what
@@ -345,6 +355,7 @@ void CD3D12Renderer::DrawOceanGrid(const SPipelineKey &Key, const SDrawConstants
   FullKey.bWaterDeferred = 1;
   FullKey.nState = GS_DEPTHFUNC_GREAT;
   FullKey.nCull = R_CULL_NONE;
+  CGpuSubSection Section(*this, "ocean shading");
   SetDepthRead(pDepth, true);
   DrawGeometry(FullKey, Full, D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST, Geom.VB, &Geom.IB, 3, g.nIndices, 0);
   SetDepthRead(pDepth, false);

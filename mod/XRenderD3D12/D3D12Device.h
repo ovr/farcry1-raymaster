@@ -71,6 +71,44 @@ struct SDisplayInfo
   char szName[32] = {};             //!< its GDI name (\\.\DISPLAY1), empty: not found
 };
 
+//! The frame's command list as the device holds it: every call through -> first records the draw DrawGeometry holds back
+//! (d3d12_DrawBatch, DrawBatch.h; CD3D12Device::HoldDraw), so that whatever else goes on the list comes after it.
+class CFrameCmdList
+{
+public:
+  ID3D12GraphicsCommandList *operator->() const
+  {
+    RecordHeld();
+    return m_p.Get();
+  }
+  ID3D12GraphicsCommandList *Get() const { return m_p.Get(); }
+  ComPtr<ID3D12GraphicsCommandList> &Ptr() { return m_p; }
+  void Reset()
+  {
+    m_pfnRecord = nullptr;
+    m_p.Reset();
+  }
+  //! pfnRecord(pContext) records the draw held back before anything else is recorded.
+  void Hold(void (*pfnRecord)(void *), void *pContext) const
+  {
+    m_pfnRecord = pfnRecord;
+    m_pContext = pContext;
+  }
+  void RecordHeld() const
+  {
+    if (void (*const pfn)(void *) = m_pfnRecord)
+    {
+      m_pfnRecord = nullptr;
+      pfn(m_pContext);
+    }
+  }
+
+private:
+  ComPtr<ID3D12GraphicsCommandList> m_p;
+  mutable void (*m_pfnRecord)(void *) = nullptr;
+  mutable void *m_pContext = nullptr;
+};
+
 class CD3D12Device
 {
 public:
@@ -123,9 +161,10 @@ public:
   ID3D12Device *GetDevice() const { return m_pDevice.Get(); }
   ID3D12CommandQueue *GetQueue() const { return m_pQueue.Get(); }
   //! The frame's command list; valid between BeginFrame and EndFrame. The caller may set state of
-  //! its own on it: what DrawGeometry set is forgotten (GetStateEpoch).
+  //! its own on it: what DrawGeometry set is forgotten (GetStateEpoch). The draw held back is recorded first.
   ID3D12GraphicsCommandList *GetCmdList() const
   {
+    m_pCmdList.RecordHeld();
     m_nStateEpoch++;
     return m_pCmdList.Get();
   }
@@ -135,7 +174,17 @@ public:
   //! Changes whenever the command list's state may have changed other than by DrawGeometry: a new
   //! list, targets bound, the root signature, a GetCmdList, ForgetDrawState.
   uint32 GetStateEpoch() const { return m_nStateEpoch; }
-  void ForgetDrawState() const { m_nStateEpoch++; }
+  void ForgetDrawState() const
+  {
+    m_pCmdList.RecordHeld();
+    m_nStateEpoch++;
+  }
+  //! DrawGeometry's draw it holds back for the next ones of the same mesh (d3d12_DrawBatch): pfnRecord(pContext)
+  //! records it before whatever else goes on the frame's list (the device's calls on it, GetCmdList, ForgetDrawState).
+  void HoldDraw(void (*pfnRecord)(void *), void *pContext) const { m_pCmdList.Hold(pfnRecord, pContext); }
+  void RecordHeldDraw() const { m_pCmdList.RecordHeld(); }
+  //! No barrier is queued for the frame's list (a draw after a held one may join it only then).
+  bool NoQueuedBarriers() const { return m_Barriers.IsQueueEmpty(); }
   //! In a frame, an open command list of the compute queue for work beside the frame's (the ray
   //! scene's builds), its GPU time that of szSection (a string with static storage) in
   //! GetComputeGpuTimes; NULL without the queue. SubmitAsyncCompute runs it.
@@ -147,9 +196,10 @@ public:
   void SubmitAsyncCompute();
   //! The frame's list from here on after the compute list of SubmitAsyncCompute (nothing when there
   //! is none or it waited already): its list so far executed, the GPU waiting in the section
-  //! "ray scene", the frame going on in the same slot's allocator (the descriptor heap, the root
+  //! szWait, the frame going on in the same slot's allocator (the descriptor heap, the root
   //! signature and the targets set again).
-  void WaitAsyncCompute();
+  void WaitAsyncCompute(const char *szWait = "ray scene");
+  bool HasAsyncCompute() const { return m_pComputeList != nullptr; }
   //! 0 .. D3D12_FRAMES-1: the slot of the current frame (per frame resources, the upload ring).
   int GetFrameSlot() const { return m_nFrameSlot; }
 
@@ -239,6 +289,8 @@ public:
   //! A resource TrackState keeps wanted in After (all of it or one subresource): nothing where a read state it is in
   //! holds After, two shader reads combine. Outside a frame nothing.
   void Require(ID3D12Resource *pRes, D3D12_RESOURCE_STATES After, UINT nSubresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES);
+  //! Require of State alone, a read state narrowed too (for the compute queue, which cannot leave a pixel shader's).
+  void RequireExact(ID3D12Resource *pRes, D3D12_RESOURCE_STATES State);
   bool IsTracked(ID3D12Resource *pRes) const { return m_Barriers.IsRegistered(pRes); }
   //! A released resource forgotten by the barriers' tracker and check (DeferredRelease, the upload pools' ranges).
   void ForgetState(ID3D12Resource *pRes)
@@ -439,7 +491,7 @@ public:
   //! its format (GetMainColorFormat), pDepth in the depth buffer's family (read as
   //! GetMainDepthSRVFormat); both in PIXEL_SHADER_RESOURCE state. Without pDepth only the colour
   //! copy is made.
-  bool CreateTargetCopies(ComPtr<ID3D12Resource> &pColor, ComPtr<ID3D12Resource> *pDepth);
+  bool CreateTargetCopies(ComPtr<ID3D12Resource> &pColor, ComPtr<ID3D12Resource> *pDepth, bool bDepthUav = false);
   //! How a depth copy of CreateTargetCopies is read: R24_UNORM_X8_TYPELESS (the back buffer's
   //! D24S8), R32_FLOAT in the scene.
   DXGI_FORMAT GetMainDepthSRVFormat() const { return m_bInScene ? DXGI_FORMAT_R32_FLOAT : DXGI_FORMAT_R24_UNORM_X8_TYPELESS; }
@@ -493,6 +545,8 @@ public:
   void SetGpuTiming(bool bOn) { m_bGpuTiming = bOn; }
   //! From here on the GPU time counts for szSection (a string with static storage).
   void GpuSection(const char *szSection);
+  //! The section the GPU time counts for now (nullptr before the first).
+  const char *GetGpuSection() const { return m_szGpuSection; }
   //! The sections' GPU milliseconds added up over GetGpuTimedFrames() frames, in the order they
   //! first came; ResetGpuTimes starts again.
   const std::vector<std::pair<const char *, double>> &GetGpuTimes() const { return m_GpuTimes; }
@@ -608,7 +662,7 @@ private:
 
   ComPtr<ID3D12CommandAllocator> m_pAllocators[D3D12_FRAMES];
   uint64 m_nFrameFence[D3D12_FRAMES] = {};
-  ComPtr<ID3D12GraphicsCommandList> m_pCmdList;
+  CFrameCmdList m_pCmdList;
   mutable uint32 m_nStateEpoch = 0;                 //!< GetStateEpoch
   ComPtr<ID3D12Fence> m_pFence;
   HANDLE m_hFenceEvent = nullptr;
@@ -675,6 +729,7 @@ private:
   ComPtr<ID3D12Resource> m_pTimestampReadback;      //!< the resolved timestamps, in the same places
   double m_fTimestampMs = 0;                        //!< milliseconds per tick
   bool m_bGpuTiming = false;
+  const char *m_szGpuSection = nullptr;             //!< GetGpuSection
   const char *m_GpuSections[D3D12_FRAMES][GPU_MARKS] = {};   //!< the section each timestamp starts
   int m_nGpuMarks[D3D12_FRAMES] = {};
   std::vector<std::pair<const char *, double>> m_GpuTimes;

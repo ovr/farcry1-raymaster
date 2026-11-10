@@ -45,6 +45,7 @@ set(XRENDERD3D12_SOURCES
     SkyFogBand.h
     DisplayPoll.h
     CascadeCull.h
+    CascadeGroups.h
     CameraCut.h
     BeachLayers.h
     FogVolume.h
@@ -59,6 +60,9 @@ set(XRENDERD3D12_SOURCES
     DrawDistance.cpp
     DrawDistance.h
     DrawExt.h
+    BytesEqual.h
+    KeySort.h
+    MatrixMul.h
     Shadows.cpp
     Cascades.cpp
     PostAA.cpp

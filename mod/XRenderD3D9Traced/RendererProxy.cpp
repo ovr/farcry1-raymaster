@@ -1439,15 +1439,12 @@ void CRendererProxy::SetFog(float density, float fogstart, float fogend, const f
 {
   TRACE_CALL("density %g start %g end %g color %p (%g %g %g %g) mode %d", density, fogstart, fogend, color,
     color ? color[0] : 0.f, color ? color[1] : 0.f, color ? color[2] : 0.f, color ? color[3] : 0.f, fogmode);
-  // XRENDERTRACED_FOG_END: another end of the fog, to see what of the renderer's follows it.
-  if (const char *szEnd = getenv("XRENDERTRACED_FOG_END"))
+  // XRENDERTRACED_FOG_END: another end of the fog, to see what of the renderer's follows it (read once).
+  static const float s_fFogEnd = getenv("XRENDERTRACED_FOG_END") ? (float)atof(getenv("XRENDERTRACED_FOG_END")) : 0.0f;
+  if (s_fFogEnd > 0)
   {
-    const float fEnd = (float)atof(szEnd);
-    if (fEnd > 0)
-    {
-      TRACE_RESULT("the end %g replaced by XRENDERTRACED_FOG_END %g", fogend, fEnd);
-      fogend = fEnd;
-    }
+    TRACE_RESULT("the end %g replaced by XRENDERTRACED_FOG_END %g", fogend, s_fFogEnd);
+    fogend = s_fFogEnd;
   }
   m_pReal->SetFog(density, fogstart, fogend, color, fogmode);
 }
@@ -1901,13 +1898,13 @@ void CRendererProxy::DrawObjSprites(list2<CStatObjInst *> *pList, float fMaxView
       Dump_HexLine("inst", (*pList)[i], 0x90);
     }
   }
-  // XRENDERTRACED_SPRITE_VIEWDIST: another view distance for the far sprites, to see what of theirs follows it.
-  if (const char *szDist = getenv("XRENDERTRACED_SPRITE_VIEWDIST"))
-    if (atof(szDist) > 0)
-    {
-      TRACE_RESULT("maxViewDist %g replaced by XRENDERTRACED_SPRITE_VIEWDIST %g", fMaxViewDist, atof(szDist));
-      fMaxViewDist = (float)atof(szDist);
-    }
+  // XRENDERTRACED_SPRITE_VIEWDIST: another view distance for the far sprites, to see what of theirs follows it (read once).
+  static const double s_fSpriteDist = getenv("XRENDERTRACED_SPRITE_VIEWDIST") ? atof(getenv("XRENDERTRACED_SPRITE_VIEWDIST")) : 0.0;
+  if (s_fSpriteDist > 0)
+  {
+    TRACE_RESULT("maxViewDist %g replaced by XRENDERTRACED_SPRITE_VIEWDIST %g", fMaxViewDist, s_fSpriteDist);
+    fMaxViewDist = (float)s_fSpriteDist;
+  }
   // The object manager's float at +0x10, which divides the far sprites' fade distance (see FarSprites.cpp), against
   // the camera's height above the terrain.
   if (bTraced && pObjMan && Trace_IsReadable((const char *)pObjMan + 0x10, 4))
@@ -1918,19 +1915,21 @@ void CRendererProxy::DrawObjSprites(list2<CStatObjInst *> *pList, float fMaxView
       vCam.x, vCam.y, vCam.z, p3D ? p3D->GetTerrainElevation(vCam.x, vCam.y) : 0.f);
   }
   // XRENDERTRACED_OBJMAN_POKE="offset value": a float of the object manager replaced during the call (and put back
-  // after it), to see which of its members the renderer reads.
-  float *pPoked = NULL, fPokedWas = 0;
-  if (const char *szPoke = getenv("XRENDERTRACED_OBJMAN_POKE"))
+  // after it), to see which of its members the renderer reads (read once).
+  static unsigned s_nPokeOffset = 0;
+  static float s_fPokeValue = 0;
+  static const bool s_bPoke = []
   {
-    unsigned nOffset = 0;
-    float fValue = 0;
-    if (pObjMan && sscanf_s(szPoke, "%x %f", &nOffset, &fValue) == 2 && Trace_IsReadable((const char *)pObjMan + nOffset, 4))
-    {
-      pPoked = (float *)((char *)pObjMan + nOffset);
-      fPokedWas = *pPoked;
-      *pPoked = fValue;
-      TRACE_RESULT("objManager +0x%x %g replaced by XRENDERTRACED_OBJMAN_POKE %g", nOffset, fPokedWas, fValue);
-    }
+    const char *szPoke = getenv("XRENDERTRACED_OBJMAN_POKE");
+    return szPoke && sscanf_s(szPoke, "%x %f", &s_nPokeOffset, &s_fPokeValue) == 2;
+  }();
+  float *pPoked = NULL, fPokedWas = 0;
+  if (s_bPoke && pObjMan && Trace_IsReadable((const char *)pObjMan + s_nPokeOffset, 4))
+  {
+    pPoked = (float *)((char *)pObjMan + s_nPokeOffset);
+    fPokedWas = *pPoked;
+    *pPoked = s_fPokeValue;
+    TRACE_RESULT("objManager +0x%x %g replaced by XRENDERTRACED_OBJMAN_POKE %g", s_nPokeOffset, fPokedWas, s_fPokeValue);
   }
   m_pReal->DrawObjSprites(pList, fMaxViewDist, pObjMan);
   if (pPoked)

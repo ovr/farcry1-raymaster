@@ -9,16 +9,19 @@
 //	FSR gets (Upscale.cpp): the scene jittered, 8 phases of Halton(2, 3),
 //	its motion vectors and depth, the textures sampled sharper, the
 //	history reset, the HDR scene's light with its exposure
-//	(d3d12_UpscaleHdr). Three kernels a frame:
-//	  1. each pixel's motion, the nearest of its 3 x 3's (R16G16_FLOAT);
-//	  2. the frame blended into the history: two R16G16B16A16_FLOAT
-//	     targets, one read and the other written in turn; into the picture
-//	     too without sharpening, or with the debug view (d3d12_AADebug);
-//	  3. with d3d12_UpscaleSharpness, the new history sharpened into the
+//	(d3d12_UpscaleHdr). Two kernels a frame:
+//	  1. the frame blended into the history at each pixel's motion (the
+//	     nearest of its 3 x 3's): two R16G16B16A16_FLOAT targets, one read
+//	     and the other written in turn; into the picture too without
+//	     sharpening, or with the debug view (d3d12_AADebug);
+//	  2. with d3d12_UpscaleSharpness, the new history sharpened into the
 //	     picture by AMD FidelityFX CAS (third_party/fidelityfx-cas,
 //	     Shaders/TaaCas.hlsli), its sharpness d3d12_UpscaleSharpness.
 //	d3d12_AAQuality is the frame's least share in the picture: low 1/5
 //	to ultra 1/14, how many frames it gathers.
+//	With d3d12_AASceneLight the first kernel makes the HDR scene's light
+//	itself (Hdr.hlsl's pass, the volumetric light through the froxels)
+//	into a tile of its group, in place of reading that pass's target.
 //
 //////////////////////////////////////////////////////////////////////
 
@@ -46,11 +49,10 @@ constexpr int JITTER_PHASES = 8;
 const float s_LeastShare[4] = { 1 / 5.0f, 1 / 7.0f, 1 / 10.0f, 1 / 14.0f };
 const float s_MovingShare[4] = { 1.5f / 5, 1.5f / 7, 1.5f / 10, 1.5f / 14 };
 
-//! The descriptor tables: the motion's; the resolve's and the sharpening's reading history n.
+//! The descriptor tables: the resolve's and the sharpening's reading history n.
 enum ETable
 {
-  eT_Dilate,          //!< t0 the depth, t1 the motion vectors; u0 the motion
-  eT_Resolve0,        //!< t0 the colours, t1 the motion, t2 history 0, t3 the exposure; u0 history 1, u1 the picture
+  eT_Resolve0,        //!< t0 the colours, t1 the depth, t2 the motion vectors, t3 history 0; u0 history 1, u1 the picture, u2 the exposure
   eT_Resolve1,        //!< the same from history 1 into history 0
   eT_Sharpen0,        //!< t0 history 0, t1 the exposure; u0 the picture
   eT_Sharpen1,        //!< the same from history 1
@@ -118,7 +120,7 @@ public:
     CD3D12Upload *pUpload = g_pRenderer ? g_pRenderer->m_pUpload.get() : nullptr;
     if (!pCompute || !pUpload || !g_pRenderer->m_pDescriptors || nWidth <= 0 || nHeight <= 0)
       return false;
-    for (ED3D12Kernel e : { eD3D12K_TaaDilate, eD3D12K_TaaResolve, eD3D12K_TaaSharpen })
+    for (ED3D12Kernel e : { eD3D12K_TaaResolve, eD3D12K_TaaSharpen })
     {
       if (!pCompute->HasKernel(e))
       {
@@ -126,10 +128,9 @@ public:
         return false;
       }
     }
-    m_pMotion = pUpload->CreateComputeTarget(nWidth, nHeight, 1, DXGI_FORMAT_R16G16_FLOAT, L"TAA motion");
     m_pHistory[0] = pUpload->CreateComputeTarget(nWidth, nHeight, 1, DXGI_FORMAT_R16G16B16A16_FLOAT, L"TAA history 0");
     m_pHistory[1] = pUpload->CreateComputeTarget(nWidth, nHeight, 1, DXGI_FORMAT_R16G16B16A16_FLOAT, L"TAA history 1");
-    if (!m_pMotion || !m_pHistory[0] || !m_pHistory[1])
+    if (!m_pHistory[0] || !m_pHistory[1])
     {
       Release();
       return false;
@@ -139,6 +140,7 @@ public:
     m_nWidth = nWidth;
     m_nHeight = nHeight;
     m_bHdr = bHdr;
+    m_bSceneLight = bHdr && pCompute->HasKernel(eD3D12K_TaaResolveLight);
     return true;
   }
 
@@ -182,6 +184,27 @@ public:
     Consts.vParams[3] = s_MovingShare[nQuality];
     Consts.vFlags[0] = (In.bReset || !m_bHistory ? TAA_RESET : 0) | (m_bHdr ? TAA_HDR : 0) | (m_bHdr && In.pExposure ? TAA_EXPOSURE : 0) |
                        (bSharpen ? 0 : TAA_OUTPUT) | (In.bDebugView ? TAA_DEBUG : 0);
+    // The scene's light made by the resolve (d3d12_AASceneLight): its inputs by their slots of the texture table, the
+    // resolve's table's views of the depth, the motion vectors and the history read.
+    const bool bSceneLight = In.bSceneLight && m_bSceneLight && In.nSceneSRV >= 0;
+    if (In.bSceneLight && !bSceneLight)
+      return false;
+    const int nResolve = eT_Resolve0 + m_nRead;
+    if (bSceneLight)
+    {
+      Consts.vInputs[0] = (uint32)In.nSceneSRV;
+      Consts.vInputs[1] = (uint32)(Table(nResolve) + 1);
+      Consts.vInputs[2] = (uint32)(Table(nResolve) + 2);
+      Consts.vInputs[3] = (uint32)(Table(nResolve) + 3);
+      if (In.bVolumetric && In.nVolumeDepthSRV >= 0 && In.nFroxelsSRV >= 0)
+      {
+        Consts.vFlags[0] |= TAA_VOLUMETRIC;
+        Consts.vVolumeInputs[0] = (uint32)In.nVolumeDepthSRV;
+        Consts.vVolumeInputs[1] = (uint32)In.nFroxelsSRV;
+        memcpy(Consts.vVolume0, In.vVolume0, sizeof(Consts.vVolume0));
+        memcpy(Consts.vVolume1, In.vVolume1, sizeof(Consts.vVolume1));
+      }
+    }
     // CAS's sharpness is d3d12_UpscaleSharpness (0 its least, which 0 turns off here, 1 its most), at the picture's size.
     AU1 Cas0[4], Cas1[4];
     CasSetup(Cas0, Cas1, Consts.vParams[1], (AF1)m_nWidth, (AF1)m_nHeight, (AF1)m_nWidth, (AF1)m_nHeight);
@@ -194,7 +217,7 @@ public:
     memcpy(CB.pCPU, &Consts, sizeof(Consts));
 
     const int nRead = m_nRead, nWrite = nRead ^ 1;
-    ID3D12Resource *pMotion = m_pMotion->m_pResource, *pRead = m_pHistory[nRead]->m_pResource, *pWrite = m_pHistory[nWrite]->m_pResource;
+    ID3D12Resource *pRead = m_pHistory[nRead]->m_pResource, *pWrite = m_pHistory[nWrite]->m_pResource;
     const UINT gx = (UINT)(m_nWidth + XR_TAA_GROUP - 1) / XR_TAA_GROUP, gy = (UINT)(m_nHeight + XR_TAA_GROUP - 1) / XR_TAA_GROUP;
     // The device's queue (D3D12Barriers.h): given in one call before the next dispatch, as many as there are.
     CD3D12Device *pDevice = g_pRenderer->m_pDevice.get();
@@ -208,15 +231,20 @@ public:
     Move(pWrite, m_eHistoryState[nWrite], UAV);
     m_eHistoryState[nRead] = READ;
     m_eHistoryState[nWrite] = UAV;
+    // The exposure (a tracked resource) read by the resolve through a UAV, the SRVs' slots taken; by the sharpening as an SRV.
+    const bool bExposure = (Consts.vFlags[0] & TAA_EXPOSURE) != 0;
+    if (bExposure)
+      pDevice->Require(In.pExposure, UAV);
 
-    pCompute->Dispatch(pList, eD3D12K_TaaDilate, CB.nGPU, Table(eT_Dilate), Table(eT_Dilate) + SRVS, gx, gy);
-    Move(pMotion, UAV, READ);
-    const int nResolve = eT_Resolve0 + nRead;
-    pCompute->Dispatch(pList, eD3D12K_TaaResolve, CB.nGPU, Table(nResolve), Table(nResolve) + SRVS, gx, gy);
-    // The motion written again next frame; the new history read by the sharpening and next frame.
-    Move(pMotion, READ, UAV);
+    if (bSceneLight)
+      pCompute->DispatchRays(pList, eD3D12K_TaaResolveLight, 0, CB.nGPU, 0, 0, Table(nResolve) + SRVS, gx, gy);
+    else
+      pCompute->Dispatch(pList, eD3D12K_TaaResolve, CB.nGPU, Table(nResolve), Table(nResolve) + SRVS, gx, gy);
+    // The new history read by the sharpening and next frame.
     Move(pWrite, UAV, READ);
     m_eHistoryState[nWrite] = READ;
+    if (bExposure)
+      pDevice->Require(In.pExposure, READ);
     if (bSharpen)
     {
       const int nSharpen = eT_Sharpen0 + nWrite;
@@ -229,12 +257,13 @@ public:
 
   const char *GetName() const override { return "TAA"; }
   bool IsAntiAliasing() const override { return true; }
+  bool MakesSceneLight() const override { return m_bSceneLight; }
 
 private:
   void Release()
   {
     CD3D12Upload *pUpload = g_pRenderer ? g_pRenderer->m_pUpload.get() : nullptr;
-    for (CD3D12Texture **pp : { &m_pMotion, &m_pHistory[0], &m_pHistory[1] })
+    for (CD3D12Texture **pp : { &m_pHistory[0], &m_pHistory[1] })
     {
       if (*pp && pUpload)
         pUpload->ReleaseTexture(*pp);
@@ -280,24 +309,22 @@ private:
       for (int i = 0; i < CD3D12Compute::COMPUTE_UAVS; i++)
         pDesc->WriteUAV(Table(e) + SRVS + i, nullptr, &NullUAV);
 
-    const D3D12_SHADER_RESOURCE_VIEW_DESC Motion = SRVDesc(DXGI_FORMAT_R16G16_FLOAT), History = SRVDesc(DXGI_FORMAT_R16G16B16A16_FLOAT),
-                                          Color = SRVDesc(ViewFormat(In.pColor)), Exposure = SRVDesc(DXGI_FORMAT_R32_FLOAT);
-    const D3D12_UNORDERED_ACCESS_VIEW_DESC MotionUAV = UAVDesc(DXGI_FORMAT_R16G16_FLOAT), HistoryUAV = UAVDesc(DXGI_FORMAT_R16G16B16A16_FLOAT),
-                                           Output = UAVDesc(ViewFormat(In.pOutput));
+    const D3D12_SHADER_RESOURCE_VIEW_DESC History = SRVDesc(DXGI_FORMAT_R16G16B16A16_FLOAT), Color = SRVDesc(ViewFormat(In.pColor)),
+                                          Exposure = SRVDesc(DXGI_FORMAT_R32_FLOAT);
+    const D3D12_UNORDERED_ACCESS_VIEW_DESC HistoryUAV = UAVDesc(DXGI_FORMAT_R16G16B16A16_FLOAT), Output = UAVDesc(ViewFormat(In.pOutput)),
+                                           ExposureUAV = UAVDesc(DXGI_FORMAT_R32_FLOAT);
     const D3D12_SHADER_RESOURCE_VIEW_DESC Depth = SRVDesc(ViewFormat(In.pDepth)), Velocity = SRVDesc(ViewFormat(In.pVelocity));
-    pDesc->WriteSRV(Table(eT_Dilate), In.pDepth, &Depth);
-    pDesc->WriteSRV(Table(eT_Dilate) + 1, In.pVelocity, &Velocity);
-    pDesc->WriteUAV(Table(eT_Dilate) + SRVS, m_pMotion->m_pResource, &MotionUAV);
     for (int n = 0; n < 2; n++)
     {
       const int r = Table(eT_Resolve0 + n);
       pDesc->WriteSRV(r, In.pColor, &Color);
-      pDesc->WriteSRV(r + 1, m_pMotion->m_pResource, &Motion);
-      pDesc->WriteSRV(r + 2, m_pHistory[n]->m_pResource, &History);
-      if (Inputs[eI_Exposure])
-        pDesc->WriteSRV(r + 3, Inputs[eI_Exposure], &Exposure);
+      pDesc->WriteSRV(r + 1, In.pDepth, &Depth);
+      pDesc->WriteSRV(r + 2, In.pVelocity, &Velocity);
+      pDesc->WriteSRV(r + 3, m_pHistory[n]->m_pResource, &History);
       pDesc->WriteUAV(r + SRVS, m_pHistory[n ^ 1]->m_pResource, &HistoryUAV);
       pDesc->WriteUAV(r + SRVS + 1, In.pOutput, &Output);
+      if (Inputs[eI_Exposure])
+        pDesc->WriteUAV(r + SRVS + 2, Inputs[eI_Exposure], &ExposureUAV);
       const int s = Table(eT_Sharpen0 + n);
       pDesc->WriteSRV(s, m_pHistory[n]->m_pResource, &History);
       if (Inputs[eI_Exposure])
@@ -309,7 +336,7 @@ private:
 
   int m_nWidth = 0, m_nHeight = 0;          //!< the display's size
   bool m_bHdr = false;                      //!< the HDR scene's light with its exposure (Create's bHdr)
-  CD3D12Texture *m_pMotion = nullptr;       //!< each pixel's motion (R16G16_FLOAT), in UNORDERED_ACCESS between frames
+  bool m_bSceneLight = false;               //!< with m_bHdr: the resolve that makes the scene's light is there
   CD3D12Texture *m_pHistory[2] = {};        //!< R16G16B16A16_FLOAT: [m_nRead] the history, the other one written next
   D3D12_RESOURCE_STATES m_eHistoryState[2] = { UAV, UAV };
   int m_nRead = 0;

@@ -18,6 +18,8 @@
 //	  6: root CBV b3 (SDrawExt, the rest of the draw's constants;
 //	     ROOT_DRAW_EXT: after the rays' so that 2 to 5 are as they were),
 //	     the draw's own or the default block (GetDefaultDrawExt, DrawExt.h)
+//	  7: root SRV t3 space5, the vertex shader's: the headers of a draw of
+//	     consecutive objects from its own on (ROOT_DRAW_OBJECTS, d3d12_DrawBatch)
 //	  static samplers s0..s3, s4 the comparison sampler of the shadow maps
 //	Only the programs with rays (Shader Model 6.5, RayTracing.h) read 3 to
 //	5; DrawGeometry binds them for those alone (5 when the frame has the
@@ -75,6 +77,8 @@ constexpr UINT ROOT_RAY_INSTANCES = 4;
 constexpr UINT ROOT_RAY_LIGHTS = 5;
 //! The root parameter of the rest of a draw's constants (b3, SDrawExt).
 constexpr UINT ROOT_DRAW_EXT = 6;
+//! The headers of a draw of consecutive objects (SPipelineKey::bDrawObjects; the frame's memory, DrawBatch.h).
+constexpr UINT ROOT_DRAW_OBJECTS = 7;
 
 //! SPipelineKey::nStreams: the extra vertex streams of a draw.
 constexpr uint8 PIPELINE_STREAM_TEXCOORD1 = 1;    //!< TEXCOORD1 from slot 2 (VERTEX_FORMAT_TEX2F)
@@ -115,7 +119,8 @@ struct SPipelineKey
                           //!< (XR_RAY_REFL, d3d12_RTReflectionSurfaces) and towards their lamps (XR_RAY_LIGHT,
                           //!< d3d12_RTLightShadows); DrawGeometry sets it, with bCascades 0, 1 or 3
   uint8 bCascadeInstances;  //!< nTarget 2: the general program's vertex shader of the full set of the sun's cascades, a slice
-                            //!< per instance (XR_CASCADE_INSTANCES: mShadow[i] into slice nShadowTex[i]; Cascades.cpp)
+                            //!< per instance (XR_CASCADE_INSTANCES: mShadow[i] into slice nShadowTex[i]; Cascades.cpp); 2 the
+                            //!< instances' matrices and slices in a raw buffer (XR_CASCADE_OBJECTS: the objects of a mesh)
   uint8 bDepthOnly;       //!< no pixel shader and no colour writes (DrawGeometry sets it for a shadow map's caster that
                           //!< discards nothing and for the main view's depth prepass)
   uint8 bPathTrace;       //!< nTarget 3 with the path tracer's G-buffer bound (CD3D12Device::BindPathTargets, the fourth to
@@ -129,7 +134,14 @@ struct SPipelineKey
   uint8 bAlphaToCoverage; //!< nSamples > 1: the samples a pixel covers by its alpha (AlphaToCoverageEnable): the general program's
                           //!< alpha-tested draws there (d3d12_AlphaToCoverage; DrawGeometry sets it, with fAlphaRef negated: the
                           //!< pixel shader gives the alpha sharpened to the test's edge, CoverageAlpha, in place of the test)
-  uint8 nUnused;          //!< 0: the key has no padding (it is hashed and compared as bytes)
+  uint8 bAlphaDepth;      //!< 1 the general program's depth alone where its alpha test passes (General.hlsl's AlphaDepthMain), no
+                          //!< colour writes; 2 the draw's colour after it, the depth test EQUAL and no depth writes (the rest as
+                          //!< GS_DEPTHWRITE's: the motion vectors, the upscaler's depth): the leaves' and the grass's depth pass
+                          //!< (d3d12_FoliagePrepass; DrawGeometry sets it); 3 nTarget 2: a caster of the sun's cascades by its
+                          //!< discards alone (General.hlsl's CasterMain, d3d12_CascadeCasterShader)
+  uint8 bDrawObjects;     //!< the general program's draw of consecutive objects of one mesh, an instance each, their matrices
+                          //!< from their headers (XR_DRAW_OBJECTS, ROOT_DRAW_OBJECTS; d3d12_DrawBatch, DrawBatch.h)
+  uint8 nReserved[7];     //!< 0: the key has no padding (it is hashed as whole words and compared as bytes)
 };
 
 //! SPipelineKey::nColorFormat.
@@ -203,6 +215,9 @@ private:
   SDrawExt m_DefaultDrawExt = {};
   //! Every key asked for, with nullptr for the keys that failed (logged once).
   std::unordered_map<SPipelineKey, Microsoft::WRL::ComPtr<ID3D12PipelineState>, SKeyHash, SKeyEqual> m_PSOs;
+  SPipelineKey m_LastKey = {};          //!< the key GetPSO found last and its state (the table's entries stay)
+  ID3D12PipelineState *m_pLastPSO = nullptr;
+  bool m_bLastKey = false;
   std::vector<SPipelineKey> m_NewKeys;  //!< made and not yet in the file
   size_t m_nNewKeysBefore = 0;          //!< m_NewKeys.size() at the last SaveKeys
 };

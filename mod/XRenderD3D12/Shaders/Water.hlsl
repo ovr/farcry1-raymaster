@@ -157,7 +157,7 @@
 //	            the factor of their slopes
 //	  vTexGenV  XR_RAYTRACE: x the mode (1, 2), y the rays' length (m), z the
 //	            instance mask (bits 0-7) and bit 8 the sun's shadow at the
-//	            hits
+//	            hits; w 1: no screen space reflection (d3d12_WaterSSR 0)
 //	  nShadowTex  x the depth tiles of the depth copy (Water.cpp, the ocean's;
 //	            R32_FLOAT: at level 0 the least depth of each XR_DEPTH_TILE x
 //	            XR_DEPTH_TILE pixels, at each next one of 2 x 2 texels of the
@@ -1250,7 +1250,7 @@ float4 ShadeWater(SWaterOutput In)
     // would be seen (no reflection, or blurred away: open water away from the camera), but in the
     // debug views.
     const float fSharp = fBlur > 0 ? saturate(2 - fBlur * g_Frame.vScreen.y / 4) : 1;
-    const bool bSharp = (F != 0 && fSharp > 0) || g_DrawExt.vParams0.z != 0;
+    const bool bSharp = ((F != 0 && fSharp > 0) || g_DrawExt.vParams0.z != 0) && g_DrawExt.vTexGenV.w == 0;
 #ifdef XR_RAYTRACE
     float4 vSSR = g_DrawExt.vTexGenV.x >= 2 && bSharp ? ScreenReflection(In.vWorldPos, Rs, g_Frame.vScreen.xy * vInvSize, float2(nW, nH), true) : 0;
 #else

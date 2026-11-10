@@ -13,6 +13,15 @@ xrender_d3d12_shader(General_Velocity_PS General.hlsl ps_6_0 PSMain XR_VELOCITY)
 # The vertex shader of the full set of the sun's cascades: a caster drawn once into all the slices it
 # reaches, an instance each (SPipelineKey::bCascadeInstances, Cascades.cpp).
 xrender_d3d12_shader(General_CascadeInstances_VS General.hlsl vs_6_0 VSMain XR_CASCADE_INSTANCES)
+# The same for the parts of one mesh drawn once for all their objects (d3d12_CascadeInstancing 3): the instances'
+# matrices and slices in a raw buffer of the frame (SPipelineKey::bCascadeInstances 2).
+xrender_d3d12_shader(General_CascadeObjects_VS General.hlsl vs_6_0 VSMain XR_CASCADE_INSTANCES XR_CASCADE_OBJECTS)
+# The draws of one mesh for consecutive objects at once (d3d12_DrawBatch, DrawBatch.h): an instance per object, its matrices
+# from its header in the frame's memory (SPipelineKey::bDrawObjects); without and with velocity.
+xrender_d3d12_shader(General_Objects_VS General.hlsl vs_6_0 VSMain XR_DRAW_OBJECTS)
+xrender_d3d12_shader(General_Objects_Velocity_VS General.hlsl vs_6_0 VSMain XR_DRAW_OBJECTS XR_VELOCITY)
+# The live set's casters drawn so (d3d12_CascadeInstancing 2): compared with the full set in their instance's slice.
+xrender_d3d12_shader(General_CascadeInstances_PS General.hlsl ps_6_0 PSMain XR_CASCADES XR_CASCADE_INSTANCES)
 # Their pixel shaders with the steps of the HDR targets (XR_HDR: DF2_SKY_GLOW, DF2_HDR_CORE), for the
 # draws into D3D12_HDR_FORMAT (SPipelineKey::nColorFormat PIPELINE_COLOR_HDR); without them the others are
 # the programs without HDR, instruction for instruction.
@@ -90,6 +99,15 @@ xrender_d3d12_shader(General_PT_Cascades_Hdr_PS General.hlsl ps_6_0 PSMain XR_PT
 xrender_d3d12_shader(General_PT_Cascades_Hdr_Velocity_PS General.hlsl ps_6_0 PSMain XR_PT XR_CASCADES XR_VELOCITY XR_HDR)
 xrender_d3d12_shader(General_PT_RaySun_Hdr_PS General.hlsl ps_6_0 PSMain XR_PT XR_CASCADES XR_RAY_SUN XR_HDR)
 xrender_d3d12_shader(General_PT_RaySun_Hdr_Velocity_PS General.hlsl ps_6_0 PSMain XR_PT XR_CASCADES XR_RAY_SUN XR_VELOCITY XR_HDR)
+# The leaves' and the grass's depth where their alpha test passes with room to spare (SPipelineKey::bAlphaDepth,
+# d3d12_FoliagePrepass): the inputs of the vertex shader without and with velocity.
+xrender_d3d12_shader(General_AlphaDepth_PS General.hlsl ps_6_0 AlphaDepthMain)
+xrender_d3d12_shader(General_AlphaDepth_Velocity_PS General.hlsl ps_6_0 AlphaDepthMain XR_VELOCITY)
+# A caster of the sun's cascades that discards, by its discards alone (SPipelineKey::bAlphaDepth 3, d3d12_CascadeCasterShader):
+# the full set's, the live set's and the live set's into all its slices at once.
+xrender_d3d12_shader(General_Caster_PS General.hlsl ps_6_0 CasterMain)
+xrender_d3d12_shader(General_Caster_Cascades_PS General.hlsl ps_6_0 CasterMain XR_CASCADES)
+xrender_d3d12_shader(General_Caster_CascadeInstances_PS General.hlsl ps_6_0 CasterMain XR_CASCADES XR_CASCADE_INSTANCES)
 
 # Water surfaces (eD3D12P_Water).
 xrender_d3d12_shader(Water_VS Water.hlsl vs_6_0 VSMain)
@@ -150,10 +168,11 @@ xrender_d3d12_shader(Cmaa2DispatchArgs_CS AntiAliasCmaa2.hlsl cs_6_0 ComputeDisp
 xrender_d3d12_shader(Cmaa2Candidates_CS AntiAliasCmaa2.hlsl cs_6_0 ProcessCandidatesCS)
 xrender_d3d12_shader(Cmaa2Apply_CS AntiAliasCmaa2.hlsl cs_6_0 DeferredColorApply2x2CS)
 set(XRENDERD3D12_SHADER_INCLUDES "")
-# TAA (d3d12_AA taa, UpscalerTaa.cpp, Taa.hlsli): each pixel's motion, the frame blended into the history, the sharpening
+# TAA (d3d12_AA taa, UpscalerTaa.cpp, Taa.hlsli): the frame blended into the history at each pixel's motion, the sharpening
 # (AMD FidelityFX CAS of third_party/fidelityfx-cas, TaaCas.hlsli).
-xrender_d3d12_shader(TaaDilate_CS Taa.hlsl cs_6_0 CSMain XR_TAA_DILATE)
 xrender_d3d12_shader(TaaResolve_CS Taa.hlsl cs_6_0 CSMain XR_TAA_RESOLVE)
+# The resolve that makes the scene's light itself (d3d12_AASceneLight), with rays' root signature (the texture table).
+xrender_d3d12_shader(TaaResolveLight_CS Taa.hlsl cs_6_0 CSMain XR_TAA_RESOLVE XR_TAA_LIGHT)
 set(XRENDERD3D12_SHADER_INCLUDES "${XRENDERD3D12_CAS_DIR}")
 xrender_d3d12_shader(TaaSharpen_CS Taa.hlsl cs_6_0 CSMain)
 set(XRENDERD3D12_SHADER_INCLUDES "")
@@ -201,6 +220,7 @@ xrender_d3d12_shader(Meter_CS Meter.hlsl cs_6_0 CSMain)
 xrender_d3d12_shader(Bloom_CS Bloom.hlsl cs_6_0 CSMain)
 xrender_d3d12_shader(DepthTiles_CS DepthTiles.hlsl cs_6_0 CSMain)
 xrender_d3d12_shader(DepthTilesUp_CS DepthTiles.hlsl cs_6_0 CSMain XR_TILES_UP)
+xrender_d3d12_shader(DepthCopy_CS DepthTiles.hlsl cs_6_0 CSMain XR_DEPTH_COPY)
 # The FFT ocean (d3d12_WaterFFT, OceanFFT.cpp): the sea's spectra and their inverse FFTs, the waves and their mip levels.
 xrender_d3d12_shader(OceanRows_CS OceanFFT.hlsl cs_6_0 CSMain XR_OCEAN_ROWS)
 xrender_d3d12_shader(OceanColumns_CS OceanFFT.hlsl cs_6_0 CSMain XR_OCEAN_COLUMNS)
@@ -221,6 +241,8 @@ xrender_d3d12_shader(VolumetricIntegrate_CS Volumetric.hlsl cs_6_0 CSIntegrate)
 # compute root signature with rays, run only on a device with DXR 1.1) and the froxels from them.
 xrender_d3d12_shader(VolumetricSun_CS VolumetricRays.hlsl cs_6_5 CSSun)
 xrender_d3d12_shader(VolumetricInjectRays_CS Volumetric.hlsl cs_6_0 CSInject XR_VOL_RAYS)
+# The alpha tests' shares by triangle (d3d12_RTAlphaCoverage, RayTracing.cpp), with rays' root signature.
+xrender_d3d12_shader(RayCoverage_CS RayCoverage.hlsl cs_6_5 CSCoverage)
 xrender_d3d12_shader(HdrHistogram_CS HdrStats.hlsl cs_6_0 CSHistogram)
 xrender_d3d12_shader(HdrOutputStats_CS HdrStats.hlsl cs_6_0 CSOutput)
 xrender_d3d12_shader(ExposureHistogram_CS Exposure.hlsl cs_6_0 CSHistogram)

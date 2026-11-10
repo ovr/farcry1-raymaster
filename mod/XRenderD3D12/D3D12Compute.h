@@ -59,6 +59,7 @@ enum ED3D12Kernel
   eD3D12K_Bloom,                    //!< a level of the bloom from one twice its size (Shaders/Bloom.hlsl)
   eD3D12K_DepthTiles,               //!< levels 0..4 of the depth tiles of the water's depth copy (Shaders/DepthTiles.hlsl)
   eD3D12K_DepthTilesUp,             //!< their levels 5 and 6 from level 4
+  eD3D12K_DepthCopy,                //!< the water's depth copy, the depth buffer's texels as they are (d3d12_WaterDepthCopy)
   eD3D12K_VolumetricInject,         //!< the volumetric light's froxels (Shaders/Volumetric.hlsl)
   eD3D12K_VolumetricIntegrate,      //!< the light they scatter towards the camera, integrated
   eD3D12K_HdrHistogram,             //!< the HDR statistics: the scene's histogram (Shaders/HdrStats.hlsl)
@@ -105,8 +106,7 @@ enum ED3D12Kernel
   eD3D12K_Cmaa2DispatchArgs,        //!< its indirect dispatches' arguments, its counters cleared
   eD3D12K_Cmaa2Candidates,          //!< its shapes' new colours (indirect)
   eD3D12K_Cmaa2Apply,               //!< those colours blended into its picture (indirect)
-  eD3D12K_TaaDilate,                //!< TAA: each pixel's motion, the nearest of its 3 x 3's (Shaders/Taa.hlsl; d3d12_AA taa)
-  eD3D12K_TaaResolve,               //!< the frame blended into its history
+  eD3D12K_TaaResolve,               //!< TAA: the frame blended into its history (Shaders/Taa.hlsl; d3d12_AA taa)
   eD3D12K_TaaSharpen,               //!< the history sharpened into the picture
   eD3D12K_OceanRows,                //!< the FFT ocean: the sea's spectra at the frame's time, their inverse FFTs along x (Shaders/OceanFFT.hlsl)
   eD3D12K_OceanColumns,             //!< their inverse FFTs along y, the fields
@@ -122,6 +122,9 @@ enum ED3D12Kernel
   eD3D12K_WakeHeight,               //!< the heights for the ocean's grid (d3d12_WaterGeometry), their mip levels 1 to 3
   eD3D12K_VolumetricSun,            //!< the volumetric light's sun by rays: its state at the froxels' points (Shaders/VolumetricRays.hlsl; with rays)
   eD3D12K_VolumetricInjectRays,     //!< the froxels with those states in place of the cascades (Shaders/Volumetric.hlsl, XR_VOL_RAYS)
+  eD3D12K_RayCoverage,              //!< the alpha tests' shares by triangle (Shaders/RayCoverage.hlsl; d3d12_RTAlphaCoverage, with rays)
+  eD3D12K_TaaResolveLight,          //!< TAA's resolve that makes the scene's light itself (Shaders/Taa.hlsl; d3d12_AASceneLight, rays'
+                                    //!< root signature without rays)
   eD3D12K_Num
 };
 

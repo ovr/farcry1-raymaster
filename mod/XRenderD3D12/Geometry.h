@@ -115,6 +115,14 @@ namespace Geometry
   //! lit with (VegetationLight.h; the raster's light on it, d3d12_PTLeafLight). False for one not baked so or baked
   //! without light.
   bool UnlitVegetationLight(const CLeafBuffer *pLB, float vAmbient[3], float vSun[3]);
+
+  //! The GPU copies of the geometry since the last call (the frame log): per-frame copies and their bytes, the static
+  //! copies turned per-frame by why (changed in consecutive frames, or again in a frame that drew them), and back.
+  struct SCopyStats
+  {
+    uint32 nFrameCopies = 0, nFrameBytes = 0, nToFrameQuick = 0, nToFrameRedraw = 0, nToStatic = 0;
+  };
+  SCopyStats TakeCopyStats();
 }
 
 //////////////////////////////////////////////////////////////////////////

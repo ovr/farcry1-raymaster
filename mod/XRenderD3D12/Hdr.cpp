@@ -212,9 +212,10 @@ void CD3D12Renderer::CopySceneForReflections()
   InvalidateFrameConstants();
 }
 
-void CD3D12Renderer::EndMainScene()
+void CD3D12Renderer::EndMainScene(bool bScreenEffects)
 {
   FUNCTION_PROFILER(iSystem, PROFILE_RENDERER);
+  m_bRmSceneNext = bScreenEffects;
   // The path tracer's G-buffer, if a list left it bound.
   EndPathTargets();
   // MSAA's samples into the main view's targets (Msaa.cpp).
@@ -237,6 +238,7 @@ void CD3D12Renderer::EndMainScene()
   if (m_bHdrScene && m_pFrameDump)
     DumpHdr();
   m_bHdrScene = false;
+  m_bRmSceneNext = false;
 }
 
 int CD3D12Renderer::HdrDepthSRV(ID3D12Resource *pDepth, DXGI_FORMAT DepthFormat)
@@ -307,7 +309,8 @@ bool CD3D12Renderer::MeterHdr(int nSceneSRV, ID3D12Resource *pScene, int nWidth,
   return true;
 }
 
-CD3D12Texture *CD3D12Renderer::HdrSceneLight(int nSceneSRV, int nWidth, int nHeight, ID3D12Resource *pDepth, DXGI_FORMAT DepthFormat)
+CD3D12Texture *CD3D12Renderer::HdrSceneLight(int nSceneSRV, int nWidth, int nHeight, ID3D12Resource *pDepth, DXGI_FORMAT DepthFormat,
+                                             SUpscaleInputs *pMakes)
 {
   if (nSceneSRV < 0 || m_Hdr.nMeteredFrame != m_nFrames || !EnsureSceneLightTargets(nWidth, nHeight))
     return nullptr;
@@ -324,7 +327,23 @@ CD3D12Texture *CD3D12Renderer::HdrSceneLight(int nSceneSRV, int nWidth, int nHei
     dc.nTex5 = (uint32)m_Hdr.nDepthSRV;
   else if (!bHeat)
     SetVolumetricConstants(dc);
-  DrawHdrPass(m_Hdr.pLight, dc);
+  // d3d12_AASceneLight: the upscaler makes it (TAA's resolve, Taa.hlsl's XR_TAA_LIGHT) from what the pass would take.
+  if (pMakes && CV_d3d12_AASceneLight && !bHeat && !bSkyMask)
+  {
+    pMakes->bSceneLight = true;
+    pMakes->nSceneSRV = nSceneSRV;
+    pMakes->bVolumetric = (dc.nFlags & HDR_VOLUMETRIC) != 0;
+    if (pMakes->bVolumetric)
+    {
+      pMakes->nVolumeDepthSRV = (int)dc.nTex5;
+      pMakes->nFroxelsSRV = (int)dc.nTex4;
+      memcpy(pMakes->vVolume0, &dc.mParams0[0], sizeof(pMakes->vVolume0));
+      Set4(pMakes->vVolume1, dc.mParams0[4], dc.mParams0[5], dc.vParams0[0], dc.vParams0[1]);
+    }
+    m_Hdr.SceneLight = dc;
+  }
+  else
+    DrawHdrPass(m_Hdr.pLight, dc);
   // The exposure's factor, which the upscaler gets.
   SDrawConstants ec = DefaultDrawConstants();
   ec.nFlags = HDR_EXPOSURE_SCALE;
@@ -334,6 +353,15 @@ CD3D12Texture *CD3D12Renderer::HdrSceneLight(int nSceneSRV, int nWidth, int nHei
   DrawHdrPass(m_Hdr.pExposureScale, ec);
   m_pDevice->SetBackBufferTargets();
   return m_Hdr.pLight;
+}
+
+void CD3D12Renderer::DrawSceneLight()
+{
+  if (!m_Hdr.pLight)
+    return;
+  DrawHdrPass(m_Hdr.pLight, m_Hdr.SceneLight);
+  m_pDevice->SetBackBufferTargets();
+  m_pDevice->Require(m_Hdr.pLight->m_pResource, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE | D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
 }
 
 CD3D12Texture *CD3D12Renderer::ResolveHdr(int nSceneSRV, ID3D12Resource *pScene, int nWidth, int nHeight, bool bToTexture, ID3D12Resource *pDepth,
@@ -429,6 +457,14 @@ CD3D12Texture *CD3D12Renderer::ResolveHdr(int nSceneSRV, ID3D12Resource *pScene,
     DrawHdrPass(m_Hdr.pLdr, dc, 0, m_pDevice->HasLayer() ? m_Hdr.pRatio : nullptr);
     m_pDevice->SetBackBufferTargets();
     return m_Hdr.pLdr;
+  }
+  // d3d12_RenderModeScene: the frame for the render mode alone, which draws all of the back buffer next (the same pixel shader).
+  if (!bVolumetric && !bSkyMask && RenderModeTakesScene())
+  {
+    DrawHdrPass(m_pRmScene, dc);
+    m_pDevice->SetBackBufferTargets();
+    m_nRmSceneFrame = m_nFrames;
+    return nullptr;
   }
   if (bVolumetric)
     SetVolumetricDepthRead(true);
@@ -703,7 +739,8 @@ void CD3D12Renderer::DrawHdrPass(CD3D12Texture *pTarget, const SDrawConstants &d
   Key.nTarget = 1;
   Key.nColorFormat = pTarget->m_Format == D3D12_HDR_FORMAT ? PIPELINE_COLOR_HDR :
                      pTarget->m_Format == DXGI_FORMAT_R32_FLOAT ? PIPELINE_COLOR_R32F :
-                     pTarget->m_Format == D3D12_HDR10_FORMAT ? PIPELINE_COLOR_HDR10 : PIPELINE_COLOR_DEFAULT;
+                     pTarget->m_Format == D3D12_HDR10_FORMAT ? PIPELINE_COLOR_HDR10 :
+                     pTarget->m_Format == D3D12_BACKBUFFER_FORMAT ? PIPELINE_COLOR_BGRA8 : PIPELINE_COLOR_DEFAULT;
   if (pRatio)
   {
     // Both targets (readable again when the device unbinds them, EndOffscreen).
@@ -866,7 +903,7 @@ bool CD3D12Renderer::EnsureSceneLightTargets(int nWidth, int nHeight)
   if (!m_Hdr.pLight)
     m_Hdr.pLight = m_pUpload->CreateRenderTarget(nWidth, nHeight, D3D12_HDR_FORMAT);
   if (!m_Hdr.pExposureScale)
-    m_Hdr.pExposureScale = m_pUpload->CreateRenderTarget(1, 1, DXGI_FORMAT_R32_FLOAT);
+    m_Hdr.pExposureScale = m_pUpload->CreateRenderTarget(1, 1, DXGI_FORMAT_R32_FLOAT, true);  // TAA's resolve reads it as a UAV
   if (BadTarget(m_Hdr.pLight) || BadTarget(m_Hdr.pExposureScale))
   {
     iLog->LogError("XRenderD3D12: no target of %d x %d for the upscaler's HDR light (d3d12_UpscaleHdr); the tone mapped scene", nWidth, nHeight);

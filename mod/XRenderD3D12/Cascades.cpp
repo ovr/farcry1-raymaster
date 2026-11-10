@@ -55,6 +55,7 @@
 #include "D3D12Descriptors.h"
 #include "Scene.h"
 #include "CascadeCull.h"
+#include "MatrixMul.h"
 #include "RayBehind.h"
 
 namespace
@@ -320,10 +321,10 @@ bool CD3D12Renderer::EnsureCascadeMaps()
   return true;
 }
 
-bool CD3D12Renderer::PartReaches(const Vec3 &c, float r, const SCascade &Cas) const
+Vec3 CD3D12Renderer::ToSunAxes(const Vec3 &c) const
 {
   const Vec3 &X = m_vCascadeAxes[0], &Y = m_vCascadeAxes[1], &Z = m_vCascadeAxes[2];
-  return CascadeCull::Reaches(Cas, c.Dot(X), c.Dot(Y), c.Dot(Z), r);
+  return Vec3(c.Dot(X), c.Dot(Y), c.Dot(Z));
 }
 
 bool CD3D12Renderer::CascadeCullsItem(const SRenderItem &it)
@@ -337,9 +338,10 @@ bool CD3D12Renderer::CascadeCullsItem(const SRenderItem &it)
     Vec3 c(0, 0, 0);
     float r = -1;
     PartSphere(it, c, r);
+    const Vec3 s = ToSunAxes(c);
     bOut = true;
     for (int i = 0; i < m_nCascades && bOut; i++)
-      bOut = !PartReaches(c, r, m_Cascades[i]);
+      bOut = !CascadeCull::Reaches(m_Cascades[i], s.x, s.y, s.z, r);
   }
   m_nCascadeCulled += bOut;
   return bOut;
@@ -444,6 +446,7 @@ void CD3D12Renderer::UpdateSunCascades(std::span<const SRenderItem> MainItems)
   m_CascadeDrawn.clear();
   m_StaticCasterItems.clear();
   m_nStaticCasterParts = 0;
+  m_nCascadeDraws[0] = m_nCascadeDraws[1] = m_nCascadeDrawInstances[0] = m_nCascadeDrawInstances[1] = 0;
   m_bNoteStaticCasters = CV_d3d12_StaticCasters != 0;
   ClearSet(m_CascadeMaps[0]);
   // d3d12_CascadeCull: without rays only the slices read the casters' scenes (NoteRayOffscreenItems keeps nothing),
@@ -531,6 +534,8 @@ void CD3D12Renderer::UpdateSunCascades(std::span<const SRenderItem> MainItems)
             (int)m_CascadeDrawn.size(), nLive, m_ShadowTint[0], m_ShadowTint[1], m_ShadowTint[2], nTint);
     fprintf(m_pFrameDump.get(), "  static casters (d3d12_StaticCasters): %d parts of the full set in the live set too, of %d leaf buffers\n",
             m_nStaticCasterParts, (int)m_StaticCasterBuffers.size());
+    fprintf(m_pFrameDump.get(), "  draws (d3d12_CascadeInstancing %d): %d into the full set (%d instances), %d into the live set (%d instances)\n",
+            CV_d3d12_CascadeInstancing, m_nCascadeDraws[0], m_nCascadeDrawInstances[0], m_nCascadeDraws[1], m_nCascadeDrawInstances[1]);
     if (bCull)
     {
       fprintf(m_pFrameDump.get(), "  left out as they came (d3d12_CascadeCull %d): %d parts that reach no slice; the camera towards the sun to %.1f m "
@@ -551,7 +556,7 @@ void CD3D12Renderer::UpdateSunCascades(std::span<const SRenderItem> MainItems)
   }
 }
 
-void CD3D12Renderer::DrawCascadeItems(std::span<const SRenderItem> Items, std::unordered_set<uint64> *pDrawn)
+void CD3D12Renderer::DrawCascadeItems(std::span<const SRenderItem> Items, CWordSet<uint64> *pDrawn)
 {
   if (!m_nCascades || !EnsureFrame())
     return;
@@ -560,7 +565,7 @@ void CD3D12Renderer::DrawCascadeItems(std::span<const SRenderItem> Items, std::u
   struct SPart
   {
     const SRenderItem *pItem;
-    Vec3 c;
+    Vec3 s;           //!< the sphere's centre along the sun's axes (ToSunAxes)
     float r;
     bool bDiscards;   //!< alpha tested (SetupShadowCasterDraw): its depth tested after its pixel shader
   };
@@ -570,12 +575,14 @@ void CD3D12Renderer::DrawCascadeItems(std::span<const SRenderItem> Items, std::u
   {
     if (!IsCascadeCasterClass(it))
       continue;
-    if (pDrawn && !pDrawn->insert(PartKey(it)).second)
+    if (pDrawn && !pDrawn->insert(PartKey(it)))
       continue;
     if (m_bNoteStaticCasters && m_nCascadeSet == 0 && IsStaticCaster(it))
       m_StaticCasterItems.push_back(it);
+    Vec3 c(0, 0, 0);
     SPart p = { &it, Vec3(0, 0, 0), -1 };
-    PartSphere(it, p.c, p.r);
+    PartSphere(it, c, p.r);
+    p.s = ToSunAxes(c);
     p.bDiscards = it.eDrawClass == eDC_AlphaTest || it.eDrawClass == eDC_AlphaTestVColor || GetAlphaRef(it.pShader, it.pRes) > 0;
     Parts.push_back(p);
   }
@@ -587,7 +594,7 @@ void CD3D12Renderer::DrawCascadeItems(std::span<const SRenderItem> Items, std::u
 
   // Into each slice that a part's sphere reaches (CascadeCull::Reaches): elsewhere the slice is not read.
   const SCascadeMaps &Maps = m_CascadeMaps[m_nCascadeSet];
-  auto Reaches = [&](const SPart &p, const SCascade &Cas) { return PartReaches(p.c, p.r, Cas); };
+  auto Reaches = [&](const SPart &p, const SCascade &Cas) { return CascadeCull::Reaches(Cas, p.s.x, p.s.y, p.s.z, p.r); };
   auto SetSlice = [&](int i, D3D12_CPU_DESCRIPTOR_HANDLE hDSV)
   {
     m_pDevice->SetShadowMapTarget(Maps.pDepth.Get(), hDSV, m_nCascadeSize);
@@ -600,10 +607,17 @@ void CD3D12Renderer::DrawCascadeItems(std::span<const SRenderItem> Items, std::u
     InvalidateFrameConstants();
   };
   m_bShadowMapPass = true;
-  // The full set: each part once, into all the slices it reaches (an instance each; the depth is
-  // the same as slice by slice, with one draw per part instead of one per slice). The live set
-  // compares each slice with the full set's (SetupCascadeCaster): slice by slice.
-  if (m_nCascadeSet == 0 && CV_d3d12_CascadeInstancing && !Parts.empty())
+  // Each part once, into all the slices it reaches (an instance each; the depth is the same as slice
+  // by slice, with one draw per part instead of one per slice); the live set's with 2 (each instance
+  // compared with the full set's slice, SetupCascadeCaster).
+  if (CV_d3d12_CascadeInstancing >= 3 && !Parts.empty())
+  {
+    // 3: both sets, the parts of one mesh and material at once for all their objects.
+    SetSlice(0, Maps.hDSV[XR_MAX_CASCADES]);
+    DrawCascadeGroups(Parts.size(), [&](size_t k) -> const SRenderItem & { return *Parts[k].pItem; },
+                      [&](size_t k, int i) { return Reaches(Parts[k], m_Cascades[i]); });
+  }
+  else if (CV_d3d12_CascadeInstancing > m_nCascadeSet && !Parts.empty())
   {
     SetSlice(0, Maps.hDSV[XR_MAX_CASCADES]);
     for (const SPart &p : Parts)
@@ -613,7 +627,7 @@ void CD3D12Renderer::DrawCascadeItems(std::span<const SRenderItem> Items, std::u
         if (Reaches(p, m_Cascades[i]))
         {
           m_CascadeInstances[m_nCascadeInstances++] = i;
-          m_Cascades[i].nCasters[0]++;
+          m_Cascades[i].nCasters[m_nCascadeSet]++;
         }
       if (m_nCascadeInstances)
         DrawLeafItem(*p.pItem);
@@ -639,6 +653,73 @@ void CD3D12Renderer::DrawCascadeItems(std::span<const SRenderItem> Items, std::u
   m_bItemScissor = false;
   m_fDepthMin = 0;
   m_fDepthMax = 1;
+}
+
+template <class TItem, class TReaches> void CD3D12Renderer::DrawCascadeGroups(size_t nParts, TItem Item, TReaches Reaches)
+{
+  // The parts that draw alike (CascadeGroups.h); on their own those whose draw takes more of their object than its
+  // matrix (DrawLeafItem: a light map's copy, the fog passes, a character, a scissor, a cube of the scene around it).
+  m_CascadeKeys.resize(nParts);
+  m_CascadeAlone.resize(nParts);
+  for (size_t k = 0; k < nParts; k++)
+  {
+    const SRenderItem &it = Item(k);
+    const CREOcLeaf *pLeaf = static_cast<const CREOcLeaf *>(it.pRE);
+    const CCObject *pObj = it.pObj;
+    m_CascadeKeys[k] = { pLeaf->m_pBuffer, pLeaf->m_pChunk, it.pShader, it.pRes, (uint64)it.eDrawClass };
+    m_CascadeAlone[k] = it.bBakedLightCopy || it.bFogPass || (it.nSort & ~EFSLIST_MASK) == eS_FogShader || pObj->m_pCharInstance ||
+                        (pObj->m_ObjFlags & (FOB_FOGPASS | FOB_NEAREST | FOB_LIGHTPASS)) ||
+                        (pObj->m_nScissorX2 > pObj->m_nScissorX1 && pObj->m_nScissorY2 > pObj->m_nScissorY1) ||
+                        it.pShader->GetProps().eEnvMap != EEnvMap::None;
+  }
+  const uint32_t nGroups = m_CascadeGrouper.Group(m_CascadeKeys.data(), m_CascadeAlone.data(), nParts, m_CascadeGroups);
+  m_CascadeGrouper.Members(m_CascadeGroups, nGroups, m_CascadeFirst, m_CascadeMembers);
+  // A part's slices as d3d12_CascadeInstancing 2 draws them (its instances of m_CascadeObjects from j).
+  auto DrawPart = [&](size_t &j)
+  {
+    const uint32 nPart = m_CascadeObjects[j].nPart;
+    m_nCascadeInstances = 0;
+    for (; j < m_CascadeObjects.size() && m_CascadeObjects[j].nPart == nPart; j++)
+      m_CascadeInstances[m_nCascadeInstances++] = m_CascadeObjects[j].nSlice;
+    DrawLeafItem(Item(nPart));
+  };
+  for (uint32_t g = 0; g < nGroups; g++)
+  {
+    m_CascadeObjects.clear();
+    for (uint32_t j = m_CascadeFirst[g]; j < m_CascadeFirst[g + 1]; j++)
+    {
+      const uint32 nPart = m_CascadeMembers[j];
+      Matrix44 World;
+      bool bWorld = false;
+      for (int i = 0; i < m_nCascades; i++)
+        if (Reaches(nPart, i))
+        {
+          if (!bWorld)
+            World = GetWorldMatrix(Item(nPart).pObj);
+          bWorld = true;
+          m_CascadeObjects.push_back({ World, i, nPart });
+          m_Cascades[i].nCasters[m_nCascadeSet]++;
+        }
+    }
+    if (m_CascadeObjects.empty())
+      continue;
+    // One object: its slices as with 2; more: all at once, or each as with 2 if DrawLeafItem did not.
+    size_t j = 0;
+    if (m_CascadeObjects.back().nPart == m_CascadeObjects[0].nPart)
+      DrawPart(j);
+    else
+    {
+      m_nCascadeObjects = m_CascadeObjects.size();
+      m_bCascadeObjectsDrawn = false;
+      DrawLeafItem(Item(m_CascadeObjects[0].nPart));
+      m_nCascadeObjects = 0;
+      if (!m_bCascadeObjectsDrawn)
+        while (j < m_CascadeObjects.size())
+          DrawPart(j);
+    }
+  }
+  m_nCascadeInstances = 0;
+  m_CascadeObjects.clear();
 }
 
 void CD3D12Renderer::UpdateRayBehind()
@@ -747,6 +828,10 @@ void CD3D12Renderer::SetupCascadeCaster(SDrawConstants &dc) const
   dc.nTex4 = (uint32)m_CascadeMaps[0].nSRV;
   dc.vParams3[0] = (float)m_nCascadeSlice;
   dc.vParams3[1] = std::max(CASCADE_LIVE_EPS_M, 2 * Cas.fTexel) / (Cas.fZMax - Cas.fZMin);
+  // Into all its slices at once: each slice's margin.
+  if (m_nCascadeInstances > 0 || m_nCascadeObjects > 0)
+    for (int i = 0; i < m_nCascades; i++)
+      dc.vShadowParams[i] = std::max(CASCADE_LIVE_EPS_M, 2 * m_Cascades[i].fTexel) / (m_Cascades[i].fZMax - m_Cascades[i].fZMin);
 }
 
 uint32 CD3D12Renderer::CascadeReceiverFlags(bool bLive) const
@@ -765,7 +850,7 @@ bool CD3D12Renderer::IsWithinCascades(const Matrix44 &World, const Vec3 &vMin, c
   // the last cascade gives way (CascadeOf); the depth is linear, so the box's is between theirs.
   const float fEnd = m_Cascades[m_nCascades - 1].fEnd, fStart = m_nCascades > 1 ? m_Cascades[m_nCascades - 2].fEnd : 0;
   const float fFull = fEnd - (fEnd - fStart) * CASCADE_BLEND;
-  const Matrix44 WorldView = World * m_CameraView;
+  const Matrix44 WorldView = MatrixMul::Mul(World, m_CameraView);
   for (int c = 0; c < 8; c++)
   {
     const Vec3 p((c & 1) ? vMax.x : vMin.x, (c & 2) ? vMax.y : vMin.y, (c & 4) ? vMax.z : vMin.z);

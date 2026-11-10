@@ -185,9 +185,10 @@ system ones (better not to touch): [`CONFIGURATION.md`](../../CONFIGURATION.md).
   with the HDR scene's light (`d3d12_UpscaleHdr`) as FSR gets it. The path tracer gets those
   targets too. It is not drawn by `DrawPostAA`, but its GPU section is theirs, `anti-aliasing`
   (until step 325 the upscalers' `upscale`).
-  - Three compute kernels: the motion of each pixel as the nearest (by the depth) of its 3 x 3's;
-    the resolve, the history where the pixel was (Catmull-Rom, 5 taps) clipped towards the 3 x 3's
-    box (YCoCg, mean +- 1.25 standard deviations within their range) and blended with the frame,
+  - Two compute kernels: the resolve, the history where the pixel was (it moves as the nearest, by
+    the depth, of its 3 x 3; a kernel of its own until step 383) by Catmull-Rom (5 taps), clipped
+    towards the 3 x 3's box (YCoCg, mean +- 1.25 standard deviations within their range) and
+    blended with the frame,
     each weighted by 1 / (1 + its luma): the frame's share 1 / (n + 1) after n frames of history
     (the history's alpha counts them, up to 32), at least 1 / 5, 1 / 7, 1 / 10, 1 / 14 by
     `d3d12_AAQuality` and up to 1.5 times it from a pixel's motion a frame on (the history,
@@ -221,7 +222,26 @@ system ones (better not to touch): [`CONFIGURATION.md`](../../CONFIGURATION.md).
     textures flicker more. At 3840 x 2160 its GPU section (`anti-aliasing`) takes 0.60-0.62 ms (0.59-0.61
     without the 3 x 3's limit in the same runs; 0.56 with the sharpening of our own and 0.49-0.51
     without the sharpening in others; FSR 4's Native AA 4.10-4.15; PerfSweep Swamp and Pier, with the
-    scene's light for it in `hdr` and the motion vectors).
+    scene's light for it in `hdr` and the motion vectors). Since step 383 the motion is the
+    resolve's own (the exposure read there as a UAV, its four SRVs taken): 0.57-0.58 ms against
+    0.61-0.64 (PerfSweep Pier in the player's settings, five runs each), the picture the same to
+    the pixel. Since step 385 (`d3d12_AASceneLight 1`) the resolve with the HDR light makes that
+    light itself, `Hdr.hlsl`'s scene pass (the scene's colours decoded, the volumetric light
+    through the froxels, `HdrShared.hlsli`'s `VolumetricThrough`) once per pixel of its group's
+    tile (8 x 8 and a pixel round), rounded to 16-bit floats as that pass's target held it; the
+    pass and its R16G16B16A16_FLOAT target of the display's size are gone (kept with the heat haze,
+    the sky's mask and the upscalers). The kernel takes the rays' root signature for the texture
+    table. PerfSweep Pier in the player's settings, three runs each: `hdr` 0.30-0.31 ms against
+    0.44-0.45, `anti-aliasing` 0.56 in both, the GPU's frame 3.64-3.67 against 3.78-3.82; frames
+    1, 181 and 661 in pairs of 0 px with the build before and with `d3d12_AASceneLight 0`. Since
+    step 392 the sharpening loads its group's pixels and their border (10 x 10) into groupshared
+    once, each also in CAS's space (`TaaToCas`), and takes its 3 x 3s from there: each pixel was
+    loaded and converted by the nine 3 x 3s around it. PerfSweep Pier and River in the player's
+    settings, three runs each in turn: `anti-aliasing` 0.56-0.57 ms against 0.52, the GPU's median
+    frame 3.250-3.255 against 3.222-3.239 ms (Pier) and 3.489-3.505 against 3.463-3.470 (River).
+    The bits are the same (`Taa_CasTileGivesTheSameBits`); with `r_WaterUpdateMinInterval 0` and
+    `d3d12_AutoExposure 0` Pier's frame 181 is 0 px between all runs of both builds and River's 700
+    has a pair of 0 px.
   - Unit tests `Taa_*`: the jitter covers the pixel; a still edge gathers the frames (under half
     of the error without it after 48 frames at every quality); a reset takes the frame; the history
     follows the motion (by the nearest of the 3 x 3) and is ignored off the picture; a stale history
@@ -230,7 +250,12 @@ system ones (better not to touch): [`CONFIGURATION.md`](../../CONFIGURATION.md).
     and the HDR light, at the sharpness 0, 0.5 and 1) with `UpscalerTaa.cpp`'s constants
     (`CasSetup`), leaves flat pictures as they are to their border and raises a texture's
     contrast, more the higher the sharpness; the HDR light sharpened stays within its 3 x 3's range
-    (a bright sky's texture and a cave's opening at the exposures 1 and 4).
+    (a bright sky's texture and a cave's opening at the exposures 1 and 4); the renderer's own
+    sharpening kernel (`Taa.hlsl`, run on the standard root signature by the harness's
+    `RunCompute2D`) gives each pixel the bits of the 3 x 3s loaded from the picture
+    (`Taa_CasTileGivesTheSameBits`: 37 x 21, LDR and HDR, the exposure from the constants and from
+    its texture), and its resolve kernel the new history's bits of the test kernel the other tests
+    run (`Taa_ResolveKernelGivesTheSameBits`: LDR, HDR and a reset, depths with many equal).
 - MSAA (`msaa2`, `msaa4`, `msaa8`, `Msaa.cpp`): from `BeginMainScene` to `EndMainScene` the main view draws into the
   device's multisampled colour, depth buffer and ambient light (`CD3D12Device::SetMsaaTargets`, `BeginMsaa`; the
   pipelines with `SPipelineKey::nSamples`). What comes after the scene, and what reads the depth buffer in it (the sun's
@@ -868,13 +893,34 @@ system ones (better not to touch): [`CONFIGURATION.md`](../../CONFIGURATION.md).
   `General_CascadeInstances_VS`). The depth is the same as drawn slice by slice (DemoLevelSurvey
   with `d3d12_CascadeInstancing 0`, which draws slice by slice, and 1: DemoCompare difference 0;
   elsewhere only what the game animates differently from run to run) with far fewer draws
-  (Training's time demo, frame 2600: 1,677 in the frame instead of 3,120). The live set is
-  drawn slice by slice, each compared with the full set's. A part goes only into the slices
+  (Training's time demo, frame 2600: 1,677 in the frame instead of 3,120). The live set's parts
+  are drawn so too (`d3d12_CascadeInstancing 2`; 1 draws them slice by slice), each instance
+  compared with the full set's slice (`General_CascadeInstances_PS`). With `d3d12_CascadeInstancing 3`
+  (the default) the parts of one mesh, chunk, shader, resources and draw class (`CascadeGroups.h`) are
+  drawn once for all their objects: an instance per object and slice, whose matrix and slice the
+  vertex shader reads from the frame's memory (`General_CascadeObjects_VS`); a part whose draw takes
+  more of its object than its matrix (a light map's copy, the fog passes, a character, a scissor, a
+  cube of the scene around it) is drawn on its own. The maps are the same (the slices' parts and
+  instances as with 2; PerfSweep's frames 0 px apart) with far fewer draws into the two sets (Pier
+  1,831 → 137, Swamp's jungle 2,808 → 194): there the cascades take about 0.5 ms less of the CPU a
+  frame, and the GPU's sun shadows 7 to 15 % less (4K RT: Pier 203 → 206 FPS, River 192 → 196).
+  A caster that discards (an alpha tested leaf; a part of the live set, compared with the full set)
+  has a pixel shader of its discards alone (`d3d12_CascadeCasterShader` 1, General.hlsl's
+  `CasterMain`: the live set's comparison, then the texture's alpha against the reference, as
+  `ShadePixel` makes them with the caster's flags), not the general one with all the program's
+  paths. The maps are the same (PerfSweep's raster frames 0 px apart in pairs of one state; suite
+  `castershader`), the sun shadows about 10 % less: Swamp's jungle at 4K with FSR raster 1.13 → 0.99
+  ms (the GPU's frame 3.87 → 3.70), RT 1.09 → 0.98, PT 1.14 → 1.04; the 4K RT sweeps Pier 0.276 →
+  0.249, Swamp 0.647 → 0.584 (194 → 197.5 FPS).
+  A part goes only into the slices
   where its shadow (its sphere drawn out away from the sun) falls on the slice's receivers: seen
   from the sun, the outline of the part of the view's frustum that takes its shadow from the
   slice, with the filter's reach around it; elsewhere a slice is not read, so the frames are the
   same (Regulator's time demo outdoors: some 400 draws and 0.11 ms of the GPU less a frame, 301
   to 311 FPS; `d3d12_ShadowDebug 1` shows the slices without the casters outside).
+  The sphere's centre along the sun's axes is the same for every slice: each part has it once
+  (`ToSunAxes`), not once a slice. River's heavy frames 600 to 800 (sampled, four pairs of runs):
+  `UpdateSunCascades` 327 to 331 samples → 312 to 319, about 0.035 ms a frame; frame 181 0 px apart.
 
   `d3d12_CascadeCull` (1): without rays (`WantsOffscreenRays`, `WantsRaySun`: they read the casters'
   scenes), only the slices read what the camera towards the sun and the live casters give, so
@@ -1081,6 +1127,24 @@ system ones (better not to touch): [`CONFIGURATION.md`](../../CONFIGURATION.md).
   that take the froxels 0.13) and +0.23 with the path tracer (14.92); outdoors against the sun through Training's trees
   the rays take 0.66-0.77 ms (the leaves' alpha tests), the injection 0.18 less without the
   cascades: +0.48 ms (8.92, 6%) and +0.76 (20.32, 4%).
+- `d3d12_VolumetricLightRaysHalf` (1, not saved, read every frame) traces those rays from every
+  other froxel a frame, a checkerboard across, down and deep (`Volumetric.hlsli`'s `VolSunFroxel`:
+  half as many threads across, each taking one of two froxels next to each other, the other one in
+  the frame after), and the froxels between them keep the state the frame before found at their
+  points: the injection blends the froxels of the frames before in anyway, and each froxel's point
+  moves from frame to frame, so a state a frame old is one more of those. Threads that skipped
+  their froxel in a dispatch of all of them saved only a seventh of the time (the groups ran half
+  empty), so the dispatch itself is half as wide. A froxel then traces in every other frame, and
+  every other place of the points' sequence lies in one half of the froxel (Halton's base 2), so
+  with it the frames go through the sequence in another order (`VolSunPointIndex`: the even frames
+  through all of it in turn, the odd ones half of it on). Not in the first frame with the rays, after
+  a frame without them or with froxels of a new size: all of them then. The rays take a third less
+  (RX 7900 XTX, 3840 x 2160 with FSR Quality, very high; the sweeps of Pier, River, Swamp and
+  Treehouse: 0.31, 0.40, 0.51, 0.22 -> 0.21, 0.26, 0.33, 0.14 ms with the rays' effects, 0.34, 0.43,
+  0.58, 0.22 -> 0.23, 0.27, 0.37, 0.15 with the path tracer; standing in Swamp's jungle 0.89 -> 0.55
+  and 1.15 -> 0.75), and the picture in the jungle is about a level of 255 brighter all over (its mean 27.2 -> 28.4 of
+  255, with the rays' effects and with the path tracer alike). 0: every froxel each frame, the sequence in its order (the frames before). The frame
+  dump's line of the volumetric light's sun says `half the froxels' rays` or `all the froxels' rays`.
 
 ## Foliage translucency
 
@@ -1134,6 +1198,17 @@ system ones (better not to touch): [`CONFIGURATION.md`](../../CONFIGURATION.md).
   `d3d12_RTDistance` (150 m) the rays' length, `d3d12_RTMemory` (384 MB) the static BLAS kept,
   `d3d12_RTMask` (31) the kinds the rays see (1 static, 2 alpha tested, 4 of the frame; a draw is
   in the scene when the mask has all of its kinds).
+  A draw is static in the scene when its vertices and indices are in a static buffer; geometry the
+  game rewrites (its copy on the GPU changes within two frames, or again in a frame that drew it)
+  goes to the frame's memory, and its draws get a BLAS a frame, built for speed. Once it has not
+  changed for 16 frames it goes back to a static buffer (`LeafBuffer.cpp`), and its BLAS is built
+  once, for fast tracing. The path tracer relights the vegetation in a level's first frames, which
+  left it in the frame's memory for good: Pier had 1883 BLAS built a frame. Back in static buffers
+  (40 a frame) the path tracer on Pier at 4K with FSR Quality took 8.66 ms of the GPU in place of
+  10.29 (the ray scene's builds on the compute queue 1.75 → 0.60 ms, the paths 2.52 → 2.07 ms) and
+  the CPU's 3D engine 5.20 ms in place of 7.39; Training 9.15 → 8.80 ms, Swamp and RT the same.
+  The frame log has `rt_frame_blas`, `rt_static_blas_built` and the copies (`geom_frame_copies`,
+  `geom_frame_kb`, `geom_to_frame_quick`, `geom_to_frame_redraw`, `geom_to_static`).
   `d3d12_RTOffscreen` (1) puts what is out of the main view into the scene too: the parts of the
   sun's cascades (what the 3D engine gives the camera towards the sun at the view's position, with
   the detail it picks for the view, and the live casters), set up as the main view would draw them,
@@ -1623,7 +1698,9 @@ system ones (better not to touch): [`CONFIGURATION.md`](../../CONFIGURATION.md).
   camera's), the renderer's device runs its passes (`NrdHost.cpp`: root signatures and pipeline states
   from its descriptions, its DXIL, its textures as compute targets; 30 frames of history at most), and
   `CSResolve` makes its light the history that `CSFilter` takes without its spatial filter; at 2560x1440
-  it takes 1.1 to 1.2 ms with its packing, 0.3 to 0.4 ms more than `CSTemporal`.
+  it takes 1.1 to 1.2 ms with its packing, 0.3 to 0.4 ms more than `CSTemporal`. There `CSFilter` finds
+  the face's normal (4 depths around the pixel) only for the terrain's pixels, whose baked light share
+  needs it: on Pier's sweep at 4K FSR Quality 0.441 -> 0.434 ms.
 - `CSSpecular` makes the highlights as the raster does, in the game's colour: the highlights' colour
   times the sun's specular colour times its visibility and each lamp's times its falloff, times
   saturate(R.V)^32; a lamp's where a ray towards it reaches it (4 rays a pixel at most, only for a
@@ -1691,7 +1768,7 @@ A draw's constants (`Shaders/Constants.h`) are two root CBVs of the root signatu
 - **b1 `SDrawHead`, 256 bytes:** the matrices (`mWorld`, `mWorldViewProj`, `mPrevWorldViewProj`),
   the colour, the flags, the textures and the alpha reference. Every draw writes it into the frame's
   memory (write-combined: written once, never read back).
-- **b3 `SDrawExt`, 1728 bytes:** the rest. That is the lights, the shadows, the other programs'
+- **b3 `SDrawExt`, 1808 bytes:** the rest. That is the lights, the shadows, the other programs'
   parameters and the materials' extras (parallax, PBR, skin, the water's and the HDR passes').
 
 C++ fills one `SDrawConstants` holding the members of both and writes each part on its own.
@@ -1712,6 +1789,230 @@ the rest of `DefaultDrawConstants` (zeros, the texture matrix the identity):
 The default block stays bound over a run of draws. `0` uploads the rest of every draw and the
 prepass's motion as before the block, for comparisons (read at each draw). `r_Stats` and
 `d3d12_FrameLog` count the bytes and the draws by why they uploaded.
+
+With `d3d12_DrawExtReuse 1` (the default, not saved) a draw whose rest has the same bytes as the
+last one uploaded binds that copy again (`DrawExt::SLast`). Most draws repeat the draw before.
+The copy is in this frame's memory, which stays as written until its frame slot starts again
+(`CD3D12Upload::GetFrameGeneration`). The renderer's own changes (heat vision's `vHeat`, a light
+pass's `nPbr` without rays) are never kept or reused. The GPU reads the same bytes, so the frames
+are the same. `0` uploads every such rest, as before (read at each draw). `d3d12_FrameLog` counts
+the reused ones (`ext_reused`) and `r_Stats` shows them next to the uploads.
+
+Both comparisons (with the default block and with the last copy) take `BytesEqual::Equal`
+(`BytesEqual.h`): the same answer as `memcmp`, 64 bytes a load with AVX-512 or 32 with AVX2 where
+the CPU and the OS have them (CPUID and XGETBV at load), else `memcmp` itself. The CRT's `memcmp`
+compares 8 bytes at a time: 24.3 ns for 1,808 equal bytes, AVX-512 11.4 and AVX2 16.4 on a Ryzen 7
+9800X3D. River's heavy frames compare about 6,700 rests a frame. The sweep there, sampled, four
+pairs of runs: `EF_EndEf3D` 1.988 → 1.955 ms (frames 60 to 1160), 4.942 → 4.872 (600 to 800),
+lower in every pair; the comparisons' samples 122 → 81. Unit tests `BytesEqual_*`: every size to 600
+bytes and 1,808, one bit off at each byte, against `memcmp`; no read past a block's end.
+
+## Per frame memory in video memory
+
+The per frame memory (`CD3D12Upload::AllocFrame`) holds the draws' constants, the vertices and
+indices drawn once, the rays' instances and the path tracer's lights. It was in the upload heap:
+system memory, which the GPU reads over the bus each time.
+
+With `d3d12_FrameMemoryVideo 1` (the default, not saved) it is in the GPU upload heap instead,
+where the device has one (`D3D12_FEATURE_D3D12_OPTIONS16.GPUUploadHeapSupported`: resizable BAR on
+and a recent runtime). That is video memory the CPU maps and writes through the bus, write
+combined; every user of this memory only writes it. The GPU then reads it at its own speed.
+
+- Its buffers start in `COMMON` and are promoted to each read.
+- A device without the heap keeps system memory, and so does one that refuses a block (the rest
+  of the frames then stay in system memory too). The log says which at the start; `r_Stats 2`
+  shows it on its "Frame memory" line.
+- The switch is read when a frame slot starts. A slot whose ring is in the other memory gets a
+  new ring then (the GPU is done with it).
+
+Player settings at 3840 x 2160 with TAA, `d3d12_PathTracing 0`, `d3d12_HDROutput 0`, `r_VSync 0`;
+one DLL, `0` and `1` in turn, three runs each, medians:
+
+| | `0` | `1` |
+|---|---|---|
+| Pier, frames 60–1160: GPU ms | 3.423 / 3.430 / 3.428 | 3.302 / 3.332 / 3.313 |
+| Pier, frames 300–600: GPU ms | 3.740 / 3.661 / 3.683 | 3.539 / 3.471 / 3.525 |
+| River, frames 60–1160: GPU ms | 3.552 / 3.617 / 3.559 | 3.490 / 3.490 / 3.487 |
+| River, frames 600–800: GPU ms | 5.130 / 5.015 / 5.069 | 4.851 / 4.939 / 4.830 |
+| River, frames 600–800: `EF_EndEf3D` ms | 6.126 / 6.048 / 6.399 | 6.156 / 6.197 / 6.022 |
+
+The GPU takes 3.4 % less on Pier and 1.9 % less on River, and 4.3 % less in their heavy parts.
+At 1920 x 1080 without the rays (Pier, two runs each) 1.557 / 1.538 → 1.418 / 1.421 ms.
+The CPU is the same. The frames are the same: frame 181 of Pier and of River has 0 px pairs
+between `0` and `1`. Unit test `Layout_DrawConstantsVideoMemory` writes the harness's constants
+and input into the GPU upload heap and reads every word back through the kernel.
+
+## Index lists
+
+The engine's strips, fans and quads are drawn as triangle lists (`IndexLists.h`), made again
+when a leaf buffer's indices or materials change. They are written through a pointer into room
+made once: a `push_back` an index took 4 ns, and a new view makes up to 388,000 at once. Pier's
+sweep at 3840 x 2160 with the rays, row 360 (the camera's jump to the flight's start, where the
+engine makes 178 leaf buffers): 14.4–15.2 ms → 13.7–13.9 (`EF_EndEf3D` 7.2–7.8 → 6.2–6.8); its
+heavy part's `EF_EndEf3D` 5.00–5.05 → 4.89–4.92 ms; the frames the same. Unit tests `IndexLists_*`.
+
+A leaf buffer's draw (`Geometry::GetDraw`) is filled where its caller keeps it: every return is
+the one named `std::optional`. A draw made in a local and returned was copied there, its fields
+written one by one and read back 16 bytes at a time, a store forwarding stall each. River's
+sweep, render thread sampled, two sets of three runs against the build before, the second with
+its code moved as the step moves it (32 NOPs in a cold function): `GetDraw`'s own samples
+826 / 814 → 238 / 256 (its caller `DrawLeafItem`'s 716 / 777 → 1,011 / 1,106), all under
+`EF_EndEf3D` 12,075 / 12,284 → 11,868 / 11,953; `EF_EndEf3D` of frames 60–1160
+2.050–2.117 → 1.960–2.046 ms, every run lower, its heaviest tenth 5.89–6.20 → 5.68–5.96 ms.
+The frames are the same (frame 181 in the runs' states). Unit test `LeafDraw_OneResult`.
+
+## The lists' order
+
+`CScene::BuildLists` puts each list in the order of its items' keys, equal keys as `EF_AddEf` gave
+them (`KeySort.h`): `std::stable_sort` of the keys with the items' places, 16 bytes each, and then
+the items (88 bytes) moved once. Sorting the items themselves moved them at each of the merge
+sort's passes. The lists come almost in order, where the merge sort is near linear: `std::sort` of
+the pairs instead was slower (River's heavy frames 4.81–5.03 → 4.99–5.27 ms). River's sweep,
+sampled, four pairs of runs: `EF_EndEf3D` 1.946–1.956 → 1.929–1.935 ms (frames 60 to 1160),
+4.84–4.89 → 4.76–4.81 (600 to 800), lower in every pair; `BuildLists`' samples 588 → 503, the
+sort's 401 → 260. The order is the same, so the frames are (0 px against the build before). Unit test
+`KeySort_StableSortsOrder`: lists of every length to 300 and two long ones, against `std::stable_sort`.
+
+## Tables looked up every draw
+
+The pipeline states, the live leaf buffers (twice a draw), the parts drawn into the sun's
+cascades, the objects' motion and the static casters are hashed as whole words (`WordHash.h`,
+the scene for rays' hash): the standard library's FNV-1a takes a multiply a byte, and a pipeline
+key's 24 bytes took 2 % of Pier's heavy frames. `GetPSO` also keeps the key it found last: most of
+a pass's draws ask for the same state. Pier's sweep at 3840 x 2160 with the rays, five pairs of
+runs: its heavy part's `EF_EndEf3D` 4.86–4.98 → 4.77–4.85 ms, the whole sweep's 1.83–2.00 →
+1.80–1.82; the frames the same. Unit tests `WordHash_*`.
+
+The sets asked only whether a key is in them (the live leaf buffers, the parts drawn into the
+cascades' full set, the live casters' parts and the main view's for the rays' walk of the parts out
+of it, the static casters' leaf buffers) are `CWordSet`s: one array of words probed in a line, at
+most half full, cleared by filling it. `std::unordered_set` made a node with the game's allocator
+for each key and freed them all when it was cleared, every frame. River's sweep with the rays (CPU
+samples of the drawing thread, 1148 frames): the sets' work about 378 → 134 samples, 0.12 ms a frame;
+`BuildRayScene` 1505 → 1273, the cascades' 1740 → 1559. Nothing walks these sets, so the frames are
+the same (River's sweep 0 and 7 px against the build before). Unit tests `WordSet_*`.
+
+## Matrix products
+
+The draws' transforms (`World * View * Proj` in `DrawLeafItem`), the cascades' (`World * WorldToMap
+* Proj`), their test of an object's box and the rays' check of a captured draw's transform multiply
+by `MatrixMul.h`: four SSE rows, each element its four products added from the left, as
+`Cry_Matrix.h`'s `operator*` does. Under `/fp:precise` that gives the very same bits. The SDK's
+product took a quarter of `DrawLeafItem`'s own samples. River's sweep at 3840 x 2160 with the rays
+(player settings, `d3d12_PathTracing 0`), five runs of the build before and four of this one:
+
+| | before | after |
+|---|---|---|
+| frames 600–800: frame ms | 7.23–7.70 | 6.90–6.98 |
+| frames 600–800: `EF_EndEf3D` ms | 5.89–6.22 | 5.58–5.67 |
+| frames 600–800: the water's reflection (CPU) ms | 2.10–2.21 | 1.95–1.97 |
+| frames 60–1160: `EF_EndEf3D` ms | 1.36–1.46 | 1.26–1.32 |
+
+The whole sweep's GPU is the same (3.45–3.51 and 3.47–3.50 ms). Frame 181 of River and of Pier has
+0 px pairs against the build before. Unit tests `MatrixMul_*` compare 20,000 random pairs with the
+SDK's sum bit for bit, and a product written over either factor.
+
+A captured draw's transform for the rays (`CaptureDraw`) is its `mWorld`'s columns, written as three
+16 byte rows (`MatrixMul::Columns3`): its hash (`DrawHash`) reads them back as 8 byte words at once,
+and from twelve 4 byte stores those reads waited for the stores to reach the cache (21 of the
+function's 138 samples on one read). `FillInstance` zeroes the instance in place: `Inst = {}`
+zeroed a copy on the stack and copied it over. River's sweep (`r_WaterUpdateMinInterval 0`,
+`d3d12_AutoExposure 0`), eight pairs of runs, two runs (one of each) of the machine's slow state left
+out: frames 60–1160 `EF_EndEf3D` 1.218 → 1.193 ms (lower in five of six pairs), frames 600–800 4.94 →
+4.91 (within the spread). `CaptureDraw`'s own samples 138–154 → 109–124, but the calls after it
+(`GetRawSRV`, the `push_back`) took most of them: the stores' queue waits there now. Frame 181 has a
+0 px pair against the build before. Unit test `MatrixMul_Columns3`.
+
+## Draws joined into one
+
+Most of a view's draws repeat the one before but for the object's transforms: the same mesh,
+range, material, textures and constants, a rock or a palm placed many times. With
+`d3d12_DrawBatch 1` (the default, not saved) the renderer holds a leaf's draw back
+(`DrawBatch.h`); the next one joins it when all it binds and draws is the same, but its header's
+three matrices (`mWorld`, `mWorldViewProj`, `mPrevWorldViewProj`), and its header is the next 256
+bytes of the frame memory. The run is recorded as one `DrawIndexedInstanced`. Its vertex program
+(`General.hlsl`'s `XR_DRAW_OBJECTS`) reads instance i's matrices from header i through a root SRV
+(`ROOT_DRAW_OBJECTS`); the pixel program reads the first header, the same in all of them. The
+instances are drawn in order, so the frames are the same.
+
+- Only the leaves' draws join (`DrawItems`): the depth prepass, the leaves' prepass, the lists and
+  the bodies. Not the draws into a shadow map, those that trace rays or those instanced already.
+- A draw joins only when no barrier waits. Any other use of the frame's list (`CFrameCmdList`'s
+  `->`, `GetCmdList`, `ForgetDrawState`) records the held run first.
+- Every draw that could join takes the instanced pipeline state, also one drawn alone (one
+  instance), so a run changes no state. With the instanced state for the runs alone, and the
+  plain one again after each, Pier's opaque list took 0.03 ms more on the GPU.
+- The vertex program goes through the wave's objects one at a time: each one's matrices are read
+  once at an address the same in the wave, as the constant buffer's.
+- `2` holds and joins the same draws but records them one by one under the plain state, each with
+  its own header bound; `0` records every draw at once, as before. `d3d12_FrameLog` counts the
+  draws that joined (`draw_joined`), the instanced draws of two or more (`draw_batches`) and the
+  draws in them (`draw_instanced`).
+
+Player settings at 3840 x 2160 with TAA, `d3d12_PathTracing 0`, `d3d12_HDROutput 0`, `r_VSync 0`;
+one DLL, `0` and `1` in turn, three runs each, medians:
+
+| | `0` | `1` |
+|---|---|---|
+| River, frames 600–800: draws / draw calls | 8,768 / 8,768 | 8,768 / about 1,230 |
+| Pier, frames 600–800: draws / draw calls | 4,308 / 4,308 | 4,308 / about 2,160 |
+| River, frames 600–800: frame ms | 6.566 / 6.497 / 6.538 | 6.131 / 6.013 / 6.040 |
+| River, frames 600–800: `EF_EndEf3D` ms | 5.120 / 5.138 / 5.127 | 4.686 / 4.728 / 4.687 |
+| River, frames 600–800: the water's reflection (CPU) ms | 1.829 / 1.827 / 1.826 | 1.558 / 1.553 / 1.548 |
+| River, frames 60–1160: `EF_EndEf3D` ms | 1.215 / 1.206 / 1.203 | 1.144 / 1.140 / 1.161 |
+| Pier, frames 600–800: `EF_EndEf3D` ms | 2.827 / 2.833 / 2.843 | 2.750 / 2.764 / 2.744 |
+| Pier, frames 600–800: GPU ms | 3.325 / 3.309 / 3.340 | 3.295 / 3.300 / 3.290 |
+
+The GPU of the whole sweeps is the same (River 3.49–3.52 ms either way). Frame 181 of Pier and
+of River and frame 700 of Pier have 0 px pairs between `0` and `1`; River's frame 700 is 9 px
+from the nearest run of `0` (runs of `0` fall into states up to 1.8 million px apart there).
+Unit tests `DrawBatch_*`; render_tests suite `drawbatch`.
+
+A draw's state for the comparison is written as whole words, its 4 byte fields in pairs
+(`DrawBatch::PutPair`: the scissor, the count and first index, the base vertex and the epoch).
+`memcmp` reads it 8 bytes a load right after, and a load over two 4 byte stores waited for both
+to reach the cache. River's sweep, sampled, four rounds against the build before with its code
+moved as much (code moved alone shifts these times by a few hundredths): the comparison's
+samples 225 → 64, `DrawGeometry`'s 3,700 → 3,474; `EF_EndEf3D` 1.924–1.960 → 1.918–1.937 ms
+(frames 60 to 1160), lower in every round; frames 600 to 800 the same within the runs' spread
+(4.74–4.85 → 4.79–4.83). Frame 181: 0 px pairs against the build before. Unit test
+`DrawBatch_PutPairIsTheFields`.
+
+## The alpha test's empty texels
+
+The general program tests the alpha at its end, after the light, the sun's cascades and the path
+tracer's G-buffer: a leaf's empty texels paid for all of it. With `d3d12_AlphaTestEarly` (1) a
+texel is left out right after its texture is read where the alpha the test takes can only be this
+one or less (no flag that raises it later) and it is under the reference by more than 1/256; the
+test at the end stays, so the same texels are kept. HLSL's `discard` demotes the pixel to a helper,
+which goes on for its neighbours' derivatives: the kept pixels get the same values. The DXIL of
+the 63 general pixel programs differs by the inserted test alone. Swamp's jungle stand (3840 x 2160,
+FSR Quality, the path tracer): the opaque list 1.62 → 1.35 ms, the GPU's frame 13.2 → 12.9 ms; the
+sweeps' with the path tracer 0.95 → 0.87 ms (Swamp) and 0.95 → 0.89 (River); the rays' and the
+raster's lists about the same (their programs lighter). render_tests suite `alphaearly`.
+
+## The leaves' depth before their colour
+
+The depth prepass leaves out what the alpha test discards, so the opaque list shaded every leaf and
+blade of grass that passed its test, also those behind others: a draw that discards and writes the
+depth is tested after its pixel shader. With `d3d12_FoliagePrepass` (2, the default: always; 1: with
+the path tracer alone) the leaves' and the grass's items (`eDC_AlphaTestVColor`) are drawn once more after the
+prepass and the sun's mask by rays, their depth alone where their alpha passes the test (a pixel
+shader of the texture's alpha, `AlphaDepthMain`); their colour then tests `EQUAL` without writing the
+depth, before its pixel shader, and shades the leaves in front alone. Only the draws whose alpha at
+the test is their vertices' times their texture's (`AlphaDepth.h`; a source lint in its unit tests
+keeps the flags read on the way classified); both programs compare that product with the reference
+(`a < ref`, not `clip(a - ref)`, which a multiply-add could fold into), so they keep the same pixels
+bit for bit. The colour keeps `GS_DEPTHWRITE` for its programs, motion vectors and the upscaler's
+depth. Not with MSAA (alpha to coverage) nor heat vision. Swamp's jungle stand (3840 x 2160, FSR
+Quality, the path tracer): the opaque list 1.37 → 0.57 ms and the pass 0.17, the GPU's frame 12.96 →
+12.30–12.35 ms; the sweeps' with the path tracer: the GPU 8.43 → 8.17 ms (Swamp), 9.06 → 8.73
+(River). The main thread draws the leaves' items twice (0.1–0.4 ms more), so at first only with the
+path tracer; after the draws got cheaper (`d3d12_DrawBatch`) always (step 403). The sweeps in the
+player's settings (3840 x 2160, TAA, the rays' reflections; two runs each, the mean frame 1 → 2):
+River 3.93 → 3.81 ms, Swamp 4.07 → 3.89, Treehouse 2.85 → 2.74, Fort 3.79 → 3.76, Pier 4.01 → 4.03;
+without the rays River 3.66 → 3.54, Swamp 3.71 → 3.53, Pier 3.21 → 3.21. render_tests suite
+`foliageprepass`; unit tests `AlphaDepth_*`.
 
 ## Resource states and barriers
 
@@ -1837,7 +2138,7 @@ given one by one, on the GPU with the debug layer).
   draws, the pipeline changes, the triangles, the dynamic lights, the camera's position and angles.
   The last field has the bytes of the draws' constants (`draw_bytes`) and the draws by why they
   uploaded their rest (`ext_default` none, `ext_all` `d3d12_DrawExt 0`, `ext_program`, `ext_vertex`,
-  `ext_differs`; Per draw constants) and, after it, the display's lookups since the last line
+  `ext_differs`; of them `ext_reused` bound the last upload's copy; Per draw constants) and, after it, the display's lookups since the last line
   (`display_lookups`, `display_lookup_ms`; the first line: since the start) and whether the game
   has the focus (`display_active`).
   `2` also turns the engine's frame profiler on (collecting, without its overlay) and adds the self
@@ -1961,6 +2262,22 @@ and lists theirs (`NamesObjects`).
   reflections 1.07 -> 0.80; Bunker's sunset 0.63 -> 0.58, with the rays 0.77 -> 0.78; Carrier's
   frame 3.22 -> 3.14 ms with the pass, 4.45 -> 4.22 with the rays); the spectrum, made on the CPU at
   the first water and when the wind changes, takes under 65 ms.
+  - Made when a level with water is loaded (`PrepareOcean`, from `PostLoad`; the engine's water level
+    known), not in the first frame that shows the sea: the FFT's targets, the spectrum, the foam's
+    texture, the ocean's grid and its terrain (made again for each level), the ponds' ripple and the
+    beach's textures. Treehouse's sweep at 3840 x 2160 with the rays: its first frame with the sea
+    (row 491, out of the hut) took 88 ms (the main view's CPU 86: the grid's terrain 34, the sea 10,
+    the grid 9, the ponds' ripple 5, the targets 5, the beach's textures 4, the foam 1), now 10 ms
+    (8), no more than the frames around the view's other new sights; the load is that much longer.
+    The frames the same (the sweep's frame 661 bit for bit). `render_tests.ps1 -Suites oceanprep`.
+  - On the compute queue (`d3d12_WaterAsync`, 1; 0 runs the kernels in the frame's list; not saved):
+    the waves, the foam and the caustics run beside the frame's first passes, the frame waiting for
+    them at the first draw that reads them; at the frame's end their targets go back to states the
+    compute queue can take. Not in frames that build the ray scene on that queue: its builds would
+    wait for them (Carrier with the rays 0.1 ms slower). 3840 x 2160 FSR Quality, standing: Pier from
+    the hill 3.375 -> 3.289 ms of GPU time, Carrier as before (the pass beside the water's reflection
+    slows it by as much as it saves). Submitting the frame so far before the kernels, so that they
+    run beside the sun's cascades instead, left the GPU idle for the CPU (Pier 0.85 ms).
 - The FFT ocean's foam (`d3d12_WaterFoam`, 1; 0 draws the frames of the water before it; not saved;
   `Shaders/WaterFoam.hlsli`, `FoamPattern.h`, the foam kernel in `Shaders/OceanFFT.hlsl`):
   - Whitecaps. Their share of the sea is Monahan and O'Muircheartaigh's law of the wind,
@@ -2247,7 +2564,15 @@ and lists theirs (`NamesObjects`).
     a geometric series of 1 + r / 0.5 m (22.6 a doubling out to 1244.5 m: 3 % apart far off, 1.5 cm
     at the centre), the last at the disc's edge; bilinear between them, two loads (the search among
     the disc's rings for each pixel cost the water 0.04-0.12 ms at 4K). Where the alpha bends at a
-    ring between two rows it is within a quarter of the slope's change times their spacing.
+    ring between two rows it is within a quarter of the slope's change times their spacing. Both
+    are of the disc's vertices alone: `OceanGrid::CDiscCache` reads them again only when a byte of
+    the vertices changed (the main thread's 0.07 ms a frame where the camera stands; River's sweep,
+    whose ring moves most frames, 178 → 123 samples of 1148 frames). Unit test `Grid_DiscCache`.
+    `ReadDisc` finds the rings without sorting the radii (each the least radius over the last
+    ring's not near it) and a vertex's segment by a cheaper angle than atan2 (within 2.1e-4 radians;
+    atan2 where it is within 0.01 segments of a tenth off one); its disc is the sorted read's, bit
+    for bit (unit test `Grid_DiscReadExact`): on River's sweep 311 → 118 samples, `EF_EndEf3D`
+    1.927-1.936 → 1.896-1.906 ms.
   - The height: the FFT ocean's cascades, each at the mip level whose texel is as wide as the grid's
     spacing there (no wave shorter than two cells: those would crawl over the vertices), and the
     wakes' (the window's height, a texture of its own with 4 mip levels written after their view).
@@ -2536,8 +2861,11 @@ and lists theirs (`NamesObjects`).
   what the main view draws after it (the fish of Training swim with other poses; with the water at
   `d3d12_WaterDebug 1` the frames otherwise stay those of 4160). `d3d12_WaterReflectionScale` is
   its size as a fraction of the screen (0.5), and
-  `r_WaterUpdateFactor`, `r_WaterUpdateDistance`, `r_WaterUpdateDeltaAngle` how often it is redrawn
-  (0, 0, 0: every frame). Its target has mip levels (up to 8, made after each redraw, about
+  `r_WaterUpdateFactor`, `r_WaterUpdateDistance`, `r_WaterUpdateDeltaAngle` how often it is redrawn,
+  by time not sooner than `r_WaterUpdateMinInterval` (1/120 s; the engine's rule alone redraws it every
+  frame at the water, but the water reads it through the matrix it was drawn with, so only what moves
+  in it waits: at 200 FPS it is drawn every other frame, Carrier with the rays' effects 1.26 -> 0.67 ms
+  of the CPU on it; the demos' step of 0.02 s gets the frames as before; all four 0: every frame). Its target has mip levels (up to 8, made after each redraw, about
   0.03 ms at 2560 x 1440), from which the water blurs it where the ripple gets finer than a pixel:
   the wave texture's alpha holds the squared slope, and its mean less the square of the mean slope
   is the variance the mip levels smoothed out of the normal. That turns the reflected rays up and
@@ -2557,6 +2885,22 @@ and lists theirs (`NamesObjects`).
   before, so the frames stay the same bit for bit (Carrier's sweep: the water 1.74 -> 1.53 ms in
   its worst 100 frames, 0.67 -> 0.61 on average). The water volumes go without them: their
   reflection meets the banks near the water, where the tiles cost more than they save.
+  `d3d12_WaterSSR 0` (1; not saved) leaves the screen space reflection and its tiles out, to
+  measure them: the planar reflection, the sky or the rays show in its place.
+- The depth of the water's scene copy is made by a compute kernel (`DepthTiles.hlsl`'s
+  `XR_DEPTH_COPY`) that reads the depth buffer through a view in its depth test's read state and
+  writes its bits into a plain 32-bit texture (`d3d12_WaterDepthCopy`, 1; when the depth has 32
+  bits, the frame draws into the scene's targets of TAA or an upscaler, and without MSAA; 0: a copy
+  of the resource as before; not saved). The bits are the same (frame 181 of Pier's sweep 0 px
+  apart). At 3840 x 2160 the copy and the passes that read it cost less, the copy's colour stays a
+  copy of the resource (2 runs of each, frames 60-1160 of the sweeps, ms):
+
+  | Sweep | Scene copy | Depth tiles | Ocean shading | GPU |
+  |---|---|---|---|---|
+  | River | 0.214 -> 0.185 | 0.046 -> 0.026 | 0.170 -> 0.152 | 3.328 -> 3.283 |
+  | Pier | 0.188 -> 0.173 | 0.041 -> 0.023 | 0.201 -> 0.189 | 3.431 -> 3.371 |
+
+  Unit test `WaterDepthCopy_SameBits`.
 - The glass of the scopes (`r_ScopeLens_fx`, the AG36's, the OICW's, the AW50's and the rocket
   launcher's) shows the scene around the middle of the screen through the same copy of the scene
   when its list has one; else (the weapon's list) a copy of only the part of the target it shows
@@ -2573,6 +2917,10 @@ and lists theirs (`NamesObjects`).
   and the others, with `r_HeatHaze 1`, as the original) show the copy of the scene behind them moved
   by the slopes of `WaterBump` and blended by `haze_mask`; the copy is taken where the particles are
   drawn, so the grass and the fire stay in it (the original's, made before the water, loses them).
+  Its two textures, the templates' below, the terrain's detail and the default cube are loaded when a
+  level is loaded (`PreloadTextures`, from `PostLoad`), not in the frame that first needs one:
+  Treehouse's sweep at 3840 x 2160 with the rays took 17.4 ms at the hut's first heat haze (row 216;
+  the main view's CPU 13.3, `WaterBump` made a normal map), now 5.1 (1.0); the frames the same.
 - The templates with shaders of their own (`TemplateFx.cpp`; one mode of `General.hlsl`'s `ShaderFx`
   each, `DF2_SHADER_FX` with the mode in `vParams3.w`, the screen copies' and the mirrors' too): the
   rainbow (`Defaults/colors2` at N.E, N.H, unlit), the membrane (a row of colours at E.N moving with
@@ -2888,6 +3236,19 @@ and lists theirs (`NamesObjects`).
   a screen wider than about 1800 is first reduced to a quarter (the mean of 4 x 4 pixels), so at
   4K Paradise takes about 0.17 ms of the GPU (the GPU time's section `render mode`: the scene's
   copy 0.07, the reductions 0.05, the composite 0.04) rather than 0.34 with 8 x 8 taps a texel.
+  The copy is of the scene's colour alone (`CopySceneForWater` without its depth, as for the other
+  screen effects: none of their passes reads it): the 4K sweeps' `water scene copy` section
+  0.100 -> 0.062 ms a frame on Treehouse, 0.119 -> 0.083 on Pier, the frames the same.
+  With HDR the copy is gone too (`d3d12_RenderModeScene`, 1): when nothing draws over the back
+  buffer between the HDR resolve and the render mode (`d3d12_AA` taa, none or MSAA, no highlight
+  layer) and the render mode's pass covers all of it (its viewport), the resolve draws the frame
+  into a target of the render mode's, in the back buffer's format, and the render mode reads it
+  there. The 4K sweeps in the player's settings (TAA, two runs each): the copy 0.029-0.030 ms
+  -> none, the section `render mode` 0.087 -> 0.070-0.072 (its passes read a render target),
+  the GPU 3.419 / 3.391 -> 3.341 / 3.362 ms a frame on River, 3.483 / 3.476 -> 3.420 / 3.439 on
+  Pier, 2.611 / 2.649 -> 2.537 / 2.583 on Treehouse. The frames are the same: Paradise's adapted
+  luminance gives a run one of a few states, and runs of 0 and of 1 share them (frame 181: Pier
+  0 px, Treehouse 0 px, River 59-84 px as two runs of 0). 0: into the back buffer and copied.
 - Cold: F first 2 saturate(0.75 F - 0.3 D), the source's gain 0.65, no blur, k 0.425.
 - The threshold and the gain above are the indoor ones. The original moves them to outdoor ones
   with an outdoor share s (`d3d12_RenderModeOutdoor`, 1; `RenderModeOutdoor.h`). Traced in

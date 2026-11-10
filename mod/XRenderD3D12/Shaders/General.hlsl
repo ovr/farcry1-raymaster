@@ -215,10 +215,19 @@
 //	the factor; the rest 0 (the unlit, the light passes, the fog volumes,
 //	the scope's glass). Without an upscaler SV_Target1 and 2 are null
 //	targets.
-//	Compiled with XR_CASCADE_INSTANCES (the vertex shader of the full set of
-//	the sun's cascades, Cascades.cpp) instance i is drawn with mShadow[i] in
-//	place of mWorldViewProj into slice nShadowTex[i] of the array
-//	(SV_RenderTargetArrayIndex).
+//	Compiled with XR_CASCADE_INSTANCES (the vertex shader of the sun's
+//	cascades, Cascades.cpp) instance i is drawn with mShadow[i] in place of
+//	mWorldViewProj into slice nShadowTex[i] of the array
+//	(SV_RenderTargetArrayIndex); the pixel shader of the live set's casters
+//	takes that slice of the full set's map and vShadowParams[slice]'s margin.
+//	With XR_CASCADE_OBJECTS too (the parts of one mesh for all their objects)
+//	instance i's matrix and slice are the record i of 80 bytes at byte
+//	nShadowTex.y of raw buffer nShadowTex.x.
+//	Compiled with XR_DRAW_OBJECTS (the vertex shader of the draws of one mesh
+//	for consecutive objects at once, d3d12_DrawBatch, DrawBatch.h) instance
+//	i's mWorld, mWorldViewProj and mPrevWorldViewProj are those of the
+//	header (SDrawHead) i * 256 bytes after the draw's (g_DrawHeads); the rest
+//	of every header is the draw's.
 //	Compiled with XR_RAY_REFL (Shader Model 6.5, the main view's draws with
 //	DF_CUBE0 while d3d12_RTReflections and d3d12_RTReflectionSurfaces are on,
 //	SPipelineKey::bRayTrace) DF_CUBE0 traces a ray where it looks the cube
@@ -897,7 +906,34 @@ float BubbleNoise(float2 v)
   return lerp(lerp(vCorner[0], vCorner[1], s.x), lerp(vCorner[2], vCorner[3], s.x), s.y);
 }
 
-#ifdef XR_CASCADE_INSTANCES
+#if defined(XR_CASCADE_OBJECTS) && !defined(XR_RAY_REFL) && !defined(XR_RAY_LIGHT)
+// The raw buffers (the texture table, D3D12Pipeline.h's space4): the instances' records.
+ByteAddressBuffer g_Buffers[] : register(t0, space4);
+#endif
+
+#ifdef XR_DRAW_OBJECTS
+//! The draws' headers from the draw's on (the frame's memory, D3D12Pipeline.h's ROOT_DRAW_OBJECTS).
+ByteAddressBuffer g_DrawHeads : register(t3, space5);
+
+//! The matrix at byte nByte of the headers (row major, as the constant buffer's).
+float4x4 DrawHeadMatrix(uint nByte)
+{
+  return float4x4(asfloat(g_DrawHeads.Load4(nByte)), asfloat(g_DrawHeads.Load4(nByte + 16)), asfloat(g_DrawHeads.Load4(nByte + 32)),
+                  asfloat(g_DrawHeads.Load4(nByte + 48)));
+}
+#define XR_DRAW_WORLD mDrawWorld
+#define XR_DRAW_WVP mDrawWorldViewProj
+#define XR_DRAW_PREV_WVP mDrawPrevWorldViewProj
+#else
+#define XR_DRAW_WORLD g_Draw.mWorld
+#define XR_DRAW_WVP g_Draw.mWorldViewProj
+#define XR_DRAW_PREV_WVP g_Draw.mPrevWorldViewProj
+#endif
+
+#if defined(XR_DRAW_OBJECTS)
+//! XR_DRAW_OBJECTS: a vertex of one object, its matrices from its header (VSMain below).
+SVertexOutput VSDrawObject(SVertexInput In, float4x4 mDrawWorld, float4x4 mDrawWorldViewProj, float4x4 mDrawPrevWorldViewProj)
+#elif defined(XR_CASCADE_INSTANCES)
 //! A caster of the full set of the sun's cascades into all the slices it reaches at once, an
 //! instance each: mShadow[i] the world to slice nShadowTex[i] in place of mWorldViewProj.
 SVertexOutput VSMain(SVertexInput In, uint nInstance : SV_InstanceID)
@@ -937,22 +973,29 @@ SVertexOutput VSMain(SVertexInput In)
       else if (g_DrawExt.vParams3.w == XR_FX_BUBBLE)
         vPos.xyz += In.vNormal * (BubbleNoise(vPos.xy + g_DrawExt.vParams1.xy) * g_DrawExt.vParams1.w);
     }
-#ifdef XR_CASCADE_INSTANCES
+#if defined(XR_CASCADE_OBJECTS)
+    const ByteAddressBuffer Records = g_Buffers[g_DrawExt.nShadowTex.x];
+    const uint nRecord = g_DrawExt.nShadowTex.y + nInstance * 80;
+    const float4x4 mObject = float4x4(asfloat(Records.Load4(nRecord)), asfloat(Records.Load4(nRecord + 16)),
+                                      asfloat(Records.Load4(nRecord + 32)), asfloat(Records.Load4(nRecord + 48)));
+    Out.vPos = mul(vPos, mObject);
+    Out.nSlice = Records.Load(nRecord + 64);
+#elif defined(XR_CASCADE_INSTANCES)
     Out.vPos = mul(vPos, g_DrawExt.mShadow[nInstance]);
     Out.nSlice = g_DrawExt.nShadowTex[nInstance];
 #else
-    Out.vPos = mul(vPos, g_Draw.mWorldViewProj);
+    Out.vPos = mul(vPos, XR_DRAW_WVP);
 #endif
-    vWorldPos = mul(vPos, g_Draw.mWorld).xyz;
+    vWorldPos = mul(vPos, XR_DRAW_WORLD).xyz;
 #ifdef XR_VELOCITY
     Out.vCurClip = Out.vPos;
-    Out.vPrevClip = mul(vPos, g_Draw.mPrevWorldViewProj);
+    Out.vPrevClip = mul(vPos, XR_DRAW_PREV_WVP);
 #endif
     if (bOverlay)
       Out.vPos.w += 0.005;
   }
   Out.vPos = Jitter(Out.vPos);
-  float3 vNormal = mul(float4(In.vNormal, 0), g_Draw.mWorld).xyz;
+  float3 vNormal = mul(float4(In.vNormal, 0), XR_DRAW_WORLD).xyz;
 
   float4 vColor = g_Draw.vColor;
   if (HasFlag(DF_VCOLOR | DF_VCOLOR_X2))
@@ -1003,11 +1046,30 @@ SVertexOutput VSMain(SVertexInput In)
   Out.vNormal = vNormal;
   Out.vCliff = HasFlag(DF_TERRAIN_CLIFF) ? DecodeVertexColor(In.vColor0).rg : 0;
   Out.vColorNoSun = vColorNoSun;
-  Out.vTangent = mul(float4(In.vTangent, 0), g_Draw.mWorld).xyz;
-  Out.vBinormal = mul(float4(In.vBinormal, 0), g_Draw.mWorld).xyz;
-  Out.vTNormal = mul(float4(In.vTNormal, 0), g_Draw.mWorld).xyz;
+  Out.vTangent = mul(float4(In.vTangent, 0), XR_DRAW_WORLD).xyz;
+  Out.vBinormal = mul(float4(In.vBinormal, 0), XR_DRAW_WORLD).xyz;
+  Out.vTNormal = mul(float4(In.vTNormal, 0), XR_DRAW_WORLD).xyz;
   return Out;
 }
+
+#ifdef XR_DRAW_OBJECTS
+//! An instance per object: the wave's objects one at a time, each one's matrices read once at an address the same in
+//! the wave (scalar registers, as the constant buffer's).
+SVertexOutput VSMain(SVertexInput In, uint nInstance : SV_InstanceID)
+{
+  SVertexOutput Out = (SVertexOutput)0;
+  [loop] for (bool bDone = false; !bDone;)
+  {
+    const uint nObject = WaveReadLaneFirst(nInstance);
+    if (nObject == nInstance)
+    {
+      Out = VSDrawObject(In, DrawHeadMatrix(nObject * 256), DrawHeadMatrix(nObject * 256 + 64), DrawHeadMatrix(nObject * 256 + 128));
+      bDone = true;
+    }
+  }
+  return Out;
+}
+#endif
 
 //! DF2_HDR_CORE: how fast the light's factor falls off from its core to its edge.
 static const float HDR_CORE_POWER = 4;
@@ -1306,6 +1368,21 @@ float3 PathDecalFactor(float4 vPos)
 }
 #endif
 
+#ifdef XR_CASCADES
+//! A caster of the live cascades: not where the full set has something nearer to the sun (SetupCascadeCaster).
+void CascadeCasterClip(SVertexOutput In)
+{
+  if (HasFlag2(DF2_CASCADE_CASTER))
+  {
+#ifdef XR_CASCADE_INSTANCES
+    clip(g_TextureArrays[g_Draw.nTex4].Load(int4(In.vPos.xy, In.nSlice, 0)).r + g_DrawExt.vShadowParams[In.nSlice] - In.vPos.z);
+#else
+    clip(g_TextureArrays[g_Draw.nTex4].Load(int4(In.vPos.xy, g_DrawExt.vParams3.x, 0)).r + g_DrawExt.vParams3.y - In.vPos.z);
+#endif
+  }
+}
+#endif
+
 float4 ShadePixel(SVertexOutput In)
 {
 #ifdef XR_AMBIENT
@@ -1366,9 +1443,7 @@ float4 ShadePixel(SVertexOutput In)
   if (HasFlag2(DF2_SHADER_FX))
     return ShaderFx(In);
 #ifdef XR_CASCADES
-  // A caster of the live cascades: not where the full set has something nearer to the sun.
-  if (HasFlag2(DF2_CASCADE_CASTER))
-    clip(g_TextureArrays[g_Draw.nTex4].Load(int4(In.vPos.xy, g_DrawExt.vParams3.x, 0)).r + g_DrawExt.vParams3.y - In.vPos.z);
+  CascadeCasterClip(In);
 #endif
   uint nSampler0 = g_Draw.nSamplers & 15;
   uint nSampler1 = (g_Draw.nSamplers >> 4) & 15;
@@ -1450,6 +1525,12 @@ float4 ShadePixel(SVertexOutput In)
   }
   if (HasFlag2(DF2_TERRAIN_LIGHT))
     vTex.rgb = 0.75 * vTex.rgb + 0.25;
+  // The alpha test's empty texels out before their light, where the test's alpha below can only be this or less and this
+  // is under the reference with room to spare (the test below stays); a lane out goes on as a helper for its neighbours.
+  if (g_Frame.nRayCoverage.y != 0 && HasFlag(DF_ALPHATEST) && !HasFlag(DF_ALPHATEST_LESS | DF_SHADOW_PASS | DF_ALPHA_FROM_TEX) &&
+      g_Draw.fAlphaRef > 0 && !HasFlag2(DF2_MODULATE | DF2_PROJECTOR | DF2_GLASS) &&
+      (!HasFlag(DF_TEX1) || HasFlag(DF_TEX1_LIGHTMAP | DF_TEX1_DETAIL)))
+    clip(In.vColor.a * vTex.a - (g_Draw.fAlphaRef - 1.0 / 256));
 
   float fSun = HasFlag(DF_SHADOWS) ? SunVisibility(In.vWorldPos, In.vNormal, In.vPos.xy) : 1;
 #ifdef XR_PT
@@ -1859,8 +1940,9 @@ float4 ShadePixel(SVertexOutput In)
     // Alpha to coverage (the reference negated, Draw.cpp's DrawGeometry): the samples the edge covers in place of the test.
     else if (g_Draw.fAlphaRef < 0)
       vColor.a = CoverageAlpha(vColor.a, -g_Draw.fAlphaRef, fwidth(vColor.a));
+    // (compared, not clip's difference, into which a multiply-add could fold the alpha's product: AlphaDepthMain's pixels)
     else
-      clip(vColor.a - g_Draw.fAlphaRef);
+      clip(vColor.a < g_Draw.fAlphaRef ? -1 : 1);
   }
   if (HasFlag(DF_ALPHA_ONE))
     vColor.a = 1;
@@ -2158,3 +2240,21 @@ float4 PSMain(XR_PS_INPUT) : SV_Target
   return SceneOutput(ShadePixel(In));
 }
 #endif
+
+//! d3d12_FoliagePrepass (Draw3D.cpp's DrawItems): the depth alone where the draw's alpha, its vertices' times its texture's
+//! (AlphaDepth.h's draws: ShadePixel's at its test, compared as there), passes the test: the pixels its colour pass keeps.
+void AlphaDepthMain(SVertexOutput In)
+{
+  clip(In.vColor.a * SampleTexture(g_Draw.nTex0, g_Draw.nSamplers & 15, In.vTex0).a < g_Draw.fAlphaRef ? -1 : 1);
+}
+
+//! d3d12_CascadeCasterShader: a caster of the sun's cascades (SetupShadowCasterDraw: DF_TEX0, DF_TEXMATRIX, DF_ALPHATEST,
+//! DF_ALPHA_FROM_TEX at most; DF2_CASCADE_CASTER) by ShadePixel's discards alone, in its order: the depth its pixels left.
+void CasterMain(SVertexOutput In)
+{
+#ifdef XR_CASCADES
+  CascadeCasterClip(In);
+#endif
+  if (HasFlag(DF_ALPHATEST))
+    clip(SampleTexture(g_Draw.nTex0, g_Draw.nSamplers & 15, In.vTex0).a < g_Draw.fAlphaRef ? -1 : 1);
+}

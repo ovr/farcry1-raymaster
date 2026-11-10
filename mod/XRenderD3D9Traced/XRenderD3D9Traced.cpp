@@ -16,6 +16,7 @@
 #include "StdAfx.h"
 #include "RenderTrace.h"
 #include "RendererProxy.h"
+#include "LeafBufferHooks.h"
 #include "VCallHooks.h"
 #include "Dpi.h"
 #include <RendererAbiChecks.h>
@@ -146,6 +147,17 @@ extern "C" __declspec(dllexport) IRenderer *PackageRenderConstructor(int argc, c
     return NULL;
   }
   Trace_Write("Original renderer '%s' loaded at %p", szPath, hReal);
+  // The vtables' hooks count and write out what the engine calls of the original renderer; XRenderD3D12 (by its export) goes
+  // without them unless XRENDERTRACED_HOOKS=1 (Pier's sweep 4-8 % faster where the CPU bounds it), XRENDERTRACED_HOOKS=0 any renderer.
+  char szHooks[8] = "";
+  GetEnvironmentVariableA("XRENDERTRACED_HOOKS", szHooks, sizeof(szHooks));
+  const bool bOurs = GetProcAddress(hReal, "XRenderD3D12_ReadFrameHdr10") != NULL;
+  if (szHooks[0] == '0' || (szHooks[0] != '1' && bOurs))
+  {
+    const char *szWhy = szHooks[0] == '0' ? "XRENDERTRACED_HOOKS=0" : "XRenderD3D12 without XRENDERTRACED_HOOKS=1";
+    VCallHooks_Disable(szWhy);
+    LeafBufferHooks_Disable(szWhy);
+  }
   VCallHooks_SetRenderer(hReal);
   // The console variables and commands the original renderer registers (it does so from here on),
   // and the variables each module looks up.

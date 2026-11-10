@@ -252,15 +252,22 @@ Details: [Device removal (DRED)](mod/XRenderD3D12/README.md#device-removal-dred)
 
 | Variable | Default | Saved | What it does |
 |---|---|---|---|
+| `d3d12_AASceneLight` | `1` |  | With TAA and HDR, its resolve makes the scene's light itself, without that light's full-screen pass (the same frames, faster) |
 | `d3d12_AlphaToCoverage` | `1` | yes | With MSAA, the alpha tested surfaces cover the samples by their alpha |
 | `d3d12_BarrierBatch` | `1` |  | The barriers queued and given in one call before the next draw |
 | `d3d12_BeachShadow` | `1` |  | The foam on the beach in the sun's shadow as the terrain under it (no glowing border round the shadow of Carrier's wreck) |
 | `d3d12_BeachResearch` | `1` |  | The beach of the shore shader `TerrainWaterBeachResearch` (Steam, Research, Bunker, Dam, Rebellion, Archive) drawn as the original's, its foam fainter than `TerrainWaterBeach`'s (0: not drawn) |
+| `d3d12_CascadeCasterShader` | `1` |  | A caster of the sun's cascades that discards (an alpha tested leaf) drawn by a pixel shader of its discards alone (the same shadows, faster) |
 | `d3d12_CascadeCull` | `1` |  | Without rays, the parts that reach none of the sun's cascades left out as the engine adds them; 2 also the camera towards the sun ending where nothing can shade them (the level's heights: nothing measurable, the engine loads other textures); 0 all of them, as far as the view |
-| `d3d12_CascadeInstancing` | `1` |  | A caster drawn once into all the sun's cascades it reaches |
+| `d3d12_CascadeInstancing` | `3` |  | A caster drawn once into all the sun's cascades it reaches: 1 the full set's, 2 the live set's too, 3 also the parts of one mesh and material once for all their objects, 0 once per slice |
 | `d3d12_DecalAddOpacity` | `1` |  | An added decal whose material's opacity is below 1 laid over by its alpha times it, as the original (Research's cave cobwebs: thin strands, no bright card) |
 | `d3d12_DepthPrepass` | `1` |  | The depth prepass (the sun's shadow by rays needs it) |
+| `d3d12_AlphaTestEarly` | `1` |  | An alpha tested draw's empty texels left out before their light (the same frames, faster foliage) |
+| `d3d12_FoliagePrepass` | `2` |  | The leaves' and the grass's depth before their colour: 2 always, 1 with the path tracer alone (the same frames, faster foliage) |
 | `d3d12_DrawExt` | `1` |  | A draw uploads the rest of its constants only when it reads them |
+| `d3d12_DrawExtReuse` | `1` |  | A draw whose rest of its constants is the same as the last one uploaded binds that copy (the same frames, less CPU) |
+| `d3d12_DrawBatch` | `1` |  | A run of draws that differ only in their transforms recorded as one instanced draw: 1 instanced, 2 held and joined but drawn one by one, 0 each at once (the same frames, less CPU) |
+| `d3d12_FrameMemoryVideo` | `1` |  | The per frame memory (draw constants, vertices drawn once) in video memory the CPU writes (resizable BAR), where the GPU has it (the same frames, less GPU) |
 | `d3d12_FadeBlend` | `1` |  | The objects that fade with the distance drawn blended |
 | `d3d12_LightColorScale` | `1` | yes | A bump template's light colour as the original's shaders take it |
 | `d3d12_LightImages` | `1` | yes | A projected light's picture as the engine asks for it |
@@ -272,7 +279,9 @@ Details: [Device removal (DRED)](mod/XRenderD3D12/README.md#device-removal-dred)
 | `d3d12_ProjectorSpecular` | `1` | yes | A projected light's highlight over a light mapped specular material |
 | `d3d12_RenderMode` | `1` | yes | The video options' render mode (`r_RenderMode`) drawn over the scene |
 | `d3d12_RenderModeOutdoor` | `1` | yes | The render modes' glare goes from its indoor threshold and gain to its outdoor ones, as the original's |
+| `d3d12_RenderModeScene` | `1` |  | The HDR resolve draws the frame into the render mode's own target, which reads it there, instead of the back buffer and its copy (the same frames; 4K: 0.045 ms less GPU time) |
 | `d3d12_RTAsync` | `1` |  | The acceleration structures built on the compute queue |
+| `d3d12_RTAlphaCoverage` | `3` |  | The rays whose light is averaged take a leaf (an alpha tested triangle) at random by the share of it its alpha test passes on, made once a mesh, in place of the test. Bits: 1 the path tracer's bounces and radiance cache, 2 the rays' GI and AO, 4 the volumetric light's sun (blurs the shafts through the crowns); 0 the exact tests |
 | `d3d12_RTFaceNormal` | `1` |  | The side of a surface the rays start from by the triangle's face (2 that face alone) |
 | `d3d12_RTPbrScreen` | `1` |  | What the metals' rays hit takes its light from the last frame's picture |
 | `d3d12_RTShadows` | `1` | yes | The sun's shadow at the rays' hits |
@@ -282,8 +291,11 @@ Details: [Device removal (DRED)](mod/XRenderD3D12/README.md#device-removal-dred)
 | `d3d12_StaticCasters` | `1` |  | The palms and the other static casters shadow the terrain everywhere |
 | `d3d12_UnderwaterBodies` | `1` |  | The fish under the ocean drawn last without the depth: no shore foam in their shape over the water |
 | `d3d12_UpscaleHdr` | `1` | yes | With HDR, the upscaler gets the scene's light before the tone map |
+| `d3d12_WaterAsync` | `1` |  | The FFT ocean's waves made on the compute queue beside the frame |
 | `d3d12_WaterDeferred` | `1` |  | The ocean's grid shaded once a pixel |
+| `d3d12_WaterDepthCopy` | `1` |  | The water's copy of the depth made by a kernel through a view, the depth buffer kept as it is (0: copied as a resource) |
 | `d3d12_WaterGeometry` | `1` |  | The ocean drawn as a grid raised to the waves' height |
+| `d3d12_WaterSSR` | `1` |  | The water's screen space reflection (0: none, to measure it) |
 | `d3d12_WaterUnder` | `1` |  | The light in the water with the camera under the ocean's surface |
 | `d3d12_WaterUnderClear` | `1` |  | Under the water, the light it scatters from the sun and the sky |
 | `d3d12_WaterUnderLine` | `1` |  | A camera just over the water whose near plane dips under it sees the water's light there |
@@ -291,6 +303,7 @@ Details: [Device removal (DRED)](mod/XRenderD3D12/README.md#device-removal-dred)
 | `d3d12_WaterVolume` | `1` |  | The ocean's water attenuates each colour by the level's water colour |
 | `d3d12_WaterVolumeColor` | `1` |  | The water of a `WaterVolume` material (pools, cave water) shows the scene behind it times the material's colour, as the original's |
 | `d3d12_FogVolumeDepth` | `1` |  | A fog volume's fog over a point under its surface at least that of the point's depth: a dense one (Training's bunker pool) hides its floor |
+| `d3d12_VolumetricLightRaysHalf` | `1` |  | The volumetric light's sun by rays from every other froxel a frame, the others keep their state for a frame (half the rays) |
 | `d3d12_WaterCaustics` | `1` |  | The caustics of the FFT ocean's waves on the sea floor |
 | `r_ParallaxMaterials` | `1` |  | `r_ParallaxDepth` scaled by each texture's physical material |
 
@@ -466,3 +479,4 @@ The renderer registers the original renderer's other variables too, so that the 
 | `r_WaterUpdateDeltaAngle` | `5` |  | The water's reflection redrawn when the camera turns this much (degrees) |
 | `r_WaterUpdateDistance` | `2` |  | The same when it moves this far (m) |
 | `r_WaterUpdateFactor` | `0.01` | yes | The same after this many seconds per metre to the water |
+| `r_WaterUpdateMinInterval` | `0.00833` |  | But by time not sooner than this many seconds (1/120: above 120 FPS not every frame; the water reads it through the matrix it was drawn with). `0` as the original |

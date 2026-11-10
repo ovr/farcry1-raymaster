@@ -64,6 +64,10 @@ set(taa "${CMAKE_CURRENT_SOURCE_DIR}/Shaders/TestTaa.hlsl")
 foreach(k Resolve Dilate Sharpen Working)
     xrender_d3d12_test_shader(Taa${k} "${taa}" cs_6_0 CSTaa${k})
 endforeach()
+# The renderer's own sharpening and resolve kernels (Taa.hlsl as Shaders.cmake compiles TaaSharpen_CS and
+# TaaResolve_CS), run by RunCompute2D.
+xrender_d3d12_test_shader(TaaSharpenKernel "${XRENDERD3D12_SHADER_SOURCE_DIR}/Taa.hlsl" cs_6_0 CSMain)
+xrender_d3d12_test_shader(TaaResolveKernel "${XRENDERD3D12_SHADER_SOURCE_DIR}/Taa.hlsl" cs_6_0 CSMain XR_TAA_RESOLVE)
 # MSAA's resolve (Msaa.hlsli as Msaa.hlsl's passes use it).
 xrender_d3d12_test_shader(Msaa "${CMAKE_CURRENT_SOURCE_DIR}/Shaders/TestMsaa.hlsl" cs_6_0 CSMsaa)
 # The draw's constants as the programs read them (Common.hlsli's g_Draw and g_DrawExt).
@@ -75,7 +79,8 @@ foreach(k UV Parts MarchGrad)
 endforeach()
 # The path tracer's functions, PathTrace.hlsl included as it is (Shader Model 6.5, as Shaders.cmake compiles it).
 set(pathtrace "${CMAKE_CURRENT_SOURCE_DIR}/Shaders/TestPathTrace.hlsl")
-foreach(k LeafSide Cosine Checkerboard Layout PixelSurface TerrainShare SurfaceNormal LampLight LampShadow LightmapFill ShadeFloor LampTarget LampStratum DecalRatio)
+foreach(k LeafSide Cosine Checkerboard Layout PixelSurface TerrainShare SurfaceNormal LampLight LampShadow LightmapFill ShadeFloor LampTarget LampStratum DecalRatio
+          TriangleCoverage CoverageDraw)
     xrender_d3d12_test_shader(${k} "${pathtrace}" cs_6_5 CS${k})
 endforeach()
 # The FFT ocean's kernels, from the renderer's own source as Shaders.cmake compiles them (GpuHarness.h's RunOcean runs
@@ -93,6 +98,8 @@ xrender_d3d12_test_shader(WakeColumns "${wake}" cs_6_0 CSMain XR_WAKE_COLUMNS)
 xrender_d3d12_test_shader(WakeRowsInverse "${wake}" cs_6_0 CSMain XR_WAKE_ROWS_INVERSE)
 xrender_d3d12_test_shader(WakeView "${wake}" cs_6_0 CSMain XR_WAKE_VIEW)
 xrender_d3d12_test_shader(WakeHeight "${wake}" cs_6_0 CSMain XR_WAKE_HEIGHT)
+# The water's depth copy by a kernel (d3d12_WaterDepthCopy), from the renderer's own source as Shaders.cmake compiles it.
+xrender_d3d12_test_shader(DepthCopyKernel "${XRENDERD3D12_SHADER_SOURCE_DIR}/DepthTiles.hlsl" cs_6_0 CSMain XR_DEPTH_COPY)
 # The renderer's own kernel, from its own source.
 xrender_d3d12_test_shader(PathCacheResolve "${XRENDERD3D12_SHADER_SOURCE_DIR}/PathTrace.hlsl" cs_6_5 CSCacheResolve)
 
@@ -134,6 +141,13 @@ set(XRENDERD3D12_TESTS_SOURCES
     DisplayTests.cpp
     CascadeCullTests.cpp
     CameraCutTests.cpp
+    IndexListTests.cpp
+    LeafDrawTests.cpp
+    WordHashTests.cpp
+    CascadeGroupsTests.cpp
+    AlphaDepthTests.cpp
+    WaterReflectionTests.cpp
+    WaterDepthCopyTests.cpp
     BeachTests.cpp
     FogVolumeTests.cpp
     WaterBodiesTests.cpp
@@ -148,6 +162,11 @@ set(XRENDERD3D12_TESTS_SOURCES
     RayFaceTests.cpp
     DrawDistanceTests.cpp
     DrawExtTests.cpp
+    BytesEqualTests.cpp
+    KeySortTests.cpp
+    DrawBatchTests.cpp
+    MatrixMulTests.cpp
+    RayCoverageTests.cpp
     BarrierTests.cpp
     VolumetricTests.cpp
     ConfigTests.cpp
@@ -163,7 +182,7 @@ set_target_properties(XRenderD3D12Tests PROPERTIES FOLDER "Renderer"
 target_include_directories(XRenderD3D12Tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}" "${CMAKE_CURRENT_SOURCE_DIR}/.."
     "${XRENDERD3D12_TESTS_SHADER_DIR}" "${XRENDERD3D12_SMAA_DIR}" "${XRENDERD3D12_CAS_DIR}")
 target_compile_definitions(XRenderD3D12Tests PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX
-    XR_RENDERER_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/..")  # Barrier_SourceLint (BarrierTests.cpp) and Config_Documented (ConfigTests.cpp) read the renderer's sources
+    XR_RENDERER_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/..")  # Barrier_SourceLint (BarrierTests.cpp), Config_Documented (ConfigTests.cpp) and LeafDraw_OneResult read the renderer's sources
 target_compile_options(XRenderD3D12Tests PRIVATE /W4)
 target_link_libraries(XRenderD3D12Tests PRIVATE d3d12 dxgi)
 

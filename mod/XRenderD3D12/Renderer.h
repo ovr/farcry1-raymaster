@@ -31,7 +31,11 @@
 #include "Shaders/Constants.h"
 #include "WakeBodies.h"
 #include "DrawDistance.h"
+#include "DrawBatch.h"
 #include "DrawExt.h"
+#include "OceanGrid.h"
+#include "WordHash.h"
+#include "CascadeGroups.h"
 #include <optional>
 
 struct SRaySunConstants;
@@ -89,6 +93,7 @@ struct SFrameStats
   double fDraws = 0;              //!< DrawGeometry's draws
   double fPSOChanges = 0;         //!< of them, those with another pipeline state than the draw before
   double fDrawExt = 0;            //!< of them, those that uploaded the rest of their constants (b3; DrawExt.h)
+  double fDrawExtReused = 0;      //!< of those, the ones that bound the last upload's copy (d3d12_DrawExtReuse)
   double fDrawBytes = 0;          //!< the bytes of the draws' constants (b1 and b3)
   double fTriangles = 0;
   double fBarrierCalls = 0;       //!< the frame's ResourceBarrier calls (CD3D12Device::GetBarrierStats), those after work, the barriers
@@ -408,6 +413,16 @@ public:
   //! d3d12_GpuTimes: from here on the GPU time counts for szSection (static storage), in the main
   //! view only (a nested scene counts for the section that renders it).
   void GpuSection(const char *szSection);
+  //! The GPU time of a pass inside the running section counted as szSection's; the running one again after it.
+  class CGpuSubSection
+  {
+  public:
+    CGpuSubSection(CD3D12Renderer &r, const char *szSection);
+    ~CGpuSubSection();
+  private:
+    CD3D12Renderer &m_r;
+    const char *m_szBefore;
+  };
   //! d3d12_GpuTimes: after each frame; every so many frames the averages to the log.
   void ReportGpuTimes();
 
@@ -662,7 +677,7 @@ public:
     int nFrame = -1;                        //!< m_nFrames of Cur
     bool bPrev = false;                     //!< Prev is of the frame upscaled before
   };
-  std::unordered_map<const void *, SObjectMotion> m_ObjectMotion;
+  std::unordered_map<const void *, SObjectMotion, SWordHash> m_ObjectMotion;
   ICVar *m_pUpscalerVar = nullptr;          //!< d3d12_Upscaler
 
   //////////////////////////////////////////////////////////////////////////
@@ -1036,12 +1051,14 @@ public:
   //! The beach (eDC_WaterBeach): pass nPass, a wave of foam (0 to BEACH_WAVES - 1) or the wet sand
   //! under them (BEACH_WAVES); bFaint: TerrainWaterBeachResearch's (SShaderProps::bBeachFaint). False: not drawn.
   bool SetupBeachDraw(SPipelineKey &Key, SDrawConstants &dc, int nPass, bool bFaint);
+  //! Its textures, loaded once (bFaint: TerrainWaterBeachResearch's two as well).
+  void LoadBeachTextures(bool bFaint);
   //! The sea floor under the ocean (eDC_WaterBottom) with the element's texture pTex (may be NULL).
   void SetupWaterBottomDraw(SPipelineKey &Key, SDrawConstants &dc, CTexture *pTex);
   //! Copies the main view's target and its depth buffer as drawn so far (m_bSceneCopied); with pRect
-  //! (left, top, right, bottom in its pixels) only that part of the target, which leaves the copies
-  //! incomplete (not m_bSceneCopied).
-  bool CopySceneForWater(const int *pRect = nullptr);
+  //! (left, top, right, bottom in its pixels) only that part of the target, and without bDepth only the
+  //! target: both leave the copies incomplete (not m_bSceneCopied).
+  bool CopySceneForWater(const int *pRect = nullptr, bool bDepth = true);
   void ReleaseWaterResources();
   //! Starts making the pixels of the wave and caustics textures on a thread of their own (at
   //! start-up; GetWaveTexture and GetCausticsTexture wait for it).
@@ -1102,6 +1119,8 @@ public:
   //! Heat haze particles (a run of sprites of a heat haze shader): their mask (haze_mask) times their
   //! alpha over the copy of the scene seen through a ripple (WaterBump); r_HeatHaze 1. False: not drawn.
   bool SetupHeatHazeDraw(SPipelineKey &Key, SDrawConstants &dc);
+  //! Its textures (m_pHazeMask, m_pHazeBump; the lava's ripple too), loaded once: false without them.
+  bool LoadHazeTextures();
   //! r_HeatHaze (looked up on first use).
   bool IsHeatHazeOn();
 
@@ -1112,8 +1131,11 @@ public:
   //! The fur's shell n (1 to FUR_SHELLS) over the model drawn by SetupTemplateFxDraw: n cm out, blended.
   static void SetupFurShell(SPipelineKey &Key, SDrawConstants &dc, int n);
   static constexpr int FUR_SHELLS = 8;
-  //! A texture of the game the templates name (Defaults/colors2, ...), loaded once (FT_CLAMP: clamped).
-  CTexture *GetFxTexture(int nIndex, const char *szName, int nFlags);
+  //! A texture of the game the templates name (TemplateFx.cpp's FX_TEXTURES: Defaults/colors2, ...), loaded once.
+  CTexture *GetFxTexture(int nIndex);
+  //! A level loaded (PostLoad): the renderer's own textures of fixed names (the heat haze's, the templates', the terrain's
+  //! detail, the default cube) loaded now, not in the frame that first needs one.
+  void PreloadTextures();
 
   ComPtr<ID3D12Resource> m_pMirrorColor, m_pMirrorDepth;
   D3D12_CPU_DESCRIPTOR_HANDLE m_hMirrorRTV = {}, m_hMirrorDSV = {};
@@ -1145,11 +1167,20 @@ public:
     CD3D12Texture *pTiles = nullptr;
     int nTileTables = -1;
     int nTileWidth = 0, nTileHeight = 0;    //!< level 0's size
+    //! The depth copy written by a kernel (d3d12_WaterDepthCopy: a texture for its UAV, not a depth target), the kernel's
+    //! descriptor tables (one a frame slot).
+    bool bDepthByKernel = false;
+    int nCopyTables = -1;
   };
   void FreeSceneCopy(SSceneCopy &Copy);
-  //! The textures of a copy of the main view's target and its depth (Copy's, made again for a new size or format) and their
-  //! SRVs; false: none.
-  bool EnsureSceneCopy(SSceneCopy &Copy);
+  //! The textures of a copy of the main view's target and its depth (Copy's, made again for a new size or format, or for
+  //! bDepthByKernel other than it has) and their SRVs; false: none.
+  bool EnsureSceneCopy(SSceneCopy &Copy, bool bDepthByKernel = false);
+  //! d3d12_WaterDepthCopy: the water's depth copy by a kernel that reads the depth buffer through an SRV (a depth of
+  //! 32 bits, the scene's targets; no MSAA) in its depth test's read state, in place of a copy of the resource.
+  bool WaterDepthByKernel();
+  //! The depth buffer's texels into Copy's depth by the kernel (WaterDepthByKernel).
+  void CopyDepthByKernel(SSceneCopy &Copy);
   //! The depth tiles of the copy made last (whole, not m_bSceneCopied's rectangle): level 0 the least
   //! depth of each XR_DEPTH_TILE x XR_DEPTH_TILE pixels of the depth copy, each next level the least
   //! of 2 x 2 texels of the one before, made in the copy's pTiles by two compute kernels
@@ -1197,19 +1228,30 @@ public:
   //! the frame's time into m_Ocean.pWaves (the targets made on the first call, the sea when
   //! d3d12_WaterWind changes). d3d12_WaterFFT 0: released.
   void UpdateOcean(std::span<const SRenderItem> Items);
+  //! A level with water loaded (PostLoad): what the first frame with its water would make made now (the FFT ocean's
+  //! targets, its sea and foam, the grid, its terrain and the ponds' ripple, the beach's textures).
+  void PrepareOcean();
   bool EnsureOceanTargets();
   //! The sea of the wind fWind (m / s) on the CPU, its h0 uploaded.
   bool MakeOcean(float fWind);
   //! The water's constants of the FFT waves (SetupWaterDraw; fBump the bump amounts' slope factor;
   //! nFoamPattern the foam's pattern's texture index, -1: no foam): false without them (the static
   //! wave texture then).
-  bool SetOceanConstants(SDrawConstants &dc, float fBump, int nFoamPattern) const;
+  bool SetOceanConstants(SDrawConstants &dc, float fBump, int nFoamPattern);
   //! The share of the surf's foam shown under the scene's sun (m_SunColor): d3d12_WaterSurfNight under a moon, all by
   //! day and without a sun (OceanSpectrum::SurfLightShare).
   float SurfLightShare() const;
   //! The caustics' constants of the FFT ocean for the sea floor's draw (SetupCausticsDraw: d3d12_WaterCaustics; fSun
   //! their strength by the sun's height): false without them (the static caustics texture then).
-  bool SetOceanCaustics(SDrawConstants &dc, float fSun) const;
+  bool SetOceanCaustics(SDrawConstants &dc, float fSun);
+  //! d3d12_WaterAsync: the frame's list after the waves of the compute queue and with them readable, before a draw that
+  //! reads them.
+  void UseOcean();
+  //! UpdateOcean's kernels on the frame's list or (bAsync) on the compute queue.
+  void RunOcean(bool bCaustics, bool bAsync);
+  //! d3d12_WaterAsync: at the frame's end the ocean's targets in the compute queue's states, so that the next frame's
+  //! kernels can run there without waiting for its list.
+  void ParkOcean();
   void ReleaseOcean();
   struct SOceanState
   {
@@ -1232,6 +1274,8 @@ public:
     int nTables = -1;                       //!< the kernels' descriptor tables
     int nFrame = -1;                        //!< the frame the waves were made in, -1 none yet
     bool bFailed = false;                   //!< no targets (until d3d12_WaterFFT 0)
+    bool bParked = false;                   //!< ParkOcean's states in the lists executed (the kernels may run on the compute queue)
+    bool bPending = false;                  //!< the kernels on the compute queue, the frame's list not waiting for them yet
     float fWind = 0;                        //!< the wind of the sea in pH0
     float fSlopeRMS = 0;                    //!< its slopes' RMS along an axis
     float fSlopeRMS0 = 0;                   //!< the long cascade's (unscaled)
@@ -1318,6 +1362,7 @@ public:
     bool bFailed = false;                   //!< no grid (until d3d12_WaterGeometry 0)
     int nBodiesFrame = -1;                  //!< the frame of Bodies
     std::vector<std::pair<int, WakeBodies::SBody>> Bodies;  //!< the bodies in the water without the wakes (theirs with them)
+    OceanGrid::CDiscCache Disc;             //!< the game's disc as last read (SetupOceanGrid)
   };
   SOceanGridState m_OceanGrid;
 
@@ -1521,7 +1566,7 @@ public:
   std::vector<const void *> m_FrameCasterLists;       //!< the same, taken by UpdateShadowMaps for the rest of the frame
   //! MakeShadowMapFrustum: the leaf buffers of the static objects the engine makes shadow maps for (the vegetation that
   //! casts), of each of their levels of detail (IsStaticCaster, d3d12_StaticCasters).
-  std::unordered_set<const void *> m_StaticCasterBuffers;
+  CWordSet<const void *> m_StaticCasterBuffers;
   //! Whether an item is a part of one of those (its leaf buffer one of m_StaticCasterBuffers).
   bool IsStaticCaster(const SRenderItem &it) const;
   int m_nNextShadowMapID = 0x40000000;                //!< the maps' IDs, apart from the texture IDs
@@ -1570,9 +1615,13 @@ public:
   //! Draws the casting parts of Items into every slice of the set m_nCascadeSet that their bounds
   //! reach. With pDrawn: the parts drawn into the set so far (PartKey), the ones in it left out,
   //! the others added.
-  void DrawCascadeItems(std::span<const SRenderItem> Items, std::unordered_set<uint64> *pDrawn);
-  //! Whether the sphere c, r (PartSphere; r < 0: none) reaches the cascade Cas (CascadeCull::Reaches).
-  bool PartReaches(const Vec3 &c, float r, const SCascade &Cas) const;
+  void DrawCascadeItems(std::span<const SRenderItem> Items, CWordSet<uint64> *pDrawn);
+  //! d3d12_CascadeInstancing 3: DrawCascadeItems' nParts parts (Item(k)) into the slices i they reach (Reaches(k, i)), those
+  //! of one mesh, chunk, shader, resources and class in one draw, an instance per object and slice (CascadeGroups.h).
+  template <class TItem, class TReaches> void DrawCascadeGroups(size_t nParts, TItem Item, TReaches Reaches);
+  //! A point along the sun's axes (m_vCascadeAxes), as CascadeCull::Reaches takes a part's sphere centre: the same for
+  //! every slice, so each part has it once.
+  Vec3 ToSunAxes(const Vec3 &c) const;
   //! CScene::AddEf with m_bCascadeCull: true for a part of a casters' scene that no slice takes (not a caster's
   //! kind, or its sphere reaches none; a character's part stays, its box comes with the skinning), counted in
   //! m_nCascadeCulled.
@@ -1612,8 +1661,23 @@ public:
   int m_nCascadeSlice = 0;                            //!< the slice being drawn
   int m_CascadeInstances[XR_MAX_CASCADES] = {};       //!< d3d12_CascadeInstancing: the slices the part being drawn reaches
   int m_nCascadeInstances = 0;                        //!< how many (0: one slice, m_nCascadeSlice)
+  //! d3d12_CascadeInstancing 3: an instance of the parts of one mesh drawn at once, its object's world and its slice.
+  struct SCascadeObject
+  {
+    Matrix44 World;
+    int nSlice;
+    uint32 nPart;             //!< DrawCascadeItems' part
+  };
+  std::vector<SCascadeObject> m_CascadeObjects;       //!< the group's instances (DrawCascadeItems)
+  size_t m_nCascadeObjects = 0;                       //!< DrawLeafItem draws them (0: m_CascadeInstances' slices)
+  bool m_bCascadeObjectsDrawn = false;                //!< it did
+  CascadeGroups::CGrouper m_CascadeGrouper;           //!< the parts that draw alike (CascadeGroups.h)
+  std::vector<CascadeGroups::SKey> m_CascadeKeys;     //!< DrawCascadeItems' scratch: the parts' keys,
+  std::vector<uint8> m_CascadeAlone;                  //!< those drawn on their own,
+  std::vector<uint32_t> m_CascadeGroups, m_CascadeFirst, m_CascadeMembers;  //!< their groups and the groups' parts
+  int m_nCascadeDraws[2] = {}, m_nCascadeDrawInstances[2] = {};  //!< the draws into the full and the live set, their instances
   int m_nCascadeFrame = -1;                           //!< m_nFrames of the cascades (m_nCascades), when drawn
-  std::unordered_set<uint64> m_CascadeDrawn;          //!< the parts drawn into the full set (DrawCascadeItems)
+  CWordSet<uint64> m_CascadeDrawn;                    //!< the parts drawn into the full set (DrawCascadeItems)
   std::vector<SRenderItem> m_StaticCasterItems;       //!< d3d12_StaticCasters: the full set's parts of static casters, for the live set
   bool m_bNoteStaticCasters = false;                  //!< DrawCascadeItems notes them (while the full set is drawn)
   int m_nStaticCasterParts = 0;                       //!< the parts of them the live set got in the frame
@@ -1648,6 +1712,7 @@ public:
     int nWidth = 0, nHeight = 0;            //!< the size of the resolve Bloom, pLdr and pRatio are for
     CD3D12Texture *pLight = nullptr;        //!< d3d12_UpscaleHdr 1: the scene's light for the upscaler (D3D12_HDR_FORMAT, HdrSceneLight)
     CD3D12Texture *pExposureScale = nullptr;  //!< and its exposure's factor (1 x 1 R32_FLOAT)
+    SDrawConstants SceneLight = {};         //!< the pass of pLight that HdrSceneLight left to the upscaler (DrawSceneLight)
     bool bAdapted = false;                  //!< pExposure[nExposure] holds an adapted EV
     int nMeteredFrame = -1;                 //!< m_nFrames of the last meter (MeterHdr)
     ComPtr<ID3D12Resource> pHdrColor;       //!< the device's HDR target nHdrColorSRV is of (kept: a new one is never at its address)
@@ -1667,7 +1732,7 @@ public:
   void BeginMainScene();
   //! After its EF_EndEf3D, before the screen effects: the scene tone mapped (HDR) and upscaled
   //! (UpscaleScene) into the back buffer, which is bound again.
-  void EndMainScene();
+  void EndMainScene(bool bScreenEffects = false);
   //! The HDR passes over the scene (pScene in PIXEL_SHADER_RESOURCE | NON_PIXEL_SHADER_RESOURCE, its
   //! SRV nSceneSRV, nWidth x nHeight): the meter (MeterHdr), the bloom and the resolve, into the
   //! back buffer, or with bToTexture into m_Hdr.pLdr, which it returns (nullptr: the back buffer, or
@@ -1686,7 +1751,12 @@ public:
   //! frame's froxels at the depth pDepth, readable already) and not exposed, into m_Hdr.pLight
   //! (the scene's size), which it returns, and the exposure's factor into m_Hdr.pExposureScale, for
   //! the upscaler; ResolveHdr with bLight tone maps its picture. nullptr: no targets, or no meter.
-  CD3D12Texture *HdrSceneLight(int nSceneSRV, int nWidth, int nHeight, ID3D12Resource *pDepth, DXGI_FORMAT DepthFormat);
+  //! With pMakes (an upscaler that MakesSceneLight) and d3d12_AASceneLight the light is not drawn but
+  //! left to the upscaler (pMakes's bSceneLight and the rest; DrawSceneLight draws it after all).
+  CD3D12Texture *HdrSceneLight(int nSceneSRV, int nWidth, int nHeight, ID3D12Resource *pDepth, DXGI_FORMAT DepthFormat,
+                               SUpscaleInputs *pMakes = nullptr);
+  //! The light HdrSceneLight left to the upscaler into m_Hdr.pLight after all (the upscaler failed).
+  void DrawSceneLight();
   //! m_Hdr.nDepthSRV for pDepth (a new view when it changes). -1: none.
   int HdrDepthSRV(ID3D12Resource *pDepth, DXGI_FORMAT DepthFormat);
   //! This frame's table of the bloom's kernel for level nPass (m_Hdr.KernelTables). The GPU is done
@@ -2019,6 +2089,9 @@ public:
   void DrawRenderMode(int nMode);
   //! The render modes' targets (made once). False: none.
   bool EnsureRenderModeTargets();
+  //! d3d12_RenderModeScene: the HDR resolve's frame into m_pRmScene for the render mode next (EndMainScene's screen effects: no
+  //! pass between, its own over all of the back buffer), which it reads in place of the back buffer's copy. False: the back buffer.
+  bool RenderModeTakesScene();
   void ReleaseRenderModeTargets();
   void ReleasePostBlur(SPostBlur &Blur);
   //! The share of the frame before in this one (r_MotionBlur, r_MotionBlurAmount, the frame time); 0: none.
@@ -2046,6 +2119,9 @@ public:
   CD3D12Texture *m_pRmGlare[2] = {};        //!< the glare at 128 x 128, and a scratch for its blur
   CD3D12Texture *m_pRmAdapt = nullptr;      //!< the adapted luminance (1 x 1 RGBA8, kept between frames as the original's)
   CD3D12Texture *m_pRmLayer = nullptr;      //!< with the highlight layer: its copy before the render mode's pass
+  CD3D12Texture *m_pRmScene = nullptr;      //!< d3d12_RenderModeScene: the HDR resolve's frame (the back buffer's size and format)
+  int m_nRmSceneFrame = -1;                 //!< the m_nFrames the resolve drew into it
+  bool m_bRmSceneNext = false;              //!< EndMainScene with the screen effects next (RenderModeTakesScene)
   bool m_bRmAdaptCleared = false;           //!< m_pRmAdapt holds a value (black at first)
   float m_fRmAdaptTime = 0;                 //!< the time since its last step
   float m_fRmOutdoor = 0;                   //!< the glare's outdoor share (UpdateRenderModeOutdoor), 0 indoors to 1
@@ -2150,6 +2226,18 @@ public:
   int m_nFrameAlphaCoverage = 0;      //!< of them, those with alpha to coverage (SPipelineKey::bAlphaToCoverage; the frame dump)
   uint32 m_nFrameDrawBytes = 0;       //!< the bytes of their constants written (b1 and b3, Shaders/Constants.h)
   int m_nFrameDrawExt[DrawExt::REASON_NUM] = {};  //!< the draws by why they uploaded the rest of their constants (DrawExt.h)
+  int m_nFrameDrawExtReused = 0;      //!< of those, the draws that bound the copy the last upload made (d3d12_DrawExtReuse)
+  DrawExt::SLast m_LastExt;           //!< the rest of the constants (b3) the last upload wrote (d3d12_DrawExtReuse)
+  //! d3d12_DrawBatch: the draw DrawGeometry holds back and those that joined it (recorded by RecordDrawBatch, also from the
+  //! device before anything else goes on the frame's list), while DrawItems draws a list's items (m_bDrawBatching).
+  DrawBatch::CBatch m_DrawBatch;
+  int m_nDrawBatchMode = 0;           //!< CV_d3d12_DrawBatch when it was held back
+  bool m_bDrawBatching = false;
+  int m_nFrameDrawsJoined = 0;        //!< the draws that joined a held one (no call of their own)
+  int m_nFrameDrawBatches = 0;        //!< the instanced draws of two or more
+  int m_nFrameDrawsInstanced = 0;     //!< the draws in them
+  void RecordDrawBatch();
+  static void RecordDrawBatchOf(void *pRenderer) { static_cast<CD3D12Renderer *>(pRenderer)->RecordDrawBatch(); }
   int m_nFrameSunLights = 0;          //!< r_DisplayInfo: the main view's sun (DLF_SUN) and other lights in this
   int m_nFrameDynLights = 0;          //!< frame (CScene::EndEf3D), 0 again at the end of Update
   ID3D12PipelineState *m_pLastPSO = nullptr;  //!< the pipeline state of the last draw (counted only)
@@ -2229,9 +2317,12 @@ public:
   bool m_bHeatVision = false;               //!< EF_EnableHeatVision
   bool m_bHeatPass = false;                 //!< the main view's items are drawn in heat vision (DF2_HEAT)
   bool m_bDepthPrepass = false;             //!< d3d12_DepthPrepass: the main view's opaque list into the depth alone (DrawItems)
+  bool m_bAlphaPrepass = false;             //!< d3d12_FoliagePrepass: the leaves' and the grass's depth where their alpha test passes (DrawItems)
+  bool m_bAlphaColour = false;              //!< an item of that pass in the list: its draws' colour where the pass left their depth
   bool m_bRayCaptureWalk = false;           //!< the main view's opaque list set up for the scene for rays, not drawn (BuildRayScene)
   std::vector<SRenderItem> m_RayOffscreenItems;   //!< NoteRayOffscreenItems' of the frame m_nRayOffscreenFrame
-  std::unordered_set<uint64> m_RayLiveParts;       //!< the PartKeys of the live casters of that frame (d3d12_RTSunShadows: XR_RAY_LIVE)
+  CWordSet<uint64> m_RayLiveParts;          //!< the PartKeys of the live casters of that frame (d3d12_RTSunShadows: XR_RAY_LIVE)
+  CWordSet<uint64> m_RayWalkedParts;        //!< BuildRayScene: the parts of the main view's lists, apart from the cascades' out of it
   int m_nRayOffscreenFrame = -1;
   int m_nRaySurfaceFrame = -2;              //!< the last frame with a draw that traced rays in place of its cube map
   int m_nRayLightFrame = -2;                //!< the last frame with a draw that traced rays towards its lamps
@@ -2246,6 +2337,7 @@ public:
   float CV_r_WaterUpdateFactor = 0.01f;     //!< the water reflection is redrawn after this many seconds per metre to the water, at most 0.3 s,
   float CV_r_WaterUpdateDistance = 2;       //!< or when the camera moved this far,
   float CV_r_WaterUpdateDeltaAngle = 5;     //!< or turned by this many degrees
+  float CV_r_WaterUpdateMinInterval = 1.0f / 120;   //!< but by time not sooner than this many seconds
   int CV_r_EnvCMResolution = 2;             //!< the environment cubes' faces are 64 << this texels wide (0 to 2)
   float CV_r_EnvCMupdateInterval = 0.1f;    //!< seconds between two faces of an environment cube
   int CV_r_DisableSfx = 0;
@@ -2302,6 +2394,9 @@ public:
   int CV_d3d12_WaterWakes = 1;        //!< the wakes of the bodies moving through the ocean, their foam (Wake.cpp; 0: none, the frames before)
   int CV_d3d12_WaterGeometry = 1;     //!< the ocean's grid raised to the waves in place of the game's flat disc (OceanGrid.cpp; 0: the disc, the frames before)
   int CV_d3d12_WaterDeferred = 1;     //!< the grid's depth first, then its water shaded once a pixel over the view (DrawOceanGrid; 0: the grid shaded as drawn)
+  int CV_d3d12_WaterAsync = 1;        //!< the FFT ocean's kernels on the compute queue beside the frame's shadows and opaque list (UpdateOcean; 0: in the frame's list)
+  int CV_d3d12_WaterDepthCopy = 1;    //!< the water's depth copy by a kernel through an SRV (WaterDepthByKernel; 0: a copy of the resource)
+  int CV_d3d12_WaterSSR = 1;          //!< the water's reflection of the screen's copy (Water.hlsl's ScreenReflection; 0: none, to measure it)
   int CV_d3d12_WaterUnder = 1;        //!< the view from under the ocean's surface: the light in its water, the sun's shafts (Underwater.cpp; 0: the fog volume's fog, the frames before)
   int CV_d3d12_WaterUnderShare = 1;   //!< under the ocean's surface the sun's light at one point of each pixel's ray, the 4 x 4 window round a pixel its ray's segments, the segments' weights in closed form (Underwater.cpp; 0: four points a pixel shared by its quad, the frames before)
   float CV_d3d12_WaterUnderAdapt = 1;  //!< under the ocean's surface the eye's white balance: the light at the camera's depth taken towards the light at the surface by this much, 0 to 1 (UnderBalance; 0: none, the frames before)
@@ -2313,6 +2408,9 @@ public:
   int CV_d3d12_BarrierBatch = 1;      //!< CD3D12Device::SetBarrierMode: 1 the frame's barriers in batches, 2 also at each GPU section, 0 each at once
   int CV_d3d12_BarrierCheck = 0;      //!< 1: the transitions' befores checked, the problems logged
   int CV_d3d12_DrawExt = 1;           //!< 1: a draw uploads the rest of its constants (b3) only when it reads other bytes than the default block's (DrawExt.h); 0 every draw
+  int CV_d3d12_DrawExtReuse = 1;      //!< 1: a draw whose rest has the bytes of the last one uploaded this frame binds that copy; 0 uploads its own
+  int CV_d3d12_DrawBatch = 1;         //!< 1: the lists' draws of one mesh for consecutive objects in one instanced draw (DrawBatch.h); 2 held back but drawn one by one; 0 each at once
+  int CV_d3d12_FrameMemoryVideo = 1;  //!< 1: the per frame memory in the GPU upload heap (video memory) where the device has it; 0 system memory
   int CV_d3d12_CpuSamples = 0;        //!< N: the render thread's stack every N microseconds, to XRenderD3D12_samples.txt at 0 (CpuSampler)
   int CV_r_Stats = 0;                 //!< the statistics on the screen: 1 the GPU time of the passes, 2 also the memory
   float CV_d3d12_WaterReflectionScale = 0.5f;   //!< size of the water reflection, a fraction of the screen's
@@ -2334,13 +2432,17 @@ public:
   int CV_d3d12_LightImages = 1;             //!< 1: a light image's FT2_REPLICATETOALLSIDES (its picture on all six faces) and FT2_CHECKFORALLSEQUENCES (its frames in turn, CTexture::SequenceFrame)
   int CV_d3d12_RenderMode = 1;              //!< 1: the menu's render mode (r_RenderMode, r_Glare) over the scene (DrawRenderMode); 0: none
   int CV_d3d12_RenderModeOutdoor = 1;       //!< 1: the render modes' glare from their indoor constants to their outdoor ones (RenderModeOutdoor.h); 0: indoor
+  int CV_d3d12_RenderModeScene = 1;         //!< 1: the render mode reads the HDR resolve's frame from a target of its own, not a copy of the back buffer (RenderModeTakesScene)
   int CV_d3d12_ShadowCascades = 4;          //!< the sun's cascaded shadow maps: how many (0: none)
   float CV_d3d12_ShadowDistance = 120;      //!< how far they reach from the camera (m)
   int CV_d3d12_ShadowCascadeSize = 2048;    //!< the size of their maps
-  int CV_d3d12_CascadeInstancing = 1;       //!< 1: a caster of the full set drawn once into all the slices it reaches (DrawCascadeItems)
+  int CV_d3d12_CascadeInstancing = 3;       //!< 1: a caster of the full set drawn once into all the slices it reaches (DrawCascadeItems); 2: the live set's too
   int CV_d3d12_CascadeCull = 1;             //!< without rays: 1 the casters' parts no slice takes left out in AddEf, 2 also the camera towards the sun shortened
   int CV_d3d12_StaticCasters = 1;           //!< 1: the static casters of the full set (the vegetation that casts) in the live set too (the terrain's shadows)
   int CV_d3d12_DepthPrepass = 1;            //!< 1: the main view's opaque surfaces into the depth buffer before the opaque list (DrawItems)
+  int CV_d3d12_AlphaTestEarly = 1;          //!< 1: the alpha test's empty texels out before their light (General.hlsl's ShadePixel)
+  int CV_d3d12_FoliagePrepass = 2;          //!< 2: the leaves' depth before the opaque list (DrawItems); 1: with the path tracer alone
+  int CV_d3d12_CascadeCasterShader = 1;     //!< 1: the sun's cascades' casters that discard by a pixel shader of their discards (DrawGeometry)
   float CV_d3d12_ShadowSoftness = 0.05f;    //!< the radius of their filter (m)
   int CV_d3d12_UpscaleMode = 0;             //!< EUpscaleMode of the upscaler (d3d12_Upscaler, a string)
   float CV_d3d12_UpscaleSharpness = 0.5f;   //!< the upscaler's sharpening, 0 (none) to 1
@@ -2358,6 +2460,7 @@ public:
                                             //!< scene tone mapped at the render size (as up to step 259)
   int CV_d3d12_AAQuality = 2;               //!< the anti-aliasing's (d3d12_AA, a string) quality, 0 (low) to 3 (ultra)
   int CV_d3d12_AADebug = 0;                 //!< 1: the anti-aliasing's view of the edges
+  int CV_d3d12_AASceneLight = 1;            //!< 1: TAA's resolve makes the HDR scene's light itself (no pass of its own; 0: the pass, the frames before)
   int CV_d3d12_AlphaToCoverage = 1;         //!< with MSAA, 1: the alpha-tested draws' edges by the samples their alpha covers
   int CV_d3d12_FadeBlend = 1;               //!< 1: the objects fading in or out by their distance blended by their alpha (SRenderItem::bFade; 0: opaque, the frames before)
   int CV_d3d12_PTFadeBlend = 1;             //!< 1: with the path tracer those objects blended as well, after the trace with the raster's light (0: whole in its G-buffer, the frames before)
@@ -2377,6 +2480,7 @@ public:
   int CV_d3d12_RTMask = 31;                 //!< the kinds of instances the rays see (XR_RAY_* bits)
   int CV_d3d12_RTShadows = 1;               //!< the sun's shadow at the hits (a ray towards it, RayShade.hlsli)
   int CV_d3d12_RTAsync = 1;                 //!< the ray scene's builds on the compute queue beside the frame
+  int CV_d3d12_RTAlphaCoverage = 3;         //!< the rays that take a leaf by its triangle's alpha share (bits: 1 the paths, 2 GI and AO, 4 the volumetric sun)
   int CV_d3d12_RTOffscreen = 1;             //!< what is out of the main view in the scene for rays: 1 for the effects that need it, 2 always
   int CV_d3d12_RTReflections = 0;           //!< the water's reflection by rays: 1 in place of the screen space one, 2 where it misses
   int CV_d3d12_RTReflectionSurfaces = 1;    //!< with d3d12_RTReflections, the cube maps' reflections by rays (XR_RAY_REFL); 2 tinted
@@ -2478,6 +2582,7 @@ public:
   float CV_d3d12_VolumetricLightAnisotropy = 0.3f;   //!< the phase's g: 0 the same all round, towards 1 forwards
   float CV_d3d12_VolumetricLightDistance = 60;       //!< the far end of its froxels (m)
   float CV_d3d12_VolumetricLightHeight = 40;         //!< the height above the water over which the air thins to half (0: the same everywhere)
+  int CV_d3d12_VolumetricLightRaysHalf = 1; //!< its rays from every other froxel a frame, the others keep the frame before's states
   int CV_d3d12_VolumetricLightRays = 1;     //!< 1: with the sun's shadow by rays or the path tracer, its sun by rays, indoors too (WantsVolumetricRays)
   float CV_d3d12_VolumetricLightIndoors = 2.5f;      //!< with the sun by rays: the air's density indoors times this (a closed room's dust)
   float CV_d3d12_FoliageTranslucency = 1.5f;  //!< the sun through the leaves and the grass (DF2_FOLIAGE): its strength, 0 off

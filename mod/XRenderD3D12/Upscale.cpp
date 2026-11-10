@@ -356,14 +356,17 @@ void CD3D12Renderer::UpscaleScene()
   // an upscaler; else tone mapped at its size first, the upscaler getting the LDR colours it is made for.
   const int rw = m_pDevice->GetSceneWidth(), rh = m_pDevice->GetSceneHeight();
   CD3D12Texture *pLdr = nullptr, *pLight = nullptr;
+  SUpscaleInputs In;
   if (m_bHdrScene)
   {
     GpuSection("hdr");
     if (UpdateVolumetricLight(m_pDevice->GetSceneDepth(), DXGI_FORMAT_R32_FLOAT))
       GpuSection("hdr");
+    // TAA's resolve makes the light itself (d3d12_AASceneLight): HdrSceneLight leaves it to it.
     if (m_bUpscalerHdrInput && EnsureSceneLightTargets(rw, rh) &&
         MeterHdr(m_nUpscaleColorSRV, m_pDevice->GetSceneColor(), rw, rh, m_pDevice->GetSceneDepth(), DXGI_FORMAT_R32_FLOAT, true))
-      pLight = HdrSceneLight(m_nUpscaleColorSRV, rw, rh, m_pDevice->GetSceneDepth(), DXGI_FORMAT_R32_FLOAT);
+      pLight = HdrSceneLight(m_nUpscaleColorSRV, rw, rh, m_pDevice->GetSceneDepth(), DXGI_FORMAT_R32_FLOAT,
+                             m_pUpscaler->MakesSceneLight() ? &In : nullptr);
     if (!pLight)
       pLdr = ResolveHdr(m_nUpscaleColorSRV, m_pDevice->GetSceneColor(), rw, rh, true, m_pDevice->GetSceneDepth(), DXGI_FORMAT_R32_FLOAT);
     InvalidateFrameConstants();
@@ -375,13 +378,18 @@ void CD3D12Renderer::UpscaleScene()
   // The upscaler reads its inputs in a compute shader (FSR in exactly the state it is told: both shaders' reads) and writes
   // its output; the device keeps their states (the inputs stay readable by the pixels after).
   constexpr D3D12_RESOURCE_STATES READ = D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE | D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE;
-  CD3D12Texture *pIn = pLight ? pLight : pLdr;
+  // The light the resolve makes: from the scene, the volumetric light's froxels and depth as the pass would read them.
+  CD3D12Texture *pIn = In.bSceneLight ? nullptr : pLight ? pLight : pLdr;
   if (pIn)
     m_pDevice->Require(pIn->m_pResource, READ);
   if (pLight)
     m_pDevice->Require(m_Hdr.pExposureScale->m_pResource, READ);
+  if (In.bVolumetric && m_Volumetric.pIntegrated && m_Volumetric.pDepth)
+  {
+    m_pDevice->Require(m_Volumetric.pIntegrated->m_pResource, READ);
+    m_pDevice->Require(m_Volumetric.pDepth.Get(), READ);
+  }
 
-  SUpscaleInputs In;
   In.pCmdList = m_pDevice->GetCmdList();
   In.pColor = pIn ? pIn->m_pResource : m_pDevice->GetSceneColor();
   In.pExposure = pLight ? m_Hdr.pExposureScale->m_pResource : nullptr;
@@ -413,7 +421,12 @@ void CD3D12Renderer::UpscaleScene()
   // Not upscaled: the light tone mapped at the scene's size, shown stretched; still readable by the bloom's kernel
   // (DispatchBloomLevel reads its first level's source so).
   if (pLight && !bUpscaled)
+  {
+    // The light left to the resolve drawn after all.
+    if (In.bSceneLight)
+      DrawSceneLight();
     pLdr = ResolveHdr(pLight->m_nSRV, pLight->m_pResource, rw, rh, true, nullptr, DXGI_FORMAT_UNKNOWN, true);
+  }
 
   const int w = m_pDevice->GetWidth(), h = m_pDevice->GetHeight();
   if (pLight && bUpscaled && CV_d3d12_UpscaleDebug != 2)

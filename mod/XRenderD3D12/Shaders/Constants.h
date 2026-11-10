@@ -30,6 +30,7 @@ typedef float float4x4_t[16];
 #define XR_FLOAT4(name) float name[4]
 #define XR_UINT4(name) uint32 name[4]
 #define XR_FLOAT4_ARRAY(name, n) float name[n][4]
+#define XR_UINT4_ARRAY(name, n) uint32 name[n][4]
 #define XR_UINT(name) uint32 name
 #define XR_FLOAT(name) float name
 #else
@@ -38,6 +39,7 @@ typedef float float4x4_t[16];
 #define XR_FLOAT4(name) float4 name
 #define XR_UINT4(name) uint4 name
 #define XR_FLOAT4_ARRAY(name, n) float4 name[n]
+#define XR_UINT4_ARRAY(name, n) uint4 name[n]
 #define XR_UINT(name) uint name
 #define XR_FLOAT(name) float name
 #endif
@@ -121,7 +123,7 @@ typedef float float4x4_t[16];
 #define DF2_SUN_CASCADES    0x00100000  //!< the sun's visibility from the cascades (SunCascades, Common.hlsli) where they reach, the shadow maps' (DF_SHADOWS) beyond; with DF_SHADOW_PASS the shadow maps' fade out where the cascades reach
 #define DF2_CASCADES_LIVE   0x00200000  //!< with DF2_SUN_CASCADES: the cascades of the live casters only (light maps, the terrain)
 #define DF2_SHADOW_TINT     0x00400000  //!< with DF2_SUN_CASCADES: rgb *= lerp(vShadowTint, 1, the visibility) (the terrain); with DF_LIGHTING (lit objects) the light in the shadow at least the lit one times vShadowTint; XR_PT: the G-buffer's ambient light so
-#define DF2_CASCADE_CASTER  0x00800000  //!< a caster of the live cascades: drawn only where it is not behind the full set's map g_TextureArrays[nTex4] slice vParams3.x by more than vParams3.y (depth)
+#define DF2_CASCADE_CASTER  0x00800000  //!< a caster of the live cascades: drawn only where it is not behind the full set's map g_TextureArrays[nTex4] slice vParams3.x by more than vParams3.y (depth; XR_CASCADE_INSTANCES: the instance's slice, vShadowParams[slice])
 // The ambient light's part of a colour whose light is baked into it, for the ambient occlusion's target
 // (XR_AMBIENT, General.hlsl; set only while it is bound)
 #define DF2_AO_BAKED        0x01000000  //!< the terrain, the vegetation: the colour (before DF2_SHADOW_TINT) times vMipBias.yzw, the share of the light the shadow leaves
@@ -225,6 +227,9 @@ struct SFrameConstants
                                   //!< rays (m_ReflCopy), without its jitter
   XR_FLOAT4(vPrevParams);         //!< its jitter in clip space (xy: xy += vPrevParams.xy * w), its projection's m22 (z) and m32 (w)
   XR_UINT4(nPrevScene);           //!< x its colour's texture table index (0: no copy), y its depth's, z w its size (pixels)
+  XR_UINT4(nRayCoverage);         //!< x the raw view (g_Buffers) of the alpha tests' shares by triangle (d3d12_RTAlphaCoverage,
+                                  //!< RayShade.hlsli's RayCandidatePasses; 0: none); y 1: the alpha test's empty texels out
+                                  //!< before their light (d3d12_AlphaTestEarly, General.hlsl's ShadePixel); z w unused
 };
 
 //! b1: per draw, the header that every draw uploads: 256 bytes, one block of the upload ring (Draw.cpp).
@@ -583,7 +588,8 @@ struct SVolumetricConstants
   XR_FLOAT4(vRays);               //!< x the rays' length (m, d3d12_RTDistance), y tan of half the sun's disc (d3d12_RTSunAngle),
                                   //!< z a froxel's height over its view depth (the rays' cone at the alpha tests),
                                   //!< w 1: the states in colours (d3d12_VolumetricLightRays 2)
-  XR_UINT4(nRays);                //!< x the instance mask (RayMask), y the frame (the points of the sun's disc)
+  XR_UINT4(nRays);                //!< x the instance mask (RayMask), y the frame (the points of the sun's disc), z 1: half the
+                                  //!< froxels trace this frame, the others keep the state of the frame before (VolSunTraced)
 };
 
 // The threads a side of a group of TAA's kernels (Taa.hlsl, UpscalerTaa.cpp)
@@ -595,8 +601,9 @@ struct SVolumetricConstants
 #define TAA_EXPOSURE        0x00000004  //!< with TAA_HDR: t3 holds the light's exposure (else vParams.z)
 #define TAA_OUTPUT          0x00000008  //!< the resolve writes the picture too (no sharpening after it)
 #define TAA_DEBUG           0x00000010  //!< its debug view in place of the picture (d3d12_AADebug 1)
+#define TAA_VOLUMETRIC      0x00000020  //!< the resolve with the scene's light (XR_TAA_LIGHT): through the volumetric light
 
-//! b0 of TAA's kernels (Taa.hlsl, UpscalerTaa.cpp).
+//! b0 of TAA's kernels (Taa.hlsl, UpscalerTaa.cpp), b2 of the resolve with the scene's light.
 struct STaaConstants
 {
   XR_FLOAT4(vSize);               //!< x width, y height (pixels), z 1 / width, w 1 / height
@@ -606,6 +613,12 @@ struct STaaConstants
   XR_UINT4(vFlags);               //!< x TAA_*
   XR_UINT4(vCas0);                //!< the sharpening's CAS constants of its sharpness (CasSetup's const0, const1; TaaCas.hlsli)
   XR_UINT4(vCas1);
+  // The resolve with the scene's light (XR_TAA_LIGHT, d3d12_AASceneLight): its inputs' slots of the texture table, the
+  // volumetric light's constants as HDR_SCENE_LIGHT has them (Volumetric.cpp's SetVolumetricConstants).
+  XR_UINT4(vInputs);              //!< x the scene's colours, y the depth, z the motion vectors, w the history
+  XR_UINT4(vVolumeInputs);        //!< x the depth buffer the froxels are at, y the integrated froxels (Texture3D)
+  XR_FLOAT4(vVolume0);            //!< mParams0[0]: the froxels' near, 1 / log2(far / near), half a slice, M22
+  XR_FLOAT4(vVolume1);            //!< x M32, y 1: the scattered light alone (mParams0[1].xy), zw the froxels' uv of a pixel
 };
 
 // MSAA's resolve's flags (SMsaaConstants::vParams.y)

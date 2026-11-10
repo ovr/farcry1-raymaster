@@ -237,7 +237,7 @@ bool CD3D12Device::Init(HWND hWnd, int nWidth, int nHeight, int nDebug, int nDre
     if (Failed(m_pDevice->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&pAllocator)), "CreateCommandAllocator"))
       return false;
   }
-  if (Failed(m_pDevice->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, m_pAllocators[0].Get(), nullptr, IID_PPV_ARGS(&m_pCmdList)), "CreateCommandList"))
+  if (Failed(m_pDevice->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, m_pAllocators[0].Get(), nullptr, IID_PPV_ARGS(&m_pCmdList.Ptr())), "CreateCommandList"))
     return false;
   m_pCmdList->SetName(L"XRenderD3D12 frame");
   m_pCmdList->Close();
@@ -940,6 +940,15 @@ void CD3D12Device::TrackState(ID3D12Resource *pRes, D3D12_RESOURCE_STATES Initia
 {
   if (pRes)
     m_Barriers.Register(pRes, Initial, nSubresources, pRes->GetDesc().Dimension == D3D12_RESOURCE_DIMENSION_BUFFER);
+}
+
+void CD3D12Device::RequireExact(ID3D12Resource *pRes, D3D12_RESOURCE_STATES State)
+{
+  if (!m_bInFrame || !pRes)
+    return;
+  m_Barriers.Require(pRes, State, D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES, true);
+  if (m_Barriers.GetMode() == Barriers::MODE_IMMEDIATE)
+    FlushBarriers(false);
 }
 
 void CD3D12Device::Require(ID3D12Resource *pRes, D3D12_RESOURCE_STATES After, UINT nSubresource)
@@ -1756,7 +1765,7 @@ void CD3D12Device::BeginFrame()
   ReadOcclusionResults();
   CollectGarbage();
   if (g_pRenderer->m_pUpload)
-    g_pRenderer->m_pUpload->BeginFrame(m_nFrameSlot);
+    g_pRenderer->m_pUpload->BeginFrame(m_nFrameSlot, g_pRenderer->CV_d3d12_FrameMemoryVideo > 0);
   m_nBackBuffer = m_pSwapChain->GetCurrentBackBufferIndex();
   // The barriers' mode for the whole frame (nothing is queued between frames).
   m_Barriers.SetMode(m_nBarrierBatchWanted > 0 ? Barriers::MODE_BATCHED : Barriers::MODE_IMMEDIATE);
@@ -1925,7 +1934,7 @@ void CD3D12Device::SubmitAsyncCompute()
   m_bComputePending = true;
 }
 
-void CD3D12Device::WaitAsyncCompute()
+void CD3D12Device::WaitAsyncCompute(const char *szWait)
 {
   if (!m_bInFrame || !m_bComputePending)
     return;
@@ -1934,7 +1943,7 @@ void CD3D12Device::WaitAsyncCompute()
   const int nMarks = m_nGpuMarks[m_nFrameSlot];
   const char *szSection = nMarks > 0 ? m_GpuSections[m_nFrameSlot][nMarks - 1] : nullptr;
   FlushBarriers(false);
-  GpuSection("ray scene");
+  GpuSection(szWait);
   m_pCmdList->Close();
   if (g_pRenderer->m_pUpload)
     g_pRenderer->m_pUpload->Flush();
@@ -2008,6 +2017,7 @@ void CD3D12Device::FlushFrame()
 
 void CD3D12Device::GpuSection(const char *szSection)
 {
+  m_szGpuSection = szSection;
   // d3d12_BarrierBatch 2: what is queued in the section before, as the barriers given at once were.
   if (m_bBarrierSections && m_bInFrame)
     FlushBarriers(false);
@@ -2142,7 +2152,7 @@ void CD3D12Device::ClearDepth(float fDepth, uint8 nStencil, bool bDepth, bool bS
   }
 }
 
-bool CD3D12Device::CreateTargetCopies(ComPtr<ID3D12Resource> &pColor, ComPtr<ID3D12Resource> *pDepth)
+bool CD3D12Device::CreateTargetCopies(ComPtr<ID3D12Resource> &pColor, ComPtr<ID3D12Resource> *pDepth, bool bDepthUav)
 {
   if (!m_pDevice)
     return false;
@@ -2162,9 +2172,10 @@ bool CD3D12Device::CreateTargetCopies(ComPtr<ID3D12Resource> &pColor, ComPtr<ID3
   TrackState(pColor.Get(), D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
   if (!pDepth)
     return true;
-  // The depth copy: the same format family and layout as the depth buffer, read through an SRV.
-  Desc.Format = m_bInScene ? DXGI_FORMAT_R32_TYPELESS : DXGI_FORMAT_R24G8_TYPELESS;
-  Desc.Flags = D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL;
+  // The depth copy: the same format family and layout as the depth buffer, read through an SRV; bDepthUav, written by a
+  // kernel instead of a copy of the resource (R32 only).
+  Desc.Format = m_bInScene || bDepthUav ? DXGI_FORMAT_R32_TYPELESS : DXGI_FORMAT_R24G8_TYPELESS;
+  Desc.Flags = bDepthUav ? D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS : D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL;
   if (Failed(m_pDevice->CreateCommittedResource(&Heap, D3D12_HEAP_FLAG_NONE, &Desc, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, nullptr,
     IID_PPV_ARGS(&*pDepth)), "CreateCommittedResource (depth copy)"))
   {

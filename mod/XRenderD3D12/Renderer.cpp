@@ -136,6 +136,7 @@ void CD3D12Renderer::RegisterVariables()
   iConsole->Register("r_WaterUpdateFactor", &CV_r_WaterUpdateFactor, 0.01f, VF_DUMPTODISK);
   iConsole->Register("r_WaterUpdateDistance", &CV_r_WaterUpdateDistance, 2.0f, 0);
   iConsole->Register("r_WaterUpdateDeltaAngle", &CV_r_WaterUpdateDeltaAngle, 5.0f, 0);
+  iConsole->Register("r_WaterUpdateMinInterval", &CV_r_WaterUpdateMinInterval, 1.0f / 120, 0);
   iConsole->Register("r_EnvCMResolution", &CV_r_EnvCMResolution, 2, VF_DUMPTODISK);
   iConsole->Register("r_EnvCMupdateInterval", &CV_r_EnvCMupdateInterval, 0.1f, VF_DUMPTODISK);
   iConsole->Register("r_DisableSfx", &CV_r_DisableSfx, 0, VF_DUMPTODISK);
@@ -259,6 +260,16 @@ void CD3D12Renderer::RegisterVariables()
                      "With d3d12_WaterGeometry: the ocean's grid drawn into the depth alone, then its water shaded once a pixel "
                      "over the view where it is (its small triangles shaded the pixels along their edges twice); 0: the grid "
                      "shaded as it is drawn");
+  iConsole->Register("d3d12_WaterAsync", &CV_d3d12_WaterAsync, 1, 0,
+                     "The FFT ocean's waves, foam and caustics made on the compute queue beside the frame's shadows and opaque "
+                     "surfaces, the frame waiting for them at the first draw that reads them; 0: in the frame's list");
+  iConsole->Register("d3d12_WaterDepthCopy", &CV_d3d12_WaterDepthCopy, 1, 0,
+                     "1: the water's copy of the depth buffer made by a kernel that reads it through a view (with a depth of "
+                     "32 bits, the scene's targets of TAA or an upscaler, no MSAA), the same bits; 0: a copy of the "
+                     "resource (CopyResource)");
+  iConsole->Register("d3d12_WaterSSR", &CV_d3d12_WaterSSR, 1, 0,
+                     "The water's reflection of what the screen shows (the scene's copy, marched along the reflected ray); 0: "
+                     "none (the planar reflection, the sky or the rays in its place), to measure what it costs");
   iConsole->Register("d3d12_WaterUnder", &CV_d3d12_WaterUnder, 1, 0,
                      "With d3d12_WaterVolume, the camera under the ocean's surface: the light in its water over the scene (each "
                      "colour channel attenuated along the view and the light's way down, the light the water scatters fading "
@@ -308,6 +319,18 @@ void CD3D12Renderer::RegisterVariables()
                      "1: a draw uploads the rest of its constants (b3: lights, shadows, the other programs' parameters) only when "
                      "it reads other bytes than the default block's (DrawExt.h), else binds that block; 0 every draw uploads "
                      "it, as before the default block (read at each draw)");
+  iConsole->Register("d3d12_DrawExtReuse", &CV_d3d12_DrawExtReuse, 1, 0,
+                     "1: a draw whose rest of its constants (b3) has the same bytes as the last one uploaded in this frame's memory "
+                     "binds that copy (the GPU reads the same bytes); 0 every such draw uploads its own (read at each draw)");
+  iConsole->Register("d3d12_DrawBatch", &CV_d3d12_DrawBatch, 1, 0,
+                     "1: a list's draws of one mesh for consecutive objects, alike but for their matrices, in one instanced draw "
+                     "whose vertex shader reads each object's matrices from its constants (the same frames, fewer calls of the "
+                     "driver; every such draw takes the instanced pipeline state, one instance or more); 2 held back the same way "
+                     "but drawn one by one under the plain state (a check); 0 each draw at once (read at each draw)");
+  iConsole->Register("d3d12_FrameMemoryVideo", &CV_d3d12_FrameMemoryVideo, 1, 0,
+                     "1: the per frame memory (the draws' constants, the vertices drawn once, the rays' instances) in video memory "
+                     "the CPU writes through the bus (the GPU upload heap: resizable BAR) where the device has it, so the GPU reads "
+                     "it at its own speed; 0 in system memory (read when a frame slot starts)");
   iConsole->Register("d3d12_CpuSamples", &CV_d3d12_CpuSamples, 0, 0,
                      "N: samples the stack of the thread that draws every N microseconds (a profiler of the wall clock: the engine's "
                      "code, ours, the driver's); back to 0 writes the samples to XRenderD3D12_samples.txt (module and offset)");
@@ -386,13 +409,19 @@ void CD3D12Renderer::RegisterVariables()
                      "original's (2 % of the way every 1/50 s; indoors: the camera in a vis area the outdoor lights do not "
                      "reach): paradise outdoors fainter in a grey fog, improved and cold fainter too; 0: the indoor ones "
                      "everywhere, as before");
+  iConsole->Register("d3d12_RenderModeScene", &CV_d3d12_RenderModeScene, 1, 0,
+                     "1: with a render mode after the HDR resolve and no pass between (d3d12_AA taa, none or MSAA), the resolve "
+                     "draws the frame into a target of the render mode's, which reads it there and draws all of the back buffer: "
+                     "no copy of the back buffer (4K: 0.03 ms) and its passes read a render target (0.015 ms less); the same frames; "
+                     "0: into the back buffer and copied");
   iConsole->Register("d3d12_ShadowCascades", &CV_d3d12_ShadowCascades, 4, VF_DUMPTODISK,
                      "With e_shadow_maps, the sun's cascaded shadow maps around the camera: how many, 1 to 4 (0: none, the shadow maps of the objects alone)");
   iConsole->Register("d3d12_ShadowDistance", &CV_d3d12_ShadowDistance, 120.0f, VF_DUMPTODISK,
                      "How far the sun's cascaded shadow maps reach from the camera (m); the shadow maps of the objects beyond");
   iConsole->Register("d3d12_ShadowCascadeSize", &CV_d3d12_ShadowCascadeSize, 2048, VF_DUMPTODISK, "The size of the sun's cascaded shadow maps, 512 to 4096");
-  iConsole->Register("d3d12_CascadeInstancing", &CV_d3d12_CascadeInstancing, 1, 0,
-                     "1: each caster of the sun's cascades drawn once into all the slices it reaches (instances); 0: once per slice");
+  iConsole->Register("d3d12_CascadeInstancing", &CV_d3d12_CascadeInstancing, 3, 0,
+                     "1: each caster of the full set of the sun's cascades drawn once into all the slices it reaches (instances); 2: the "
+                     "live set's too; 3: also the parts of one mesh and material once for all their objects; 0: once per slice");
   iConsole->Register("d3d12_CascadeCull", &CV_d3d12_CascadeCull, 1, 0,
                      "Without rays (none read the scene of the camera towards the sun): 1 the parts that reach no slice of the sun's "
                      "cascades left out as the engine adds them (not prepared), 2 also that camera ending where nothing "
@@ -404,6 +433,18 @@ void CD3D12Renderer::RegisterVariables()
   iConsole->Register("d3d12_DepthPrepass", &CV_d3d12_DepthPrepass, 1, 0,
                      "1: the main view's opaque surfaces that discard nothing drawn into the depth buffer before the opaque list, which "
                      "then shades only the pixels it keeps; 0: the list alone");
+  iConsole->Register("d3d12_AlphaTestEarly", &CV_d3d12_AlphaTestEarly, 1, 0,
+                     "1: an alpha tested draw's texels under its reference with room to spare (a leaf's empty parts) left out right "
+                     "after its texture is read, before their light and the sun's shadows; the test at the end stays, the frames the "
+                     "same (Swamp's jungle with the path tracer: the opaque list 1.62 -> 1.35 ms); 0: at the end alone");
+  iConsole->Register("d3d12_FoliagePrepass", &CV_d3d12_FoliagePrepass, 2, 0,
+                     "2: the leaves' and the grass's depth into the depth buffer after the depth prepass, where their alpha test "
+                     "passes (a pixel shader of the texture's alpha alone), their colour then only there (the depth test EQUAL, before "
+                     "the pixel shader): the opaque list shades only the leaves in front; the same frames; 1: with the path tracer "
+                     "alone; 0: none");
+  iConsole->Register("d3d12_CascadeCasterShader", &CV_d3d12_CascadeCasterShader, 1, 0,
+                     "1: a caster of the sun's cascades that discards (an alpha tested leaf, the live set's casters) drawn by a pixel "
+                     "shader of its discards alone, not the general one: the same maps, faster; 0: the general one");
   iConsole->Register("d3d12_ShadowSoftness", &CV_d3d12_ShadowSoftness, 0.05f, VF_DUMPTODISK,
                      "The softness of the sun's cascaded shadows: the radius of their filter (m; at least a texel and a half of each map)");
   iConsole->CreateVariable("d3d12_Upscaler", "none", VF_DUMPTODISK,
@@ -465,6 +506,9 @@ void CD3D12Renderer::RegisterVariables()
   iConsole->Register("d3d12_AADebug", &CV_d3d12_AADebug, 0, 0,
                      "1: the anti-aliasing's view of the edges (grey where it leaves the picture, red by how much it blends; SMAA and "
                      "CMAA2: also the edges they found; TAA: red where its history goes, yellow where it is clipped)");
+  iConsole->Register("d3d12_AASceneLight", &CV_d3d12_AASceneLight, 1, 0,
+                     "1: with TAA and the HDR scene's light (d3d12_UpscaleHdr) its resolve makes that light itself from the scene "
+                     "(the same picture, no full-screen pass of its own); 0: the light's own pass, as the frames before");
   iConsole->Register("d3d12_AlphaToCoverage", &CV_d3d12_AlphaToCoverage, 1, VF_DUMPTODISK,
                      "With MSAA (d3d12_AA msaa2, msaa4, msaa8), 1: the alpha-tested surfaces (grass, leaves, gratings) cover the samples "
                      "their alpha sharpened to the test's edge covers (alpha to coverage): their edges smooth; 0: the alpha test, a step");
@@ -678,6 +722,11 @@ void CD3D12Renderer::RegisterVariables()
   iConsole->Register("d3d12_RTAsync", &CV_d3d12_RTAsync, 1, 0,
                      "1: the acceleration structures for the rays built on the compute queue, beside the frame's shadows, opaque "
                      "geometry and ambient occlusion; 0: in the frame's command list, before the opaque geometry");
+  iConsole->Register("d3d12_RTAlphaCoverage", &CV_d3d12_RTAlphaCoverage, 3, 0,
+                     "The rays whose light is averaged take an alpha tested triangle (a leaf) at random by the share of it its alpha "
+                     "test passes on, made once a mesh, in place of the test (faster in the foliage). Bits: 1 the path tracer's "
+                     "bounces and radiance cache, 2 the rays' GI and AO, 4 the volumetric light's sun (blurs the shafts); 0 the "
+                     "exact tests everywhere");
   iConsole->Register("d3d12_RTOffscreen", &CV_d3d12_RTOffscreen, 1, VF_DUMPTODISK,
                      "What is out of the main view in the scene for rays: the parts of the sun's cascades (the static objects "
                      "and entities towards the sun, the live casters). 1 for the effects that trace rays from the main view's "
@@ -941,6 +990,11 @@ void CD3D12Renderer::RegisterVariables()
                      "(TemplMuzzleFlash_Auto) not drawn; 0: by the sun's cascades, none indoors, the planes drawn (the frames before); "
                      "2: as 1, the air lit by the states its rays found, in colours (red the sun reaches it, green in a shadow, "
                      "blue under a surface: not air; with d3d12_VolumetricLight 2 alone)");
+  iConsole->Register("d3d12_VolumetricLightRaysHalf", &CV_d3d12_VolumetricLightRaysHalf, 1, 0,
+                     "With the volumetric light's sun by rays (d3d12_VolumetricLightRays), 1: every other froxel traces its ray "
+                     "towards the sun in a frame, the froxels between them in the next, each keeping the state it found for a "
+                     "frame (half the rays; the froxels blend the frames before in anyway); 0: every froxel each frame (the "
+                     "frames before)");
   iConsole->Register("d3d12_VolumetricLightIndoors", &CV_d3d12_VolumetricLightIndoors, 2.5f, VF_DUMPTODISK,
                      "With the volumetric light's sun by rays (d3d12_VolumetricLightRays), its air indoors (where the outdoor lights do "
                      "not reach: Training's bunker) d3d12_VolumetricLightDensity times this: a closed room's dust, which shows the "
@@ -1024,6 +1078,7 @@ WIN_HWND CD3D12Renderer::Init(int x,int y,int width,int height,unsigned int cbpp
   m_pDevice = std::make_unique<CD3D12Device>();
   m_pDescriptors = std::make_unique<CD3D12Descriptors>();
   m_pUpload = std::make_unique<CD3D12Upload>();
+  m_LastExt.nGPU = 0;  // an address of another upload's memory
   m_pPipeline = std::make_unique<CD3D12Pipeline>();
   m_pCompute = std::make_unique<CD3D12Compute>();
   m_pRayScene = std::make_unique<CD3D12RayScene>();
@@ -1033,7 +1088,7 @@ WIN_HWND CD3D12Renderer::Init(int x,int y,int width,int height,unsigned int cbpp
   StartWaterTextures();
   if (!m_pDevice->Init(m_hWnd, m_nWidth, m_nHeight, nDebug, nDred)
     || !m_pDescriptors->Init(m_pDevice->GetDevice())
-    || !m_pUpload->Init(m_pDevice->GetDevice(), nFrameRingSize)
+    || !m_pUpload->Init(m_pDevice->GetDevice(), nFrameRingSize, CV_d3d12_FrameMemoryVideo > 0)
     || !m_pPipeline->Init(m_pDevice->GetDevice())
     || !m_pCompute->Init(m_pDevice->GetDevice())
     || !m_pTextures->Init()
@@ -1461,6 +1516,8 @@ void CD3D12Renderer::PostLoad (void)
 {
   m_OceanGrid.bTerrainStale = true;
   m_TerrainRange.bStale = true;
+  PreloadTextures();
+  PrepareOcean();
 }
 
 //////////////////////////////////////////////////////////////////////////
@@ -1547,6 +1604,7 @@ void CD3D12Renderer::Update (void)
     m_pDevice->DredTest(CV_d3d12_DredTest);
     CV_d3d12_DredTest = 0;
   }
+  ParkOcean();
   m_pDevice->EndFrame(m_bSwapBuffers, m_bVSync || CV_r_vsync != 0);
   m_pPipeline->SaveKeys();
   // The game asks for the triangles after the frame is shown (the time demo's Tri/Frame).
@@ -1571,6 +1629,18 @@ void CD3D12Renderer::GpuSection(const char *szSection)
 {
   if (m_pDevice && m_nRecurseLevel <= 1)
     m_pDevice->GpuSection(szSection);
+}
+
+CD3D12Renderer::CGpuSubSection::CGpuSubSection(CD3D12Renderer &r, const char *szSection)
+  : m_r(r), m_szBefore(r.m_pDevice ? r.m_pDevice->GetGpuSection() : nullptr)
+{
+  m_r.GpuSection(szSection);
+}
+
+CD3D12Renderer::CGpuSubSection::~CGpuSubSection()
+{
+  if (m_szBefore)
+    m_r.GpuSection(m_szBefore);
 }
 
 void CD3D12Renderer::ReportGpuTimes()

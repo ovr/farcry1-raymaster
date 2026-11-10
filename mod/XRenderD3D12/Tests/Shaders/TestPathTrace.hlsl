@@ -149,6 +149,29 @@ void CSLampTarget(uint i : SV_DispatchThreadID)
   TestOut(i, float4(vTo * fDistance - vCentre, fGap));
 }
 
+//! RayShade.hlsli's RayTriangleCoverage of the harness's instance's triangle g_TestIn[i].x (a uint): out[i].x (a uint).
+[numthreads(64, 1, 1)]
+void CSTriangleCoverage(uint i : SV_DispatchThreadID)
+{
+  if (i < g_Test.nTest.x)
+    TestOut(i, float4(asfloat(RayTriangleCoverage(0, asuint(TestIn(i).x))), 0, 0, 0));
+}
+
+//! RayShade.hlsli's RayCoverageDraw of the share g_TestIn[i].x (a uint) for the seeds 1, 3, 5, ... (g_Test.nTest.y of them)
+//! and the triangles 0 to g_Test.nTest.z - 1 of instance g_TestIn[i].y: out[i].x the hits (a uint).
+[numthreads(64, 1, 1)]
+void CSCoverageDraw(uint i : SV_DispatchThreadID)
+{
+  if (i >= g_Test.nTest.x)
+    return;
+  const uint nShare = asuint(TestIn(i).x), nInstance = asuint(TestIn(i).y);
+  uint n = 0;
+  for (uint s = 0; s < g_Test.nTest.y; s++)
+    for (uint t = 0; t < g_Test.nTest.z; t++)
+      n += RayCoverageDraw(nShare, 2 * s + 1, nInstance, t) ? 1 : 0;
+  TestOut(i, float4(asfloat(n), 0, 0, 0));
+}
+
 //! RayShade.hlsli's LampStratum of the ray g_TestIn[i].x of g_TestIn[i].y (uints) by the random numbers g_TestIn[i].zw:
 //! out[i].xy.
 [numthreads(64, 1, 1)]

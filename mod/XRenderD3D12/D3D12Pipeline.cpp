@@ -18,6 +18,7 @@
 #include "D3D12Pipeline.h"
 #include "Shaders/Constants.h"
 #include "DrawExt.h"
+#include "WordHash.h"
 
 // The programs, compiled by dxc at build time (Shaders/Shaders.cmake).
 #include "General_VS.h"
@@ -25,6 +26,10 @@
 #include "General_Velocity_VS.h"
 #include "General_Velocity_PS.h"
 #include "General_CascadeInstances_VS.h"
+#include "General_CascadeInstances_PS.h"
+#include "General_CascadeObjects_VS.h"
+#include "General_Objects_VS.h"
+#include "General_Objects_Velocity_VS.h"
 #include "General_Hdr_PS.h"
 #include "General_Hdr_Velocity_PS.h"
 #include "General_Cascades_PS.h"
@@ -85,6 +90,11 @@
 #include "General_PT_Cascades_Hdr_Velocity_PS.h"
 #include "General_PT_RaySun_Hdr_PS.h"
 #include "General_PT_RaySun_Hdr_Velocity_PS.h"
+#include "General_AlphaDepth_PS.h"
+#include "General_AlphaDepth_Velocity_PS.h"
+#include "General_Caster_PS.h"
+#include "General_Caster_Cascades_PS.h"
+#include "General_Caster_CascadeInstances_PS.h"
 #include "Water_VS.h"
 #include "Water_PS.h"
 #include "Water_Velocity_VS.h"
@@ -369,7 +379,7 @@ namespace
   static_assert(sizeof(struct_VERTEX_FORMAT_P3F_N_COL4UB_COL4UB_TEX2F) == 40);
   static_assert(sizeof(SPipTangents) == 36);
   static_assert(sizeof(SDefaultStream) == 72);
-  static_assert(sizeof(SPipelineKey) == 24, "SPipelineKey is hashed and compared as bytes");
+  static_assert(sizeof(SPipelineKey) == 32, "SPipelineKey is hashed and compared as bytes");
 
   //! The most elements of an input layout.
   constexpr int MAX_INPUT_ELEMENTS = 9;
@@ -493,15 +503,8 @@ namespace
 
 size_t CD3D12Pipeline::SKeyHash::operator()(const SPipelineKey &Key) const
 {
-  // FNV-1a over the bytes of the key (callers zero-initialise it).
-  const uint8 *p = (const uint8 *)&Key;
-  uint64 nHash = 14695981039346656037ull;
-  for (size_t i = 0; i < sizeof(Key); i++)
-  {
-    nHash ^= p[i];
-    nHash *= 1099511628211ull;
-  }
-  return (size_t)nHash;
+  // Its bytes as words (callers zero-initialise it).
+  return SWordHash()(Key);
 }
 
 bool CD3D12Pipeline::SKeyEqual::operator()(const SPipelineKey &a, const SPipelineKey &b) const
@@ -532,6 +535,7 @@ void CD3D12Pipeline::Shutdown()
     WriteKeyFile("ab", m_NewKeys.data(), m_NewKeys.size());
   m_NewKeys.clear();
   m_nNewKeysBefore = 0;
+  m_bLastKey = false;
   m_PSOs.clear();
   m_pDefaultStream.Reset();
   m_DefaultStreamView = {};
@@ -566,7 +570,7 @@ bool CD3D12Pipeline::CreateRootSignature()
   Ranges[4] = Ranges[0];
   Ranges[4].RegisterSpace = 6;                  // Texture3D g_Volumes[] (the volumetric light's froxels)
 
-  D3D12_ROOT_PARAMETER Params[7] = {};
+  D3D12_ROOT_PARAMETER Params[8] = {};
   Params[0].ParameterType = D3D12_ROOT_PARAMETER_TYPE_CBV;      // b0 SFrameConstants
   Params[0].Descriptor.ShaderRegister = 0;
   Params[0].ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
@@ -592,6 +596,10 @@ bool CD3D12Pipeline::CreateRootSignature()
   Params[ROOT_DRAW_EXT].ParameterType = D3D12_ROOT_PARAMETER_TYPE_CBV;     // b3 SDrawExt
   Params[ROOT_DRAW_EXT].Descriptor.ShaderRegister = 3;
   Params[ROOT_DRAW_EXT].ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
+  Params[ROOT_DRAW_OBJECTS].ParameterType = D3D12_ROOT_PARAMETER_TYPE_SRV;  // t3 space5 the headers of a draw of objects
+  Params[ROOT_DRAW_OBJECTS].Descriptor.ShaderRegister = 3;
+  Params[ROOT_DRAW_OBJECTS].Descriptor.RegisterSpace = 5;
+  Params[ROOT_DRAW_OBJECTS].ShaderVisibility = D3D12_SHADER_VISIBILITY_VERTEX;
 
   D3D12_STATIC_SAMPLER_DESC Samplers[5];
   Samplers[XR_SAMPLER_LINEAR_WRAP] = StaticSampler(XR_SAMPLER_LINEAR_WRAP, D3D12_FILTER_ANISOTROPIC, D3D12_TEXTURE_ADDRESS_MODE_WRAP);
@@ -731,9 +739,17 @@ ID3D12PipelineState *CD3D12Pipeline::GetPSO(const SPipelineKey &Key)
 {
   if (!m_pRootSignature)
     return nullptr;
+  // A run of draws of one pipeline state (most of a pass's) asks the table once.
+  if (m_bLastKey && memcmp(&Key, &m_LastKey, sizeof(Key)) == 0)
+    return m_pLastPSO;
   auto it = m_PSOs.find(Key);
   if (it != m_PSOs.end())
-    return it->second.Get();
+  {
+    m_LastKey = Key;
+    m_pLastPSO = it->second.Get();
+    m_bLastKey = true;
+    return m_pLastPSO;
+  }
   ComPtr<ID3D12PipelineState> pPSO;
   {
     FRAME_PROFILER("CD3D12Pipeline::CreatePSO", iSystem, PROFILE_RENDERER);
@@ -797,6 +813,7 @@ void CD3D12Pipeline::LoadKeys()
     Thread.join();
   // A key the device refuses now is made again (and its error logged) when a draw asks for it.
   std::erase_if(m_PSOs, [](const auto &Entry) { return !Entry.second; });
+  m_bLastKey = false;
   if (!bValid || m_PSOs.size() != Keys.size())
   {
     std::vector<SPipelineKey> Made;
@@ -934,9 +951,29 @@ ComPtr<ID3D12PipelineState> CD3D12Pipeline::CreatePSO(const SPipelineKey &Key, b
     // (the leaves' sun through them, XR_FOLIAGE, as the cascades: the path tracer lights them)
     Desc.PS = s_PathPS[Key.bCascades == 3 ? 2 : Key.bCascades ? 1 : 0][bMotion ? 1 : 0];
   }
-  // A caster of the sun's cascades into all its slices at once.
+  // A draw of consecutive objects of one mesh (d3d12_DrawBatch): the vertex shader above reading each instance's matrices
+  // from its header.
+  if (bGeneral && !bShadowMap && Key.bDrawObjects)
+    Desc.VS = Desc.VS.pShaderBytecode == g_General_Velocity_VS ? D3D12_SHADER_BYTECODE{ g_General_Objects_Velocity_VS, sizeof(g_General_Objects_Velocity_VS) }
+                                                               : D3D12_SHADER_BYTECODE{ g_General_Objects_VS, sizeof(g_General_Objects_VS) };
+  // A caster of the sun's cascades into all its slices at once; the live set's compared with the full set's map in its
+  // instance's slice.
   if (bGeneral && bShadowMap && Key.bCascadeInstances)
-    Desc.VS = { g_General_CascadeInstances_VS, sizeof(g_General_CascadeInstances_VS) };
+  {
+    Desc.VS = Key.bCascadeInstances == 2 ? D3D12_SHADER_BYTECODE{ g_General_CascadeObjects_VS, sizeof(g_General_CascadeObjects_VS) }
+                                         : D3D12_SHADER_BYTECODE{ g_General_CascadeInstances_VS, sizeof(g_General_CascadeInstances_VS) };
+    if (Key.bCascades == 1)
+      Desc.PS = { g_General_CascadeInstances_PS, sizeof(g_General_CascadeInstances_PS) };
+  }
+  // A caster of the sun's cascades by its discards alone (d3d12_CascadeCasterShader): the vertex shader's above.
+  if (bGeneral && bShadowMap && Key.bAlphaDepth == 3)
+    Desc.PS = !Key.bCascades ? D3D12_SHADER_BYTECODE{ g_General_Caster_PS, sizeof(g_General_Caster_PS) }
+              : Key.bCascadeInstances ? D3D12_SHADER_BYTECODE{ g_General_Caster_CascadeInstances_PS, sizeof(g_General_Caster_CascadeInstances_PS) }
+                                      : D3D12_SHADER_BYTECODE{ g_General_Caster_Cascades_PS, sizeof(g_General_Caster_Cascades_PS) };
+  // The depth alone where the alpha test passes (d3d12_FoliagePrepass): the vertex shader's above.
+  if (bGeneral && Key.bAlphaDepth == 1)
+    Desc.PS = bVelocity || bUpscaleDepth ? D3D12_SHADER_BYTECODE{ g_General_AlphaDepth_Velocity_PS, sizeof(g_General_AlphaDepth_Velocity_PS) }
+                                         : D3D12_SHADER_BYTECODE{ g_General_AlphaDepth_PS, sizeof(g_General_AlphaDepth_PS) };
   // The depth alone: the rasterizer's, as with the pixel shader that discards nothing.
   if (Key.bDepthOnly)
     Desc.PS = {};
@@ -1030,8 +1067,8 @@ ComPtr<ID3D12PipelineState> CD3D12Pipeline::CreatePSO(const SPipelineKey &Key, b
     Desc.BlendState.RenderTarget[6] = Albedo;
     Desc.BlendState.RenderTarget[7] = Normal;
   }
-  // Without a pixel shader no colour target is written.
-  if (Key.bDepthOnly)
+  // Without a pixel shader (or with the alpha's alone) no colour target is written.
+  if (Key.bDepthOnly || Key.bAlphaDepth == 1)
   {
     Desc.BlendState.IndependentBlendEnable = TRUE;
     for (D3D12_RENDER_TARGET_BLEND_DESC &Target : Desc.BlendState.RenderTarget)
@@ -1039,7 +1076,7 @@ ComPtr<ID3D12PipelineState> CD3D12Pipeline::CreatePSO(const SPipelineKey &Key, b
   }
   Desc.SampleMask = UINT_MAX;
   // The samples covered by the pixel's alpha (an alpha-tested draw with MSAA): its edge over the samples, not a step.
-  Desc.BlendState.AlphaToCoverageEnable = Key.bAlphaToCoverage && Key.nSamples > 1 && !Key.bDepthOnly ? TRUE : FALSE;
+  Desc.BlendState.AlphaToCoverageEnable = Key.bAlphaToCoverage && Key.nSamples > 1 && !Key.bDepthOnly && !Key.bAlphaDepth ? TRUE : FALSE;
 
   D3D12_RASTERIZER_DESC &Raster = Desc.RasterizerState;
   Raster.FillMode = Key.bWireframe ? D3D12_FILL_MODE_WIREFRAME : D3D12_FILL_MODE_SOLID;
@@ -1081,6 +1118,12 @@ ComPtr<ID3D12PipelineState> CD3D12Pipeline::CreatePSO(const SPipelineKey &Key, b
       Depth.DepthFunc = D3D12_COMPARISON_FUNC_GREATER;
     else
       Depth.DepthFunc = D3D12_COMPARISON_FUNC_LESS_EQUAL;
+    // The leaves' colour after their depth pass (d3d12_FoliagePrepass): where it left their depth, none written.
+    if (Key.bAlphaDepth == 2)
+    {
+      Depth.DepthWriteMask = D3D12_DEPTH_WRITE_MASK_ZERO;
+      Depth.DepthFunc = D3D12_COMPARISON_FUNC_EQUAL;
+    }
   }
   else
   {
@@ -1133,10 +1176,10 @@ ComPtr<ID3D12PipelineState> CD3D12Pipeline::CreatePSO(const SPipelineKey &Key, b
       return nullptr;
     iLog->LogError("XRenderD3D12: CreateGraphicsPipelineState failed (0x%08X): program %s, vertex format %d, state 0x%08X, "
       "cull %d, topology %d, target %d, depth bias %d, streams %d, wireframe %d, colour format %d, ambient %d, blend op %d, rays %d, path %d, "
-      "samples %d, alpha to coverage %d", (unsigned)hr,
+      "samples %d, alpha to coverage %d, alpha depth %d", (unsigned)hr,
       Program.szName, (int)Key.nVertexFormat, nState, (int)Key.nCull, nTopology, (int)Key.nTarget, (int)Key.bDepthBias,
       (int)Key.nStreams, (int)Key.bWireframe, (int)Key.nColorFormat, (int)Key.bAmbient, (int)Key.nBlendOp, (int)Key.bRayTrace, (int)Key.bPathTrace,
-      (int)Key.nSamples, (int)Key.bAlphaToCoverage);
+      (int)Key.nSamples, (int)Key.bAlphaToCoverage, (int)Key.bAlphaDepth);
     return nullptr;
   }
   return pPSO;

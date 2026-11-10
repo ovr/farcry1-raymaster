@@ -62,6 +62,8 @@
                                     //!< the sky): reaching it white, hidden the distance to what hides it in the distance's colours
 #define XR_RAY_DEBUG_SUN_AIR    14  //!< the air the sun reaches along the camera's ray to its hit, as the volumetric light's rays
                                     //!< find it but without its froxels: the shafts as they are in the scene for rays, white
+#define XR_RAY_DEBUG_COVERAGE   15  //!< the share of the hit's triangle its alpha test passes on (d3d12_RTAlphaCoverage), grey;
+                                    //!< an alpha tested one without shares red, an opaque one dark blue
 // The path tracer's G-buffer (d3d12_PTDebug 1 to 4, PathTrace.cpp; Shaders/PathGBuffer.hlsli), no rays
 #define XR_RAY_DEBUG_GB_ALBEDO  16  //!< the albedo, the game's colour
 #define XR_RAY_DEBUG_GB_NORMAL  17  //!< the normal, rgb = n * 0.5 + 0.5; no surface black
@@ -109,7 +111,25 @@ struct SRayInstance
   XR_UINT4(nPath);        //!< x XR_PT_MAT_*, y the game's ambient light on it (what its ambient colour adds to its albedo, the
                           //!< game's colour) / 2, 8 bits a channel from the lowest (PathPackAmbient); z a hash of the mesh
                           //!< (the static buffers and the part of them, this frame's by the counts: d3d12_RTDebug 1's colours);
-                          //!< w unused
+                          //!< w the byte of its triangle 0 in the alpha tests' shares (SFrameConstants::nRayCoverage, a byte a
+                          //!< triangle; XR_RAY_NONE: none, the exact test)
+};
+
+//! d3d12_RTAlphaCoverage: the shares of the triangles an alpha test passes on (RayShade.hlsli's RayTriangleCoverage), made
+//! once a mesh and material (RayCoverage.hlsl, RayTracing.cpp): XR_RAY_COVERAGE_SIDE^2 points a triangle, a thread for each 4
+//! triangles (a word), at most XR_RAY_COVERAGE_JOBS instances a dispatch.
+#define XR_RAY_COVERAGE_SIDE   8
+#define XR_RAY_COVERAGE_GROUP  64
+#define XR_RAY_COVERAGE_JOBS   256
+//! The rays that take the shares (bit 9 of their masks' constants; their light is averaged over many).
+#define XR_RAY_COVERAGE_RAYS   0x200
+
+//! b2 of RayCoverage.hlsl.
+struct SRayCoverageConstants
+{
+  XR_UINT4(nParams);              //!< x the jobs
+  XR_UINT4_ARRAY(nJobs, XR_RAY_COVERAGE_JOBS);  //!< x the instance (g_RayInstances), y its shares' first byte (a word's), z its
+                                  //!< triangles, w its first thread (the threads of the jobs before)
 };
 
 //! SRayInstance::nPath.x, how the path tracer takes the draw's colour.

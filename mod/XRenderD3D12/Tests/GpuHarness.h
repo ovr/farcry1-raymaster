@@ -205,8 +205,21 @@ namespace XrTest
     //! other, in turn) with its barriers, in one command list. Start: the window's texels at the start (empty: zeros).
     //! What the last frame leaves.
     SWakeOutput RunWake(const std::vector<float> &Start, const std::vector<SWakeFrame> &Frames, const SWakeKernels &Kernels);
+    //! A renderer's kernel on the standard root signature: b0 the constants, t0..t3 Textures (null ones after them), u0 a
+    //! fresh nWidth x nHeight R32G32B32A32_FLOAT target (u1..u4 null), nGroups groups. The target's texels, row by row.
+    std::vector<float> RunCompute2D(const SBytecode &Shader, const void *pConstants, size_t nConstantBytes,
+                                    const std::vector<STestTexture> &Textures, uint32 nWidth, uint32 nHeight, const uint32 nGroups[3]);
+    //! The water's depth copy as Water.cpp's CopyDepthByKernel makes it: a depth buffer (R32_TYPELESS, a depth target) of
+    //! nWidth x nHeight with Bits (row by row), drawn on as a depth target, then read through an R32_FLOAT SRV in the
+    //! depth test's read state by Shader into a fresh R32_TYPELESS texture's R32_UINT UAV, on a direct queue of
+    //! its own (as the frame's). The copy's words, row by row.
+    std::vector<uint32> RunDepthCopy(const SBytecode &Shader, const std::vector<uint32> &Bits, uint32 nWidth, uint32 nHeight);
     //! Whether the device stores the format through a typed UAV (CMAA2's output).
     bool HasTypedStore(DXGI_FORMAT Format);
+    //! Whether the device has the GPU upload heap (video memory the CPU writes, the renderer's d3d12_FrameMemoryVideo).
+    bool HasGpuUploadHeap();
+    //! The runs' uploads (their constants, inputs and staging) in the GPU upload heap, not the upload heap.
+    void SetVideoUploads(bool bVideo) { m_bVideoUploads = bVideo; }
     //! The radiance cache emptied (every word 0).
     void ClearCache();
 
@@ -233,14 +246,14 @@ namespace XrTest
     ComPtr<ID3D12Resource> Buffer(D3D12_HEAP_TYPE eHeap, size_t nBytes, D3D12_RESOURCE_STATES eState, bool bUav);
     ComPtr<ID3D12Resource> Upload(const void *pData, size_t nBytes);
     ID3D12PipelineState *Pipeline(const SBytecode &Shader);
-    //! D3D12Compute.h's standard root signature (RunOcean, RunWake), made at the first; a kernel's pipeline on it.
+    //! D3D12Compute.h's standard root signature (RunOcean, RunWake, RunCompute2D), made at the first; a kernel's pipeline on it.
     void CreateComputeRootSignature();
     ID3D12PipelineState *ComputePipeline(const SBytecode &Shader);
     //! The scene's BLAS and TLAS built into the open list (the buffers kept in Keep until the run ends); the TLAS.
     D3D12_GPU_VIRTUAL_ADDRESS BuildScene(const SRayScene &Scene, std::vector<ComPtr<ID3D12Resource>> &Keep);
-    //! The texture uploaded by the open list into a resource of its own (kept in Keep until the run ends), its SRV in
-    //! the heap's slot nSlot.
-    void UploadTexture(const STestTexture &Texture, UINT nSlot, std::vector<ComPtr<ID3D12Resource>> &Keep);
+    //! The texture uploaded by the open list into a resource of its own (kept in Keep until the run ends), its SRV at
+    //! View.
+    void UploadTexture(const STestTexture &Texture, D3D12_CPU_DESCRIPTOR_HANDLE View, std::vector<ComPtr<ID3D12Resource>> &Keep);
     //! A 2D texture of one level in the default heap.
     ComPtr<ID3D12Resource> Texture2D(UINT nWidth, UINT nHeight, DXGI_FORMAT Format, D3D12_RESOURCE_STATES eState, bool bUav);
     //! nRow bytes a row of Texture's data copied by the open list into pTexture (in COPY_DEST; the staging buffer kept in
@@ -258,6 +271,7 @@ namespace XrTest
 
     std::string m_Name;
     bool m_bWarp = false;
+    bool m_bVideoUploads = false;   //!< SetVideoUploads
     D3D_SHADER_MODEL m_nShaderModel = D3D_SHADER_MODEL_5_1;
     ComPtr<ID3D12Device> m_pDevice;
     ComPtr<ID3D12CommandQueue> m_pQueue;

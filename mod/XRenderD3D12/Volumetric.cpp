@@ -140,6 +140,8 @@ bool CD3D12Renderer::UpdateVolumetricLight(ID3D12Resource *pDepth, DXGI_FORMAT D
       ReleaseVolumetricLight();
     return false;
   }
+  // The sun's states of the frame before, where its update had the sun by rays (the same texture still: not a new size's).
+  const CD3D12Texture *pStatesBefore = m_Volumetric.bRays && m_Volumetric.nFrame == m_nFrames - 1 ? m_Volumetric.pSunStates : nullptr;
   m_Volumetric.bRays = false;
   if (m_bHeatVision || !m_pCompute || !m_pUpload || !m_pDescriptors || !m_pDevice)
     return false;
@@ -222,7 +224,11 @@ bool CD3D12Renderer::UpdateVolumetricLight(ID3D12Resource *pDepth, DXGI_FORMAT D
   const float fLog = log2f(fFar / fNear);
   Set4(vc.vSize, (float)m_Volumetric.nWidth, (float)m_Volumetric.nHeight, (float)VOLUME_SLICES, 1.0f / VOLUME_SLICES);
   Set4(vc.vSlices, fNear, fLog, 1 / fLog, fFar);
-  const int n = m_nFrames % 32 + 1;
+  // Half the froxels' rays a frame where the others have the frame before's states (not the first frame with them, nor
+  // after a frame without, nor with a new size: all of them then); the points' sequence then in an order that gives
+  // each froxel points all over it (VolSunPointIndex).
+  const bool bHalf = CV_d3d12_VolumetricLightRaysHalf != 0 && bRays && pStatesBefore && pStatesBefore == m_Volumetric.pSunStates;
+  const int n = (CV_d3d12_VolumetricLightRaysHalf != 0 && bRays ? (int)((((uint32)m_nFrames >> 1) + ((m_nFrames & 1) ? 16 : 0)) & 31) : m_nFrames % 32) + 1;
   Set4(vc.vJitter, Halton(n, 2), Halton(n, 3), Halton(n, 5), 0);
 
   // The light: the sun's (with a sun in the scene) and the light from all round. Indoors the scene has
@@ -268,8 +274,9 @@ bool CD3D12Renderer::UpdateVolumetricLight(ID3D12Resource *pDepth, DXGI_FORMAT D
   memcpy(vc.mViewProj, ViewProj.data, sizeof(vc.mViewProj));
   Set4(vc.vRays, std::max(CV_d3d12_RTDistance, 1.0f), tanf(DEG2RAD(std::clamp(CV_d3d12_RTSunAngle, 0.0f, 10.0f)) * 0.5f),
        2 / (fabsf(P[5]) * m_Volumetric.nHeight), CV_d3d12_VolumetricLightRays >= 2 ? 1.0f : 0.0f);
-  vc.nRays[0] = RayMask() & 0xff & ~(uint32)XR_RAY_SKY;
+  vc.nRays[0] = (RayMask() & 0xff & ~(uint32)XR_RAY_SKY) | ((CV_d3d12_RTAlphaCoverage & 4) ? XR_RAY_COVERAGE_RAYS : 0);
   vc.nRays[1] = (uint32)m_nFrames;
+  vc.nRays[2] = bHalf ? 1 : 0;
   const SD3D12FrameAlloc CB = m_pUpload->AllocFrame(sizeof(vc), 256);
   memcpy(CB.pCPU, &vc, sizeof(vc));
 
@@ -296,7 +303,7 @@ bool CD3D12Renderer::UpdateVolumetricLight(ID3D12Resource *pDepth, DXGI_FORMAT D
   const UINT nGroupsY = (UINT)(m_Volumetric.nHeight + XR_VOLUMETRIC_GROUP - 1) / XR_VOLUMETRIC_GROUP;
   m_pDevice->EndOffscreen();
   // The sun by rays: its states at this frame's points first, read by the injection in place of the cascades.
-  const bool bSunRays = bRays && DispatchVolumetricSun(CB.nGPU, nGroupsX, nGroupsY);
+  const bool bSunRays = bRays && DispatchVolumetricSun(CB.nGPU, bHalf ? (UINT)((m_Volumetric.nWidth + 1) / 2 + XR_VOLUMETRIC_GROUP - 1) / XR_VOLUMETRIC_GROUP : nGroupsX, nGroupsY);
   ID3D12Resource *pMaps = nCascades > 0 && !bSunRays ? m_CascadeMaps[0].pDepth.Get() : nullptr;
   if (bSunRays)
   {
@@ -336,9 +343,10 @@ bool CD3D12Renderer::UpdateVolumetricLight(ID3D12Resource *pDepth, DXGI_FORMAT D
     const Vec3 vEngine = p3D ? (p3D->GetSunPosition(true) - vCamera).GetNormalized() : Vec3(0, 0, 0);
     const Vec3 EngineColor = p3D ? p3D->GetSunColor() : Vec3(0, 0, 0);
     fprintf(m_pFrameDump.get(), "volumetric light's sun: %s, direction (%.3f %.3f %.3f) colour (%.2f %.2f %.2f)%s; the 3D engine's (%.3f %.3f %.3f) "
-            "colour (%.2f %.2f %.2f); rays to %g m, mask 0x%02x%s\n", bSunRays ? "by rays" : bRays ? "by the cascades (no rays)" : "by the cascades",
+            "colour (%.2f %.2f %.2f); rays to %g m, mask 0x%02x%s%s\n", bSunRays ? "by rays" : bRays ? "by the cascades (no rays)" : "by the cascades",
             vc.vSunDir[0], vc.vSunDir[1], vc.vSunDir[2], SunColor[0], SunColor[1], SunColor[2], bEngineSun ? " (the 3D engine's: the frame has no sun)" : "",
-            vEngine.x, vEngine.y, vEngine.z, EngineColor.x, EngineColor.y, EngineColor.z, vc.vRays[0], vc.nRays[0], vc.vRays[3] > 0 ? ", the states in colours" : "");
+            vEngine.x, vEngine.y, vEngine.z, EngineColor.x, EngineColor.y, EngineColor.z, vc.vRays[0], vc.nRays[0], vc.vRays[3] > 0 ? ", the states in colours" : "",
+            bSunRays ? (bHalf ? ", half the froxels' rays (d3d12_VolumetricLightRaysHalf)" : ", all the froxels' rays") : "");
   }
   return true;
 }

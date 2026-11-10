@@ -20,6 +20,7 @@ using namespace RetailRenderer;
 
 static void **s_pVTable = NULL;
 static void *s_pOrig[LBS_NumSlots];
+static bool s_bDisabled = false;
 
 //! The tracing replacements of the CLeafBuffer virtual functions. 'this' is a CLeafBuffer of the
 //! original renderer. The class has no bases, members or virtual functions, so pointers to its
@@ -618,9 +619,16 @@ static bool WriteVTable(void **pVTable, void *const *pEntries)
   return true;
 }
 
+void LeafBufferHooks_Disable(const char *szReason)
+{
+  if (s_bDisabled || s_pVTable)
+    return;
+  Trace_Write("CLeafBuffer hooks: off (%s)", szReason);
+  s_bDisabled = true;
+}
+
 void LeafBufferHooks_Install(CLeafBuffer *pLB)
 {
-  static bool s_bDisabled = false;
   static bool s_bOtherLogged = false;
   if (!pLB || s_bDisabled)
     return;

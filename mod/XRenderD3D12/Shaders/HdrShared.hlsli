@@ -5,7 +5,8 @@
 //	File: HdrShared.hlsli
 //	Description: The maths of the HDR passes that both the program
 //	(Hdr.hlsl) and the kernels (Meter.hlsl, Bloom.hlsl) do: the light of
-//	the scene, the meter's first level (HDR_LUMINANCE), a level of the bloom
+//	the scene (through the volumetric light also in TAA's resolve), the
+//	meter's first level (HDR_LUMINANCE), a level of the bloom
 //	from its 13 taps (HDR_BLOOM_DOWN), the bin of the statistics' histogram
 //	(HdrStats.hlsl). Without bindings.
 //
@@ -31,6 +32,18 @@ float3 Decode(float3 c)
 float Luminance(float3 vLight)
 {
   return dot(vLight, LUMINANCE);
+}
+
+//! HDR_VOLUMETRIC: the light vLight of the scene at vPixel through the volumetric light (Hdr.hlsl's Volumetric; TAA's resolve
+//! with the scene's light): fDepth the depth buffer's there, p and q SetVolumetricConstants's mParams0[0] and mParams0[1].xy,
+//! vToUV the froxels' uv of a pixel.
+float3 VolumetricThrough(Texture3D Froxels, SamplerState Linear, float2 vPixel, float3 vLight, float fDepth, float4 p, float2 q, float2 vToUV)
+{
+  float d = q.x / (fDepth + p.w);
+  // A froxel's integrated light is at its far end: half a slice after its centre.
+  float w = saturate(log2(max(d, 1e-3) / p.x) * p.y) - p.z;
+  float4 v = Froxels.SampleLevel(Linear, float3(vPixel * vToUV, w), 0);
+  return q.y > 0 ? v.rgb : vLight * v.a + v.rgb;
 }
 
 float Max3(float3 v)

@@ -50,6 +50,13 @@ struct SUpscaleInputs
   int nQuality = 2;                     //!< the anti-aliasing's quality, 0 (low) to 3 (ultra): d3d12_AAQuality (TAA's)
   bool bReset = false;                  //!< the frame before shows something else: no history
   bool bDebugView = false;              //!< the upscaler's debug view instead of the picture
+  //! With bSceneLight (an upscaler that MakesSceneLight) pColor is the scene, whose light the upscaler makes itself as
+  //! HDR_SCENE_LIGHT would (its slot nSceneSRV; through the volumetric light with bVolumetric: the depth buffer's slot
+  //! nVolumeDepthSRV, the integrated froxels' nFroxelsSRV, vVolume0 / vVolume1 STaaConstants's).
+  bool bSceneLight = false;
+  bool bVolumetric = false;
+  int nSceneSRV = -1, nVolumeDepthSRV = -1, nFroxelsSRV = -1;
+  float vVolume0[4] = {}, vVolume1[4] = {};
 };
 
 class IUpscaler
@@ -77,6 +84,8 @@ public:
   virtual bool GathersFrames() const { return true; }
   //! It is the anti-aliasing of d3d12_AA (TAA), not an upscaler for the statistics and the log.
   virtual bool IsAntiAliasing() const { return false; }
+  //! It makes the HDR scene's light itself from the scene (SUpscaleInputs::bSceneLight; TAA's resolve).
+  virtual bool MakesSceneLight() const { return false; }
 };
 
 //! Element i (from 1) of the Halton sequence of base b: 1/2, 1/4, 3/4, 1/8, ... for b 2.
