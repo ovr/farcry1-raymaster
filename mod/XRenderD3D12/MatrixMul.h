@@ -9,6 +9,7 @@
 //	Cry_Matrix.h's operator* adds them, so the bits are the same (the
 //	renderer builds with /fp:precise: no fused multiply-add). For the
 //	transforms every draw makes (DrawLeafItem, the cascades' instances).
+//	Columns3: a matrix's columns as rows (the scene for rays' transforms).
 //
 //////////////////////////////////////////////////////////////////////
 
@@ -40,5 +41,16 @@ namespace MatrixMul
     M m;
     Mul44(l.data, r.data, m.data);
     return m;
+  }
+
+  //! out's rows 0..2 (four floats each) are m's columns 0..2, each written as one 16 byte store: whole words read back
+  //! soon after (a hash) are forwarded from it, where from four 4 byte stores they wait for them to reach the cache.
+  inline void Columns3(const float *m, float *out)
+  {
+    __m128 c0 = _mm_loadu_ps(m), c1 = _mm_loadu_ps(m + 4), c2 = _mm_loadu_ps(m + 8), c3 = _mm_loadu_ps(m + 12);
+    _MM_TRANSPOSE4_PS(c0, c1, c2, c3);
+    _mm_storeu_ps(out, c0);
+    _mm_storeu_ps(out + 4, c1);
+    _mm_storeu_ps(out + 8, c2);
   }
 }

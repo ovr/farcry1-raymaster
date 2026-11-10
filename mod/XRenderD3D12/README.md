@@ -1876,6 +1876,17 @@ The whole sweep's GPU is the same (3.45–3.51 and 3.47–3.50 ms). Frame 181 of
 0 px pairs against the build before. Unit tests `MatrixMul_*` compare 20,000 random pairs with the
 SDK's sum bit for bit, and a product written over either factor.
 
+A captured draw's transform for the rays (`CaptureDraw`) is its `mWorld`'s columns, written as three
+16 byte rows (`MatrixMul::Columns3`): its hash (`DrawHash`) reads them back as 8 byte words at once,
+and from twelve 4 byte stores those reads waited for the stores to reach the cache (21 of the
+function's 138 samples on one read). `FillInstance` zeroes the instance in place: `Inst = {}`
+zeroed a copy on the stack and copied it over. River's sweep (`r_WaterUpdateMinInterval 0`,
+`d3d12_AutoExposure 0`), eight pairs of runs, two runs (one of each) of the machine's slow state left
+out: frames 60–1160 `EF_EndEf3D` 1.218 → 1.193 ms (lower in five of six pairs), frames 600–800 4.94 →
+4.91 (within the spread). `CaptureDraw`'s own samples 138–154 → 109–124, but the calls after it
+(`GetRawSRV`, the `push_back`) took most of them: the stores' queue waits there now. Frame 181 has a
+0 px pair against the build before. Unit test `MatrixMul_Columns3`.
+
 ## Draws joined into one
 
 Most of a view's draws repeat the one before but for the object's transforms: the same mesh,

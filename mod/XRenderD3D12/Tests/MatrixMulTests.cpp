@@ -5,7 +5,8 @@
 //	File: MatrixMulTests.cpp
 //	Description: Unit tests of MatrixMul.h on the CPU: its product has the
 //	bits of Cry_Matrix.h's operator* (each element its four products
-//	added from the left), also where it writes over a factor.
+//	added from the left), also where it writes over a factor; Columns3
+//	the bits of an element by element transpose.
 //
 //////////////////////////////////////////////////////////////////////
 
@@ -94,4 +95,27 @@ XR_TEST(MatrixMul_InPlace)
   SMat b = r;
   MatrixMul::Mul44(l.data, b.data, b.data);
   CHECK(SameBits(b, Want));
+}
+
+// Why: the scene for rays' transform of a draw (CaptureDraw) is its mWorld's columns 0..2 as rows; written by SSE rows, it must hold
+// the bits of the element by element copy (its hash too) and nothing past its twelve floats.
+XR_TEST(MatrixMul_Columns3)
+{
+  uint32_t s = 4242;
+  for (int n = 0; n < 2000; n++)
+  {
+    SMat m;
+    for (float &f : m.data)
+      f = Next(s);
+    float Want[16], Got[16];
+    for (int i = 0; i < 16; i++)
+      Want[i] = Got[i] = Next(s);
+    for (int r = 0; r < 3; r++)
+      for (int c = 0; c < 4; c++)
+        Want[r * 4 + c] = m.data[c * 4 + r];
+    MatrixMul::Columns3(m.data, Got);
+    CHECK_MSG(std::memcmp(Got, Want, sizeof(Got)) == 0, "matrix " + std::to_string(n));
+    if (std::memcmp(Got, Want, sizeof(Got)))
+      break;
+  }
 }

@@ -665,12 +665,10 @@ void CD3D12RayScene::CaptureDraw(const SPipelineKey &Key, const SDrawConstants &
   GetTextureSlots(d.Inst, Slots);
   for (int i = 0; i < 4; i++)
     d.nTexGeneration[i] = g_pRenderer->m_pDescriptors->GetGeneration((int)Slots[i]);
-  // The instance's transform: object to world for column vectors, mWorld's for row vectors transposed.
-  for (int r = 0; r < 3; r++)
-  {
-    for (int c = 0; c < 4; c++)
-      d.Transform[r][c] = w[c * 4 + r];
-  }
+  // The instance's transform: object to world for column vectors, mWorld's for row vectors transposed (a row a store:
+  // DrawHash reads it back at once).
+  static_assert(sizeof(d.Transform) == 48, "three rows of four floats");
+  MatrixMul::Columns3(w, &d.Transform[0][0]);
   d.nHash = DrawHash(d);
   d.eSource = bReflection ? SOURCE_REFLECTION : m_eCaptureSource;
   d.bLive = !bReflection && m_bCaptureLive;
@@ -682,7 +680,9 @@ void CD3D12RayScene::FillInstance(SRayInstance &Inst, const SPipelineKey &Key, c
   D3D12_GPU_VIRTUAL_ADDRESS nTexCoord1)
 {
   CD3D12Upload &Upload = *g_pRenderer->m_pUpload;
-  Inst = {};
+  // (in place: Inst = {} zeroes a copy on the stack first and reads it back)
+  static_assert(std::is_trivially_copyable_v<SRayInstance>, "zeroed as bytes");
+  memset(&Inst, 0, sizeof(Inst));
   uint64 nOffset = 0;
   const int nVB = Upload.GetRawSRV(Tri.VertexBuffer.StartAddress, nOffset);
   Inst.nGeom[0] = nVB >= 0 ? (uint32)nVB : XR_RAY_NONE;
