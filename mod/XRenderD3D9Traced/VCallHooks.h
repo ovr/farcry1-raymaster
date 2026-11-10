@@ -17,7 +17,8 @@
 //	first ones of each parameter; all with XRENDERTRACED_SCREENFX_ALL=1).
 //	The engine's own interfaces the renderer calls back into (I3DEngine) are
 //	hooked the same way, and there the calls from the renderer are written out.
-//	x64 only; XRENDERTRACED_NO_VCALL_HOOKS=1 turns them off.
+//	x64 only; XRENDERTRACED_NO_VCALL_HOOKS=1 turns them off, and so does
+//	VCallHooks_Disable (XRenderD3D12 without XRENDERTRACED_HOOKS=1).
 //
 //////////////////////////////////////////////////////////////////////
 
@@ -25,6 +26,8 @@
 
 //! The module of the original renderer: calls from it are the renderer's own.
 void VCallHooks_SetRenderer(HMODULE hRenderer);
+//! No hooks from now on (before the first one); szReason goes in the log.
+void VCallHooks_Disable(const char *szReason);
 //! Hooks the vtable of pObject, an object of the original renderer of the SDK class szClass (one
 //! of VTables.inl), once per vtable. szTag tells apart vtables hooked as the same class.
 void VCallHooks_Install(const char *szClass, void *pObject, const char *szTag = NULL);

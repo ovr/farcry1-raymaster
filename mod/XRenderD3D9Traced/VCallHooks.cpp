@@ -887,6 +887,17 @@ static void InstallLocked(const char *szClass, void **pVTable, const char *szTag
 #endif
 }
 
+void VCallHooks_Disable(const char *szReason)
+{
+  AcquireSRWLockExclusive(&s_Lock);
+  if (!s_bDisabled && !s_nTables)
+  {
+    Trace_Write("vcall hooks: off (%s)", szReason);
+    s_bDisabled = true;
+  }
+  ReleaseSRWLockExclusive(&s_Lock);
+}
+
 void VCallHooks_Install(const char *szClass, void *pObject, const char *szTag)
 {
   if (!pObject || s_bDisabled)

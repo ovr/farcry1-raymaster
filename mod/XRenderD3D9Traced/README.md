@@ -12,8 +12,12 @@ reference of the rest.
 
 - The x64 build also hooks the vtables of the shaders, textures and render elements of the
   original renderer (`VCallHooks.h`): the summary after the captured frame lists which virtual
-  functions the engine calls. A call that is not written out is only counted: its module comes from
-  a cache of the return addresses, and the thread that loaded the renderer counts it without a
+  functions the engine calls. With `XRenderD3D12` (the DLL that exports `XRenderD3D12_ReadFrameHdr10`)
+  neither these hooks nor the `CLeafBuffer` ones (`LeafBufferHooks.h`) are installed unless
+  `XRENDERTRACED_HOOKS=1`: without them Pier's sweep at 4K runs 4–6 % faster in the raster and 6–8 %
+  with the RT reflections alone, where the CPU bounds the frame (step 382);
+  `XRENDERTRACED_HOOKS=0` leaves them out with any renderer. A call that is not written out is
+  only counted: its module comes from a cache of the return addresses, and the thread that loaded the renderer counts it without a
   locked instruction. The next calls from the last two places of such a call (on that thread,
   with the same `xrt_Trace`) go from the slot's stub straight to the original function after
   adding 1 to their count (`VCall_Fast`). A command `screenfx Effect 1`, `screenfx Effect.Param 0.5` or
