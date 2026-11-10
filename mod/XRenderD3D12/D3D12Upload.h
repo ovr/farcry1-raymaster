@@ -155,6 +155,8 @@ public:
   uint64 GetVideoMemory() const;
   //! Bytes of per frame memory handed out since the current frame slot started (AllocFrame).
   uint64 GetFrameMemory() const { return m_Slots[m_nSlot].nUsed; }
+  //! Counts the frame slots started (BeginFrame): an address AllocFrame gave holds what was written there while it is the same.
+  uint64 GetFrameGeneration() const { return m_nFrameGeneration; }
 
 private:
   //! A persistently mapped buffer in the upload heap.
@@ -223,6 +225,7 @@ private:
   // Per frame memory
   SFrameSlot m_Slots[D3D12_FRAMES];
   int m_nSlot = 0;
+  uint64 m_nFrameGeneration = 1;      //!< GetFrameGeneration
   int m_nCurBlock = -1;               //!< -1 the ring of m_nSlot, else its Extra[m_nCurBlock]
   uint64 m_nCurOffset = 0;
   std::vector<uint8> m_Scratch;       //!< handed out when the device refuses more memory

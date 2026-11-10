@@ -265,6 +265,7 @@ Details: [Device removal (DRED)](mod/XRenderD3D12/README.md#device-removal-dred)
 | `d3d12_AlphaTestEarly` | `1` |  | An alpha tested draw's empty texels left out before their light (the same frames, faster foliage) |
 | `d3d12_FoliagePrepass` | `1` |  | The leaves' and the grass's depth before their colour: 1 with the path tracer, 2 always (the same frames, faster foliage) |
 | `d3d12_DrawExt` | `1` |  | A draw uploads the rest of its constants only when it reads them |
+| `d3d12_DrawExtReuse` | `1` |  | A draw whose rest of its constants is the same as the last one uploaded binds that copy (the same frames, less CPU) |
 | `d3d12_FadeBlend` | `1` |  | The objects that fade with the distance drawn blended |
 | `d3d12_LightColorScale` | `1` | yes | A bump template's light colour as the original's shaders take it |
 | `d3d12_LightImages` | `1` | yes | A projected light's picture as the engine asks for it |

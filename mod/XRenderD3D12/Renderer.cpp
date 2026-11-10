@@ -315,6 +315,9 @@ void CD3D12Renderer::RegisterVariables()
                      "1: a draw uploads the rest of its constants (b3: lights, shadows, the other programs' parameters) only when "
                      "it reads other bytes than the default block's (DrawExt.h), else binds that block; 0 every draw uploads "
                      "it, as before the default block (read at each draw)");
+  iConsole->Register("d3d12_DrawExtReuse", &CV_d3d12_DrawExtReuse, 1, 0,
+                     "1: a draw whose rest of its constants (b3) has the same bytes as the last one uploaded in this frame's memory "
+                     "binds that copy (the GPU reads the same bytes); 0 every such draw uploads its own (read at each draw)");
   iConsole->Register("d3d12_CpuSamples", &CV_d3d12_CpuSamples, 0, 0,
                      "N: samples the stack of the thread that draws every N microseconds (a profiler of the wall clock: the engine's "
                      "code, ours, the driver's); back to 0 writes the samples to XRenderD3D12_samples.txt (module and offset)");
@@ -1057,6 +1060,7 @@ WIN_HWND CD3D12Renderer::Init(int x,int y,int width,int height,unsigned int cbpp
   m_pDevice = std::make_unique<CD3D12Device>();
   m_pDescriptors = std::make_unique<CD3D12Descriptors>();
   m_pUpload = std::make_unique<CD3D12Upload>();
+  m_LastExt.nGPU = 0;  // an address of another upload's memory
   m_pPipeline = std::make_unique<CD3D12Pipeline>();
   m_pCompute = std::make_unique<CD3D12Compute>();
   m_pRayScene = std::make_unique<CD3D12RayScene>();

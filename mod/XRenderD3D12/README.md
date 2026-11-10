@@ -1750,7 +1750,7 @@ A draw's constants (`Shaders/Constants.h`) are two root CBVs of the root signatu
 - **b1 `SDrawHead`, 256 bytes:** the matrices (`mWorld`, `mWorldViewProj`, `mPrevWorldViewProj`),
   the colour, the flags, the textures and the alpha reference. Every draw writes it into the frame's
   memory (write-combined: written once, never read back).
-- **b3 `SDrawExt`, 1728 bytes:** the rest. That is the lights, the shadows, the other programs'
+- **b3 `SDrawExt`, 1808 bytes:** the rest. That is the lights, the shadows, the other programs'
   parameters and the materials' extras (parallax, PBR, skin, the water's and the HDR passes').
 
 C++ fills one `SDrawConstants` holding the members of both and writes each part on its own.
@@ -1771,6 +1771,14 @@ the rest of `DefaultDrawConstants` (zeros, the texture matrix the identity):
 The default block stays bound over a run of draws. `0` uploads the rest of every draw and the
 prepass's motion as before the block, for comparisons (read at each draw). `r_Stats` and
 `d3d12_FrameLog` count the bytes and the draws by why they uploaded.
+
+With `d3d12_DrawExtReuse 1` (the default, not saved) a draw whose rest has the same bytes as the
+last one uploaded binds that copy again (`DrawExt::SLast`). Most draws repeat the draw before.
+The copy is in this frame's memory, which stays as written until its frame slot starts again
+(`CD3D12Upload::GetFrameGeneration`). The renderer's own changes (heat vision's `vHeat`, a light
+pass's `nPbr` without rays) are never kept or reused. The GPU reads the same bytes, so the frames
+are the same. `0` uploads every such rest, as before (read at each draw). `d3d12_FrameLog` counts
+the reused ones (`ext_reused`) and `r_Stats` shows them next to the uploads.
 
 ## Index lists
 
@@ -1957,7 +1965,7 @@ given one by one, on the GPU with the debug layer).
   draws, the pipeline changes, the triangles, the dynamic lights, the camera's position and angles.
   The last field has the bytes of the draws' constants (`draw_bytes`) and the draws by why they
   uploaded their rest (`ext_default` none, `ext_all` `d3d12_DrawExt 0`, `ext_program`, `ext_vertex`,
-  `ext_differs`; Per draw constants) and, after it, the display's lookups since the last line
+  `ext_differs`; of them `ext_reused` bound the last upload's copy; Per draw constants) and, after it, the display's lookups since the last line
   (`display_lookups`, `display_lookup_ms`; the first line: since the start) and whether the game
   has the focus (`display_active`).
   `2` also turns the engine's frame profiler on (collecting, without its overlay) and adds the self

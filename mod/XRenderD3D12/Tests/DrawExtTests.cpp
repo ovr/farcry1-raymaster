@@ -6,7 +6,8 @@
 //	Description: Unit tests of when a draw uploads the rest of its
 //	constants (DrawExt.h, on the CPU): the default block in place of a rest
 //	that is the default, and of the rest a depth-only draw never reads;
-//	the draws that read it whatever it holds upload it.
+//	the draws that read it whatever it holds upload it; a rest of the
+//	last upload's bytes binds its copy.
 //
 //////////////////////////////////////////////////////////////////////
 
@@ -114,4 +115,32 @@ XR_TEST(DrawExt_ChangedAndAll)
   CHECK(Needs(All, Def, Def) == REASON_ALL);
   All.bGeneral = true;
   CHECK(Needs(All, Def, Def) == REASON_ALL);
+}
+
+// Why: a draw binds the last upload's copy (d3d12_DrawExtReuse) only where the GPU then reads the very bytes it would have
+// uploaded: the same in every word, in memory of the same frame (a frame slot started again reuses that memory), and only
+// once there is a copy (an upload that got no memory gives address 0).
+XR_TEST(DrawExt_Reuse)
+{
+  SDrawExt Lit = Default();
+  Lit.vAmbient[0] = 0.5f;
+  SLast Last;
+  CHECK(Last.Find(Lit, 1) == 0);
+  Last.Keep(Lit, 0x1000, 7);
+  CHECK(Last.Find(Lit, 7) == 0x1000);
+  CHECK(Last.Find(Lit, 8) == 0);
+  for (size_t w = 0; w < sizeof(SDrawExt) / 4; w++)
+  {
+    SDrawExt e = Lit;
+    ((uint32 *)&e)[w] ^= 0x80000000u;
+    CHECK_MSG(Last.Find(e, 7) == 0, "word " + std::to_string(w));
+  }
+  // The copy kept is the bytes as they were when kept, not the caller's later changes.
+  SDrawExt Changed = Lit;
+  Last.Keep(Changed, 0x2000, 7);
+  Changed.vAmbient[1] = 1;
+  CHECK(Last.Find(Lit, 7) == 0x2000);
+  CHECK(Last.Find(Changed, 7) == 0);
+  Last.Keep(Lit, 0, 7);
+  CHECK(Last.Find(Lit, 7) == 0);
 }

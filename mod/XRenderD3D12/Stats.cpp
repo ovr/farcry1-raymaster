@@ -233,10 +233,10 @@ void CD3D12Renderer::LogFrame()
       const Barriers::SStats &BarrierStats = m_pDevice->GetBarrierStats();
       const std::string BarrierCounts = Format(",barrier_calls=%u;barrier_drains=%u;barrier_transitions=%u;barrier_uav=%u;barrier_uav_all=%u",
                                                BarrierStats.nCalls, BarrierStats.nDrains, BarrierStats.nTransitions, BarrierStats.nUav, BarrierStats.nUavAll);
-      const std::string DrawCounts = Format(",draw_bytes=%u;ext_default=%d;ext_all=%d;ext_program=%d;ext_vertex=%d;ext_differs=%d",
+      const std::string DrawCounts = Format(",draw_bytes=%u;ext_default=%d;ext_all=%d;ext_program=%d;ext_vertex=%d;ext_differs=%d;ext_reused=%d",
                                             m_nFrameDrawBytes, m_nFrameDrawExt[DrawExt::REASON_DEFAULT], m_nFrameDrawExt[DrawExt::REASON_ALL],
                                             m_nFrameDrawExt[DrawExt::REASON_PROGRAM], m_nFrameDrawExt[DrawExt::REASON_VERTEX],
-                                            m_nFrameDrawExt[DrawExt::REASON_DIFFERS]);
+                                            m_nFrameDrawExt[DrawExt::REASON_DIFFERS], m_nFrameDrawExtReused);
       const std::string CoverageCounts = m_pRayScene ? Format(";rt_coverage_meshes=%u;rt_coverage_bytes=%u;rt_coverage_made=%u;rt_frame_blas=%u;rt_static_blas_built=%u",
                                                               m_pRayScene->GetCoverageMeshes(), m_pRayScene->GetCoverageBytes(), m_pRayScene->GetCoverageMade(),
                                                               m_pRayScene->GetFrameBlasBuilt(), m_pRayScene->GetStaticBlasBuilt())
@@ -278,9 +278,9 @@ void CD3D12Renderer::CollectStats()
     m_pDevice->ResetGpuTimes();
   }
   const int nDraws = m_nFrameDraws, nPSOChanges = m_nFramePSOChanges;
-  const int nDrawExt = nDraws - m_nFrameDrawExt[DrawExt::REASON_DEFAULT];
+  const int nDrawExt = nDraws - m_nFrameDrawExt[DrawExt::REASON_DEFAULT], nDrawExtReused = m_nFrameDrawExtReused;
   const uint32 nDrawBytes = m_nFrameDrawBytes;
-  m_nFrameDraws = m_nFramePSOChanges = m_nFrameAlphaCoverage = 0;
+  m_nFrameDraws = m_nFramePSOChanges = m_nFrameAlphaCoverage = m_nFrameDrawExtReused = 0;
   m_nFrameDrawBytes = 0;
   for (int &n : m_nFrameDrawExt)
     n = 0;
@@ -320,6 +320,7 @@ void CD3D12Renderer::CollectStats()
   Sum.fDraws += nDraws;
   Sum.fPSOChanges += nPSOChanges;
   Sum.fDrawExt += nDrawExt;
+  Sum.fDrawExtReused += nDrawExtReused;
   Sum.fDrawBytes += nDrawBytes;
   Sum.fTriangles += m_nPolygons;
   const Barriers::SStats &BarrierStats = m_pDevice->GetBarrierStats();
@@ -430,8 +431,9 @@ void CD3D12Renderer::DrawStats()
       Add(Format("CPU waits for the GPU %.2f ms, in Present %.2f ms", S.fWaitMs / fFrames, S.fPresentMs / fFrames));
       Add(Format("Draws %s, PSO changes %s, triangles %s", Thousands((uint64)(S.fDraws / fFrames + 0.5)).c_str(),
                  Thousands((uint64)(S.fPSOChanges / fFrames + 0.5)).c_str(), Thousands((uint64)(S.fTriangles / fFrames + 0.5)).c_str()));
-      Add(Format("Draw constants %.2f MB, the rest uploaded by %s draws%s", S.fDrawBytes / fFrames / (1024.0 * 1024.0),
-                 Thousands((uint64)(S.fDrawExt / fFrames + 0.5)).c_str(), CV_d3d12_DrawExt > 0 ? "" : " (all)"));
+      Add(Format("Draw constants %.2f MB, the rest uploaded by %s draws%s (%s bound the copy before)", S.fDrawBytes / fFrames / (1024.0 * 1024.0),
+                 Thousands((uint64)(S.fDrawExt / fFrames + 0.5)).c_str(), CV_d3d12_DrawExt > 0 ? "" : " (all)",
+                 Thousands((uint64)(S.fDrawExtReused / fFrames + 0.5)).c_str()));
       Add(Format("Barrier calls %s (%s after work), barriers %s%s", Thousands((uint64)(S.fBarrierCalls / fFrames + 0.5)).c_str(),
                  Thousands((uint64)(S.fBarrierDrains / fFrames + 0.5)).c_str(), Thousands((uint64)(S.fBarriers / fFrames + 0.5)).c_str(),
                  CV_d3d12_BarrierBatch > 0 ? "" : ", each at once"));

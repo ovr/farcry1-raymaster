@@ -234,6 +234,7 @@ void CD3D12Upload::BeginFrame(int nSlot)
   if (nSlot < 0 || nSlot >= D3D12_FRAMES)
     return;
   m_nSlot = nSlot;
+  m_nFrameGeneration++;
   SFrameSlot &Slot = m_Slots[nSlot];
   if (!Slot.Extra.empty() && m_pDevice)
   {

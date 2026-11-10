@@ -473,7 +473,18 @@ void CD3D12Renderer::DrawGeometry(const SPipelineKey &Key, const SDrawConstants 
   const DrawExt::EReason eExt = DrawExt::Needs(Ext, dc, m_pPipeline->GetDefaultDrawExtData());
   m_nFrameDrawExt[eExt]++;
   D3D12_GPU_VIRTUAL_ADDRESS nExt = m_pPipeline->GetDefaultDrawExt();
-  if (eExt != DrawExt::REASON_DEFAULT)
+  // The same bytes as the rest uploaded last in this frame's memory (most draws repeat the one before): that copy again
+  // (d3d12_DrawExtReuse). Not the renderer's changes below.
+  const bool bExtChanged = bHeat || (bPbrLightPass && !bRayView);
+  const uint64 nUploadFrame = m_pUpload->GetFrameGeneration();
+  const D3D12_GPU_VIRTUAL_ADDRESS nLastExt =
+    eExt != DrawExt::REASON_DEFAULT && !bExtChanged && CV_d3d12_DrawExtReuse > 0 ? m_LastExt.Find(dc, nUploadFrame) : 0;
+  if (nLastExt)
+  {
+    nExt = nLastExt;
+    m_nFrameDrawExtReused++;
+  }
+  else if (eExt != DrawExt::REASON_DEFAULT)
   {
     const SD3D12FrameAlloc ExtMem = m_pUpload->AllocFrame((sizeof(SDrawExt) + 255) & ~255u, 256);
     memcpy(ExtMem.pCPU, static_cast<const SDrawExt *>(&dc), sizeof(SDrawExt));
@@ -491,6 +502,8 @@ void CD3D12Renderer::DrawGeometry(const SPipelineKey &Key, const SDrawConstants 
     }
     nExt = ExtMem.nGPU;
     m_nFrameDrawBytes += sizeof(SDrawExt);
+    if (!bExtChanged)
+      m_LastExt.Keep(dc, ExtMem.nGPU, nUploadFrame);
   }
   if (nExt != Set.nDrawExt)
   {

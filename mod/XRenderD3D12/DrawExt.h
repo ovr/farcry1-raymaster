@@ -19,6 +19,7 @@
 
 #include "Shaders/Constants.h"
 
+#include <cstdint>
 #include <cstring>
 
 namespace DrawExt
@@ -65,6 +66,27 @@ namespace DrawExt
       return (d.nFlags2 & DF2_SHADER_FX) || d.bCascadeInstances ? REASON_VERTEX : REASON_DEFAULT;
     return d.bChanged || memcmp(&Ext, &Default, sizeof(SDrawExt)) ? REASON_DIFFERS : REASON_DEFAULT;
   }
+
+  //! The rest the last draw that uploaded one wrote (without the renderer's changes) and where, in the frame memory of
+  //! nUploadFrame (CD3D12Upload::GetFrameGeneration): a draw with the same bytes binds that copy (d3d12_DrawExtReuse).
+  struct SLast
+  {
+    SDrawExt Data;
+    uint64_t nGPU = 0;
+    uint64_t nUploadFrame = 0;
+
+    //! The copy's address for a rest of these bytes in that frame's memory, 0 none.
+    uint64_t Find(const SDrawExt &Ext, uint64_t nFrame) const
+    {
+      return nGPU && nUploadFrame == nFrame && !memcmp(&Ext, &Data, sizeof(SDrawExt)) ? nGPU : 0;
+    }
+    void Keep(const SDrawExt &Ext, uint64_t nAddress, uint64_t nFrame)
+    {
+      memcpy(&Data, &Ext, sizeof(SDrawExt));
+      nGPU = nAddress;
+      nUploadFrame = nFrame;
+    }
+  };
 }
 
 #endif
