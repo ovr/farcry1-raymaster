@@ -405,6 +405,11 @@ void CD3D12Renderer::RegisterVariables()
                      "original's (2 % of the way every 1/50 s; indoors: the camera in a vis area the outdoor lights do not "
                      "reach): paradise outdoors fainter in a grey fog, improved and cold fainter too; 0: the indoor ones "
                      "everywhere, as before");
+  iConsole->Register("d3d12_RenderModeScene", &CV_d3d12_RenderModeScene, 1, 0,
+                     "1: with a render mode after the HDR resolve and no pass between (d3d12_AA taa, none or MSAA), the resolve "
+                     "draws the frame into a target of the render mode's, which reads it there and draws all of the back buffer: "
+                     "no copy of the back buffer (4K: 0.03 ms) and its passes read a render target (0.015 ms less); the same frames; "
+                     "0: into the back buffer and copied");
   iConsole->Register("d3d12_ShadowCascades", &CV_d3d12_ShadowCascades, 4, VF_DUMPTODISK,
                      "With e_shadow_maps, the sun's cascaded shadow maps around the camera: how many, 1 to 4 (0: none, the shadow maps of the objects alone)");
   iConsole->Register("d3d12_ShadowDistance", &CV_d3d12_ShadowDistance, 120.0f, VF_DUMPTODISK,

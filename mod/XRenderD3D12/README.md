@@ -3215,6 +3215,16 @@ and lists theirs (`NamesObjects`).
   The copy is of the scene's colour alone (`CopySceneForWater` without its depth, as for the other
   screen effects: none of their passes reads it): the 4K sweeps' `water scene copy` section
   0.100 -> 0.062 ms a frame on Treehouse, 0.119 -> 0.083 on Pier, the frames the same.
+  With HDR the copy is gone too (`d3d12_RenderModeScene`, 1): when nothing draws over the back
+  buffer between the HDR resolve and the render mode (`d3d12_AA` taa, none or MSAA, no highlight
+  layer) and the render mode's pass covers all of it (its viewport), the resolve draws the frame
+  into a target of the render mode's, in the back buffer's format, and the render mode reads it
+  there. The 4K sweeps in the player's settings (TAA, two runs each): the copy 0.029-0.030 ms
+  -> none, the section `render mode` 0.087 -> 0.070-0.072 (its passes read a render target),
+  the GPU 3.419 / 3.391 -> 3.341 / 3.362 ms a frame on River, 3.483 / 3.476 -> 3.420 / 3.439 on
+  Pier, 2.611 / 2.649 -> 2.537 / 2.583 on Treehouse. The frames are the same: Paradise's adapted
+  luminance gives a run one of a few states, and runs of 0 and of 1 share them (frame 181: Pier
+  0 px, Treehouse 0 px, River 59-84 px as two runs of 0). 0: into the back buffer and copied.
 - Cold: F first 2 saturate(0.75 F - 0.3 D), the source's gain 0.65, no blur, k 0.425.
 - The threshold and the gain above are the indoor ones. The original moves them to outdoor ones
   with an outdoor share s (`d3d12_RenderModeOutdoor`, 1; `RenderModeOutdoor.h`). Traced in

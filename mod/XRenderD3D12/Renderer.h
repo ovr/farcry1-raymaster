@@ -1723,7 +1723,7 @@ public:
   void BeginMainScene();
   //! After its EF_EndEf3D, before the screen effects: the scene tone mapped (HDR) and upscaled
   //! (UpscaleScene) into the back buffer, which is bound again.
-  void EndMainScene();
+  void EndMainScene(bool bScreenEffects = false);
   //! The HDR passes over the scene (pScene in PIXEL_SHADER_RESOURCE | NON_PIXEL_SHADER_RESOURCE, its
   //! SRV nSceneSRV, nWidth x nHeight): the meter (MeterHdr), the bloom and the resolve, into the
   //! back buffer, or with bToTexture into m_Hdr.pLdr, which it returns (nullptr: the back buffer, or
@@ -2080,6 +2080,9 @@ public:
   void DrawRenderMode(int nMode);
   //! The render modes' targets (made once). False: none.
   bool EnsureRenderModeTargets();
+  //! d3d12_RenderModeScene: the HDR resolve's frame into m_pRmScene for the render mode next (EndMainScene's screen effects: no
+  //! pass between, its own over all of the back buffer), which it reads in place of the back buffer's copy. False: the back buffer.
+  bool RenderModeTakesScene();
   void ReleaseRenderModeTargets();
   void ReleasePostBlur(SPostBlur &Blur);
   //! The share of the frame before in this one (r_MotionBlur, r_MotionBlurAmount, the frame time); 0: none.
@@ -2107,6 +2110,9 @@ public:
   CD3D12Texture *m_pRmGlare[2] = {};        //!< the glare at 128 x 128, and a scratch for its blur
   CD3D12Texture *m_pRmAdapt = nullptr;      //!< the adapted luminance (1 x 1 RGBA8, kept between frames as the original's)
   CD3D12Texture *m_pRmLayer = nullptr;      //!< with the highlight layer: its copy before the render mode's pass
+  CD3D12Texture *m_pRmScene = nullptr;      //!< d3d12_RenderModeScene: the HDR resolve's frame (the back buffer's size and format)
+  int m_nRmSceneFrame = -1;                 //!< the m_nFrames the resolve drew into it
+  bool m_bRmSceneNext = false;              //!< EndMainScene with the screen effects next (RenderModeTakesScene)
   bool m_bRmAdaptCleared = false;           //!< m_pRmAdapt holds a value (black at first)
   float m_fRmAdaptTime = 0;                 //!< the time since its last step
   float m_fRmOutdoor = 0;                   //!< the glare's outdoor share (UpdateRenderModeOutdoor), 0 indoors to 1
@@ -2416,6 +2422,7 @@ public:
   int CV_d3d12_LightImages = 1;             //!< 1: a light image's FT2_REPLICATETOALLSIDES (its picture on all six faces) and FT2_CHECKFORALLSEQUENCES (its frames in turn, CTexture::SequenceFrame)
   int CV_d3d12_RenderMode = 1;              //!< 1: the menu's render mode (r_RenderMode, r_Glare) over the scene (DrawRenderMode); 0: none
   int CV_d3d12_RenderModeOutdoor = 1;       //!< 1: the render modes' glare from their indoor constants to their outdoor ones (RenderModeOutdoor.h); 0: indoor
+  int CV_d3d12_RenderModeScene = 1;         //!< 1: the render mode reads the HDR resolve's frame from a target of its own, not a copy of the back buffer (RenderModeTakesScene)
   int CV_d3d12_ShadowCascades = 4;          //!< the sun's cascaded shadow maps: how many (0: none)
   float CV_d3d12_ShadowDistance = 120;      //!< how far they reach from the camera (m)
   int CV_d3d12_ShadowCascadeSize = 2048;    //!< the size of their maps

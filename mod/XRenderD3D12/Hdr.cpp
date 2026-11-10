@@ -212,9 +212,10 @@ void CD3D12Renderer::CopySceneForReflections()
   InvalidateFrameConstants();
 }
 
-void CD3D12Renderer::EndMainScene()
+void CD3D12Renderer::EndMainScene(bool bScreenEffects)
 {
   FUNCTION_PROFILER(iSystem, PROFILE_RENDERER);
+  m_bRmSceneNext = bScreenEffects;
   // The path tracer's G-buffer, if a list left it bound.
   EndPathTargets();
   // MSAA's samples into the main view's targets (Msaa.cpp).
@@ -237,6 +238,7 @@ void CD3D12Renderer::EndMainScene()
   if (m_bHdrScene && m_pFrameDump)
     DumpHdr();
   m_bHdrScene = false;
+  m_bRmSceneNext = false;
 }
 
 int CD3D12Renderer::HdrDepthSRV(ID3D12Resource *pDepth, DXGI_FORMAT DepthFormat)
@@ -455,6 +457,14 @@ CD3D12Texture *CD3D12Renderer::ResolveHdr(int nSceneSRV, ID3D12Resource *pScene,
     DrawHdrPass(m_Hdr.pLdr, dc, 0, m_pDevice->HasLayer() ? m_Hdr.pRatio : nullptr);
     m_pDevice->SetBackBufferTargets();
     return m_Hdr.pLdr;
+  }
+  // d3d12_RenderModeScene: the frame for the render mode alone, which draws all of the back buffer next (the same pixel shader).
+  if (!bVolumetric && !bSkyMask && RenderModeTakesScene())
+  {
+    DrawHdrPass(m_pRmScene, dc);
+    m_pDevice->SetBackBufferTargets();
+    m_nRmSceneFrame = m_nFrames;
+    return nullptr;
   }
   if (bVolumetric)
     SetVolumetricDepthRead(true);
@@ -729,7 +739,8 @@ void CD3D12Renderer::DrawHdrPass(CD3D12Texture *pTarget, const SDrawConstants &d
   Key.nTarget = 1;
   Key.nColorFormat = pTarget->m_Format == D3D12_HDR_FORMAT ? PIPELINE_COLOR_HDR :
                      pTarget->m_Format == DXGI_FORMAT_R32_FLOAT ? PIPELINE_COLOR_R32F :
-                     pTarget->m_Format == D3D12_HDR10_FORMAT ? PIPELINE_COLOR_HDR10 : PIPELINE_COLOR_DEFAULT;
+                     pTarget->m_Format == D3D12_HDR10_FORMAT ? PIPELINE_COLOR_HDR10 :
+                     pTarget->m_Format == D3D12_BACKBUFFER_FORMAT ? PIPELINE_COLOR_BGRA8 : PIPELINE_COLOR_DEFAULT;
   if (pRatio)
   {
     // Both targets (readable again when the device unbinds them, EndOffscreen).

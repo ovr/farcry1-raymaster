@@ -424,26 +424,58 @@ bool CD3D12Renderer::EnsureRenderModeTargets()
          (!bQuarter || Ok(m_pRmQuarter));
 }
 
+bool CD3D12Renderer::RenderModeTakesScene()
+{
+  // EndMainScene's main view with its screen effects next (DrawScreenEffects' view), a render mode, no highlight layer.
+  if (!CV_d3d12_RenderModeScene || !m_bRmSceneNext || !m_pDevice || !m_pUpload || m_pDevice->HasLayer() || !RenderMode() || !m_pScene ||
+      !(m_nSceneFlags & SHDF_ALLOWHDR) || m_nRecurseLevel > 1 || m_bReflectionPass || m_bSpritePass || m_bShadowMapPass)
+    return false;
+  // No anti-aliasing's pass over the back buffer between (DrawPostAA), and the render mode's over all of it (its viewport).
+  const EAntiAlias eAA = AntiAliasing();
+  const int w = m_pDevice->GetWidth(), h = m_pDevice->GetHeight();
+  if ((eAA != EAntiAlias::None && eAA != EAntiAlias::Taa && !MsaaSamples(eAA)) || m_bScissor || m_bItemScissor || m_Viewport[0] > 0 ||
+      m_Viewport[1] > 0 || m_Viewport[0] + m_Viewport[2] < w || m_Viewport[1] + m_Viewport[3] < h || !EnsureRenderModeTargets())
+    return false;
+  if (m_pRmScene && (m_pRmScene->m_nWidth != w || m_pRmScene->m_nHeight != h))
+  {
+    m_pUpload->ReleaseTexture(m_pRmScene);
+    m_pRmScene = nullptr;
+  }
+  if (!m_pRmScene)
+    m_pRmScene = m_pUpload->CreateRenderTarget(w, h, D3D12_BACKBUFFER_FORMAT);
+  return m_pRmScene && m_pRmScene->m_nSRV >= 0;
+}
+
 void CD3D12Renderer::ReleaseRenderModeTargets()
 {
   if (m_pUpload)
   {
-    for (CD3D12Texture *pTex : { m_pRmDown, m_pRmGlare[0], m_pRmGlare[1], m_pRmAdapt, m_pRmLayer, m_pRmQuarter })
+    for (CD3D12Texture *pTex : { m_pRmDown, m_pRmGlare[0], m_pRmGlare[1], m_pRmAdapt, m_pRmLayer, m_pRmQuarter, m_pRmScene })
     {
       if (pTex)
         m_pUpload->ReleaseTexture(pTex);
     }
   }
-  m_pRmDown = m_pRmGlare[0] = m_pRmGlare[1] = m_pRmAdapt = m_pRmLayer = m_pRmQuarter = nullptr;
+  m_pRmDown = m_pRmGlare[0] = m_pRmGlare[1] = m_pRmAdapt = m_pRmLayer = m_pRmQuarter = m_pRmScene = nullptr;
+  m_nRmSceneFrame = -1;
   m_bRmAdaptCleared = false;
   m_fRmAdaptTime = 0;
 }
 
 void CD3D12Renderer::DrawRenderMode(int nMode)
 {
-  // The scene's colour alone (no pass here reads its depth, which at the swap chain's size cost as much again).
-  if (!EnsureRenderModeTargets() || !CopySceneForWater(nullptr, false))
+  // The scene's colour alone (no pass here reads its depth, which at the swap chain's size cost as much again); else the
+  // target the HDR resolve drew the frame into for it (d3d12_RenderModeScene), the copies' state left as the copy leaves it.
+  const bool bOwnScene = m_nRmSceneFrame == m_nFrames && m_pRmScene;
+  if (!EnsureRenderModeTargets() || (!bOwnScene && !CopySceneForWater(nullptr, false)))
     return;
+  if (bOwnScene)
+  {
+    m_nSceneColorSRV = m_pRmScene->m_nSRV;
+    m_bSceneCopied = false;
+    m_pSceneCopy = nullptr;
+    m_nSceneTileSRV = -1;
+  }
   const int w = m_pDevice->GetWidth(), h = m_pDevice->GetHeight();
   const bool bCartoon = nMode == 4;
   const int nLook = bCartoon ? 0 : nMode - 1;
@@ -545,9 +577,10 @@ void CD3D12Renderer::DrawRenderMode(int nMode)
   {
     uint8 vAdapt[4] = {};
     const bool bRead = !bCartoon && m_pDevice->ReadBackTexture(m_pRmAdapt->m_pResource, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, vAdapt, 1, 1);
-    fprintf(m_pFrameDump.get(), "render mode %d (%s): adapted luminance %d / 255, %.3f s to its next step%s; the scene's colour copied alone\n", nMode,
+    fprintf(m_pFrameDump.get(), "render mode %d (%s): adapted luminance %d / 255, %.3f s to its next step%s; %s\n", nMode,
             nMode == 1 ? "improved" : nMode == 2 ? "paradise" : nMode == 3 ? "cold" : "cartoon", bRead ? vAdapt[0] : -1,
-            std::max(RM_ADAPT_STEP - m_fRmAdaptTime, 0.0f), pLayer ? ", the highlight layer kept" : "");
+            std::max(RM_ADAPT_STEP - m_fRmAdaptTime, 0.0f), pLayer ? ", the highlight layer kept" : "",
+            bOwnScene ? "the scene from the HDR resolve's target of its own (d3d12_RenderModeScene)" : "the scene's colour copied alone");
     if (!bCartoon)
       fprintf(m_pFrameDump.get(), "render mode's glare: outdoor share %.4f (the camera %s, d3d12_RenderModeOutdoor %d), threshold %.4f, gain %.4f\n",
               m_fRmOutdoor, m_bRmIndoors ? "indoors" : "outdoors", CV_d3d12_RenderModeOutdoor, Glare.fThreshold, Glare.fGain);

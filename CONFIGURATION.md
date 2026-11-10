@@ -279,6 +279,7 @@ Details: [Device removal (DRED)](mod/XRenderD3D12/README.md#device-removal-dred)
 | `d3d12_ProjectorSpecular` | `1` | yes | A projected light's highlight over a light mapped specular material |
 | `d3d12_RenderMode` | `1` | yes | The video options' render mode (`r_RenderMode`) drawn over the scene |
 | `d3d12_RenderModeOutdoor` | `1` | yes | The render modes' glare goes from its indoor threshold and gain to its outdoor ones, as the original's |
+| `d3d12_RenderModeScene` | `1` |  | The HDR resolve draws the frame into the render mode's own target, which reads it there, instead of the back buffer and its copy (the same frames; 4K: 0.045 ms less GPU time) |
 | `d3d12_RTAsync` | `1` |  | The acceleration structures built on the compute queue |
 | `d3d12_RTAlphaCoverage` | `3` |  | The rays whose light is averaged take a leaf (an alpha tested triangle) at random by the share of it its alpha test passes on, made once a mesh, in place of the test. Bits: 1 the path tracer's bounces and radiance cache, 2 the rays' GI and AO, 4 the volumetric light's sun (blurs the shafts through the crowns); 0 the exact tests |
 | `d3d12_RTFaceNormal` | `1` |  | The side of a surface the rays start from by the triangle's face (2 that face alone) |
