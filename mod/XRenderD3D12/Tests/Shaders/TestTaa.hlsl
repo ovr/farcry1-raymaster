@@ -10,7 +10,8 @@
 //	g_Test.nTest.x of them, a thread a pixel (i = y * width + x);
 //	g_Test.nTest.w: 1 no history, 2 the colours are HDR light; g_Test.vTest:
 //	x the frame's least share at rest, y the exposure (with 2), z the
-//	sharpening, w the least share in motion.
+//	sharpening, w the least share in motion; g_Test.vTest2.xy 1 / the
+//	width and 1 / the height, from the CPU as UpscalerTaa.cpp's vSize.
 //	  CSTaaResolve  g_Textures[0] the frame's colours (rgb), [1] the depth
 //	                (r), [2] the motion vectors (rg), [3] the history
 //	                (rgba): out[i] = (the pixel's colour, the new
@@ -53,7 +54,7 @@ int2 TestTaaPixel(uint i)
 
 float4 TestTaaSize()
 {
-  return float4(g_Test.nTest.y, g_Test.nTest.z, 1.0 / g_Test.nTest.y, 1.0 / g_Test.nTest.z);
+  return float4(g_Test.nTest.y, g_Test.nTest.z, g_Test.vTest2.xy);
 }
 
 float TestTaaExposure()

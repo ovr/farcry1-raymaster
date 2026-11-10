@@ -983,8 +983,8 @@ void XrTest::CGpu::CreateComputeRootSignature()
 {
   if (m_pComputeRootSignature)
     return;
-  // D3D12Compute.cpp's: 0 CBV b0; 1 table t0..t3; 2 table u0..u4 (its static samplers unused by the ocean's and the
-  // wakes' kernels).
+  // D3D12Compute.cpp's: 0 CBV b0; 1 table t0..t3; 2 table u0..u4; s0 point clamp, s1 linear clamp, s2 the shadow
+  // comparison.
   D3D12_DESCRIPTOR_RANGE Ranges[2] = {};
   Ranges[0].RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_SRV;
   Ranges[0].NumDescriptors = 4;
@@ -1000,9 +1000,24 @@ void XrTest::CGpu::CreateComputeRootSignature()
     Params[i].DescriptorTable.pDescriptorRanges = &Ranges[i - 1];
     Params[i].ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
   }
+  D3D12_STATIC_SAMPLER_DESC Samplers[3] = {};
+  for (UINT i = 0; i < 3; i++)
+  {
+    D3D12_STATIC_SAMPLER_DESC &S = Samplers[i];
+    S.Filter = i == 0 ? D3D12_FILTER_MIN_MAG_MIP_POINT : i == 1 ? D3D12_FILTER_MIN_MAG_MIP_LINEAR : D3D12_FILTER_COMPARISON_MIN_MAG_LINEAR_MIP_POINT;
+    S.AddressU = S.AddressV = S.AddressW = i == 2 ? D3D12_TEXTURE_ADDRESS_MODE_BORDER : D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
+    S.MaxAnisotropy = 1;
+    S.ComparisonFunc = i == 2 ? D3D12_COMPARISON_FUNC_LESS_EQUAL : D3D12_COMPARISON_FUNC_NEVER;
+    S.BorderColor = D3D12_STATIC_BORDER_COLOR_OPAQUE_WHITE;
+    S.MaxLOD = D3D12_FLOAT32_MAX;
+    S.ShaderRegister = i;
+    S.ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
+  }
   D3D12_ROOT_SIGNATURE_DESC Rs = {};
   Rs.NumParameters = 3;
   Rs.pParameters = Params;
+  Rs.NumStaticSamplers = 3;
+  Rs.pStaticSamplers = Samplers;
   ComPtr<ID3DBlob> pBlob, pError;
   Ok(D3D12SerializeRootSignature(&Rs, D3D_ROOT_SIGNATURE_VERSION_1, &pBlob, &pError), "D3D12SerializeRootSignature (compute)");
   Ok(m_pDevice->CreateRootSignature(0, pBlob->GetBufferPointer(), pBlob->GetBufferSize(), IID_PPV_ARGS(&m_pComputeRootSignature)),

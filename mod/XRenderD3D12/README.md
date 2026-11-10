@@ -254,7 +254,8 @@ system ones (better not to touch): [`CONFIGURATION.md`](../../CONFIGURATION.md).
     sharpening kernel (`Taa.hlsl`, run on the standard root signature by the harness's
     `RunCompute2D`) gives each pixel the bits of the 3 x 3s loaded from the picture
     (`Taa_CasTileGivesTheSameBits`: 37 x 21, LDR and HDR, the exposure from the constants and from
-    its texture).
+    its texture), and its resolve kernel the new history's bits of the test kernel the other tests
+    run (`Taa_ResolveKernelGivesTheSameBits`: LDR, HDR and a reset, depths with many equal).
 - MSAA (`msaa2`, `msaa4`, `msaa8`, `Msaa.cpp`): from `BeginMainScene` to `EndMainScene` the main view draws into the
   device's multisampled colour, depth buffer and ambient light (`CD3D12Device::SetMsaaTargets`, `BeginMsaa`; the
   pipelines with `SPipelineKey::nSamples`). What comes after the scene, and what reads the depth buffer in it (the sun's
