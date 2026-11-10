@@ -1743,6 +1743,15 @@ The default block stays bound over a run of draws. `0` uploads the rest of every
 prepass's motion as before the block, for comparisons (read at each draw). `r_Stats` and
 `d3d12_FrameLog` count the bytes and the draws by why they uploaded.
 
+## Index lists
+
+The engine's strips, fans and quads are drawn as triangle lists (`IndexLists.h`), made again
+when a leaf buffer's indices or materials change. They are written through a pointer into room
+made once: a `push_back` an index took 4 ns, and a new view makes up to 388,000 at once. Pier's
+sweep at 3840 x 2160 with the rays, row 360 (the camera's jump to the flight's start, where the
+engine makes 178 leaf buffers): 14.4–15.2 ms → 13.7–13.9 (`EF_EndEf3D` 7.2–7.8 → 6.2–6.8); its
+heavy part's `EF_EndEf3D` 5.00–5.05 → 4.89–4.92 ms; the frames the same. Unit tests `IndexLists_*`.
+
 ## Resource states and barriers
 
 The frame's barriers go through the device (`CD3D12Device::Transition`, `UavBarrier`,

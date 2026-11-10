@@ -17,6 +17,7 @@
 #include "Shader.h"
 #include "TangentFrame.h"
 #include "VegetationLight.h"
+#include "IndexLists.h"
 #include <CryCompiledFile.h>
 
 #include <array>
@@ -25,6 +26,11 @@
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
+
+static_assert(IndexLists::PRIM_TRIANGLES == R_PRIMV_TRIANGLES && IndexLists::PRIM_TRIANGLE_STRIP == R_PRIMV_TRIANGLE_STRIP &&
+              IndexLists::PRIM_QUADS == R_PRIMV_QUADS && IndexLists::PRIM_TRIANGLE_FAN == R_PRIMV_TRIANGLE_FAN &&
+              IndexLists::PRIM_MULTI_STRIPS == R_PRIMV_MULTI_STRIPS && IndexLists::PRIM_MULTI_GROUPS == R_PRIMV_MULTI_GROUPS);
+static_assert(sizeof(uint16) == sizeof(uint16_t));
 
 CLeafBuffer CLeafBuffer::m_Root("Root");
 CLeafBuffer CLeafBuffer::m_RootGlobal("RootGlobal");
@@ -199,47 +205,10 @@ void ConvertVertices(uint8 *pDst, int nDstFormat, const uint8 *pSrc, int nSrcFor
   }
 }
 
-//! Primitives of nPrimType (R_PRIMV_*) appended as a triangle list.
+//! Primitives of nPrimType (R_PRIMV_*) appended as a triangle list (IndexLists.h).
 void AppendAsList(std::vector<uint16> &Out, const uint16 *p, int n, int nPrimType)
 {
-  if (!p || n < 3)
-    return;
-  switch (nPrimType)
-  {
-  case R_PRIMV_TRIANGLE_STRIP:
-  case R_PRIMV_MULTI_STRIPS:
-    for (int i = 0; i + 2 < n; i++)
-    {
-      uint16 a = p[i], b = p[i + 1];
-      const uint16 c = p[i + 2];
-      if (a == b || b == c || a == c)
-        continue;
-      if (i & 1)
-        std::swap(a, b);
-      Out.push_back(a);
-      Out.push_back(b);
-      Out.push_back(c);
-    }
-    break;
-  case R_PRIMV_TRIANGLE_FAN:
-    for (int i = 1; i + 1 < n; i++)
-    {
-      Out.push_back(p[0]);
-      Out.push_back(p[i]);
-      Out.push_back(p[i + 1]);
-    }
-    break;
-  case R_PRIMV_QUADS:
-    for (int i = 0; i + 3 < n; i += 4)
-    {
-      const uint16 q[6] = { p[i], p[i + 1], p[i + 2], p[i], p[i + 2], p[i + 3] };
-      Out.insert(Out.end(), q, q + 6);
-    }
-    break;
-  default:    // R_PRIMV_TRIANGLES, R_PRIMV_MULTI_GROUPS (lists here)
-    Out.insert(Out.end(), p, p + (n - n % 3));
-    break;
-  }
+  IndexLists::Append(Out, p, n, nPrimType);
 }
 
 //////////////////////////////////////////////////////////////////////////
@@ -709,6 +678,14 @@ void UpdateList(CLeafBuffer *pLB, SGeomStream &IS)
   const int nInds = pInds ? pLB->m_Indices.m_nItems : 0;
   const int nPrim = pLB->m_nPrimetiveType;
   IS.List.clear();
+  size_t nBound = 0;
+  for (int i = 0; i < nMats; i++)
+  {
+    const CMatInfo &m = (*pLB->m_pMats)[i];
+    const int nFirst = std::clamp(m.nFirstIndexId, 0, nInds);
+    nBound += IndexLists::Bound(std::clamp(m.nNumIndices, 0, nInds - nFirst), nPrim);
+  }
+  IS.List.reserve(nBound);
   IS.Ranges.assign(nMats, SGeomRange());
   IS.Sources.assign(nMats, SChunkSource());
   for (int i = 0; i < nMats; i++)
