@@ -1762,6 +1762,19 @@ a pass's draws ask for the same state. Pier's sweep at 3840 x 2160 with the rays
 runs: its heavy part's `EF_EndEf3D` 4.86–4.98 → 4.77–4.85 ms, the whole sweep's 1.83–2.00 →
 1.80–1.82; the frames the same. Unit tests `WordHash_*`.
 
+## The alpha test's empty texels
+
+The general program tests the alpha at its end, after the light, the sun's cascades and the path
+tracer's G-buffer: a leaf's empty texels paid for all of it. With `d3d12_AlphaTestEarly` (1) a
+texel is left out right after its texture is read where the alpha the test takes can only be this
+one or less (no flag that raises it later) and it is under the reference by more than 1/256; the
+test at the end stays, so the same texels are kept. HLSL's `discard` demotes the pixel to a helper,
+which goes on for its neighbours' derivatives: the kept pixels get the same values. The DXIL of
+the 63 general pixel programs differs by the inserted test alone. Swamp's jungle stand (3840 x 2160,
+FSR Quality, the path tracer): the opaque list 1.62 → 1.35 ms, the GPU's frame 13.2 → 12.9 ms; the
+sweeps' with the path tracer 0.95 → 0.87 ms (Swamp) and 0.95 → 0.89 (River); the rays' and the
+raster's lists about the same (their programs lighter). render_tests suite `alphaearly`.
+
 ## Resource states and barriers
 
 The frame's barriers go through the device (`CD3D12Device::Transition`, `UavBarrier`,

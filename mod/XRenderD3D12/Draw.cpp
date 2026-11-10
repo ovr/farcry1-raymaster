@@ -155,6 +155,7 @@ void CD3D12Renderer::MakeFrameConstants(SFrameConstants &fc, bool bScene) const
   SetCascadeConstants(fc);
   if (m_pRayScene && CV_d3d12_RTAlphaCoverage)
     fc.nRayCoverage[0] = m_pRayScene->GetCoverageView();
+  fc.nRayCoverage[1] = CV_d3d12_AlphaTestEarly ? 1 : 0;
   const float fFoliageEnd = std::max(CV_d3d12_FoliageTranslucencyDistance, 1.0f);
   Set4(fc.vFoliage, std::max(CV_d3d12_FoliageTranslucency, 0.0f), std::max(CV_d3d12_FoliageTranslucencyPower, 0.1f), fFoliageEnd, 2 / fFoliageEnd);
   if (m_RaySun.bActive && m_RaySun.pMask)

@@ -228,7 +228,8 @@ struct SFrameConstants
   XR_FLOAT4(vPrevParams);         //!< its jitter in clip space (xy: xy += vPrevParams.xy * w), its projection's m22 (z) and m32 (w)
   XR_UINT4(nPrevScene);           //!< x its colour's texture table index (0: no copy), y its depth's, z w its size (pixels)
   XR_UINT4(nRayCoverage);         //!< x the raw view (g_Buffers) of the alpha tests' shares by triangle (d3d12_RTAlphaCoverage,
-                                  //!< RayShade.hlsli's RayCandidatePasses; 0: none), y z w unused
+                                  //!< RayShade.hlsli's RayCandidatePasses; 0: none); y 1: the alpha test's empty texels out
+                                  //!< before their light (d3d12_AlphaTestEarly, General.hlsl's ShadePixel); z w unused
 };
 
 //! b1: per draw, the header that every draw uploads: 256 bytes, one block of the upload ring (Draw.cpp).

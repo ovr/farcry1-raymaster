@@ -1457,6 +1457,12 @@ float4 ShadePixel(SVertexOutput In)
   }
   if (HasFlag2(DF2_TERRAIN_LIGHT))
     vTex.rgb = 0.75 * vTex.rgb + 0.25;
+  // The alpha test's empty texels out before their light, where the test's alpha below can only be this or less and this
+  // is under the reference with room to spare (the test below stays); a lane out goes on as a helper for its neighbours.
+  if (g_Frame.nRayCoverage.y != 0 && HasFlag(DF_ALPHATEST) && !HasFlag(DF_ALPHATEST_LESS | DF_SHADOW_PASS | DF_ALPHA_FROM_TEX) &&
+      g_Draw.fAlphaRef > 0 && !HasFlag2(DF2_MODULATE | DF2_PROJECTOR | DF2_GLASS) &&
+      (!HasFlag(DF_TEX1) || HasFlag(DF_TEX1_LIGHTMAP | DF_TEX1_DETAIL)))
+    clip(In.vColor.a * vTex.a - (g_Draw.fAlphaRef - 1.0 / 256));
 
   float fSun = HasFlag(DF_SHADOWS) ? SunVisibility(In.vWorldPos, In.vNormal, In.vPos.xy) : 1;
 #ifdef XR_PT

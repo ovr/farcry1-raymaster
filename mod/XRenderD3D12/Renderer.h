@@ -2375,6 +2375,7 @@ public:
   int CV_d3d12_CascadeCull = 1;             //!< without rays: 1 the casters' parts no slice takes left out in AddEf, 2 also the camera towards the sun shortened
   int CV_d3d12_StaticCasters = 1;           //!< 1: the static casters of the full set (the vegetation that casts) in the live set too (the terrain's shadows)
   int CV_d3d12_DepthPrepass = 1;            //!< 1: the main view's opaque surfaces into the depth buffer before the opaque list (DrawItems)
+  int CV_d3d12_AlphaTestEarly = 1;          //!< 1: the alpha test's empty texels out before their light (General.hlsl's ShadePixel)
   float CV_d3d12_ShadowSoftness = 0.05f;    //!< the radius of their filter (m)
   int CV_d3d12_UpscaleMode = 0;             //!< EUpscaleMode of the upscaler (d3d12_Upscaler, a string)
   float CV_d3d12_UpscaleSharpness = 0.5f;   //!< the upscaler's sharpening, 0 (none) to 1

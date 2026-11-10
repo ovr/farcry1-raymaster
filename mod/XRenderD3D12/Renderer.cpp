@@ -412,6 +412,10 @@ void CD3D12Renderer::RegisterVariables()
   iConsole->Register("d3d12_DepthPrepass", &CV_d3d12_DepthPrepass, 1, 0,
                      "1: the main view's opaque surfaces that discard nothing drawn into the depth buffer before the opaque list, which "
                      "then shades only the pixels it keeps; 0: the list alone");
+  iConsole->Register("d3d12_AlphaTestEarly", &CV_d3d12_AlphaTestEarly, 1, 0,
+                     "1: an alpha tested draw's texels under its reference with room to spare (a leaf's empty parts) left out right "
+                     "after its texture is read, before their light and the sun's shadows; the test at the end stays, the frames the "
+                     "same (Swamp's jungle with the path tracer: the opaque list 1.62 -> 1.35 ms); 0: at the end alone");
   iConsole->Register("d3d12_ShadowSoftness", &CV_d3d12_ShadowSoftness, 0.05f, VF_DUMPTODISK,
                      "The softness of the sun's cascaded shadows: the radius of their filter (m; at least a texel and a half of each map)");
   iConsole->CreateVariable("d3d12_Upscaler", "none", VF_DUMPTODISK,
