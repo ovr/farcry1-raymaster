@@ -2562,8 +2562,11 @@ and lists theirs (`NamesObjects`).
   what the main view draws after it (the fish of Training swim with other poses; with the water at
   `d3d12_WaterDebug 1` the frames otherwise stay those of 4160). `d3d12_WaterReflectionScale` is
   its size as a fraction of the screen (0.5), and
-  `r_WaterUpdateFactor`, `r_WaterUpdateDistance`, `r_WaterUpdateDeltaAngle` how often it is redrawn
-  (0, 0, 0: every frame). Its target has mip levels (up to 8, made after each redraw, about
+  `r_WaterUpdateFactor`, `r_WaterUpdateDistance`, `r_WaterUpdateDeltaAngle` how often it is redrawn,
+  by time not sooner than `r_WaterUpdateMinInterval` (1/120 s; the engine's rule alone redraws it every
+  frame at the water, but the water reads it through the matrix it was drawn with, so only what moves
+  in it waits: at 200 FPS it is drawn every other frame, Carrier with the rays' effects 1.26 -> 0.67 ms
+  of the CPU on it; the demos' step of 0.02 s gets the frames as before; all four 0: every frame). Its target has mip levels (up to 8, made after each redraw, about
   0.03 ms at 2560 x 1440), from which the water blurs it where the ripple gets finer than a pixel:
   the wave texture's alpha holds the squared slope, and its mean less the square of the mean slope
   is the variance the mip levels smoothed out of the normal. That turns the reflected rays up and

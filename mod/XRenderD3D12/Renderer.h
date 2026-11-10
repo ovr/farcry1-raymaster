@@ -2266,6 +2266,7 @@ public:
   float CV_r_WaterUpdateFactor = 0.01f;     //!< the water reflection is redrawn after this many seconds per metre to the water, at most 0.3 s,
   float CV_r_WaterUpdateDistance = 2;       //!< or when the camera moved this far,
   float CV_r_WaterUpdateDeltaAngle = 5;     //!< or turned by this many degrees
+  float CV_r_WaterUpdateMinInterval = 1.0f / 120;   //!< but by time not sooner than this many seconds
   int CV_r_EnvCMResolution = 2;             //!< the environment cubes' faces are 64 << this texels wide (0 to 2)
   float CV_r_EnvCMupdateInterval = 0.1f;    //!< seconds between two faces of an environment cube
   int CV_r_DisableSfx = 0;

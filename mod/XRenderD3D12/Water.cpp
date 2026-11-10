@@ -56,6 +56,7 @@
 #include "SkyFogBand.h"
 #include "BeachLayers.h"
 #include "PondRipple.h"
+#include "WaterReflection.h"
 #include <atomic>
 
 namespace
@@ -95,9 +96,7 @@ float Sign(float f)
   return f > 0 ? 1.0f : f < 0 ? -1.0f : 0.0f;
 }
 
-// The water reflection is redrawn after at most this many seconds (with r_WaterUpdateFactor), and
-// its camera's near plane is at most this far.
-constexpr float REFLECTION_MAX_INTERVAL = 0.3f;
+// The water reflection camera's near plane is at most this far.
 constexpr float REFLECTION_MAX_NEAR = 16.0f;
 
 //! A triangle over the whole target (clip space).
@@ -832,16 +831,13 @@ void CD3D12Renderer::UpdateWaterReflection(std::span<const SRenderItem> Items)
     m_nReflectionHeight = h;
   }
 
-  // Due when the last one is older than r_WaterUpdateFactor seconds per metre to the nearest water
-  // (at most 0.3 s), or the camera has moved more than r_WaterUpdateDistance or turned more than
-  // r_WaterUpdateDeltaAngle degrees since.
   const float fToWater = p3D->GetDistanceToSectorWithWater();
   const float fTime = iTimer ? iTimer->GetCurrTime() : 0.0f;
   const Vec3 vDir = ConvertToRadAngles(Camera.GetAngles());
   const bool bDue = !m_bReflectionValid || fWaterZ != m_fReflectionWaterZ || fTime < m_fReflectionTime ||
-                    fTime - m_fReflectionTime > std::min(CV_r_WaterUpdateFactor * fToWater, REFLECTION_MAX_INTERVAL) ||
-                    (vPos - m_vReflectionCamPos).GetLength() > CV_r_WaterUpdateDistance ||
-                    vDir.Dot(m_vReflectionCamDir) < cosf(DEG2RAD(CV_r_WaterUpdateDeltaAngle));
+                    WaterReflection::IsDue(fTime - m_fReflectionTime, fToWater, (vPos - m_vReflectionCamPos).GetLength(),
+                                           vDir.Dot(m_vReflectionCamDir), CV_r_WaterUpdateFactor, CV_r_WaterUpdateMinInterval,
+                                           CV_r_WaterUpdateDistance, cosf(DEG2RAD(CV_r_WaterUpdateDeltaAngle)));
   if (!bDue)
     return;
 

@@ -470,3 +470,4 @@ The renderer registers the original renderer's other variables too, so that the 
 | `r_WaterUpdateDeltaAngle` | `5` |  | The water's reflection redrawn when the camera turns this much (degrees) |
 | `r_WaterUpdateDistance` | `2` |  | The same when it moves this far (m) |
 | `r_WaterUpdateFactor` | `0.01` | yes | The same after this many seconds per metre to the water |
+| `r_WaterUpdateMinInterval` | `0.00833` |  | But by time not sooner than this many seconds (1/120: above 120 FPS not every frame; the water reads it through the matrix it was drawn with). `0` as the original |
