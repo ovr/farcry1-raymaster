@@ -2152,7 +2152,7 @@ void CD3D12Device::ClearDepth(float fDepth, uint8 nStencil, bool bDepth, bool bS
   }
 }
 
-bool CD3D12Device::CreateTargetCopies(ComPtr<ID3D12Resource> &pColor, ComPtr<ID3D12Resource> *pDepth)
+bool CD3D12Device::CreateTargetCopies(ComPtr<ID3D12Resource> &pColor, ComPtr<ID3D12Resource> *pDepth, bool bDepthUav)
 {
   if (!m_pDevice)
     return false;
@@ -2172,9 +2172,10 @@ bool CD3D12Device::CreateTargetCopies(ComPtr<ID3D12Resource> &pColor, ComPtr<ID3
   TrackState(pColor.Get(), D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
   if (!pDepth)
     return true;
-  // The depth copy: the same format family and layout as the depth buffer, read through an SRV.
-  Desc.Format = m_bInScene ? DXGI_FORMAT_R32_TYPELESS : DXGI_FORMAT_R24G8_TYPELESS;
-  Desc.Flags = D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL;
+  // The depth copy: the same format family and layout as the depth buffer, read through an SRV; bDepthUav, written by a
+  // kernel instead of a copy of the resource (R32 only).
+  Desc.Format = m_bInScene || bDepthUav ? DXGI_FORMAT_R32_TYPELESS : DXGI_FORMAT_R24G8_TYPELESS;
+  Desc.Flags = bDepthUav ? D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS : D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL;
   if (Failed(m_pDevice->CreateCommittedResource(&Heap, D3D12_HEAP_FLAG_NONE, &Desc, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, nullptr,
     IID_PPV_ARGS(&*pDepth)), "CreateCommittedResource (depth copy)"))
   {

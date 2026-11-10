@@ -293,6 +293,7 @@ Details: [Device removal (DRED)](mod/XRenderD3D12/README.md#device-removal-dred)
 | `d3d12_UpscaleHdr` | `1` | yes | With HDR, the upscaler gets the scene's light before the tone map |
 | `d3d12_WaterAsync` | `1` |  | The FFT ocean's waves made on the compute queue beside the frame |
 | `d3d12_WaterDeferred` | `1` |  | The ocean's grid shaded once a pixel |
+| `d3d12_WaterDepthCopy` | `1` |  | The water's copy of the depth made by a kernel through a view, the depth buffer kept as it is (0: copied as a resource) |
 | `d3d12_WaterGeometry` | `1` |  | The ocean drawn as a grid raised to the waves' height |
 | `d3d12_WaterSSR` | `1` |  | The water's screen space reflection (0: none, to measure it) |
 | `d3d12_WaterUnder` | `1` |  | The light in the water with the camera under the ocean's surface |

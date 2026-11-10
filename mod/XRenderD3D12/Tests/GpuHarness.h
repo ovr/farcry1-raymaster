@@ -209,6 +209,11 @@ namespace XrTest
     //! fresh nWidth x nHeight R32G32B32A32_FLOAT target (u1..u4 null), nGroups groups. The target's texels, row by row.
     std::vector<float> RunCompute2D(const SBytecode &Shader, const void *pConstants, size_t nConstantBytes,
                                     const std::vector<STestTexture> &Textures, uint32 nWidth, uint32 nHeight, const uint32 nGroups[3]);
+    //! The water's depth copy as Water.cpp's CopyDepthByKernel makes it: a depth buffer (R32_TYPELESS, a depth target) of
+    //! nWidth x nHeight with Bits (row by row), drawn on as a depth target, then read through an R32_FLOAT SRV in the
+    //! depth test's read state by Shader into a fresh R32_TYPELESS texture's R32_UINT UAV, on a direct queue of
+    //! its own (as the frame's). The copy's words, row by row.
+    std::vector<uint32> RunDepthCopy(const SBytecode &Shader, const std::vector<uint32> &Bits, uint32 nWidth, uint32 nHeight);
     //! Whether the device stores the format through a typed UAV (CMAA2's output).
     bool HasTypedStore(DXGI_FORMAT Format);
     //! Whether the device has the GPU upload heap (video memory the CPU writes, the renderer's d3d12_FrameMemoryVideo).

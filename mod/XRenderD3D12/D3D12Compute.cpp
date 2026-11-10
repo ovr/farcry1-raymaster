@@ -27,6 +27,7 @@
 #include "Bloom_CS.h"
 #include "DepthTiles_CS.h"
 #include "DepthTilesUp_CS.h"
+#include "DepthCopy_CS.h"
 #include "VolumetricInject_CS.h"
 #include "VolumetricIntegrate_CS.h"
 #include "VolumetricInjectRays_CS.h"
@@ -123,6 +124,7 @@ const SKernel s_Kernels[eD3D12K_Num] =
   { "bloom", g_Bloom_CS, sizeof(g_Bloom_CS) },
   { "depth tiles", g_DepthTiles_CS, sizeof(g_DepthTiles_CS) },
   { "depth tiles (levels 5, 6)", g_DepthTilesUp_CS, sizeof(g_DepthTilesUp_CS) },
+  { "depth copy", g_DepthCopy_CS, sizeof(g_DepthCopy_CS) },
   { "volumetric light", g_VolumetricInject_CS, sizeof(g_VolumetricInject_CS) },
   { "volumetric light (integration)", g_VolumetricIntegrate_CS, sizeof(g_VolumetricIntegrate_CS) },
   { "HDR statistics (histogram)", g_HdrHistogram_CS, sizeof(g_HdrHistogram_CS) },

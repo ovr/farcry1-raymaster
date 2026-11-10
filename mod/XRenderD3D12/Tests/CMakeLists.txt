@@ -98,6 +98,8 @@ xrender_d3d12_test_shader(WakeColumns "${wake}" cs_6_0 CSMain XR_WAKE_COLUMNS)
 xrender_d3d12_test_shader(WakeRowsInverse "${wake}" cs_6_0 CSMain XR_WAKE_ROWS_INVERSE)
 xrender_d3d12_test_shader(WakeView "${wake}" cs_6_0 CSMain XR_WAKE_VIEW)
 xrender_d3d12_test_shader(WakeHeight "${wake}" cs_6_0 CSMain XR_WAKE_HEIGHT)
+# The water's depth copy by a kernel (d3d12_WaterDepthCopy), from the renderer's own source as Shaders.cmake compiles it.
+xrender_d3d12_test_shader(DepthCopyKernel "${XRENDERD3D12_SHADER_SOURCE_DIR}/DepthTiles.hlsl" cs_6_0 CSMain XR_DEPTH_COPY)
 # The renderer's own kernel, from its own source.
 xrender_d3d12_test_shader(PathCacheResolve "${XRENDERD3D12_SHADER_SOURCE_DIR}/PathTrace.hlsl" cs_6_5 CSCacheResolve)
 
@@ -145,6 +147,7 @@ set(XRENDERD3D12_TESTS_SOURCES
     CascadeGroupsTests.cpp
     AlphaDepthTests.cpp
     WaterReflectionTests.cpp
+    WaterDepthCopyTests.cpp
     BeachTests.cpp
     FogVolumeTests.cpp
     WaterBodiesTests.cpp

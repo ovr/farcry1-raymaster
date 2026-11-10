@@ -1037,6 +1037,133 @@ ID3D12PipelineState *XrTest::CGpu::ComputePipeline(const SBytecode &Shader)
   return pPso.Get();
 }
 
+std::vector<uint32> XrTest::CGpu::RunDepthCopy(const SBytecode &Shader, const std::vector<uint32> &Bits, uint32 nWidth, uint32 nHeight)
+{
+  constexpr UINT SRVS = 4, UAVS = 5;
+  if (!nWidth || !nHeight || Bits.size() != (size_t)nWidth * nHeight)
+    throw std::runtime_error("the depth's bits are not its size");
+  CreateComputeRootSignature();
+  const uint32 Zeros[64] = {};
+  ComPtr<ID3D12Resource> pCB = Upload(Zeros, sizeof(Zeros));
+  D3D12_HEAP_PROPERTIES Heap = {};
+  Heap.Type = D3D12_HEAP_TYPE_DEFAULT;
+  D3D12_RESOURCE_DESC Desc = {};
+  Desc.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
+  Desc.Width = nWidth;
+  Desc.Height = nHeight;
+  Desc.DepthOrArraySize = 1;
+  Desc.MipLevels = 1;
+  Desc.Format = DXGI_FORMAT_R32_TYPELESS;
+  Desc.SampleDesc.Count = 1;
+  Desc.Flags = D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL;
+  ComPtr<ID3D12Resource> pDepth, pCopy;
+  Ok(m_pDevice->CreateCommittedResource(&Heap, D3D12_HEAP_FLAG_NONE, &Desc, D3D12_RESOURCE_STATE_COPY_DEST, nullptr, IID_PPV_ARGS(&pDepth)),
+     "CreateCommittedResource (depth)");
+  Desc.Flags = D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS;
+  Ok(m_pDevice->CreateCommittedResource(&Heap, D3D12_HEAP_FLAG_NONE, &Desc, D3D12_RESOURCE_STATE_UNORDERED_ACCESS, nullptr, IID_PPV_ARGS(&pCopy)),
+     "CreateCommittedResource (depth copy)");
+  D3D12_PLACED_SUBRESOURCE_FOOTPRINT Layout = {};
+  UINT64 nBytes = 0;
+  m_pDevice->GetCopyableFootprints(&Desc, 0, 1, 0, &Layout, nullptr, nullptr, &nBytes);
+  std::vector<uint8_t> Rows((size_t)nBytes);
+  for (UINT y = 0; y < nHeight; y++)
+    memcpy(&Rows[Layout.Offset + (size_t)y * Layout.Footprint.RowPitch], &Bits[(size_t)y * nWidth], (size_t)nWidth * 4);
+  ComPtr<ID3D12Resource> pIn = Upload(Rows.data(), Rows.size());
+  ComPtr<ID3D12Resource> pReadback = Buffer(D3D12_HEAP_TYPE_READBACK, (size_t)nBytes, D3D12_RESOURCE_STATE_COPY_DEST, false);
+
+  ComPtr<ID3D12DescriptorHeap> pHeap;
+  D3D12_DESCRIPTOR_HEAP_DESC HeapDesc = {};
+  HeapDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
+  HeapDesc.NumDescriptors = SRVS + UAVS;
+  HeapDesc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
+  Ok(m_pDevice->CreateDescriptorHeap(&HeapDesc, IID_PPV_ARGS(&pHeap)), "CreateDescriptorHeap (depth copy)");
+  auto Cpu = [&](UINT n) {
+    D3D12_CPU_DESCRIPTOR_HANDLE h = pHeap->GetCPUDescriptorHandleForHeapStart();
+    h.ptr += (SIZE_T)n * m_nDescriptorSize;
+    return h;
+  };
+  auto Gpu = [&](UINT n) {
+    D3D12_GPU_DESCRIPTOR_HANDLE h = pHeap->GetGPUDescriptorHandleForHeapStart();
+    h.ptr += (UINT64)n * m_nDescriptorSize;
+    return h;
+  };
+  D3D12_SHADER_RESOURCE_VIEW_DESC SRV = {};
+  SRV.Format = DXGI_FORMAT_R32_FLOAT;
+  SRV.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
+  SRV.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+  SRV.Texture2D.MipLevels = 1;
+  for (UINT i = 0; i < SRVS; i++)
+    m_pDevice->CreateShaderResourceView(i == 0 ? pDepth.Get() : nullptr, &SRV, Cpu(i));
+  D3D12_UNORDERED_ACCESS_VIEW_DESC UAV = {};
+  UAV.Format = DXGI_FORMAT_R32_UINT;
+  UAV.ViewDimension = D3D12_UAV_DIMENSION_TEXTURE2D;
+  for (UINT i = 0; i < UAVS; i++)
+    m_pDevice->CreateUnorderedAccessView(i == 0 ? pCopy.Get() : nullptr, nullptr, &UAV, Cpu(SRVS + i));
+
+  // A list of the direct queue's (the frame's own): a compute list may not name a depth target's states.
+  ComPtr<ID3D12CommandQueue> pQueue;
+  ComPtr<ID3D12CommandAllocator> pAllocator;
+  ComPtr<ID3D12GraphicsCommandList> pList;
+  D3D12_COMMAND_QUEUE_DESC Queue = {};
+  Queue.Type = D3D12_COMMAND_LIST_TYPE_DIRECT;
+  Ok(m_pDevice->CreateCommandQueue(&Queue, IID_PPV_ARGS(&pQueue)), "CreateCommandQueue (direct)");
+  Ok(m_pDevice->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&pAllocator)), "CreateCommandAllocator (direct)");
+  Ok(m_pDevice->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, pAllocator.Get(), ComputePipeline(Shader), IID_PPV_ARGS(&pList)),
+     "CreateCommandList (direct)");
+  D3D12_TEXTURE_COPY_LOCATION Dst = {}, Src = {};
+  Dst.pResource = pDepth.Get();
+  Dst.Type = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
+  Src.pResource = pIn.Get();
+  Src.Type = D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT;
+  Src.PlacedFootprint = Layout;
+  pList->CopyTextureRegion(&Dst, 0, 0, 0, &Src, nullptr);
+  // As the frame's depth buffer: a depth target, then read with its test's state kept.
+  const D3D12_RESOURCE_BARRIER ToTarget = Transition(pDepth.Get(), D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_DEPTH_WRITE);
+  pList->ResourceBarrier(1, &ToTarget);
+  const D3D12_RESOURCE_BARRIER ToRead = Transition(pDepth.Get(), D3D12_RESOURCE_STATE_DEPTH_WRITE,
+                                                   D3D12_RESOURCE_STATE_DEPTH_READ | D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+  pList->ResourceBarrier(1, &ToRead);
+  pList->SetComputeRootSignature(m_pComputeRootSignature.Get());
+  ID3D12DescriptorHeap *pHeaps[] = { pHeap.Get() };
+  pList->SetDescriptorHeaps(1, pHeaps);
+  pList->SetComputeRootConstantBufferView(0, pCB->GetGPUVirtualAddress());
+  pList->SetComputeRootDescriptorTable(1, Gpu(0));
+  pList->SetComputeRootDescriptorTable(2, Gpu(SRVS));
+  pList->Dispatch((nWidth + 7) / 8, (nHeight + 7) / 8, 1);
+  const D3D12_RESOURCE_BARRIER Copy = Transition(pCopy.Get(), D3D12_RESOURCE_STATE_UNORDERED_ACCESS, D3D12_RESOURCE_STATE_COPY_SOURCE);
+  pList->ResourceBarrier(1, &Copy);
+  Dst.pResource = pReadback.Get();
+  Dst.Type = D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT;
+  Dst.PlacedFootprint = Layout;
+  Src.pResource = pCopy.Get();
+  Src.Type = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
+  pList->CopyTextureRegion(&Dst, 0, 0, 0, &Src, nullptr);
+  const HRESULT hrClose = pList->Close();
+  if (FAILED(hrClose))
+    CheckDebugMessages();
+  Ok(hrClose, "Close");
+  ID3D12CommandList *pLists[] = { pList.Get() };
+  pQueue->ExecuteCommandLists(1, pLists);
+  Ok(pQueue->Signal(m_pFence.Get(), ++m_nFence), "Signal");
+  if (m_pFence->GetCompletedValue() < m_nFence)
+  {
+    m_pFence->SetEventOnCompletion(m_nFence, m_hEvent);
+    WaitForSingleObject(m_hEvent, INFINITE);
+  }
+  Ok(m_pDevice->GetDeviceRemovedReason(), "the device (removed)");
+  CheckDebugMessages();
+
+  std::vector<uint32> Out((size_t)nWidth * nHeight);
+  void *p = nullptr;
+  D3D12_RANGE Range = { 0, (SIZE_T)nBytes };
+  Ok(pReadback->Map(0, &Range, &p), "Map");
+  for (UINT y = 0; y < nHeight; y++)
+    memcpy(&Out[(size_t)y * nWidth], (const uint8_t *)p + Layout.Offset + (size_t)y * Layout.Footprint.RowPitch, (size_t)nWidth * 4);
+  D3D12_RANGE None = { 0, 0 };
+  pReadback->Unmap(0, &None);
+  return Out;
+}
+
 std::vector<float> XrTest::CGpu::RunCompute2D(const SBytecode &Shader, const void *pConstants, size_t nConstantBytes,
                                               const std::vector<STestTexture> &Textures, uint32 nWidth, uint32 nHeight,
                                               const uint32 nGroups[3])

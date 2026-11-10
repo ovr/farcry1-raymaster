@@ -1167,11 +1167,20 @@ public:
     CD3D12Texture *pTiles = nullptr;
     int nTileTables = -1;
     int nTileWidth = 0, nTileHeight = 0;    //!< level 0's size
+    //! The depth copy written by a kernel (d3d12_WaterDepthCopy: a texture for its UAV, not a depth target), the kernel's
+    //! descriptor tables (one a frame slot).
+    bool bDepthByKernel = false;
+    int nCopyTables = -1;
   };
   void FreeSceneCopy(SSceneCopy &Copy);
-  //! The textures of a copy of the main view's target and its depth (Copy's, made again for a new size or format) and their
-  //! SRVs; false: none.
-  bool EnsureSceneCopy(SSceneCopy &Copy);
+  //! The textures of a copy of the main view's target and its depth (Copy's, made again for a new size or format, or for
+  //! bDepthByKernel other than it has) and their SRVs; false: none.
+  bool EnsureSceneCopy(SSceneCopy &Copy, bool bDepthByKernel = false);
+  //! d3d12_WaterDepthCopy: the water's depth copy by a kernel that reads the depth buffer through an SRV (a depth of
+  //! 32 bits, the scene's targets; no MSAA) in its depth test's read state, in place of a copy of the resource.
+  bool WaterDepthByKernel();
+  //! The depth buffer's texels into Copy's depth by the kernel (WaterDepthByKernel).
+  void CopyDepthByKernel(SSceneCopy &Copy);
   //! The depth tiles of the copy made last (whole, not m_bSceneCopied's rectangle): level 0 the least
   //! depth of each XR_DEPTH_TILE x XR_DEPTH_TILE pixels of the depth copy, each next level the least
   //! of 2 x 2 texels of the one before, made in the copy's pTiles by two compute kernels
@@ -2386,6 +2395,7 @@ public:
   int CV_d3d12_WaterGeometry = 1;     //!< the ocean's grid raised to the waves in place of the game's flat disc (OceanGrid.cpp; 0: the disc, the frames before)
   int CV_d3d12_WaterDeferred = 1;     //!< the grid's depth first, then its water shaded once a pixel over the view (DrawOceanGrid; 0: the grid shaded as drawn)
   int CV_d3d12_WaterAsync = 1;        //!< the FFT ocean's kernels on the compute queue beside the frame's shadows and opaque list (UpdateOcean; 0: in the frame's list)
+  int CV_d3d12_WaterDepthCopy = 1;    //!< the water's depth copy by a kernel through an SRV (WaterDepthByKernel; 0: a copy of the resource)
   int CV_d3d12_WaterSSR = 1;          //!< the water's reflection of the screen's copy (Water.hlsl's ScreenReflection; 0: none, to measure it)
   int CV_d3d12_WaterUnder = 1;        //!< the view from under the ocean's surface: the light in its water, the sun's shafts (Underwater.cpp; 0: the fog volume's fog, the frames before)
   int CV_d3d12_WaterUnderShare = 1;   //!< under the ocean's surface the sun's light at one point of each pixel's ray, the 4 x 4 window round a pixel its ray's segments, the segments' weights in closed form (Underwater.cpp; 0: four points a pixel shared by its quad, the frames before)

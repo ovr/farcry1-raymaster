@@ -263,6 +263,10 @@ void CD3D12Renderer::RegisterVariables()
   iConsole->Register("d3d12_WaterAsync", &CV_d3d12_WaterAsync, 1, 0,
                      "The FFT ocean's waves, foam and caustics made on the compute queue beside the frame's shadows and opaque "
                      "surfaces, the frame waiting for them at the first draw that reads them; 0: in the frame's list");
+  iConsole->Register("d3d12_WaterDepthCopy", &CV_d3d12_WaterDepthCopy, 1, 0,
+                     "1: the water's copy of the depth buffer made by a kernel that reads it through a view (with a depth of "
+                     "32 bits, the scene's targets of TAA or an upscaler, no MSAA), the same bits; 0: a copy of the "
+                     "resource (CopyResource)");
   iConsole->Register("d3d12_WaterSSR", &CV_d3d12_WaterSSR, 1, 0,
                      "The water's reflection of what the screen shows (the scene's copy, marched along the reflected ray); 0: "
                      "none (the planar reflection, the sky or the rays in its place), to measure what it costs");

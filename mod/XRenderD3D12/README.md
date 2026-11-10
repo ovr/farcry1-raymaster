@@ -2887,6 +2887,20 @@ and lists theirs (`NamesObjects`).
   reflection meets the banks near the water, where the tiles cost more than they save.
   `d3d12_WaterSSR 0` (1; not saved) leaves the screen space reflection and its tiles out, to
   measure them: the planar reflection, the sky or the rays show in its place.
+- The depth of the water's scene copy is made by a compute kernel (`DepthTiles.hlsl`'s
+  `XR_DEPTH_COPY`) that reads the depth buffer through a view in its depth test's read state and
+  writes its bits into a plain 32-bit texture (`d3d12_WaterDepthCopy`, 1; when the depth has 32
+  bits, the frame draws into the scene's targets of TAA or an upscaler, and without MSAA; 0: a copy
+  of the resource as before; not saved). The bits are the same (frame 181 of Pier's sweep 0 px
+  apart). At 3840 x 2160 the copy and the passes that read it cost less, the copy's colour stays a
+  copy of the resource (2 runs of each, frames 60-1160 of the sweeps, ms):
+
+  | Sweep | Scene copy | Depth tiles | Ocean shading | GPU |
+  |---|---|---|---|---|
+  | River | 0.214 -> 0.185 | 0.046 -> 0.026 | 0.170 -> 0.152 | 3.328 -> 3.283 |
+  | Pier | 0.188 -> 0.173 | 0.041 -> 0.023 | 0.201 -> 0.189 | 3.431 -> 3.371 |
+
+  Unit test `WaterDepthCopy_SameBits`.
 - The glass of the scopes (`r_ScopeLens_fx`, the AG36's, the OICW's, the AW50's and the rocket
   launcher's) shows the scene around the middle of the screen through the same copy of the scene
   when its list has one; else (the weapon's list) a copy of only the part of the target it shows

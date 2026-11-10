@@ -9,11 +9,12 @@
 //	texels of the one before. A group makes 16 x 16 texels of its first
 //	level and the four levels after (the threads' minima through group
 //	shared memory): levels 0 to 4 from the copy, then (XR_TILES_UP)
-//	levels 5 and 6 from level 4.
+//	levels 5 and 6 from level 4. XR_DEPTH_COPY: the copy itself, the
+//	depth buffer's texels as they are (d3d12_WaterDepthCopy).
 //
 //	Bindings (D3D12Compute.h): b0 SDepthTileConstants; t0 the depth copy;
 //	u0..u4 levels 0..4 (XR_TILES_UP: u0 level 4, read, u1 and u2 levels 5
-//	and 6).
+//	and 6; XR_DEPTH_COPY: t0 the depth buffer, u0 the copy, its words).
 //
 //////////////////////////////////////////////////////////////////////
 
@@ -26,7 +27,22 @@ cbuffer cbTiles : register(b0)
 
 SamplerState g_SamplerPointClamp : register(s0);
 
-#ifndef XR_TILES_UP
+#if defined(XR_DEPTH_COPY)
+
+Texture2D<float> g_Source : register(t0);
+RWTexture2D<uint> g_Copy : register(u0);
+
+// The depth's bits moved, not its value: no float operation in between.
+[numthreads(8, 8, 1)]
+void CSMain(uint2 v : SV_DispatchThreadID)
+{
+  uint2 vSize;
+  g_Copy.GetDimensions(vSize.x, vSize.y);
+  if (all(v < vSize))
+    g_Copy[v] = asuint(g_Source.Load(int3(v, 0)));
+}
+
+#elif !defined(XR_TILES_UP)
 
 Texture2D<float> g_Depth : register(t0);
 RWTexture2D<float> g_Level0 : register(u0);

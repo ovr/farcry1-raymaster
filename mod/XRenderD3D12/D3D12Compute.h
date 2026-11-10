@@ -59,6 +59,7 @@ enum ED3D12Kernel
   eD3D12K_Bloom,                    //!< a level of the bloom from one twice its size (Shaders/Bloom.hlsl)
   eD3D12K_DepthTiles,               //!< levels 0..4 of the depth tiles of the water's depth copy (Shaders/DepthTiles.hlsl)
   eD3D12K_DepthTilesUp,             //!< their levels 5 and 6 from level 4
+  eD3D12K_DepthCopy,                //!< the water's depth copy, the depth buffer's texels as they are (d3d12_WaterDepthCopy)
   eD3D12K_VolumetricInject,         //!< the volumetric light's froxels (Shaders/Volumetric.hlsl)
   eD3D12K_VolumetricIntegrate,      //!< the light they scatter towards the camera, integrated
   eD3D12K_HdrHistogram,             //!< the HDR statistics: the scene's histogram (Shaders/HdrStats.hlsl)

@@ -220,6 +220,7 @@ xrender_d3d12_shader(Meter_CS Meter.hlsl cs_6_0 CSMain)
 xrender_d3d12_shader(Bloom_CS Bloom.hlsl cs_6_0 CSMain)
 xrender_d3d12_shader(DepthTiles_CS DepthTiles.hlsl cs_6_0 CSMain)
 xrender_d3d12_shader(DepthTilesUp_CS DepthTiles.hlsl cs_6_0 CSMain XR_TILES_UP)
+xrender_d3d12_shader(DepthCopy_CS DepthTiles.hlsl cs_6_0 CSMain XR_DEPTH_COPY)
 # The FFT ocean (d3d12_WaterFFT, OceanFFT.cpp): the sea's spectra and their inverse FFTs, the waves and their mip levels.
 xrender_d3d12_shader(OceanRows_CS OceanFFT.hlsl cs_6_0 CSMain XR_OCEAN_ROWS)
 xrender_d3d12_shader(OceanColumns_CS OceanFFT.hlsl cs_6_0 CSMain XR_OCEAN_COLUMNS)

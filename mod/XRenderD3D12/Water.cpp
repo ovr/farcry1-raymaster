@@ -588,7 +588,8 @@ bool CD3D12Renderer::CopySceneForWater(const int *pRect, bool bDepth)
     return false;
   // The copies of the main view's target: the back buffer, or the HDR target or an upscaler's scene.
   SSceneCopy &Copy = m_SceneCopies[m_pDevice->IsInScene() || m_pDevice->IsInHdr() ? 1 : 0];
-  if (!EnsureSceneCopy(Copy))
+  const bool bKernel = WaterDepthByKernel();
+  if (!EnsureSceneCopy(Copy, bKernel))
     return false;
   CGpuSubSection Section(*this, "water scene copy");
   if (pRect)
@@ -598,6 +599,11 @@ bool CD3D12Renderer::CopySceneForWater(const int *pRect, bool bDepth)
   }
   else if (!bDepth)
     m_pDevice->CopyTargets(Copy.pColor.Get(), nullptr);
+  else if (bKernel)
+  {
+    m_pDevice->CopyTargets(Copy.pColor.Get(), nullptr);
+    CopyDepthByKernel(Copy);
+  }
   else
   {
     // With MSAA the depth buffer's nearest samples first (Msaa.cpp; CopyTargets resolves the colour).
@@ -612,16 +618,17 @@ bool CD3D12Renderer::CopySceneForWater(const int *pRect, bool bDepth)
   return true;
 }
 
-bool CD3D12Renderer::EnsureSceneCopy(SSceneCopy &Copy)
+bool CD3D12Renderer::EnsureSceneCopy(SSceneCopy &Copy, bool bDepthByKernel)
 {
   if (!m_pDevice || !m_pDescriptors)
     return false;
   const int w = m_pDevice->GetMainWidth(), h = m_pDevice->GetMainHeight();
   const DXGI_FORMAT ColorFormat = m_pDevice->GetMainColorFormat(), DepthFormat = m_pDevice->GetMainDepthSRVFormat();
-  if (!Copy.pColor || w != Copy.nWidth || h != Copy.nHeight || ColorFormat != Copy.ColorFormat || DepthFormat != Copy.DepthFormat)
+  if (!Copy.pColor || w != Copy.nWidth || h != Copy.nHeight || ColorFormat != Copy.ColorFormat || DepthFormat != Copy.DepthFormat ||
+      bDepthByKernel != Copy.bDepthByKernel)
   {
     FreeSceneCopy(Copy);
-    if (!m_pDevice->CreateTargetCopies(Copy.pColor, &Copy.pDepth))
+    if (!m_pDevice->CreateTargetCopies(Copy.pColor, &Copy.pDepth, bDepthByKernel))
       return false;
     Copy.nColorSRV = m_pDescriptors->AllocSRV(Copy.pColor.Get(), nullptr);
     D3D12_SHADER_RESOURCE_VIEW_DESC Desc = {};
@@ -634,13 +641,64 @@ bool CD3D12Renderer::EnsureSceneCopy(SSceneCopy &Copy)
     Copy.nHeight = h;
     Copy.ColorFormat = ColorFormat;
     Copy.DepthFormat = DepthFormat;
-    if (Copy.nColorSRV < 0 || Copy.nDepthSRV < 0)
+    Copy.bDepthByKernel = bDepthByKernel;
+    if (bDepthByKernel)
+    {
+      // The kernel's tables, one a frame slot (t0 the depth buffer, written each frame; u0 the copy's words).
+      constexpr int TABLE = CD3D12Compute::COMPUTE_SRVS + CD3D12Compute::COMPUTE_UAVS;
+      Copy.nCopyTables = m_pDescriptors->AllocRange(D3D12_FRAMES * TABLE);
+      D3D12_SHADER_RESOURCE_VIEW_DESC SRV = {};
+      SRV.Format = DXGI_FORMAT_R32_FLOAT;
+      SRV.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
+      SRV.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+      SRV.Texture2D.MipLevels = 1;
+      D3D12_UNORDERED_ACCESS_VIEW_DESC UAV = {};
+      UAV.Format = DXGI_FORMAT_R32_UINT;
+      UAV.ViewDimension = D3D12_UAV_DIMENSION_TEXTURE2D;
+      for (int f = 0; Copy.nCopyTables >= 0 && f < D3D12_FRAMES; f++)
+      {
+        const int nTable = Copy.nCopyTables + f * TABLE;
+        for (int i = 0; i < CD3D12Compute::COMPUTE_SRVS; i++)
+          m_pDescriptors->WriteSRV(nTable + i, nullptr, &SRV);
+        for (int i = 0; i < CD3D12Compute::COMPUTE_UAVS; i++)
+          m_pDescriptors->WriteUAV(nTable + CD3D12Compute::COMPUTE_SRVS + i, i == 0 ? Copy.pDepth.Get() : nullptr, &UAV);
+      }
+    }
+    if (Copy.nColorSRV < 0 || Copy.nDepthSRV < 0 || (bDepthByKernel && Copy.nCopyTables < 0))
     {
       FreeSceneCopy(Copy);
       return false;
     }
   }
   return true;
+}
+
+bool CD3D12Renderer::WaterDepthByKernel()
+{
+  return CV_d3d12_WaterDepthCopy && m_pDevice && m_pCompute && m_pDevice->IsInScene() && !m_pDevice->IsInMsaa() &&
+         m_pDevice->GetMainDepthSRVFormat() == DXGI_FORMAT_R32_FLOAT && m_pCompute->HasKernel(eD3D12K_DepthCopy);
+}
+
+void CD3D12Renderer::CopyDepthByKernel(SSceneCopy &Copy)
+{
+  ID3D12Resource *pDepth = m_pDevice->GetMainDepth();
+  if (!pDepth || !Copy.pDepth || Copy.nCopyTables < 0)
+    return;
+  const int nTable = Copy.nCopyTables + m_pDevice->GetFrameSlot() * (CD3D12Compute::COMPUTE_SRVS + CD3D12Compute::COMPUTE_UAVS);
+  D3D12_SHADER_RESOURCE_VIEW_DESC SRV = {};
+  SRV.Format = DXGI_FORMAT_R32_FLOAT;
+  SRV.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
+  SRV.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+  SRV.Texture2D.MipLevels = 1;
+  m_pDescriptors->WriteSRV(nTable, pDepth, &SRV);
+  // The depth buffer read with its depth test's state kept (the next draw gets it back to write), the copy written, then
+  // read as the copy of the resource left it.
+  constexpr D3D12_RESOURCE_STATES DEPTH_READ = D3D12_RESOURCE_STATE_DEPTH_READ | D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE;
+  m_pDevice->Require(pDepth, DEPTH_READ);
+  m_pDevice->Require(Copy.pDepth.Get(), D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+  m_pCompute->Dispatch(m_pDevice->GetCmdList(), eD3D12K_DepthCopy, 0, nTable, nTable + CD3D12Compute::COMPUTE_SRVS,
+                       (UINT)(Copy.nWidth + 7) / 8, (UINT)(Copy.nHeight + 7) / 8);
+  m_pDevice->Require(Copy.pDepth.Get(), D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
 }
 
 bool CD3D12Renderer::BuildDepthTiles()
@@ -747,6 +805,8 @@ void CD3D12Renderer::FreeSceneCopy(SSceneCopy &Copy)
       m_pDescriptors->FreeSRV(Copy.nColorSRV);
     if (Copy.nDepthSRV >= 0)
       m_pDescriptors->FreeSRV(Copy.nDepthSRV);
+    if (Copy.nCopyTables >= 0)
+      m_pDescriptors->FreeRange(Copy.nCopyTables, D3D12_FRAMES * (CD3D12Compute::COMPUTE_SRVS + CD3D12Compute::COMPUTE_UAVS));
   }
   if (m_pDevice)
   {
