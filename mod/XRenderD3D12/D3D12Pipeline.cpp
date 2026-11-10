@@ -87,6 +87,8 @@
 #include "General_PT_Cascades_Hdr_Velocity_PS.h"
 #include "General_PT_RaySun_Hdr_PS.h"
 #include "General_PT_RaySun_Hdr_Velocity_PS.h"
+#include "General_AlphaDepth_PS.h"
+#include "General_AlphaDepth_Velocity_PS.h"
 #include "Water_VS.h"
 #include "Water_PS.h"
 #include "Water_Velocity_VS.h"
@@ -947,6 +949,10 @@ ComPtr<ID3D12PipelineState> CD3D12Pipeline::CreatePSO(const SPipelineKey &Key, b
     if (Key.bCascades == 1)
       Desc.PS = { g_General_CascadeInstances_PS, sizeof(g_General_CascadeInstances_PS) };
   }
+  // The depth alone where the alpha test passes (d3d12_FoliagePrepass): the vertex shader's above.
+  if (bGeneral && Key.bAlphaDepth == 1)
+    Desc.PS = bVelocity || bUpscaleDepth ? D3D12_SHADER_BYTECODE{ g_General_AlphaDepth_Velocity_PS, sizeof(g_General_AlphaDepth_Velocity_PS) }
+                                         : D3D12_SHADER_BYTECODE{ g_General_AlphaDepth_PS, sizeof(g_General_AlphaDepth_PS) };
   // The depth alone: the rasterizer's, as with the pixel shader that discards nothing.
   if (Key.bDepthOnly)
     Desc.PS = {};
@@ -1040,8 +1046,8 @@ ComPtr<ID3D12PipelineState> CD3D12Pipeline::CreatePSO(const SPipelineKey &Key, b
     Desc.BlendState.RenderTarget[6] = Albedo;
     Desc.BlendState.RenderTarget[7] = Normal;
   }
-  // Without a pixel shader no colour target is written.
-  if (Key.bDepthOnly)
+  // Without a pixel shader (or with the alpha's alone) no colour target is written.
+  if (Key.bDepthOnly || Key.bAlphaDepth == 1)
   {
     Desc.BlendState.IndependentBlendEnable = TRUE;
     for (D3D12_RENDER_TARGET_BLEND_DESC &Target : Desc.BlendState.RenderTarget)
@@ -1049,7 +1055,7 @@ ComPtr<ID3D12PipelineState> CD3D12Pipeline::CreatePSO(const SPipelineKey &Key, b
   }
   Desc.SampleMask = UINT_MAX;
   // The samples covered by the pixel's alpha (an alpha-tested draw with MSAA): its edge over the samples, not a step.
-  Desc.BlendState.AlphaToCoverageEnable = Key.bAlphaToCoverage && Key.nSamples > 1 && !Key.bDepthOnly ? TRUE : FALSE;
+  Desc.BlendState.AlphaToCoverageEnable = Key.bAlphaToCoverage && Key.nSamples > 1 && !Key.bDepthOnly && !Key.bAlphaDepth ? TRUE : FALSE;
 
   D3D12_RASTERIZER_DESC &Raster = Desc.RasterizerState;
   Raster.FillMode = Key.bWireframe ? D3D12_FILL_MODE_WIREFRAME : D3D12_FILL_MODE_SOLID;
@@ -1091,6 +1097,12 @@ ComPtr<ID3D12PipelineState> CD3D12Pipeline::CreatePSO(const SPipelineKey &Key, b
       Depth.DepthFunc = D3D12_COMPARISON_FUNC_GREATER;
     else
       Depth.DepthFunc = D3D12_COMPARISON_FUNC_LESS_EQUAL;
+    // The leaves' colour after their depth pass (d3d12_FoliagePrepass): where it left their depth, none written.
+    if (Key.bAlphaDepth == 2)
+    {
+      Depth.DepthWriteMask = D3D12_DEPTH_WRITE_MASK_ZERO;
+      Depth.DepthFunc = D3D12_COMPARISON_FUNC_EQUAL;
+    }
   }
   else
   {
@@ -1143,10 +1155,10 @@ ComPtr<ID3D12PipelineState> CD3D12Pipeline::CreatePSO(const SPipelineKey &Key, b
       return nullptr;
     iLog->LogError("XRenderD3D12: CreateGraphicsPipelineState failed (0x%08X): program %s, vertex format %d, state 0x%08X, "
       "cull %d, topology %d, target %d, depth bias %d, streams %d, wireframe %d, colour format %d, ambient %d, blend op %d, rays %d, path %d, "
-      "samples %d, alpha to coverage %d", (unsigned)hr,
+      "samples %d, alpha to coverage %d, alpha depth %d", (unsigned)hr,
       Program.szName, (int)Key.nVertexFormat, nState, (int)Key.nCull, nTopology, (int)Key.nTarget, (int)Key.bDepthBias,
       (int)Key.nStreams, (int)Key.bWireframe, (int)Key.nColorFormat, (int)Key.bAmbient, (int)Key.nBlendOp, (int)Key.bRayTrace, (int)Key.bPathTrace,
-      (int)Key.nSamples, (int)Key.bAlphaToCoverage);
+      (int)Key.nSamples, (int)Key.bAlphaToCoverage, (int)Key.bAlphaDepth);
     return nullptr;
   }
   return pPSO;

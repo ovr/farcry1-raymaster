@@ -1872,8 +1872,9 @@ float4 ShadePixel(SVertexOutput In)
     // Alpha to coverage (the reference negated, Draw.cpp's DrawGeometry): the samples the edge covers in place of the test.
     else if (g_Draw.fAlphaRef < 0)
       vColor.a = CoverageAlpha(vColor.a, -g_Draw.fAlphaRef, fwidth(vColor.a));
+    // (compared, not clip's difference, into which a multiply-add could fold the alpha's product: AlphaDepthMain's pixels)
     else
-      clip(vColor.a - g_Draw.fAlphaRef);
+      clip(vColor.a < g_Draw.fAlphaRef ? -1 : 1);
   }
   if (HasFlag(DF_ALPHA_ONE))
     vColor.a = 1;
@@ -2171,3 +2172,10 @@ float4 PSMain(XR_PS_INPUT) : SV_Target
   return SceneOutput(ShadePixel(In));
 }
 #endif
+
+//! d3d12_FoliagePrepass (Draw3D.cpp's DrawItems): the depth alone where the draw's alpha, its vertices' times its texture's
+//! (AlphaDepth.h's draws: ShadePixel's at its test, compared as there), passes the test: the pixels its colour pass keeps.
+void AlphaDepthMain(SVertexOutput In)
+{
+  clip(In.vColor.a * SampleTexture(g_Draw.nTex0, g_Draw.nSamplers & 15, In.vTex0).a < g_Draw.fAlphaRef ? -1 : 1);
+}

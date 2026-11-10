@@ -361,6 +361,13 @@ void CD3D12Renderer::DrawItems(SRenderItem *pItems, int nItems, int eList)
     bBodies = p3DEngine && fBodyCameraZ > fBodyLevel;
   }
   std::vector<int> Bodies;
+  // The leaves' and the grass's items of their depth pass (d3d12_FoliagePrepass, below; their draws DrawGeometry's).
+  const auto AlphaPrepassItem = [&](const SRenderItem &it)
+  {
+    return it.pRE && it.pRE->m_Type == eDATA_OcLeaf && it.eDrawClass == eDC_AlphaTestVColor && !it.bFade && !it.bFogPass &&
+           !(it.pObj->m_ObjFlags & (FOB_LIGHTPASS | FOB_FOGPASS)) && !(bBodies && LooksPastUnderwater(it, fBodyLevel, fBodyCameraZ));
+  };
+  bool bAlphaPrepass = false;
   // d3d12_DepthPrepass: the main view's opaque surfaces that write the depth and discard nothing
   // into the depth buffer first, without a pixel shader (DrawGeometry); the list then shades only
   // the pixels it keeps, where at 4K it shaded each pixel 4 to 6 times outdoors. Its depth test
@@ -390,6 +397,24 @@ void CD3D12Renderer::DrawItems(SRenderItem *pItems, int nItems, int eList)
     m_ItemScissor = ItemScissor;
     // The sun's shadow by rays at the surfaces in the depth buffer, for the list's receivers.
     DrawRaySunMask();
+    // d3d12_FoliagePrepass: then the leaves' and the grass's depth where their alpha test passes (DrawGeometry, AlphaDepth.h),
+    // their colour after it only there (the depth test before the pixel shader: the list shades the leaves in front alone).
+    // Not with MSAA (alpha to coverage) nor heat vision.
+    if ((CV_d3d12_FoliagePrepass >= 2 || (CV_d3d12_FoliagePrepass == 1 && m_pDevice->IsPathBound())) && m_pDevice->GetBoundSamples() <= 1 &&
+        !m_bHeatVision)
+    {
+      GpuSection("foliage prepass");
+      m_bAlphaPrepass = true;
+      for (int i = 0; i < nItems; i++)
+        if (AlphaPrepassItem(pItems[i]))
+          DrawLeafItem(pItems[i]);
+      m_bAlphaPrepass = false;
+      bAlphaPrepass = true;
+      m_fDepthMin = fDepthMin;
+      m_fDepthMax = fDepthMax;
+      m_bItemScissor = bItemScissor;
+      m_ItemScissor = ItemScissor;
+    }
   }
   GpuSection(eList == eRL_Opaque ? "opaque" : eList == eRL_Nearest ? "nearest" : "water");
   if (m_pFrameDump)
@@ -434,7 +459,10 @@ void CD3D12Renderer::DrawItems(SRenderItem *pItems, int nItems, int eList)
     switch (it.pRE->m_Type)
     {
     case eDATA_OcLeaf:
+      // (an item of the leaves' depth pass: its draws' colour where the pass left their depth, DrawGeometry)
+      m_bAlphaColour = bAlphaPrepass && AlphaPrepassItem(it);
       DrawLeafItem(it);
+      m_bAlphaColour = false;
       break;
     case eDATA_Sky:
       DrawSkyItem(it);

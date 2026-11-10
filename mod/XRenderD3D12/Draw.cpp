@@ -15,6 +15,7 @@
 #include "D3D12Upload.h"
 #include "D3D12Descriptors.h"
 #include "RayTracing.h"
+#include "AlphaDepth.h"
 
 namespace
 {
@@ -210,10 +211,20 @@ void CD3D12Renderer::DrawGeometry(const SPipelineKey &Key, const SDrawConstants 
                           (Key.nState & (GS_BLSRC_MASK | GS_BLDST_MASK | GS_NODEPTHTEST | GS_DEPTHFUNC_EQUAL | GS_DEPTHFUNC_GREAT)) ||
                           (dc.nFlags & DF_ALPHATEST)))
     return;
+  // The leaves' and the grass's depth pass and their colour after it (DrawItems, d3d12_FoliagePrepass): the general program's
+  // draws that write the depth with LESS_EQUAL and whose alpha at their test is their vertices' times their texture's
+  // (AlphaDepth.h); the depth pass draws them alone. The same draws in both: the same items, constants and flags.
+  const bool bAlphaDepth = (m_bAlphaPrepass || m_bAlphaColour) && Key.nProgram == eD3D12P_General && Key.nTarget == 0 && !Key.bWireframe &&
+                           !Key.bDepthBias && (Key.nState & GS_DEPTHWRITE) &&
+                           !(Key.nState & (GS_BLSRC_MASK | GS_BLDST_MASK | GS_NODEPTHTEST | GS_DEPTHFUNC_EQUAL | GS_DEPTHFUNC_GREAT)) &&
+                           !m_bNoDepthWrite && AlphaDepth::Covers(dc.nFlags, dc.nFlags2, dc.fAlphaRef, dc.nParallax[0]);
+  if (m_bAlphaPrepass && !bAlphaDepth)
+    return;
+  const bool bPrepass = m_bDepthPrepass || m_bAlphaPrepass;
   const bool bOffscreen = m_pDevice->IsOffscreen();
   const bool bScene = m_pDevice->IsSceneBound();
   // The water reflection's draws for the scene for rays (RayTracing.h).
-  if (m_pRayScene && !m_bDepthPrepass && m_pRayScene->IsCapturingReflection())
+  if (m_pRayScene && !bPrepass && m_pRayScene->IsCapturingReflection())
     m_pRayScene->CaptureDraw(Key, dc, eTopology, VB, pIB, nCount, nFirst, nBaseVertex, pTexCoord1);
   // The main view's draws that reflect a cube map, with rays in its place (d3d12_RTReflectionSurfaces;
   // not the leaves letting the sun through), and the metals and smooth materials of the RayMaster maps
@@ -223,7 +234,7 @@ void CD3D12Renderer::DrawGeometry(const SPipelineKey &Key, const SDrawConstants 
   const bool bPbrLightPass = dc.nPbr[2] && (dc.nPbr[3] & XR_PBR_LIGHT_PASS);
   const bool bRayView = Key.nProgram == eD3D12P_General && !(dc.nFlags2 & DF2_FOLIAGE) && Key.nTarget == 0 && !bOffscreen && !m_bEnvCubePass &&
                         !m_bReflectionPass && !m_bSpritePass && WantsRaySurfaces();
-  const bool bSurfaceRays = bRayView && ((dc.nFlags & DF_CUBE0) || (dc.nPbr[2] && !bPbrLightPass)) && !m_bDepthPrepass;
+  const bool bSurfaceRays = bRayView && ((dc.nFlags & DF_CUBE0) || (dc.nPbr[2] && !bPbrLightPass)) && !bPrepass;
   if (bSurfaceRays)
     m_nRaySurfaceFrame = m_nFrames;
   // d3d12_RTPbrScreen: the main view a draw reflects by rays of the RayMaster maps in (the picture copied at its end).
@@ -233,12 +244,12 @@ void CD3D12Renderer::DrawGeometry(const SPipelineKey &Key, const SDrawConstants 
   // lights of the draw's list per pixel, a light pass's, a projector's.
   bool bLightRays = false;
   if (Key.nProgram == eD3D12P_General && dc.nLights && (dc.nFlags & DF_LIGHTING) && ((dc.nFlags & DF_PIXEL_LIGHTING) || (dc.nFlags2 & DF2_MATERIAL_LIGHT)) &&
-      Key.nTarget == 0 && !bOffscreen && !m_bDepthPrepass && !m_bEnvCubePass && !m_bReflectionPass && !m_bSpritePass && WantsRayLights())
+      Key.nTarget == 0 && !bOffscreen && !bPrepass && !m_bEnvCubePass && !m_bReflectionPass && !m_bSpritePass && WantsRayLights())
     for (uint32 i = 0; i < std::min<uint32>(dc.nLights, XR_MAX_DRAW_LIGHTS) && !bLightRays; i++)
       bLightRays = dc.vLightPos[i][3] == 1;
   // (DF2_LIGHTMAP_LIGHTS lights per pixel without DF_LIGHTING.)
   if (!bLightRays && Key.nProgram == eD3D12P_General && dc.nLights && (dc.nFlags2 & DF2_LIGHTMAP_LIGHTS) && (dc.nFlags & DF_TEX1_LIGHTMAP) &&
-      Key.nTarget == 0 && !bOffscreen && !m_bDepthPrepass && !m_bEnvCubePass && !m_bReflectionPass && !m_bSpritePass && WantsRayLights())
+      Key.nTarget == 0 && !bOffscreen && !bPrepass && !m_bEnvCubePass && !m_bReflectionPass && !m_bSpritePass && WantsRayLights())
     for (uint32 i = 0; i < std::min<uint32>(dc.nLights, XR_MAX_DRAW_LIGHTS) && !bLightRays; i++)
       bLightRays = dc.vLightPos[i][3] == 1;
   if (bLightRays)
@@ -277,6 +288,14 @@ void CD3D12Renderer::DrawGeometry(const SPipelineKey &Key, const SDrawConstants 
   // The depth prepass: the depth alone too; and a draw that asks for it (the ocean's grid's depth pass, DrawOceanGrid).
   FullKey.bDepthOnly = (FullKey.nTarget == 2 && Key.nProgram == eD3D12P_General && !(dc.nFlags & DF_ALPHATEST) &&
                         !(dc.nFlags2 & (DF2_CASCADE_CASTER | DF2_SHADER_FX))) || m_bDepthPrepass || Key.bDepthOnly ? 1 : 0;
+  // The leaves' and the grass's depth pass: the alpha's pixel shader alone (one pipeline whatever the colour's); their colour
+  // after it: the depth test EQUAL without writes, so the GPU tests before the pixel shader (the rest as the draw's).
+  if (bAlphaDepth)
+  {
+    FullKey.bAlphaDepth = m_bAlphaPrepass ? 1 : 2;
+    if (m_bAlphaPrepass)
+      FullKey.bCascades = 0;
+  }
   // The ambient occlusion's target bound to the main view (AmbientOcclusion.cpp).
   FullKey.bAmbient = (FullKey.nTarget == 0 || FullKey.nTarget == 3) && m_pDevice->IsAmbientBound() ? 1 : 0;
   // The path tracer's G-buffer bound to the scene's targets (PathTrace.cpp).

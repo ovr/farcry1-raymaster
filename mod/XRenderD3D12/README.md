@@ -1775,6 +1775,26 @@ FSR Quality, the path tracer): the opaque list 1.62 → 1.35 ms, the GPU's frame
 sweeps' with the path tracer 0.95 → 0.87 ms (Swamp) and 0.95 → 0.89 (River); the rays' and the
 raster's lists about the same (their programs lighter). render_tests suite `alphaearly`.
 
+## The leaves' depth before their colour
+
+The depth prepass leaves out what the alpha test discards, so the opaque list shaded every leaf and
+blade of grass that passed its test, also those behind others: a draw that discards and writes the
+depth is tested after its pixel shader. With `d3d12_FoliagePrepass` (1: with the path tracer, 2:
+always) the leaves' and the grass's items (`eDC_AlphaTestVColor`) are drawn once more after the
+prepass and the sun's mask by rays, their depth alone where their alpha passes the test (a pixel
+shader of the texture's alpha, `AlphaDepthMain`); their colour then tests `EQUAL` without writing the
+depth, before its pixel shader, and shades the leaves in front alone. Only the draws whose alpha at
+the test is their vertices' times their texture's (`AlphaDepth.h`; a source lint in its unit tests
+keeps the flags read on the way classified); both programs compare that product with the reference
+(`a < ref`, not `clip(a - ref)`, which a multiply-add could fold into), so they keep the same pixels
+bit for bit. The colour keeps `GS_DEPTHWRITE` for its programs, motion vectors and the upscaler's
+depth. Not with MSAA (alpha to coverage) nor heat vision. Swamp's jungle stand (3840 x 2160, FSR
+Quality, the path tracer): the opaque list 1.37 → 0.57 ms and the pass 0.17, the GPU's frame 12.96 →
+12.30–12.35 ms; the sweeps' with the path tracer: the GPU 8.43 → 8.17 ms (Swamp), 9.06 → 8.73
+(River). The main thread draws the leaves' items twice (0.1–0.4 ms more); with the rays (2) the
+sweeps' GPU gained 0.06–0.09 ms alone, so 1 by default. render_tests suite `foliageprepass`; unit
+tests `AlphaDepth_*`.
+
 ## Resource states and barriers
 
 The frame's barriers go through the device (`CD3D12Device::Transition`, `UavBarrier`,

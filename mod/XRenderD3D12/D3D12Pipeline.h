@@ -129,7 +129,11 @@ struct SPipelineKey
   uint8 bAlphaToCoverage; //!< nSamples > 1: the samples a pixel covers by its alpha (AlphaToCoverageEnable): the general program's
                           //!< alpha-tested draws there (d3d12_AlphaToCoverage; DrawGeometry sets it, with fAlphaRef negated: the
                           //!< pixel shader gives the alpha sharpened to the test's edge, CoverageAlpha, in place of the test)
-  uint8 nUnused;          //!< 0: the key has no padding (it is hashed and compared as bytes)
+  uint8 bAlphaDepth;      //!< 1 the general program's depth alone where its alpha test passes (General.hlsl's AlphaDepthMain), no
+                          //!< colour writes; 2 the draw's colour after it, the depth test EQUAL and no depth writes (the rest as
+                          //!< GS_DEPTHWRITE's: the motion vectors, the upscaler's depth): the leaves' and the grass's depth pass
+                          //!< (d3d12_FoliagePrepass; DrawGeometry sets it); the last byte: the key has no padding (it is hashed
+                          //!< and compared as bytes)
 };
 
 //! SPipelineKey::nColorFormat.

@@ -2260,6 +2260,8 @@ public:
   bool m_bHeatVision = false;               //!< EF_EnableHeatVision
   bool m_bHeatPass = false;                 //!< the main view's items are drawn in heat vision (DF2_HEAT)
   bool m_bDepthPrepass = false;             //!< d3d12_DepthPrepass: the main view's opaque list into the depth alone (DrawItems)
+  bool m_bAlphaPrepass = false;             //!< d3d12_FoliagePrepass: the leaves' and the grass's depth where their alpha test passes (DrawItems)
+  bool m_bAlphaColour = false;              //!< an item of that pass in the list: its draws' colour where the pass left their depth
   bool m_bRayCaptureWalk = false;           //!< the main view's opaque list set up for the scene for rays, not drawn (BuildRayScene)
   std::vector<SRenderItem> m_RayOffscreenItems;   //!< NoteRayOffscreenItems' of the frame m_nRayOffscreenFrame
   std::unordered_set<uint64, SWordHash> m_RayLiveParts;   //!< the PartKeys of the live casters of that frame (d3d12_RTSunShadows: XR_RAY_LIVE)
@@ -2376,6 +2378,7 @@ public:
   int CV_d3d12_StaticCasters = 1;           //!< 1: the static casters of the full set (the vegetation that casts) in the live set too (the terrain's shadows)
   int CV_d3d12_DepthPrepass = 1;            //!< 1: the main view's opaque surfaces into the depth buffer before the opaque list (DrawItems)
   int CV_d3d12_AlphaTestEarly = 1;          //!< 1: the alpha test's empty texels out before their light (General.hlsl's ShadePixel)
+  int CV_d3d12_FoliagePrepass = 1;          //!< 1: with the path tracer the leaves' depth before the opaque list (DrawItems); 2: always
   float CV_d3d12_ShadowSoftness = 0.05f;    //!< the radius of their filter (m)
   int CV_d3d12_UpscaleMode = 0;             //!< EUpscaleMode of the upscaler (d3d12_Upscaler, a string)
   float CV_d3d12_UpscaleSharpness = 0.5f;   //!< the upscaler's sharpening, 0 (none) to 1

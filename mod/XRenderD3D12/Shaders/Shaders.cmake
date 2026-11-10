@@ -92,6 +92,10 @@ xrender_d3d12_shader(General_PT_Cascades_Hdr_PS General.hlsl ps_6_0 PSMain XR_PT
 xrender_d3d12_shader(General_PT_Cascades_Hdr_Velocity_PS General.hlsl ps_6_0 PSMain XR_PT XR_CASCADES XR_VELOCITY XR_HDR)
 xrender_d3d12_shader(General_PT_RaySun_Hdr_PS General.hlsl ps_6_0 PSMain XR_PT XR_CASCADES XR_RAY_SUN XR_HDR)
 xrender_d3d12_shader(General_PT_RaySun_Hdr_Velocity_PS General.hlsl ps_6_0 PSMain XR_PT XR_CASCADES XR_RAY_SUN XR_VELOCITY XR_HDR)
+# The leaves' and the grass's depth where their alpha test passes with room to spare (SPipelineKey::bAlphaDepth,
+# d3d12_FoliagePrepass): the inputs of the vertex shader without and with velocity.
+xrender_d3d12_shader(General_AlphaDepth_PS General.hlsl ps_6_0 AlphaDepthMain)
+xrender_d3d12_shader(General_AlphaDepth_Velocity_PS General.hlsl ps_6_0 AlphaDepthMain XR_VELOCITY)
 
 # Water surfaces (eD3D12P_Water).
 xrender_d3d12_shader(Water_VS Water.hlsl vs_6_0 VSMain)
