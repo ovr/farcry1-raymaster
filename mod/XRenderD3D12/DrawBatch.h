@@ -48,6 +48,18 @@ namespace DrawBatch
     uint8_t Rest[HEAD_REST];  //!< the header after its matrices
   };
   static_assert(sizeof(SState) % 8 == 0, "SState is compared as bytes");
+  static_assert(offsetof(SState, Scissor) % 8 == 0 && offsetof(SState, nCount) % 8 == 0 && offsetof(SState, nBaseVertex) % 8 == 0 &&
+                offsetof(SState, Rest) == offsetof(SState, nBaseVertex) + 8 && offsetof(SState, Viewport) == 96 &&
+                offsetof(SState, Scissor) == 120 && offsetof(SState, Rest) + HEAD_REST == sizeof(SState),
+                "SState's 4 byte fields in pairs of whole words, no byte between its fields");
+
+  //! Two 4 byte fields of SState written as one word (the first at the lower address): Joins compares it 8 bytes a load at
+  //! once, and a load over two 4 byte stores waits for both to reach the cache, where one 8 byte store passes it on.
+  inline void PutPair(void *p, uint32_t nFirst, uint32_t nSecond)
+  {
+    const uint64_t nWord = (uint64_t)nFirst | (uint64_t)nSecond << 32;
+    memcpy(p, &nWord, 8);
+  }
 
   //! The draw held back and the ones that joined it.
   class CBatch

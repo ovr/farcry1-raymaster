@@ -6,7 +6,8 @@
 //	Description: Unit tests of when a draw joins the one held back
 //	(DrawBatch.h, d3d12_DrawBatch, on the CPU): all it binds and draws the
 //	same but its header's matrices, its header the next 256 bytes; and
-//	the header's layout the vertex shader reads (XR_DRAW_OBJECTS).
+//	the header's layout the vertex shader reads (XR_DRAW_OBJECTS); two 4
+//	byte fields written as one word (PutPair) are their bytes.
 //
 //////////////////////////////////////////////////////////////////////
 
@@ -96,4 +97,27 @@ XR_TEST(DrawBatch_AnyByteDiffers)
   b.Start(s, 0x1000);
   SState t = s;
   CHECK(b.Joins(t, 0x1100));
+}
+
+// Why: DrawGeometry writes the state's 4 byte fields in pairs (PutPair) and Joins compares the bytes: a pair's word must
+// be the bytes the two fields make (the first at the lower address), negative ones too (the scissor, the base vertex).
+XR_TEST(DrawBatch_PutPairIsTheFields)
+{
+  const SState s = Some();
+  const int32_t Values[] = { 0, 1, -1, 1280, -720, 0x7fffffff, (int32_t)0x80000000 };
+  for (int32_t a : Values)
+    for (int32_t c : Values)
+    {
+      SState f = s, w = s;
+      f.Scissor[0] = a;
+      f.Scissor[1] = c;
+      f.nBaseVertex = c;
+      f.nEpoch = (uint32_t)a;
+      PutPair(&w.Scissor[0], (uint32_t)a, (uint32_t)c);
+      PutPair(&w.nBaseVertex, (uint32_t)c, (uint32_t)a);
+      CHECK(memcmp(&f, &w, sizeof(SState)) == 0);
+      CBatch b;
+      b.Start(f, 0x1000);
+      CHECK(b.Joins(w, 0x1100));
+    }
 }

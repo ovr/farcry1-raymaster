@@ -468,29 +468,24 @@ void CD3D12Renderer::DrawGeometry(const SPipelineKey &Key, const SDrawConstants 
   DrawBatch::SState Batch;
   if (bBatch)
   {
-    memset(&Batch, 0, sizeof(Batch));
+    // Every byte written, the 4 byte fields in pairs (DrawBatch::PutPair): Joins compares them at once.
     Batch.pPSO = pPSO;
     Batch.nFrameCB = m_nFrameCB;
     Batch.nExt = nExt;
     const D3D12_VERTEX_BUFFER_VIEW *const pViews[3] = { &VB, pTexCoord1, pTangents };
     for (int i = 0; i < 3; i++)
-      if (pViews[i])
-      {
-        Batch.VB[i][0] = pViews[i]->BufferLocation;
-        Batch.VB[i][1] = ((uint64)pViews[i]->SizeInBytes << 32) | pViews[i]->StrideInBytes;
-      }
+    {
+      Batch.VB[i][0] = pViews[i] ? pViews[i]->BufferLocation : 0;
+      Batch.VB[i][1] = pViews[i] ? ((uint64)pViews[i]->SizeInBytes << 32) | pViews[i]->StrideInBytes : 0;
+    }
     Batch.IB[0] = pIB->BufferLocation;
     Batch.IB[1] = ((uint64)pIB->SizeInBytes << 32) | (uint32)pIB->Format;
     Batch.nTopology = (uint64)eTopology;
     memcpy(Batch.Viewport, &Viewport, sizeof(Batch.Viewport));
-    Batch.Scissor[0] = Scissor.left;
-    Batch.Scissor[1] = Scissor.top;
-    Batch.Scissor[2] = Scissor.right;
-    Batch.Scissor[3] = Scissor.bottom;
-    Batch.nCount = nCount;
-    Batch.nFirst = nFirst;
-    Batch.nBaseVertex = nBaseVertex;
-    Batch.nEpoch = m_pDevice->GetStateEpoch();
+    DrawBatch::PutPair(&Batch.Scissor[0], (uint32)Scissor.left, (uint32)Scissor.top);
+    DrawBatch::PutPair(&Batch.Scissor[2], (uint32)Scissor.right, (uint32)Scissor.bottom);
+    DrawBatch::PutPair(&Batch.nCount, nCount, nFirst);
+    DrawBatch::PutPair(&Batch.nBaseVertex, (uint32)nBaseVertex, m_pDevice->GetStateEpoch());
     memcpy(Batch.Rest, reinterpret_cast<const uint8 *>(&Head) + DrawBatch::HEAD_MATRICES, DrawBatch::HEAD_REST);
     // (a barrier queued since would have to come before this draw)
     if (nBatchMode == m_nDrawBatchMode && m_pDevice->NoQueuedBarriers() && m_DrawBatch.Joins(Batch, HeadMem.nGPU))

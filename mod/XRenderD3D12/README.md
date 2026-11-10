@@ -1956,6 +1956,16 @@ of River and frame 700 of Pier have 0 px pairs between `0` and `1`; River's fram
 from the nearest run of `0` (runs of `0` fall into states up to 1.8 million px apart there).
 Unit tests `DrawBatch_*`; render_tests suite `drawbatch`.
 
+A draw's state for the comparison is written as whole words, its 4 byte fields in pairs
+(`DrawBatch::PutPair`: the scissor, the count and first index, the base vertex and the epoch).
+`memcmp` reads it 8 bytes a load right after, and a load over two 4 byte stores waited for both
+to reach the cache. River's sweep, sampled, four rounds against the build before with its code
+moved as much (code moved alone shifts these times by a few hundredths): the comparison's
+samples 225 → 64, `DrawGeometry`'s 3,700 → 3,474; `EF_EndEf3D` 1.924–1.960 → 1.918–1.937 ms
+(frames 60 to 1160), lower in every round; frames 600 to 800 the same within the runs' spread
+(4.74–4.85 → 4.79–4.83). Frame 181: 0 px pairs against the build before. Unit test
+`DrawBatch_PutPairIsTheFields`.
+
 ## The alpha test's empty texels
 
 The general program tests the alpha at its end, after the light, the sun's cascades and the path
