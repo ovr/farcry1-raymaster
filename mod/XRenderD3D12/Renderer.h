@@ -2381,6 +2381,7 @@ public:
   int CV_d3d12_BarrierCheck = 0;      //!< 1: the transitions' befores checked, the problems logged
   int CV_d3d12_DrawExt = 1;           //!< 1: a draw uploads the rest of its constants (b3) only when it reads other bytes than the default block's (DrawExt.h); 0 every draw
   int CV_d3d12_DrawExtReuse = 1;      //!< 1: a draw whose rest has the bytes of the last one uploaded this frame binds that copy; 0 uploads its own
+  int CV_d3d12_FrameMemoryVideo = 1;  //!< 1: the per frame memory in the GPU upload heap (video memory) where the device has it; 0 system memory
   int CV_d3d12_CpuSamples = 0;        //!< N: the render thread's stack every N microseconds, to XRenderD3D12_samples.txt at 0 (CpuSampler)
   int CV_r_Stats = 0;                 //!< the statistics on the screen: 1 the GPU time of the passes, 2 also the memory
   float CV_d3d12_WaterReflectionScale = 0.5f;   //!< size of the water reflection, a fraction of the screen's

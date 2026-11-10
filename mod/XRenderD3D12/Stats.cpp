@@ -445,7 +445,8 @@ void CD3D12Renderer::DrawStats()
         Add(Format("Textures and buffers %s MB, rays %s MB", Thousands((uint64)(S.nResourceBytes / MB)).c_str(), Thousands((uint64)(S.nRayBytes / MB)).c_str()));
         Add(Format("Textures %s (%s MB), upscaled %s (%s MB)", Thousands((uint64)S.nTextures).c_str(), Thousands((uint64)(S.nTextureBytes / MB)).c_str(),
                    Thousands((uint64)S.nUpscaled).c_str(), Thousands((uint64)(S.nUpscaledBytes / MB)).c_str()));
-        Add(Format("Frame memory %s KB, PSOs %s", Thousands((uint64)(S.fFrameMemory / fFrames / 1024.0)).c_str(), Thousands(S.nPSOs).c_str()));
+        Add(Format("Frame memory %s KB in %s memory, PSOs %s", Thousands((uint64)(S.fFrameMemory / fFrames / 1024.0)).c_str(),
+                   m_pUpload && m_pUpload->IsFrameMemoryVideo() ? "video" : "system", Thousands(S.nPSOs).c_str()));
       }
       SStatsLine &Heading = Add("GPU per pass", true);
       Heading.Value = "ms";

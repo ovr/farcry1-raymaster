@@ -1765,7 +1765,7 @@ void CD3D12Device::BeginFrame()
   ReadOcclusionResults();
   CollectGarbage();
   if (g_pRenderer->m_pUpload)
-    g_pRenderer->m_pUpload->BeginFrame(m_nFrameSlot);
+    g_pRenderer->m_pUpload->BeginFrame(m_nFrameSlot, g_pRenderer->CV_d3d12_FrameMemoryVideo > 0);
   m_nBackBuffer = m_pSwapChain->GetCurrentBackBufferIndex();
   // The barriers' mode for the whole frame (nothing is queued between frames).
   m_Barriers.SetMode(m_nBarrierBatchWanted > 0 ? Barriers::MODE_BATCHED : Barriers::MODE_IMMEDIATE);

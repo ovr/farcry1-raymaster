@@ -390,7 +390,9 @@ void XrTest::CGpu::CopyRows(ID3D12Resource *pTexture, const STestTexture &Textur
 
 XrTest::ComPtr<ID3D12Resource> XrTest::CGpu::Upload(const void *pData, size_t nBytes)
 {
-  ComPtr<ID3D12Resource> pRes = Buffer(D3D12_HEAP_TYPE_UPLOAD, nBytes ? nBytes : 16, D3D12_RESOURCE_STATE_GENERIC_READ, false);
+  // The GPU upload heap's buffers start COMMON (promoted to each read), the upload heap's are GENERIC_READ.
+  ComPtr<ID3D12Resource> pRes = Buffer(m_bVideoUploads ? D3D12_HEAP_TYPE_GPU_UPLOAD : D3D12_HEAP_TYPE_UPLOAD, nBytes ? nBytes : 16,
+                                       m_bVideoUploads ? D3D12_RESOURCE_STATE_COMMON : D3D12_RESOURCE_STATE_GENERIC_READ, false);
   void *p = nullptr;
   Ok(pRes->Map(0, nullptr, &p), "Map");
   memset(p, 0, (size_t)pRes->GetDesc().Width);
@@ -720,6 +722,13 @@ bool XrTest::CGpu::HasTypedStore(DXGI_FORMAT Format)
   D3D12_FEATURE_DATA_FORMAT_SUPPORT Support = { Format };
   return SUCCEEDED(m_pDevice->CheckFeatureSupport(D3D12_FEATURE_FORMAT_SUPPORT, &Support, sizeof(Support))) &&
          (Support.Support1 & D3D12_FORMAT_SUPPORT1_TYPED_UNORDERED_ACCESS_VIEW) && (Support.Support2 & D3D12_FORMAT_SUPPORT2_UAV_TYPED_STORE);
+}
+
+bool XrTest::CGpu::HasGpuUploadHeap()
+{
+  D3D12_FEATURE_DATA_D3D12_OPTIONS16 Options16 = {};
+  return SUCCEEDED(m_pDevice->CheckFeatureSupport(D3D12_FEATURE_D3D12_OPTIONS16, &Options16, sizeof(Options16))) &&
+         Options16.GPUUploadHeapSupported;
 }
 
 void XrTest::CGpu::CreateWide()

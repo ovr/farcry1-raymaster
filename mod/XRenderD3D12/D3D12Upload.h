@@ -8,7 +8,8 @@
 //	- Per frame memory (AllocFrame): a ring in an upload heap, persistently
 //	  mapped, one part per frame slot, reset when the slot starts again.
 //	  For constants and for vertices and indices drawn once (2D, text,
-//	  dynamic buffers).
+//	  dynamic buffers). In video memory the CPU writes (the GPU upload
+//	  heap, resizable BAR) where the device has it and BeginFrame asks.
 //	- Static buffers and textures live in the default heap. Their data is
 //	  copied through an upload batch: a command list of its own that
 //	  CD3D12Device::EndFrame executes before the frame's list (and Flush
@@ -91,12 +92,14 @@ public:
   CD3D12Upload();
   ~CD3D12Upload();
 
-  //! nFrameRingSize: bytes of per frame memory per frame slot.
-  bool Init(ID3D12Device *pDevice, uint32 nFrameRingSize);
+  //! nFrameRingSize: bytes of per frame memory per frame slot; bVideo: in video memory (see BeginFrame).
+  bool Init(ID3D12Device *pDevice, uint32 nFrameRingSize, bool bVideo = false);
   void Shutdown();
 
-  //! The device starts frame slot nSlot (its previous use has finished on the GPU).
-  void BeginFrame(int nSlot);
+  //! The device starts frame slot nSlot (its previous use has finished on the GPU). bVideo: its memory in the GPU upload
+  //! heap (video memory the CPU writes through the bus) where the device has one, else in system memory; a slot whose
+  //! memory is in the other moves now.
+  void BeginFrame(int nSlot, bool bVideo = false);
   //! Memory for this frame. nAlign: 256 for constant buffers, 4 or 16 for vertices and indices.
   //! Never fails (grows by a new block when the ring is full). It belongs to the current frame
   //! slot, so it is for the command list of the frame being recorded.
@@ -157,9 +160,13 @@ public:
   uint64 GetFrameMemory() const { return m_Slots[m_nSlot].nUsed; }
   //! Counts the frame slots started (BeginFrame): an address AllocFrame gave holds what was written there while it is the same.
   uint64 GetFrameGeneration() const { return m_nFrameGeneration; }
+  //! Whether the device has the GPU upload heap (and has not refused a block of it).
+  bool HasVideoUploadHeap() const { return m_bVideoHeap; }
+  //! Whether the current frame slot's ring is in video memory.
+  bool IsFrameMemoryVideo() const { return m_Slots[m_nSlot].Ring.bVideo; }
 
 private:
-  //! A persistently mapped buffer in the upload heap.
+  //! A persistently mapped buffer in the upload heap (or the GPU upload heap).
   struct SUploadBlock
   {
     Microsoft::WRL::ComPtr<ID3D12Resource> pResource;
@@ -167,6 +174,7 @@ private:
     D3D12_GPU_VIRTUAL_ADDRESS nGPU = 0;
     uint64 nSize = 0;
     int nRawSRV = -1;                 //!< per frame memory: GetRawSRV's view of it
+    bool bVideo = false;              //!< in the GPU upload heap
   };
   //! The per frame memory of one frame slot.
   struct SFrameSlot
@@ -188,7 +196,8 @@ private:
     uint64 nFence = 0;                //!< free when this fence completed
   };
 
-  bool CreateUploadBlock(uint64 nSize, SUploadBlock &Block, const wchar_t *szName);
+  //! bVideo: in the GPU upload heap when the device has it (system memory when it refuses).
+  bool CreateUploadBlock(uint64 nSize, SUploadBlock &Block, const wchar_t *szName, bool bVideo = false);
   //! Opens the upload batch (when it isn't); false when the device refuses.
   bool OpenBatch();
   //! Gives back the staging memory of the batches the GPU finished: those of a fence up to
@@ -230,6 +239,8 @@ private:
   uint64 m_nCurOffset = 0;
   std::vector<uint8> m_Scratch;       //!< handed out when the device refuses more memory
   bool m_bFrameFailLogged = false;
+  bool m_bVideoHeap = false;          //!< HasVideoUploadHeap
+  bool m_bVideoWanted = false;        //!< the frame memory asked for in video memory (BeginFrame)
 
   // Upload batch
   Microsoft::WRL::ComPtr<ID3D12GraphicsCommandList> m_pCmdList;

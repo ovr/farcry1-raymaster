@@ -10,7 +10,8 @@
 //	place, CSLayout (TestPathTrace.hlsl) reads them member by member as
 //	HLSL lays them out and writes the words back in the members' order.
 //	The draw's constants (Shaders/Constants.h: b1 SDrawHead, b3 SDrawExt)
-//	the same way, by CSDrawLayout (TestDraw.hlsl).
+//	the same way, by CSDrawLayout (TestDraw.hlsl), also written into the
+//	GPU upload heap (the renderer's per frame memory in video memory).
 //	(AbiChecks.cpp checks the SDK classes against the engine, not these.)
 //
 //////////////////////////////////////////////////////////////////////
@@ -101,6 +102,37 @@ XR_TEST(Layout_DrawConstants)
   SDrawExt *pExt = &dc;
   Fill(pHead, 1, 4);
   Fill(pExt, 1, 5);
+  SDispatch d;
+  d.Shader = XR_BYTECODE(Test_DrawLayout);
+  d.pDraw = pHead;
+  d.pDrawExt = pExt;
+  d.nOut = DRAW_HEAD_VECTORS + DRAW_EXT_VECTORS;
+  const std::vector<uint32> Out = Gpu().Run(d);
+  const uint32 *pHeadWords = (const uint32 *)pHead, *pExtWords = (const uint32 *)pExt;
+  size_t o = 0;
+  for (size_t w = 0; w < DRAW_HEAD_VECTORS * 4; w++, o++)
+    CHECK_MSG(Out[o] == pHeadWords[w], "SDrawHead word " + std::to_string(w));
+  for (size_t w = 0; w < DRAW_EXT_VECTORS * 4; w++, o++)
+    CHECK_MSG(Out[o] == pExtWords[w], "SDrawExt word " + std::to_string(w));
+}
+
+//! The same with the constants and the input written by the CPU into the GPU upload heap (video memory through the bus,
+//! write combined), as the renderer's per frame memory with d3d12_FrameMemoryVideo 1. Why: the draws' constants, the
+//! vertices drawn once and the rays' instances live there; the GPU must read every word as the CPU wrote it.
+XR_TEST(Layout_DrawConstantsVideoMemory)
+{
+  if (!Gpu().HasGpuUploadHeap())
+    XR_SKIP("the device has no GPU upload heap (resizable BAR off, or an older runtime)");
+  struct SBack
+  {
+    ~SBack() { Gpu().SetVideoUploads(false); }
+  } Back;
+  Gpu().SetVideoUploads(true);
+  SDrawConstants dc;
+  SDrawHead *pHead = &dc;
+  SDrawExt *pExt = &dc;
+  Fill(pHead, 1, 6);
+  Fill(pExt, 1, 7);
   SDispatch d;
   d.Shader = XR_BYTECODE(Test_DrawLayout);
   d.pDraw = pHead;

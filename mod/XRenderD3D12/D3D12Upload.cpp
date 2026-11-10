@@ -8,7 +8,9 @@
 //	Per frame memory: a ring per frame slot, an upload heap buffer mapped
 //	for good. When a frame needs more, the slot gets extra blocks; when the
 //	slot starts again (its frame finished on the GPU) they are released and
-//	the ring is made big enough for all of it.
+//	the ring is made big enough for all of it. With the GPU upload heap
+//	(resizable BAR) the blocks are in video memory: the CPU only writes them
+//	(write combined), the GPU reads them without the bus.
 //
 //	Upload batch: one command list on the device's direct queue, recorded
 //	with a command allocator of its own per batch. The data goes through
@@ -152,16 +154,22 @@ CD3D12Upload::~CD3D12Upload()
   Shutdown();
 }
 
-bool CD3D12Upload::Init(ID3D12Device *pDevice, uint32 nFrameRingSize)
+bool CD3D12Upload::Init(ID3D12Device *pDevice, uint32 nFrameRingSize, bool bVideo)
 {
   Shutdown();
   m_pDevice = pDevice;
   m_nFrameRingSize = (uint32)AlignUp(std::max<uint32>(nFrameRingSize, (uint32)BLOCK_ALIGN), BLOCK_ALIGN);
+  D3D12_FEATURE_DATA_D3D12_OPTIONS16 Options16 = {};
+  m_bVideoHeap = SUCCEEDED(pDevice->CheckFeatureSupport(D3D12_FEATURE_D3D12_OPTIONS16, &Options16, sizeof(Options16)))
+    && Options16.GPUUploadHeapSupported;
+  m_bVideoWanted = bVideo;
   for (SFrameSlot &Slot : m_Slots)
   {
-    if (!CreateUploadBlock(m_nFrameRingSize, Slot.Ring, L"XRenderD3D12 frame memory"))
+    if (!CreateUploadBlock(m_nFrameRingSize, Slot.Ring, L"XRenderD3D12 frame memory", bVideo))
       return false;
   }
+  iLog->Log("XRenderD3D12: GPU upload heap %s; per frame memory in %s memory", m_bVideoHeap ? "supported" : "not supported",
+            m_Slots[0].Ring.bVideo ? "video" : "system");
   m_nSlot = 0;
   m_nCurBlock = -1;
   m_nCurOffset = 0;
@@ -197,13 +205,23 @@ void CD3D12Upload::Shutdown()
   m_pDevice = nullptr;
 }
 
-bool CD3D12Upload::CreateUploadBlock(uint64 nSize, SUploadBlock &Block, const wchar_t *szName)
+bool CD3D12Upload::CreateUploadBlock(uint64 nSize, SUploadBlock &Block, const wchar_t *szName, bool bVideo)
 {
-  const D3D12_HEAP_PROPERTIES Heap = HeapProps(D3D12_HEAP_TYPE_UPLOAD);
+  bVideo = bVideo && m_bVideoHeap;
+  const D3D12_HEAP_PROPERTIES Heap = HeapProps(bVideo ? D3D12_HEAP_TYPE_GPU_UPLOAD : D3D12_HEAP_TYPE_UPLOAD);
   const D3D12_RESOURCE_DESC Desc = BufferDesc(nSize);
   ComPtr<ID3D12Resource> pResource;
-  HRESULT hr = m_pDevice->CreateCommittedResource(&Heap, D3D12_HEAP_FLAG_NONE, &Desc, D3D12_RESOURCE_STATE_GENERIC_READ,
-    nullptr, IID_PPV_ARGS(&pResource));
+  // The upload heap's buffers are GENERIC_READ for good; the GPU upload heap's start COMMON and are promoted to each read.
+  HRESULT hr = m_pDevice->CreateCommittedResource(&Heap, D3D12_HEAP_FLAG_NONE, &Desc,
+    bVideo ? D3D12_RESOURCE_STATE_COMMON : D3D12_RESOURCE_STATE_GENERIC_READ, nullptr, IID_PPV_ARGS(&pResource));
+  if (FAILED(hr) && bVideo)
+  {
+    // Video memory refused (its BAR full): system memory, and no more video memory for the frames.
+    iLog->LogWarning("XRenderD3D12: CreateCommittedResource (GPU upload heap, %llu bytes) failed (0x%08X); frame memory in system memory",
+                     (unsigned long long)nSize, (unsigned)hr);
+    m_bVideoHeap = false;
+    return CreateUploadBlock(nSize, Block, szName, false);
+  }
   if (FAILED(hr))
   {
     iLog->LogError("XRenderD3D12: CreateCommittedResource (upload heap, %llu bytes) failed (0x%08X)", (unsigned long long)nSize, (unsigned)hr);
@@ -223,33 +241,37 @@ bool CD3D12Upload::CreateUploadBlock(uint64 nSize, SUploadBlock &Block, const wc
   Block.pCPU = (uint8 *)pCPU;
   Block.nGPU = Block.pResource->GetGPUVirtualAddress();
   Block.nSize = nSize;
+  Block.bVideo = bVideo;
   return true;
 }
 
 //////////////////////////////////////////////////////////////////////////
 // Per frame memory
 
-void CD3D12Upload::BeginFrame(int nSlot)
+void CD3D12Upload::BeginFrame(int nSlot, bool bVideo)
 {
   if (nSlot < 0 || nSlot >= D3D12_FRAMES)
     return;
   m_nSlot = nSlot;
   m_nFrameGeneration++;
+  m_bVideoWanted = bVideo;
   SFrameSlot &Slot = m_Slots[nSlot];
-  if (!Slot.Extra.empty() && m_pDevice)
+  const bool bMove = Slot.Ring.pResource && Slot.Ring.bVideo != (bVideo && m_bVideoHeap);
+  if ((!Slot.Extra.empty() || bMove) && m_pDevice)
   {
-    // The slot's last frame needed more than its ring: one ring for all of it (with some room).
-    // The GPU has finished that frame, so the old blocks can go at once.
-    const uint64 nSize = AlignUp(std::max(Slot.Ring.nSize, Slot.nUsed + Slot.nUsed / 4), BLOCK_ALIGN);
+    // The slot's last frame needed more than its ring: one ring for all of it (with some room); or the ring moves to the
+    // other memory. The GPU has finished that frame, so the old blocks can go at once.
+    const uint64 nSize = Slot.Extra.empty() ? Slot.Ring.nSize : AlignUp(std::max(Slot.Ring.nSize, Slot.nUsed + Slot.nUsed / 4), BLOCK_ALIGN);
     for (SUploadBlock &Block : Slot.Extra)
       FreeRawSRV(Block.nRawSRV);
     Slot.Extra.clear();
     SUploadBlock Ring;
-    if (CreateUploadBlock(nSize, Ring, L"XRenderD3D12 frame memory"))
+    if (CreateUploadBlock(nSize, Ring, L"XRenderD3D12 frame memory", bVideo))
     {
       FreeRawSRV(Slot.Ring.nRawSRV);
       Slot.Ring = std::move(Ring);
-      iLog->Log("XRenderD3D12: frame memory of slot %d grown to %llu KB", nSlot, (unsigned long long)(nSize / 1024));
+      iLog->Log("XRenderD3D12: frame memory of slot %d %llu KB in %s memory", nSlot, (unsigned long long)(nSize / 1024),
+                Slot.Ring.bVideo ? "video" : "system");
     }
   }
   Slot.nUsed = 0;
@@ -266,7 +288,7 @@ SD3D12FrameAlloc CD3D12Upload::AllocFrame(uint32 nSize, uint32 nAlign)
   {
     SUploadBlock Block;
     const uint64 nBlockSize = AlignUp(std::max<uint64>(m_nFrameRingSize, nSize), BLOCK_ALIGN);
-    if (!m_pDevice || !CreateUploadBlock(nBlockSize, Block, L"XRenderD3D12 frame memory (extra)"))
+    if (!m_pDevice || !CreateUploadBlock(nBlockSize, Block, L"XRenderD3D12 frame memory (extra)", m_bVideoWanted))
     {
       // Memory the GPU never reads, so that the caller can still write.
       if (!m_bFrameFailLogged)

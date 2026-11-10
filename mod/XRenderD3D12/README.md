@@ -1780,6 +1780,41 @@ pass's `nPbr` without rays) are never kept or reused. The GPU reads the same byt
 are the same. `0` uploads every such rest, as before (read at each draw). `d3d12_FrameLog` counts
 the reused ones (`ext_reused`) and `r_Stats` shows them next to the uploads.
 
+## Per frame memory in video memory
+
+The per frame memory (`CD3D12Upload::AllocFrame`) holds the draws' constants, the vertices and
+indices drawn once, the rays' instances and the path tracer's lights. It was in the upload heap:
+system memory, which the GPU reads over the bus each time.
+
+With `d3d12_FrameMemoryVideo 1` (the default, not saved) it is in the GPU upload heap instead,
+where the device has one (`D3D12_FEATURE_D3D12_OPTIONS16.GPUUploadHeapSupported`: resizable BAR on
+and a recent runtime). That is video memory the CPU maps and writes through the bus, write
+combined; every user of this memory only writes it. The GPU then reads it at its own speed.
+
+- Its buffers start in `COMMON` and are promoted to each read.
+- A device without the heap keeps system memory, and so does one that refuses a block (the rest
+  of the frames then stay in system memory too). The log says which at the start; `r_Stats 2`
+  shows it on its "Frame memory" line.
+- The switch is read when a frame slot starts. A slot whose ring is in the other memory gets a
+  new ring then (the GPU is done with it).
+
+Player settings at 3840 x 2160 with TAA, `d3d12_PathTracing 0`, `d3d12_HDROutput 0`, `r_VSync 0`;
+one DLL, `0` and `1` in turn, three runs each, medians:
+
+| | `0` | `1` |
+|---|---|---|
+| Pier, frames 60–1160: GPU ms | 3.423 / 3.430 / 3.428 | 3.302 / 3.332 / 3.313 |
+| Pier, frames 300–600: GPU ms | 3.740 / 3.661 / 3.683 | 3.539 / 3.471 / 3.525 |
+| River, frames 60–1160: GPU ms | 3.552 / 3.617 / 3.559 | 3.490 / 3.490 / 3.487 |
+| River, frames 600–800: GPU ms | 5.130 / 5.015 / 5.069 | 4.851 / 4.939 / 4.830 |
+| River, frames 600–800: `EF_EndEf3D` ms | 6.126 / 6.048 / 6.399 | 6.156 / 6.197 / 6.022 |
+
+The GPU takes 3.4 % less on Pier and 1.9 % less on River, and 4.3 % less in their heavy parts.
+At 1920 x 1080 without the rays (Pier, two runs each) 1.557 / 1.538 → 1.418 / 1.421 ms.
+The CPU is the same. The frames are the same: frame 181 of Pier and of River has 0 px pairs
+between `0` and `1`. Unit test `Layout_DrawConstantsVideoMemory` writes the harness's constants
+and input into the GPU upload heap and reads every word back through the kernel.
+
 ## Index lists
 
 The engine's strips, fans and quads are drawn as triangle lists (`IndexLists.h`), made again

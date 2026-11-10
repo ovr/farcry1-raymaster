@@ -207,6 +207,10 @@ namespace XrTest
     SWakeOutput RunWake(const std::vector<float> &Start, const std::vector<SWakeFrame> &Frames, const SWakeKernels &Kernels);
     //! Whether the device stores the format through a typed UAV (CMAA2's output).
     bool HasTypedStore(DXGI_FORMAT Format);
+    //! Whether the device has the GPU upload heap (video memory the CPU writes, the renderer's d3d12_FrameMemoryVideo).
+    bool HasGpuUploadHeap();
+    //! The runs' uploads (their constants, inputs and staging) in the GPU upload heap, not the upload heap.
+    void SetVideoUploads(bool bVideo) { m_bVideoUploads = bVideo; }
     //! The radiance cache emptied (every word 0).
     void ClearCache();
 
@@ -258,6 +262,7 @@ namespace XrTest
 
     std::string m_Name;
     bool m_bWarp = false;
+    bool m_bVideoUploads = false;   //!< SetVideoUploads
     D3D_SHADER_MODEL m_nShaderModel = D3D_SHADER_MODEL_5_1;
     ComPtr<ID3D12Device> m_pDevice;
     ComPtr<ID3D12CommandQueue> m_pQueue;

@@ -318,6 +318,10 @@ void CD3D12Renderer::RegisterVariables()
   iConsole->Register("d3d12_DrawExtReuse", &CV_d3d12_DrawExtReuse, 1, 0,
                      "1: a draw whose rest of its constants (b3) has the same bytes as the last one uploaded in this frame's memory "
                      "binds that copy (the GPU reads the same bytes); 0 every such draw uploads its own (read at each draw)");
+  iConsole->Register("d3d12_FrameMemoryVideo", &CV_d3d12_FrameMemoryVideo, 1, 0,
+                     "1: the per frame memory (the draws' constants, the vertices drawn once, the rays' instances) in video memory "
+                     "the CPU writes through the bus (the GPU upload heap: resizable BAR) where the device has it, so the GPU reads "
+                     "it at its own speed; 0 in system memory (read when a frame slot starts)");
   iConsole->Register("d3d12_CpuSamples", &CV_d3d12_CpuSamples, 0, 0,
                      "N: samples the stack of the thread that draws every N microseconds (a profiler of the wall clock: the engine's "
                      "code, ours, the driver's); back to 0 writes the samples to XRenderD3D12_samples.txt (module and offset)");
@@ -1070,7 +1074,7 @@ WIN_HWND CD3D12Renderer::Init(int x,int y,int width,int height,unsigned int cbpp
   StartWaterTextures();
   if (!m_pDevice->Init(m_hWnd, m_nWidth, m_nHeight, nDebug, nDred)
     || !m_pDescriptors->Init(m_pDevice->GetDevice())
-    || !m_pUpload->Init(m_pDevice->GetDevice(), nFrameRingSize)
+    || !m_pUpload->Init(m_pDevice->GetDevice(), nFrameRingSize, CV_d3d12_FrameMemoryVideo > 0)
     || !m_pPipeline->Init(m_pDevice->GetDevice())
     || !m_pCompute->Init(m_pDevice->GetDevice())
     || !m_pTextures->Init()
