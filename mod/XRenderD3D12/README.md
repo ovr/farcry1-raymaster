@@ -1796,6 +1796,15 @@ pass's `nPbr` without rays) are never kept or reused. The GPU reads the same byt
 are the same. `0` uploads every such rest, as before (read at each draw). `d3d12_FrameLog` counts
 the reused ones (`ext_reused`) and `r_Stats` shows them next to the uploads.
 
+Both comparisons (with the default block and with the last copy) take `BytesEqual::Equal`
+(`BytesEqual.h`): the same answer as `memcmp`, 64 bytes a load with AVX-512 or 32 with AVX2 where
+the CPU and the OS have them (CPUID and XGETBV at load), else `memcmp` itself. The CRT's `memcmp`
+compares 8 bytes at a time: 24.3 ns for 1,808 equal bytes, AVX-512 11.4 and AVX2 16.4 on a Ryzen 7
+9800X3D. River's heavy frames compare about 6,700 rests a frame. The sweep there, sampled, four
+pairs of runs: `EF_EndEf3D` 1.988 → 1.955 ms (frames 60 to 1160), 4.942 → 4.872 (600 to 800),
+lower in every pair; the comparisons' samples 122 → 81. Unit tests `BytesEqual_*`: every size to 600
+bytes and 1,808, one bit off at each byte, against `memcmp`; no read past a block's end.
+
 ## Per frame memory in video memory
 
 The per frame memory (`CD3D12Upload::AllocFrame`) holds the draws' constants, the vertices and
