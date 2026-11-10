@@ -17,7 +17,9 @@
 //	  CSSharpen  t0 the new history, t1 the exposure as CSResolve's u2
 //	             (an SRV); u0 the picture,
 //	             the history sharpened by AMD FidelityFX CAS (TaaCas.hlsli)
-//	             with the constants vCas0, vCas1 of its sharpness
+//	             with the constants vCas0, vCas1 of its sharpness; its
+//	             group's pixels and their border loaded into groupshared
+//	             once, in CAS's space too (the bits of loads of each)
 //	  CSResolve with XR_TAA_LIGHT (d3d12_AASceneLight): the colours the
 //	             scene's light it makes itself, as HDR_SCENE_LIGHT would
 //	             (Hdr.hlsl's SceneLight, its half floats), once a pixel of
@@ -135,9 +137,23 @@ float TaaExposure()
 //! The exposure of the picture CAS loads (TaaExposure, once a thread).
 static float s_fCasExposure;
 
+//! The group's pixels of the picture and their 3 x 3s' border's (clamped into it), from the group's first pixel less one on,
+//! and each in CAS's space (TaaToCas): loaded and taken there once, not by each of the 3 x 3s around it.
+#define CAS_TILE (XR_TAA_GROUP + 2)
+groupshared float3 s_CasPicture[CAS_TILE][CAS_TILE];
+groupshared float3 s_CasSpace[CAS_TILE][CAS_TILE];
+static int2 s_vCasTile;
+
 float3 TaaCasPicture(int2 p)
 {
-  return g_Resolved.Load(int3(TaaClamp(p), 0)).rgb;
+  const int2 t = p - s_vCasTile;
+  return s_CasPicture[t.y][t.x];
+}
+
+float3 TaaCasLoad(int2 p)
+{
+  const int2 t = p - s_vCasTile;
+  return s_CasSpace[t.y][t.x];
 }
 
 float TaaCasExposure()
@@ -145,6 +161,7 @@ float TaaCasExposure()
   return s_fCasExposure;
 }
 
+#define TAA_CAS_LOAD 1
 #include "TaaCas.hlsli"
 #endif
 
@@ -160,6 +177,17 @@ void CSMain(uint2 vPixel : SV_DispatchThreadID, uint2 vThread : SV_GroupThreadID
     s_TaaLight[t.y][t.x] = TaaSceneLight(TaaClamp(s_vTaaTile + t));
   }
   GroupMemoryBarrierWithGroupSync();
+#elif !defined(XR_TAA_RESOLVE)
+  s_fCasExposure = TaaExposure();
+  s_vCasTile = (int2)(vGroup * XR_TAA_GROUP) - 1;
+  for (uint i = vThread.y * XR_TAA_GROUP + vThread.x; i < CAS_TILE * CAS_TILE; i += XR_TAA_GROUP * XR_TAA_GROUP)
+  {
+    const int2 t = int2(i % CAS_TILE, i / CAS_TILE);
+    const float3 c = g_Resolved.Load(int3(TaaClamp(s_vCasTile + t), 0)).rgb;
+    s_CasPicture[t.y][t.x] = c;
+    s_CasSpace[t.y][t.x] = TaaToCas(c, s_fCasExposure);
+  }
+  GroupMemoryBarrierWithGroupSync();
 #endif
   if (any(vPixel >= (uint2)g_Taa.vSize.xy))
     return;
@@ -171,7 +199,6 @@ void CSMain(uint2 vPixel : SV_DispatchThreadID, uint2 vThread : SV_GroupThreadID
   if (g_Taa.vFlags.x & TAA_OUTPUT)
     g_Output[p] = float4((g_Taa.vFlags.x & TAA_DEBUG) ? TaaDebug(r, fExposure) : r.vColor, 1);
 #else
-  s_fCasExposure = TaaExposure();
   g_Output[p] = float4(TaaCas(p, g_Taa.vCas0, g_Taa.vCas1), 1);
 #endif
 }

@@ -21,7 +21,9 @@
 #include "Test_TaaResolve.h"
 #include "Test_TaaDilate.h"
 #include "Test_TaaSharpen.h"
+#include "Test_TaaSharpenKernel.h"
 #include "Test_TaaWorking.h"
+#include "Shaders/Constants.h"
 
 #include <algorithm>
 #include <cmath>
@@ -620,4 +622,62 @@ XR_TEST(Taa_CasKeepsHighlights)
         CHECK_MSG(fWorst < 2e-3, std::string(pPicture == &Sky ? "sky" : "opening") + ", exposure " + std::to_string(fExposure) +
                                      ", sharpness " + std::to_string(fSharpness) + ": " + std::to_string(fWorst) + " past the 3 x 3's range");
       }
+}
+
+//! The renderer's sharpening kernel (Taa.hlsl's, from its own source), which loads its group's pixels and their border
+//! into groupshared once and takes CAS's 3 x 3s from there, gives each pixel the bits CSTaaSharpen gives (each of its 3 x
+//! 3s loaded from the picture): at 37 x 21 (the last groups partly off the picture, the tile's border clamped into it), on
+//! a noise of the LDR colours and of the HDR light from 0.001 to 2000, at the exposure of the constants and of the
+//! exposure's texture, at the sharpness's middle and most. Why: the tile is there only to load and convert each pixel
+//! once (d3d12_AA taa's sharpening 0.56 -> 0.52 ms at 4K); the picture must not change by a bit.
+XR_TEST(Taa_CasTileGivesTheSameBits)
+{
+  const int w = 37, h = 21;
+  struct SCase
+  {
+    float fExposure;
+    bool bTexture;   // the exposure from t1 (TAA_EXPOSURE), else vParams.z
+  };
+  for (const SCase c : { SCase{ 0, false }, SCase{ 0.7f, false }, SCase{ 4, true } })
+  {
+    SImage Picture(w, h);
+    uint32 s = 777;
+    for (size_t i = 0; i < Picture.v.size(); i++)
+    {
+      s = s * 1664525u + 1013904223u;
+      const float u = (float)(s >> 8) / 16777216.0f;
+      Picture.v[i] = i % 4 == 3 ? 1 : c.fExposure > 0 ? 0.001f * std::pow(2e6f, u) : u;
+    }
+    for (const float fSharpness : { 0.5f, 1.0f })
+    {
+      STaaConstants k = {};
+      k.vSize[0] = (float)w;
+      k.vSize[1] = (float)h;
+      k.vSize[2] = 1.0f / w;
+      k.vSize[3] = 1.0f / h;
+      k.vParams[1] = fSharpness;
+      k.vParams[2] = c.bTexture ? 1 : c.fExposure;
+      k.vFlags[0] = (c.fExposure > 0 ? TAA_HDR : 0) | (c.bTexture ? TAA_EXPOSURE : 0);
+      CasSetup(k.vCas0, k.vCas1, fSharpness, (float)w, (float)h, (float)w, (float)h);
+      std::vector<STestTexture> Textures = { Texture(Picture) };
+      if (c.bTexture)
+      {
+        STestTexture e;
+        e.nWidth = e.nHeight = 1;
+        e.Format = DXGI_FORMAT_R32_FLOAT;
+        e.Data.resize(4);
+        memcpy(e.Data.data(), &c.fExposure, 4);
+        Textures.push_back(e);
+      }
+      const uint32 nGroups[3] = { (w + XR_TAA_GROUP - 1) / XR_TAA_GROUP, (h + XR_TAA_GROUP - 1) / XR_TAA_GROUP, 1 };
+      const std::vector<float> Got = Gpu().RunCompute2D(XR_BYTECODE(Test_TaaSharpenKernel), &k, sizeof(k), Textures, w, h, nGroups);
+      const SImage Want = Sharpen(Picture, fSharpness, c.fExposure);
+      size_t nDiffer = 0;
+      for (size_t i = 0; i < Want.v.size(); i++)
+        nDiffer += memcmp(&Got[i], &Want.v[i], 4) != 0;
+      CHECK_MSG(nDiffer == 0, "exposure " + std::to_string(c.fExposure) + (c.bTexture ? " (texture)" : "") + ", sharpness " +
+                                  std::to_string(fSharpness) + ": " + std::to_string(nDiffer) + " of " + std::to_string(Want.v.size()) +
+                                  " floats differ");
+    }
+  }
 }

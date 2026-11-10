@@ -20,6 +20,9 @@
 //	                                it): the HDR light or the LDR colours
 //	  float TaaCasExposure()        the picture's exposure (TaaToCas's:
 //	                                0 for the LDR colours)
+//	and with TAA_CAS_LOAD
+//	  float3 TaaCasLoad(int2 p)     TaaToCas of TaaCasPicture(p) at that
+//	                                exposure (Taa.hlsl's, from its tile)
 //
 //////////////////////////////////////////////////////////////////////
 
@@ -40,9 +43,17 @@
 float3 TaaCasPicture(int2 p);
 float TaaCasExposure();
 
+#if defined(TAA_CAS_LOAD)
+float3 TaaCasLoad(int2 p);
+#endif
+
 AF3 CasLoad(ASU2 p)
 {
+#if defined(TAA_CAS_LOAD)
+  return TaaCasLoad(p);
+#else
   return TaaToCas(TaaCasPicture(p), TaaCasExposure());
+#endif
 }
 
 void CasInput(inout AF1 r, inout AF1 g, inout AF1 b)

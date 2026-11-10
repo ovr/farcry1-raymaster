@@ -233,7 +233,15 @@ system ones (better not to touch): [`CONFIGURATION.md`](../../CONFIGURATION.md).
     the sky's mask and the upscalers). The kernel takes the rays' root signature for the texture
     table. PerfSweep Pier in the player's settings, three runs each: `hdr` 0.30-0.31 ms against
     0.44-0.45, `anti-aliasing` 0.56 in both, the GPU's frame 3.64-3.67 against 3.78-3.82; frames
-    1, 181 and 661 in pairs of 0 px with the build before and with `d3d12_AASceneLight 0`.
+    1, 181 and 661 in pairs of 0 px with the build before and with `d3d12_AASceneLight 0`. Since
+    step 392 the sharpening loads its group's pixels and their border (10 x 10) into groupshared
+    once, each also in CAS's space (`TaaToCas`), and takes its 3 x 3s from there: each pixel was
+    loaded and converted by the nine 3 x 3s around it. PerfSweep Pier and River in the player's
+    settings, three runs each in turn: `anti-aliasing` 0.56-0.57 ms against 0.52, the GPU's median
+    frame 3.250-3.255 against 3.222-3.239 ms (Pier) and 3.489-3.505 against 3.463-3.470 (River).
+    The bits are the same (`Taa_CasTileGivesTheSameBits`); with `r_WaterUpdateMinInterval 0` and
+    `d3d12_AutoExposure 0` Pier's frame 181 is 0 px between all runs of both builds and River's 700
+    has a pair of 0 px.
   - Unit tests `Taa_*`: the jitter covers the pixel; a still edge gathers the frames (under half
     of the error without it after 48 frames at every quality); a reset takes the frame; the history
     follows the motion (by the nearest of the 3 x 3) and is ignored off the picture; a stale history
@@ -242,7 +250,11 @@ system ones (better not to touch): [`CONFIGURATION.md`](../../CONFIGURATION.md).
     and the HDR light, at the sharpness 0, 0.5 and 1) with `UpscalerTaa.cpp`'s constants
     (`CasSetup`), leaves flat pictures as they are to their border and raises a texture's
     contrast, more the higher the sharpness; the HDR light sharpened stays within its 3 x 3's range
-    (a bright sky's texture and a cave's opening at the exposures 1 and 4).
+    (a bright sky's texture and a cave's opening at the exposures 1 and 4); the renderer's own
+    sharpening kernel (`Taa.hlsl`, run on the standard root signature by the harness's
+    `RunCompute2D`) gives each pixel the bits of the 3 x 3s loaded from the picture
+    (`Taa_CasTileGivesTheSameBits`: 37 x 21, LDR and HDR, the exposure from the constants and from
+    its texture).
 - MSAA (`msaa2`, `msaa4`, `msaa8`, `Msaa.cpp`): from `BeginMainScene` to `EndMainScene` the main view draws into the
   device's multisampled colour, depth buffer and ambient light (`CD3D12Device::SetMsaaTargets`, `BeginMsaa`; the
   pipelines with `SPipelineKey::nSamples`). What comes after the scene, and what reads the depth buffer in it (the sun's

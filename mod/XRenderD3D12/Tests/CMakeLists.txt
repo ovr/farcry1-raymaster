@@ -64,6 +64,8 @@ set(taa "${CMAKE_CURRENT_SOURCE_DIR}/Shaders/TestTaa.hlsl")
 foreach(k Resolve Dilate Sharpen Working)
     xrender_d3d12_test_shader(Taa${k} "${taa}" cs_6_0 CSTaa${k})
 endforeach()
+# The renderer's own sharpening kernel (Taa.hlsl as Shaders.cmake compiles TaaSharpen_CS), run by RunCompute2D.
+xrender_d3d12_test_shader(TaaSharpenKernel "${XRENDERD3D12_SHADER_SOURCE_DIR}/Taa.hlsl" cs_6_0 CSMain)
 # MSAA's resolve (Msaa.hlsli as Msaa.hlsl's passes use it).
 xrender_d3d12_test_shader(Msaa "${CMAKE_CURRENT_SOURCE_DIR}/Shaders/TestMsaa.hlsl" cs_6_0 CSMsaa)
 # The draw's constants as the programs read them (Common.hlsli's g_Draw and g_DrawExt).
