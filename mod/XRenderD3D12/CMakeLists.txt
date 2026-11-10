@@ -45,6 +45,7 @@ set(XRENDERD3D12_SOURCES
     SkyFogBand.h
     DisplayPoll.h
     CascadeCull.h
+    CascadeGroups.h
     CameraCut.h
     BeachLayers.h
     FogVolume.h

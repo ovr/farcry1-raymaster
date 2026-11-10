@@ -220,6 +220,9 @@
 //	mWorldViewProj into slice nShadowTex[i] of the array
 //	(SV_RenderTargetArrayIndex); the pixel shader of the live set's casters
 //	takes that slice of the full set's map and vShadowParams[slice]'s margin.
+//	With XR_CASCADE_OBJECTS too (the parts of one mesh for all their objects)
+//	instance i's matrix and slice are the record i of 80 bytes at byte
+//	nShadowTex.y of raw buffer nShadowTex.x.
 //	Compiled with XR_RAY_REFL (Shader Model 6.5, the main view's draws with
 //	DF_CUBE0 while d3d12_RTReflections and d3d12_RTReflectionSurfaces are on,
 //	SPipelineKey::bRayTrace) DF_CUBE0 traces a ray where it looks the cube
@@ -898,6 +901,11 @@ float BubbleNoise(float2 v)
   return lerp(lerp(vCorner[0], vCorner[1], s.x), lerp(vCorner[2], vCorner[3], s.x), s.y);
 }
 
+#if defined(XR_CASCADE_OBJECTS) && !defined(XR_RAY_REFL) && !defined(XR_RAY_LIGHT)
+// The raw buffers (the texture table, D3D12Pipeline.h's space4): the instances' records.
+ByteAddressBuffer g_Buffers[] : register(t0, space4);
+#endif
+
 #ifdef XR_CASCADE_INSTANCES
 //! A caster of the full set of the sun's cascades into all the slices it reaches at once, an
 //! instance each: mShadow[i] the world to slice nShadowTex[i] in place of mWorldViewProj.
@@ -938,7 +946,14 @@ SVertexOutput VSMain(SVertexInput In)
       else if (g_DrawExt.vParams3.w == XR_FX_BUBBLE)
         vPos.xyz += In.vNormal * (BubbleNoise(vPos.xy + g_DrawExt.vParams1.xy) * g_DrawExt.vParams1.w);
     }
-#ifdef XR_CASCADE_INSTANCES
+#if defined(XR_CASCADE_OBJECTS)
+    const ByteAddressBuffer Records = g_Buffers[g_DrawExt.nShadowTex.x];
+    const uint nRecord = g_DrawExt.nShadowTex.y + nInstance * 80;
+    const float4x4 mObject = float4x4(asfloat(Records.Load4(nRecord)), asfloat(Records.Load4(nRecord + 16)),
+                                      asfloat(Records.Load4(nRecord + 32)), asfloat(Records.Load4(nRecord + 48)));
+    Out.vPos = mul(vPos, mObject);
+    Out.nSlice = Records.Load(nRecord + 64);
+#elif defined(XR_CASCADE_INSTANCES)
     Out.vPos = mul(vPos, g_DrawExt.mShadow[nInstance]);
     Out.nSlice = g_DrawExt.nShadowTex[nInstance];
 #else

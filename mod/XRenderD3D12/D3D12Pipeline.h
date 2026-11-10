@@ -115,7 +115,8 @@ struct SPipelineKey
                           //!< (XR_RAY_REFL, d3d12_RTReflectionSurfaces) and towards their lamps (XR_RAY_LIGHT,
                           //!< d3d12_RTLightShadows); DrawGeometry sets it, with bCascades 0, 1 or 3
   uint8 bCascadeInstances;  //!< nTarget 2: the general program's vertex shader of the full set of the sun's cascades, a slice
-                            //!< per instance (XR_CASCADE_INSTANCES: mShadow[i] into slice nShadowTex[i]; Cascades.cpp)
+                            //!< per instance (XR_CASCADE_INSTANCES: mShadow[i] into slice nShadowTex[i]; Cascades.cpp); 2 the
+                            //!< instances' matrices and slices in a raw buffer (XR_CASCADE_OBJECTS: the objects of a mesh)
   uint8 bDepthOnly;       //!< no pixel shader and no colour writes (DrawGeometry sets it for a shadow map's caster that
                           //!< discards nothing and for the main view's depth prepass)
   uint8 bPathTrace;       //!< nTarget 3 with the path tracer's G-buffer bound (CD3D12Device::BindPathTargets, the fourth to

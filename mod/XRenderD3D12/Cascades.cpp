@@ -444,6 +444,7 @@ void CD3D12Renderer::UpdateSunCascades(std::span<const SRenderItem> MainItems)
   m_CascadeDrawn.clear();
   m_StaticCasterItems.clear();
   m_nStaticCasterParts = 0;
+  m_nCascadeDraws[0] = m_nCascadeDraws[1] = m_nCascadeDrawInstances[0] = m_nCascadeDrawInstances[1] = 0;
   m_bNoteStaticCasters = CV_d3d12_StaticCasters != 0;
   ClearSet(m_CascadeMaps[0]);
   // d3d12_CascadeCull: without rays only the slices read the casters' scenes (NoteRayOffscreenItems keeps nothing),
@@ -531,6 +532,8 @@ void CD3D12Renderer::UpdateSunCascades(std::span<const SRenderItem> MainItems)
             (int)m_CascadeDrawn.size(), nLive, m_ShadowTint[0], m_ShadowTint[1], m_ShadowTint[2], nTint);
     fprintf(m_pFrameDump.get(), "  static casters (d3d12_StaticCasters): %d parts of the full set in the live set too, of %d leaf buffers\n",
             m_nStaticCasterParts, (int)m_StaticCasterBuffers.size());
+    fprintf(m_pFrameDump.get(), "  draws (d3d12_CascadeInstancing %d): %d into the full set (%d instances), %d into the live set (%d instances)\n",
+            CV_d3d12_CascadeInstancing, m_nCascadeDraws[0], m_nCascadeDrawInstances[0], m_nCascadeDraws[1], m_nCascadeDrawInstances[1]);
     if (bCull)
     {
       fprintf(m_pFrameDump.get(), "  left out as they came (d3d12_CascadeCull %d): %d parts that reach no slice; the camera towards the sun to %.1f m "
@@ -603,7 +606,14 @@ void CD3D12Renderer::DrawCascadeItems(std::span<const SRenderItem> Items, CWordS
   // Each part once, into all the slices it reaches (an instance each; the depth is the same as slice
   // by slice, with one draw per part instead of one per slice); the live set's with 2 (each instance
   // compared with the full set's slice, SetupCascadeCaster).
-  if (CV_d3d12_CascadeInstancing > m_nCascadeSet && !Parts.empty())
+  if (CV_d3d12_CascadeInstancing >= 3 && !Parts.empty())
+  {
+    // 3: both sets, the parts of one mesh and material at once for all their objects.
+    SetSlice(0, Maps.hDSV[XR_MAX_CASCADES]);
+    DrawCascadeGroups(Parts.size(), [&](size_t k) -> const SRenderItem & { return *Parts[k].pItem; },
+                      [&](size_t k, int i) { return Reaches(Parts[k], m_Cascades[i]); });
+  }
+  else if (CV_d3d12_CascadeInstancing > m_nCascadeSet && !Parts.empty())
   {
     SetSlice(0, Maps.hDSV[XR_MAX_CASCADES]);
     for (const SPart &p : Parts)
@@ -639,6 +649,73 @@ void CD3D12Renderer::DrawCascadeItems(std::span<const SRenderItem> Items, CWordS
   m_bItemScissor = false;
   m_fDepthMin = 0;
   m_fDepthMax = 1;
+}
+
+template <class TItem, class TReaches> void CD3D12Renderer::DrawCascadeGroups(size_t nParts, TItem Item, TReaches Reaches)
+{
+  // The parts that draw alike (CascadeGroups.h); on their own those whose draw takes more of their object than its
+  // matrix (DrawLeafItem: a light map's copy, the fog passes, a character, a scissor, a cube of the scene around it).
+  m_CascadeKeys.resize(nParts);
+  m_CascadeAlone.resize(nParts);
+  for (size_t k = 0; k < nParts; k++)
+  {
+    const SRenderItem &it = Item(k);
+    const CREOcLeaf *pLeaf = static_cast<const CREOcLeaf *>(it.pRE);
+    const CCObject *pObj = it.pObj;
+    m_CascadeKeys[k] = { pLeaf->m_pBuffer, pLeaf->m_pChunk, it.pShader, it.pRes, (uint64)it.eDrawClass };
+    m_CascadeAlone[k] = it.bBakedLightCopy || it.bFogPass || (it.nSort & ~EFSLIST_MASK) == eS_FogShader || pObj->m_pCharInstance ||
+                        (pObj->m_ObjFlags & (FOB_FOGPASS | FOB_NEAREST | FOB_LIGHTPASS)) ||
+                        (pObj->m_nScissorX2 > pObj->m_nScissorX1 && pObj->m_nScissorY2 > pObj->m_nScissorY1) ||
+                        it.pShader->GetProps().eEnvMap != EEnvMap::None;
+  }
+  const uint32_t nGroups = m_CascadeGrouper.Group(m_CascadeKeys.data(), m_CascadeAlone.data(), nParts, m_CascadeGroups);
+  m_CascadeGrouper.Members(m_CascadeGroups, nGroups, m_CascadeFirst, m_CascadeMembers);
+  // A part's slices as d3d12_CascadeInstancing 2 draws them (its instances of m_CascadeObjects from j).
+  auto DrawPart = [&](size_t &j)
+  {
+    const uint32 nPart = m_CascadeObjects[j].nPart;
+    m_nCascadeInstances = 0;
+    for (; j < m_CascadeObjects.size() && m_CascadeObjects[j].nPart == nPart; j++)
+      m_CascadeInstances[m_nCascadeInstances++] = m_CascadeObjects[j].nSlice;
+    DrawLeafItem(Item(nPart));
+  };
+  for (uint32_t g = 0; g < nGroups; g++)
+  {
+    m_CascadeObjects.clear();
+    for (uint32_t j = m_CascadeFirst[g]; j < m_CascadeFirst[g + 1]; j++)
+    {
+      const uint32 nPart = m_CascadeMembers[j];
+      Matrix44 World;
+      bool bWorld = false;
+      for (int i = 0; i < m_nCascades; i++)
+        if (Reaches(nPart, i))
+        {
+          if (!bWorld)
+            World = GetWorldMatrix(Item(nPart).pObj);
+          bWorld = true;
+          m_CascadeObjects.push_back({ World, i, nPart });
+          m_Cascades[i].nCasters[m_nCascadeSet]++;
+        }
+    }
+    if (m_CascadeObjects.empty())
+      continue;
+    // One object: its slices as with 2; more: all at once, or each as with 2 if DrawLeafItem did not.
+    size_t j = 0;
+    if (m_CascadeObjects.back().nPart == m_CascadeObjects[0].nPart)
+      DrawPart(j);
+    else
+    {
+      m_nCascadeObjects = m_CascadeObjects.size();
+      m_bCascadeObjectsDrawn = false;
+      DrawLeafItem(Item(m_CascadeObjects[0].nPart));
+      m_nCascadeObjects = 0;
+      if (!m_bCascadeObjectsDrawn)
+        while (j < m_CascadeObjects.size())
+          DrawPart(j);
+    }
+  }
+  m_nCascadeInstances = 0;
+  m_CascadeObjects.clear();
 }
 
 void CD3D12Renderer::UpdateRayBehind()
@@ -748,7 +825,7 @@ void CD3D12Renderer::SetupCascadeCaster(SDrawConstants &dc) const
   dc.vParams3[0] = (float)m_nCascadeSlice;
   dc.vParams3[1] = std::max(CASCADE_LIVE_EPS_M, 2 * Cas.fTexel) / (Cas.fZMax - Cas.fZMin);
   // Into all its slices at once: each slice's margin.
-  if (m_nCascadeInstances > 0)
+  if (m_nCascadeInstances > 0 || m_nCascadeObjects > 0)
     for (int i = 0; i < m_nCascades; i++)
       dc.vShadowParams[i] = std::max(CASCADE_LIVE_EPS_M, 2 * m_Cascades[i].fTexel) / (m_Cascades[i].fZMax - m_Cascades[i].fZMin);
 }

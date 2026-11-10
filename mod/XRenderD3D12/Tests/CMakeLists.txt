@@ -137,6 +137,7 @@ set(XRENDERD3D12_TESTS_SOURCES
     CameraCutTests.cpp
     IndexListTests.cpp
     WordHashTests.cpp
+    CascadeGroupsTests.cpp
     AlphaDepthTests.cpp
     WaterReflectionTests.cpp
     BeachTests.cpp

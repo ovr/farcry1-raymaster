@@ -24,6 +24,7 @@
 #include "Renderer.h"
 #include "D3D12Device.h"
 #include "D3D12Descriptors.h"
+#include "D3D12Upload.h"
 #include "Texture.h"
 #include "PbrCompanion.h"
 #include "Scene.h"
@@ -847,8 +848,32 @@ void CD3D12Renderer::DrawLeafItem(const SRenderItem &it)
     if (!SetupShadowCasterDraw(Key, dc, it))
       return;
     // Into the slices of the sun's cascades it reaches, an instance each (DrawCascadeItems): the
-    // world to each slice as WorldViewProj would be with its matrix.
-    if (m_nCascadeInstances > 0)
+    // world to each slice as WorldViewProj would be with its matrix. The parts of a mesh at once
+    // (d3d12_CascadeInstancing 3): each instance's object and slice in this frame's memory.
+    if (m_nCascadeObjects > 0)
+    {
+      const uint32 n = (uint32)m_nCascadeObjects;
+      const SD3D12FrameAlloc Mem = m_pUpload->AllocFrame(n * 80, 16);
+      uint64 nOffset = 0;
+      const int nSRV = Mem.pCPU ? m_pUpload->GetRawSRV(Mem.nGPU, nOffset) : -1;
+      if (nSRV < 0)
+        return;
+      uint8 *pRecord = (uint8 *)Mem.pCPU;
+      for (uint32 i = 0; i < n; i++, pRecord += 80)
+      {
+        const SCascadeObject &o = m_CascadeObjects[i];
+        const Matrix44 WorldToSlice = o.World * m_Cascades[o.nSlice].WorldToMap * m_ProjMatrix;
+        const uint32 Slice[4] = { (uint32)o.nSlice, 0, 0, 0 };
+        memcpy(pRecord, WorldToSlice.data, 64);
+        memcpy(pRecord + 64, Slice, sizeof(Slice));
+      }
+      dc.nShadowTex[0] = (uint32)nSRV;
+      dc.nShadowTex[1] = (uint32)nOffset;
+      Key.bCascadeInstances = 2;
+      nInstances = n;
+      m_bCascadeObjectsDrawn = true;
+    }
+    else if (m_nCascadeInstances > 0)
     {
       for (int i = 0; i < m_nCascadeInstances; i++)
       {
@@ -859,6 +884,11 @@ void CD3D12Renderer::DrawLeafItem(const SRenderItem &it)
       }
       Key.bCascadeInstances = 1;
       nInstances = (uint32)m_nCascadeInstances;
+    }
+    if (m_bCascadePass)
+    {
+      m_nCascadeDraws[m_nCascadeSet & 1]++;
+      m_nCascadeDrawInstances[m_nCascadeSet & 1] += (int)nInstances;
     }
     Draw();
     return;

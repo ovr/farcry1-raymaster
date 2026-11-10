@@ -870,7 +870,16 @@ system ones (better not to touch): [`CONFIGURATION.md`](../../CONFIGURATION.md).
   elsewhere only what the game animates differently from run to run) with far fewer draws
   (Training's time demo, frame 2600: 1,677 in the frame instead of 3,120). The live set's parts
   are drawn so too (`d3d12_CascadeInstancing 2`; 1 draws them slice by slice), each instance
-  compared with the full set's slice (`General_CascadeInstances_PS`). A part goes only into the slices
+  compared with the full set's slice (`General_CascadeInstances_PS`). With `d3d12_CascadeInstancing 3`
+  (the default) the parts of one mesh, chunk, shader, resources and draw class (`CascadeGroups.h`) are
+  drawn once for all their objects: an instance per object and slice, whose matrix and slice the
+  vertex shader reads from the frame's memory (`General_CascadeObjects_VS`); a part whose draw takes
+  more of its object than its matrix (a light map's copy, the fog passes, a character, a scissor, a
+  cube of the scene around it) is drawn on its own. The maps are the same (the slices' parts and
+  instances as with 2; PerfSweep's frames 0 px apart) with far fewer draws into the two sets (Pier
+  1,831 → 137, Swamp's jungle 2,808 → 194): there the cascades take about 0.5 ms less of the CPU a
+  frame, and the GPU's sun shadows 7 to 15 % less (4K RT: Pier 203 → 206 FPS, River 192 → 196).
+  A part goes only into the slices
   where its shadow (its sphere drawn out away from the sun) falls on the slice's receivers: seen
   from the sun, the outline of the part of the view's frustum that takes its shadow from the
   slice, with the filter's reach around it; elsewhere a slice is not read, so the frames are the

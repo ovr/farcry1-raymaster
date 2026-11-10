@@ -27,6 +27,7 @@
 #include "General_Velocity_PS.h"
 #include "General_CascadeInstances_VS.h"
 #include "General_CascadeInstances_PS.h"
+#include "General_CascadeObjects_VS.h"
 #include "General_Hdr_PS.h"
 #include "General_Hdr_Velocity_PS.h"
 #include "General_Cascades_PS.h"
@@ -945,7 +946,8 @@ ComPtr<ID3D12PipelineState> CD3D12Pipeline::CreatePSO(const SPipelineKey &Key, b
   // instance's slice.
   if (bGeneral && bShadowMap && Key.bCascadeInstances)
   {
-    Desc.VS = { g_General_CascadeInstances_VS, sizeof(g_General_CascadeInstances_VS) };
+    Desc.VS = Key.bCascadeInstances == 2 ? D3D12_SHADER_BYTECODE{ g_General_CascadeObjects_VS, sizeof(g_General_CascadeObjects_VS) }
+                                         : D3D12_SHADER_BYTECODE{ g_General_CascadeInstances_VS, sizeof(g_General_CascadeInstances_VS) };
     if (Key.bCascades == 1)
       Desc.PS = { g_General_CascadeInstances_PS, sizeof(g_General_CascadeInstances_PS) };
   }

@@ -34,6 +34,7 @@
 #include "DrawExt.h"
 #include "OceanGrid.h"
 #include "WordHash.h"
+#include "CascadeGroups.h"
 #include <optional>
 
 struct SRaySunConstants;
@@ -1604,6 +1605,9 @@ public:
   //! reach. With pDrawn: the parts drawn into the set so far (PartKey), the ones in it left out,
   //! the others added.
   void DrawCascadeItems(std::span<const SRenderItem> Items, CWordSet<uint64> *pDrawn);
+  //! d3d12_CascadeInstancing 3: DrawCascadeItems' nParts parts (Item(k)) into the slices i they reach (Reaches(k, i)), those
+  //! of one mesh, chunk, shader, resources and class in one draw, an instance per object and slice (CascadeGroups.h).
+  template <class TItem, class TReaches> void DrawCascadeGroups(size_t nParts, TItem Item, TReaches Reaches);
   //! Whether the sphere c, r (PartSphere; r < 0: none) reaches the cascade Cas (CascadeCull::Reaches).
   bool PartReaches(const Vec3 &c, float r, const SCascade &Cas) const;
   //! CScene::AddEf with m_bCascadeCull: true for a part of a casters' scene that no slice takes (not a caster's
@@ -1645,6 +1649,21 @@ public:
   int m_nCascadeSlice = 0;                            //!< the slice being drawn
   int m_CascadeInstances[XR_MAX_CASCADES] = {};       //!< d3d12_CascadeInstancing: the slices the part being drawn reaches
   int m_nCascadeInstances = 0;                        //!< how many (0: one slice, m_nCascadeSlice)
+  //! d3d12_CascadeInstancing 3: an instance of the parts of one mesh drawn at once, its object's world and its slice.
+  struct SCascadeObject
+  {
+    Matrix44 World;
+    int nSlice;
+    uint32 nPart;             //!< DrawCascadeItems' part
+  };
+  std::vector<SCascadeObject> m_CascadeObjects;       //!< the group's instances (DrawCascadeItems)
+  size_t m_nCascadeObjects = 0;                       //!< DrawLeafItem draws them (0: m_CascadeInstances' slices)
+  bool m_bCascadeObjectsDrawn = false;                //!< it did
+  CascadeGroups::CGrouper m_CascadeGrouper;           //!< the parts that draw alike (CascadeGroups.h)
+  std::vector<CascadeGroups::SKey> m_CascadeKeys;     //!< DrawCascadeItems' scratch: the parts' keys,
+  std::vector<uint8> m_CascadeAlone;                  //!< those drawn on their own,
+  std::vector<uint32_t> m_CascadeGroups, m_CascadeFirst, m_CascadeMembers;  //!< their groups and the groups' parts
+  int m_nCascadeDraws[2] = {}, m_nCascadeDrawInstances[2] = {};  //!< the draws into the full and the live set, their instances
   int m_nCascadeFrame = -1;                           //!< m_nFrames of the cascades (m_nCascades), when drawn
   CWordSet<uint64> m_CascadeDrawn;                    //!< the parts drawn into the full set (DrawCascadeItems)
   std::vector<SRenderItem> m_StaticCasterItems;       //!< d3d12_StaticCasters: the full set's parts of static casters, for the live set
@@ -2376,7 +2395,7 @@ public:
   int CV_d3d12_ShadowCascades = 4;          //!< the sun's cascaded shadow maps: how many (0: none)
   float CV_d3d12_ShadowDistance = 120;      //!< how far they reach from the camera (m)
   int CV_d3d12_ShadowCascadeSize = 2048;    //!< the size of their maps
-  int CV_d3d12_CascadeInstancing = 2;       //!< 1: a caster of the full set drawn once into all the slices it reaches (DrawCascadeItems); 2: the live set's too
+  int CV_d3d12_CascadeInstancing = 3;       //!< 1: a caster of the full set drawn once into all the slices it reaches (DrawCascadeItems); 2: the live set's too
   int CV_d3d12_CascadeCull = 1;             //!< without rays: 1 the casters' parts no slice takes left out in AddEf, 2 also the camera towards the sun shortened
   int CV_d3d12_StaticCasters = 1;           //!< 1: the static casters of the full set (the vegetation that casts) in the live set too (the terrain's shadows)
   int CV_d3d12_DepthPrepass = 1;            //!< 1: the main view's opaque surfaces into the depth buffer before the opaque list (DrawItems)
