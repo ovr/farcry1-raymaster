@@ -1985,8 +1985,8 @@ raster's lists about the same (their programs lighter). render_tests suite `alph
 
 The depth prepass leaves out what the alpha test discards, so the opaque list shaded every leaf and
 blade of grass that passed its test, also those behind others: a draw that discards and writes the
-depth is tested after its pixel shader. With `d3d12_FoliagePrepass` (1: with the path tracer, 2:
-always) the leaves' and the grass's items (`eDC_AlphaTestVColor`) are drawn once more after the
+depth is tested after its pixel shader. With `d3d12_FoliagePrepass` (2, the default: always; 1: with
+the path tracer alone) the leaves' and the grass's items (`eDC_AlphaTestVColor`) are drawn once more after the
 prepass and the sun's mask by rays, their depth alone where their alpha passes the test (a pixel
 shader of the texture's alpha, `AlphaDepthMain`); their colour then tests `EQUAL` without writing the
 depth, before its pixel shader, and shades the leaves in front alone. Only the draws whose alpha at
@@ -1997,9 +1997,12 @@ bit for bit. The colour keeps `GS_DEPTHWRITE` for its programs, motion vectors a
 depth. Not with MSAA (alpha to coverage) nor heat vision. Swamp's jungle stand (3840 x 2160, FSR
 Quality, the path tracer): the opaque list 1.37 → 0.57 ms and the pass 0.17, the GPU's frame 12.96 →
 12.30–12.35 ms; the sweeps' with the path tracer: the GPU 8.43 → 8.17 ms (Swamp), 9.06 → 8.73
-(River). The main thread draws the leaves' items twice (0.1–0.4 ms more); with the rays (2) the
-sweeps' GPU gained 0.06–0.09 ms alone, so 1 by default. render_tests suite `foliageprepass`; unit
-tests `AlphaDepth_*`.
+(River). The main thread draws the leaves' items twice (0.1–0.4 ms more), so at first only with the
+path tracer; after the draws got cheaper (`d3d12_DrawBatch`) always (step 403). The sweeps in the
+player's settings (3840 x 2160, TAA, the rays' reflections; two runs each, the mean frame 1 → 2):
+River 3.93 → 3.81 ms, Swamp 4.07 → 3.89, Treehouse 2.85 → 2.74, Fort 3.79 → 3.76, Pier 4.01 → 4.03;
+without the rays River 3.66 → 3.54, Swamp 3.71 → 3.53, Pier 3.21 → 3.21. render_tests suite
+`foliageprepass`; unit tests `AlphaDepth_*`.
 
 ## Resource states and barriers
 

@@ -428,11 +428,11 @@ void CD3D12Renderer::RegisterVariables()
                      "1: an alpha tested draw's texels under its reference with room to spare (a leaf's empty parts) left out right "
                      "after its texture is read, before their light and the sun's shadows; the test at the end stays, the frames the "
                      "same (Swamp's jungle with the path tracer: the opaque list 1.62 -> 1.35 ms); 0: at the end alone");
-  iConsole->Register("d3d12_FoliagePrepass", &CV_d3d12_FoliagePrepass, 1, 0,
-                     "1: with the path tracer the leaves' and the grass's depth into the depth buffer after the depth prepass, where "
-                     "their alpha test passes (a pixel shader of the texture's alpha alone), their colour then only there (the depth "
-                     "test EQUAL, before the pixel shader): the opaque list shades only the leaves in front; the same frames; 2: also "
-                     "without it; 0: none");
+  iConsole->Register("d3d12_FoliagePrepass", &CV_d3d12_FoliagePrepass, 2, 0,
+                     "2: the leaves' and the grass's depth into the depth buffer after the depth prepass, where their alpha test "
+                     "passes (a pixel shader of the texture's alpha alone), their colour then only there (the depth test EQUAL, before "
+                     "the pixel shader): the opaque list shades only the leaves in front; the same frames; 1: with the path tracer "
+                     "alone; 0: none");
   iConsole->Register("d3d12_CascadeCasterShader", &CV_d3d12_CascadeCasterShader, 1, 0,
                      "1: a caster of the sun's cascades that discards (an alpha tested leaf, the live set's casters) drawn by a pixel "
                      "shader of its discards alone, not the general one: the same maps, faster; 0: the general one");

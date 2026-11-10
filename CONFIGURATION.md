@@ -263,7 +263,7 @@ Details: [Device removal (DRED)](mod/XRenderD3D12/README.md#device-removal-dred)
 | `d3d12_DecalAddOpacity` | `1` |  | An added decal whose material's opacity is below 1 laid over by its alpha times it, as the original (Research's cave cobwebs: thin strands, no bright card) |
 | `d3d12_DepthPrepass` | `1` |  | The depth prepass (the sun's shadow by rays needs it) |
 | `d3d12_AlphaTestEarly` | `1` |  | An alpha tested draw's empty texels left out before their light (the same frames, faster foliage) |
-| `d3d12_FoliagePrepass` | `1` |  | The leaves' and the grass's depth before their colour: 1 with the path tracer, 2 always (the same frames, faster foliage) |
+| `d3d12_FoliagePrepass` | `2` |  | The leaves' and the grass's depth before their colour: 2 always, 1 with the path tracer alone (the same frames, faster foliage) |
 | `d3d12_DrawExt` | `1` |  | A draw uploads the rest of its constants only when it reads them |
 | `d3d12_DrawExtReuse` | `1` |  | A draw whose rest of its constants is the same as the last one uploaded binds that copy (the same frames, less CPU) |
 | `d3d12_DrawBatch` | `1` |  | A run of draws that differ only in their transforms recorded as one instanced draw: 1 instanced, 2 held and joined but drawn one by one, 0 each at once (the same frames, less CPU) |
