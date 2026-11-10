@@ -1698,7 +1698,9 @@ system ones (better not to touch): [`CONFIGURATION.md`](../../CONFIGURATION.md).
   camera's), the renderer's device runs its passes (`NrdHost.cpp`: root signatures and pipeline states
   from its descriptions, its DXIL, its textures as compute targets; 30 frames of history at most), and
   `CSResolve` makes its light the history that `CSFilter` takes without its spatial filter; at 2560x1440
-  it takes 1.1 to 1.2 ms with its packing, 0.3 to 0.4 ms more than `CSTemporal`.
+  it takes 1.1 to 1.2 ms with its packing, 0.3 to 0.4 ms more than `CSTemporal`. There `CSFilter` finds
+  the face's normal (4 depths around the pixel) only for the terrain's pixels, whose baked light share
+  needs it: on Pier's sweep at 4K FSR Quality 0.441 -> 0.434 ms.
 - `CSSpecular` makes the highlights as the raster does, in the game's colour: the highlights' colour
   times the sun's specular colour times its visibility and each lamp's times its falloff, times
   saturate(R.V)^32; a lamp's where a ray towards it reaches it (4 rays a pixel at most, only for a

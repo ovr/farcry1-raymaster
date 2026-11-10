@@ -426,7 +426,11 @@ void CSFilter(uint3 vId : SV_DispatchThreadID)
   const float4 vGBuffer = GBufferNormalAt(p);
   const float3 vPos = PixelPos(p + 0.5, d);
   const float3 vN = PixelNormal(vGBuffer);
-  const float3 vFace = FaceNormal(p, vPos, d);
+  // The face's normal (4 depth loads) only where the filter or the terrain's share takes it: after NRD the terrain's.
+  const bool bTerrain = PathGBufferMaterial(vGBuffer) == XR_PT_MAT_TERRAIN + 1 && g_PT.vShade.x > 1;
+  float3 vFace = 0;
+  if (g_PT.nFlags.z || bTerrain)
+    vFace = FaceNormal(p, vPos, d);
   float3 vLight = c.rgb;
   if (g_PT.nFlags.z)
   {
@@ -458,7 +462,7 @@ void CSFilter(uint3 vId : SV_DispatchThreadID)
   // The terrain: the share of the light its texture has baked in (the composite takes it times SPathShade::vBakeLight and
   // divides the albedo by that).
   float fBaked = 1;
-  if (PathGBufferMaterial(vGBuffer) == XR_PT_MAT_TERRAIN + 1 && g_PT.vShade.x > 1)
+  if (bTerrain)
     fBaked = PixelTerrainShare(vPos, vN, vFace, d);
   g_Out[p] = float4(max(vLight, 0), fBaked);
 }
