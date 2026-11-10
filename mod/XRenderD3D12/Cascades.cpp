@@ -321,10 +321,10 @@ bool CD3D12Renderer::EnsureCascadeMaps()
   return true;
 }
 
-bool CD3D12Renderer::PartReaches(const Vec3 &c, float r, const SCascade &Cas) const
+Vec3 CD3D12Renderer::ToSunAxes(const Vec3 &c) const
 {
   const Vec3 &X = m_vCascadeAxes[0], &Y = m_vCascadeAxes[1], &Z = m_vCascadeAxes[2];
-  return CascadeCull::Reaches(Cas, c.Dot(X), c.Dot(Y), c.Dot(Z), r);
+  return Vec3(c.Dot(X), c.Dot(Y), c.Dot(Z));
 }
 
 bool CD3D12Renderer::CascadeCullsItem(const SRenderItem &it)
@@ -338,9 +338,10 @@ bool CD3D12Renderer::CascadeCullsItem(const SRenderItem &it)
     Vec3 c(0, 0, 0);
     float r = -1;
     PartSphere(it, c, r);
+    const Vec3 s = ToSunAxes(c);
     bOut = true;
     for (int i = 0; i < m_nCascades && bOut; i++)
-      bOut = !PartReaches(c, r, m_Cascades[i]);
+      bOut = !CascadeCull::Reaches(m_Cascades[i], s.x, s.y, s.z, r);
   }
   m_nCascadeCulled += bOut;
   return bOut;
@@ -564,7 +565,7 @@ void CD3D12Renderer::DrawCascadeItems(std::span<const SRenderItem> Items, CWordS
   struct SPart
   {
     const SRenderItem *pItem;
-    Vec3 c;
+    Vec3 s;           //!< the sphere's centre along the sun's axes (ToSunAxes)
     float r;
     bool bDiscards;   //!< alpha tested (SetupShadowCasterDraw): its depth tested after its pixel shader
   };
@@ -578,8 +579,10 @@ void CD3D12Renderer::DrawCascadeItems(std::span<const SRenderItem> Items, CWordS
       continue;
     if (m_bNoteStaticCasters && m_nCascadeSet == 0 && IsStaticCaster(it))
       m_StaticCasterItems.push_back(it);
+    Vec3 c(0, 0, 0);
     SPart p = { &it, Vec3(0, 0, 0), -1 };
-    PartSphere(it, p.c, p.r);
+    PartSphere(it, c, p.r);
+    p.s = ToSunAxes(c);
     p.bDiscards = it.eDrawClass == eDC_AlphaTest || it.eDrawClass == eDC_AlphaTestVColor || GetAlphaRef(it.pShader, it.pRes) > 0;
     Parts.push_back(p);
   }
@@ -591,7 +594,7 @@ void CD3D12Renderer::DrawCascadeItems(std::span<const SRenderItem> Items, CWordS
 
   // Into each slice that a part's sphere reaches (CascadeCull::Reaches): elsewhere the slice is not read.
   const SCascadeMaps &Maps = m_CascadeMaps[m_nCascadeSet];
-  auto Reaches = [&](const SPart &p, const SCascade &Cas) { return PartReaches(p.c, p.r, Cas); };
+  auto Reaches = [&](const SPart &p, const SCascade &Cas) { return CascadeCull::Reaches(Cas, p.s.x, p.s.y, p.s.z, p.r); };
   auto SetSlice = [&](int i, D3D12_CPU_DESCRIPTOR_HANDLE hDSV)
   {
     m_pDevice->SetShadowMapTarget(Maps.pDepth.Get(), hDSV, m_nCascadeSize);

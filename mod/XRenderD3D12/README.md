@@ -918,6 +918,9 @@ system ones (better not to touch): [`CONFIGURATION.md`](../../CONFIGURATION.md).
   slice, with the filter's reach around it; elsewhere a slice is not read, so the frames are the
   same (Regulator's time demo outdoors: some 400 draws and 0.11 ms of the GPU less a frame, 301
   to 311 FPS; `d3d12_ShadowDebug 1` shows the slices without the casters outside).
+  The sphere's centre along the sun's axes is the same for every slice: each part has it once
+  (`ToSunAxes`), not once a slice. River's heavy frames 600 to 800 (sampled, four pairs of runs):
+  `UpdateSunCascades` 327 to 331 samples → 312 to 319, about 0.035 ms a frame; frame 181 0 px apart.
 
   `d3d12_CascadeCull` (1): without rays (`WantsOffscreenRays`, `WantsRaySun`: they read the casters'
   scenes), only the slices read what the camera towards the sun and the live casters give, so

@@ -1610,8 +1610,9 @@ public:
   //! d3d12_CascadeInstancing 3: DrawCascadeItems' nParts parts (Item(k)) into the slices i they reach (Reaches(k, i)), those
   //! of one mesh, chunk, shader, resources and class in one draw, an instance per object and slice (CascadeGroups.h).
   template <class TItem, class TReaches> void DrawCascadeGroups(size_t nParts, TItem Item, TReaches Reaches);
-  //! Whether the sphere c, r (PartSphere; r < 0: none) reaches the cascade Cas (CascadeCull::Reaches).
-  bool PartReaches(const Vec3 &c, float r, const SCascade &Cas) const;
+  //! A point along the sun's axes (m_vCascadeAxes), as CascadeCull::Reaches takes a part's sphere centre: the same for
+  //! every slice, so each part has it once.
+  Vec3 ToSunAxes(const Vec3 &c) const;
   //! CScene::AddEf with m_bCascadeCull: true for a part of a casters' scene that no slice takes (not a caster's
   //! kind, or its sphere reaches none; a character's part stays, its box comes with the skinning), counted in
   //! m_nCascadeCulled.
