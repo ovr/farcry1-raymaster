@@ -32,6 +32,7 @@
 #include "WakeBodies.h"
 #include "DrawDistance.h"
 #include "DrawExt.h"
+#include "OceanGrid.h"
 #include "WordHash.h"
 #include <optional>
 
@@ -1349,6 +1350,7 @@ public:
     bool bFailed = false;                   //!< no grid (until d3d12_WaterGeometry 0)
     int nBodiesFrame = -1;                  //!< the frame of Bodies
     std::vector<std::pair<int, WakeBodies::SBody>> Bodies;  //!< the bodies in the water without the wakes (theirs with them)
+    OceanGrid::CDiscCache Disc;             //!< the game's disc as last read (SetupOceanGrid)
   };
   SOceanGridState m_OceanGrid;
 

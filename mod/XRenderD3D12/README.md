@@ -2354,7 +2354,10 @@ and lists theirs (`NamesObjects`).
     a geometric series of 1 + r / 0.5 m (22.6 a doubling out to 1244.5 m: 3 % apart far off, 1.5 cm
     at the centre), the last at the disc's edge; bilinear between them, two loads (the search among
     the disc's rings for each pixel cost the water 0.04-0.12 ms at 4K). Where the alpha bends at a
-    ring between two rows it is within a quarter of the slope's change times their spacing.
+    ring between two rows it is within a quarter of the slope's change times their spacing. Both
+    are of the disc's vertices alone: `OceanGrid::CDiscCache` reads them again only when a byte of
+    the vertices changed (the main thread's 0.07 ms a frame where the camera stands; River's sweep,
+    whose ring moves most frames, 178 → 123 samples of 1148 frames). Unit test `Grid_DiscCache`.
   - The height: the FFT ocean's cascades, each at the mip level whose texel is as wide as the grid's
     spacing there (no wave shorter than two cells: those would crawl over the vertices), and the
     wakes' (the window's height, a texture of its own with 4 mip levels written after their view).

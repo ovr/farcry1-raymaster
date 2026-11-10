@@ -6,6 +6,7 @@
 //	Description: Unit tests of the ocean's grid (d3d12_WaterGeometry): its
 //	rings and triangles (OceanGrid.h), the game's disc read from its
 //	vertices and its alpha between them (ReadDisc, DiscTable and
+//	CDiscCache, which reads it again only when a byte of them changed;
 //	OceanGrid.hlsli's GridDiscAlpha; the deferred ocean's by its table,
 //	AlphaTable and GridDiscAlphaTable), how much of the waves' height a vertex
 //	takes (OceanGrid.hlsli: by the depth under the level, the bodies in the
@@ -31,6 +32,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstring>
 #include <string>
 #include <vector>
 
@@ -803,4 +805,46 @@ XR_TEST(Grid_WakeHeights)
   CHECK_MSG(nWrong == 0, std::to_string(nWrong) + " texels off");
   // The window itself as it was (a view, no step).
   CHECK(o.State == Start);
+}
+
+// The disc is read once a frame from the game's vertices, which change only when its ring moves: the cache gives back the
+// disc and both tables as a fresh read would, bit for bit, reads again for one changed byte, and nothing for no disc.
+XR_TEST(Grid_DiscCache)
+{
+  const auto Same = [](const CDiscCache &C, const SDisc &D)
+  {
+    std::vector<float> Table(DiscTableSize(D)), Alpha(AlphaTableSize());
+    DiscTable(D, Table.data());
+    AlphaTable(D, Alpha.data());
+    return C.GetTable() == Table && C.GetAlphaTable() == Alpha;
+  };
+  // Field by field (the struct may have padding).
+  const auto Equal = [](const SDisc &a, const SDisc &b)
+  {
+    return a.fX == b.fX && a.fY == b.fY && a.fZ == b.fZ && a.nRings == b.nRings && memcmp(a.fRadius, b.fRadius, sizeof(a.fRadius)) == 0 &&
+           memcmp(a.fAlpha, b.fAlpha, sizeof(a.fAlpha)) == 0;
+  };
+  CDiscCache C;
+  const std::vector<SVertex> V = GameDisc(GAME_RINGS);
+  SDisc D;
+  CHECK(ReadDisc(V.data(), V.size(), D));
+  const SDisc *p = C.Read(V.data(), V.size());
+  CHECK(p && C.GetReads() == 1 && Equal(*p, D) && Same(C, D));
+  // The same bytes elsewhere: not read again.
+  const std::vector<SVertex> Copy = V;
+  CHECK(C.Read(Copy.data(), Copy.size()) == p && C.GetReads() == 1 && Same(C, D));
+  // One vertex's alpha a step lower: read again, as fresh.
+  std::vector<SVertex> Changed = V;
+  Changed[40].nColor -= 1u << 24;
+  SDisc E;
+  CHECK(ReadDisc(Changed.data(), Changed.size(), E) && !Equal(D, E));
+  p = C.Read(Changed.data(), Changed.size());
+  CHECK(p && C.GetReads() == 2 && Equal(*p, E) && Same(C, E));
+  // No disc (turned by half a segment), none read, then the disc again; no vertices.
+  const std::vector<SVertex> Turned = GameDisc(GAME_RINGS, 5 * PI / 180);
+  CHECK(!C.Read(Turned.data(), Turned.size()) && C.GetReads() == 3 && C.GetTable().empty() && C.GetAlphaTable().empty());
+  CHECK(!C.Read(Turned.data(), Turned.size()) && C.GetReads() == 3);
+  p = C.Read(V.data(), V.size());
+  CHECK(p && C.GetReads() == 4 && Equal(*p, D) && Same(C, D));
+  CHECK(!C.Read(nullptr, V.size()) && C.GetReads() == 5);
 }

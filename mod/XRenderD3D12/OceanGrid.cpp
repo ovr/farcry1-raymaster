@@ -177,9 +177,10 @@ std::optional<SGeomDraw> CD3D12Renderer::SetupOceanGrid(SDrawConstants &dc, cons
                              : pVC ? pVC->m_pVertexBuffer : nullptr;
   if (!pVB || pVB->m_vertexformat != VERTEX_FORMAT_P3F_COL4UB || !pVB->m_VS[VSF_GENERAL].m_VData || pVB->m_NumVerts <= 0)
     return {};
-  OceanGrid::SDisc Disc;
-  if (!OceanGrid::ReadDisc((const OceanGrid::SVertex *)pVB->m_VS[VSF_GENERAL].m_VData, (size_t)pVB->m_NumVerts, Disc) || !EnsureOceanGrid())
+  const OceanGrid::SDisc *pDisc = g.Disc.Read((const OceanGrid::SVertex *)pVB->m_VS[VSF_GENERAL].m_VData, (size_t)pVB->m_NumVerts);
+  if (!pDisc || !EnsureOceanGrid())
     return {};
+  const OceanGrid::SDisc &Disc = *pDisc;
   const bool bTerrain = EnsureGridTerrain((float)Disc.fZ);
 
   // The frame's rings (OceanGrid::FrameRings): seen from the camera's height over the level, the pixels a radian across
@@ -190,13 +191,14 @@ std::optional<SGeomDraw> CD3D12Renderer::SetupOceanGrid(SDrawConstants &dc, cons
   OceanGrid::FrameRings(m_Camera.GetPos().z - fLevel, o.fSlopeRMS0 * dc.vParams0[0], fPixelsPerRadian, g.Rings);
   // The disc's table (OceanGrid.hlsli's GridDiscAlpha), the rings' (GridRing), the disc's alpha by radius for the
   // deferred ocean (GridDiscAlphaTable), in this frame's memory.
-  const size_t nDisc = OceanGrid::DiscTableSize(Disc), nAlpha = nDisc + g.Rings.size();
-  const SD3D12FrameAlloc Table = m_pUpload->AllocFrame((uint32)(sizeof(float) * (nAlpha + OceanGrid::AlphaTableSize())), 16);
+  const std::vector<float> &DiscTable = g.Disc.GetTable(), &AlphaTable = g.Disc.GetAlphaTable();
+  const size_t nDisc = DiscTable.size(), nAlpha = nDisc + g.Rings.size();
+  const SD3D12FrameAlloc Table = m_pUpload->AllocFrame((uint32)(sizeof(float) * (nAlpha + AlphaTable.size())), 16);
   if (!Table.pCPU)
     return {};
-  OceanGrid::DiscTable(Disc, (float *)Table.pCPU);
+  std::copy(DiscTable.begin(), DiscTable.end(), (float *)Table.pCPU);
   std::copy(g.Rings.begin(), g.Rings.end(), (float *)Table.pCPU + nDisc);
-  OceanGrid::AlphaTable(Disc, (float *)Table.pCPU + nAlpha);
+  std::copy(AlphaTable.begin(), AlphaTable.end(), (float *)Table.pCPU + nAlpha);
   uint64 nTableOffset = 0;
   const int nTableSRV = m_pUpload->GetRawSRV(Table.nGPU, nTableOffset);
   if (nTableSRV < 0)

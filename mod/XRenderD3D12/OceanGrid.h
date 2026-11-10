@@ -34,6 +34,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <cstring>
 #include <vector>
 
 namespace OceanGrid
@@ -270,6 +271,43 @@ namespace OceanGrid
         pRow[s] = (float)(D.fAlpha[k0][s % S] + (D.fAlpha[k1][s % S] - D.fAlpha[k0][s % S]) * t);
     }
   }
+
+  //! The disc of a frame's vertices with its tables (DiscTable's, AlphaTable's), read again only when a byte of the
+  //! vertices changed: ReadDisc and the tables are of them alone (the game's ring moves with the camera in steps).
+  class CDiscCache
+  {
+  public:
+    //! The disc of the n vertices V, nullptr where they are none; GetTable and GetAlphaTable its tables.
+    const SDisc *Read(const SVertex *V, size_t n)
+    {
+      if (!V)
+        n = 0;
+      if (m_V.size() != n || (n && memcmp(m_V.data(), V, n * sizeof(SVertex)) != 0))
+      {
+        m_V.assign(V, V + n);
+        m_bDisc = ReadDisc(V, n, m_Disc);
+        m_Table.assign(m_bDisc ? DiscTableSize(m_Disc) : 0, 0.0f);
+        m_Alpha.assign(m_bDisc ? AlphaTableSize() : 0, 0.0f);
+        if (m_bDisc)
+        {
+          DiscTable(m_Disc, m_Table.data());
+          AlphaTable(m_Disc, m_Alpha.data());
+        }
+        m_nReads++;
+      }
+      return m_bDisc ? &m_Disc : nullptr;
+    }
+    const std::vector<float> &GetTable() const { return m_Table; }
+    const std::vector<float> &GetAlphaTable() const { return m_Alpha; }
+    int GetReads() const { return m_nReads; }
+
+  private:
+    std::vector<SVertex> m_V;
+    SDisc m_Disc;
+    bool m_bDisc = false;
+    std::vector<float> m_Table, m_Alpha;
+    int m_nReads = 0;
+  };
 }
 
 #endif
