@@ -1851,6 +1851,16 @@ sweep at 3840 x 2160 with the rays, row 360 (the camera's jump to the flight's s
 engine makes 178 leaf buffers): 14.4–15.2 ms → 13.7–13.9 (`EF_EndEf3D` 7.2–7.8 → 6.2–6.8); its
 heavy part's `EF_EndEf3D` 5.00–5.05 → 4.89–4.92 ms; the frames the same. Unit tests `IndexLists_*`.
 
+A leaf buffer's draw (`Geometry::GetDraw`) is filled where its caller keeps it: every return is
+the one named `std::optional`. A draw made in a local and returned was copied there, its fields
+written one by one and read back 16 bytes at a time, a store forwarding stall each. River's
+sweep, render thread sampled, two sets of three runs against the build before, the second with
+its code moved as the step moves it (32 NOPs in a cold function): `GetDraw`'s own samples
+826 / 814 → 238 / 256 (its caller `DrawLeafItem`'s 716 / 777 → 1,011 / 1,106), all under
+`EF_EndEf3D` 12,075 / 12,284 → 11,868 / 11,953; `EF_EndEf3D` of frames 60–1160
+2.050–2.117 → 1.960–2.046 ms, every run lower, its heaviest tenth 5.89–6.20 → 5.68–5.96 ms.
+The frames are the same (frame 181 in the runs' states). Unit test `LeafDraw_OneResult`.
+
 ## The lists' order
 
 `CScene::BuildLists` puts each list in the order of its items' keys, equal keys as `EF_AddEf` gave

@@ -2177,32 +2177,35 @@ void CLeafBuffer::Render(const SRendParams &rParams, CCObject *pObj, TArray<int>
 
 std::optional<SGeomDraw> Geometry::GetDraw(CLeafBuffer *pLB, const CMatInfo *pChunk)
 {
+  // Every return the one named result, made in the caller's place (a local copied there was written field by field
+  // and read back 16 bytes at a time: four stalls of the store forwarding a draw).
+  std::optional<SGeomDraw> Draw;
   if (!pLB || !pChunk || !GeometryImpl::IsLeafBuffer(pLB) || !MatCount(pLB))
-    return std::nullopt;
+    return Draw;
   const ptrdiff_t nMat = pChunk - &(*pLB->m_pMats)[0];
   if (nMat < 0 || nMat >= MatCount(pLB))
-    return std::nullopt;
+    return Draw;
   CLeafBuffer *pVC = pLB->GetVertexContainer();
   if (pVC != pLB && !GeometryImpl::IsLeafBuffer(pVC))
-    return std::nullopt;
+    return Draw;
   PrepareVideo(pVC, 0);
   CVertexBuffer *pVB = pVC->m_pVertexBuffer;
   if (!pVB || !GeometryImpl::IsDrawableFormat(pVB->m_vertexformat) || pVB->m_NumVerts <= 0)
-    return std::nullopt;
+    return Draw;
 
   SGeomStream &IS = LeafIndices(pLB);
   UpdateList(pLB, IS);
   const SGeomRange r = IS.Ranges[nMat];
   if (!r.nCount)
-    return std::nullopt;
+    return Draw;
   uint32 nVBBytes = 0;
   const D3D12_GPU_VIRTUAL_ADDRESS nVB = VertexGPU(pVB, nVBBytes);
   const uint32 nIBBytes = (uint32)(IS.List.size() * sizeof(uint16));
   const D3D12_GPU_VIRTUAL_ADDRESS nIB = nVB ? IS.GPU.Get(IS.List.data(), nIBBytes) : 0;
   if (!nVB || !nIB)
-    return std::nullopt;
+    return Draw;
 
-  SGeomDraw d;
+  SGeomDraw &d = Draw.emplace();
   d.VB.BufferLocation = nVB;
   d.VB.SizeInBytes = nVBBytes;
   d.VB.StrideInBytes = GeometryImpl::VertexSize(pVB->m_vertexformat);
@@ -2216,7 +2219,7 @@ std::optional<SGeomDraw> Geometry::GetDraw(CLeafBuffer *pLB, const CMatInfo *pCh
   d.nBaseVertex = 0;
   d.nFirstVertex = (uint32)std::max(pChunk->nFirstVertId, 0);
   d.nNumVertices = (uint32)std::max(pChunk->nNumVerts, 0);
-  return d;
+  return Draw;
 }
 
 std::span<const uint16> Geometry::GetTriangles(CLeafBuffer *pLB, const CMatInfo *pChunk)
