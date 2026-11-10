@@ -185,9 +185,10 @@ system ones (better not to touch): [`CONFIGURATION.md`](../../CONFIGURATION.md).
   with the HDR scene's light (`d3d12_UpscaleHdr`) as FSR gets it. The path tracer gets those
   targets too. It is not drawn by `DrawPostAA`, but its GPU section is theirs, `anti-aliasing`
   (until step 325 the upscalers' `upscale`).
-  - Three compute kernels: the motion of each pixel as the nearest (by the depth) of its 3 x 3's;
-    the resolve, the history where the pixel was (Catmull-Rom, 5 taps) clipped towards the 3 x 3's
-    box (YCoCg, mean +- 1.25 standard deviations within their range) and blended with the frame,
+  - Two compute kernels: the resolve, the history where the pixel was (it moves as the nearest, by
+    the depth, of its 3 x 3; a kernel of its own until step 383) by Catmull-Rom (5 taps), clipped
+    towards the 3 x 3's box (YCoCg, mean +- 1.25 standard deviations within their range) and
+    blended with the frame,
     each weighted by 1 / (1 + its luma): the frame's share 1 / (n + 1) after n frames of history
     (the history's alpha counts them, up to 32), at least 1 / 5, 1 / 7, 1 / 10, 1 / 14 by
     `d3d12_AAQuality` and up to 1.5 times it from a pixel's motion a frame on (the history,
@@ -221,7 +222,10 @@ system ones (better not to touch): [`CONFIGURATION.md`](../../CONFIGURATION.md).
     textures flicker more. At 3840 x 2160 its GPU section (`anti-aliasing`) takes 0.60-0.62 ms (0.59-0.61
     without the 3 x 3's limit in the same runs; 0.56 with the sharpening of our own and 0.49-0.51
     without the sharpening in others; FSR 4's Native AA 4.10-4.15; PerfSweep Swamp and Pier, with the
-    scene's light for it in `hdr` and the motion vectors).
+    scene's light for it in `hdr` and the motion vectors). Since step 383 the motion is the
+    resolve's own (the exposure read there as a UAV, its four SRVs taken): 0.57-0.58 ms against
+    0.61-0.64 (PerfSweep Pier in the player's settings, five runs each), the picture the same to
+    the pixel.
   - Unit tests `Taa_*`: the jitter covers the pixel; a still edge gathers the frames (under half
     of the error without it after 48 frames at every quality); a reset takes the frame; the history
     follows the motion (by the nearest of the 3 x 3) and is ignored off the picture; a stale history

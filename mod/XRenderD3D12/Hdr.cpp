@@ -866,7 +866,7 @@ bool CD3D12Renderer::EnsureSceneLightTargets(int nWidth, int nHeight)
   if (!m_Hdr.pLight)
     m_Hdr.pLight = m_pUpload->CreateRenderTarget(nWidth, nHeight, D3D12_HDR_FORMAT);
   if (!m_Hdr.pExposureScale)
-    m_Hdr.pExposureScale = m_pUpload->CreateRenderTarget(1, 1, DXGI_FORMAT_R32_FLOAT);
+    m_Hdr.pExposureScale = m_pUpload->CreateRenderTarget(1, 1, DXGI_FORMAT_R32_FLOAT, true);  // TAA's resolve reads it as a UAV
   if (BadTarget(m_Hdr.pLight) || BadTarget(m_Hdr.pExposureScale))
   {
     iLog->LogError("XRenderD3D12: no target of %d x %d for the upscaler's HDR light (d3d12_UpscaleHdr); the tone mapped scene", nWidth, nHeight);

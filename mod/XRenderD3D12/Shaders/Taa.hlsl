@@ -5,16 +5,17 @@
 //	File: Taa.hlsl
 //	Description: TAA's kernels (d3d12_AA taa, UpscalerTaa.cpp; the method
 //	is Taa.hlsli's), a thread a pixel of the display's size:
-//	  CSDilate   t0 the depth (R32_FLOAT), t1 the motion vectors
-//	             (R16G16_FLOAT); u0 each pixel's motion, the nearest of its
-//	             3 x 3's (R16G16_FLOAT)
 //	  CSResolve  t0 the frame's colours (LDR, or with TAA_HDR the HDR
-//	             light), t1 CSDilate's motion, t2 the history (the frame
-//	             before's, R16G16B16A16_FLOAT: rgb the colour, a the
-//	             frames / TAA_FRAMES), t3 with TAA_EXPOSURE the light's
-//	             exposure (R32_FLOAT, 1 x 1); u0 the new history, u1 with
-//	             TAA_OUTPUT the picture (its debug view with TAA_DEBUG)
-//	  CSSharpen  t0 the new history, t1 as CSResolve's t3; u0 the picture,
+//	             light), t1 the depth (R32_FLOAT), t2 the motion vectors
+//	             (R16G16_FLOAT; the pixel's that of the nearest of its
+//	             3 x 3, TaaDilate), t3 the history (the frame before's,
+//	             R16G16B16A16_FLOAT: rgb the colour, a the frames /
+//	             TAA_FRAMES); u0 the new history, u1 with TAA_OUTPUT the
+//	             picture (its debug view with TAA_DEBUG), u2 with
+//	             TAA_EXPOSURE the light's exposure (R32_FLOAT, 1 x 1; a UAV,
+//	             the SRVs' four slots taken)
+//	  CSSharpen  t0 the new history, t1 the exposure as CSResolve's u2
+//	             (an SRV); u0 the picture,
 //	             the history sharpened by AMD FidelityFX CAS (TaaCas.hlsli)
 //	             with the constants vCas0, vCas1 of its sharpness
 //	Bindings (D3D12Compute.h): b0 STaaConstants, s1 linear clamp.
@@ -30,17 +31,14 @@ cbuffer cbTaa : register(b0)
 
 SamplerState g_LinearClamp : register(s1);
 
-#if defined(XR_TAA_DILATE)
-Texture2D<float> g_Depth : register(t0);
-Texture2D<float2> g_Velocity : register(t1);
-RWTexture2D<float2> g_Motion : register(u0);
-#elif defined(XR_TAA_RESOLVE)
+#if defined(XR_TAA_RESOLVE)
 Texture2D<float4> g_Color : register(t0);
-Texture2D<float2> g_MotionIn : register(t1);
-Texture2D<float4> g_History : register(t2);
-Texture2D<float> g_Exposure : register(t3);
+Texture2D<float> g_Depth : register(t1);
+Texture2D<float2> g_Velocity : register(t2);
+Texture2D<float4> g_History : register(t3);
 RWTexture2D<float4> g_NewHistory : register(u0);
 RWTexture2D<float4> g_Output : register(u1);
+RWTexture2D<float> g_ExposureIn : register(u2);
 #else
 Texture2D<float4> g_Resolved : register(t0);
 Texture2D<float> g_Exposure : register(t1);
@@ -52,18 +50,17 @@ int2 TaaClamp(int2 p)
   return clamp(p, int2(0, 0), (int2)g_Taa.vSize.xy - 1);
 }
 
-#if defined(XR_TAA_DILATE)
+#if defined(XR_TAA_RESOLVE)
 float TaaLoadDepth(int2 p) { return g_Depth.Load(int3(TaaClamp(p), 0)); }
 float2 TaaLoadVelocity(int2 p) { return g_Velocity.Load(int3(TaaClamp(p), 0)); }
+float3 TaaLoadColor(int2 p) { return g_Color.Load(int3(TaaClamp(p), 0)).rgb; }
+// The motion read only at the resolve's own pixel: TaaDilate's there, no kernel of its own.
+float2 TaaDilate(int2 p);
+float2 TaaLoadMotion(int2 p) { return TaaDilate(p); }
+float4 TaaSampleHistory(float2 uv) { return g_History.SampleLevel(g_LinearClamp, uv, 0); }
 #else
 float TaaLoadDepth(int2 p) { return 0; }
 float2 TaaLoadVelocity(int2 p) { return 0; }
-#endif
-#if defined(XR_TAA_RESOLVE)
-float3 TaaLoadColor(int2 p) { return g_Color.Load(int3(TaaClamp(p), 0)).rgb; }
-float2 TaaLoadMotion(int2 p) { return g_MotionIn.Load(int3(TaaClamp(p), 0)); }
-float4 TaaSampleHistory(float2 uv) { return g_History.SampleLevel(g_LinearClamp, uv, 0); }
-#else
 float3 TaaLoadColor(int2 p) { return 0; }
 float2 TaaLoadMotion(int2 p) { return 0; }
 float4 TaaSampleHistory(float2 uv) { return 0; }
@@ -76,14 +73,14 @@ float TaaExposure()
 {
   if (!(g_Taa.vFlags.x & TAA_HDR))
     return 0;
-#if defined(XR_TAA_DILATE)
-  return 0;
+#if defined(XR_TAA_RESOLVE)
+  return (g_Taa.vFlags.x & TAA_EXPOSURE) ? max(g_ExposureIn[int2(0, 0)], 1e-8) : g_Taa.vParams.z;
 #else
   return (g_Taa.vFlags.x & TAA_EXPOSURE) ? max(g_Exposure.Load(int3(0, 0, 0)), 1e-8) : g_Taa.vParams.z;
 #endif
 }
 
-#if !defined(XR_TAA_DILATE) && !defined(XR_TAA_RESOLVE)
+#if !defined(XR_TAA_RESOLVE)
 //! The exposure of the picture CAS loads (TaaExposure, once a thread).
 static float s_fCasExposure;
 
@@ -106,9 +103,7 @@ void CSMain(uint2 vPixel : SV_DispatchThreadID)
   if (any(vPixel >= (uint2)g_Taa.vSize.xy))
     return;
   const int2 p = (int2)vPixel;
-#if defined(XR_TAA_DILATE)
-  g_Motion[p] = TaaDilate(p);
-#elif defined(XR_TAA_RESOLVE)
+#if defined(XR_TAA_RESOLVE)
   const float fExposure = TaaExposure();
   const STaaPixel r = TaaResolve(p, g_Taa.vSize, fExposure, g_Taa.vParams.x, g_Taa.vParams.w, (g_Taa.vFlags.x & TAA_RESET) != 0);
   g_NewHistory[p] = float4(r.vColor, r.fFrames);

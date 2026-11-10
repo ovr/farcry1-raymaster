@@ -75,7 +75,6 @@
 #include "Cmaa2DispatchArgs_CS.h"
 #include "Cmaa2Candidates_CS.h"
 #include "Cmaa2Apply_CS.h"
-#include "TaaDilate_CS.h"
 #include "TaaResolve_CS.h"
 #include "TaaSharpen_CS.h"
 #include "OceanRows_CS.h"
@@ -183,7 +182,6 @@ const SKernel s_Kernels[eD3D12K_Num] =
   { "CMAA2 dispatch arguments", g_Cmaa2DispatchArgs_CS, sizeof(g_Cmaa2DispatchArgs_CS), false, true },
   { "CMAA2 candidates", g_Cmaa2Candidates_CS, sizeof(g_Cmaa2Candidates_CS), false, true },
   { "CMAA2 apply", g_Cmaa2Apply_CS, sizeof(g_Cmaa2Apply_CS), false, true },
-  { "TAA motion", g_TaaDilate_CS, sizeof(g_TaaDilate_CS) },
   { "TAA resolve", g_TaaResolve_CS, sizeof(g_TaaResolve_CS) },
   { "TAA sharpening", g_TaaSharpen_CS, sizeof(g_TaaSharpen_CS) },
   { "ocean (rows)", g_OceanRows_CS, sizeof(g_OceanRows_CS) },

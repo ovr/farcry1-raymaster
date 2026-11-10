@@ -164,9 +164,8 @@ xrender_d3d12_shader(Cmaa2DispatchArgs_CS AntiAliasCmaa2.hlsl cs_6_0 ComputeDisp
 xrender_d3d12_shader(Cmaa2Candidates_CS AntiAliasCmaa2.hlsl cs_6_0 ProcessCandidatesCS)
 xrender_d3d12_shader(Cmaa2Apply_CS AntiAliasCmaa2.hlsl cs_6_0 DeferredColorApply2x2CS)
 set(XRENDERD3D12_SHADER_INCLUDES "")
-# TAA (d3d12_AA taa, UpscalerTaa.cpp, Taa.hlsli): each pixel's motion, the frame blended into the history, the sharpening
+# TAA (d3d12_AA taa, UpscalerTaa.cpp, Taa.hlsli): the frame blended into the history at each pixel's motion, the sharpening
 # (AMD FidelityFX CAS of third_party/fidelityfx-cas, TaaCas.hlsli).
-xrender_d3d12_shader(TaaDilate_CS Taa.hlsl cs_6_0 CSMain XR_TAA_DILATE)
 xrender_d3d12_shader(TaaResolve_CS Taa.hlsl cs_6_0 CSMain XR_TAA_RESOLVE)
 set(XRENDERD3D12_SHADER_INCLUDES "${XRENDERD3D12_CAS_DIR}")
 xrender_d3d12_shader(TaaSharpen_CS Taa.hlsl cs_6_0 CSMain)
