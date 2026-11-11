@@ -1713,6 +1713,42 @@ The default block stays bound over a run of draws. `0` uploads the rest of every
 prepass's motion as before the block, for comparisons (read at each draw). `r_Stats` and
 `d3d12_FrameLog` count the bytes and the draws by why they uploaded.
 
+## GPU memory
+
+All of the renderer's GPU memory comes from AMD's D3D12 Memory Allocator
+(`third_party/d3d12-memory-allocator`, v3.3.0): one allocator of the device, made with it
+(`CD3D12Device::CreateResource`, `D3D12Memory.h`). A resource is made with its memory
+(`CD3D12Resource`: the allocation, which owns the resource, and the allocator) and goes with it,
+through `DeferredRelease` once the GPU has passed the frame's fence.
+
+- Placed in the allocator's heaps (its memory as the last user left it): what is written whole
+  before it is read, the static buffers and the textures with data, the characters' shadow maps
+  (a dozen come at once when a turn brings them into view), the ray scene's structures and
+  scratch, the upload heaps (the frame's ring, staging, the pipeline's defaults). Small buffers
+  are placed too (`ALLOCATOR_FLAG_DONT_PREFER_SMALL_BUFFERS_COMMITTED`): a committed resource costs
+  the kernel a few hundred microseconds to make and to free, and the terrain makes index buffers
+  every frame outdoors. The allocator's own heaps are not zeroed (`DEFAULT_POOLS_NOT_ZEROED`).
+- Committed (a heap of its own, zeroed): what is read before it is written, the device's targets,
+  the render and compute targets, the histories, the counters and words of the HDR passes and
+  CMAA2, the path tracer's radiance cache (no keys at the start), the read backs, MSAA targets.
+- The ray scene's static BLAS share pools of 64 MB, their ranges kept by a `D3D12MA::VirtualBlock`
+  each (256-byte aligned); a pool that empties goes (the first stays).
+- Outside the allocator: the swap chain's buffers, what AMD FSR's backend and CACAO make inside
+  their libraries, and DRED's test buffer (`d3d12_DredTest 2`).
+- `r_Stats 2` shows the process' video memory and the shared memory with their budgets
+  (`Allocator::GetBudget`), the allocator's heaps (committed resources among them) with what is
+  free in them and its resources (`CalculateStatistics`, twice a second), the resources' bytes
+  by heap type, then the textures and buffers of the upload (the allocations' sizes), the static
+  BLAS, the textures and the frame memory. `r_DisplayInfo` has a line `VRAM` (the video memory and
+  its budget).
+- `d3d12_MemoryDump 1` writes the allocator's statistics with every heap and resource (its name,
+  size, offset, `BuildStatsString`) to `farcry1_testing1/XRenderD3D12_memory.json` (never
+  committed) at the frame's end, then the variable is 0 again; the log has the totals. AMD's
+  `GpuMemDumpVis.py` draws it.
+- Tests: `Tests/MemoryTests.cpp` (`Memory_*`, also under the debug layer): placed and committed
+  resources in their heap types, the placed ones' ranges apart and reused, a resource outliving
+  its allocator's owner, mapped upload buffers, the statistics and the JSON dump.
+
 ## Resource states and barriers
 
 The frame's barriers go through the device (`CD3D12Device::Transition`, `UavBarrier`,
@@ -1812,13 +1848,14 @@ given one by one, on the GPU with the debug layer).
   between frames, the CPU's wait for the GPU at the start of a frame and in `Present`, the draws,
   how many of them changed the pipeline state, and the triangles, the megabytes of the draws'
   constants and the draws that uploaded their rest (b3, `d3d12_DrawExt`); `2` (and more) also the memory:
-  the process' video memory and its budget (DXGI), the textures and buffers, the static
-  geometry's acceleration structures, the frame memory and the pipeline states made. A frame read
+  the process' video memory and the shared memory with their budgets, the GPU memory allocator's
+  heaps and resources (GPU memory), the textures and buffers, the static geometry's acceleration
+  structures, the frame memory and the pipeline states made. A frame read
   before `Update` (a demo's frames and clips) has them too. It turns the GPU's timestamps on, as
   `d3d12_GpuTimes` does; both get the same times.
 - `r_DisplayInfo` is drawn by `XRenderD3D12` in the same way, a panel at the top right in place of
   the engine's block: the game's version and level, the view's camera position, angles and
-  distance, the frame rate of the half second with its slowest and fastest frames', the triangles
+  distance, the video memory and its budget (`VRAM`), the frame rate of the half second with its slowest and fastest frames', the triangles
   per frame and per second, the main view's lights (the sun, the others; counted at its
   `EF_EndEf3D`), the ambient occlusion's backend as it is made (XeGTAO, CACAO, by rays, GI by rays,
   none; none (path tracing) under the path tracer), ray tracing (not supported, off, or the last scene for rays' instances and triangles; then
@@ -1851,6 +1888,8 @@ given one by one, on the GPU with the debug layer).
   offset, leaf first) to `farcry1_testing1/XRenderD3D12_samples.txt`; with 250 a time demo runs
   about 5 % slower. In DemoReplay's arguments `--exec-at 60 "d3d12_CpuSamples 250" --exec-at 2800
   "d3d12_CpuSamples 0"` samples a part of a run.
+- `d3d12_MemoryDump 1` writes the GPU memory allocator's heaps and resources to
+  `farcry1_testing1/XRenderD3D12_memory.json` (GPU memory).
 - `d3d12_DumpFrame 1` writes the render items of the next frame to
   `farcry1_testing1/XRenderD3D12_frame.txt` (never committed): the camera (position, angles,
   field of view, near and far plane, view and projection matrices), then for each item its list, sort

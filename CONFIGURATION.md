@@ -233,6 +233,7 @@ Details: [Statistics and profiling](mod/XRenderD3D12/README.md#statistics-and-pr
 | `d3d12_FrameLog` | `0` |  | 1 a line per frame to `XRenderD3D12_frames.txt` |
 | `d3d12_CpuSamples` | `0` |  | N: the drawing thread's stack sampled every N microseconds; back to 0 writes the report |
 | `d3d12_DumpFrame` | `0` |  | 1 the next frame's render items and draws to `XRenderD3D12_frame.txt` |
+| `d3d12_MemoryDump` | `0` |  | 1 the GPU memory allocator's heaps and resources to `XRenderD3D12_memory.json` (JSON) at the frame's end |
 | `d3d12_HDRLog` | `0` |  | 1 a line of the HDR statistics per frame to `XRenderD3D12_hdr.txt` |
 
 ### The device and its checks

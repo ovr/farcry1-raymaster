@@ -14,16 +14,17 @@
 //	GPU's frame; the time between frames, the CPU's wait for the GPU at
 //	the start of a frame and in Present; the draws, how many changed the
 //	pipeline state, the triangles. r_Stats 2 adds the memory: the process'
-//	video memory and its budget (DXGI), the textures and buffers, the
-//	acceleration structures of the static geometry, the frame memory and
-//	the pipeline states made. The panel is below the text at the top left
+//	video memory and the shared memory with their budgets, the GPU memory
+//	allocator's heaps and resources (D3D12Memory.h; d3d12_MemoryDump writes
+//	them all), the textures and buffers, the acceleration structures of the
+//	static geometry, the frame memory and the pipeline states made. The panel is below the text at the top left
 //	(the time demo's lines), or at the top.
 //
 //	r_DisplayInfo is drawn here too, at the top right in the same way, in
 //	place of the engine's own block: the console's variable stays 0 (the
 //	engine draws its block when it is not), its value is the renderer's
 //	(TakeDisplayInfo). The game's version and level, the view's camera,
-//	angles and distance, the frame rate (half a second's, and of its
+//	angles and distance, the video memory and its budget, the frame rate (half a second's, and of its
 //	slowest and fastest frames), the triangles and the lights of the frame,
 //	the anti-aliasing, the upscaler and the 3D scene's size before and
 //	after it. d3d12_DisplayHDR's panel (HdrStats.cpp) is below it: the
@@ -287,7 +288,7 @@ void CD3D12Renderer::CollectStats()
   SFrameStats &Sum = m_StatsSum;
   const auto TakeMemory = [this](SFrameStats &Stats)
   {
-    m_pDevice->GetVideoMemory(Stats.nVideoUsage, Stats.nVideoBudget);
+    m_pDevice->GetMemoryStats(Stats.Memory, CV_r_Stats >= 2);
     Stats.nResourceBytes = m_pUpload ? m_pUpload->GetVideoMemory() : 0;
     Stats.nRayBytes = m_pRayScene ? m_pRayScene->GetStaticBytes() : 0;
     if (m_pTextures)
@@ -430,8 +431,19 @@ void CD3D12Renderer::DrawStats()
       if (CV_r_Stats >= 2)
       {
         constexpr double MB = 1024.0 * 1024.0;
-        if (S.nVideoBudget)
-          Add(Format("Video memory %s of %s MB", Thousands((uint64)(S.nVideoUsage / MB)).c_str(), Thousands((uint64)(S.nVideoBudget / MB)).c_str()));
+        const SD3D12MemoryStats &M = S.Memory;
+        const auto Mb = [](uint64 n) { return Thousands((uint64)(n / MB)); };
+        if (M.nLocalBudget)
+          Add(Format("Video memory %s of %s MB, shared %s of %s MB", Mb(M.nLocalUsage).c_str(), Mb(M.nLocalBudget).c_str(), Mb(M.nSharedUsage).c_str(),
+                     Mb(M.nSharedBudget).c_str()));
+        if (M.nHeaps)
+        {
+          Add(Format("Heaps %s (%s MB, %s MB free in them), resources %s (%s MB)", Thousands(M.nHeaps).c_str(), Mb(M.nHeapBytes).c_str(),
+                     Mb(M.nHeapBytes - std::min(M.nHeapBytes, M.nAllocationBytes)).c_str(), Thousands(M.nAllocations).c_str(),
+                     Mb(M.nAllocationBytes).c_str()));
+          Add(Format("Resources in default heaps %s MB, upload %s MB, read back %s MB", Mb(M.nTypeBytes[0]).c_str(), Mb(M.nTypeBytes[1]).c_str(),
+                     Mb(M.nTypeBytes[2]).c_str()));
+        }
         Add(Format("Textures and buffers %s MB, rays %s MB", Thousands((uint64)(S.nResourceBytes / MB)).c_str(), Thousands((uint64)(S.nRayBytes / MB)).c_str()));
         Add(Format("Textures %s (%s MB), upscaled %s (%s MB)", Thousands((uint64)S.nTextures).c_str(), Thousands((uint64)(S.nTextureBytes / MB)).c_str(),
                    Thousands((uint64)S.nUpscaled).c_str(), Thousands((uint64)(S.nUpscaledBytes / MB)).c_str()));
@@ -484,6 +496,8 @@ void CD3D12Renderer::DrawStats()
     Value("Camera", Format("%.1f %.1f %.1f", vPos.x, vPos.y, vPos.z));
     Value("Angles", Format("%.0f %.0f %.0f", vAngles.x, vAngles.y, vAngles.z));
     Value("View distance", Format("%.0f m", Camera.GetZMax()));
+    if (S.Memory.nLocalBudget)
+      Value("VRAM", Format("%s / %s MB", Thousands(S.Memory.nLocalUsage >> 20).c_str(), Thousands(S.Memory.nLocalBudget >> 20).c_str()));
     if (!S.nFrames || S.fFrameMs <= 0)
     {
       Value("FPS", "collecting");

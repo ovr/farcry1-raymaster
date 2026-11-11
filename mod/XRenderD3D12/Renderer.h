@@ -95,8 +95,7 @@ struct SFrameStats
   double fBarrierDrains = 0;
   double fBarriers = 0;
   double fFrameMemory = 0;        //!< bytes of per frame memory (CD3D12Upload::AllocFrame)
-  uint64 nVideoUsage = 0;         //!< the process' video memory (DXGI) and how much it may use
-  uint64 nVideoBudget = 0;
+  SD3D12MemoryStats Memory;       //!< the allocator's (CD3D12Device::GetMemoryStats)
   uint64 nResourceBytes = 0;      //!< the textures and buffers (CD3D12Upload::GetVideoMemory)
   uint64 nRayBytes = 0;           //!< the acceleration structures of the static geometry
   int nTextures = 0;              //!< the textures with a GPU picture, and of them those upscaled (r_TexUpscaled), with their bytes
@@ -2274,6 +2273,7 @@ public:
   int CV_d3d12_DRED = 1;              //!< DRED, 1 the page faults and our markers, 2 and every command (XRENDERD3D12_DRED before it); only read at Init
   int CV_d3d12_DredTest = 0;          //!< 1 removes the device, 2 makes a GPU page fault (CD3D12Device::DredTest), then 0
   int CV_d3d12_DumpFrame = 0;         //!< non-zero: the next frame's 3D draws go to XRenderD3D12_frame.txt, then 0
+  int CV_d3d12_MemoryDump = 0;        //!< non-zero: the allocator's statistics go to XRenderD3D12_memory.json at the frame's end, then 0
   ICVar *m_pVolumetricFog = nullptr;  //!< r_VolumetricFog, looked up on first use
   ICVar *m_pScopeLens = nullptr;      //!< r_ScopeLens_fx, looked up on first use
   ICVar *m_pNoDrawNear = nullptr;     //!< r_NoDrawNear, looked up on first use

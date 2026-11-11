@@ -510,9 +510,11 @@ public:
   double GetPresentMs() const { return m_fPresentMs; }
   //! The adapter's name (UTF-8).
   const char *GetAdapterName() const { return m_szAdapter; }
-  //! The process' use of the adapter's own memory and how much it may use (its budget); false
-  //! when DXGI does not tell.
-  bool GetVideoMemory(uint64 &nUsage, uint64 &nBudget) const;
+  //! The memory's use and budgets (cheap); with bHeaps also what the allocator's heaps hold (it walks them: twice a
+  //! second at most). False without an allocator.
+  bool GetMemoryStats(SD3D12MemoryStats &Out, bool bHeaps) const;
+  //! The allocator's JSON statistics (D3D12MA::Allocator::BuildStatsString with every allocation) to szPath, UTF-8.
+  bool DumpMemory(const char *szPath) const;
 
   //! Occlusion queries: BeginOcclusion .. EndOcclusion count the samples drawn in between that
   //! pass the depth test, at most OCCLUSION_QUERIES per frame. A frame's counts come when the GPU

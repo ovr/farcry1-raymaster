@@ -17,6 +17,7 @@
 #pragma once
 
 #include <D3D12MemAlloc.h>
+#include <cstdint>
 #include <wrl/client.h>
 
 enum class ED3D12Memory
@@ -29,6 +30,16 @@ enum class ED3D12Memory
 //! make and to free, and the terrain makes index buffers every frame outdoors.
 inline constexpr D3D12MA::ALLOCATOR_FLAGS D3D12_ALLOCATOR_FLAGS =
   D3D12MA_RECOMMENDED_ALLOCATOR_FLAGS | D3D12MA::ALLOCATOR_FLAG_DONT_PREFER_SMALL_BUFFERS_COMMITTED;
+
+//! The allocator's memory for the overlay (r_Stats 2, r_DisplayInfo; CD3D12Device::GetMemoryStats).
+struct SD3D12MemoryStats
+{
+  uint64_t nLocalUsage = 0, nLocalBudget = 0;     //!< the adapter's own memory: the process' use and how much it may use
+  uint64_t nSharedUsage = 0, nSharedBudget = 0;   //!< the system memory the GPU reads (upload and read back heaps)
+  uint32_t nHeaps = 0, nAllocations = 0;          //!< heaps (committed resources among them) and resources in them
+  uint64_t nHeapBytes = 0, nAllocationBytes = 0;
+  uint64_t nTypeBytes[3] = {};                    //!< the resources' bytes in the default, upload and read back heaps
+};
 
 //! A resource with its allocation, which owns it: where a ComPtr<ID3D12Resource> held one the renderer made, so that
 //! releasing it (DeferredRelease, Reset) gives back the memory too. A ComPtr may still hold the resource itself to keep

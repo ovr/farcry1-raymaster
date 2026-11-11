@@ -2102,15 +2102,48 @@ void CD3D12Device::ReadGpuTimes()
   m_nGpuTimedFrames++;
 }
 
-bool CD3D12Device::GetVideoMemory(uint64 &nUsage, uint64 &nBudget) const
+bool CD3D12Device::GetMemoryStats(SD3D12MemoryStats &Out, bool bHeaps) const
 {
-  ComPtr<IDXGIAdapter3> pAdapter3;
-  DXGI_QUERY_VIDEO_MEMORY_INFO Info;
-  if (!m_pAdapter || FAILED(m_pAdapter.As(&pAdapter3)) || FAILED(pAdapter3->QueryVideoMemoryInfo(0, DXGI_MEMORY_SEGMENT_GROUP_LOCAL, &Info)))
+  Out = SD3D12MemoryStats();
+  if (!m_pAllocator)
     return false;
-  nUsage = Info.CurrentUsage;
-  nBudget = Info.Budget;
+  D3D12MA::Budget Local = {}, Shared = {};
+  m_pAllocator->GetBudget(&Local, &Shared);
+  Out.nLocalUsage = Local.UsageBytes;
+  Out.nLocalBudget = Local.BudgetBytes;
+  Out.nSharedUsage = Shared.UsageBytes;
+  Out.nSharedBudget = Shared.BudgetBytes;
+  if (!bHeaps)
+    return true;
+  D3D12MA::TotalStatistics Stats = {};
+  m_pAllocator->CalculateStatistics(&Stats);
+  Out.nHeaps = Stats.Total.Stats.BlockCount;
+  Out.nAllocations = Stats.Total.Stats.AllocationCount;
+  Out.nHeapBytes = Stats.Total.Stats.BlockBytes;
+  Out.nAllocationBytes = Stats.Total.Stats.AllocationBytes;
+  for (int i = 0; i < 3; i++)
+    Out.nTypeBytes[i] = Stats.HeapType[i].Stats.AllocationBytes;
   return true;
+}
+
+bool CD3D12Device::DumpMemory(const char *szPath) const
+{
+  if (!m_pAllocator)
+    return false;
+  WCHAR *szJson = nullptr;
+  m_pAllocator->BuildStatsString(&szJson, TRUE);
+  if (!szJson)
+    return false;
+  const int nBytes = WideCharToMultiByte(CP_UTF8, 0, szJson, -1, nullptr, 0, nullptr, nullptr);
+  std::string Json(nBytes > 0 ? nBytes - 1 : 0, '\0');
+  if (nBytes > 1)
+    WideCharToMultiByte(CP_UTF8, 0, szJson, -1, Json.data(), nBytes, nullptr, nullptr);
+  m_pAllocator->FreeStatsString(szJson);
+  FILE *pFile = fopen(szPath, "wb");
+  if (!pFile)
+    return false;
+  const bool bOk = fwrite(Json.data(), 1, Json.size(), pFile) == Json.size();
+  return fclose(pFile) == 0 && bOk;
 }
 
 int CD3D12Device::BeginOcclusion()

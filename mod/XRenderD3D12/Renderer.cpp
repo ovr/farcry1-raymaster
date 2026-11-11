@@ -158,6 +158,8 @@ void CD3D12Renderer::RegisterVariables()
                      "Tests DRED's report in the next frame: 1 removes the device, 2 makes a GPU page fault (the driver resets the GPU); "
                      "the renderer draws nothing after either");
   iConsole->Register("d3d12_DumpFrame", &CV_d3d12_DumpFrame, 0, 0, "Writes the render items and draws of the next frame to XRenderD3D12_frame.txt");
+  iConsole->Register("d3d12_MemoryDump", &CV_d3d12_MemoryDump, 0, 0,
+                     "Writes the GPU memory allocator's statistics, every heap and resource, to XRenderD3D12_memory.json (JSON)");
   iConsole->Register("d3d12_WaterDebug", &CV_d3d12_WaterDebug, 0, 0,
                      "Water surfaces show one term: 1 refraction, 2 reflection, 3 water thickness (0-2 m: black-white), 4 normal, 5 screen space reflection hits, 6 their colour, 7 the planar reflection, "
                      "8 the scene behind, 9 view path (red, 0-32 m), depth (green, 0-16 m) and fresnel (blue), 10 the vertex colour, 11 its alpha, "
@@ -1560,6 +1562,17 @@ void CD3D12Renderer::Update (void)
     m_pFrameDump.reset();
     CV_d3d12_DumpFrame = 0;
     iLog->Log("XRenderD3D12: frame %d written to XRenderD3D12_frame.txt", m_nFrameID);
+  }
+  if (CV_d3d12_MemoryDump && m_pDevice)
+  {
+    CV_d3d12_MemoryDump = 0;
+    SD3D12MemoryStats Mem;
+    m_pDevice->GetMemoryStats(Mem, true);
+    if (m_pDevice->DumpMemory("XRenderD3D12_memory.json"))
+      iLog->Log("XRenderD3D12: GPU memory written to XRenderD3D12_memory.json: %u heaps of %.1f MB, %u resources of %.1f MB",
+                Mem.nHeaps, Mem.nHeapBytes / 1048576.0, Mem.nAllocations, Mem.nAllocationBytes / 1048576.0);
+    else
+      iLog->LogError("XRenderD3D12: d3d12_MemoryDump: XRenderD3D12_memory.json not written");
   }
   m_nFrameID++;
   m_nFrames++;
