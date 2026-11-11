@@ -432,9 +432,9 @@ void CD3D12Renderer::RegisterVariables()
                      "scene behind it times the material's diffuse colour, as the original's refraction pass; 0: untinted (the frames "
                      "before)");
   iConsole->Register("d3d12_FogVolumeDepth", &CV_d3d12_FogVolumeDepth, 1, 0,
-                     "1: a fog volume's fog over a point under its layer, seen from above, at least the fog of the point's depth under "
-                     "the layer, which every ray to it crosses (a dense volume, Training's bunker pool's 0.1 m, hides its floor); 0: "
-                     "the gate of 5 m below the layer alone (the frames before)");
+                     "1: the floor seen through a water volume's surface has at least the fog of its depth under it, in the volume's "
+                     "colour lit by the brightness behind (a dense volume, Training's bunker pool's 0.1 m, hides its floor); 0: the "
+                     "gate of 5 m below the layer alone (the frames before)");
   iConsole->Register("d3d12_UnderwaterBodies", &CV_d3d12_UnderwaterBodies, 1, 0,
                      "1: with the camera above the ocean, the characters under its level (the fish; a body shorter than 1 m by its middle) drawn after the rest of the "
                      "opaque surfaces without writing the depth: the water over them takes the floor under them, its shore's foam no "

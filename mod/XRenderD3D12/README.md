@@ -2647,7 +2647,13 @@ and lists theirs (`NamesObjects`).
   olive. In the comparison film's training-bunker at frame 490 the pool's luma is 30.6 against the original's 32.8, its
   spread 11.1 against 12.7 (before 35.8 and 19.7). The view's whole path under the layer would be more fog still, but it
   would also thicken the fog of the thin volumes far off at a slant (Swamp's, 35 m), which the gate matches to the
-  original. Tests: unit tests `FogVolume_*`, `render_tests` suite `watervolume`.
+  original. The water's surface lays that fog over what is seen through it (`Water.hlsl`; the fog passes of the objects
+  keep the gate), in the colour of its volume lit by the brightness behind (full from a tenth of white): laid by the fog
+  passes in the volume's colour as given, the dark cave pool round Jack's rock in the first cut scene (the bunker pool's
+  height, its own volume of 0.1 m, seen 9 m from above) turned a flat light blue sheet with a bright rim up the rock under
+  the layer, against the original's dark water. The engine gives the water's surface no fog volume: it takes the volume at
+  its height with an object of the frame nearest to it (`CScene::WaterFogVolume`; the bunker pool 2, the cave pool 5, at
+  the same 20.46 m). Tests: unit tests `FogVolume_*`, `render_tests` suite `watervolume` (its cave runs).
 - The decals multiplied into the frame (`TemplDecalModulate`: DESTCOLOR, ZERO) whose material has an
   opacity below 1 are transparent, as the opaque templates are with it: their texture is laid over
   the frame by its alpha times the opacity (SRCALPHA, INVSRCALPHA), unlit, not multiplied in (step

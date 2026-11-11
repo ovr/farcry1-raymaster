@@ -291,7 +291,7 @@ Details: [Device removal (DRED)](mod/XRenderD3D12/README.md#device-removal-dred)
 | `d3d12_WaterUnderShare` | `1` |  | Under the water, the sun's light shared over a 4 x 4 window (faster) |
 | `d3d12_WaterVolume` | `1` |  | The ocean's water attenuates each colour by the level's water colour |
 | `d3d12_WaterVolumeColor` | `1` |  | The water of a `WaterVolume` material (pools, cave water) shows the scene behind it times the material's colour, as the original's |
-| `d3d12_FogVolumeDepth` | `1` |  | A fog volume's fog over a point under its surface at least that of the point's depth: a dense one (Training's bunker pool) hides its floor |
+| `d3d12_FogVolumeDepth` | `1` |  | The floor seen through a water volume's surface has at least the fog of its depth under it, in the volume's colour lit by the brightness behind: a dense one (Training's bunker pool) hides its floor, the dark cave pool of the first cut scene stays dark |
 | `d3d12_WaterCaustics` | `1` |  | The caustics of the FFT ocean's waves on the sea floor |
 | `r_ParallaxMaterials` | `1` |  | `r_ParallaxDepth` scaled by each texture's physical material |
 

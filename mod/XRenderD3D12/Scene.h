@@ -209,6 +209,8 @@ public:
   const SFogVolume *GetFogVolume(int nId) const;
   //! The ocean's fog volume (the first with caustics), NULL without one.
   const SFogVolume *GetOceanFogVolume() const;
+  //! The fog volume a water volume's surface item fills (FogVolume.h's CWaterVolumePick over this scene's items), 0 none.
+  int WaterFogVolume(const SRenderItem &Water) const;
   //! Forgets the volumes (a new level registers its own; call at PreLoad).
   void ResetFogVolumes() { m_FogVolumes.clear(); }
 

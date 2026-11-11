@@ -168,8 +168,8 @@
 //	      (DF2_SUN_CASCADES: one tap, CascadeTapNormal), fading out to
 //	      vParams1.z m of depth
 //	    DF2_FOG_VOLUME (a fog volume over an object in it): the volume's colour
-//	      (vColor.rgb), alpha FogVolumeAlpha (times the alpha with vParams0.w;
-//	      vParams1.x 1: d3d12_FogVolumeDepth); nothing below applies
+//	      (vColor.rgb), alpha FogVolumeAlpha (times the alpha with vParams0.w);
+//	      nothing below applies
 //	    DF_FOG (with vFogParams.w set): linear fog by the depth along the
 //	      view axis (SceneFog), per pixel (towards 0.5 with DF_DETAIL_LAYER, DF_CAUSTICS, 0
 //	      with DF2_FOG_BLACK, 1 with DF2_MODULATE)
@@ -633,9 +633,9 @@ void MaterialLighting(float3 vPos, float3 vN, float fSun, out float3 vDiffuse, o
 //! the depth d along the view axis (ViewDepth), 1 - exp(-d * vParams0.y), 99 % at twice the
 //! volume's fog distance. Seen from inside, every point under the layer is in it, with the fog of
 //! its depth (FogInsideVolume). The volume's cap (vParams0.z), the layer seen from below, has the
-//! fog of the depth from inside and none from above. With d3d12_FogVolumeDepth (vParams1.x) the
-//! fog from above is at least that of the point's depth under the layer, which every ray to it
-//! crosses (FogVolume.h): a dense volume hides its floor near its surface.
+//! fog of the depth from inside and none from above. The fog of the depth under a water volume's
+//! surface (d3d12_FogVolumeDepth) is the water's to add (Water.hlsl): a point under the layer may
+//! lie on dry ground no ray to it through the water reaches.
 float FogVolumeAlpha(float3 vPos)
 {
   float fCamera = g_Frame.vCameraPos.z - g_DrawExt.vParams0.x;
@@ -644,11 +644,7 @@ float FogVolumeAlpha(float3 vPos)
     return (g_DrawExt.vParams0.z > 0 || fDepth > 0) ? FogInsideVolume(ViewDepth(vPos), g_DrawExt.vParams0.y) : 0;
   if (g_DrawExt.vParams0.z > 0 || fDepth <= 0)
     return 0;
-  float fGate = 1 - pow(1 - saturate(fDepth / 5), lerp(3, 1.6, saturate(fCamera / 5)));
-  float fFog = fGate * (1 - exp(-ViewDepth(vPos) * g_DrawExt.vParams0.y));
-  if (g_DrawExt.vParams1.x > 0)
-    fFog = max(fFog, 1 - exp(-fDepth * g_DrawExt.vParams0.y));
-  return fFog;
+  return FogVolumeGate(fCamera, fDepth, ViewDepth(vPos), g_DrawExt.vParams0.y);
 }
 
 //! The glass of a scope (DF2_SHADER_FX, XR_FX_SCOPE): the copy of the scene (tex0) around the middle of the

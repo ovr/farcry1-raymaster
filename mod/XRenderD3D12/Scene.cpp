@@ -11,6 +11,7 @@
 #include "StdAfx.h"
 #include "Renderer.h"
 #include "Scene.h"
+#include "FogVolume.h"
 #include "UnderwaterBody.h"
 #include "Texture.h"
 
@@ -1027,6 +1028,25 @@ const SFogVolume *CScene::GetOceanFogVolume() const
     if (fv.bCaustics)
       return &fv;
   return nullptr;
+}
+
+int CScene::WaterFogVolume(const SRenderItem &Water) const
+{
+  if (!Water.pRE || m_FogVolumes.empty())
+    return 0;
+  Vec3 vMin, vMax;
+  // A flat surface: the middle of its box (a sphere's about its chunk) is its height.
+  Water.pRE->mfGetBBox(vMin, vMax);
+  const Vec3 t = Water.pObj->GetTranslation();
+  FogVolume::CWaterVolumePick Pick(vMin.x + t.x, vMin.y + t.y, vMax.x + t.x, vMax.y + t.y,
+                                  (vMin.z + vMax.z) / 2 + t.z);
+  for (const SRenderItem &it : Cur().Items)
+    if (const SFogVolume *pFV = GetFogVolume(it.nFog))
+    {
+      const Vec3 p = it.pObj->GetTranslation();
+      Pick.Add(it.nFog, pFV->fFogLayerZ, pFV->bCaustics, p.x, p.y);
+    }
+  return Pick.Best();
 }
 
 //////////////////////////////////////////////////////////////////////////
