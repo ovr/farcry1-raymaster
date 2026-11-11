@@ -174,6 +174,19 @@ else()
         "XRenderD3D12 is built without AMD FidelityFX Denoiser.")
 endif()
 
+# AMD D3D12 Memory Allocator v3.3.0 (MIT): every resource of the renderer and its tests is allocated
+# through it. A git submodule of AMD's repository at the tag v3.3.0 (third_party/d3d12-memory-allocator),
+# required; built here as a static library of its one source rather than by its own CMake.
+set(XRENDERD3D12_D3D12MA_DIR "${CMAKE_SOURCE_DIR}/third_party/d3d12-memory-allocator")
+if(NOT EXISTS "${XRENDERD3D12_D3D12MA_DIR}/include/D3D12MemAlloc.h")
+    message(FATAL_ERROR "third_party/d3d12-memory-allocator is empty: run git submodule update --init.")
+endif()
+add_library(D3D12MA STATIC "${XRENDERD3D12_D3D12MA_DIR}/src/D3D12MemAlloc.cpp" "${XRENDERD3D12_D3D12MA_DIR}/include/D3D12MemAlloc.h")
+set_target_properties(D3D12MA PROPERTIES FOLDER "Third Party" MSVC_RUNTIME_LIBRARY "MultiThreaded")
+target_include_directories(D3D12MA PUBLIC "${XRENDERD3D12_D3D12MA_DIR}/include")
+target_compile_options(D3D12MA PRIVATE /W3)
+target_link_libraries(D3D12MA PUBLIC d3d12 dxgi dxguid)
+
 set(XRENDERD3D12_NRD_DIR "${CMAKE_SOURCE_DIR}/third_party/nrd")
 set(XRENDERD3D12_SHADERMAKE_DIR "${CMAKE_SOURCE_DIR}/third_party/shadermake")
 set(XRENDERD3D12_MATHLIB_DIR "${CMAKE_SOURCE_DIR}/third_party/mathlib")
@@ -306,7 +319,7 @@ file(CONFIGURE OUTPUT "${XRENDERD3D12_BATCH_PROPS}" CONTENT [[<?xml version="1.0
 ]])
 set_property(TARGET XRenderD3D12 PROPERTY VS_PROJECT_IMPORT "${XRENDERD3D12_BATCH_PROPS}")
 
-target_link_libraries(XRenderD3D12 PRIVATE CryCommon XRenderCommon d3d12 dxgi dxguid windowscodecs)
+target_link_libraries(XRenderD3D12 PRIVATE CryCommon XRenderCommon D3D12MA d3d12 dxgi dxguid windowscodecs)
 target_include_directories(XRenderD3D12 PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}" "${XRENDERD3D12_SHADER_DIR}" "${XRENDERD3D12_XEGTAO_DIR}"
     "${XRENDERD3D12_CACAO_DIR}/inc" "${XRENDERD3D12_SMAA_DIR}" "${XRENDERD3D12_CAS_DIR}")
 

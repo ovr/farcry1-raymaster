@@ -26,6 +26,8 @@ Mods for Far Cry, built with the CryENGINE MOD SDK for Far Cry:
   (or run `git submodule update --init`); without them XRenderD3D12 is built without NRD.
 - `third_party/fidelityfx-denoiser` - a git submodule: AMD FidelityFX Denoiser, whose shadows
   denoiser XRenderD3D12 can take for the sun's shadow by rays; without it that denoiser is left out.
+- `third_party/d3d12-memory-allocator` - a git submodule: AMD's D3D12 Memory Allocator, which
+  allocates XRenderD3D12's GPU memory; XRenderD3D12 is not built without it.
 - `assets/levels` - `Patch Levels.cmd`, which moves pieces of the levels where the sun of the ray
   traced lighting needs them, in the levels of an installed game (`Patch Levels.cmd <game
   folder>`; each pak it changes is kept as `<name>.orig`, copying that back gives back the original
@@ -106,6 +108,8 @@ NVIDIA RTX SDKs License (`LICENSE.txt` in its repository), which allows distribu
 into an application; ShaderMake and MathLib are under NVIDIA's MIT licenses.
 `third_party/fidelityfx-denoiser` is a git submodule too: a link to AMD's repository of FidelityFX
 Denoiser at the tag v1.2, under AMD's MIT license (`LICENSE.txt` in its repository).
+`third_party/d3d12-memory-allocator` is a git submodule as well: a link to AMD's repository of D3D12
+Memory Allocator at the tag v3.3.0, under AMD's MIT license (`LICENSE.txt` in its repository).
 
 `mod/XRenderCommon/` is dedicated to the public domain (CC0 1.0, `mod/XRenderCommon/COPYING`): its
 authors claim no rights to it, and any renderer for the game may use it, under any license.
