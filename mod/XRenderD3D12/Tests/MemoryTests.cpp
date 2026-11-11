@@ -290,6 +290,35 @@ XR_TEST(Memory_LiveAllocationNames)
   CHECK(LiveAllocationNames(*pAllocator.Get()).empty());
 }
 
+// The path tracer's pairs that take turns (d3d12_PTAlias): an alias lies in its base's memory, which it keeps when the
+// base goes, and is counted once (the overlay's bytes, the churn).
+XR_TEST(Memory_Alias)
+{
+  ComPtr<D3D12MA::Allocator> pAllocator = MakeAllocator();
+  const D3D12_RESOURCE_DESC Desc = TextureDesc(256, DXGI_FORMAT_R16G16B16A16_FLOAT, D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS);
+  CD3D12Resource Base = Make(pAllocator.Get(), D3D12_HEAP_TYPE_DEFAULT, Desc, D3D12_RESOURCE_STATE_UNORDERED_ACCESS, ED3D12Memory::Aliased);
+  CHECK(Base.GetAllocation()->GetHeap() != nullptr && !Base.IsAlias());
+  CHECK(Base.GetBytes() == Base.GetAllocation()->GetSize() && Base.GetBytes() >= 256ull * 256 * 8);
+  CD3D12Resource Alias;
+  CHECK(SUCCEEDED(CD3D12Resource::CreateAlias(Base, Desc, D3D12_RESOURCE_STATE_UNORDERED_ACCESS, Alias)));
+  CHECK(Alias && Alias.IsAlias() && Alias.Get() && Alias.Get() != Base.Get());
+  CHECK(Alias.GetAllocation() == Base.GetAllocation() && Alias.GetBytes() == 0);
+  D3D12MA::TotalStatistics Stats = {};
+  pAllocator->CalculateStatistics(&Stats);
+  CHECK(Stats.Total.Stats.AllocationCount == 1);
+  // Larger than the memory: refused.
+  CD3D12Resource Big;
+  CHECK(FAILED(CD3D12Resource::CreateAlias(Base, TextureDesc(512, DXGI_FORMAT_R16G16B16A16_FLOAT, D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS),
+                                           D3D12_RESOURCE_STATE_UNORDERED_ACCESS, Big)) && !Big);
+  Base.Reset();
+  pAllocator->CalculateStatistics(&Stats);
+  CHECK(Stats.Total.Stats.AllocationCount == 1);
+  CHECK(Alias.Get() && Alias->GetDesc().Width == 256);
+  Alias.Reset();
+  pAllocator->CalculateStatistics(&Stats);
+  CHECK(Stats.Total.Stats.AllocationCount == 0);
+}
+
 // The overlay's churn counts every resource made and freed, from several threads at once (loading threads make
 // resources), and starts again from zero after each Take.
 XR_TEST(Memory_Churn)

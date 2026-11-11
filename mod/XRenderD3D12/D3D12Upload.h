@@ -125,7 +125,11 @@ public:
   //! pass writes them into its descriptor tables, so Format may be typeless); starts in
   //! UNORDERED_ACCESS. szName names it for the debug layer; nArraySize > 1: a texture array of that
   //! many slices.
-  CD3D12Texture *CreateComputeTarget(int nWidth, int nHeight, int nMips, DXGI_FORMAT Format, const wchar_t *szName, int nArraySize = 1);
+  CD3D12Texture *CreateComputeTarget(int nWidth, int nHeight, int nMips, DXGI_FORMAT Format, const wchar_t *szName, int nArraySize = 1,
+                                     ED3D12Memory eMemory = ED3D12Memory::Committed);
+  //! A compute target of one mip in the memory of pBase (made ED3D12Memory::Aliased; CD3D12Device::ActivateAlias between
+  //! their turns); it keeps that memory. Null where it does not fit there.
+  CD3D12Texture *CreateComputeAlias(const CD3D12Texture *pBase, int nWidth, int nHeight, DXGI_FORMAT Format, const wchar_t *szName);
   //! The same as a 3D texture of nWidth x nHeight x nDepth texels, one mip.
   CD3D12Texture *CreateComputeVolume(int nWidth, int nHeight, int nDepth, DXGI_FORMAT Format, const wchar_t *szName);
   //! Replaces a rectangle of one sub resource (x, y, nWidth, nHeight in texels; multiples of 4
@@ -186,7 +190,7 @@ private:
   //! Obj takes the memory as its own, counted in GetResourceBytes until Retire.
   template<class T> void Adopt(T &Obj, CD3D12Resource &&Memory)
   {
-    m_nResourceBytes += Memory ? Memory.GetAllocation()->GetSize() : 0;
+    m_nResourceBytes += Memory.GetBytes();
     Obj.m_pResource = Memory.Get();
     Obj.m_Memory = std::move(Memory);
   }

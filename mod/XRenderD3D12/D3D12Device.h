@@ -120,6 +120,12 @@ public:
   //! says. szName names the allocation (d3d12_MemoryDump) and, with names on (NamesObjects), the resource.
   HRESULT CreateResource(D3D12_HEAP_TYPE eHeap, const D3D12_RESOURCE_DESC &Desc, D3D12_RESOURCE_STATES eState, const D3D12_CLEAR_VALUE *pClear,
                          ED3D12Memory eMemory, const wchar_t *szName, CD3D12Resource &Out);
+  //! A resource in Base's memory (D3D12Memory.h's CreateAlias), named as CreateResource names.
+  HRESULT CreateAlias(const CD3D12Resource &Base, const D3D12_RESOURCE_DESC &Desc, D3D12_RESOURCE_STATES eState, const wchar_t *szName,
+                      CD3D12Resource &Out);
+  //! The memory pBefore and pAfter share given to pAfter from here on (an aliasing barrier, queued in order), pAfter in
+  //! eWrite (UNORDERED_ACCESS, RENDER_TARGET or DEPTH_WRITE) and discarded: the next pass must write all it reads.
+  void ActivateAlias(ID3D12Resource *pBefore, ID3D12Resource *pAfter, D3D12_RESOURCE_STATES eWrite);
   ID3D12CommandQueue *GetQueue() const { return m_pQueue.Get(); }
   //! The frame's command list; valid between BeginFrame and EndFrame. The caller may set state of
   //! its own on it: what DrawGeometry set is forgotten (GetStateEpoch).

@@ -773,6 +773,9 @@ void CD3D12Renderer::RegisterVariables()
   iConsole->Register("d3d12_PTCheckerboard", &CV_d3d12_PTCheckerboard, 1, VF_DUMPTODISK,
                      "With d3d12_PathTracing 1, the paths of half the pixels each frame, in a checkerboard, the others' light "
                      "from their four neighbours (0: a path from each pixel)");
+  iConsole->Register("d3d12_PTAlias", &CV_d3d12_PTAlias, 1, 0,
+                     "With d3d12_PathTracing 1, targets of the path tracer that live in turns within a frame share their memory: "
+                     "the highlights the paths', NRD's light input the filtered light's (0: each its own)");
   iConsole->Register("d3d12_PTSunHistory", &CV_d3d12_PTSunHistory, 64, VF_DUMPTODISK,
                      "With d3d12_PathTracing, the frames the sun's shadow by rays (its mask, d3d12_RTSunDenoise 1) holds at "
                      "most (24 without it); where the shadow moves (crowns in the wind) the history keeps a quarter of them "
@@ -1093,6 +1096,7 @@ WIN_HWND CD3D12Renderer::Init(int x,int y,int width,int height,unsigned int cbpp
     iConsole->UnregisterVariable("d3d12_PTSunHistory", true);
     iConsole->UnregisterVariable("d3d12_PTBehind", true);
     iConsole->UnregisterVariable("d3d12_PTCheckerboard", true);
+    iConsole->UnregisterVariable("d3d12_PTAlias", true);
     iConsole->UnregisterVariable("d3d12_PTReferenceBounces", true);
     iConsole->UnregisterVariable("d3d12_PTAmbient", true);
     iConsole->UnregisterVariable("d3d12_PTAmbientRange", true);

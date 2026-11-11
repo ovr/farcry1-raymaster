@@ -994,7 +994,9 @@ public:
     CD3D12Texture *pHistory[2] = {};        //!< this frame's history and the frame before's
     CD3D12Texture *pFrames[2] = {};         //!< the frames in them
     CD3D12Texture *pLight = nullptr;        //!< CSFilter's light, the composite's
-    CD3D12Texture *pHighlights = nullptr;   //!< CSSpecular's highlights, the composite's
+    CD3D12Texture *pHighlights = nullptr;   //!< CSSpecular's highlights, the composite's; with bAlias in pRays' memory
+    bool bAliasWanted = false;              //!< d3d12_PTAlias as the targets were made with it
+    bool bAlias = false;                    //!< pHighlights is pRays' alias (and pNrdIn[0] pLight's where IsAlias)
     int nHistory = 0;                       //!< pHistory's current one
     int nTables[5] = { -1, -1, -1, -1, -1 }; //!< the kernels' UAV tables
     int nDepthSRV = -1;                     //!< the depth buffer in the texture table
@@ -2430,6 +2432,7 @@ public:
   int CV_d3d12_PTCache = 1;                 //!< its radiance cache in real time (all the light at its last bounce's hit)
   float CV_d3d12_PTBehind = 40;             //!< how far what is behind the camera is in its scene for rays (m, UpdateRayBehind)
   int CV_d3d12_PTCheckerboard = 1;          //!< the paths of half the pixels each frame, the others from their neighbours
+  int CV_d3d12_PTAlias = 1;                 //!< targets that live in turns within a frame share their memory (UpdatePathKernels)
   int CV_d3d12_PTSunHistory = 64;           //!< the frames the sun's shadow by rays holds at most with it (RaySun)
   int CV_d3d12_PTBounces = 1;               //!< its bounces in real time
   int CV_d3d12_PTReferenceBounces = 8;      //!< and in the reference (d3d12_PathTracing 2)

@@ -476,17 +476,26 @@ void CD3D12Renderer::SetPathDecalLight(SDrawConstants &dc) const
 bool CD3D12Renderer::UpdatePathKernels(int w, int h)
 {
   SPathTraceState &s = m_PathTrace;
-  if (s.pRays && s.pRays->m_nWidth == w && s.pRays->m_nHeight == h)
+  // d3d12_PTDebug 6 and 11 show the paths after the frame, when their memory has the highlights.
+  const bool bAlias = CV_d3d12_PTAlias > 0 && CV_d3d12_PTDebug != 6 && CV_d3d12_PTDebug != 11;
+  if (s.pRays && s.pRays->m_nWidth == w && s.pRays->m_nHeight == h && s.bAliasWanted == bAlias)
     return true;
   ReleasePathKernels();
-  s.pRays = m_pUpload->CreateComputeTarget(w, h, 1, PATH_LIGHT_FORMAT, L"XRenderD3D12 path tracer's paths");
+  s.bAliasWanted = bAlias;
+  const ED3D12Memory eShared = bAlias ? ED3D12Memory::Aliased : ED3D12Memory::Committed;
+  s.pRays = m_pUpload->CreateComputeTarget(w, h, 1, PATH_LIGHT_FORMAT, L"XRenderD3D12 path tracer's paths", 1, eShared);
   for (int i = 0; i < 2; i++)
   {
     s.pHistory[i] = m_pUpload->CreateComputeTarget(w, h, 1, PATH_HISTORY_FORMAT, L"XRenderD3D12 path tracer's history");
     s.pFrames[i] = m_pUpload->CreateComputeTarget(w, h, 1, PATH_FRAMES_FORMAT, L"XRenderD3D12 path tracer's history frames");
   }
-  s.pLight = m_pUpload->CreateComputeTarget(w, h, 1, PATH_LIGHT_FORMAT, L"XRenderD3D12 path tracer's light");
-  s.pHighlights = m_pUpload->CreateComputeTarget(w, h, 1, PATH_LIGHT_FORMAT, L"XRenderD3D12 path tracer's highlights");
+  s.pLight = m_pUpload->CreateComputeTarget(w, h, 1, PATH_LIGHT_FORMAT, L"XRenderD3D12 path tracer's light", 1, eShared);
+  // The paths are read last by CSTemporal or NRD's CSResolve, before CSSpecular writes the highlights.
+  s.pHighlights = bAlias && s.pRays ? m_pUpload->CreateComputeAlias(s.pRays, w, h, PATH_LIGHT_FORMAT, L"XRenderD3D12 path tracer's highlights")
+                                    : nullptr;
+  s.bAlias = s.pHighlights != nullptr;
+  if (!s.pHighlights)
+    s.pHighlights = m_pUpload->CreateComputeTarget(w, h, 1, PATH_LIGHT_FORMAT, L"XRenderD3D12 path tracer's highlights");
   bool bOk = s.pRays && s.pHistory[0] && s.pHistory[1] && s.pFrames[0] && s.pFrames[1] && s.pLight && s.pHighlights;
   if (bOk)
   {
@@ -547,8 +556,12 @@ bool CD3D12Renderer::UpdatePathNrd(int w, int h)
   s.pHitDistance = m_pUpload->CreateComputeTarget(w, h, 1, PATH_HIT_FORMAT, L"XRenderD3D12 path tracer's hit distance");
   static const wchar_t *const s_Names[4] = { L"XRenderD3D12 NRD's diffuse light", L"XRenderD3D12 NRD's normal and roughness",
                                              L"XRenderD3D12 NRD's view depth", L"XRenderD3D12 NRD's motion" };
+  // NRD's light input is read last by NRD, before CSFilter writes the filtered light (made Aliased with d3d12_PTAlias).
+  if (s.bAliasWanted && s.pLight)
+    s.pNrdIn[0] = m_pUpload->CreateComputeAlias(s.pLight, w, h, PATH_NRD_FORMATS[0], s_Names[0]);
   for (int i = 0; i < 4; i++)
-    bOk &= (s.pNrdIn[i] = m_pUpload->CreateComputeTarget(w, h, 1, PATH_NRD_FORMATS[i], s_Names[i])) != nullptr;
+    if (!s.pNrdIn[i])
+      bOk &= (s.pNrdIn[i] = m_pUpload->CreateComputeTarget(w, h, 1, PATH_NRD_FORMATS[i], s_Names[i])) != nullptr;
   s.pNrdOut = m_pUpload->CreateComputeTarget(w, h, 1, PATH_NRD_OUT_FORMAT, L"XRenderD3D12 NRD's denoised light");
   bOk &= s.pHitDistance && s.pNrdOut;
   if (bOk)
@@ -697,6 +710,7 @@ void CD3D12Renderer::ReleasePathKernels()
   s.pVelocity.Reset();
   s.nHistoryFrame = -1;
   s.nLightFrame = -1;
+  s.bAlias = false;
 }
 
 void CD3D12Renderer::DrawPathTrace()
@@ -858,7 +872,10 @@ void CD3D12Renderer::DrawPathTrace()
   // The targets' states kept by the device (UpdatePathKernels): each kernel asks for its outputs and inputs, nothing moved
   // back after (the frame before's history, read by this one, stays readable). The table of the cache's kernels and
   // CSTrace has the paths and the hit distance.
-  m_pDevice->Require(s.pRays->m_pResource, UAV);
+  if (s.bAlias)
+    m_pDevice->ActivateAlias(s.pHighlights->m_pResource, s.pRays->m_pResource, UAV);
+  else
+    m_pDevice->Require(s.pRays->m_pResource, UAV);
   if (s.pHitDistance)
     m_pDevice->Require(s.pHitDistance->m_pResource, UAV);
   if (bCache)
@@ -882,11 +899,15 @@ void CD3D12Renderer::DrawPathTrace()
   m_pDevice->Require(s.pRays->m_pResource, PATH_KERNEL_READ);
   bool bNrdDone = false;
   int nNrdPasses = 0;
+  // NRD's light input in the filtered light's memory: its turn from CSPack to NRD (d3d12_PTAlias).
+  const bool bNrdAlias = bNrd && s.pNrdIn[0]->m_Memory.IsAlias();
   if (bNrd)
   {
     // NRD's inputs from the paths (the motion vectors readable meanwhile), NRD, its light as this frame's history.
     GpuSection("pt nrd");
     m_pDevice->Require(s.pHitDistance->m_pResource, PATH_KERNEL_READ);
+    if (bNrdAlias)
+      m_pDevice->ActivateAlias(s.pLight->m_pResource, s.pNrdIn[0]->m_pResource, UAV);
     for (CD3D12Texture *pTex : s.pNrdIn)
       m_pDevice->Require(pTex->m_pResource, UAV);
     // The scene's motion vectors (kept by the device; a render target bound again before the next draw).
@@ -931,8 +952,14 @@ void CD3D12Renderer::DrawPathTrace()
   }
   m_pDevice->Require(pHistory->m_pResource, PATH_KERNEL_READ);
   m_pDevice->Require(pFrames->m_pResource, PATH_KERNEL_READ);
-  m_pDevice->Require(s.pLight->m_pResource, UAV);
-  m_pDevice->Require(s.pHighlights->m_pResource, UAV);
+  if (bNrdAlias)
+    m_pDevice->ActivateAlias(s.pNrdIn[0]->m_pResource, s.pLight->m_pResource, UAV);
+  else
+    m_pDevice->Require(s.pLight->m_pResource, UAV);
+  if (s.bAlias)
+    m_pDevice->ActivateAlias(s.pRays->m_pResource, s.pHighlights->m_pResource, UAV);
+  else
+    m_pDevice->Require(s.pHighlights->m_pResource, UAV);
   GpuSection("pt filter");
   m_pCompute->DispatchRays(pList, eD3D12K_PathFilter, FrameCB.nGPU, PassCB.nGPU, nTlas, nInstances, s.nTables[PATH_TABLE_FILTER], gx, gy, nLights);
   GpuSection("pt highlights");

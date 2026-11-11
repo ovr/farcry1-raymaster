@@ -457,8 +457,7 @@ void CD3D12Upload::Barrier(ID3D12Resource *pResource, UINT nSubresource, D3D12_R
 
 void CD3D12Upload::Retire(CD3D12Resource &Memory)
 {
-  if (Memory)
-    m_nResourceBytes -= std::min<uint64>(m_nResourceBytes, Memory.GetAllocation()->GetSize());
+  m_nResourceBytes -= std::min<uint64>(m_nResourceBytes, Memory.GetBytes());
   g_pRenderer->m_pDevice->DeferredRelease(Memory);
 }
 
@@ -747,14 +746,15 @@ CD3D12Texture *CD3D12Upload::CreateRenderTarget(int nWidth, int nHeight, DXGI_FO
   return pTex;
 }
 
-CD3D12Texture *CD3D12Upload::CreateComputeTarget(int nWidth, int nHeight, int nMips, DXGI_FORMAT Format, const wchar_t *szName, int nArraySize)
+CD3D12Texture *CD3D12Upload::CreateComputeTarget(int nWidth, int nHeight, int nMips, DXGI_FORMAT Format, const wchar_t *szName, int nArraySize,
+                                                 ED3D12Memory eMemory)
 {
   if (!m_pDevice || nWidth <= 0 || nHeight <= 0 || nMips <= 0 || nArraySize <= 0)
     return nullptr;
   const D3D12_RESOURCE_DESC Desc = TextureDesc(nWidth, nHeight, nArraySize, nMips, Format, D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS);
   CD3D12Resource Memory;
   HRESULT hr = g_pRenderer->m_pDevice->CreateResource(D3D12_HEAP_TYPE_DEFAULT, Desc, D3D12_RESOURCE_STATE_UNORDERED_ACCESS, nullptr,
-                                                      ED3D12Memory::Committed, szName ? szName : L"XRenderD3D12 compute target", Memory);
+                                                      eMemory, szName ? szName : L"XRenderD3D12 compute target", Memory);
   if (FAILED(hr))
   {
     iLog->LogError("XRenderD3D12: CreateResource (compute target %dx%dx%d, %d mips, format %d) failed (0x%08X)",
@@ -769,6 +769,29 @@ CD3D12Texture *CD3D12Upload::CreateComputeTarget(int nWidth, int nHeight, int nM
   pTex->m_nHeight = nHeight;
   pTex->m_nMips = nMips;
   pTex->m_nArraySize = nArraySize;
+  return pTex;
+}
+
+CD3D12Texture *CD3D12Upload::CreateComputeAlias(const CD3D12Texture *pBase, int nWidth, int nHeight, DXGI_FORMAT Format, const wchar_t *szName)
+{
+  if (!m_pDevice || !pBase || nWidth <= 0 || nHeight <= 0)
+    return nullptr;
+  const D3D12_RESOURCE_DESC Desc = TextureDesc(nWidth, nHeight, 1, 1, Format, D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS);
+  CD3D12Resource Memory;
+  const HRESULT hr = g_pRenderer->m_pDevice->CreateAlias(pBase->m_Memory, Desc, D3D12_RESOURCE_STATE_UNORDERED_ACCESS, szName, Memory);
+  if (FAILED(hr))
+  {
+    iLog->LogWarning("XRenderD3D12: CreateAliasingResource (compute target %dx%d, format %d) failed (0x%08X)", nWidth, nHeight, (int)Format,
+                     (unsigned)hr);
+    return nullptr;
+  }
+  CD3D12Texture *pTex = new CD3D12Texture;
+  Adopt(*pTex, std::move(Memory));
+  pTex->m_Format = Format;
+  pTex->m_nWidth = nWidth;
+  pTex->m_nHeight = nHeight;
+  pTex->m_nMips = 1;
+  pTex->m_nArraySize = 1;
   return pTex;
 }
 

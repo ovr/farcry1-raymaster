@@ -504,7 +504,7 @@ void CD3D12Device::DeferredRelease(CD3D12Resource &r)
   if (!r)
     return;
   ForgetState(r.Get());
-  m_Churn.Freed(r.GetAllocation()->GetSize());
+  m_Churn.Freed(r.GetBytes());
   SDeferred d;
   d.Memory = std::move(r);
   d.nFence = m_nNextFence;
@@ -517,10 +517,34 @@ HRESULT CD3D12Device::CreateResource(D3D12_HEAP_TYPE eHeap, const D3D12_RESOURCE
   const HRESULT hr = CD3D12Resource::Create(m_pAllocator.Get(), eHeap, Desc, eState, pClear, eMemory, szName, Out);
   if (FAILED(hr))
     return hr;
-  m_Churn.Made(Out.GetAllocation()->GetSize());
+  m_Churn.Made(Out.GetBytes());
   if (szName && NamesObjects())
     Out->SetName(szName);
   return hr;
+}
+
+HRESULT CD3D12Device::CreateAlias(const CD3D12Resource &Base, const D3D12_RESOURCE_DESC &Desc, D3D12_RESOURCE_STATES eState, const wchar_t *szName,
+                                  CD3D12Resource &Out)
+{
+  const HRESULT hr = CD3D12Resource::CreateAlias(Base, Desc, eState, Out);
+  if (SUCCEEDED(hr) && szName && NamesObjects())
+    Out->SetName(szName);
+  return hr;
+}
+
+void CD3D12Device::ActivateAlias(ID3D12Resource *pBefore, ID3D12Resource *pAfter, D3D12_RESOURCE_STATES eWrite)
+{
+  if (!m_bInFrame || !pAfter)
+    return;
+  D3D12_RESOURCE_BARRIER Barrier = {};
+  Barrier.Type = D3D12_RESOURCE_BARRIER_TYPE_ALIASING;
+  Barrier.Aliasing.pResourceBefore = pBefore;
+  Barrier.Aliasing.pResourceAfter = pAfter;
+  ResourceBarriers(1, &Barrier);
+  Require(pAfter, eWrite);
+  // Its memory as the other left it: discarded, so that the GPU keeps nothing of its compression state.
+  FlushBarriers();
+  m_pCmdList->DiscardResource(pAfter, nullptr);  // barriers flushed
 }
 
 void CD3D12Device::CollectGarbage()

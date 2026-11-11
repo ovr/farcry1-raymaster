@@ -1758,10 +1758,24 @@ reference of its own.
 - `r_Stats 2` also has a line `Resources made`: those made and freed a frame with their bytes,
   and the most made in one frame of the window. The film's flights at 1080p make 0.1 to 0.2 a
   frame (5 to 14 KB, at most 4 to 10 in one frame: River, Pier, Swamp); no pool is worth it.
+- Aliases (`d3d12_PTAlias`, 1 by default): two of the path tracer's targets that live in turns
+  within a frame share one heap (`ED3D12Memory::Aliased`, `CD3D12Resource::CreateAlias`). The
+  highlights lie in the paths' memory (the paths are read last by `CSTemporal` or NRD's
+  `CSResolve`, before `CSSpecular` writes the highlights; `d3d12_PTDebug` 6 and 11, which show the
+  paths after the frame, turn it off), NRD's light input in the filtered light's (NRD reads it
+  last, before `CSFilter`). `CD3D12Device::ActivateAlias` gives the memory to the next of the
+  pair: an aliasing barrier, queued in order with the others, then `DiscardResource`; each pass
+  writes every pixel it reads. An alias' bytes are its base's (counted once). River at 4K with
+  NRD: 3,227 MB of the allocator's down to 3,100 (two targets of 64 MB), the GPU's frame the same
+  (22.0 to 22.1 ms); the frames with the simple denoiser equal to the pixel, with NRD within the
+  spread of its own runs (no two equal). Test: `render_tests` suite `ptalias`. The other targets
+  stay apart: the histories carry to the next frame, and the scene's copies, the HDR and the
+  anti-aliasing's targets are used across the frame by passes the cvars switch on and off.
 - Tests: `Tests/MemoryTests.cpp` (`Memory_*`, also under the debug layer): placed and committed
   resources in their heap types, the placed ones' ranges apart and reused, a resource outliving
   its allocator's owner, mapped upload buffers, the overlay's statistics and the JSON dump
-  (`ReadMemoryStats`, `MemoryStatsJson`: the device's own code), the ray pools' virtual blocks.
+  (`ReadMemoryStats`, `MemoryStatsJson`: the device's own code), the ray pools' virtual blocks,
+  an alias in its base's heap that keeps it and is counted once (`Memory_Alias`).
 
 ## Resource states and barriers
 
