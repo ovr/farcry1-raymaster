@@ -1751,9 +1751,13 @@ reference of its own.
   the resources, megabytes and heaps before and after each level's load (a level loaded again
   leaves as much as the first time) and at the device's shutdown, where every resource still
   held is one too many and its name is listed (the twelve most common, with their counts).
+  Training loaded three times: the first load leaves 1,145 resources (601 MB), before the
+  renderer's own targets (made in the first frames of play) and the textures the play streams
+  in; the second and the third 1,310 each (1,533 and 1,501 MB); the shutdown 0. Test:
+  `render_tests` suite `memreload`.
 - `r_Stats 2` also has a line `Resources made`: those made and freed a frame with their bytes,
-  and the most made in one frame of the window. A level in play makes few; a steady churn is
-  memory made and freed again each frame (the terrain's index buffers, outdoors).
+  and the most made in one frame of the window. The film's flights at 1080p make 0.1 to 0.2 a
+  frame (5 to 14 KB, at most 4 to 10 in one frame: River, Pier, Swamp); no pool is worth it.
 - Tests: `Tests/MemoryTests.cpp` (`Memory_*`, also under the debug layer): placed and committed
   resources in their heap types, the placed ones' ranges apart and reused, a resource outliving
   its allocator's owner, mapped upload buffers, the overlay's statistics and the JSON dump
