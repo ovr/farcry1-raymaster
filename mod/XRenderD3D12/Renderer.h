@@ -2349,7 +2349,7 @@ public:
   int CV_d3d12_BeachShadow = 1;             //!< 1: the beach's foam strips in the sun's shadow as the terrain under them (0: lit in it, the frames before)
   int CV_d3d12_BeachResearch = 1;           //!< 1: the beach of TerrainWaterBeachResearch drawn as the original's (0: not drawn, the frames before)
   int CV_d3d12_WaterVolumeColor = 1;        //!< 1: a WaterVolume material's water the scene behind times its diffuse colour, as the original's (0: the frames before)
-  int CV_d3d12_FogVolumeDepth = 1;          //!< 1: the floor seen through a water volume's surface in at least the fog of its depth there (FogVolume.h; 0: the frames before)
+  int CV_d3d12_FogVolumeDepth = 0;          //!< 1: the floor seen through a water volume's surface in at least the fog of its depth there (FogVolume.h; 0: the original's look)
   int CV_d3d12_UnderwaterBodies = 1;        //!< 1: the characters under the ocean (the fish) drawn last without the depth: the water looks past them (UnderwaterBody.h; 0: the frames before)
   int CV_d3d12_SpriteSort = 1;              //!< 1: the particles drawn back to front by their distance (SpriteOrder.h; 0: in the engine's order, the frames before)
   int CV_d3d12_DecalAddOpacity = 1;         //!< 1: TemplDecalAdd with a material opacity below 1 blended by its alpha times it (Draw3D.cpp; 0: added, the frames before)

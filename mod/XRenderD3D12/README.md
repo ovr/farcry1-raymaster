@@ -2640,7 +2640,7 @@ and lists theirs (`NamesObjects`).
   original's refraction pass (`CGRCIndoorWater_final`: the screen's copy times `WaterColor = DiffuseColor`, "using difuse
   component for color" as its script says; doubled in its HDR mode, and the game ships with that off). And a fog volume's
   fog over a point under its layer, seen from above, is at least that of the point's depth there, which every ray to it
-  crosses (`d3d12_FogVolumeDepth`, 1; 0: the frames before): it grew by a gate from nothing at the layer to all of it 5 m
+  crosses (`d3d12_FogVolumeDepth` 1; off by default, the user's choice: with it the first cut scene's cave pool is still a dark plane over the floor the original shows): it grew by a gate from nothing at the layer to all of it 5 m
   down whatever the volume's density. Training's bunker pool (`water.waterA15`, diffuse 0.34 0.36 0.27, in a fog volume
   of 0.1 m: 23 per metre) showed its floor's tiles and the rocks under the water through clear water, where the
   original's water is murky; now its floor is in the volume's fog a few centimetres down, and the water tints that a dark
