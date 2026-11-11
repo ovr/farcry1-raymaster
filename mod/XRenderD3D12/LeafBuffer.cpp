@@ -270,11 +270,7 @@ public:
       if (g_pRenderer && g_pRenderer->m_pUpload)
         g_pRenderer->m_pUpload->ReleaseBuffer(m_pStatic);
       else
-      {
-        if (m_pStatic->m_pResource)
-          m_pStatic->m_pResource->Release();
         delete m_pStatic;
-      }
       m_pStatic = nullptr;
       m_nStaticSize = 0;
     }
