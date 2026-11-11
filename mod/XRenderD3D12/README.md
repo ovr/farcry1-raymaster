@@ -2692,6 +2692,16 @@ and lists theirs (`NamesObjects`).
   (made before the particles) over it, and each burst of new particles (every 5 frames) changed how
   much smoke was left: the smoke over the lava was a step brighter every 5 frames. Tests: unit
   tests `SpriteOrder_*`, `render_tests` suite `spritesort`.
+- The blended objects are drawn far to near by the distance of their objects' origins
+  (`d3d12_BlendSortObject 1`; step 421), as the original: by each part's own centre (0, the frames
+  before) a part of a large object could come nearer than a small object inside it. In Training's
+  first cut scene the camera carries a black gradient (`Objects/gradient.dds`, an alpha ramp) down
+  through the hole in the cave's roof for the fade to black; the ruin round the hole has hanging
+  moss whose part's centre (1.25 m) came nearer than the gradient's (1.65 m) from frame 455 on, and
+  its strands stayed lit at the frame's edges over the black, where the original's frame is black
+  (the ruin's origin 2.94 m). An object's own parts keep their order by their centres, each part's
+  passes together (the grass clumps' blades); the particles and sprites, whose objects stand at the
+  world's origin, keep their own distance. Test: `render_tests` suite `blendsort`.
 
 ## Vegetation sprites and terrain detail
 

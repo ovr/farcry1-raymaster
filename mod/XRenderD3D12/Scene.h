@@ -64,6 +64,7 @@ struct SRenderItem
   EDrawClass eDrawClass = eDC_NoDraw;       //!< the shader's draw class; alpha blended when the resources' opacity is below 1
   ERenderList eList = eRL_Opaque;           //!< the list the item is drawn in
   float fDistance = 0;                      //!< from the camera (CRendElement::mfDistanceToCameraSquared), set in EF_EndEf3D
+  float fObjectDistance = 0;                //!< from the camera to its object's origin, the blended list's order (d3d12_BlendSortObject)
   int nOrder = 0;                           //!< position in the scene (EF_AddEf order)
   bool bFogPass = false;                    //!< the fog volume pass the renderer adds itself (see CScene::AddEf)
   bool bBakedLightCopy = false;             //!< a light mapped surface again for a light its light map has, not drawn (CScene::BuildLists)

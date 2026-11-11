@@ -280,6 +280,7 @@ Details: [Device removal (DRED)](mod/XRenderD3D12/README.md#device-removal-dred)
 | `d3d12_SkyFogBand` | `1` | yes | With a near fog (Swamp, Volcano), the fog's colour over the sky box's lower part, as the original draws it |
 | `d3d12_SpriteDistFactor` | `1` |  | The far vegetation sprites end by their distance times the engine's factor, as the original's (River's at 304 m, not 400: no fogged trees round the sky in a gap of the far mountains) |
 | `d3d12_SpriteSort` | `1` |  | The particles drawn back to front, as the original sorts them (Volcano's smoke over the lava without steps) |
+| `d3d12_BlendSortObject` | `1` |  | The blended objects drawn far to near by their objects' origins, as the original (the fade to black of Training's first cut scene covers the hanging moss round it); 0 by each part's own centre |
 | `d3d12_StaticCasters` | `1` |  | The palms and the other static casters shadow the terrain everywhere |
 | `d3d12_UnderwaterBodies` | `1` |  | The fish under the ocean drawn last without the depth: no shore foam in their shape over the water |
 | `d3d12_UpscaleHdr` | `1` | yes | With HDR, the upscaler gets the scene's light before the tone map |
