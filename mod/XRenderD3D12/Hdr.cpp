@@ -531,7 +531,6 @@ bool CD3D12Renderer::EnsureExposureTargets()
   if (m_Hdr.bExposureFailed || !m_pCompute || !m_pUpload || !m_pDevice->IsInFrame())
     return false;
   ID3D12Device *pDevice = m_pDevice->GetDevice();
-  const D3D12_HEAP_PROPERTIES Default = { D3D12_HEAP_TYPE_DEFAULT };
   D3D12_RESOURCE_DESC Desc = {};
   Desc.Dimension = D3D12_RESOURCE_DIMENSION_BUFFER;
   Desc.Width = EXPOSURE_WORDS_BYTES;
@@ -542,8 +541,8 @@ bool CD3D12Renderer::EnsureExposureTargets()
   Desc.Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
   Desc.Flags = D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS;
   bool bOk = m_pCompute->HasKernel(eD3D12K_ExposureHistogram) && m_pCompute->HasKernel(eD3D12K_ExposureTarget) &&
-             SUCCEEDED(pDevice->CreateCommittedResource(&Default, D3D12_HEAP_FLAG_NONE, &Desc, D3D12_RESOURCE_STATE_COMMON, nullptr,
-                                                        IID_PPV_ARGS(&m_Hdr.pExposureWords)));
+             SUCCEEDED(m_pDevice->CreateResource(D3D12_HEAP_TYPE_DEFAULT, Desc, D3D12_RESOURCE_STATE_COMMON, nullptr, ED3D12Memory::Committed,
+                                                 L"XRenderD3D12 exposure words", m_Hdr.pExposureWords));
   m_Hdr.pExposureTarget = bOk ? m_pUpload->CreateRenderTarget(1, 1, DXGI_FORMAT_R32G32B32A32_FLOAT, true) : nullptr;
   bOk = bOk && m_Hdr.pExposureTarget && m_Hdr.pExposureTarget->m_nSRV >= 0;
   // The tables: t0 the scene and t1 the depth each frame, u0 the words, u1 the target; the views the kernels do not use null.

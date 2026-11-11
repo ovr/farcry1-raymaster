@@ -622,8 +622,7 @@ bool CD3D12Renderer::UpdatePathCache()
     return false;
   if (!s.pCache)
   {
-    // Zeroed as made: no keys, no light.
-    const D3D12_HEAP_PROPERTIES Heap = { D3D12_HEAP_TYPE_DEFAULT };
+    // Committed, so zeroed as made: no keys, no light.
     D3D12_RESOURCE_DESC Desc = {};
     Desc.Dimension = D3D12_RESOURCE_DIMENSION_BUFFER;
     Desc.Width = XR_PT_CACHE_BYTES;
@@ -633,8 +632,8 @@ bool CD3D12Renderer::UpdatePathCache()
     Desc.SampleDesc.Count = 1;
     Desc.Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
     Desc.Flags = D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS;
-    if (FAILED(m_pDevice->GetDevice()->CreateCommittedResource(&Heap, D3D12_HEAP_FLAG_NONE, &Desc, D3D12_RESOURCE_STATE_COMMON, nullptr,
-                                                               IID_PPV_ARGS(&s.pCache))))
+    if (FAILED(m_pDevice->CreateResource(D3D12_HEAP_TYPE_DEFAULT, Desc, D3D12_RESOURCE_STATE_COMMON, nullptr, ED3D12Memory::Committed,
+                                         L"XRenderD3D12 path tracer's radiance cache", s.pCache)))
     {
       iLog->LogWarning("XRenderD3D12: the path tracer's radiance cache (%u KB) is not available: its paths without it",
                        XR_PT_CACHE_BYTES / 1024);
@@ -642,7 +641,6 @@ bool CD3D12Renderer::UpdatePathCache()
       s.bCacheFailed = true;
       return false;
     }
-    s.pCache->SetName(L"XRenderD3D12 path tracer's radiance cache");
     s.nCacheTable = -1;
     s.nCacheFrame = -1;
   }

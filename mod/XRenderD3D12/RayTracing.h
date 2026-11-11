@@ -181,7 +181,7 @@ private:
   };
   struct SPool
   {
-    Microsoft::WRL::ComPtr<ID3D12Resource> pBuffer;   //!< RAYTRACING_ACCELERATION_STRUCTURE
+    CD3D12Resource pBuffer;                             //!< RAYTRACING_ACCELERATION_STRUCTURE
     uint64 nSize = 0, nUsed = 0;
     std::map<uint64, uint64> Free;                      //!< offset -> size, merged with their neighbours
   };
@@ -213,7 +213,7 @@ private:
   //! A buffer of a frame slot that grows (RAYTRACING_ACCELERATION_STRUCTURE or UNORDERED_ACCESS).
   struct SSlotBuffer
   {
-    Microsoft::WRL::ComPtr<ID3D12Resource> pBuffer;
+    CD3D12Resource pBuffer;
     uint64 nSize = 0;
   };
   struct SFrameSlot
@@ -238,7 +238,7 @@ private:
   //! with its colour as the albedo, else unlit.
   static void DefaultMaterial(SRayInstance &Inst, const SDrawConstants &dc);
   //! A buffer of nSize bytes with unordered access in the default heap; NULL when refused (logged).
-  Microsoft::WRL::ComPtr<ID3D12Resource> CreateBuffer(uint64 nSize, D3D12_RESOURCE_STATES State, const wchar_t *szName);
+  CD3D12Resource CreateBuffer(uint64 nSize, D3D12_RESOURCE_STATES State, const wchar_t *szName);
   //! At least nSize bytes in Buf (a new buffer of the next power of two, the old one released when the GPU
   //! is done with it).
   bool Reserve(SSlotBuffer &Buf, uint64 nSize, D3D12_RESOURCE_STATES State, const wchar_t *szName);

@@ -438,7 +438,6 @@ bool CD3D12Renderer::DrawCmaa2Passes(ID3D12Resource *pCopy, int w, int h, int nQ
     const UINT64 Bytes[CMAA2_BUFFERS] = { nPixels / 4 * 4, (nPixels + 5) / 6 * 4, nPixels / 2 * 8, 16 * 4, 4 * 4 };
     const wchar_t *const Names[CMAA2_BUFFERS] = { L"XRenderD3D12 CMAA2 shapes", L"XRenderD3D12 CMAA2 quads", L"XRenderD3D12 CMAA2 colours",
                                                  L"XRenderD3D12 CMAA2 counters", L"XRenderD3D12 CMAA2 arguments" };
-    const D3D12_HEAP_PROPERTIES Heap = { D3D12_HEAP_TYPE_DEFAULT };
     bool bOk = true;
     for (int i = 0; i < CMAA2_BUFFERS && bOk; i++)
     {
@@ -450,10 +449,8 @@ bool CD3D12Renderer::DrawCmaa2Passes(ID3D12Resource *pCopy, int w, int h, int nQ
       Desc.Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
       Desc.Flags = D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS;
       // Common, as a buffer is after each list: the kernels promote them to UNORDERED_ACCESS.
-      bOk = SUCCEEDED(pDevice->CreateCommittedResource(&Heap, D3D12_HEAP_FLAG_NONE, &Desc, D3D12_RESOURCE_STATE_COMMON, nullptr,
-                                                       IID_PPV_ARGS(&m_pCmaa2Buffers[i])));
-      if (bOk)
-        m_pCmaa2Buffers[i]->SetName(Names[i]);
+      bOk = SUCCEEDED(m_pDevice->CreateResource(D3D12_HEAP_TYPE_DEFAULT, Desc, D3D12_RESOURCE_STATE_COMMON, nullptr, ED3D12Memory::Committed,
+                                                Names[i], m_pCmaa2Buffers[i]));
     }
     m_pCmaa2Color = bOk ? m_pUpload->CreateComputeTarget(w, h, 1, Typeless, L"XRenderD3D12 CMAA2 picture") : nullptr;
     m_pCmaa2Edges = m_pCmaa2Color ? m_pUpload->CreateComputeTarget((w + 1) / 2, h, 1, DXGI_FORMAT_R8_TYPELESS, L"XRenderD3D12 CMAA2 edges") : nullptr;
@@ -574,7 +571,7 @@ void CD3D12Renderer::ReleaseCmaa2()
       m_pUpload->ReleaseTexture(*p);
     *p = nullptr;
   }
-  for (ComPtr<ID3D12Resource> &p : m_pCmaa2Buffers)
+  for (CD3D12Resource &p : m_pCmaa2Buffers)
   {
     if (p && m_pDevice)
       m_pDevice->DeferredRelease(p);

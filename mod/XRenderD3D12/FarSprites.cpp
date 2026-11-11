@@ -284,7 +284,7 @@ void CD3D12Renderer::BakeSprites()
   const int w = nTilesPerRow * nTile;
   const int h = (nPassObjects * SPRITE_ANGLES + nTilesPerRow - 1) / nTilesPerRow * nTile;
 
-  ComPtr<ID3D12Resource> pColor, pDepth;
+  CD3D12Resource pColor, pDepth;
   const D3D12_CPU_DESCRIPTOR_HANDLE hRTV = m_pDescriptors->AllocRTV(), hDSV = m_pDescriptors->AllocDSV();
   std::vector<uint8> Pixels;
   int nMade = 0;

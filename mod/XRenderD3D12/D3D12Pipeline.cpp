@@ -630,11 +630,9 @@ bool CD3D12Pipeline::CreateRootSignature()
   return true;
 }
 
-Microsoft::WRL::ComPtr<ID3D12Resource> CD3D12Pipeline::CreateStaticUpload(const void *pData, uint32 nSize, const wchar_t *szName)
+CD3D12Resource CD3D12Pipeline::CreateStaticUpload(const void *pData, uint32 nSize, const wchar_t *szName)
 {
   // An upload heap buffer: small, written once, and every draw reads the same bytes.
-  D3D12_HEAP_PROPERTIES Heap = {};
-  Heap.Type = D3D12_HEAP_TYPE_UPLOAD;
   D3D12_RESOURCE_DESC Desc = {};
   Desc.Dimension = D3D12_RESOURCE_DIMENSION_BUFFER;
   Desc.Width = (nSize + 255) & ~255u;
@@ -644,13 +642,13 @@ Microsoft::WRL::ComPtr<ID3D12Resource> CD3D12Pipeline::CreateStaticUpload(const 
   Desc.Format = DXGI_FORMAT_UNKNOWN;
   Desc.SampleDesc.Count = 1;
   Desc.Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
-  Microsoft::WRL::ComPtr<ID3D12Resource> pBuffer;
-  HRESULT hr = m_pDevice->CreateCommittedResource(&Heap, D3D12_HEAP_FLAG_NONE, &Desc, D3D12_RESOURCE_STATE_GENERIC_READ,
-    nullptr, IID_PPV_ARGS(&pBuffer));
+  CD3D12Resource pBuffer;
+  HRESULT hr = g_pRenderer->m_pDevice->CreateResource(D3D12_HEAP_TYPE_UPLOAD, Desc, D3D12_RESOURCE_STATE_GENERIC_READ, nullptr,
+                                                      ED3D12Memory::Placed, szName, pBuffer);
   if (FAILED(hr))
   {
-    iLog->LogError("XRenderD3D12: CreateCommittedResource (%ls) failed (0x%08X)", szName, (unsigned)hr);
-    return nullptr;
+    iLog->LogError("XRenderD3D12: CreateResource (%ls) failed (0x%08X)", szName, (unsigned)hr);
+    return {};
   }
   pBuffer->SetName(szName);
   void *pCPU = nullptr;
@@ -659,7 +657,7 @@ Microsoft::WRL::ComPtr<ID3D12Resource> CD3D12Pipeline::CreateStaticUpload(const 
   if (FAILED(hr))
   {
     iLog->LogError("XRenderD3D12: Map (%ls) failed (0x%08X)", szName, (unsigned)hr);
-    return nullptr;
+    return {};
   }
   memset(pCPU, 0, (size_t)Desc.Width);
   memcpy(pCPU, pData, nSize);

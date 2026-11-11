@@ -536,10 +536,8 @@ void CD3D12RayScene::SetCaptureMaterial(uint32 nMaterial, const float vAlbedo[4]
 //////////////////////////////////////////////////////////////////////////
 // Memory
 
-ComPtr<ID3D12Resource> CD3D12RayScene::CreateBuffer(uint64 nSize, D3D12_RESOURCE_STATES State, const wchar_t *szName)
+CD3D12Resource CD3D12RayScene::CreateBuffer(uint64 nSize, D3D12_RESOURCE_STATES State, const wchar_t *szName)
 {
-  D3D12_HEAP_PROPERTIES Heap = {};
-  Heap.Type = D3D12_HEAP_TYPE_DEFAULT;
   D3D12_RESOURCE_DESC Desc = {};
   Desc.Dimension = D3D12_RESOURCE_DIMENSION_BUFFER;
   Desc.Width = nSize;
@@ -550,12 +548,13 @@ ComPtr<ID3D12Resource> CD3D12RayScene::CreateBuffer(uint64 nSize, D3D12_RESOURCE
   Desc.SampleDesc.Count = 1;
   Desc.Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
   Desc.Flags = D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS;
-  ComPtr<ID3D12Resource> pBuffer;
-  const HRESULT hr = m_pDevice5->CreateCommittedResource(&Heap, D3D12_HEAP_FLAG_NONE, &Desc, State, nullptr, IID_PPV_ARGS(&pBuffer));
+  // Placed: written whole by the builds before any read.
+  CD3D12Resource pBuffer;
+  const HRESULT hr = g_pRenderer->m_pDevice->CreateResource(D3D12_HEAP_TYPE_DEFAULT, Desc, State, nullptr, ED3D12Memory::Placed, szName, pBuffer);
   if (FAILED(hr))
   {
-    iLog->LogError("XRenderD3D12: CreateCommittedResource (ray scene, %llu bytes) failed (0x%08X)", (unsigned long long)nSize, (unsigned)hr);
-    return nullptr;
+    iLog->LogError("XRenderD3D12: CreateResource (ray scene, %llu bytes) failed (0x%08X)", (unsigned long long)nSize, (unsigned)hr);
+    return {};
   }
   pBuffer->SetName(szName);
   return pBuffer;
@@ -566,7 +565,7 @@ bool CD3D12RayScene::Reserve(SSlotBuffer &Buf, uint64 nSize, D3D12_RESOURCE_STAT
   if (Buf.pBuffer && nSize <= Buf.nSize)
     return true;
   const uint64 nNew = AlignUp(std::bit_ceil(nSize), BUFFER_ALIGN);
-  ComPtr<ID3D12Resource> pBuffer = CreateBuffer(nNew, State, szName);
+  CD3D12Resource pBuffer = CreateBuffer(nNew, State, szName);
   if (!pBuffer)
     return false;
   if (Buf.pBuffer)
@@ -601,7 +600,7 @@ bool CD3D12RayScene::AllocPool(uint64 nSize, SPoolRange &Out)
   }
   // A new pool, where one was released or at the end.
   const uint64 nPoolSize = std::max(POOL_SIZE, AlignUp(nSize, BUFFER_ALIGN));
-  ComPtr<ID3D12Resource> pBuffer = CreateBuffer(nPoolSize, D3D12_RESOURCE_STATE_RAYTRACING_ACCELERATION_STRUCTURE, L"XRenderD3D12 ray scene BLAS");
+  CD3D12Resource pBuffer = CreateBuffer(nPoolSize, D3D12_RESOURCE_STATE_RAYTRACING_ACCELERATION_STRUCTURE, L"XRenderD3D12 ray scene BLAS");
   if (!pBuffer)
     return false;
   size_t nPool = 0;

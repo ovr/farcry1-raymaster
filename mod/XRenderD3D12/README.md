@@ -1756,8 +1756,8 @@ given one by one, on the GPU with the debug layer).
   stays where its state holds `DEPTH_READ`). A buffer's state decays to `COMMON` when the frame's
   list has run (a readback's flush, the wait for the rays' compute list, the frame's end) and is
   given back by a transition at the next list's start, so that no implicit promotion goes past the
-  tracker. A tracked resource is released through `DeferredRelease` or the upload pools, which
-  forget it (its address may come again); the upload list never writes one (`d3d12_BarrierCheck`
+  tracker. A tracked resource is released through `DeferredRelease`, which forgets it (its
+  address may come again); the upload list never writes one (`d3d12_BarrierCheck`
   says so if it does).
 - Every command recorded on a command list directly (not through the device's or
   `CD3D12Compute`'s wrappers, which give the queue first) says `barriers flushed` in its
