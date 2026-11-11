@@ -164,8 +164,7 @@ void CD3D12RayScene::Shutdown()
   m_ReflectionDraws.clear();
   m_Static.clear();
   m_nStaticBytes = 0;
-  m_Pools.clear();
-  m_PendingFree.clear();
+  ReleasePools(false);
   for (SFrameSlot &Slot : m_Slots)
     Slot = SFrameSlot();
   m_nBuiltFrame = -1;
@@ -181,11 +180,7 @@ void CD3D12RayScene::Release()
   if (!bHeld || !g_pRenderer->m_pDevice)
     return;
   CD3D12Device &Device = *g_pRenderer->m_pDevice;
-  for (const auto &p : m_Pools)
-  {
-    if (p->pBuffer)
-      Device.DeferredRelease(p->pBuffer);
-  }
+  ReleasePools(true);
   for (SFrameSlot &Slot : m_Slots)
   {
     for (SSlotBuffer *pBuf : { &Slot.Scratch, &Slot.Blas, &Slot.Tlas })
@@ -195,8 +190,6 @@ void CD3D12RayScene::Release()
     }
     Slot = SFrameSlot();
   }
-  m_Pools.clear();
-  m_PendingFree.clear();
   m_Static.clear();
   m_nStaticBytes = 0;
   m_Draws.clear();
@@ -578,31 +571,36 @@ bool CD3D12RayScene::Reserve(SSlotBuffer &Buf, uint64 nSize, D3D12_RESOURCE_STAT
 bool CD3D12RayScene::AllocPool(uint64 nSize, SPoolRange &Out)
 {
   nSize = AlignUp(nSize, AS_ALIGN);
-  for (size_t i = 0; i < m_Pools.size(); i++)
+  D3D12MA::VIRTUAL_ALLOCATION_DESC Desc = {};
+  Desc.Size = nSize;
+  Desc.Alignment = AS_ALIGN;
+  const auto Place = [&](size_t i)
   {
     SPool &Pool = *m_Pools[i];
-    if (!Pool.pBuffer)
-      continue;
-    for (auto it = Pool.Free.begin(); it != Pool.Free.end(); ++it)
-    {
-      if (it->second < nSize)
-        continue;
-      Out.nPool = (int)i;
-      Out.nOffset = it->first;
-      Out.nSize = nSize;
-      const uint64 nRest = it->second - nSize;
-      Pool.Free.erase(it);
-      if (nRest)
-        Pool.Free[Out.nOffset + nSize] = nRest;
-      Pool.nUsed += nSize;
+    if (!Pool.pBuffer || FAILED(Pool.pBlock->Allocate(&Desc, &Out.Alloc, &Out.nOffset)))
+      return false;
+    Out.nPool = (int)i;
+    Out.nSize = nSize;
+    Pool.nUsed += nSize;
+    return true;
+  };
+  for (size_t i = 0; i < m_Pools.size(); i++)
+  {
+    if (Place(i))
       return true;
-    }
   }
   // A new pool, where one was released or at the end.
   const uint64 nPoolSize = std::max(POOL_SIZE, AlignUp(nSize, BUFFER_ALIGN));
   CD3D12Resource pBuffer = CreateBuffer(nPoolSize, D3D12_RESOURCE_STATE_RAYTRACING_ACCELERATION_STRUCTURE, L"XRenderD3D12 ray scene BLAS");
-  if (!pBuffer)
+  D3D12MA::VIRTUAL_BLOCK_DESC BlockDesc = {};
+  BlockDesc.Size = nPoolSize;
+  Microsoft::WRL::ComPtr<D3D12MA::VirtualBlock> pBlock;
+  if (!pBuffer || FAILED(D3D12MA::CreateVirtualBlock(&BlockDesc, &pBlock)))
+  {
+    if (pBuffer)
+      g_pRenderer->m_pDevice->DeferredRelease(pBuffer);
     return false;
+  }
   size_t nPool = 0;
   while (nPool < m_Pools.size() && m_Pools[nPool]->pBuffer)
     nPool++;
@@ -610,15 +608,10 @@ bool CD3D12RayScene::AllocPool(uint64 nSize, SPoolRange &Out)
     m_Pools.push_back(std::make_unique<SPool>());
   SPool &Pool = *m_Pools[nPool];
   Pool.pBuffer = std::move(pBuffer);
+  Pool.pBlock = std::move(pBlock);
   Pool.nSize = nPoolSize;
-  Pool.nUsed = nSize;
-  Pool.Free.clear();
-  if (nPoolSize > nSize)
-    Pool.Free[nSize] = nPoolSize - nSize;
-  Out.nPool = (int)nPool;
-  Out.nOffset = 0;
-  Out.nSize = nSize;
-  return true;
+  Pool.nUsed = 0;
+  return Place(nPool);
 }
 
 void CD3D12RayScene::FreePool(const SPoolRange &Range)
@@ -641,22 +634,8 @@ void CD3D12RayScene::CollectPools()
     }
     SPool &Pool = *m_Pools[Range.nPool];
     Pool.nUsed -= std::min(Pool.nUsed, Range.nSize);
-    auto it = Pool.Free.emplace(Range.nOffset, Range.nSize).first;
-    auto Next = std::next(it);
-    if (Next != Pool.Free.end() && it->first + it->second == Next->first)
-    {
-      it->second += Next->second;
-      Pool.Free.erase(Next);
-    }
-    if (it != Pool.Free.begin())
-    {
-      auto Prev = std::prev(it);
-      if (Prev->first + Prev->second == it->first)
-      {
-        Prev->second += it->second;
-        Pool.Free.erase(it);
-      }
-    }
+    if (Pool.pBlock)
+      Pool.pBlock->FreeAllocation(Range.Alloc);
   }
   m_PendingFree.resize(nKept);
   // An empty pool goes (the first one stays).
@@ -666,10 +645,23 @@ void CD3D12RayScene::CollectPools()
     if (Pool.pBuffer && !Pool.nUsed)
     {
       g_pRenderer->m_pDevice->DeferredRelease(Pool.pBuffer);
+      Pool.pBlock.Reset();
       Pool.nSize = 0;
-      Pool.Free.clear();
     }
   }
+}
+
+void CD3D12RayScene::ReleasePools(bool bDefer)
+{
+  for (const auto &p : m_Pools)
+  {
+    if (p->pBlock)
+      p->pBlock->Clear();
+    if (bDefer && p->pBuffer)
+      g_pRenderer->m_pDevice->DeferredRelease(p->pBuffer);
+  }
+  m_Pools.clear();
+  m_PendingFree.clear();
 }
 
 void CD3D12RayScene::Evict(uint64 nBudget)

@@ -230,3 +230,53 @@ XR_TEST(Memory_Statistics)
     CHECK(Json.find(L"XRenderD3D12Tests memory") != std::wstring::npos);
   }
 }
+
+// The ray scene's pools as CD3D12RayScene::AllocPool keeps them: ranges in a virtual block of 64 MB, 256-byte aligned,
+// apart, and what is freed joins its neighbours (the whole pool fits again).
+XR_TEST(Memory_VirtualPool)
+{
+  constexpr UINT64 POOL = 64ull << 20, ALIGN = D3D12_RAYTRACING_ACCELERATION_STRUCTURE_BYTE_ALIGNMENT;
+  D3D12MA::VIRTUAL_BLOCK_DESC BlockDesc = {};
+  BlockDesc.Size = POOL;
+  ComPtr<D3D12MA::VirtualBlock> pBlock;
+  CHECK(SUCCEEDED(D3D12MA::CreateVirtualBlock(&BlockDesc, &pBlock)));
+  if (!pBlock)
+    return;
+  struct SRange
+  {
+    D3D12MA::VirtualAllocation Alloc;
+    UINT64 nOffset, nSize;
+  };
+  std::vector<SRange> Ranges;
+  for (int i = 0; i < 300; i++)
+  {
+    D3D12MA::VIRTUAL_ALLOCATION_DESC Desc = {};
+    Desc.Size = (UINT64)(1 + i * 7919 % 97) * 2304;
+    Desc.Alignment = ALIGN;
+    SRange r = { {}, 0, Desc.Size };
+    if (SUCCEEDED(pBlock->Allocate(&Desc, &r.Alloc, &r.nOffset)))
+      Ranges.push_back(r);
+  }
+  CHECK(Ranges.size() == 300);
+  std::vector<SRange> Sorted = Ranges;
+  std::sort(Sorted.begin(), Sorted.end(), [](const SRange &a, const SRange &b) { return a.nOffset < b.nOffset; });
+  for (size_t i = 0; i < Sorted.size(); i++)
+  {
+    CHECK(Sorted[i].nOffset % ALIGN == 0);
+    CHECK(Sorted[i].nOffset + Sorted[i].nSize <= POOL);
+    if (i)
+      CHECK(Sorted[i - 1].nOffset + Sorted[i - 1].nSize <= Sorted[i].nOffset);
+  }
+  for (size_t i = 0; i < Ranges.size(); i += 2)
+    pBlock->FreeAllocation(Ranges[i].Alloc);
+  for (size_t i = 1; i < Ranges.size(); i += 2)
+    pBlock->FreeAllocation(Ranges[i].Alloc);
+  CHECK(pBlock->IsEmpty());
+  D3D12MA::VIRTUAL_ALLOCATION_DESC Whole = {};
+  Whole.Size = POOL;
+  Whole.Alignment = ALIGN;
+  D3D12MA::VirtualAllocation Alloc = {};
+  UINT64 nOffset = 1;
+  CHECK(SUCCEEDED(pBlock->Allocate(&Whole, &Alloc, &nOffset)) && nOffset == 0);
+  pBlock->Clear();
+}

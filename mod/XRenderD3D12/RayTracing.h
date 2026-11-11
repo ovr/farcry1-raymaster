@@ -178,12 +178,13 @@ private:
   {
     int nPool = -1;
     uint64 nOffset = 0, nSize = 0;
+    D3D12MA::VirtualAllocation Alloc = {};
   };
   struct SPool
   {
     CD3D12Resource pBuffer;                             //!< RAYTRACING_ACCELERATION_STRUCTURE
+    Microsoft::WRL::ComPtr<D3D12MA::VirtualBlock> pBlock;   //!< its ranges
     uint64 nSize = 0, nUsed = 0;
-    std::map<uint64, uint64> Free;                      //!< offset -> size, merged with their neighbours
   };
   struct SStaticBlas
   {
@@ -246,6 +247,8 @@ private:
   //! Back to the pool once the GPU finished the current frame.
   void FreePool(const SPoolRange &Range);
   void CollectPools();
+  //! All pools gone, their buffers once the GPU is done with them (bDefer) or at once (the device's shutdown).
+  void ReleasePools(bool bDefer);
   //! The static BLAS not used in this frame, least recently used first, until the pools hold at most
   //! nBudget bytes; and those not used for a while.
   void Evict(uint64 nBudget);
