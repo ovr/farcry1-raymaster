@@ -441,13 +441,7 @@ bool CD3D12Renderer::DrawCmaa2Passes(ID3D12Resource *pCopy, int w, int h, int nQ
     bool bOk = true;
     for (int i = 0; i < CMAA2_BUFFERS && bOk; i++)
     {
-      D3D12_RESOURCE_DESC Desc = {};
-      Desc.Dimension = D3D12_RESOURCE_DIMENSION_BUFFER;
-      Desc.Width = Bytes[i];
-      Desc.Height = Desc.DepthOrArraySize = Desc.MipLevels = 1;
-      Desc.SampleDesc.Count = 1;
-      Desc.Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
-      Desc.Flags = D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS;
+      const D3D12_RESOURCE_DESC Desc = D3D12BufferDesc(Bytes[i], D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS);
       // Common, as a buffer is after each list: the kernels promote them to UNORDERED_ACCESS.
       bOk = SUCCEEDED(m_pDevice->CreateResource(D3D12_HEAP_TYPE_DEFAULT, Desc, D3D12_RESOURCE_STATE_COMMON, nullptr, ED3D12Memory::Committed,
                                                 Names[i], m_pCmaa2Buffers[i]));

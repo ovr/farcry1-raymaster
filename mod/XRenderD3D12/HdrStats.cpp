@@ -39,20 +39,6 @@ void Set4(float v[4], float x, float y, float z, float w)
   v[0] = x; v[1] = y; v[2] = z; v[3] = w;
 }
 
-D3D12_RESOURCE_DESC BufferDesc(UINT64 nBytes, D3D12_RESOURCE_FLAGS Flags)
-{
-  D3D12_RESOURCE_DESC Desc = {};
-  Desc.Dimension = D3D12_RESOURCE_DIMENSION_BUFFER;
-  Desc.Width = nBytes;
-  Desc.Height = 1;
-  Desc.DepthOrArraySize = 1;
-  Desc.MipLevels = 1;
-  Desc.SampleDesc.Count = 1;
-  Desc.Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
-  Desc.Flags = Flags;
-  return Desc;
-}
-
 float AsFloat(uint32 n)
 {
   float f;
@@ -76,9 +62,8 @@ bool CD3D12Renderer::BeginHdrStats()
     return true;
   if (!s.pWords)
   {
-    ID3D12Device *pDevice = m_pDevice->GetDevice();
-    const D3D12_RESOURCE_DESC Words = BufferDesc(WORDS_BYTES, D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS);
-    const D3D12_RESOURCE_DESC Copies = BufferDesc((UINT64)WORDS_BYTES * D3D12_FRAMES, D3D12_RESOURCE_FLAG_NONE);
+    const D3D12_RESOURCE_DESC Words = D3D12BufferDesc(WORDS_BYTES, D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS);
+    const D3D12_RESOURCE_DESC Copies = D3D12BufferDesc((UINT64)WORDS_BYTES * D3D12_FRAMES);
     s.Tables.assign(2 * D3D12_FRAMES, -1);
     // The words common (a buffer is created so; the device keeps their state from here on, TrackState), the read back copy
     // destination.
@@ -120,8 +105,6 @@ bool CD3D12Renderer::BeginHdrStats()
       s.bFailed = true;
       return false;
     }
-    s.pWords->SetName(L"XRenderD3D12 HDR statistics");
-    s.pReadback->SetName(L"XRenderD3D12 HDR statistics (read back)");
     m_pDevice->TrackState(s.pWords.Get(), D3D12_RESOURCE_STATE_COMMON);
     for (SHdrStatsFrame &f : s.Slots)
       f = {};

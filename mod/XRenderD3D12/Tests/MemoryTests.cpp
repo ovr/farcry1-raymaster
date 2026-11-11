@@ -14,8 +14,9 @@
 #include <dxgi1_6.h>
 #include <algorithm>
 #include <cstring>
-#include <cwctype>
+#include <cctype>
 #include <string>
+#include <type_traits>
 #include <vector>
 #include "D3D12Memory.h"
 #include "GpuHarness.h"
@@ -25,27 +26,14 @@ namespace
 {
   using Microsoft::WRL::ComPtr;
 
+  // One owner per allocation: a copy would let DeferredRelease free memory another copy still draws with.
+  static_assert(!std::is_copy_constructible_v<CD3D12Resource> && std::is_move_constructible_v<CD3D12Resource>);
+
   ComPtr<D3D12MA::Allocator> MakeAllocator()
   {
-    D3D12MA::ALLOCATOR_DESC Desc = {};
-    Desc.Flags = D3D12_ALLOCATOR_FLAGS;
-    Desc.pDevice = XrTest::Gpu().Device();
-    Desc.pAdapter = XrTest::Gpu().Adapter();
     ComPtr<D3D12MA::Allocator> p;
-    CHECK(SUCCEEDED(D3D12MA::CreateAllocator(&Desc, &p)));
+    CHECK(SUCCEEDED(CreateD3D12Allocator(XrTest::Gpu().Device(), XrTest::Gpu().Adapter(), p)));
     return p;
-  }
-
-  D3D12_RESOURCE_DESC BufferDesc(UINT64 nBytes, D3D12_RESOURCE_FLAGS eFlags = D3D12_RESOURCE_FLAG_NONE)
-  {
-    D3D12_RESOURCE_DESC Desc = {};
-    Desc.Dimension = D3D12_RESOURCE_DIMENSION_BUFFER;
-    Desc.Width = nBytes;
-    Desc.Height = Desc.DepthOrArraySize = Desc.MipLevels = 1;
-    Desc.SampleDesc.Count = 1;
-    Desc.Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
-    Desc.Flags = eFlags;
-    return Desc;
   }
 
   D3D12_RESOURCE_DESC TextureDesc(UINT nSize, DXGI_FORMAT Format, D3D12_RESOURCE_FLAGS eFlags)
@@ -74,9 +62,11 @@ namespace
 XR_TEST(Memory_PlacedAndCommitted)
 {
   ComPtr<D3D12MA::Allocator> pAllocator = MakeAllocator();
-  const CD3D12Resource Placed = Make(pAllocator.Get(), D3D12_HEAP_TYPE_DEFAULT, BufferDesc(64 << 10), D3D12_RESOURCE_STATE_COMMON, ED3D12Memory::Placed);
-  const CD3D12Resource Committed = Make(pAllocator.Get(), D3D12_HEAP_TYPE_DEFAULT, BufferDesc(64 << 10, D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS),
-                                        D3D12_RESOURCE_STATE_COMMON, ED3D12Memory::Committed);
+  const CD3D12Resource Placed = Make(pAllocator.Get(), D3D12_HEAP_TYPE_DEFAULT, D3D12BufferDesc(64 << 10), D3D12_RESOURCE_STATE_COMMON,
+                                     ED3D12Memory::Placed);
+  const CD3D12Resource Committed = Make(pAllocator.Get(), D3D12_HEAP_TYPE_DEFAULT,
+                                        D3D12BufferDesc(64 << 10, D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS), D3D12_RESOURCE_STATE_COMMON,
+                                        ED3D12Memory::Committed);
   const CD3D12Resource Texture = Make(pAllocator.Get(), D3D12_HEAP_TYPE_DEFAULT, TextureDesc(64, DXGI_FORMAT_R8G8B8A8_UNORM, D3D12_RESOURCE_FLAG_NONE),
                                       D3D12_RESOURCE_STATE_COPY_DEST, ED3D12Memory::Placed);
   D3D12_CLEAR_VALUE Clear = {};
@@ -84,7 +74,7 @@ XR_TEST(Memory_PlacedAndCommitted)
   const CD3D12Resource Target = Make(pAllocator.Get(), D3D12_HEAP_TYPE_DEFAULT,
                                      TextureDesc(64, DXGI_FORMAT_R16G16B16A16_FLOAT, D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET),
                                      D3D12_RESOURCE_STATE_RENDER_TARGET, ED3D12Memory::Committed, &Clear);
-  const CD3D12Resource Readback = Make(pAllocator.Get(), D3D12_HEAP_TYPE_READBACK, BufferDesc(4096), D3D12_RESOURCE_STATE_COPY_DEST,
+  const CD3D12Resource Readback = Make(pAllocator.Get(), D3D12_HEAP_TYPE_READBACK, D3D12BufferDesc(4096), D3D12_RESOURCE_STATE_COPY_DEST,
                                        ED3D12Memory::Committed);
   CHECK(Placed.GetAllocation()->GetHeap() != nullptr);
   CHECK(Texture.GetAllocation()->GetHeap() != nullptr);
@@ -107,12 +97,12 @@ XR_TEST(Memory_NoOverlap)
   ComPtr<D3D12MA::Allocator> pAllocator = MakeAllocator();
   std::vector<CD3D12Resource> Buffers;
   for (int i = 0; i < 24; i++)
-    Buffers.push_back(Make(pAllocator.Get(), D3D12_HEAP_TYPE_DEFAULT, BufferDesc((UINT64)(1 + i % 5) * 48 * 1024), D3D12_RESOURCE_STATE_COMMON,
+    Buffers.push_back(Make(pAllocator.Get(), D3D12_HEAP_TYPE_DEFAULT, D3D12BufferDesc((UINT64)(1 + i % 5) * 48 * 1024), D3D12_RESOURCE_STATE_COMMON,
                            ED3D12Memory::Placed));
   for (size_t i = 0; i < Buffers.size(); i += 3)
     Buffers[i].Reset();
   for (int i = 0; i < 8; i++)
-    Buffers.push_back(Make(pAllocator.Get(), D3D12_HEAP_TYPE_DEFAULT, BufferDesc((UINT64)(1 + i % 3) * 40 * 1024), D3D12_RESOURCE_STATE_COMMON,
+    Buffers.push_back(Make(pAllocator.Get(), D3D12_HEAP_TYPE_DEFAULT, D3D12BufferDesc((UINT64)(1 + i % 3) * 40 * 1024), D3D12_RESOURCE_STATE_COMMON,
                            ED3D12Memory::Placed));
   int nPairs = 0;
   for (size_t i = 0; i < Buffers.size(); i++)
@@ -138,7 +128,7 @@ XR_TEST(Memory_Reuse)
   UINT64 nOffset = 0;
   for (int i = 0; i < 64; i++)
   {
-    CD3D12Resource r = Make(pAllocator.Get(), D3D12_HEAP_TYPE_DEFAULT, BufferDesc(256 << 10), D3D12_RESOURCE_STATE_COMMON, ED3D12Memory::Placed);
+    CD3D12Resource r = Make(pAllocator.Get(), D3D12_HEAP_TYPE_DEFAULT, D3D12BufferDesc(256 << 10), D3D12_RESOURCE_STATE_COMMON, ED3D12Memory::Placed);
     if (!i)
     {
       pHeap = r.GetAllocation()->GetHeap();
@@ -157,18 +147,15 @@ XR_TEST(Memory_Reuse)
 XR_TEST(Memory_OutlivesAllocator)
 {
   ComPtr<D3D12MA::Allocator> pAllocator = MakeAllocator();
-  CD3D12Resource r = Make(pAllocator.Get(), D3D12_HEAP_TYPE_DEFAULT, BufferDesc(4096), D3D12_RESOURCE_STATE_COMMON, ED3D12Memory::Placed);
-  CD3D12Resource Copy = r;
+  CD3D12Resource r = Make(pAllocator.Get(), D3D12_HEAP_TYPE_DEFAULT, D3D12BufferDesc(4096), D3D12_RESOURCE_STATE_COMMON, ED3D12Memory::Placed);
   D3D12MA::Allocator *pRaw = pAllocator.Get();
   pAllocator.Reset();
   D3D12MA::TotalStatistics Stats = {};
   pRaw->CalculateStatistics(&Stats);
   CHECK(Stats.Total.Stats.AllocationCount == 1);
-  r.Reset();
-  CHECK(Copy.Get() != nullptr);
   CD3D12Resource Other;
-  Other = Copy;
-  Copy.Reset();
+  Other = std::move(r);
+  CHECK(!r && r == nullptr);
   CHECK(Other.Get() != nullptr && !(Other == nullptr));
   Other.Reset();
   CHECK(Other == nullptr && !Other.Get());
@@ -178,7 +165,8 @@ XR_TEST(Memory_OutlivesAllocator)
 XR_TEST(Memory_UploadMapped)
 {
   ComPtr<D3D12MA::Allocator> pAllocator = MakeAllocator();
-  CD3D12Resource r = Make(pAllocator.Get(), D3D12_HEAP_TYPE_UPLOAD, BufferDesc(1 << 20), D3D12_RESOURCE_STATE_GENERIC_READ, ED3D12Memory::Placed);
+  CD3D12Resource r = Make(pAllocator.Get(), D3D12_HEAP_TYPE_UPLOAD, D3D12BufferDesc(1 << 20), D3D12_RESOURCE_STATE_GENERIC_READ,
+                          ED3D12Memory::Placed);
   void *pCPU = nullptr;
   const D3D12_RANGE NoRead = { 0, 0 };
   CHECK(SUCCEEDED(r->Map(0, &NoRead, &pCPU)) && pCPU);
@@ -199,40 +187,33 @@ XR_TEST(Memory_Statistics)
   UINT64 nBytes = 0;
   for (int i = 0; i < 6; i++)
   {
-    Live.push_back(Make(pAllocator.Get(), D3D12_HEAP_TYPE_DEFAULT, BufferDesc((UINT64)(i + 1) << 16), D3D12_RESOURCE_STATE_COMMON,
+    Live.push_back(Make(pAllocator.Get(), D3D12_HEAP_TYPE_DEFAULT, D3D12BufferDesc((UINT64)(i + 1) << 16), D3D12_RESOURCE_STATE_COMMON,
                         i % 2 ? ED3D12Memory::Committed : ED3D12Memory::Placed));
     nBytes += Live.back().GetAllocation()->GetSize();
   }
-  D3D12MA::TotalStatistics Stats = {};
-  pAllocator->CalculateStatistics(&Stats);
-  CHECK(Stats.Total.Stats.AllocationCount == 6);
-  CHECK(Stats.Total.Stats.AllocationBytes == nBytes);
-  CHECK(Stats.Total.Stats.BlockBytes >= Stats.Total.Stats.AllocationBytes);
-  D3D12MA::Budget Local = {}, NonLocal = {};
-  pAllocator->GetBudget(&Local, &NonLocal);
-  CHECK(Local.Stats.AllocationBytes + NonLocal.Stats.AllocationBytes == nBytes);
+  SD3D12MemoryStats M;
+  ReadMemoryStats(*pAllocator.Get(), M, true);
+  CHECK(M.nAllocations == 6);
+  CHECK(M.nAllocationBytes == nBytes);
+  CHECK(M.nHeaps >= 4 && M.nHeapBytes >= M.nAllocationBytes);
+  CHECK(M.nTypeBytes[0] == nBytes && M.nTypeBytes[1] == 0 && M.nTypeBytes[2] == 0);
+  CHECK(M.nLocalBudget > 0);
+  SD3D12MemoryStats Cheap;
+  ReadMemoryStats(*pAllocator.Get(), Cheap, false);
+  CHECK(Cheap.nHeaps == 0 && Cheap.nAllocations == 0 && Cheap.nLocalBudget > 0);
 
-  WCHAR *szJson = nullptr;
-  pAllocator->BuildStatsString(&szJson, TRUE);
-  CHECK(szJson != nullptr);
-  if (szJson)
-  {
-    std::wstring Json = szJson;
-    pAllocator->FreeStatsString(szJson);
-    // After its byte order mark (AMD's GpuMemDumpVis.py reads the file so).
-    CHECK(!Json.empty() && Json.front() == 0xFEFF);
-    if (!Json.empty() && Json.front() == 0xFEFF)
-      Json.erase(0, 1);
-    while (!Json.empty() && iswspace(Json.back()))
-      Json.pop_back();
-    CHECK(Json.size() > 2 && Json.front() == L'{' && Json.back() == L'}');
-    CHECK(Json.find(L"\"Total\"") != std::wstring::npos);
-    CHECK(Json.find(L"XRenderD3D12Tests memory") != std::wstring::npos);
-  }
+  std::string Json = MemoryStatsJson(*pAllocator.Get());
+  // The byte order mark in UTF-8 (AMD's GpuMemDumpVis.py reads the file so), then the object.
+  CHECK(Json.rfind("\xEF\xBB\xBF{", 0) == 0);
+  while (!Json.empty() && isspace((unsigned char)Json.back()))
+    Json.pop_back();
+  CHECK(!Json.empty() && Json.back() == '}');
+  CHECK(Json.find("\"Total\"") != std::string::npos);
+  CHECK(Json.find("XRenderD3D12Tests memory") != std::string::npos);
 }
 
-// The ray scene's pools as CD3D12RayScene::AllocPool keeps them: ranges in a virtual block of 64 MB, 256-byte aligned,
-// apart, and what is freed joins its neighbours (the whole pool fits again).
+// The ray scene's pools as CD3D12RayScene::AllocPool keeps them: aligned ranges apart, and freed ones join again (the
+// whole pool fits).
 XR_TEST(Memory_VirtualPool)
 {
   constexpr UINT64 POOL = 64ull << 20, ALIGN = D3D12_RAYTRACING_ACCELERATION_STRUCTURE_BYTE_ALIGNMENT;

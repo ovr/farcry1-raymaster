@@ -623,15 +623,7 @@ bool CD3D12Renderer::UpdatePathCache()
   if (!s.pCache)
   {
     // Committed, so zeroed as made: no keys, no light.
-    D3D12_RESOURCE_DESC Desc = {};
-    Desc.Dimension = D3D12_RESOURCE_DIMENSION_BUFFER;
-    Desc.Width = XR_PT_CACHE_BYTES;
-    Desc.Height = 1;
-    Desc.DepthOrArraySize = 1;
-    Desc.MipLevels = 1;
-    Desc.SampleDesc.Count = 1;
-    Desc.Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
-    Desc.Flags = D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS;
+    const D3D12_RESOURCE_DESC Desc = D3D12BufferDesc(XR_PT_CACHE_BYTES, D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS);
     if (FAILED(m_pDevice->CreateResource(D3D12_HEAP_TYPE_DEFAULT, Desc, D3D12_RESOURCE_STATE_COMMON, nullptr, ED3D12Memory::Committed,
                                          L"XRenderD3D12 path tracer's radiance cache", s.pCache)))
     {

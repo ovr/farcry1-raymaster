@@ -1715,11 +1715,13 @@ prepass's motion as before the block, for comparisons (read at each draw). `r_St
 
 ## GPU memory
 
-All of the renderer's GPU memory comes from AMD's D3D12 Memory Allocator
+The renderer's own GPU memory comes from AMD's D3D12 Memory Allocator
 (`third_party/d3d12-memory-allocator`, v3.3.0): one allocator of the device, made with it
 (`CD3D12Device::CreateResource`, `D3D12Memory.h`). A resource is made with its memory
 (`CD3D12Resource`: the allocation, which owns the resource, and the allocator) and goes with it,
-through `DeferredRelease` once the GPU has passed the frame's fence.
+through `DeferredRelease` once the GPU has passed the frame's fence. A `CD3D12Resource` is moved,
+never copied: one owner per allocation. The raw `m_pResource` of a texture or a buffer holds no
+reference of its own.
 
 - Placed in the allocator's heaps (its memory as the last user left it): what is written whole
   before it is read, the static buffers and the textures with data, the characters' shadow maps
@@ -1747,7 +1749,8 @@ through `DeferredRelease` once the GPU has passed the frame's fence.
   `GpuMemDumpVis.py` draws it.
 - Tests: `Tests/MemoryTests.cpp` (`Memory_*`, also under the debug layer): placed and committed
   resources in their heap types, the placed ones' ranges apart and reused, a resource outliving
-  its allocator's owner, mapped upload buffers, the statistics and the JSON dump.
+  its allocator's owner, mapped upload buffers, the overlay's statistics and the JSON dump
+  (`ReadMemoryStats`, `MemoryStatsJson`: the device's own code), the ray pools' virtual blocks.
 
 ## Resource states and barriers
 

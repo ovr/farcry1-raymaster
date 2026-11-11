@@ -530,16 +530,7 @@ bool CD3D12Renderer::EnsureExposureTargets()
     return true;
   if (m_Hdr.bExposureFailed || !m_pCompute || !m_pUpload || !m_pDevice->IsInFrame())
     return false;
-  ID3D12Device *pDevice = m_pDevice->GetDevice();
-  D3D12_RESOURCE_DESC Desc = {};
-  Desc.Dimension = D3D12_RESOURCE_DIMENSION_BUFFER;
-  Desc.Width = EXPOSURE_WORDS_BYTES;
-  Desc.Height = 1;
-  Desc.DepthOrArraySize = 1;
-  Desc.MipLevels = 1;
-  Desc.SampleDesc.Count = 1;
-  Desc.Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
-  Desc.Flags = D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS;
+  const D3D12_RESOURCE_DESC Desc = D3D12BufferDesc(EXPOSURE_WORDS_BYTES, D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS);
   bool bOk = m_pCompute->HasKernel(eD3D12K_ExposureHistogram) && m_pCompute->HasKernel(eD3D12K_ExposureTarget) &&
              SUCCEEDED(m_pDevice->CreateResource(D3D12_HEAP_TYPE_DEFAULT, Desc, D3D12_RESOURCE_STATE_COMMON, nullptr, ED3D12Memory::Committed,
                                                  L"XRenderD3D12 exposure words", m_Hdr.pExposureWords));
@@ -587,7 +578,6 @@ bool CD3D12Renderer::EnsureExposureTargets()
     m_Hdr.bExposureFailed = true;
     return false;
   }
-  m_Hdr.pExposureWords->SetName(L"XRenderD3D12 exposure histogram");
   memset(Zeros.pCPU, 0, EXPOSURE_WORDS_BYTES);
   m_pDevice->EndOffscreen();
   m_pDevice->CopyBufferRegion(m_Hdr.pExposureWords.Get(), 0, Zeros.pResource, Zeros.nOffset, EXPOSURE_WORDS_BYTES);

@@ -42,7 +42,7 @@ struct SD3D12FrameAlloc
 class CD3D12Buffer
 {
 public:
-  ID3D12Resource *m_pResource;
+  ID3D12Resource *m_pResource;        //!< m_Memory's, no reference of its own
   D3D12_GPU_VIRTUAL_ADDRESS m_nGPU;
   uint32 m_nSize;
   uint64 m_nId;                       //!< never the same for two buffers (FindBuffer's callers tell them apart by it)
@@ -58,7 +58,7 @@ public:
 class CD3D12Texture
 {
 public:
-  ID3D12Resource *m_pResource;
+  ID3D12Resource *m_pResource;        //!< m_Memory's, no reference of its own
   DXGI_FORMAT m_Format;
   int m_nWidth, m_nHeight, m_nMips;
   bool m_bCube;                       //!< 6 faces
@@ -115,7 +115,7 @@ public:
   static constexpr int MAX_RAW_SRVS = 16384;
 
   //! A 2D texture (or a cube with 6 faces), nMips levels, with an SRV in the texture table.
-  //! pSubData: [face * nMips + mip] for every face and mip, or NULL (contents undefined); an
+  //! pSubData: [face * nMips + mip] for every face and mip, or NULL (zeros: committed); an
   //! entry with pData NULL leaves that sub resource undefined. NULL when the device refuses it.
   CD3D12Texture *CreateTexture(int nWidth, int nHeight, int nMips, DXGI_FORMAT Format, bool bCube, const SD3D12SubData *pSubData, int nArraySize = 1);
   //! A render target texture (one mip) with an RTV and an SRV; starts in PIXEL_SHADER_RESOURCE.
@@ -139,7 +139,7 @@ public:
   void Flush();
 
   //! Bytes of the textures and buffers alive (GetMemoryUsage).
-  uint64 GetVideoMemory() const;
+  uint64 GetResourceBytes() const { return m_nResourceBytes; }
   //! Bytes of per frame memory handed out since the current frame slot started (AllocFrame).
   uint64 GetFrameMemory() const { return m_Slots[m_nSlot].nUsed; }
 
@@ -183,8 +183,14 @@ private:
   bool AllocStaging(uint64 nSize, uint64 nAlign, SD3D12FrameAlloc &Out);
   void Barrier(ID3D12Resource *pResource, UINT nSubresource, D3D12_RESOURCE_STATES Before, D3D12_RESOURCE_STATES After);
   void UploadSubresources(ID3D12Resource *pResource, const D3D12_RESOURCE_DESC &Desc, int nFaces, int nMips, int nDataMips, const SD3D12SubData *pSubData);
-  void AddVideoMemory(const CD3D12Resource &Memory);
-  void SubVideoMemory(const CD3D12Resource &Memory);
+  //! Obj takes the memory as its own, counted in GetResourceBytes until Retire.
+  template<class T> void Adopt(T &Obj, CD3D12Resource &&Memory)
+  {
+    m_nResourceBytes += Memory ? Memory.GetAllocation()->GetSize() : 0;
+    Obj.m_pResource = Memory.Get();
+    Obj.m_Memory = std::move(Memory);
+  }
+  void Retire(CD3D12Resource &Memory);
   //! A raw SRV of all of pResource (nSize bytes), -1 when refused.
   int CreateRawSRV(ID3D12Resource *pResource, uint64 nSize);
   void FreeRawSRV(int &nSlot);
@@ -211,7 +217,7 @@ private:
   uint64 m_nBatchBytes = 0;           //!< staging bytes of the open batch
   uint64 m_nInFlightBytes = 0;        //!< staging bytes of the executed batches not retired yet
 
-  uint64 m_nVideoMemory = 0;
+  uint64 m_nResourceBytes = 0;
 
   // Static buffers
   std::map<D3D12_GPU_VIRTUAL_ADDRESS, CD3D12Buffer *> m_Buffers;   //!< by their GPU address

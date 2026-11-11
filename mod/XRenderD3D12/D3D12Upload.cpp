@@ -20,10 +20,9 @@
 //	(their draws' states and the shader resource states of the rays),
 //	textures in PIXEL_SHADER_RESOURCE.
 //
-//	Static buffers and textures: placed resources in heaps of 64 MB (best fit,
-//	the free ranges joined again; buffers and textures in heaps of their own),
-//	a committed resource each above 8 MB. A released one's range is free again
-//	once the GPU passed the frame that last used it.
+//	Static buffers and textures: their memory from the device's allocator
+//	(D3D12Memory.h), given back through DeferredRelease once the GPU passed
+//	the frame that last used it.
 //
 //////////////////////////////////////////////////////////////////////
 
@@ -68,20 +67,6 @@ namespace
     return nMips;
   }
 
-  D3D12_RESOURCE_DESC BufferDesc(uint64 nSize)
-  {
-    D3D12_RESOURCE_DESC Desc = {};
-    Desc.Dimension = D3D12_RESOURCE_DIMENSION_BUFFER;
-    Desc.Width = nSize;
-    Desc.Height = 1;
-    Desc.DepthOrArraySize = 1;
-    Desc.MipLevels = 1;
-    Desc.Format = DXGI_FORMAT_UNKNOWN;
-    Desc.SampleDesc.Count = 1;
-    Desc.Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
-    return Desc;
-  }
-
   D3D12_RESOURCE_DESC TextureDesc(int nWidth, int nHeight, int nArraySize, int nMips, DXGI_FORMAT Format, D3D12_RESOURCE_FLAGS Flags)
   {
     D3D12_RESOURCE_DESC Desc = {};
@@ -95,15 +80,6 @@ namespace
     Desc.Layout = D3D12_TEXTURE_LAYOUT_UNKNOWN;
     Desc.Flags = Flags;
     return Desc;
-  }
-
-  D3D12_HEAP_PROPERTIES HeapProps(D3D12_HEAP_TYPE Type)
-  {
-    D3D12_HEAP_PROPERTIES Heap = {};
-    Heap.Type = Type;
-    Heap.CreationNodeMask = 1;
-    Heap.VisibleNodeMask = 1;
-    return Heap;
   }
 
   //! nRows rows of nRowSize bytes from Src (nPitch apart; 0: packed) to pDst (nDstPitch apart).
@@ -196,7 +172,7 @@ void CD3D12Upload::Shutdown()
 
 bool CD3D12Upload::CreateUploadBlock(uint64 nSize, SUploadBlock &Block, const wchar_t *szName)
 {
-  const D3D12_RESOURCE_DESC Desc = BufferDesc(nSize);
+  const D3D12_RESOURCE_DESC Desc = D3D12BufferDesc(nSize);
   CD3D12Resource pResource;
   HRESULT hr = g_pRenderer->m_pDevice->CreateResource(D3D12_HEAP_TYPE_UPLOAD, Desc, D3D12_RESOURCE_STATE_GENERIC_READ, nullptr,
                                                       ED3D12Memory::Placed, szName ? szName : L"XRenderD3D12 upload heap", pResource);
@@ -477,23 +453,13 @@ void CD3D12Upload::Barrier(ID3D12Resource *pResource, UINT nSubresource, D3D12_R
 }
 
 //////////////////////////////////////////////////////////////////////////
-// Video memory
+// Memory
 
-void CD3D12Upload::AddVideoMemory(const CD3D12Resource &Memory)
+void CD3D12Upload::Retire(CD3D12Resource &Memory)
 {
   if (Memory)
-    m_nVideoMemory += Memory.GetAllocation()->GetSize();
-}
-
-void CD3D12Upload::SubVideoMemory(const CD3D12Resource &Memory)
-{
-  if (Memory)
-    m_nVideoMemory -= std::min<uint64>(m_nVideoMemory, Memory.GetAllocation()->GetSize());
-}
-
-uint64 CD3D12Upload::GetVideoMemory() const
-{
-  return m_nVideoMemory;
+    m_nResourceBytes -= std::min<uint64>(m_nResourceBytes, Memory.GetAllocation()->GetSize());
+  g_pRenderer->m_pDevice->DeferredRelease(Memory);
 }
 
 //////////////////////////////////////////////////////////////////////////
@@ -504,7 +470,7 @@ CD3D12Buffer *CD3D12Upload::CreateBuffer(const void *pData, uint32 nSize)
   if (!m_pDevice)
     return nullptr;
   // Whole words: a raw view (GetRawSRV) reaches the last bytes.
-  const D3D12_RESOURCE_DESC Desc = BufferDesc(AlignUp(std::max<uint64>(nSize, 16), 4));
+  const D3D12_RESOURCE_DESC Desc = D3D12BufferDesc(AlignUp(std::max<uint64>(nSize, 16), 4));
   CD3D12Resource Memory;
   // Buffers start in COMMON whatever the initial state says.
   HRESULT hr = g_pRenderer->m_pDevice->CreateResource(D3D12_HEAP_TYPE_DEFAULT, Desc, D3D12_RESOURCE_STATE_COMMON, nullptr, ED3D12Memory::Placed,
@@ -528,13 +494,11 @@ CD3D12Buffer *CD3D12Upload::CreateBuffer(const void *pData, uint32 nSize)
     Barrier(pResource, D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES, D3D12_RESOURCE_STATE_COMMON, BUFFER_STATE);
 
   CD3D12Buffer *pBuf = new CD3D12Buffer;
-  pBuf->m_pResource = pResource;
-  pBuf->m_Memory = std::move(Memory);
+  Adopt(*pBuf, std::move(Memory));
   pBuf->m_nGPU = pBuf->m_pResource->GetGPUVirtualAddress();
   pBuf->m_nSize = nSize;
   pBuf->m_nId = m_nNextBufferId++;
   m_Buffers[pBuf->m_nGPU] = pBuf;
-  AddVideoMemory(pBuf->m_Memory);
   return pBuf;
 }
 
@@ -561,8 +525,7 @@ void CD3D12Upload::ReleaseBuffer(CD3D12Buffer *pBuf)
   if (!pBuf)
     return;
   FreeRawSRV(pBuf->m_nRawSRV);
-  SubVideoMemory(pBuf->m_Memory);
-  g_pRenderer->m_pDevice->DeferredRelease(pBuf->m_Memory);
+  Retire(pBuf->m_Memory);
   auto it = m_Buffers.find(pBuf->m_nGPU);
   if (it != m_Buffers.end() && it->second == pBuf)
     m_Buffers.erase(it);
@@ -714,10 +677,9 @@ CD3D12Texture *CD3D12Upload::CreateTexture(int nWidth, int nHeight, int nMips, D
   nArraySize = bCube ? 1 : std::clamp(nArraySize, 1, D3D12_REQ_TEXTURE2D_ARRAY_AXIS_DIMENSION);
   const int nFaces = bCube ? 6 : nArraySize;
 
-  // Placed in a texture heap: its memory is not cleared, every sub resource is written from pSubData.
+  // Placed when pSubData writes every sub resource; without data committed, so it reads as zeros until updated.
   const D3D12_RESOURCE_DESC Desc = TextureDesc(nWidth, nHeight, nFaces, nMips, Format, D3D12_RESOURCE_FLAG_NONE);
   CD3D12Resource Memory;
-  // Without data the texture reads as zeros until it is updated.
   const HRESULT hr = g_pRenderer->m_pDevice->CreateResource(D3D12_HEAP_TYPE_DEFAULT, Desc, pSubData ? D3D12_RESOURCE_STATE_COPY_DEST : TEXTURE_STATE,
                                                             nullptr, pSubData ? ED3D12Memory::Placed : ED3D12Memory::Committed,
                                                             L"XRenderD3D12 texture", Memory);
@@ -731,8 +693,7 @@ CD3D12Texture *CD3D12Upload::CreateTexture(int nWidth, int nHeight, int nMips, D
     UploadSubresources(Memory.Get(), Desc, nFaces, nMips, nDataMips, pSubData);
 
   CD3D12Texture *pTex = new CD3D12Texture;
-  pTex->m_pResource = Memory.Get();
-  pTex->m_Memory = std::move(Memory);
+  Adopt(*pTex, std::move(Memory));
   pTex->m_Format = Format;
   pTex->m_nWidth = nWidth;
   pTex->m_nHeight = nHeight;
@@ -742,7 +703,6 @@ CD3D12Texture *CD3D12Upload::CreateTexture(int nWidth, int nHeight, int nMips, D
   pTex->m_bRenderTarget = false;
   const D3D12_SHADER_RESOURCE_VIEW_DESC SRV = TextureSRVDesc(Format, nMips, bCube, nArraySize);
   pTex->m_nSRV = g_pRenderer->m_pDescriptors->AllocSRV(pTex->m_pResource, &SRV);
-  AddVideoMemory(pTex->m_Memory);
   return pTex;
 }
 
@@ -767,15 +727,11 @@ CD3D12Texture *CD3D12Upload::CreateRenderTarget(int nWidth, int nHeight, DXGI_FO
   }
   const D3D12_CPU_DESCRIPTOR_HANDLE RTV = g_pRenderer->m_pDescriptors->AllocRTV();
   if (!RTV.ptr)
-  {
-    g_pRenderer->m_pDevice->DeferredRelease(Memory);
     return nullptr;
-  }
   m_pDevice->CreateRenderTargetView(Memory.Get(), nullptr, RTV);
 
   CD3D12Texture *pTex = new CD3D12Texture;
-  pTex->m_pResource = Memory.Get();
-  pTex->m_Memory = std::move(Memory);
+  Adopt(*pTex, std::move(Memory));
   pTex->m_Format = Format;
   pTex->m_nWidth = nWidth;
   pTex->m_nHeight = nHeight;
@@ -785,7 +741,6 @@ CD3D12Texture *CD3D12Upload::CreateRenderTarget(int nWidth, int nHeight, DXGI_FO
   pTex->m_RTV = RTV;
   const D3D12_SHADER_RESOURCE_VIEW_DESC SRV = TextureSRVDesc(Format, 1, false);
   pTex->m_nSRV = g_pRenderer->m_pDescriptors->AllocSRV(pTex->m_pResource, &SRV);
-  AddVideoMemory(pTex->m_Memory);
   // Its state kept by the device (SetOffscreenTargets, the bound targets' and the passes' Require; ReleaseTexture
   // forgets it).
   g_pRenderer->m_pDevice->TrackState(pTex->m_pResource, TEXTURE_STATE);
@@ -806,18 +761,14 @@ CD3D12Texture *CD3D12Upload::CreateComputeTarget(int nWidth, int nHeight, int nM
       nWidth, nHeight, nArraySize, nMips, (int)Format, (unsigned)hr);
     return nullptr;
   }
-  if (szName)
-    Memory->SetName(szName);
 
   CD3D12Texture *pTex = new CD3D12Texture;
-  pTex->m_pResource = Memory.Get();
-  pTex->m_Memory = std::move(Memory);
+  Adopt(*pTex, std::move(Memory));
   pTex->m_Format = Format;
   pTex->m_nWidth = nWidth;
   pTex->m_nHeight = nHeight;
   pTex->m_nMips = nMips;
   pTex->m_nArraySize = nArraySize;
-  AddVideoMemory(pTex->m_Memory);
   return pTex;
 }
 
@@ -836,17 +787,13 @@ CD3D12Texture *CD3D12Upload::CreateComputeVolume(int nWidth, int nHeight, int nD
       nWidth, nHeight, nDepth, (int)Format, (unsigned)hr);
     return nullptr;
   }
-  if (szName)
-    Memory->SetName(szName);
 
   CD3D12Texture *pTex = new CD3D12Texture;
-  pTex->m_pResource = Memory.Get();
-  pTex->m_Memory = std::move(Memory);
+  Adopt(*pTex, std::move(Memory));
   pTex->m_Format = Format;
   pTex->m_nWidth = nWidth;
   pTex->m_nHeight = nHeight;
   pTex->m_nMips = 1;
-  AddVideoMemory(pTex->m_Memory);
   return pTex;
 }
 
@@ -913,7 +860,6 @@ void CD3D12Upload::ReleaseTexture(CD3D12Texture *pTex)
     g_pRenderer->m_pDescriptors->FreeSRV(pTex->m_nSRV);
   if (pTex->m_bRenderTarget && pTex->m_RTV.ptr)
     g_pRenderer->m_pDescriptors->FreeRTV(pTex->m_RTV);
-  SubVideoMemory(pTex->m_Memory);
-  g_pRenderer->m_pDevice->DeferredRelease(pTex->m_Memory);
+  Retire(pTex->m_Memory);
   delete pTex;
 }

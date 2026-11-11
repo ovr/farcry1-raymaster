@@ -633,15 +633,7 @@ bool CD3D12Pipeline::CreateRootSignature()
 CD3D12Resource CD3D12Pipeline::CreateStaticUpload(const void *pData, uint32 nSize, const wchar_t *szName)
 {
   // An upload heap buffer: small, written once, and every draw reads the same bytes.
-  D3D12_RESOURCE_DESC Desc = {};
-  Desc.Dimension = D3D12_RESOURCE_DIMENSION_BUFFER;
-  Desc.Width = (nSize + 255) & ~255u;
-  Desc.Height = 1;
-  Desc.DepthOrArraySize = 1;
-  Desc.MipLevels = 1;
-  Desc.Format = DXGI_FORMAT_UNKNOWN;
-  Desc.SampleDesc.Count = 1;
-  Desc.Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
+  const D3D12_RESOURCE_DESC Desc = D3D12BufferDesc((nSize + 255) & ~255u);
   CD3D12Resource pBuffer;
   HRESULT hr = g_pRenderer->m_pDevice->CreateResource(D3D12_HEAP_TYPE_UPLOAD, Desc, D3D12_RESOURCE_STATE_GENERIC_READ, nullptr,
                                                       ED3D12Memory::Placed, szName, pBuffer);
@@ -650,7 +642,6 @@ CD3D12Resource CD3D12Pipeline::CreateStaticUpload(const void *pData, uint32 nSiz
     iLog->LogError("XRenderD3D12: CreateResource (%ls) failed (0x%08X)", szName, (unsigned)hr);
     return {};
   }
-  pBuffer->SetName(szName);
   void *pCPU = nullptr;
   const D3D12_RANGE NoRead = { 0, 0 };
   hr = pBuffer->Map(0, &NoRead, &pCPU);

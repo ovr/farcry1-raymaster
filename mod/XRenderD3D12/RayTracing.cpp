@@ -184,10 +184,7 @@ void CD3D12RayScene::Release()
   for (SFrameSlot &Slot : m_Slots)
   {
     for (SSlotBuffer *pBuf : { &Slot.Scratch, &Slot.Blas, &Slot.Tlas })
-    {
-      if (pBuf->pBuffer)
-        Device.DeferredRelease(pBuf->pBuffer);
-    }
+      Device.DeferredRelease(pBuf->pBuffer);
     Slot = SFrameSlot();
   }
   m_Static.clear();
@@ -531,16 +528,7 @@ void CD3D12RayScene::SetCaptureMaterial(uint32 nMaterial, const float vAlbedo[4]
 
 CD3D12Resource CD3D12RayScene::CreateBuffer(uint64 nSize, D3D12_RESOURCE_STATES State, const wchar_t *szName)
 {
-  D3D12_RESOURCE_DESC Desc = {};
-  Desc.Dimension = D3D12_RESOURCE_DIMENSION_BUFFER;
-  Desc.Width = nSize;
-  Desc.Height = 1;
-  Desc.DepthOrArraySize = 1;
-  Desc.MipLevels = 1;
-  Desc.Format = DXGI_FORMAT_UNKNOWN;
-  Desc.SampleDesc.Count = 1;
-  Desc.Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
-  Desc.Flags = D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS;
+  const D3D12_RESOURCE_DESC Desc = D3D12BufferDesc(nSize, D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS);
   // Placed: written whole by the builds before any read.
   CD3D12Resource pBuffer;
   const HRESULT hr = g_pRenderer->m_pDevice->CreateResource(D3D12_HEAP_TYPE_DEFAULT, Desc, State, nullptr, ED3D12Memory::Placed, szName, pBuffer);
@@ -549,7 +537,6 @@ CD3D12Resource CD3D12RayScene::CreateBuffer(uint64 nSize, D3D12_RESOURCE_STATES 
     iLog->LogError("XRenderD3D12: CreateResource (ray scene, %llu bytes) failed (0x%08X)", (unsigned long long)nSize, (unsigned)hr);
     return {};
   }
-  pBuffer->SetName(szName);
   return pBuffer;
 }
 
@@ -561,8 +548,7 @@ bool CD3D12RayScene::Reserve(SSlotBuffer &Buf, uint64 nSize, D3D12_RESOURCE_STAT
   CD3D12Resource pBuffer = CreateBuffer(nNew, State, szName);
   if (!pBuffer)
     return false;
-  if (Buf.pBuffer)
-    g_pRenderer->m_pDevice->DeferredRelease(Buf.pBuffer);
+  g_pRenderer->m_pDevice->DeferredRelease(Buf.pBuffer);
   Buf.pBuffer = std::move(pBuffer);
   Buf.nSize = nNew;
   return true;
@@ -581,7 +567,6 @@ bool CD3D12RayScene::AllocPool(uint64 nSize, SPoolRange &Out)
       return false;
     Out.nPool = (int)i;
     Out.nSize = nSize;
-    Pool.nUsed += nSize;
     return true;
   };
   for (size_t i = 0; i < m_Pools.size(); i++)
@@ -591,16 +576,14 @@ bool CD3D12RayScene::AllocPool(uint64 nSize, SPoolRange &Out)
   }
   // A new pool, where one was released or at the end.
   const uint64 nPoolSize = std::max(POOL_SIZE, AlignUp(nSize, BUFFER_ALIGN));
-  CD3D12Resource pBuffer = CreateBuffer(nPoolSize, D3D12_RESOURCE_STATE_RAYTRACING_ACCELERATION_STRUCTURE, L"XRenderD3D12 ray scene BLAS");
   D3D12MA::VIRTUAL_BLOCK_DESC BlockDesc = {};
   BlockDesc.Size = nPoolSize;
   Microsoft::WRL::ComPtr<D3D12MA::VirtualBlock> pBlock;
-  if (!pBuffer || FAILED(D3D12MA::CreateVirtualBlock(&BlockDesc, &pBlock)))
-  {
-    if (pBuffer)
-      g_pRenderer->m_pDevice->DeferredRelease(pBuffer);
+  if (FAILED(D3D12MA::CreateVirtualBlock(&BlockDesc, &pBlock)))
     return false;
-  }
+  CD3D12Resource pBuffer = CreateBuffer(nPoolSize, D3D12_RESOURCE_STATE_RAYTRACING_ACCELERATION_STRUCTURE, L"XRenderD3D12 ray scene BLAS");
+  if (!pBuffer)
+    return false;
   size_t nPool = 0;
   while (nPool < m_Pools.size() && m_Pools[nPool]->pBuffer)
     nPool++;
@@ -610,7 +593,6 @@ bool CD3D12RayScene::AllocPool(uint64 nSize, SPoolRange &Out)
   Pool.pBuffer = std::move(pBuffer);
   Pool.pBlock = std::move(pBlock);
   Pool.nSize = nPoolSize;
-  Pool.nUsed = 0;
   return Place(nPool);
 }
 
@@ -632,17 +614,14 @@ void CD3D12RayScene::CollectPools()
       m_PendingFree[nKept++] = m_PendingFree[i];
       continue;
     }
-    SPool &Pool = *m_Pools[Range.nPool];
-    Pool.nUsed -= std::min(Pool.nUsed, Range.nSize);
-    if (Pool.pBlock)
-      Pool.pBlock->FreeAllocation(Range.Alloc);
+    m_Pools[Range.nPool]->pBlock->FreeAllocation(Range.Alloc);
   }
   m_PendingFree.resize(nKept);
   // An empty pool goes (the first one stays).
   for (size_t i = 1; i < m_Pools.size(); i++)
   {
     SPool &Pool = *m_Pools[i];
-    if (Pool.pBuffer && !Pool.nUsed)
+    if (Pool.pBuffer && Pool.pBlock->IsEmpty())
     {
       g_pRenderer->m_pDevice->DeferredRelease(Pool.pBuffer);
       Pool.pBlock.Reset();
@@ -657,7 +636,7 @@ void CD3D12RayScene::ReleasePools(bool bDefer)
   {
     if (p->pBlock)
       p->pBlock->Clear();
-    if (bDefer && p->pBuffer)
+    if (bDefer)
       g_pRenderer->m_pDevice->DeferredRelease(p->pBuffer);
   }
   m_Pools.clear();

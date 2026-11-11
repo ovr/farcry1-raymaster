@@ -116,9 +116,8 @@ public:
   void CollectGarbage();
 
   ID3D12Device *GetDevice() const { return m_pDevice.Get(); }
-  D3D12MA::Allocator *GetAllocator() const { return m_pAllocator.Get(); }
-  //! A resource and its memory from the allocator (D3D12Memory.h), in eState (a buffer in COMMON whatever it says),
-  //! pClear its clear value; szName the allocation's name in the allocator's statistics (d3d12_MemoryDump).
+  //! A resource with its memory from the device's allocator (D3D12Memory.h); a buffer starts in COMMON whatever eState
+  //! says. szName names the allocation (d3d12_MemoryDump) and, with names on (NamesObjects), the resource.
   HRESULT CreateResource(D3D12_HEAP_TYPE eHeap, const D3D12_RESOURCE_DESC &Desc, D3D12_RESOURCE_STATES eState, const D3D12_CLEAR_VALUE *pClear,
                          ED3D12Memory eMemory, const wchar_t *szName, CD3D12Resource &Out);
   ID3D12CommandQueue *GetQueue() const { return m_pQueue.Get(); }
@@ -583,7 +582,7 @@ private:
   UINT m_nFactoryFlags = 0;
   ComPtr<IDXGIAdapter1> m_pAdapter;
   ComPtr<ID3D12Device> m_pDevice;
-  ComPtr<D3D12MA::Allocator> m_pAllocator;          //!< every resource's memory but the swap chain's (CreateResource)
+  ComPtr<D3D12MA::Allocator> m_pAllocator;          //!< CreateResource's (outside it: the swap chain, FSR's and CACAO's own, d3d12_DredTest's)
   ComPtr<ID3D12CommandQueue> m_pQueue;
   ComPtr<IDXGISwapChain3> m_pSwapChain;
   ComPtr<ID3D12InfoQueue> m_pInfoQueue;
@@ -699,7 +698,7 @@ private:
 
   struct SDeferred
   {
-    ComPtr<D3D12MA::Allocator> pAllocator;          //!< of an allocation (CD3D12Resource's order)
+    CD3D12Resource Memory;
     ComPtr<IUnknown> pObject;
     uint64 nFence;
   };

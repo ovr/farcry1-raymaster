@@ -184,7 +184,7 @@ private:
   {
     CD3D12Resource pBuffer;                             //!< RAYTRACING_ACCELERATION_STRUCTURE
     Microsoft::WRL::ComPtr<D3D12MA::VirtualBlock> pBlock;   //!< its ranges
-    uint64 nSize = 0, nUsed = 0;
+    uint64 nSize = 0;
   };
   struct SStaticBlas
   {

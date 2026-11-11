@@ -78,6 +78,11 @@ std::string Thousands(uint64 n)
   return s;
 }
 
+std::string Mb(uint64 nBytes)
+{
+  return Thousands(nBytes >> 20);
+}
+
 std::string Format(const char *szFormat, ...)
 {
   char szBuf[256];
@@ -289,7 +294,7 @@ void CD3D12Renderer::CollectStats()
   const auto TakeMemory = [this](SFrameStats &Stats)
   {
     m_pDevice->GetMemoryStats(Stats.Memory, CV_r_Stats >= 2);
-    Stats.nResourceBytes = m_pUpload ? m_pUpload->GetVideoMemory() : 0;
+    Stats.nResourceBytes = m_pUpload ? m_pUpload->GetResourceBytes() : 0;
     Stats.nRayBytes = m_pRayScene ? m_pRayScene->GetStaticBytes() : 0;
     if (m_pTextures)
       m_pTextures->UpscaledStats(Stats.nUpscaled, Stats.nTextures, Stats.nUpscaledBytes, Stats.nTextureBytes);
@@ -430,9 +435,7 @@ void CD3D12Renderer::DrawStats()
                  CV_d3d12_BarrierBatch > 0 ? "" : ", each at once"));
       if (CV_r_Stats >= 2)
       {
-        constexpr double MB = 1024.0 * 1024.0;
         const SD3D12MemoryStats &M = S.Memory;
-        const auto Mb = [](uint64 n) { return Thousands((uint64)(n / MB)); };
         if (M.nLocalBudget)
           Add(Format("Video memory %s of %s MB, shared %s of %s MB", Mb(M.nLocalUsage).c_str(), Mb(M.nLocalBudget).c_str(), Mb(M.nSharedUsage).c_str(),
                      Mb(M.nSharedBudget).c_str()));
@@ -444,9 +447,9 @@ void CD3D12Renderer::DrawStats()
           Add(Format("Resources in default heaps %s MB, upload %s MB, read back %s MB", Mb(M.nTypeBytes[0]).c_str(), Mb(M.nTypeBytes[1]).c_str(),
                      Mb(M.nTypeBytes[2]).c_str()));
         }
-        Add(Format("Textures and buffers %s MB, rays %s MB", Thousands((uint64)(S.nResourceBytes / MB)).c_str(), Thousands((uint64)(S.nRayBytes / MB)).c_str()));
-        Add(Format("Textures %s (%s MB), upscaled %s (%s MB)", Thousands((uint64)S.nTextures).c_str(), Thousands((uint64)(S.nTextureBytes / MB)).c_str(),
-                   Thousands((uint64)S.nUpscaled).c_str(), Thousands((uint64)(S.nUpscaledBytes / MB)).c_str()));
+        Add(Format("Textures and buffers %s MB, rays %s MB", Mb(S.nResourceBytes).c_str(), Mb(S.nRayBytes).c_str()));
+        Add(Format("Textures %s (%s MB), upscaled %s (%s MB)", Thousands((uint64)S.nTextures).c_str(), Mb(S.nTextureBytes).c_str(),
+                   Thousands((uint64)S.nUpscaled).c_str(), Mb(S.nUpscaledBytes).c_str()));
         Add(Format("Frame memory %s KB, PSOs %s", Thousands((uint64)(S.fFrameMemory / fFrames / 1024.0)).c_str(), Thousands(S.nPSOs).c_str()));
       }
       SStatsLine &Heading = Add("GPU per pass", true);
@@ -497,7 +500,7 @@ void CD3D12Renderer::DrawStats()
     Value("Angles", Format("%.0f %.0f %.0f", vAngles.x, vAngles.y, vAngles.z));
     Value("View distance", Format("%.0f m", Camera.GetZMax()));
     if (S.Memory.nLocalBudget)
-      Value("VRAM", Format("%s / %s MB", Thousands(S.Memory.nLocalUsage >> 20).c_str(), Thousands(S.Memory.nLocalBudget >> 20).c_str()));
+      Value("VRAM", Format("%s / %s MB", Mb(S.Memory.nLocalUsage).c_str(), Mb(S.Memory.nLocalBudget).c_str()));
     if (!S.nFrames || S.fFrameMs <= 0)
     {
       Value("FPS", "collecting");

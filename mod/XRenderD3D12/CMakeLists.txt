@@ -174,9 +174,8 @@ else()
         "XRenderD3D12 is built without AMD FidelityFX Denoiser.")
 endif()
 
-# AMD D3D12 Memory Allocator v3.3.0 (MIT): every resource of the renderer and its tests is allocated
-# through it. A git submodule of AMD's repository at the tag v3.3.0 (third_party/d3d12-memory-allocator),
-# required; built here as a static library of its one source rather than by its own CMake.
+# AMD D3D12 Memory Allocator (MIT, a git submodule at its tag), required: the renderer's GPU memory.
+# Built from its one source here rather than by its own CMake.
 set(XRENDERD3D12_D3D12MA_DIR "${CMAKE_SOURCE_DIR}/third_party/d3d12-memory-allocator")
 if(NOT EXISTS "${XRENDERD3D12_D3D12MA_DIR}/include/D3D12MemAlloc.h")
     message(FATAL_ERROR "third_party/d3d12-memory-allocator is empty: run git submodule update --init.")

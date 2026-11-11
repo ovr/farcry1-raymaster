@@ -96,7 +96,7 @@ struct SFrameStats
   double fBarriers = 0;
   double fFrameMemory = 0;        //!< bytes of per frame memory (CD3D12Upload::AllocFrame)
   SD3D12MemoryStats Memory;       //!< the allocator's (CD3D12Device::GetMemoryStats)
-  uint64 nResourceBytes = 0;      //!< the textures and buffers (CD3D12Upload::GetVideoMemory)
+  uint64 nResourceBytes = 0;      //!< the textures and buffers (CD3D12Upload::GetResourceBytes)
   uint64 nRayBytes = 0;           //!< the acceleration structures of the static geometry
   int nTextures = 0;              //!< the textures with a GPU picture, and of them those upscaled (r_TexUpscaled), with their bytes
   int nUpscaled = 0;
