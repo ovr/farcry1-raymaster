@@ -17,8 +17,12 @@
 #pragma once
 
 #include <D3D12MemAlloc.h>
+#include <algorithm>
+#include <atomic>
 #include <cstdint>
 #include <string>
+#include <utility>
+#include <vector>
 #include <wrl/client.h>
 
 enum class ED3D12Memory
@@ -152,3 +156,66 @@ inline std::string MemoryStatsJson(D3D12MA::Allocator &Allocator)
   Allocator.FreeStatsString(szJson);
   return Json;
 }
+
+//! The live allocations' names (CD3D12Resource::Create's szName) with their counts, the most first; unnamed ones are
+//! left out. What is still held where nothing should be (the device's Shutdown) names its owner so.
+inline std::vector<std::pair<std::string, uint32_t>> LiveAllocationNames(D3D12MA::Allocator &Allocator)
+{
+  const std::string Json = MemoryStatsJson(Allocator);
+  std::vector<std::pair<std::string, uint32_t>> Names;
+  const std::string Key = "\"Name\"";
+  for (size_t i = Json.find(Key); i != std::string::npos; i = Json.find(Key, i))
+  {
+    i = Json.find_first_not_of(" \t\r\n:", i + Key.size());
+    if (i == std::string::npos || Json[i] != '"')
+      continue;
+    const size_t nEnd = Json.find('"', i + 1);
+    if (nEnd == std::string::npos)
+      break;
+    const std::string Name = Json.substr(i + 1, nEnd - i - 1);
+    i = nEnd + 1;
+    const auto it = std::find_if(Names.begin(), Names.end(), [&](const auto &p) { return p.first == Name; });
+    if (it != Names.end())
+      it->second++;
+    else
+      Names.emplace_back(Name, 1u);
+  }
+  std::stable_sort(Names.begin(), Names.end(), [](const auto &a, const auto &b) { return a.second > b.second; });
+  return Names;
+}
+
+//! Resources made and freed since the last Take: the overlay's per frame churn (r_Stats 2). Loading threads make
+//! resources too.
+class CD3D12MemoryChurn
+{
+public:
+  struct SCounts
+  {
+    uint32_t nMade = 0, nFreed = 0;
+    uint64_t nMadeBytes = 0, nFreedBytes = 0;
+  };
+
+  void Made(uint64_t nBytes)
+  {
+    m_nMade.fetch_add(1, std::memory_order_relaxed);
+    m_nMadeBytes.fetch_add(nBytes, std::memory_order_relaxed);
+  }
+  void Freed(uint64_t nBytes)
+  {
+    m_nFreed.fetch_add(1, std::memory_order_relaxed);
+    m_nFreedBytes.fetch_add(nBytes, std::memory_order_relaxed);
+  }
+  SCounts Take()
+  {
+    SCounts c;
+    c.nMade = m_nMade.exchange(0, std::memory_order_relaxed);
+    c.nFreed = m_nFreed.exchange(0, std::memory_order_relaxed);
+    c.nMadeBytes = m_nMadeBytes.exchange(0, std::memory_order_relaxed);
+    c.nFreedBytes = m_nFreedBytes.exchange(0, std::memory_order_relaxed);
+    return c;
+  }
+
+private:
+  std::atomic<uint32_t> m_nMade{ 0 }, m_nFreed{ 0 };
+  std::atomic<uint64_t> m_nMadeBytes{ 0 }, m_nFreedBytes{ 0 };
+};

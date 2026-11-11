@@ -406,6 +406,8 @@ void CD3D12Device::Shutdown()
   m_pQueue.Reset();
   LogDebugMessages();
   m_pInfoQueue.Reset();
+  // Every part of the renderer let its memory go before this: what is held now leaks or outlives the device.
+  LogMemory("at the device's shutdown", true);
   m_pAllocator.Reset();
   m_pDevice.Reset();
   m_pAdapter.Reset();
@@ -502,6 +504,7 @@ void CD3D12Device::DeferredRelease(CD3D12Resource &r)
   if (!r)
     return;
   ForgetState(r.Get());
+  m_Churn.Freed(r.GetAllocation()->GetSize());
   SDeferred d;
   d.Memory = std::move(r);
   d.nFence = m_nNextFence;
@@ -512,7 +515,10 @@ HRESULT CD3D12Device::CreateResource(D3D12_HEAP_TYPE eHeap, const D3D12_RESOURCE
                                      const D3D12_CLEAR_VALUE *pClear, ED3D12Memory eMemory, const wchar_t *szName, CD3D12Resource &Out)
 {
   const HRESULT hr = CD3D12Resource::Create(m_pAllocator.Get(), eHeap, Desc, eState, pClear, eMemory, szName, Out);
-  if (SUCCEEDED(hr) && szName && NamesObjects())
+  if (FAILED(hr))
+    return hr;
+  m_Churn.Made(Out.GetAllocation()->GetSize());
+  if (szName && NamesObjects())
     Out->SetName(szName);
   return hr;
 }
@@ -2061,6 +2067,40 @@ bool CD3D12Device::DumpMemory(const char *szPath) const
     return false;
   const bool bOk = fwrite(Json.data(), 1, Json.size(), pFile) == Json.size();
   return fclose(pFile) == 0 && bOk;
+}
+
+void CD3D12Device::LogMemory(const char *szWhen, bool bNames) const
+{
+  SD3D12MemoryStats Stats;
+  if (!GetMemoryStats(Stats, true))
+    return;
+  std::string Names;
+  if (bNames && Stats.nAllocations)
+  {
+    int nShown = 0;
+    for (const auto &[Name, n] : LiveAllocationNames(*m_pAllocator.Get()))
+    {
+      if (nShown++ == 12)
+      {
+        Names += ", ...";
+        break;
+      }
+      Names += (Names.empty() ? ": " : ", ") + std::to_string(n) + " x '" + Name + "'";
+    }
+  }
+  char szLine[160];
+  snprintf(szLine, sizeof(szLine), "GPU memory %s: %u resources, %.1f MB, %u heaps", szWhen, Stats.nAllocations,
+           Stats.nAllocationBytes / 1048576.0, Stats.nHeaps);
+  iLog->Log("XRenderD3D12: %s%s", szLine, Names.c_str());
+  // The game's log drops the renderer's lines after its start: a file of our own, new each run, closed after each line
+  // so that a run killed (DemoHost) keeps what it wrote.
+  static bool s_bStarted = false;
+  if (FILE *pFile = fopen("XRenderD3D12_memory.txt", s_bStarted ? "a" : "w"))
+  {
+    s_bStarted = true;
+    fprintf(pFile, "%s%s\n", szLine, Names.c_str());
+    fclose(pFile);
+  }
 }
 
 int CD3D12Device::BeginOcclusion()

@@ -1747,6 +1747,13 @@ reference of its own.
   size, offset, `BuildStatsString`) to `farcry1_testing1/XRenderD3D12_memory.json` (never
   committed) at the frame's end, then the variable is 0 again; the log has the totals. AMD's
   `GpuMemDumpVis.py` draws it.
+- A leak shows in `farcry1_testing1/XRenderD3D12_memory.txt` (new each run, also in the log):
+  the resources, megabytes and heaps before and after each level's load (a level loaded again
+  leaves as much as the first time) and at the device's shutdown, where every resource still
+  held is one too many and its name is listed (the twelve most common, with their counts).
+- `r_Stats 2` also has a line `Resources made`: those made and freed a frame with their bytes,
+  and the most made in one frame of the window. A level in play makes few; a steady churn is
+  memory made and freed again each frame (the terrain's index buffers, outdoors).
 - Tests: `Tests/MemoryTests.cpp` (`Memory_*`, also under the debug layer): placed and committed
   resources in their heap types, the placed ones' ranges apart and reused, a resource outliving
   its allocator's owner, mapped upload buffers, the overlay's statistics and the JSON dump

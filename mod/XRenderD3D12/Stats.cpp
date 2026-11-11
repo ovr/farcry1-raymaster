@@ -278,6 +278,7 @@ void CD3D12Renderer::CollectStats()
   const int nDraws = m_nFrameDraws, nPSOChanges = m_nFramePSOChanges;
   const int nDrawExt = nDraws - m_nFrameDrawExt[DrawExt::REASON_DEFAULT];
   const uint32 nDrawBytes = m_nFrameDrawBytes;
+  const CD3D12MemoryChurn::SCounts Churn = m_pDevice->TakeMemoryChurn();
   m_nFrameDraws = m_nFramePSOChanges = m_nFrameAlphaCoverage = 0;
   m_nFrameDrawBytes = 0;
   for (int &n : m_nFrameDrawExt)
@@ -325,6 +326,11 @@ void CD3D12Renderer::CollectStats()
   Sum.fBarrierDrains += BarrierStats.nDrains;
   Sum.fBarriers += BarrierStats.nTransitions + BarrierStats.nUav + BarrierStats.nUavAll + BarrierStats.nOther;
   Sum.fFrameMemory += m_pUpload ? (double)m_pUpload->GetFrameMemory() : 0.0;
+  Sum.fMade += Churn.nMade;
+  Sum.fMadeBytes += (double)Churn.nMadeBytes;
+  Sum.fFreed += Churn.nFreed;
+  Sum.fFreedBytes += (double)Churn.nFreedBytes;
+  Sum.nMaxMade = std::max(Sum.nMaxMade, (uint32)Churn.nMade);
   m_fStatsLastFrame = fNow;
   if (fNow - m_fStatsStart < STATS_WINDOW_MS)
     return;
@@ -451,6 +457,9 @@ void CD3D12Renderer::DrawStats()
         Add(Format("Textures %s (%s MB), upscaled %s (%s MB)", Thousands((uint64)S.nTextures).c_str(), Mb(S.nTextureBytes).c_str(),
                    Thousands((uint64)S.nUpscaled).c_str(), Mb(S.nUpscaledBytes).c_str()));
         Add(Format("Frame memory %s KB, PSOs %s", Thousands((uint64)(S.fFrameMemory / fFrames / 1024.0)).c_str(), Thousands(S.nPSOs).c_str()));
+        Add(Format("Resources made %.1f a frame (%s KB, at most %u), freed %.1f (%s KB)", S.fMade / fFrames,
+                   Thousands((uint64)(S.fMadeBytes / fFrames / 1024.0)).c_str(), S.nMaxMade, S.fFreed / fFrames,
+                   Thousands((uint64)(S.fFreedBytes / fFrames / 1024.0)).c_str()));
       }
       SStatsLine &Heading = Add("GPU per pass", true);
       Heading.Value = "ms";

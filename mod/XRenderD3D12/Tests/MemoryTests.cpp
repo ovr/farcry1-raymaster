@@ -6,7 +6,8 @@
 //	Description: The renderer's GPU memory (D3D12Memory.h): an allocator
 //	with the renderer's flags on the test device, CD3D12Resource's placed
 //	and committed resources, their ranges, their lifetime against the
-//	allocator's, the statistics the overlay and d3d12_MemoryDump read.
+//	allocator's, the statistics the overlay and d3d12_MemoryDump read, the
+//	names of what is still held and the per frame churn.
 //
 //////////////////////////////////////////////////////////////////////
 
@@ -16,6 +17,7 @@
 #include <cstring>
 #include <cctype>
 #include <string>
+#include <thread>
 #include <type_traits>
 #include <vector>
 #include "D3D12Memory.h"
@@ -260,4 +262,55 @@ XR_TEST(Memory_VirtualPool)
   UINT64 nOffset = 1;
   CHECK(SUCCEEDED(pBlock->Allocate(&Whole, &Alloc, &nOffset)) && nOffset == 0);
   pBlock->Clear();
+}
+
+// What is still held is named by its owner, the most first (the device's shutdown and level loads log it); unnamed
+// allocations are left out and a freed one is gone from the list.
+XR_TEST(Memory_LiveAllocationNames)
+{
+  ComPtr<D3D12MA::Allocator> pAllocator = MakeAllocator();
+  std::vector<CD3D12Resource> Live(6);
+  const wchar_t *Names[6] = { L"XRenderD3D12 tests B", L"XRenderD3D12 tests A", L"XRenderD3D12 tests A", nullptr,
+                              L"XRenderD3D12 tests A", L"XRenderD3D12 tests B" };
+  for (int i = 0; i < 6; i++)
+    CHECK(SUCCEEDED(CD3D12Resource::Create(pAllocator.Get(), D3D12_HEAP_TYPE_DEFAULT, D3D12BufferDesc(4096), D3D12_RESOURCE_STATE_COMMON,
+                                           nullptr, i == 2 ? ED3D12Memory::Committed : ED3D12Memory::Placed, Names[i], Live[i])));
+  auto Found = LiveAllocationNames(*pAllocator.Get());
+  CHECK(Found.size() == 2);
+  if (Found.size() == 2)
+  {
+    CHECK(Found[0].first == "XRenderD3D12 tests A" && Found[0].second == 3);
+    CHECK(Found[1].first == "XRenderD3D12 tests B" && Found[1].second == 2);
+  }
+  Live[0].Reset();
+  Live[5].Reset();
+  Found = LiveAllocationNames(*pAllocator.Get());
+  CHECK(Found.size() == 1 && Found[0].second == 3);
+  Live.clear();
+  CHECK(LiveAllocationNames(*pAllocator.Get()).empty());
+}
+
+// The overlay's churn counts every resource made and freed, from several threads at once (loading threads make
+// resources), and starts again from zero after each Take.
+XR_TEST(Memory_Churn)
+{
+  CD3D12MemoryChurn Churn;
+  std::vector<std::thread> Threads;
+  for (int t = 0; t < 4; t++)
+    Threads.emplace_back([&Churn, t]
+    {
+      for (int i = 0; i < 1000; i++)
+      {
+        Churn.Made(256);
+        if (i % 2 == t % 2)
+          Churn.Freed(64);
+      }
+    });
+  for (std::thread &t : Threads)
+    t.join();
+  const CD3D12MemoryChurn::SCounts c = Churn.Take();
+  CHECK(c.nMade == 4000 && c.nMadeBytes == 4000ull * 256);
+  CHECK(c.nFreed == 2000 && c.nFreedBytes == 2000ull * 64);
+  const CD3D12MemoryChurn::SCounts Again = Churn.Take();
+  CHECK(Again.nMade == 0 && Again.nFreed == 0 && Again.nMadeBytes == 0 && Again.nFreedBytes == 0);
 }

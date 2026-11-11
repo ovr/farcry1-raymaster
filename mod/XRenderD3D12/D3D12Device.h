@@ -514,6 +514,11 @@ public:
   bool GetMemoryStats(SD3D12MemoryStats &Out, bool bHeaps) const;
   //! The allocator's JSON statistics (D3D12MA::Allocator::BuildStatsString with every allocation) to szPath, UTF-8.
   bool DumpMemory(const char *szPath) const;
+  //! The allocator's resources and bytes to the log (szWhen: "after a level's load"); bNames with their names, the most
+  //! first.
+  void LogMemory(const char *szWhen, bool bNames) const;
+  //! Resources made (CreateResource) and freed (DeferredRelease) since the last call.
+  CD3D12MemoryChurn::SCounts TakeMemoryChurn() { return m_Churn.Take(); }
 
   //! Occlusion queries: BeginOcclusion .. EndOcclusion count the samples drawn in between that
   //! pass the depth test, at most OCCLUSION_QUERIES per frame. A frame's counts come when the GPU
@@ -583,6 +588,7 @@ private:
   ComPtr<IDXGIAdapter1> m_pAdapter;
   ComPtr<ID3D12Device> m_pDevice;
   ComPtr<D3D12MA::Allocator> m_pAllocator;          //!< CreateResource's (outside it: the swap chain, FSR's and CACAO's own, d3d12_DredTest's)
+  CD3D12MemoryChurn m_Churn;
   ComPtr<ID3D12CommandQueue> m_pQueue;
   ComPtr<IDXGISwapChain3> m_pSwapChain;
   ComPtr<ID3D12InfoQueue> m_pInfoQueue;

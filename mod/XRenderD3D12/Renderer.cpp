@@ -1443,6 +1443,9 @@ void CD3D12Renderer::RefreshResources(int nFlags)
 
 void CD3D12Renderer::PreLoad (void)
 {
+  // A level's load leaves as much memory as the same level's load before it: a leak grows it each time.
+  if (m_pDevice)
+    m_pDevice->LogMemory("before a level's load", false);
   // A new level registers its own fog volumes and makes its own sprites; the objects of a load
   // that never got drawn may be gone, and so may the textures of the water reflection's draws
   // kept for the rays.
@@ -1461,6 +1464,8 @@ void CD3D12Renderer::PreLoad (void)
 
 void CD3D12Renderer::PostLoad (void)
 {
+  if (m_pDevice)
+    m_pDevice->LogMemory("after a level's load", false);
   m_OceanGrid.bTerrainStale = true;
   m_TerrainRange.bStale = true;
 }

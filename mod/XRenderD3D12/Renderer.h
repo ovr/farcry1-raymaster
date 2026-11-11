@@ -95,6 +95,11 @@ struct SFrameStats
   double fBarrierDrains = 0;
   double fBarriers = 0;
   double fFrameMemory = 0;        //!< bytes of per frame memory (CD3D12Upload::AllocFrame)
+  double fMade = 0;               //!< resources made and freed, with their bytes (CD3D12Device::TakeMemoryChurn)
+  double fMadeBytes = 0;
+  double fFreed = 0;
+  double fFreedBytes = 0;
+  uint32 nMaxMade = 0;            //!< made in the frame that made the most
   SD3D12MemoryStats Memory;       //!< the allocator's (CD3D12Device::GetMemoryStats)
   uint64 nResourceBytes = 0;      //!< the textures and buffers (CD3D12Upload::GetResourceBytes)
   uint64 nRayBytes = 0;           //!< the acceleration structures of the static geometry
