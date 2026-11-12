@@ -146,6 +146,8 @@ bool CD3D12Device::Init(HWND hWnd, int nWidth, int nHeight, int nDebug, int nDre
     iLog->LogError("XRenderD3D12: no Direct3D 12 adapter (feature level 11_0)");
     return false;
   }
+  if (Failed(CreateD3D12Allocator(m_pDevice.Get(), m_pAdapter.Get(), m_pAllocator), "D3D12MA::CreateAllocator"))
+    return false;
 
   // The messages are kept for LogDebugMessages; nothing breaks into a debugger. Not kept: the
   // hint that a clear of an off screen target is not to its optimised clear colour (the
@@ -262,20 +264,11 @@ bool CD3D12Device::Init(HWND hWnd, int nWidth, int nHeight, int nDebug, int nDre
     D3D12_QUERY_HEAP_DESC QueryDesc = {};
     QueryDesc.Type = D3D12_QUERY_HEAP_TYPE_TIMESTAMP;
     QueryDesc.Count = D3D12_FRAMES * COMPUTE_LISTS * 2;
-    D3D12_HEAP_PROPERTIES Heap = {};
-    Heap.Type = D3D12_HEAP_TYPE_READBACK;
-    D3D12_RESOURCE_DESC Desc = {};
-    Desc.Dimension = D3D12_RESOURCE_DIMENSION_BUFFER;
-    Desc.Width = sizeof(uint64) * QueryDesc.Count;
-    Desc.Height = 1;
-    Desc.DepthOrArraySize = 1;
-    Desc.MipLevels = 1;
-    Desc.SampleDesc.Count = 1;
-    Desc.Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
+    const D3D12_RESOURCE_DESC Desc = D3D12BufferDesc(sizeof(uint64) * QueryDesc.Count);
     if (FAILED(m_pComputeQueue->GetTimestampFrequency(&nComputeFrequency)) || !nComputeFrequency ||
         FAILED(m_pDevice->CreateQueryHeap(&QueryDesc, IID_PPV_ARGS(&m_pComputeTimestamps))) ||
-        FAILED(m_pDevice->CreateCommittedResource(&Heap, D3D12_HEAP_FLAG_NONE, &Desc, D3D12_RESOURCE_STATE_COPY_DEST, nullptr,
-                                                  IID_PPV_ARGS(&m_pComputeTimestampReadback))))
+        FAILED(CreateResource(D3D12_HEAP_TYPE_READBACK, Desc, D3D12_RESOURCE_STATE_COPY_DEST, nullptr, ED3D12Memory::Committed,
+                              L"XRenderD3D12 compute timestamps", m_pComputeTimestampReadback)))
       m_pComputeTimestamps.Reset();
     else
       m_fComputeTimestampMs = 1000.0 / (double)nComputeFrequency;
@@ -297,18 +290,9 @@ bool CD3D12Device::Init(HWND hWnd, int nWidth, int nHeight, int nDebug, int nDre
   if (SUCCEEDED(m_pQueue->GetTimestampFrequency(&nFrequency)) && nFrequency &&
       SUCCEEDED(m_pDevice->CreateQueryHeap(&QueryDesc, IID_PPV_ARGS(&m_pTimestamps))))
   {
-    D3D12_HEAP_PROPERTIES Heap = {};
-    Heap.Type = D3D12_HEAP_TYPE_READBACK;
-    D3D12_RESOURCE_DESC Desc = {};
-    Desc.Dimension = D3D12_RESOURCE_DIMENSION_BUFFER;
-    Desc.Width = sizeof(uint64) * D3D12_FRAMES * GPU_MARKS;
-    Desc.Height = 1;
-    Desc.DepthOrArraySize = 1;
-    Desc.MipLevels = 1;
-    Desc.SampleDesc.Count = 1;
-    Desc.Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
-    if (FAILED(m_pDevice->CreateCommittedResource(&Heap, D3D12_HEAP_FLAG_NONE, &Desc, D3D12_RESOURCE_STATE_COPY_DEST, nullptr,
-                                                  IID_PPV_ARGS(&m_pTimestampReadback))))
+    const D3D12_RESOURCE_DESC Desc = D3D12BufferDesc(sizeof(uint64) * D3D12_FRAMES * GPU_MARKS);
+    if (FAILED(CreateResource(D3D12_HEAP_TYPE_READBACK, Desc, D3D12_RESOURCE_STATE_COPY_DEST, nullptr, ED3D12Memory::Committed,
+                              L"XRenderD3D12 timestamps", m_pTimestampReadback)))
       m_pTimestamps.Reset();
     m_fTimestampMs = 1000.0 / (double)nFrequency;
   }
@@ -318,18 +302,9 @@ bool CD3D12Device::Init(HWND hWnd, int nWidth, int nHeight, int nDebug, int nDre
   QueryDesc.Count = D3D12_FRAMES * OCCLUSION_QUERIES;
   if (SUCCEEDED(m_pDevice->CreateQueryHeap(&QueryDesc, IID_PPV_ARGS(&m_pOcclusion))))
   {
-    D3D12_HEAP_PROPERTIES Heap = {};
-    Heap.Type = D3D12_HEAP_TYPE_READBACK;
-    D3D12_RESOURCE_DESC Desc = {};
-    Desc.Dimension = D3D12_RESOURCE_DIMENSION_BUFFER;
-    Desc.Width = sizeof(uint64) * D3D12_FRAMES * OCCLUSION_QUERIES;
-    Desc.Height = 1;
-    Desc.DepthOrArraySize = 1;
-    Desc.MipLevels = 1;
-    Desc.SampleDesc.Count = 1;
-    Desc.Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
-    if (FAILED(m_pDevice->CreateCommittedResource(&Heap, D3D12_HEAP_FLAG_NONE, &Desc, D3D12_RESOURCE_STATE_COPY_DEST, nullptr,
-                                                  IID_PPV_ARGS(&m_pOcclusionReadback))))
+    const D3D12_RESOURCE_DESC Desc = D3D12BufferDesc(sizeof(uint64) * D3D12_FRAMES * OCCLUSION_QUERIES);
+    if (FAILED(CreateResource(D3D12_HEAP_TYPE_READBACK, Desc, D3D12_RESOURCE_STATE_COPY_DEST, nullptr, ED3D12Memory::Committed,
+                              L"XRenderD3D12 occlusion counts", m_pOcclusionReadback)))
       m_pOcclusion.Reset();
   }
   return CreateSwapChainBuffers();
@@ -348,8 +323,6 @@ bool CD3D12Device::CreateSwapChainBuffers()
     hRTV.ptr += m_nRTVSize;
   }
 
-  D3D12_HEAP_PROPERTIES Heap = {};
-  Heap.Type = D3D12_HEAP_TYPE_DEFAULT;
   D3D12_RESOURCE_DESC Desc = {};
   Desc.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
   Desc.Width = m_nWidth;
@@ -363,10 +336,9 @@ bool CD3D12Device::CreateSwapChainBuffers()
   D3D12_CLEAR_VALUE Clear = {};
   Clear.Format = D3D12_DEPTH_FORMAT;
   Clear.DepthStencil.Depth = 1.0f;
-  if (Failed(m_pDevice->CreateCommittedResource(&Heap, D3D12_HEAP_FLAG_NONE, &Desc, D3D12_RESOURCE_STATE_DEPTH_WRITE, &Clear, IID_PPV_ARGS(&m_pDepth)),
-    "CreateCommittedResource (depth)"))
+  if (Failed(CreateResource(D3D12_HEAP_TYPE_DEFAULT, Desc, D3D12_RESOURCE_STATE_DEPTH_WRITE, &Clear, ED3D12Memory::Committed,
+                            L"XRenderD3D12 depth", m_pDepth), "CreateResource (depth)"))
     return false;
-  m_pDepth->SetName(L"XRenderD3D12 depth");
   TrackState(m_pDepth.Get(), D3D12_RESOURCE_STATE_DEPTH_WRITE);
   D3D12_DEPTH_STENCIL_VIEW_DESC View = {};
   View.Format = D3D12_DEPTH_FORMAT;
@@ -381,7 +353,7 @@ bool CD3D12Device::CreateSwapChainBuffers()
 void CD3D12Device::ReleaseSwapChainBuffers()
 {
   // Released once the GPU is done (the caller waited): forgotten by the tracker, their addresses may come again.
-  const auto Release = [this](ComPtr<ID3D12Resource> &p)
+  const auto Release = [this](auto &p)
   {
     ForgetState(p.Get());
     p.Reset();
@@ -434,6 +406,9 @@ void CD3D12Device::Shutdown()
   m_pQueue.Reset();
   LogDebugMessages();
   m_pInfoQueue.Reset();
+  // Every part of the renderer let its memory go before this: what is held now leaks or outlives the device.
+  LogMemory("at the device's shutdown", true);
+  m_pAllocator.Reset();
   m_pDevice.Reset();
   m_pAdapter.Reset();
   m_pFactory.Reset();
@@ -503,7 +478,7 @@ void CD3D12Device::WaitForGPU()
     return;
   }
   // The frame's list is recorded but not submitted, and what it uses may have been released with
-  // the frame's fence (GetFrameFence: the pools' ranges, DeferredRelease, the descriptors). That
+  // the frame's fence (GetFrameFence: DeferredRelease, the ray scene's pools, the descriptors). That
   // value signalled now would free them before the list runs; EndFrame signals it after the list.
   // The frames before have their values done by the time this one is. The compute list of the frame
   // too, and the frame's list after it from here on.
@@ -522,6 +497,54 @@ void CD3D12Device::DeferredRelease(IUnknown *p)
   d.pObject.Attach(p);
   d.nFence = m_nNextFence;
   m_Deferred.push_back(std::move(d));
+}
+
+void CD3D12Device::DeferredRelease(CD3D12Resource &r)
+{
+  if (!r)
+    return;
+  ForgetState(r.Get());
+  m_Churn.Freed(r.GetBytes());
+  SDeferred d;
+  d.Memory = std::move(r);
+  d.nFence = m_nNextFence;
+  m_Deferred.push_back(std::move(d));
+}
+
+HRESULT CD3D12Device::CreateResource(D3D12_HEAP_TYPE eHeap, const D3D12_RESOURCE_DESC &Desc, D3D12_RESOURCE_STATES eState,
+                                     const D3D12_CLEAR_VALUE *pClear, ED3D12Memory eMemory, const wchar_t *szName, CD3D12Resource &Out)
+{
+  const HRESULT hr = CD3D12Resource::Create(m_pAllocator.Get(), eHeap, Desc, eState, pClear, eMemory, szName, Out);
+  if (FAILED(hr))
+    return hr;
+  m_Churn.Made(Out.GetBytes());
+  if (szName && NamesObjects())
+    Out->SetName(szName);
+  return hr;
+}
+
+HRESULT CD3D12Device::CreateAlias(const CD3D12Resource &Base, const D3D12_RESOURCE_DESC &Desc, D3D12_RESOURCE_STATES eState, const wchar_t *szName,
+                                  CD3D12Resource &Out)
+{
+  const HRESULT hr = CD3D12Resource::CreateAlias(Base, Desc, eState, Out);
+  if (SUCCEEDED(hr) && szName && NamesObjects())
+    Out->SetName(szName);
+  return hr;
+}
+
+void CD3D12Device::ActivateAlias(ID3D12Resource *pBefore, ID3D12Resource *pAfter, D3D12_RESOURCE_STATES eWrite)
+{
+  if (!m_bInFrame || !pAfter)
+    return;
+  D3D12_RESOURCE_BARRIER Barrier = {};
+  Barrier.Type = D3D12_RESOURCE_BARRIER_TYPE_ALIASING;
+  Barrier.Aliasing.pResourceBefore = pBefore;
+  Barrier.Aliasing.pResourceAfter = pAfter;
+  ResourceBarriers(1, &Barrier);
+  Require(pAfter, eWrite);
+  // Its memory as the other left it: discarded, so that the GPU keeps nothing of its compression state.
+  FlushBarriers();
+  m_pCmdList->DiscardResource(pAfter, nullptr);  // barriers flushed
 }
 
 void CD3D12Device::CollectGarbage()
@@ -549,14 +572,12 @@ D3D12_CPU_DESCRIPTOR_HANDLE CD3D12Device::GetDSV() const
   return m_pDSVHeap->GetCPUDescriptorHandleForHeapStart();
 }
 
-bool CD3D12Device::CreateOffscreenTargets(int nWidth, int nHeight, ComPtr<ID3D12Resource> &pColor, ComPtr<ID3D12Resource> &pDepth,
+bool CD3D12Device::CreateOffscreenTargets(int nWidth, int nHeight, CD3D12Resource &pColor, CD3D12Resource &pDepth,
                                           D3D12_CPU_DESCRIPTOR_HANDLE hRTV, D3D12_CPU_DESCRIPTOR_HANDLE hDSV, DXGI_FORMAT Format, int nMips,
                                           const D3D12_CPU_DESCRIPTOR_HANDLE *phMipRTV)
 {
   if (!m_pDevice || nWidth <= 0 || nHeight <= 0 || !hRTV.ptr || !hDSV.ptr || nMips < 1 || (nMips > 1 && !phMipRTV))
     return false;
-  D3D12_HEAP_PROPERTIES Heap = {};
-  Heap.Type = D3D12_HEAP_TYPE_DEFAULT;
   D3D12_RESOURCE_DESC Desc = {};
   Desc.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
   Desc.Width = nWidth;
@@ -570,8 +591,8 @@ bool CD3D12Device::CreateOffscreenTargets(int nWidth, int nHeight, ComPtr<ID3D12
   // colour).
   D3D12_CLEAR_VALUE ColorClear = {};
   ColorClear.Format = Format;
-  if (Failed(m_pDevice->CreateCommittedResource(&Heap, D3D12_HEAP_FLAG_NONE, &Desc, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE,
-    &ColorClear, IID_PPV_ARGS(&pColor)), "CreateCommittedResource (off screen colour)"))
+  if (Failed(CreateResource(D3D12_HEAP_TYPE_DEFAULT, Desc, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, &ColorClear, ED3D12Memory::Committed,
+                            L"XRenderD3D12 off screen colour", pColor), "CreateResource (off screen colour)"))
     return false;
   Desc.MipLevels = 1;
   Desc.Format = D3D12_DEPTH_FORMAT;
@@ -579,8 +600,8 @@ bool CD3D12Device::CreateOffscreenTargets(int nWidth, int nHeight, ComPtr<ID3D12
   D3D12_CLEAR_VALUE Clear = {};
   Clear.Format = D3D12_DEPTH_FORMAT;
   Clear.DepthStencil.Depth = 1.0f;
-  if (Failed(m_pDevice->CreateCommittedResource(&Heap, D3D12_HEAP_FLAG_NONE, &Desc, D3D12_RESOURCE_STATE_DEPTH_WRITE, &Clear, IID_PPV_ARGS(&pDepth)),
-    "CreateCommittedResource (off screen depth)"))
+  if (Failed(CreateResource(D3D12_HEAP_TYPE_DEFAULT, Desc, D3D12_RESOURCE_STATE_DEPTH_WRITE, &Clear, ED3D12Memory::Committed,
+                            L"XRenderD3D12 off screen depth", pDepth), "CreateResource (off screen depth)"))
   {
     pColor.Reset();
     return false;
@@ -601,13 +622,11 @@ bool CD3D12Device::CreateOffscreenTargets(int nWidth, int nHeight, ComPtr<ID3D12
   return true;
 }
 
-bool CD3D12Device::CreateCubeTargets(int nSize, ComPtr<ID3D12Resource> &pColor, ComPtr<ID3D12Resource> &pDepth, const D3D12_CPU_DESCRIPTOR_HANDLE hRTV[6],
+bool CD3D12Device::CreateCubeTargets(int nSize, CD3D12Resource &pColor, CD3D12Resource &pDepth, const D3D12_CPU_DESCRIPTOR_HANDLE hRTV[6],
                                      D3D12_CPU_DESCRIPTOR_HANDLE hDSV, DXGI_FORMAT Format)
 {
   if (!m_pDevice || nSize <= 0 || !hDSV.ptr || std::any_of(hRTV, hRTV + 6, [](const D3D12_CPU_DESCRIPTOR_HANDLE &h) { return !h.ptr; }))
     return false;
-  D3D12_HEAP_PROPERTIES Heap = {};
-  Heap.Type = D3D12_HEAP_TYPE_DEFAULT;
   D3D12_RESOURCE_DESC Desc = {};
   Desc.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
   Desc.Width = nSize;
@@ -619,8 +638,8 @@ bool CD3D12Device::CreateCubeTargets(int nSize, ComPtr<ID3D12Resource> &pColor, 
   Desc.Flags = D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET;
   D3D12_CLEAR_VALUE ColorClear = {};
   ColorClear.Format = Format;
-  if (Failed(m_pDevice->CreateCommittedResource(&Heap, D3D12_HEAP_FLAG_NONE, &Desc, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE,
-    &ColorClear, IID_PPV_ARGS(&pColor)), "CreateCommittedResource (cube colour)"))
+  if (Failed(CreateResource(D3D12_HEAP_TYPE_DEFAULT, Desc, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, &ColorClear, ED3D12Memory::Committed,
+                            L"XRenderD3D12 cube colour", pColor), "CreateResource (cube colour)"))
     return false;
   Desc.DepthOrArraySize = 1;
   Desc.Format = D3D12_DEPTH_FORMAT;
@@ -628,8 +647,8 @@ bool CD3D12Device::CreateCubeTargets(int nSize, ComPtr<ID3D12Resource> &pColor, 
   D3D12_CLEAR_VALUE Clear = {};
   Clear.Format = D3D12_DEPTH_FORMAT;
   Clear.DepthStencil.Depth = 1.0f;
-  if (Failed(m_pDevice->CreateCommittedResource(&Heap, D3D12_HEAP_FLAG_NONE, &Desc, D3D12_RESOURCE_STATE_DEPTH_WRITE, &Clear, IID_PPV_ARGS(&pDepth)),
-    "CreateCommittedResource (cube depth)"))
+  if (Failed(CreateResource(D3D12_HEAP_TYPE_DEFAULT, Desc, D3D12_RESOURCE_STATE_DEPTH_WRITE, &Clear, ED3D12Memory::Committed,
+                            L"XRenderD3D12 cube depth", pDepth), "CreateResource (cube depth)"))
   {
     pColor.Reset();
     return false;
@@ -676,9 +695,9 @@ void CD3D12Device::SetOffscreenTargets(ID3D12Resource *pColor, D3D12_CPU_DESCRIP
   m_pCmdList->RSSetScissorRects(1, &rc);
 }
 
-bool CD3D12Device::CreateShadowMap(int nSize, ComPtr<ID3D12Resource> &pDepth, SD3D12Placement &Place, D3D12_CPU_DESCRIPTOR_HANDLE hDSV)
+bool CD3D12Device::CreateShadowMap(int nSize, CD3D12Resource &pDepth, D3D12_CPU_DESCRIPTOR_HANDLE hDSV)
 {
-  if (!m_pDevice || nSize <= 0 || !hDSV.ptr || !g_pRenderer->m_pUpload)
+  if (!m_pDevice || nSize <= 0 || !hDSV.ptr)
     return false;
   D3D12_RESOURCE_DESC Desc = {};
   Desc.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
@@ -692,7 +711,9 @@ bool CD3D12Device::CreateShadowMap(int nSize, ComPtr<ID3D12Resource> &pDepth, SD
   D3D12_CLEAR_VALUE Clear = {};
   Clear.Format = D3D12_SHADOW_MAP_FORMAT;
   Clear.DepthStencil.Depth = 1.0f;
-  if (Failed(g_pRenderer->m_pUpload->CreateDepthTarget(Desc, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, Clear, pDepth, Place), "CreateDepthTarget (shadow map)"))
+  // Placed: the characters' shadow maps come a dozen at once when a turn brings them into view.
+  if (Failed(CreateResource(D3D12_HEAP_TYPE_DEFAULT, Desc, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, &Clear, ED3D12Memory::Placed,
+                            L"XRenderD3D12 shadow map", pDepth), "CreateResource (shadow map)"))
     return false;
   D3D12_DEPTH_STENCIL_VIEW_DESC View = {};
   View.Format = D3D12_SHADOW_MAP_FORMAT;
@@ -702,12 +723,10 @@ bool CD3D12Device::CreateShadowMap(int nSize, ComPtr<ID3D12Resource> &pDepth, SD
   return true;
 }
 
-bool CD3D12Device::CreateShadowMapArray(int nSize, int nSlices, ComPtr<ID3D12Resource> &pDepth, const D3D12_CPU_DESCRIPTOR_HANDLE *phDSV)
+bool CD3D12Device::CreateShadowMapArray(int nSize, int nSlices, CD3D12Resource &pDepth, const D3D12_CPU_DESCRIPTOR_HANDLE *phDSV)
 {
   if (!m_pDevice || nSize <= 0 || nSlices <= 0 || !phDSV)
     return false;
-  D3D12_HEAP_PROPERTIES Heap = {};
-  Heap.Type = D3D12_HEAP_TYPE_DEFAULT;
   D3D12_RESOURCE_DESC Desc = {};
   Desc.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
   Desc.Width = nSize;
@@ -720,8 +739,8 @@ bool CD3D12Device::CreateShadowMapArray(int nSize, int nSlices, ComPtr<ID3D12Res
   D3D12_CLEAR_VALUE Clear = {};
   Clear.Format = D3D12_SHADOW_MAP_FORMAT;
   Clear.DepthStencil.Depth = 1.0f;
-  if (Failed(m_pDevice->CreateCommittedResource(&Heap, D3D12_HEAP_FLAG_NONE, &Desc, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, &Clear,
-    IID_PPV_ARGS(&pDepth)), "CreateCommittedResource (shadow map array)"))
+  if (Failed(CreateResource(D3D12_HEAP_TYPE_DEFAULT, Desc, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, &Clear, ED3D12Memory::Committed,
+                            L"XRenderD3D12 shadow map array", pDepth), "CreateResource (shadow map array)"))
     return false;
   for (int i = 0; i < nSlices; i++)
   {
@@ -1156,8 +1175,6 @@ bool CD3D12Device::SetSceneSize(int nWidth, int nHeight, DXGI_FORMAT ColorFormat
   ReleaseSceneTargets();
   if (!m_pDevice)
     return false;
-  D3D12_HEAP_PROPERTIES Heap = {};
-  Heap.Type = D3D12_HEAP_TYPE_DEFAULT;
   D3D12_RESOURCE_DESC Desc = {};
   Desc.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
   Desc.Width = nWidth;
@@ -1169,37 +1186,32 @@ bool CD3D12Device::SetSceneSize(int nWidth, int nHeight, DXGI_FORMAT ColorFormat
   bool bOk = true;
   Desc.Format = Clear.Format = ColorFormat;
   Desc.Flags = D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET;
-  bOk = bOk && !Failed(m_pDevice->CreateCommittedResource(&Heap, D3D12_HEAP_FLAG_NONE, &Desc, SCENE_READ, &Clear, IID_PPV_ARGS(&m_pSceneColor)),
-                       "CreateCommittedResource (scene colour)");
+  bOk = bOk && !Failed(CreateResource(D3D12_HEAP_TYPE_DEFAULT, Desc, SCENE_READ, &Clear, ED3D12Memory::Committed,
+                                      L"XRenderD3D12 scene colour", m_pSceneColor), "CreateResource (scene colour)");
   Desc.Format = Clear.Format = D3D12_VELOCITY_FORMAT;
-  bOk = bOk && !Failed(m_pDevice->CreateCommittedResource(&Heap, D3D12_HEAP_FLAG_NONE, &Desc, SCENE_READ, &Clear, IID_PPV_ARGS(&m_pSceneVelocity)),
-                       "CreateCommittedResource (scene motion vectors)");
+  bOk = bOk && !Failed(CreateResource(D3D12_HEAP_TYPE_DEFAULT, Desc, SCENE_READ, &Clear, ED3D12Memory::Committed,
+                                      L"XRenderD3D12 scene motion vectors", m_pSceneVelocity), "CreateResource (scene motion vectors)");
   Desc.Format = Clear.Format = D3D12_UPSCALE_DEPTH_FORMAT;
   Clear.Color[0] = 1.0f;
-  bOk = bOk && !Failed(m_pDevice->CreateCommittedResource(&Heap, D3D12_HEAP_FLAG_NONE, &Desc, SCENE_READ, &Clear, IID_PPV_ARGS(&m_pUpscaleDepth)),
-                       "CreateCommittedResource (upscaler depth)");
+  bOk = bOk && !Failed(CreateResource(D3D12_HEAP_TYPE_DEFAULT, Desc, SCENE_READ, &Clear, ED3D12Memory::Committed,
+                                      L"XRenderD3D12 upscaler depth", m_pUpscaleDepth), "CreateResource (upscaler depth)");
   Desc.Format = DXGI_FORMAT_R32_TYPELESS;
   Desc.Flags = D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL;
   Clear.Format = D3D12_SCENE_DEPTH_FORMAT;
   Clear.DepthStencil.Depth = 1.0f;
-  bOk = bOk && !Failed(m_pDevice->CreateCommittedResource(&Heap, D3D12_HEAP_FLAG_NONE, &Desc, SCENE_READ, &Clear, IID_PPV_ARGS(&m_pSceneDepth)),
-                       "CreateCommittedResource (scene depth)");
+  bOk = bOk && !Failed(CreateResource(D3D12_HEAP_TYPE_DEFAULT, Desc, SCENE_READ, &Clear, ED3D12Memory::Committed,
+                                      L"XRenderD3D12 scene depth", m_pSceneDepth), "CreateResource (scene depth)");
   Desc.Width = m_nWidth;
   Desc.Height = m_nHeight;
   Desc.Format = OutputFormat;
   Desc.Flags = D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS;
-  bOk = bOk && !Failed(m_pDevice->CreateCommittedResource(&Heap, D3D12_HEAP_FLAG_NONE, &Desc, D3D12_RESOURCE_STATE_UNORDERED_ACCESS, nullptr,
-                                                          IID_PPV_ARGS(&m_pSceneOutput)), "CreateCommittedResource (upscaler output)");
+  bOk = bOk && !Failed(CreateResource(D3D12_HEAP_TYPE_DEFAULT, Desc, D3D12_RESOURCE_STATE_UNORDERED_ACCESS, nullptr, ED3D12Memory::Committed,
+                                      L"XRenderD3D12 upscaler output", m_pSceneOutput), "CreateResource (upscaler output)");
   if (!bOk)
   {
     ReleaseSceneTargets();
     return false;
   }
-  m_pSceneColor->SetName(L"XRenderD3D12 scene colour");
-  m_pSceneVelocity->SetName(L"XRenderD3D12 scene motion vectors");
-  m_pUpscaleDepth->SetName(L"XRenderD3D12 upscaler depth");
-  m_pSceneDepth->SetName(L"XRenderD3D12 scene depth");
-  m_pSceneOutput->SetName(L"XRenderD3D12 upscaler output");
   for (ID3D12Resource *p : { m_pSceneColor.Get(), m_pSceneVelocity.Get(), m_pUpscaleDepth.Get(), m_pSceneDepth.Get() })
     TrackState(p, SCENE_READ);
   TrackState(m_pSceneOutput.Get(), D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
@@ -1277,8 +1289,6 @@ bool CD3D12Device::SetHdrTarget(bool bOn)
     return true;
   if (!m_pDevice)
     return false;
-  D3D12_HEAP_PROPERTIES Heap = {};
-  Heap.Type = D3D12_HEAP_TYPE_DEFAULT;
   D3D12_RESOURCE_DESC Desc = {};
   Desc.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
   Desc.Width = m_nWidth;
@@ -1290,10 +1300,9 @@ bool CD3D12Device::SetHdrTarget(bool bOn)
   Desc.Flags = D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET;
   D3D12_CLEAR_VALUE Clear = {};
   Clear.Format = D3D12_HDR_FORMAT;
-  if (Failed(m_pDevice->CreateCommittedResource(&Heap, D3D12_HEAP_FLAG_NONE, &Desc, SCENE_READ, &Clear, IID_PPV_ARGS(&m_pHdrColor)),
-    "CreateCommittedResource (HDR colour)"))
+  if (Failed(CreateResource(D3D12_HEAP_TYPE_DEFAULT, Desc, SCENE_READ, &Clear, ED3D12Memory::Committed,
+                            L"XRenderD3D12 HDR colour", m_pHdrColor), "CreateResource (HDR colour)"))
     return false;
-  m_pHdrColor->SetName(L"XRenderD3D12 HDR colour");
   TrackState(m_pHdrColor.Get(), SCENE_READ);
   m_pDevice->CreateRenderTargetView(m_pHdrColor.Get(), nullptr, SceneRTV(3));
   return true;
@@ -1355,8 +1364,6 @@ bool CD3D12Device::SetMsaaTargets(int nSamples, DXGI_FORMAT ColorFormat)
   if (!Supports(ColorFormat, true) || !Supports(D3D12_AMBIENT_FORMAT, true) || !Supports(D3D12_DEPTH_FORMAT, false) ||
       !Supports(D3D12_VELOCITY_FORMAT, false) || !Supports(D3D12_UPSCALE_DEPTH_FORMAT, false))
     return false;
-  D3D12_HEAP_PROPERTIES Heap = {};
-  Heap.Type = D3D12_HEAP_TYPE_DEFAULT;
   D3D12_RESOURCE_DESC Desc = {};
   Desc.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
   Desc.Width = m_nWidth;
@@ -1368,18 +1375,18 @@ bool CD3D12Device::SetMsaaTargets(int nSamples, DXGI_FORMAT ColorFormat)
   Desc.Flags = D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET;
   D3D12_CLEAR_VALUE Clear = {};
   Clear.Format = ColorFormat;
-  bool bOk = SUCCEEDED(m_pDevice->CreateCommittedResource(&Heap, D3D12_HEAP_FLAG_NONE, &Desc, D3D12_RESOURCE_STATE_RENDER_TARGET, &Clear,
-                                                          IID_PPV_ARGS(&m_pMsaaColor)));
+  bool bOk = SUCCEEDED(CreateResource(D3D12_HEAP_TYPE_DEFAULT, Desc, D3D12_RESOURCE_STATE_RENDER_TARGET, &Clear, ED3D12Memory::Committed,
+                                      L"XRenderD3D12 MSAA colour", m_pMsaaColor));
   Desc.Format = Clear.Format = D3D12_AMBIENT_FORMAT;
-  bOk = bOk && SUCCEEDED(m_pDevice->CreateCommittedResource(&Heap, D3D12_HEAP_FLAG_NONE, &Desc, D3D12_RESOURCE_STATE_RENDER_TARGET, &Clear,
-                                                            IID_PPV_ARGS(&m_pMsaaAmbient)));
+  bOk = bOk && SUCCEEDED(CreateResource(D3D12_HEAP_TYPE_DEFAULT, Desc, D3D12_RESOURCE_STATE_RENDER_TARGET, &Clear, ED3D12Memory::Committed,
+                                        L"XRenderD3D12 MSAA ambient light", m_pMsaaAmbient));
   // Typeless as the depth buffer: read by the resolve (Msaa.cpp).
   Desc.Format = DXGI_FORMAT_R24G8_TYPELESS;
   Desc.Flags = D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL;
   Clear.Format = D3D12_DEPTH_FORMAT;
   Clear.DepthStencil.Depth = 1.0f;
-  bOk = bOk && SUCCEEDED(m_pDevice->CreateCommittedResource(&Heap, D3D12_HEAP_FLAG_NONE, &Desc, D3D12_RESOURCE_STATE_DEPTH_WRITE, &Clear,
-                                                            IID_PPV_ARGS(&m_pMsaaDepth)));
+  bOk = bOk && SUCCEEDED(CreateResource(D3D12_HEAP_TYPE_DEFAULT, Desc, D3D12_RESOURCE_STATE_DEPTH_WRITE, &Clear, ED3D12Memory::Committed,
+                                        L"XRenderD3D12 MSAA depth", m_pMsaaDepth));
   if (!bOk)
   {
     iLog->LogError("XRenderD3D12: MSAA %dx: its targets at %d x %d not made", nSamples, m_nWidth, m_nHeight);
@@ -1388,9 +1395,6 @@ bool CD3D12Device::SetMsaaTargets(int nSamples, DXGI_FORMAT ColorFormat)
     m_pMsaaDepth.Reset();
     return false;
   }
-  m_pMsaaColor->SetName(L"XRenderD3D12 MSAA colour");
-  m_pMsaaAmbient->SetName(L"XRenderD3D12 MSAA ambient light");
-  m_pMsaaDepth->SetName(L"XRenderD3D12 MSAA depth");
   TrackState(m_pMsaaColor.Get(), D3D12_RESOURCE_STATE_RENDER_TARGET);
   TrackState(m_pMsaaAmbient.Get(), D3D12_RESOURCE_STATE_RENDER_TARGET);
   TrackState(m_pMsaaDepth.Get(), D3D12_RESOURCE_STATE_DEPTH_WRITE);
@@ -1477,8 +1481,6 @@ void CD3D12Device::BindMsaaResolveTarget(bool bColor)
 
 bool CD3D12Device::CreateLayer()
 {
-  D3D12_HEAP_PROPERTIES Heap = {};
-  Heap.Type = D3D12_HEAP_TYPE_DEFAULT;
   D3D12_RESOURCE_DESC Desc = {};
   Desc.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
   Desc.Width = m_nWidth;
@@ -1489,22 +1491,20 @@ bool CD3D12Device::CreateLayer()
   Desc.SampleDesc.Count = 1;
   Desc.Flags = D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET;
   // The frame target is cleared to any colour, as a swap chain's buffer: no clear value.
-  if (Failed(m_pDevice->CreateCommittedResource(&Heap, D3D12_HEAP_FLAG_NONE, &Desc, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, nullptr,
-    IID_PPV_ARGS(&m_pFrame)), "CreateCommittedResource (frame target)"))
+  if (Failed(CreateResource(D3D12_HEAP_TYPE_DEFAULT, Desc, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, nullptr, ED3D12Memory::Committed,
+                            L"XRenderD3D12 frame target", m_pFrame), "CreateResource (frame target)"))
     return false;
   Desc.Format = D3D12_HIGHLIGHT_FORMAT;
   D3D12_CLEAR_VALUE Clear = {};
   Clear.Format = D3D12_HIGHLIGHT_FORMAT;
   Clear.Color[0] = Clear.Color[1] = Clear.Color[2] = 1;
   Clear.Color[3] = -1;
-  if (Failed(m_pDevice->CreateCommittedResource(&Heap, D3D12_HEAP_FLAG_NONE, &Desc, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, &Clear,
-    IID_PPV_ARGS(&m_pHighlight)), "CreateCommittedResource (highlight layer)"))
+  if (Failed(CreateResource(D3D12_HEAP_TYPE_DEFAULT, Desc, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, &Clear, ED3D12Memory::Committed,
+                            L"XRenderD3D12 highlight layer", m_pHighlight), "CreateResource (highlight layer)"))
   {
     m_pFrame.Reset();
     return false;
   }
-  m_pFrame->SetName(L"XRenderD3D12 frame target");
-  m_pHighlight->SetName(L"XRenderD3D12 highlight layer");
   m_pDevice->CreateRenderTargetView(m_pFrame.Get(), nullptr, SceneRTV(4));
   m_pDevice->CreateRenderTargetView(m_pHighlight.Get(), nullptr, SceneRTV(5));
   TrackState(m_pFrame.Get(), D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
@@ -2070,15 +2070,61 @@ void CD3D12Device::ReadGpuTimes()
   m_nGpuTimedFrames++;
 }
 
-bool CD3D12Device::GetVideoMemory(uint64 &nUsage, uint64 &nBudget) const
+bool CD3D12Device::GetMemoryStats(SD3D12MemoryStats &Out, bool bHeaps) const
 {
-  ComPtr<IDXGIAdapter3> pAdapter3;
-  DXGI_QUERY_VIDEO_MEMORY_INFO Info;
-  if (!m_pAdapter || FAILED(m_pAdapter.As(&pAdapter3)) || FAILED(pAdapter3->QueryVideoMemoryInfo(0, DXGI_MEMORY_SEGMENT_GROUP_LOCAL, &Info)))
+  Out = SD3D12MemoryStats();
+  if (!m_pAllocator)
     return false;
-  nUsage = Info.CurrentUsage;
-  nBudget = Info.Budget;
+  ReadMemoryStats(*m_pAllocator.Get(), Out, bHeaps);
   return true;
+}
+
+bool CD3D12Device::DumpMemory(const char *szPath) const
+{
+  if (!m_pAllocator)
+    return false;
+  const std::string Json = MemoryStatsJson(*m_pAllocator.Get());
+  if (Json.empty())
+    return false;
+  FILE *pFile = fopen(szPath, "wb");
+  if (!pFile)
+    return false;
+  const bool bOk = fwrite(Json.data(), 1, Json.size(), pFile) == Json.size();
+  return fclose(pFile) == 0 && bOk;
+}
+
+void CD3D12Device::LogMemory(const char *szWhen, bool bNames) const
+{
+  SD3D12MemoryStats Stats;
+  if (!GetMemoryStats(Stats, true))
+    return;
+  std::string Names;
+  if (bNames && Stats.nAllocations)
+  {
+    int nShown = 0;
+    for (const auto &[Name, n] : LiveAllocationNames(*m_pAllocator.Get()))
+    {
+      if (nShown++ == 12)
+      {
+        Names += ", ...";
+        break;
+      }
+      Names += (Names.empty() ? ": " : ", ") + std::to_string(n) + " x '" + Name + "'";
+    }
+  }
+  char szLine[160];
+  snprintf(szLine, sizeof(szLine), "GPU memory %s: %u resources, %.1f MB, %u heaps", szWhen, Stats.nAllocations,
+           Stats.nAllocationBytes / 1048576.0, Stats.nHeaps);
+  iLog->Log("XRenderD3D12: %s%s", szLine, Names.c_str());
+  // The game's log drops the renderer's lines after its start: a file of our own, new each run, closed after each line
+  // so that a run killed (DemoHost) keeps what it wrote.
+  static bool s_bStarted = false;
+  if (FILE *pFile = fopen("XRenderD3D12_memory.txt", s_bStarted ? "a" : "w"))
+  {
+    s_bStarted = true;
+    fprintf(pFile, "%s%s\n", szLine, Names.c_str());
+    fclose(pFile);
+  }
 }
 
 int CD3D12Device::BeginOcclusion()
@@ -2142,12 +2188,10 @@ void CD3D12Device::ClearDepth(float fDepth, uint8 nStencil, bool bDepth, bool bS
   }
 }
 
-bool CD3D12Device::CreateTargetCopies(ComPtr<ID3D12Resource> &pColor, ComPtr<ID3D12Resource> *pDepth)
+bool CD3D12Device::CreateTargetCopies(CD3D12Resource &pColor, CD3D12Resource *pDepth)
 {
   if (!m_pDevice)
     return false;
-  D3D12_HEAP_PROPERTIES Heap = {};
-  Heap.Type = D3D12_HEAP_TYPE_DEFAULT;
   D3D12_RESOURCE_DESC Desc = {};
   Desc.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
   Desc.Width = GetMainWidth();
@@ -2156,8 +2200,8 @@ bool CD3D12Device::CreateTargetCopies(ComPtr<ID3D12Resource> &pColor, ComPtr<ID3
   Desc.MipLevels = 1;
   Desc.Format = GetMainColorFormat();
   Desc.SampleDesc.Count = 1;
-  if (Failed(m_pDevice->CreateCommittedResource(&Heap, D3D12_HEAP_FLAG_NONE, &Desc, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, nullptr,
-    IID_PPV_ARGS(&pColor)), "CreateCommittedResource (colour copy)"))
+  if (Failed(CreateResource(D3D12_HEAP_TYPE_DEFAULT, Desc, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, nullptr, ED3D12Memory::Committed,
+                            L"XRenderD3D12 colour copy", pColor), "CreateResource (colour copy)"))
     return false;
   TrackState(pColor.Get(), D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
   if (!pDepth)
@@ -2165,8 +2209,8 @@ bool CD3D12Device::CreateTargetCopies(ComPtr<ID3D12Resource> &pColor, ComPtr<ID3
   // The depth copy: the same format family and layout as the depth buffer, read through an SRV.
   Desc.Format = m_bInScene ? DXGI_FORMAT_R32_TYPELESS : DXGI_FORMAT_R24G8_TYPELESS;
   Desc.Flags = D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL;
-  if (Failed(m_pDevice->CreateCommittedResource(&Heap, D3D12_HEAP_FLAG_NONE, &Desc, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, nullptr,
-    IID_PPV_ARGS(&*pDepth)), "CreateCommittedResource (depth copy)"))
+  if (Failed(CreateResource(D3D12_HEAP_TYPE_DEFAULT, Desc, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, nullptr, ED3D12Memory::Committed,
+                            L"XRenderD3D12 depth copy", *pDepth), "CreateResource (depth copy)"))
   {
     ForgetState(pColor.Get());
     pColor.Reset();
@@ -2252,19 +2296,10 @@ bool CD3D12Device::ReadBackTexture(ID3D12Resource *pTexture, D3D12_RESOURCE_STAT
   UINT64 nTotal = 0;
   m_pDevice->GetCopyableFootprints(&Desc, 0, 1, 0, &Footprint, nullptr, nullptr, &nTotal);
 
-  D3D12_HEAP_PROPERTIES Heap = {};
-  Heap.Type = D3D12_HEAP_TYPE_READBACK;
-  D3D12_RESOURCE_DESC BufDesc = {};
-  BufDesc.Dimension = D3D12_RESOURCE_DIMENSION_BUFFER;
-  BufDesc.Width = nTotal;
-  BufDesc.Height = 1;
-  BufDesc.DepthOrArraySize = 1;
-  BufDesc.MipLevels = 1;
-  BufDesc.SampleDesc.Count = 1;
-  BufDesc.Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
-  ComPtr<ID3D12Resource> pReadback;
-  if (Failed(m_pDevice->CreateCommittedResource(&Heap, D3D12_HEAP_FLAG_NONE, &BufDesc, D3D12_RESOURCE_STATE_COPY_DEST, nullptr, IID_PPV_ARGS(&pReadback)),
-    "CreateCommittedResource (readback)"))
+  const D3D12_RESOURCE_DESC BufDesc = D3D12BufferDesc(nTotal);
+  CD3D12Resource pReadback;
+  if (Failed(CreateResource(D3D12_HEAP_TYPE_READBACK, BufDesc, D3D12_RESOURCE_STATE_COPY_DEST, nullptr, ED3D12Memory::Committed,
+                            L"XRenderD3D12 readback", pReadback), "CreateResource (readback)"))
     return false;
 
   if (!bInFrame)

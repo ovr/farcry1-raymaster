@@ -140,6 +140,9 @@
 //	  vColor    rgb a water volume's scene behind times it (a WaterVolume
 //	            material's diffuse colour, d3d12_WaterVolumeColor; white:
 //	            as it is)
+//	  vUnderColor a water volume's: rgb the colour of the fog volume it
+//	            fills, w its density (d3d12_FogVolumeDepth; 0 none); the
+//	            ocean's: Underwater.hlsl's
 //	  nTex0     colour copy, nTex1 depth copy (R24 of D24S8, R32 of an
 //	            upscaler's scene)
 //	  nTex2..4  the sky box textures: top, _12, _34
@@ -1202,6 +1205,18 @@ float4 ShadeWater(SWaterOutput In)
     }
     else
     {
+      // The floor seen through the water has at least the fog of its depth under the surface (d3d12_FogVolumeDepth,
+      // vUnderColor): its own fog pass laid the gate's (FogVolumeGate), this adds the rest (FogVolume.h's ThroughWater).
+      // Its colour lit by the brightness behind (as the water's scatter, vParams3.w 1, but full from a tenth): the volume's
+      // colour as given glowed in a dark cave; the lit bunker pool keeps its murk.
+      const float fFogDensity = g_DrawExt.vUnderColor.w;
+      if (fFogDensity > 0 && fDepthBelow > 0)
+      {
+        const float fGated = FogVolumeGate(vCamera.z - In.vWorldPos.z, fDepthBelow, fBehind0, fFogDensity);
+        const float fDeep = 1 - exp(-fDepthBelow * fFogDensity);
+        vScene = lerp(vScene, g_DrawExt.vUnderColor.rgb * saturate(dot(vScene0, float3(0.30, 0.59, 0.11)) * 10),
+                      saturate((fDeep - fGated) / max(1 - fGated, 1e-4)));
+      }
       // A WaterVolume material's water times its diffuse colour (vColor rgb; white for the others: d3d12_WaterVolumeColor).
       float3 T = exp(-vExtinction * fPath);
       vRefracted = (vScene * T * exp(-vExtinction * fLightPath) + vScatter * (1 - T)) * g_Draw.vColor.rgb;

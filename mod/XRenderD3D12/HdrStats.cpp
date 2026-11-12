@@ -39,20 +39,6 @@ void Set4(float v[4], float x, float y, float z, float w)
   v[0] = x; v[1] = y; v[2] = z; v[3] = w;
 }
 
-D3D12_RESOURCE_DESC BufferDesc(UINT64 nBytes, D3D12_RESOURCE_FLAGS Flags)
-{
-  D3D12_RESOURCE_DESC Desc = {};
-  Desc.Dimension = D3D12_RESOURCE_DIMENSION_BUFFER;
-  Desc.Width = nBytes;
-  Desc.Height = 1;
-  Desc.DepthOrArraySize = 1;
-  Desc.MipLevels = 1;
-  Desc.SampleDesc.Count = 1;
-  Desc.Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
-  Desc.Flags = Flags;
-  return Desc;
-}
-
 float AsFloat(uint32 n)
 {
   float f;
@@ -76,17 +62,15 @@ bool CD3D12Renderer::BeginHdrStats()
     return true;
   if (!s.pWords)
   {
-    ID3D12Device *pDevice = m_pDevice->GetDevice();
-    const D3D12_HEAP_PROPERTIES Default = { D3D12_HEAP_TYPE_DEFAULT }, Readback = { D3D12_HEAP_TYPE_READBACK };
-    const D3D12_RESOURCE_DESC Words = BufferDesc(WORDS_BYTES, D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS);
-    const D3D12_RESOURCE_DESC Copies = BufferDesc((UINT64)WORDS_BYTES * D3D12_FRAMES, D3D12_RESOURCE_FLAG_NONE);
+    const D3D12_RESOURCE_DESC Words = D3D12BufferDesc(WORDS_BYTES, D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS);
+    const D3D12_RESOURCE_DESC Copies = D3D12BufferDesc((UINT64)WORDS_BYTES * D3D12_FRAMES);
     s.Tables.assign(2 * D3D12_FRAMES, -1);
     // The words common (a buffer is created so; the device keeps their state from here on, TrackState), the read back copy
     // destination.
-    bool bOk = SUCCEEDED(pDevice->CreateCommittedResource(&Default, D3D12_HEAP_FLAG_NONE, &Words, D3D12_RESOURCE_STATE_COMMON, nullptr,
-                                                          IID_PPV_ARGS(&s.pWords))) &&
-               SUCCEEDED(pDevice->CreateCommittedResource(&Readback, D3D12_HEAP_FLAG_NONE, &Copies, D3D12_RESOURCE_STATE_COPY_DEST, nullptr,
-                                                          IID_PPV_ARGS(&s.pReadback)));
+    bool bOk = SUCCEEDED(m_pDevice->CreateResource(D3D12_HEAP_TYPE_DEFAULT, Words, D3D12_RESOURCE_STATE_COMMON, nullptr, ED3D12Memory::Committed,
+                                                   L"XRenderD3D12 HDR statistics words", s.pWords)) &&
+               SUCCEEDED(m_pDevice->CreateResource(D3D12_HEAP_TYPE_READBACK, Copies, D3D12_RESOURCE_STATE_COPY_DEST, nullptr, ED3D12Memory::Committed,
+                                                   L"XRenderD3D12 HDR statistics read back", s.pReadback));
     // The tables, their views the kernels do not use null; the words the UAV of each.
     D3D12_SHADER_RESOURCE_VIEW_DESC NullSRV = {};
     NullSRV.Format = D3D12_HDR_FORMAT;
@@ -121,8 +105,6 @@ bool CD3D12Renderer::BeginHdrStats()
       s.bFailed = true;
       return false;
     }
-    s.pWords->SetName(L"XRenderD3D12 HDR statistics");
-    s.pReadback->SetName(L"XRenderD3D12 HDR statistics (read back)");
     m_pDevice->TrackState(s.pWords.Get(), D3D12_RESOURCE_STATE_COMMON);
     for (SHdrStatsFrame &f : s.Slots)
       f = {};

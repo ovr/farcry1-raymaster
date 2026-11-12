@@ -224,20 +224,10 @@ bool CD3D12Renderer::EnsureFrameAverage()
     return true;
   if (o.bFallFailed || !m_pCompute || !m_pUpload || !m_pDescriptors)
     return false;
-  ID3D12Device *pDevice = m_pDevice->GetDevice();
-  const D3D12_HEAP_PROPERTIES Default = { D3D12_HEAP_TYPE_DEFAULT };
-  D3D12_RESOURCE_DESC Desc = {};
-  Desc.Dimension = D3D12_RESOURCE_DIMENSION_BUFFER;
-  Desc.Width = FALL_WORDS_BYTES;
-  Desc.Height = 1;
-  Desc.DepthOrArraySize = 1;
-  Desc.MipLevels = 1;
-  Desc.SampleDesc.Count = 1;
-  Desc.Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
-  Desc.Flags = D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS;
+  const D3D12_RESOURCE_DESC Desc = D3D12BufferDesc(FALL_WORDS_BYTES, D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS);
   bool bOk = m_pCompute->HasKernel(eD3D12K_FrameAverageSum) && m_pCompute->HasKernel(eD3D12K_FrameAverageLimit) &&
-             SUCCEEDED(pDevice->CreateCommittedResource(&Default, D3D12_HEAP_FLAG_NONE, &Desc, D3D12_RESOURCE_STATE_COMMON, nullptr,
-                                                        IID_PPV_ARGS(&o.pFallWords)));
+             SUCCEEDED(m_pDevice->CreateResource(D3D12_HEAP_TYPE_DEFAULT, Desc, D3D12_RESOURCE_STATE_COMMON, nullptr, ED3D12Memory::Committed,
+                                                 L"XRenderD3D12 frame average words", o.pFallWords));
   o.pFall = bOk ? m_pUpload->CreateRenderTarget(1, 1, DXGI_FORMAT_R32G32B32A32_FLOAT, true) : nullptr;
   bOk = bOk && o.pFall && o.pFall->m_nSRV >= 0;
   // The tables: t0 the frame target and t1 the highlight layer each frame, u0 the words, u1 the target; the views the
@@ -283,7 +273,6 @@ bool CD3D12Renderer::EnsureFrameAverage()
     o.bFallFailed = true;
     return false;
   }
-  o.pFallWords->SetName(L"XRenderD3D12 frame average limit");
   memset(Zeros.pCPU, 0, FALL_WORDS_BYTES);
   m_pDevice->CopyBufferRegion(o.pFallWords.Get(), 0, Zeros.pResource, Zeros.nOffset, FALL_WORDS_BYTES);
   m_pDevice->Transition(o.pFallWords.Get(), D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);

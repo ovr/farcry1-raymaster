@@ -864,8 +864,6 @@ void CD3D12Renderer::DrawLeafItem(const SRenderItem &it)
     if (it.bFade)
       dc.vEdgeFade[1] = FadeAlpha(pObj);
     Set4(dc.vParams0, pFogVolume->fFogLayerZ, FogVolume::Density(pFogVolume->fMaxFogDist), bCap ? 1.0f : 0.0f, bBlended ? 1.0f : 0.0f);
-    // d3d12_FogVolumeDepth: from above at least the fog of the point's depth under the layer (FogVolume.h).
-    Set4(dc.vParams1, CV_d3d12_FogVolumeDepth > 0 ? 1.0f : 0.0f, 0, 0, 0);
     Key.nState = GS_BLSRC_SRCALPHA | GS_BLDST_ONEMINUSSRCALPHA | (bBlended || bCap ? 0 : GS_DEPTHFUNC_EQUAL);
     if (bCap || eDC == eDC_WaterBottom)
       Key.nCull = R_CULL_NONE;
@@ -1816,7 +1814,7 @@ void CD3D12Renderer::DumpItem(int nIndex, const SRenderItem &it, int eList)
   if (it.pRE->m_Type == eDATA_OcLeaf && static_cast<CREOcLeaf *>(it.pRE)->m_pBuffer)
     szLB = static_cast<CREOcLeaf *>(it.pRE)->m_pBuffer->m_sSource;
   const CTexture *pTex = GetDiffuseTexture(it.pRes);
-  fprintf(m_pFrameDump.get(), "[%d] list %d sort 0x%x fog %d %s RE %d shader '%s' templ '%s' tex '%s' lb '%s' pos (%.2f %.2f %.2f) flags 0x%x LM %d (dir %d occl %d HDR %d) LMTC %d mask 0x%x amb (%.2f %.2f %.2f) col (%.2f %.2f %.2f %.2f) res aref %.3f opacity %.2f flags 0x%x casters %d\n",
+  fprintf(m_pFrameDump.get(), "[%d] list %d sort 0x%x fog %d %s RE %d shader '%s' templ '%s' tex '%s' lb '%s' pos (%.2f %.2f %.2f) flags 0x%x LM %d (dir %d occl %d HDR %d) LMTC %d mask 0x%x amb (%.2f %.2f %.2f) col (%.2f %.2f %.2f %.2f) res aref %.3f opacity %.2f flags 0x%x casters %d dist %.2f sortid %g\n",
           nIndex, eList, it.nSort, it.nFog, (unsigned)it.eDrawClass < std::size(s_DrawClasses) ? s_DrawClasses[it.eDrawClass] : "?", it.pRE->m_Type,
           it.pShader ? it.pShader->GetName() : "", it.pShader ? it.pShader->GetProps().Template.c_str() : "", pTex ? pTex->m_Name.c_str() : "",
           szLB ? szLB : "",
@@ -1824,7 +1822,7 @@ void CD3D12Renderer::DumpItem(int nIndex, const SRenderItem &it, int eList)
           pObj->m_nLMDirId, pObj->m_nOcclId, pObj->m_nHDRLMId, pObj->m_pLMTCBufferO ? 1 : 0, pObj->m_DynLMMask, pObj->m_AmbColor.x, pObj->m_AmbColor.y, pObj->m_AmbColor.z,
           pObj->m_Color.r, pObj->m_Color.g, pObj->m_Color.b, pObj->m_Color.a, it.pRes ? it.pRes->m_AlphaRef : 0.0f,
           it.pRes ? it.pRes->m_Opacity : 1.0f, it.pRes ? it.pRes->m_ResFlags : 0,
-          pObj->m_pShadowCasters ? reinterpret_cast<const int *>(pObj->m_pShadowCasters)[2] : -1);
+          pObj->m_pShadowCasters ? reinterpret_cast<const int *>(pObj->m_pShadowCasters)[2] : -1, it.fDistance, pObj->m_SortId);
   if (it.bBakedLightCopy)
     fprintf(m_pFrameDump.get(), "    not drawn: a light mapped surface again for a light its light map has\n");
   if (it.bFade)

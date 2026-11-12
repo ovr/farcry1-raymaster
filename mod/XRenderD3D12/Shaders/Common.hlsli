@@ -134,6 +134,14 @@ float ViewDepth(float3 vPos)
   return abs(mul(float4(vPos, 1), g_Frame.mView).z);
 }
 
+//! A fog volume's fog over a point fDepth under its layer seen from fCamera above it, fViewDepth
+//! along the view axis (General.hlsl's FogVolumeAlpha; FogVolume.h's Alpha mirrors it).
+float FogVolumeGate(float fCamera, float fDepth, float fViewDepth, float fDensity)
+{
+  float fGate = 1 - pow(1 - saturate(fDepth / 5), lerp(3, 1.6, saturate(fCamera / 5)));
+  return fGate * (1 - exp(-fViewDepth * fDensity));
+}
+
 //! How much of its colour a fog volume the camera is in lays over a point fDepth along the view
 //! axis away (fDensity = ln 100 / (2 * the volume's fog distance)): a tenth at the camera, growing
 //! evenly to all of it at 0.65 times the fog distance.

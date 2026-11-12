@@ -158,6 +158,8 @@ void CD3D12Renderer::RegisterVariables()
                      "Tests DRED's report in the next frame: 1 removes the device, 2 makes a GPU page fault (the driver resets the GPU); "
                      "the renderer draws nothing after either");
   iConsole->Register("d3d12_DumpFrame", &CV_d3d12_DumpFrame, 0, 0, "Writes the render items and draws of the next frame to XRenderD3D12_frame.txt");
+  iConsole->Register("d3d12_MemoryDump", &CV_d3d12_MemoryDump, 0, 0,
+                     "Writes the GPU memory allocator's statistics, every heap and resource, to XRenderD3D12_memory.json (JSON)");
   iConsole->Register("d3d12_WaterDebug", &CV_d3d12_WaterDebug, 0, 0,
                      "Water surfaces show one term: 1 refraction, 2 reflection, 3 water thickness (0-2 m: black-white), 4 normal, 5 screen space reflection hits, 6 their colour, 7 the planar reflection, "
                      "8 the scene behind, 9 view path (red, 0-32 m), depth (green, 0-16 m) and fresnel (blue), 10 the vertex colour, 11 its alpha, "
@@ -429,10 +431,13 @@ void CD3D12Renderer::RegisterVariables()
                      "1: the water of a material with the shader WaterVolume or WaterVolumeBumpReflCM (pools, cave water) shows the "
                      "scene behind it times the material's diffuse colour, as the original's refraction pass; 0: untinted (the frames "
                      "before)");
-  iConsole->Register("d3d12_FogVolumeDepth", &CV_d3d12_FogVolumeDepth, 1, 0,
-                     "1: a fog volume's fog over a point under its layer, seen from above, at least the fog of the point's depth under "
-                     "the layer, which every ray to it crosses (a dense volume, Training's bunker pool's 0.1 m, hides its floor); 0: "
-                     "the gate of 5 m below the layer alone (the frames before)");
+  iConsole->Register("d3d12_BlendSortObject", &CV_d3d12_BlendSortObject, 1, 0,
+                     "1: the blended objects drawn far to near by their objects' origins, as the original (the black gradient of "
+                     "Training's first cut scene over the hanging moss round it); 0: by each part's own centre (the frames before)");
+  iConsole->Register("d3d12_FogVolumeDepth", &CV_d3d12_FogVolumeDepth, 0, 0,
+                     "1: the floor seen through a water volume's surface has at least the fog of its depth under it, in the volume's "
+                     "colour lit by the brightness behind (a dense volume, Training's bunker pool's 0.1 m, hides its floor); 0: the "
+                     "gate of 5 m below the layer alone, as the original (the default)");
   iConsole->Register("d3d12_UnderwaterBodies", &CV_d3d12_UnderwaterBodies, 1, 0,
                      "1: with the camera above the ocean, the characters under its level (the fish; a body shorter than 1 m by its middle) drawn after the rest of the "
                      "opaque surfaces without writing the depth: the water over them takes the floor under them, its shore's foam no "
@@ -768,6 +773,9 @@ void CD3D12Renderer::RegisterVariables()
   iConsole->Register("d3d12_PTCheckerboard", &CV_d3d12_PTCheckerboard, 1, VF_DUMPTODISK,
                      "With d3d12_PathTracing 1, the paths of half the pixels each frame, in a checkerboard, the others' light "
                      "from their four neighbours (0: a path from each pixel)");
+  iConsole->Register("d3d12_PTAlias", &CV_d3d12_PTAlias, 1, 0,
+                     "With d3d12_PathTracing 1, targets of the path tracer that live in turns within a frame share their memory: "
+                     "the highlights the paths', NRD's light input the filtered light's (0: each its own)");
   iConsole->Register("d3d12_PTSunHistory", &CV_d3d12_PTSunHistory, 64, VF_DUMPTODISK,
                      "With d3d12_PathTracing, the frames the sun's shadow by rays (its mask, d3d12_RTSunDenoise 1) holds at "
                      "most (24 without it); where the shadow moves (crowns in the wind) the history keeps a quarter of them "
@@ -1088,6 +1096,7 @@ WIN_HWND CD3D12Renderer::Init(int x,int y,int width,int height,unsigned int cbpp
     iConsole->UnregisterVariable("d3d12_PTSunHistory", true);
     iConsole->UnregisterVariable("d3d12_PTBehind", true);
     iConsole->UnregisterVariable("d3d12_PTCheckerboard", true);
+    iConsole->UnregisterVariable("d3d12_PTAlias", true);
     iConsole->UnregisterVariable("d3d12_PTReferenceBounces", true);
     iConsole->UnregisterVariable("d3d12_PTAmbient", true);
     iConsole->UnregisterVariable("d3d12_PTAmbientRange", true);
@@ -1441,6 +1450,9 @@ void CD3D12Renderer::RefreshResources(int nFlags)
 
 void CD3D12Renderer::PreLoad (void)
 {
+  // A level's load leaves as much memory as the same level's load before it: a leak grows it each time.
+  if (m_pDevice)
+    m_pDevice->LogMemory("before a level's load", false);
   // A new level registers its own fog volumes and makes its own sprites; the objects of a load
   // that never got drawn may be gone, and so may the textures of the water reflection's draws
   // kept for the rays.
@@ -1459,6 +1471,8 @@ void CD3D12Renderer::PreLoad (void)
 
 void CD3D12Renderer::PostLoad (void)
 {
+  if (m_pDevice)
+    m_pDevice->LogMemory("after a level's load", false);
   m_OceanGrid.bTerrainStale = true;
   m_TerrainRange.bStale = true;
 }
@@ -1560,6 +1574,17 @@ void CD3D12Renderer::Update (void)
     m_pFrameDump.reset();
     CV_d3d12_DumpFrame = 0;
     iLog->Log("XRenderD3D12: frame %d written to XRenderD3D12_frame.txt", m_nFrameID);
+  }
+  if (CV_d3d12_MemoryDump && m_pDevice)
+  {
+    CV_d3d12_MemoryDump = 0;
+    SD3D12MemoryStats Mem;
+    m_pDevice->GetMemoryStats(Mem, true);
+    if (m_pDevice->DumpMemory("XRenderD3D12_memory.json"))
+      iLog->Log("XRenderD3D12: GPU memory written to XRenderD3D12_memory.json: %u heaps of %.1f MB, %u resources of %.1f MB",
+                Mem.nHeaps, Mem.nHeapBytes / 1048576.0, Mem.nAllocations, Mem.nAllocationBytes / 1048576.0);
+    else
+      iLog->LogError("XRenderD3D12: d3d12_MemoryDump: XRenderD3D12_memory.json not written");
   }
   m_nFrameID++;
   m_nFrames++;

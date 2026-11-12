@@ -18,17 +18,10 @@
 #pragma once
 
 #include "D3D12Barriers.h"
+#include "D3D12Memory.h"
 #include "DisplayPoll.h"
 
 #include <span>
-
-//! Where CD3D12Upload::CreateDepthTarget put a resource.
-struct SD3D12Placement
-{
-  int nHeap = -1;                     //!< the heap of the depth targets' pool, -1 a committed resource
-  uint64 nOffset = 0;                 //!< where in that heap
-  uint64 nBytes = 0;                  //!< the bytes it takes there
-};
 
 constexpr int D3D12_FRAMES = 2;         //!< frames in flight
 constexpr int D3D12_BACKBUFFERS = 3;     //!< swap chain buffers
@@ -117,10 +110,22 @@ public:
   void DeferredRelease(IUnknown *p);
   //! The same for an object held in a ComPtr (which is left empty).
   template<class T> void DeferredRelease(ComPtr<T> &p) { DeferredRelease(static_cast<IUnknown *>(p.Detach())); }
+  //! The same for a resource with its memory (left empty).
+  void DeferredRelease(CD3D12Resource &r);
   //! Releases what the GPU no longer uses (called once per frame).
   void CollectGarbage();
 
   ID3D12Device *GetDevice() const { return m_pDevice.Get(); }
+  //! A resource with its memory from the device's allocator (D3D12Memory.h); a buffer starts in COMMON whatever eState
+  //! says. szName names the allocation (d3d12_MemoryDump) and, with names on (NamesObjects), the resource.
+  HRESULT CreateResource(D3D12_HEAP_TYPE eHeap, const D3D12_RESOURCE_DESC &Desc, D3D12_RESOURCE_STATES eState, const D3D12_CLEAR_VALUE *pClear,
+                         ED3D12Memory eMemory, const wchar_t *szName, CD3D12Resource &Out);
+  //! A resource in Base's memory (D3D12Memory.h's CreateAlias), named as CreateResource names.
+  HRESULT CreateAlias(const CD3D12Resource &Base, const D3D12_RESOURCE_DESC &Desc, D3D12_RESOURCE_STATES eState, const wchar_t *szName,
+                      CD3D12Resource &Out);
+  //! The memory pBefore and pAfter share given to pAfter from here on (an aliasing barrier, queued in order), pAfter in
+  //! eWrite (UNORDERED_ACCESS, RENDER_TARGET or DEPTH_WRITE) and discarded: the next pass must write all it reads.
+  void ActivateAlias(ID3D12Resource *pBefore, ID3D12Resource *pAfter, D3D12_RESOURCE_STATES eWrite);
   ID3D12CommandQueue *GetQueue() const { return m_pQueue.Get(); }
   //! The frame's command list; valid between BeginFrame and EndFrame. The caller may set state of
   //! its own on it: what DrawGeometry set is forgotten (GetStateEpoch).
@@ -233,14 +238,14 @@ public:
   //! A resource whose state the device keeps from here on (the tracker's Register; nSubresources of them, all in
   //! Initial): Require asks for a state without naming the one before, a Transition's before is checked against it. A
   //! buffer's state decays to COMMON when the frame's list has run and is given back by a transition at the next list's
-  //! start. It is released by DeferredRelease or the upload pools (which forget it); the upload list never writes it
+  //! start. It is released by DeferredRelease (which forgets it); the upload list never writes it
   //! (d3d12_BarrierCheck tells, CheckUntracked).
   void TrackState(ID3D12Resource *pRes, D3D12_RESOURCE_STATES Initial, UINT nSubresources = 1);
   //! A resource TrackState keeps wanted in After (all of it or one subresource): nothing where a read state it is in
   //! holds After, two shader reads combine. Outside a frame nothing.
   void Require(ID3D12Resource *pRes, D3D12_RESOURCE_STATES After, UINT nSubresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES);
   bool IsTracked(ID3D12Resource *pRes) const { return m_Barriers.IsRegistered(pRes); }
-  //! A released resource forgotten by the barriers' tracker and check (DeferredRelease, the upload pools' ranges).
+  //! A released resource forgotten by the barriers' tracker and check (DeferredRelease).
   void ForgetState(ID3D12Resource *pRes)
   {
     m_Barriers.Forget(pRes);
@@ -391,13 +396,13 @@ public:
   //! states kept by the device each: TrackState) and pDepth (D24S8, DEPTH_WRITE), their views written
   //! to hRTV and hDSV. pColor gets nMips mip levels: hRTV is the view of level 0, phMipRTV[i - 1] gets
   //! that of level i (the depth buffer has level 0 only).
-  bool CreateOffscreenTargets(int nWidth, int nHeight, ComPtr<ID3D12Resource> &pColor, ComPtr<ID3D12Resource> &pDepth,
+  bool CreateOffscreenTargets(int nWidth, int nHeight, CD3D12Resource &pColor, CD3D12Resource &pDepth,
                               D3D12_CPU_DESCRIPTOR_HANDLE hRTV, D3D12_CPU_DESCRIPTOR_HANDLE hDSV, DXGI_FORMAT Format = D3D12_BACKBUFFER_FORMAT,
                               int nMips = 1, const D3D12_CPU_DESCRIPTOR_HANDLE *phMipRTV = nullptr);
   //! The same for a cube of nSize: pColor an array of the six faces (one RTV per face in hRTV, in
   //! the order of D3D12_TEXTURECUBE_FACE), pDepth one face's size; drawn a face at a time with
   //! SetOffscreenTargets.
-  bool CreateCubeTargets(int nSize, ComPtr<ID3D12Resource> &pColor, ComPtr<ID3D12Resource> &pDepth, const D3D12_CPU_DESCRIPTOR_HANDLE hRTV[6],
+  bool CreateCubeTargets(int nSize, CD3D12Resource &pColor, CD3D12Resource &pDepth, const D3D12_CPU_DESCRIPTOR_HANDLE hRTV[6],
                          D3D12_CPU_DESCRIPTOR_HANDLE hDSV, DXGI_FORMAT Format = D3D12_BACKBUFFER_FORMAT);
   //! Draws into targets of CreateOffscreenTargets instead of the back buffer, all of them, until
   //! SetBackBufferTargets (in a frame). hDSV may be empty: a colour target alone (a render target
@@ -416,12 +421,12 @@ public:
   //! The colour format of the target drawn into: the off screen target's, else the main view's.
   DXGI_FORMAT GetTargetColorFormat() const { return m_pOffscreen ? m_OffscreenFormat : GetMainColorFormat(); }
   //! A shadow map of nSize x nSize: R32_TYPELESS (D3D12_SHADOW_MAP_FORMAT, its DSV written to hDSV,
-  //! read as R32_FLOAT), in the state PIXEL_SHADER_RESOURCE while it is not drawn into; a depth
-  //! target of CD3D12Upload (Place; released with ReleaseDepthTarget), undefined until cleared.
-  bool CreateShadowMap(int nSize, ComPtr<ID3D12Resource> &pDepth, SD3D12Placement &Place, D3D12_CPU_DESCRIPTOR_HANDLE hDSV);
+  //! read as R32_FLOAT), in the state PIXEL_SHADER_RESOURCE while it is not drawn into; placed memory, undefined
+  //! until cleared.
+  bool CreateShadowMap(int nSize, CD3D12Resource &pDepth, D3D12_CPU_DESCRIPTOR_HANDLE hDSV);
   //! The same with nSlices slices (a texture array), the DSV of slice i written to phDSV[i], the DSV
   //! of all of them to phDSV[nSlices] (drawn into with SV_RenderTargetArrayIndex).
-  bool CreateShadowMapArray(int nSize, int nSlices, ComPtr<ID3D12Resource> &pDepth, const D3D12_CPU_DESCRIPTOR_HANDLE *phDSV);
+  bool CreateShadowMapArray(int nSize, int nSlices, CD3D12Resource &pDepth, const D3D12_CPU_DESCRIPTOR_HANDLE *phDSV);
   //! Draws into a shadow map of CreateShadowMap (depth only, no colour target) until
   //! SetBackBufferTargets (in a frame); hDSV may be the DSV of a slice of CreateShadowMapArray (the
   //! slices of one array one after another stay in the state of a depth target).
@@ -439,7 +444,7 @@ public:
   //! its format (GetMainColorFormat), pDepth in the depth buffer's family (read as
   //! GetMainDepthSRVFormat); both in PIXEL_SHADER_RESOURCE state. Without pDepth only the colour
   //! copy is made.
-  bool CreateTargetCopies(ComPtr<ID3D12Resource> &pColor, ComPtr<ID3D12Resource> *pDepth);
+  bool CreateTargetCopies(CD3D12Resource &pColor, CD3D12Resource *pDepth);
   //! How a depth copy of CreateTargetCopies is read: R24_UNORM_X8_TYPELESS (the back buffer's
   //! D24S8), R32_FLOAT in the scene.
   DXGI_FORMAT GetMainDepthSRVFormat() const { return m_bInScene ? DXGI_FORMAT_R32_FLOAT : DXGI_FORMAT_R24_UNORM_X8_TYPELESS; }
@@ -510,9 +515,16 @@ public:
   double GetPresentMs() const { return m_fPresentMs; }
   //! The adapter's name (UTF-8).
   const char *GetAdapterName() const { return m_szAdapter; }
-  //! The process' use of the adapter's own memory and how much it may use (its budget); false
-  //! when DXGI does not tell.
-  bool GetVideoMemory(uint64 &nUsage, uint64 &nBudget) const;
+  //! The memory's use and budgets (cheap); with bHeaps also what the allocator's heaps hold (it walks them: twice a
+  //! second at most). False without an allocator.
+  bool GetMemoryStats(SD3D12MemoryStats &Out, bool bHeaps) const;
+  //! The allocator's JSON statistics (D3D12MA::Allocator::BuildStatsString with every allocation) to szPath, UTF-8.
+  bool DumpMemory(const char *szPath) const;
+  //! The allocator's resources and bytes to the log (szWhen: "after a level's load"); bNames with their names, the most
+  //! first.
+  void LogMemory(const char *szWhen, bool bNames) const;
+  //! Resources made (CreateResource) and freed (DeferredRelease) since the last call.
+  CD3D12MemoryChurn::SCounts TakeMemoryChurn() { return m_Churn.Take(); }
 
   //! Occlusion queries: BeginOcclusion .. EndOcclusion count the samples drawn in between that
   //! pass the depth test, at most OCCLUSION_QUERIES per frame. A frame's counts come when the GPU
@@ -581,6 +593,8 @@ private:
   UINT m_nFactoryFlags = 0;
   ComPtr<IDXGIAdapter1> m_pAdapter;
   ComPtr<ID3D12Device> m_pDevice;
+  ComPtr<D3D12MA::Allocator> m_pAllocator;          //!< CreateResource's (outside it: the swap chain, FSR's and CACAO's own, d3d12_DredTest's)
+  CD3D12MemoryChurn m_Churn;
   ComPtr<ID3D12CommandQueue> m_pQueue;
   ComPtr<IDXGISwapChain3> m_pSwapChain;
   ComPtr<ID3D12InfoQueue> m_pInfoQueue;
@@ -597,7 +611,7 @@ private:
   DXGI_FORMAT m_SwapChainFormat = D3D12_BACKBUFFER_FORMAT;
   float m_fMetadataPeak = 0, m_fMetadataFrameAverage = 0;   //!< HDR10's metadata as set
   bool m_bLayer = false;                            //!< the frame target and the highlight layer are wanted
-  ComPtr<ID3D12Resource> m_pFrame, m_pHighlight;    //!< CreateLayer (their states kept by the tracker)
+  CD3D12Resource m_pFrame, m_pHighlight;            //!< CreateLayer (their states kept by the tracker)
   bool m_bHighlightBound = false;                   //!< BindHighlight
   bool m_bOutput = false;                           //!< BeginOutput .. EndFrame
   SDisplayInfo m_Display;
@@ -630,7 +644,7 @@ private:
   ComPtr<ID3D12DescriptorHeap> m_pDSVHeap;
   uint32 m_nRTVSize = 0;
   ComPtr<ID3D12Resource> m_pBackBuffers[D3D12_BACKBUFFERS];
-  ComPtr<ID3D12Resource> m_pDepth;
+  CD3D12Resource m_pDepth;
   int m_nBackBuffer = 0;
   ID3D12Resource *m_pOffscreen = nullptr;           //!< SetOffscreenTargets: the colour target drawn into (SetShadowMapTarget: the shadow map)
   ID3D12Resource *m_pOffscreenSecond = nullptr;     //!< BindSecondTarget
@@ -640,17 +654,17 @@ private:
   D3D12_CPU_DESCRIPTOR_HANDLE m_hOffscreenRTV = {}, m_hOffscreenDSV = {};
   int m_nOffscreenWidth = 0, m_nOffscreenHeight = 0;
   DXGI_FORMAT m_OffscreenFormat = DXGI_FORMAT_UNKNOWN;
-  ComPtr<ID3D12Resource> m_pSceneColor, m_pSceneVelocity, m_pUpscaleDepth, m_pSceneDepth, m_pSceneOutput;   //!< SetSceneSize
+  CD3D12Resource m_pSceneColor, m_pSceneVelocity, m_pUpscaleDepth, m_pSceneDepth, m_pSceneOutput;   //!< SetSceneSize
   int m_nSceneWidth = 0, m_nSceneHeight = 0;
   int m_nSceneOutputWidth = 0, m_nSceneOutputHeight = 0;
   DXGI_FORMAT m_SceneColorFormat = D3D12_BACKBUFFER_FORMAT;
   DXGI_FORMAT m_SceneOutputFormat = D3D12_UPSCALE_FORMAT;
   bool m_bInScene = false;                          //!< BeginScene .. EndScene
-  ComPtr<ID3D12Resource> m_pHdrColor;               //!< SetHdrTarget
+  CD3D12Resource m_pHdrColor;                       //!< SetHdrTarget
   bool m_bInHdr = false;                            //!< BeginHdr .. EndHdr
   D3D12_CPU_DESCRIPTOR_HANDLE m_hAmbientRTV = {};   //!< BindAmbient
   ID3D12Resource *m_pAmbientResource = nullptr;     //!< BindAmbient: what the multisampled ambient light resolves into
-  ComPtr<ID3D12Resource> m_pMsaaColor, m_pMsaaDepth, m_pMsaaAmbient;   //!< SetMsaaTargets
+  CD3D12Resource m_pMsaaColor, m_pMsaaDepth, m_pMsaaAmbient;   //!< SetMsaaTargets
   int m_nMsaaSamples = 0;                           //!< of m_pMsaaColor (0: none)
   DXGI_FORMAT m_MsaaColorFormat = DXGI_FORMAT_UNKNOWN;
   uint32 m_nMsaaGeneration = 0;                     //!< GetMsaaGeneration
@@ -672,14 +686,14 @@ private:
   Barriers::SStats m_LastBarrierStats;              //!< GetBarrierStats
 
   ComPtr<ID3D12QueryHeap> m_pTimestamps;            //!< GPU_MARKS per frame slot; NULL: no GPU timing
-  ComPtr<ID3D12Resource> m_pTimestampReadback;      //!< the resolved timestamps, in the same places
+  CD3D12Resource m_pTimestampReadback;              //!< the resolved timestamps, in the same places
   double m_fTimestampMs = 0;                        //!< milliseconds per tick
   bool m_bGpuTiming = false;
   const char *m_GpuSections[D3D12_FRAMES][GPU_MARKS] = {};   //!< the section each timestamp starts
   int m_nGpuMarks[D3D12_FRAMES] = {};
   std::vector<std::pair<const char *, double>> m_GpuTimes;
   ComPtr<ID3D12QueryHeap> m_pComputeTimestamps;     //!< COMPUTE_LISTS pairs per frame slot; NULL: the compute lists not timed
-  ComPtr<ID3D12Resource> m_pComputeTimestampReadback;
+  CD3D12Resource m_pComputeTimestampReadback;
   double m_fComputeTimestampMs = 0;
   const char *m_ComputeSections[D3D12_FRAMES][COMPUTE_LISTS] = {};
   int m_nComputeLists[D3D12_FRAMES] = {};
@@ -690,12 +704,13 @@ private:
   char m_szAdapter[128] = {};                       //!< GetAdapterName
 
   ComPtr<ID3D12QueryHeap> m_pOcclusion;             //!< OCCLUSION_QUERIES per frame slot; NULL: no queries
-  ComPtr<ID3D12Resource> m_pOcclusionReadback;      //!< the resolved counts, in the same places
+  CD3D12Resource m_pOcclusionReadback;              //!< the resolved counts, in the same places
   int m_nOcclusions[D3D12_FRAMES] = {};             //!< queries begun in the slot's frame
   std::vector<uint64> m_OcclusionResults;
 
   struct SDeferred
   {
+    CD3D12Resource Memory;
     ComPtr<IUnknown> pObject;
     uint64 nFence;
   };

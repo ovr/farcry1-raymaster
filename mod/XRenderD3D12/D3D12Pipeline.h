@@ -53,6 +53,7 @@
 
 #include <wrl/client.h>
 #include <unordered_map>
+#include "D3D12Memory.h"
 
 enum ED3D12Program
 {
@@ -186,7 +187,7 @@ private:
   bool CreateDefaultStream();
   bool CreateDefaultDrawExt();
   //! An upload heap buffer of nSize bytes holding pData, for the bindings that stay (the default stream, the default block).
-  Microsoft::WRL::ComPtr<ID3D12Resource> CreateStaticUpload(const void *pData, uint32 nSize, const wchar_t *szName);
+  CD3D12Resource CreateStaticUpload(const void *pData, uint32 nSize, const wchar_t *szName);
   //! Makes the pipeline states of the file's keys, then writes it again without those the device
   //! refused and the repeats.
   void LoadKeys();
@@ -196,9 +197,9 @@ private:
 
   ID3D12Device *m_pDevice = nullptr;
   Microsoft::WRL::ComPtr<ID3D12RootSignature> m_pRootSignature;
-  Microsoft::WRL::ComPtr<ID3D12Resource> m_pDefaultStream;   //!< input slot 1
+  CD3D12Resource m_pDefaultStream;   //!< input slot 1
   D3D12_VERTEX_BUFFER_VIEW m_DefaultStreamView = {};
-  Microsoft::WRL::ComPtr<ID3D12Resource> m_pDefaultDrawExt;  //!< b3's default block
+  CD3D12Resource m_pDefaultDrawExt;  //!< b3's default block
   D3D12_GPU_VIRTUAL_ADDRESS m_nDefaultDrawExt = 0;
   SDrawExt m_DefaultDrawExt = {};
   //! Every key asked for, with nullptr for the keys that failed (logged once).

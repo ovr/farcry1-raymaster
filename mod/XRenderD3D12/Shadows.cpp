@@ -342,7 +342,7 @@ bool CD3D12Renderer::DrawShadowMap(void *pFrustum, const Vec3 &vOrigin)
     Map.pFrustum = pFrustum;
     Map.nSize = nSize;
     Map.hDSV = m_pDescriptors->AllocDSV();
-    if (!Map.hDSV.ptr || !m_pDevice->CreateShadowMap(nSize, Map.pDepth, Map.Place, Map.hDSV))
+    if (!Map.hDSV.ptr || !m_pDevice->CreateShadowMap(nSize, Map.pDepth, Map.hDSV))
     {
       FreeShadowMap(Map);
       return false;
@@ -655,9 +655,7 @@ void CD3D12Renderer::FreeShadowMap(SShadowMap &Map)
   }
   Map.nSRV = -1;
   Map.hDSV = {};
-  if (m_pUpload)
-    m_pUpload->ReleaseDepthTarget(Map.pDepth, Map.Place);
-  else if (m_pDevice)
+  if (m_pDevice)
     m_pDevice->DeferredRelease(Map.pDepth);
   Map.pDepth.Reset();
 }

@@ -14,16 +14,17 @@
 //	GPU's frame; the time between frames, the CPU's wait for the GPU at
 //	the start of a frame and in Present; the draws, how many changed the
 //	pipeline state, the triangles. r_Stats 2 adds the memory: the process'
-//	video memory and its budget (DXGI), the textures and buffers, the
-//	acceleration structures of the static geometry, the frame memory and
-//	the pipeline states made. The panel is below the text at the top left
+//	video memory and the shared memory with their budgets, the GPU memory
+//	allocator's heaps and resources (D3D12Memory.h; d3d12_MemoryDump writes
+//	them all), the textures and buffers, the acceleration structures of the
+//	static geometry, the frame memory and the pipeline states made. The panel is below the text at the top left
 //	(the time demo's lines), or at the top.
 //
 //	r_DisplayInfo is drawn here too, at the top right in the same way, in
 //	place of the engine's own block: the console's variable stays 0 (the
 //	engine draws its block when it is not), its value is the renderer's
 //	(TakeDisplayInfo). The game's version and level, the view's camera,
-//	angles and distance, the frame rate (half a second's, and of its
+//	angles and distance, the video memory and its budget, the frame rate (half a second's, and of its
 //	slowest and fastest frames), the triangles and the lights of the frame,
 //	the anti-aliasing, the upscaler and the 3D scene's size before and
 //	after it. d3d12_DisplayHDR's panel (HdrStats.cpp) is below it: the
@@ -75,6 +76,11 @@ std::string Thousands(uint64 n)
   for (int i = (int)s.size() - 3; i > 0; i -= 3)
     s.insert((size_t)i, ",");
   return s;
+}
+
+std::string Mb(uint64 nBytes)
+{
+  return Thousands(nBytes >> 20);
 }
 
 std::string Format(const char *szFormat, ...)
@@ -272,6 +278,7 @@ void CD3D12Renderer::CollectStats()
   const int nDraws = m_nFrameDraws, nPSOChanges = m_nFramePSOChanges;
   const int nDrawExt = nDraws - m_nFrameDrawExt[DrawExt::REASON_DEFAULT];
   const uint32 nDrawBytes = m_nFrameDrawBytes;
+  const CD3D12MemoryChurn::SCounts Churn = m_pDevice->TakeMemoryChurn();
   m_nFrameDraws = m_nFramePSOChanges = m_nFrameAlphaCoverage = 0;
   m_nFrameDrawBytes = 0;
   for (int &n : m_nFrameDrawExt)
@@ -287,8 +294,8 @@ void CD3D12Renderer::CollectStats()
   SFrameStats &Sum = m_StatsSum;
   const auto TakeMemory = [this](SFrameStats &Stats)
   {
-    m_pDevice->GetVideoMemory(Stats.nVideoUsage, Stats.nVideoBudget);
-    Stats.nResourceBytes = m_pUpload ? m_pUpload->GetVideoMemory() : 0;
+    m_pDevice->GetMemoryStats(Stats.Memory, CV_r_Stats >= 2);
+    Stats.nResourceBytes = m_pUpload ? m_pUpload->GetResourceBytes() : 0;
     Stats.nRayBytes = m_pRayScene ? m_pRayScene->GetStaticBytes() : 0;
     if (m_pTextures)
       m_pTextures->UpscaledStats(Stats.nUpscaled, Stats.nTextures, Stats.nUpscaledBytes, Stats.nTextureBytes);
@@ -319,6 +326,11 @@ void CD3D12Renderer::CollectStats()
   Sum.fBarrierDrains += BarrierStats.nDrains;
   Sum.fBarriers += BarrierStats.nTransitions + BarrierStats.nUav + BarrierStats.nUavAll + BarrierStats.nOther;
   Sum.fFrameMemory += m_pUpload ? (double)m_pUpload->GetFrameMemory() : 0.0;
+  Sum.fMade += Churn.nMade;
+  Sum.fMadeBytes += (double)Churn.nMadeBytes;
+  Sum.fFreed += Churn.nFreed;
+  Sum.fFreedBytes += (double)Churn.nFreedBytes;
+  Sum.nMaxMade = std::max(Sum.nMaxMade, (uint32)Churn.nMade);
   m_fStatsLastFrame = fNow;
   if (fNow - m_fStatsStart < STATS_WINDOW_MS)
     return;
@@ -429,13 +441,25 @@ void CD3D12Renderer::DrawStats()
                  CV_d3d12_BarrierBatch > 0 ? "" : ", each at once"));
       if (CV_r_Stats >= 2)
       {
-        constexpr double MB = 1024.0 * 1024.0;
-        if (S.nVideoBudget)
-          Add(Format("Video memory %s of %s MB", Thousands((uint64)(S.nVideoUsage / MB)).c_str(), Thousands((uint64)(S.nVideoBudget / MB)).c_str()));
-        Add(Format("Textures and buffers %s MB, rays %s MB", Thousands((uint64)(S.nResourceBytes / MB)).c_str(), Thousands((uint64)(S.nRayBytes / MB)).c_str()));
-        Add(Format("Textures %s (%s MB), upscaled %s (%s MB)", Thousands((uint64)S.nTextures).c_str(), Thousands((uint64)(S.nTextureBytes / MB)).c_str(),
-                   Thousands((uint64)S.nUpscaled).c_str(), Thousands((uint64)(S.nUpscaledBytes / MB)).c_str()));
+        const SD3D12MemoryStats &M = S.Memory;
+        if (M.nLocalBudget)
+          Add(Format("Video memory %s of %s MB, shared %s of %s MB", Mb(M.nLocalUsage).c_str(), Mb(M.nLocalBudget).c_str(), Mb(M.nSharedUsage).c_str(),
+                     Mb(M.nSharedBudget).c_str()));
+        if (M.nHeaps)
+        {
+          Add(Format("Heaps %s (%s MB, %s MB free in them), resources %s (%s MB)", Thousands(M.nHeaps).c_str(), Mb(M.nHeapBytes).c_str(),
+                     Mb(M.nHeapBytes - std::min(M.nHeapBytes, M.nAllocationBytes)).c_str(), Thousands(M.nAllocations).c_str(),
+                     Mb(M.nAllocationBytes).c_str()));
+          Add(Format("Resources in default heaps %s MB, upload %s MB, read back %s MB", Mb(M.nTypeBytes[0]).c_str(), Mb(M.nTypeBytes[1]).c_str(),
+                     Mb(M.nTypeBytes[2]).c_str()));
+        }
+        Add(Format("Textures and buffers %s MB, rays %s MB", Mb(S.nResourceBytes).c_str(), Mb(S.nRayBytes).c_str()));
+        Add(Format("Textures %s (%s MB), upscaled %s (%s MB)", Thousands((uint64)S.nTextures).c_str(), Mb(S.nTextureBytes).c_str(),
+                   Thousands((uint64)S.nUpscaled).c_str(), Mb(S.nUpscaledBytes).c_str()));
         Add(Format("Frame memory %s KB, PSOs %s", Thousands((uint64)(S.fFrameMemory / fFrames / 1024.0)).c_str(), Thousands(S.nPSOs).c_str()));
+        Add(Format("Resources made %.1f a frame (%s KB, at most %u), freed %.1f (%s KB)", S.fMade / fFrames,
+                   Thousands((uint64)(S.fMadeBytes / fFrames / 1024.0)).c_str(), S.nMaxMade, S.fFreed / fFrames,
+                   Thousands((uint64)(S.fFreedBytes / fFrames / 1024.0)).c_str()));
       }
       SStatsLine &Heading = Add("GPU per pass", true);
       Heading.Value = "ms";
@@ -484,6 +508,8 @@ void CD3D12Renderer::DrawStats()
     Value("Camera", Format("%.1f %.1f %.1f", vPos.x, vPos.y, vPos.z));
     Value("Angles", Format("%.0f %.0f %.0f", vAngles.x, vAngles.y, vAngles.z));
     Value("View distance", Format("%.0f m", Camera.GetZMax()));
+    if (S.Memory.nLocalBudget)
+      Value("VRAM", Format("%s / %s MB", Mb(S.Memory.nLocalUsage).c_str(), Mb(S.Memory.nLocalBudget).c_str()));
     if (!S.nFrames || S.fFrameMs <= 0)
     {
       Value("FPS", "collecting");

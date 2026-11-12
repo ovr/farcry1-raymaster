@@ -151,6 +151,7 @@ set(XRENDERD3D12_TESTS_SOURCES
     BarrierTests.cpp
     VolumetricTests.cpp
     ConfigTests.cpp
+    MemoryTests.cpp
 )
 file(GLOB XRENDERD3D12_TESTS_HLSL "${CMAKE_CURRENT_SOURCE_DIR}/Shaders/*.hlsl" "${CMAKE_CURRENT_SOURCE_DIR}/Shaders/*.hlsli")
 set_source_files_properties(${XRENDERD3D12_TESTS_HLSL} PROPERTIES HEADER_FILE_ONLY ON)
@@ -165,11 +166,17 @@ target_include_directories(XRenderD3D12Tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR
 target_compile_definitions(XRenderD3D12Tests PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX
     XR_RENDERER_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/..")  # Barrier_SourceLint (BarrierTests.cpp) and Config_Documented (ConfigTests.cpp) read the renderer's sources
 target_compile_options(XRenderD3D12Tests PRIVATE /W4)
-target_link_libraries(XRenderD3D12Tests PRIVATE d3d12 dxgi)
+target_link_libraries(XRenderD3D12Tests PRIVATE d3d12 dxgi dxguid)
+# D3D12MA compiled in here, not linked: the renderer's library has the release CRT in every configuration, the tests
+# the configuration's.
+set(XRENDERD3D12_TESTS_D3D12MA "${XRENDERD3D12_D3D12MA_DIR}/src/D3D12MemAlloc.cpp")
+target_sources(XRenderD3D12Tests PRIVATE "${XRENDERD3D12_TESTS_D3D12MA}")
+set_source_files_properties("${XRENDERD3D12_TESTS_D3D12MA}" PROPERTIES COMPILE_OPTIONS "/W3")
+target_include_directories(XRenderD3D12Tests PRIVATE "${XRENDERD3D12_D3D12MA_DIR}/include")
 
 add_test(NAME XRenderD3D12Tests COMMAND XRenderD3D12Tests)
 # The same on WARP: the results do not depend on the adapter (nor on a GPU being there at all).
 add_test(NAME XRenderD3D12Tests.Warp COMMAND XRenderD3D12Tests --warp)
 # The barriers' tests and the runs whose barriers the tracker gives (D3D12Barriers.h) under the debug layer: any of its
-# warnings fails them (a transition's wrong before, a subresource twice in a call).
-add_test(NAME XRenderD3D12Tests.Debug COMMAND XRenderD3D12Tests --debug Barrier Ocean_ Caustics_ Wake_ Cmaa2)
+# warnings fails them (a transition's wrong before, a subresource twice in a call, placed resources sharing memory).
+add_test(NAME XRenderD3D12Tests.Debug COMMAND XRenderD3D12Tests --debug Barrier Ocean_ Caustics_ Wake_ Cmaa2 Memory_)

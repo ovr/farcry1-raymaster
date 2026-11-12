@@ -1713,6 +1713,70 @@ The default block stays bound over a run of draws. `0` uploads the rest of every
 prepass's motion as before the block, for comparisons (read at each draw). `r_Stats` and
 `d3d12_FrameLog` count the bytes and the draws by why they uploaded.
 
+## GPU memory
+
+The renderer's own GPU memory comes from AMD's D3D12 Memory Allocator
+(`third_party/d3d12-memory-allocator`, v3.3.0): one allocator of the device, made with it
+(`CD3D12Device::CreateResource`, `D3D12Memory.h`). A resource is made with its memory
+(`CD3D12Resource`: the allocation, which owns the resource, and the allocator) and goes with it,
+through `DeferredRelease` once the GPU has passed the frame's fence. A `CD3D12Resource` is moved,
+never copied: one owner per allocation. The raw `m_pResource` of a texture or a buffer holds no
+reference of its own.
+
+- Placed in the allocator's heaps (its memory as the last user left it): what is written whole
+  before it is read, the static buffers and the textures with data, the characters' shadow maps
+  (a dozen come at once when a turn brings them into view), the ray scene's structures and
+  scratch, the upload heaps (the frame's ring, staging, the pipeline's defaults). Small buffers
+  are placed too (`ALLOCATOR_FLAG_DONT_PREFER_SMALL_BUFFERS_COMMITTED`): a committed resource costs
+  the kernel a few hundred microseconds to make and to free, and the terrain makes index buffers
+  every frame outdoors. The allocator's own heaps are not zeroed (`DEFAULT_POOLS_NOT_ZEROED`).
+- Committed (a heap of its own, zeroed): what is read before it is written, the device's targets,
+  the render and compute targets, the histories, the counters and words of the HDR passes and
+  CMAA2, the path tracer's radiance cache (no keys at the start), the read backs, MSAA targets.
+- The ray scene's static BLAS share pools of 64 MB, their ranges kept by a `D3D12MA::VirtualBlock`
+  each (256-byte aligned); a pool that empties goes (the first stays).
+- Outside the allocator: the swap chain's buffers, what AMD FSR's backend and CACAO make inside
+  their libraries, and DRED's test buffer (`d3d12_DredTest 2`).
+- `r_Stats 2` shows the process' video memory and the shared memory with their budgets
+  (`Allocator::GetBudget`), the allocator's heaps (committed resources among them) with what is
+  free in them and its resources (`CalculateStatistics`, twice a second), the resources' bytes
+  by heap type, then the textures and buffers of the upload (the allocations' sizes), the static
+  BLAS, the textures and the frame memory. `r_DisplayInfo` has a line `VRAM` (the video memory and
+  its budget).
+- `d3d12_MemoryDump 1` writes the allocator's statistics with every heap and resource (its name,
+  size, offset, `BuildStatsString`) to `farcry1_testing1/XRenderD3D12_memory.json` (never
+  committed) at the frame's end, then the variable is 0 again; the log has the totals. AMD's
+  `GpuMemDumpVis.py` draws it.
+- A leak shows in `farcry1_testing1/XRenderD3D12_memory.txt` (new each run, also in the log):
+  the resources, megabytes and heaps before and after each level's load (a level loaded again
+  leaves as much as the first time) and at the device's shutdown, where every resource still
+  held is one too many and its name is listed (the twelve most common, with their counts).
+  Training loaded three times: the first load leaves 1,145 resources (601 MB), before the
+  renderer's own targets (made in the first frames of play) and the textures the play streams
+  in; the second and the third 1,310 each (1,533 and 1,501 MB); the shutdown 0. Test:
+  `render_tests` suite `memreload`.
+- `r_Stats 2` also has a line `Resources made`: those made and freed a frame with their bytes,
+  and the most made in one frame of the window. The film's flights at 1080p make 0.1 to 0.2 a
+  frame (5 to 14 KB, at most 4 to 10 in one frame: River, Pier, Swamp); no pool is worth it.
+- Aliases (`d3d12_PTAlias`, 1 by default): two of the path tracer's targets that live in turns
+  within a frame share one heap (`ED3D12Memory::Aliased`, `CD3D12Resource::CreateAlias`). The
+  highlights lie in the paths' memory (the paths are read last by `CSTemporal` or NRD's
+  `CSResolve`, before `CSSpecular` writes the highlights; `d3d12_PTDebug` 6 and 11, which show the
+  paths after the frame, turn it off), NRD's light input in the filtered light's (NRD reads it
+  last, before `CSFilter`). `CD3D12Device::ActivateAlias` gives the memory to the next of the
+  pair: an aliasing barrier, queued in order with the others, then `DiscardResource`; each pass
+  writes every pixel it reads. An alias' bytes are its base's (counted once). River at 4K with
+  NRD: 3,227 MB of the allocator's down to 3,100 (two targets of 64 MB), the GPU's frame the same
+  (22.0 to 22.1 ms); the frames with the simple denoiser equal to the pixel, with NRD within the
+  spread of its own runs (no two equal). Test: `render_tests` suite `ptalias`. The other targets
+  stay apart: the histories carry to the next frame, and the scene's copies, the HDR and the
+  anti-aliasing's targets are used across the frame by passes the cvars switch on and off.
+- Tests: `Tests/MemoryTests.cpp` (`Memory_*`, also under the debug layer): placed and committed
+  resources in their heap types, the placed ones' ranges apart and reused, a resource outliving
+  its allocator's owner, mapped upload buffers, the overlay's statistics and the JSON dump
+  (`ReadMemoryStats`, `MemoryStatsJson`: the device's own code), the ray pools' virtual blocks,
+  an alias in its base's heap that keeps it and is counted once (`Memory_Alias`).
+
 ## Resource states and barriers
 
 The frame's barriers go through the device (`CD3D12Device::Transition`, `UavBarrier`,
@@ -1756,8 +1820,8 @@ given one by one, on the GPU with the debug layer).
   stays where its state holds `DEPTH_READ`). A buffer's state decays to `COMMON` when the frame's
   list has run (a readback's flush, the wait for the rays' compute list, the frame's end) and is
   given back by a transition at the next list's start, so that no implicit promotion goes past the
-  tracker. A tracked resource is released through `DeferredRelease` or the upload pools, which
-  forget it (its address may come again); the upload list never writes one (`d3d12_BarrierCheck`
+  tracker. A tracked resource is released through `DeferredRelease`, which forgets it (its
+  address may come again); the upload list never writes one (`d3d12_BarrierCheck`
   says so if it does).
 - Every command recorded on a command list directly (not through the device's or
   `CD3D12Compute`'s wrappers, which give the queue first) says `barriers flushed` in its
@@ -1812,13 +1876,14 @@ given one by one, on the GPU with the debug layer).
   between frames, the CPU's wait for the GPU at the start of a frame and in `Present`, the draws,
   how many of them changed the pipeline state, and the triangles, the megabytes of the draws'
   constants and the draws that uploaded their rest (b3, `d3d12_DrawExt`); `2` (and more) also the memory:
-  the process' video memory and its budget (DXGI), the textures and buffers, the static
-  geometry's acceleration structures, the frame memory and the pipeline states made. A frame read
+  the process' video memory and the shared memory with their budgets, the GPU memory allocator's
+  heaps and resources (GPU memory), the textures and buffers, the static geometry's acceleration
+  structures, the frame memory and the pipeline states made. A frame read
   before `Update` (a demo's frames and clips) has them too. It turns the GPU's timestamps on, as
   `d3d12_GpuTimes` does; both get the same times.
 - `r_DisplayInfo` is drawn by `XRenderD3D12` in the same way, a panel at the top right in place of
   the engine's block: the game's version and level, the view's camera position, angles and
-  distance, the frame rate of the half second with its slowest and fastest frames', the triangles
+  distance, the video memory and its budget (`VRAM`), the frame rate of the half second with its slowest and fastest frames', the triangles
   per frame and per second, the main view's lights (the sun, the others; counted at its
   `EF_EndEf3D`), the ambient occlusion's backend as it is made (XeGTAO, CACAO, by rays, GI by rays,
   none; none (path tracing) under the path tracer), ray tracing (not supported, off, or the last scene for rays' instances and triangles; then
@@ -1851,6 +1916,8 @@ given one by one, on the GPU with the debug layer).
   offset, leaf first) to `farcry1_testing1/XRenderD3D12_samples.txt`; with 250 a time demo runs
   about 5 % slower. In DemoReplay's arguments `--exec-at 60 "d3d12_CpuSamples 250" --exec-at 2800
   "d3d12_CpuSamples 0"` samples a part of a run.
+- `d3d12_MemoryDump 1` writes the GPU memory allocator's heaps and resources to
+  `farcry1_testing1/XRenderD3D12_memory.json` (GPU memory).
 - `d3d12_DumpFrame 1` writes the render items of the next frame to
   `farcry1_testing1/XRenderD3D12_frame.txt` (never committed): the camera (position, angles,
   field of view, near and far plane, view and projection matrices), then for each item its list, sort
@@ -2598,14 +2665,20 @@ and lists theirs (`NamesObjects`).
   original's refraction pass (`CGRCIndoorWater_final`: the screen's copy times `WaterColor = DiffuseColor`, "using difuse
   component for color" as its script says; doubled in its HDR mode, and the game ships with that off). And a fog volume's
   fog over a point under its layer, seen from above, is at least that of the point's depth there, which every ray to it
-  crosses (`d3d12_FogVolumeDepth`, 1; 0: the frames before): it grew by a gate from nothing at the layer to all of it 5 m
+  crosses (`d3d12_FogVolumeDepth` 1; off by default, the user's choice: with it the first cut scene's cave pool is still a dark plane over the floor the original shows): it grew by a gate from nothing at the layer to all of it 5 m
   down whatever the volume's density. Training's bunker pool (`water.waterA15`, diffuse 0.34 0.36 0.27, in a fog volume
   of 0.1 m: 23 per metre) showed its floor's tiles and the rocks under the water through clear water, where the
   original's water is murky; now its floor is in the volume's fog a few centimetres down, and the water tints that a dark
   olive. In the comparison film's training-bunker at frame 490 the pool's luma is 30.6 against the original's 32.8, its
   spread 11.1 against 12.7 (before 35.8 and 19.7). The view's whole path under the layer would be more fog still, but it
   would also thicken the fog of the thin volumes far off at a slant (Swamp's, 35 m), which the gate matches to the
-  original. Tests: unit tests `FogVolume_*`, `render_tests` suite `watervolume`.
+  original. The water's surface lays that fog over what is seen through it (`Water.hlsl`; the fog passes of the objects
+  keep the gate), in the colour of its volume lit by the brightness behind (full from a tenth of white): laid by the fog
+  passes in the volume's colour as given, the dark cave pool round Jack's rock in the first cut scene (the bunker pool's
+  height, its own volume of 0.1 m, seen 9 m from above) turned a flat light blue sheet with a bright rim up the rock under
+  the layer, against the original's dark water. The engine gives the water's surface no fog volume: it takes the volume at
+  its height with an object of the frame nearest to it (`CScene::WaterFogVolume`; the bunker pool 2, the cave pool 5, at
+  the same 20.46 m). Tests: unit tests `FogVolume_*`, `render_tests` suite `watervolume` (its cave runs).
 - The decals multiplied into the frame (`TemplDecalModulate`: DESTCOLOR, ZERO) whose material has an
   opacity below 1 are transparent, as the opaque templates are with it: their texture is laid over
   the frame by its alpha times the opacity (SRCALPHA, INVSRCALPHA), unlit, not multiplied in (step
@@ -2637,6 +2710,16 @@ and lists theirs (`NamesObjects`).
   (made before the particles) over it, and each burst of new particles (every 5 frames) changed how
   much smoke was left: the smoke over the lava was a step brighter every 5 frames. Tests: unit
   tests `SpriteOrder_*`, `render_tests` suite `spritesort`.
+- The blended objects are drawn far to near by the distance of their objects' origins
+  (`d3d12_BlendSortObject 1`; step 421), as the original: by each part's own centre (0, the frames
+  before) a part of a large object could come nearer than a small object inside it. In Training's
+  first cut scene the camera carries a black gradient (`Objects/gradient.dds`, an alpha ramp) down
+  through the hole in the cave's roof for the fade to black; the ruin round the hole has hanging
+  moss whose part's centre (1.25 m) came nearer than the gradient's (1.65 m) from frame 455 on, and
+  its strands stayed lit at the frame's edges over the black, where the original's frame is black
+  (the ruin's origin 2.94 m). An object's own parts keep their order by their centres, each part's
+  passes together (the grass clumps' blades); the particles and sprites, whose objects stand at the
+  world's origin, keep their own distance. Test: `render_tests` suite `blendsort`.
 
 ## Vegetation sprites and terrain detail
 

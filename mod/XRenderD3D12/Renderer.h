@@ -95,9 +95,13 @@ struct SFrameStats
   double fBarrierDrains = 0;
   double fBarriers = 0;
   double fFrameMemory = 0;        //!< bytes of per frame memory (CD3D12Upload::AllocFrame)
-  uint64 nVideoUsage = 0;         //!< the process' video memory (DXGI) and how much it may use
-  uint64 nVideoBudget = 0;
-  uint64 nResourceBytes = 0;      //!< the textures and buffers (CD3D12Upload::GetVideoMemory)
+  double fMade = 0;               //!< resources made and freed, with their bytes (CD3D12Device::TakeMemoryChurn)
+  double fMadeBytes = 0;
+  double fFreed = 0;
+  double fFreedBytes = 0;
+  uint32 nMaxMade = 0;            //!< made in the frame that made the most
+  SD3D12MemoryStats Memory;       //!< the allocator's (CD3D12Device::GetMemoryStats)
+  uint64 nResourceBytes = 0;      //!< the textures and buffers (CD3D12Upload::GetResourceBytes)
   uint64 nRayBytes = 0;           //!< the acceleration structures of the static geometry
   int nTextures = 0;              //!< the textures with a GPU picture, and of them those upscaled (r_TexUpscaled), with their bytes
   int nUpscaled = 0;
@@ -724,7 +728,7 @@ public:
   CD3D12Texture *m_pCmaa2Color = nullptr;   //!< CMAA2's picture (typeless; t0 its sRGB view, u0 its UNORM view; m_nSRV UNORM)
   CD3D12Texture *m_pCmaa2Edges = nullptr;   //!< its edges (R8_TYPELESS, half the width: u1 R8_UINT; m_nSRV R8_UNORM)
   CD3D12Texture *m_pCmaa2Heads = nullptr;   //!< the heads of its lists of colours, one a 2 x 2 quad (R32_UINT)
-  ComPtr<ID3D12Resource> m_pCmaa2Buffers[5];  //!< its shapes, quads, colours, counters and indirect arguments (u2, u3, u4, u6, u7)
+  CD3D12Resource m_pCmaa2Buffers[5];  //!< its shapes, quads, colours, counters and indirect arguments (u2, u3, u4, u6, u7)
   int m_nCmaa2Table = -1;                   //!< the wide table of its kernels (AllocRange)
   bool m_bCmaa2Cleared = false;             //!< its counters cleared since its buffers were made
 
@@ -990,7 +994,9 @@ public:
     CD3D12Texture *pHistory[2] = {};        //!< this frame's history and the frame before's
     CD3D12Texture *pFrames[2] = {};         //!< the frames in them
     CD3D12Texture *pLight = nullptr;        //!< CSFilter's light, the composite's
-    CD3D12Texture *pHighlights = nullptr;   //!< CSSpecular's highlights, the composite's
+    CD3D12Texture *pHighlights = nullptr;   //!< CSSpecular's highlights, the composite's; with bAlias in pRays' memory
+    bool bAliasWanted = false;              //!< d3d12_PTAlias as the targets were made with it
+    bool bAlias = false;                    //!< pHighlights is pRays' alias (and pNrdIn[0] pLight's where IsAlias)
     int nHistory = 0;                       //!< pHistory's current one
     int nTables[5] = { -1, -1, -1, -1, -1 }; //!< the kernels' UAV tables
     int nDepthSRV = -1;                     //!< the depth buffer in the texture table
@@ -1005,7 +1011,7 @@ public:
     int nNrdFrame = -1;                     //!< m_nFrames NRD last denoised (-1: never; its history starts again)
     bool bNrdFailed = false;                //!< NRD is not available at this size (logged)
     // With d3d12_PTCache (UpdatePathCache; UNORDERED_ACCESS between the frames)
-    ComPtr<ID3D12Resource> pCache;          //!< the radiance cache (PathCache.hlsli: its keys, samples and light)
+    CD3D12Resource pCache;                  //!< the radiance cache (PathCache.hlsli: its keys, samples and light)
     int nCacheTable = -1;                   //!< the table of CSTrace whose u3 views it
     int nCacheFrame = -1;                   //!< m_nFrames it was last brought up to date in (-1: its light starts again)
     bool bCacheFailed = false;              //!< not to be had (logged)
@@ -1115,7 +1121,7 @@ public:
   //! A texture of the game the templates name (Defaults/colors2, ...), loaded once (FT_CLAMP: clamped).
   CTexture *GetFxTexture(int nIndex, const char *szName, int nFlags);
 
-  ComPtr<ID3D12Resource> m_pMirrorColor, m_pMirrorDepth;
+  CD3D12Resource m_pMirrorColor, m_pMirrorDepth;
   D3D12_CPU_DESCRIPTOR_HANDLE m_hMirrorRTV = {}, m_hMirrorDSV = {};
   int m_nMirrorSRV = -1;
   int m_nMirrorWidth = 0, m_nMirrorHeight = 0;
@@ -1135,7 +1141,7 @@ public:
   //! A copy of the main view's target and of its depth buffer (CopySceneForWater).
   struct SSceneCopy
   {
-    ComPtr<ID3D12Resource> pColor, pDepth;
+    CD3D12Resource pColor, pDepth;
     int nColorSRV = -1, nDepthSRV = -1;
     int nWidth = 0, nHeight = 0;
     DXGI_FORMAT ColorFormat = DXGI_FORMAT_UNKNOWN;
@@ -1176,7 +1182,7 @@ public:
   int m_nFoamTexture = 0;                   //!< GetFoamTexture: its ID, 0 not made yet, -1 failed
   float m_fCausticsMinMean = 1;             //!< the mean of the smaller of two texels of it (its mean 1)
   static constexpr int REFLECTION_MIPS = 8;  //!< the most mip levels of m_pReflectionColor
-  ComPtr<ID3D12Resource> m_pReflectionColor, m_pReflectionDepth;
+  CD3D12Resource m_pReflectionColor, m_pReflectionDepth;
   D3D12_CPU_DESCRIPTOR_HANDLE m_hReflectionRTV = {}, m_hReflectionDSV = {};
   D3D12_CPU_DESCRIPTOR_HANDLE m_hReflectionMipRTV[REFLECTION_MIPS - 1] = {};   //!< the RTVs of levels 1 on
   int m_nReflectionMipSRV[REFLECTION_MIPS - 1] = { -1, -1, -1, -1, -1, -1, -1 }; //!< the SRVs of levels 0, 1, ... alone (the next is made from each)
@@ -1407,7 +1413,7 @@ public:
   //! A cube of the scene seen from a point.
   struct SEnvCube
   {
-    ComPtr<ID3D12Resource> pColor, pDepth;
+    CD3D12Resource pColor, pDepth;
     D3D12_CPU_DESCRIPTOR_HANDLE hRTV[6] = {}, hDSV = {};
     int nSRV = -1;                          //!< the texture table index (a TEXTURECUBE view)
     int nSize = 0;
@@ -1471,8 +1477,7 @@ public:
   struct SShadowMap
   {
     const void *pFrustum = nullptr;         //!< the frustum it was drawn for
-    ComPtr<ID3D12Resource> pDepth;
-    SD3D12Placement Place;                  //!< where CreateShadowMap put pDepth
+    CD3D12Resource pDepth;
     D3D12_CPU_DESCRIPTOR_HANDLE hDSV = {};
     int nSRV = -1;                          //!< the texture table index
     int nSize = 0;
@@ -1552,7 +1557,7 @@ public:
   //! A set of cascades' maps: a texture array of a slice per cascade.
   struct SCascadeMaps
   {
-    ComPtr<ID3D12Resource> pDepth;
+    CD3D12Resource pDepth;
     D3D12_CPU_DESCRIPTOR_HANDLE hDSV[XR_MAX_CASCADES + 1] = {};  //!< the slices', then all of them (CreateShadowMapArray)
     int nSRV = -1;            //!< the texture table index (a TEXTURE2DARRAY view)
   };
@@ -1655,7 +1660,7 @@ public:
     ComPtr<ID3D12Resource> pDepth;          //!< d3d12_HDRDebug 3 (the sky mask): the scene's depth buffer nDepthSRV is of (kept, as pHdrColor)
     int nDepthSRV = -1;
     // d3d12_ExposureMeter 1 (Shaders/Exposure.hlsl), made when first used:
-    ComPtr<ID3D12Resource> pExposureWords;  //!< the histogram's XR_EXPOSURE_WORDS (a raw UAV, always in UNORDERED_ACCESS)
+    CD3D12Resource pExposureWords;          //!< the histogram's XR_EXPOSURE_WORDS (a raw UAV, always in UNORDERED_ACCESS)
     CD3D12Texture *pExposureTarget = nullptr;   //!< 1 x 1 R32G32B32A32_FLOAT: the target EV, the mean, the sky's ceiling and share
     std::vector<int> ExposureTables;        //!< the kernels' tables, D3D12_FRAMES
     bool bExposureFailed = false;           //!< no buffer, target or kernels: the old meter
@@ -1798,8 +1803,8 @@ public:
   //! The words on the GPU and their copies to read back.
   struct SHdrStatsState
   {
-    ComPtr<ID3D12Resource> pWords;          //!< XR_HDR_STAT_WORDS (a raw UAV), its state kept by the device (TrackState)
-    ComPtr<ID3D12Resource> pReadback;      //!< D3D12_FRAMES copies of them, a frame slot each
+    CD3D12Resource pWords;                  //!< XR_HDR_STAT_WORDS (a raw UAV), its state kept by the device (TrackState)
+    CD3D12Resource pReadback;               //!< D3D12_FRAMES copies of them, a frame slot each
     std::vector<int> Tables;                //!< the kernels' tables, D3D12_FRAMES each: the histogram's, the output's
     int nFrame = -1;                        //!< m_nFrames of the frame whose words are being added up (cleared then)
     SHdrStatsFrame Cur;                     //!< its settings and what was added up
@@ -1943,7 +1948,7 @@ public:
     ComPtr<ID3D12Resource> pFrame, pHighlight;   //!< the device's the SRVs are of
     int nFrameSRV = -1, nHighlightSRV = -1;
     float fFrameAverage = 0;                //!< the frame average limit in use (nits; 0: none)
-    ComPtr<ID3D12Resource> pFallWords;      //!< its sums and its factor (Shaders/FrameAverage.hlsl, XR_FALL_*), a raw UAV
+    CD3D12Resource pFallWords;              //!< its sums and its factor (Shaders/FrameAverage.hlsl, XR_FALL_*), a raw UAV
     CD3D12Texture *pFall = nullptr;         //!< its 1 x 1 target (R32G32B32A32_FLOAT: x the factor)
     std::vector<int> FallTables;            //!< its kernels' tables, a frame slot each
     int nFallFrame = -1;                    //!< m_nFrames of the frame its kernels last ran in
@@ -2033,7 +2038,7 @@ public:
   SPostBlur m_PostSoft;                     //!< the screen blur's (its own radius)
   CD3D12Texture *m_pPostGhost = nullptr;    //!< the flash bang's afterimage: the glow blur at the start of the flash
   bool m_bFlashGhost = false;               //!< m_pPostGhost holds the current flash's afterimage
-  ComPtr<ID3D12Resource> m_pMotionHistory;  //!< motion blur: the frame before, as the screen effects left it before the fade
+  CD3D12Resource m_pMotionHistory;          //!< motion blur: the frame before, as the screen effects left it before the fade
   int m_nMotionHistorySRV = -1;
   int m_nMotionHistoryWidth = 0, m_nMotionHistoryHeight = 0;
   int m_nMotionHistoryFrame = -1;           //!< the m_nFrames it was copied in
@@ -2275,6 +2280,7 @@ public:
   int CV_d3d12_DRED = 1;              //!< DRED, 1 the page faults and our markers, 2 and every command (XRENDERD3D12_DRED before it); only read at Init
   int CV_d3d12_DredTest = 0;          //!< 1 removes the device, 2 makes a GPU page fault (CD3D12Device::DredTest), then 0
   int CV_d3d12_DumpFrame = 0;         //!< non-zero: the next frame's 3D draws go to XRenderD3D12_frame.txt, then 0
+  int CV_d3d12_MemoryDump = 0;        //!< non-zero: the allocator's statistics go to XRenderD3D12_memory.json at the frame's end, then 0
   ICVar *m_pVolumetricFog = nullptr;  //!< r_VolumetricFog, looked up on first use
   ICVar *m_pScopeLens = nullptr;      //!< r_ScopeLens_fx, looked up on first use
   ICVar *m_pNoDrawNear = nullptr;     //!< r_NoDrawNear, looked up on first use
@@ -2350,7 +2356,8 @@ public:
   int CV_d3d12_BeachShadow = 1;             //!< 1: the beach's foam strips in the sun's shadow as the terrain under them (0: lit in it, the frames before)
   int CV_d3d12_BeachResearch = 1;           //!< 1: the beach of TerrainWaterBeachResearch drawn as the original's (0: not drawn, the frames before)
   int CV_d3d12_WaterVolumeColor = 1;        //!< 1: a WaterVolume material's water the scene behind times its diffuse colour, as the original's (0: the frames before)
-  int CV_d3d12_FogVolumeDepth = 1;          //!< 1: a fog volume's fog from above over a point under its layer at least that of its depth there (FogVolume.h; 0: the frames before)
+  int CV_d3d12_BlendSortObject = 1;         //!< 1: the blended list far to near by the objects' origins, as the original (0: by each part's centre, the frames before)
+  int CV_d3d12_FogVolumeDepth = 0;          //!< 1: the floor seen through a water volume's surface in at least the fog of its depth there (FogVolume.h; 0: the original's look)
   int CV_d3d12_UnderwaterBodies = 1;        //!< 1: the characters under the ocean (the fish) drawn last without the depth: the water looks past them (UnderwaterBody.h; 0: the frames before)
   int CV_d3d12_SpriteSort = 1;              //!< 1: the particles drawn back to front by their distance (SpriteOrder.h; 0: in the engine's order, the frames before)
   int CV_d3d12_DecalAddOpacity = 1;         //!< 1: TemplDecalAdd with a material opacity below 1 blended by its alpha times it (Draw3D.cpp; 0: added, the frames before)
@@ -2425,6 +2432,7 @@ public:
   int CV_d3d12_PTCache = 1;                 //!< its radiance cache in real time (all the light at its last bounce's hit)
   float CV_d3d12_PTBehind = 40;             //!< how far what is behind the camera is in its scene for rays (m, UpdateRayBehind)
   int CV_d3d12_PTCheckerboard = 1;          //!< the paths of half the pixels each frame, the others from their neighbours
+  int CV_d3d12_PTAlias = 1;                 //!< targets that live in turns within a frame share their memory (UpdatePathKernels)
   int CV_d3d12_PTSunHistory = 64;           //!< the frames the sun's shadow by rays holds at most with it (RaySun)
   int CV_d3d12_PTBounces = 1;               //!< its bounces in real time
   int CV_d3d12_PTReferenceBounces = 8;      //!< and in the reference (d3d12_PathTracing 2)

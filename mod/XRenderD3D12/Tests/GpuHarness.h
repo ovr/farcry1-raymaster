@@ -183,6 +183,9 @@ namespace XrTest
     bool HasShaderModel65() const { return m_nShaderModel >= D3D_SHADER_MODEL_6_5; }
     //! Whether it builds scenes for rays and runs inline RayQuery (raytracing tier 1.1; SDispatch::pScene).
     bool HasRaytracing() const { return m_pDevice5 && m_pList4 && HasShaderModel65(); }
+    //! The device and its adapter (MemoryTests.cpp: an allocator of their own).
+    ID3D12Device *Device() const { return m_pDevice.Get(); }
+    IDXGIAdapter *Adapter() const { return m_pAdapter.Get(); }
 
     //! Runs a kernel; the words it wrote to u0 space9 (4 an item).
     std::vector<uint32> Run(const SDispatch &d);
@@ -259,6 +262,7 @@ namespace XrTest
     std::string m_Name;
     bool m_bWarp = false;
     D3D_SHADER_MODEL m_nShaderModel = D3D_SHADER_MODEL_5_1;
+    ComPtr<IDXGIAdapter> m_pAdapter;
     ComPtr<ID3D12Device> m_pDevice;
     ComPtr<ID3D12CommandQueue> m_pQueue;
     ComPtr<ID3D12CommandAllocator> m_pAllocator;

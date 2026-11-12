@@ -178,12 +178,13 @@ private:
   {
     int nPool = -1;
     uint64 nOffset = 0, nSize = 0;
+    D3D12MA::VirtualAllocation Alloc = {};
   };
   struct SPool
   {
-    Microsoft::WRL::ComPtr<ID3D12Resource> pBuffer;   //!< RAYTRACING_ACCELERATION_STRUCTURE
-    uint64 nSize = 0, nUsed = 0;
-    std::map<uint64, uint64> Free;                      //!< offset -> size, merged with their neighbours
+    CD3D12Resource pBuffer;                             //!< RAYTRACING_ACCELERATION_STRUCTURE
+    Microsoft::WRL::ComPtr<D3D12MA::VirtualBlock> pBlock;   //!< its ranges
+    uint64 nSize = 0;
   };
   struct SStaticBlas
   {
@@ -213,7 +214,7 @@ private:
   //! A buffer of a frame slot that grows (RAYTRACING_ACCELERATION_STRUCTURE or UNORDERED_ACCESS).
   struct SSlotBuffer
   {
-    Microsoft::WRL::ComPtr<ID3D12Resource> pBuffer;
+    CD3D12Resource pBuffer;
     uint64 nSize = 0;
   };
   struct SFrameSlot
@@ -238,7 +239,7 @@ private:
   //! with its colour as the albedo, else unlit.
   static void DefaultMaterial(SRayInstance &Inst, const SDrawConstants &dc);
   //! A buffer of nSize bytes with unordered access in the default heap; NULL when refused (logged).
-  Microsoft::WRL::ComPtr<ID3D12Resource> CreateBuffer(uint64 nSize, D3D12_RESOURCE_STATES State, const wchar_t *szName);
+  CD3D12Resource CreateBuffer(uint64 nSize, D3D12_RESOURCE_STATES State, const wchar_t *szName);
   //! At least nSize bytes in Buf (a new buffer of the next power of two, the old one released when the GPU
   //! is done with it).
   bool Reserve(SSlotBuffer &Buf, uint64 nSize, D3D12_RESOURCE_STATES State, const wchar_t *szName);
@@ -246,6 +247,8 @@ private:
   //! Back to the pool once the GPU finished the current frame.
   void FreePool(const SPoolRange &Range);
   void CollectPools();
+  //! All pools gone, their buffers once the GPU is done with them (bDefer) or at once (the device's shutdown).
+  void ReleasePools(bool bDefer);
   //! The static BLAS not used in this frame, least recently used first, until the pools hold at most
   //! nBudget bytes; and those not used for a while.
   void Evict(uint64 nBudget);

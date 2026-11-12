@@ -43,6 +43,7 @@
 //////////////////////////////////////////////////////////////////////
 
 #include "StdAfx.h"
+#include "FogVolume.h"
 #include "Renderer.h"
 #include "D3D12Device.h"
 #include "D3D12Upload.h"
@@ -1102,9 +1103,17 @@ bool CD3D12Renderer::SetupWaterDraw(SPipelineKey &Key, SDrawConstants &dc, const
     const CFColor &d = it.pRes->m_LMaterial->Front.m_Diffuse;
     Set4(dc.vColor, std::clamp(d.r, 0.0f, 1.0f), std::clamp(d.g, 0.0f, 1.0f), std::clamp(d.b, 0.0f, 1.0f), 1);
   }
+  // d3d12_FogVolumeDepth: the fog volume the water fills lays the fog of the floor's depth under the surface over what is
+  // seen through it (Water.hlsl, vUnderColor: rgb its colour, w its density; FogVolume.h).
+  const int nWaterFog = bVolume && CV_d3d12_FogVolumeDepth > 0 ? m_pScene->WaterFogVolume(it) : 0;
+  const SFogVolume *pWaterFog = m_pScene->GetFogVolume(nWaterFog);
+  if (bVolume)
+    Set4(dc.vUnderColor, pWaterFog ? pWaterFog->Color.r : 0.0f, pWaterFog ? pWaterFog->Color.g : 0.0f,
+         pWaterFog ? pWaterFog->Color.b : 0.0f, pWaterFog ? FogVolume::Density(pWaterFog->fMaxFogDist) : 0.0f);
   if (m_pFrameDump && bVolume && !m_bRayCaptureWalk)
-    fprintf(m_pFrameDump.get(), "water volume '%s' (template '%s'): the scene behind times (%.3f %.3f %.3f)\n", it.pShader->GetName(),
-            it.pShader->GetTemplateName(), dc.vColor[0], dc.vColor[1], dc.vColor[2]);
+    fprintf(m_pFrameDump.get(), "water volume '%s' (template '%s'): the scene behind times (%.3f %.3f %.3f), fog volume %d (%s)\n",
+            it.pShader->GetName(), it.pShader->GetTemplateName(), dc.vColor[0], dc.vColor[1], dc.vColor[2], nWaterFog,
+            pWaterFog ? "its depth's fog" : "none");
 
   // The colour of deep water: the ocean's that of its fog volume (the one with caustics) as the level
   // gives it, laid over the scene behind by its layer and distance (1 % of the scene left at twice

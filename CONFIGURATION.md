@@ -233,6 +233,7 @@ Details: [Statistics and profiling](mod/XRenderD3D12/README.md#statistics-and-pr
 | `d3d12_FrameLog` | `0` |  | 1 a line per frame to `XRenderD3D12_frames.txt` |
 | `d3d12_CpuSamples` | `0` |  | N: the drawing thread's stack sampled every N microseconds; back to 0 writes the report |
 | `d3d12_DumpFrame` | `0` |  | 1 the next frame's render items and draws to `XRenderD3D12_frame.txt` |
+| `d3d12_MemoryDump` | `0` |  | 1 the GPU memory allocator's heaps and resources to `XRenderD3D12_memory.json` (JSON) at the frame's end |
 | `d3d12_HDRLog` | `0` |  | 1 a line of the HDR statistics per frame to `XRenderD3D12_hdr.txt` |
 
 ### The device and its checks
@@ -272,6 +273,7 @@ Details: [Device removal (DRED)](mod/XRenderD3D12/README.md#device-removal-dred)
 | `d3d12_ProjectorSpecular` | `1` | yes | A projected light's highlight over a light mapped specular material |
 | `d3d12_RenderMode` | `1` | yes | The video options' render mode (`r_RenderMode`) drawn over the scene |
 | `d3d12_RenderModeOutdoor` | `1` | yes | The render modes' glare goes from its indoor threshold and gain to its outdoor ones, as the original's |
+| `d3d12_PTAlias` | `1` |  | The path tracer's targets that live in turns within a frame share their memory: the highlights the paths', NRD's light input the filtered light's (4K: 64 MB each pair) |
 | `d3d12_RTAsync` | `1` |  | The acceleration structures built on the compute queue |
 | `d3d12_RTFaceNormal` | `1` |  | The side of a surface the rays start from by the triangle's face (2 that face alone) |
 | `d3d12_RTPbrScreen` | `1` |  | What the metals' rays hit takes its light from the last frame's picture |
@@ -279,6 +281,7 @@ Details: [Device removal (DRED)](mod/XRenderD3D12/README.md#device-removal-dred)
 | `d3d12_SkyFogBand` | `1` | yes | With a near fog (Swamp, Volcano), the fog's colour over the sky box's lower part, as the original draws it |
 | `d3d12_SpriteDistFactor` | `1` |  | The far vegetation sprites end by their distance times the engine's factor, as the original's (River's at 304 m, not 400: no fogged trees round the sky in a gap of the far mountains) |
 | `d3d12_SpriteSort` | `1` |  | The particles drawn back to front, as the original sorts them (Volcano's smoke over the lava without steps) |
+| `d3d12_BlendSortObject` | `1` |  | The blended objects drawn far to near by their objects' origins, as the original (the fade to black of Training's first cut scene covers the hanging moss round it); 0 by each part's own centre |
 | `d3d12_StaticCasters` | `1` |  | The palms and the other static casters shadow the terrain everywhere |
 | `d3d12_UnderwaterBodies` | `1` |  | The fish under the ocean drawn last without the depth: no shore foam in their shape over the water |
 | `d3d12_UpscaleHdr` | `1` | yes | With HDR, the upscaler gets the scene's light before the tone map |
@@ -290,7 +293,7 @@ Details: [Device removal (DRED)](mod/XRenderD3D12/README.md#device-removal-dred)
 | `d3d12_WaterUnderShare` | `1` |  | Under the water, the sun's light shared over a 4 x 4 window (faster) |
 | `d3d12_WaterVolume` | `1` |  | The ocean's water attenuates each colour by the level's water colour |
 | `d3d12_WaterVolumeColor` | `1` |  | The water of a `WaterVolume` material (pools, cave water) shows the scene behind it times the material's colour, as the original's |
-| `d3d12_FogVolumeDepth` | `1` |  | A fog volume's fog over a point under its surface at least that of the point's depth: a dense one (Training's bunker pool) hides its floor |
+| `d3d12_FogVolumeDepth` | `0` |  | 1: the floor seen through a water volume's surface has at least the fog of its depth under it, in the volume's colour lit by the brightness behind (a dense one, Training's bunker pool, hides its floor); 0: the fog passes' gate alone, as the original (the floors of the bunker pool and of the first cut scene's cave pool show through the water) |
 | `d3d12_WaterCaustics` | `1` |  | The caustics of the FFT ocean's waves on the sea floor |
 | `r_ParallaxMaterials` | `1` |  | `r_ParallaxDepth` scaled by each texture's physical material |
 

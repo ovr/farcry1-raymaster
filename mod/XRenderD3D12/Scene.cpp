@@ -11,6 +11,7 @@
 #include "StdAfx.h"
 #include "Renderer.h"
 #include "Scene.h"
+#include "FogVolume.h"
 #include "UnderwaterBody.h"
 #include "Texture.h"
 
@@ -208,10 +209,16 @@ namespace
       // beach), then the rest far to near.
       if (IsWaterClass(it.eDrawClass))
         return (1ull << 61) | (nGroup << 32) | FarFirstBits(it.fDistance);
+      // Far to near by the object's origin, as the original: a part's own centre may come nearer than a smaller object
+      // inside its object (Training's first cut scene: the hanging moss of the ruin round the hole over the black
+      // gradient the camera carries down through it, the fade to black).
+      // An object's own parts keep their order by their centres, each part's passes together.
+      const float fDist = g_pRenderer && g_pRenderer->CV_d3d12_BlendSortObject > 0 ? it.fObjectDistance : it.fDistance;
+      const uint64 nFarToNear = (FarFirstBits(fDist) << 29) | ((FarFirstBits(it.fDistance) >> 5) << 2) | PassOrder(it);
       const auto [fBottom, fTop] = ZRange(it);
       if (it.eDrawClass != eDC_Additive && it.eDrawClass != eDC_ProcFlare && (bUnderWater ? fBottom > fWaterZ : fTop < fWaterZ))
-        return (FarFirstBits(it.fDistance) << 2) | PassOrder(it);
-      return (1ull << 62) | (FarFirstBits(it.fDistance) << 30) | PassOrder(it);
+        return nFarToNear;
+      return (1ull << 62) | nFarToNear;
     }
     // Opaque and nearest: by pass, sort group, shader and resources; in the nearest list the
     // blended ones after the opaque ones, far to near.
@@ -586,6 +593,10 @@ int CScene::PrepareItems(SSceneSlot &Slot)
   {
     SRenderItem &it = Slot.Items[i];
     it.fDistance = sqrtf(std::max(0.0f, it.pRE->mfDistanceToCameraSquared(*it.pObj)));
+    // The particles' and the sprites' objects are at the world's origin: their own distance.
+    it.fObjectDistance = g_pRenderer && it.pRE->m_Type == eDATA_OcLeaf
+                           ? (it.pObj->GetTranslation() - g_pRenderer->m_Camera.GetPos()).GetLength()
+                           : it.fDistance;
   }
   return (int)nItems;
 }
@@ -1027,6 +1038,25 @@ const SFogVolume *CScene::GetOceanFogVolume() const
     if (fv.bCaustics)
       return &fv;
   return nullptr;
+}
+
+int CScene::WaterFogVolume(const SRenderItem &Water) const
+{
+  if (!Water.pRE || m_FogVolumes.empty())
+    return 0;
+  Vec3 vMin, vMax;
+  // A flat surface: the middle of its box (a sphere's about its chunk) is its height.
+  Water.pRE->mfGetBBox(vMin, vMax);
+  const Vec3 t = Water.pObj->GetTranslation();
+  FogVolume::CWaterVolumePick Pick(vMin.x + t.x, vMin.y + t.y, vMax.x + t.x, vMax.y + t.y,
+                                  (vMin.z + vMax.z) / 2 + t.z);
+  for (const SRenderItem &it : Cur().Items)
+    if (const SFogVolume *pFV = GetFogVolume(it.nFog))
+    {
+      const Vec3 p = it.pObj->GetTranslation();
+      Pick.Add(it.nFog, pFV->fFogLayerZ, pFV->bCaustics, p.x, p.y);
+    }
+  return Pick.Best();
 }
 
 //////////////////////////////////////////////////////////////////////////
